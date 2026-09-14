@@ -15,6 +15,11 @@ on:
         options:
           - chromium
           - webkit
+      first-frame-barrier:
+        description: Diagnostic-only gate before the first seek
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -23,6 +28,7 @@ permissions:
 env:
   CI: 'true'
   KRKR_VIDEO_DIAGNOSTIC: '1'
+  KRKR_VIDEO_FIRST_FRAME_BARRIER: ${{ inputs.first-frame-barrier && '1' || '0' }}
 
 defaults:
   run:

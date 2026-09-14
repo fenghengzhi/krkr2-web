@@ -25,8 +25,9 @@ export const test = base.extend<{ presentation: void }>({
   presentation: [
     async ({ page }, use, testInfo) => {
       if (process.env.KRKR_VIDEO_DIAGNOSTIC !== '1') return use()
-      await page.addInitScript(() => {
+      await page.addInitScript((firstFrameBarrier: boolean) => {
         const records: unknown[] = []
+        const presented = new WeakSet<HTMLVideoElement>()
         ;(window as ProbeWindow).videoPresentation = records
         const source = new OffscreenCanvas(1, 1),
           context = source.getContext('2d')!
@@ -60,6 +61,15 @@ export const test = base.extend<{ presentation: void }>({
           ...descriptor,
           set(this: HTMLMediaElement, value: number) {
             if (this instanceof HTMLVideoElement) record(this, 'seek-request', { value })
+            if (firstFrameBarrier && this instanceof HTMLVideoElement && !presented.has(this)) {
+              const video = this
+              record(video, 'seek-deferred', { value })
+              video.requestVideoFrameCallback(() => {
+                record(video, 'seek-released', { value })
+                descriptor.set!.call(video, value)
+              })
+              return
+            }
             descriptor.set!.call(this, value)
           },
         })
@@ -81,6 +91,7 @@ export const test = base.extend<{ presentation: void }>({
               record(video, name)
               if (name === 'loadedmetadata') {
                 const frame: VideoFrameRequestCallback = (_now, metadata) => {
+                  presented.add(video)
                   record(video, 'presented', metadata)
                   if (video.isConnected) video.requestVideoFrameCallback(frame)
                 }
@@ -89,7 +100,7 @@ export const test = base.extend<{ presentation: void }>({
             },
             true,
           )
-      })
+      }, process.env.KRKR_VIDEO_FIRST_FRAME_BARRIER === '1')
       await use()
       const data = await page
         .evaluate(() => ({
