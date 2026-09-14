@@ -356,6 +356,7 @@ const runtime = await json(
   base.root + '/artifacts/runtime-results/verification/vm-console/runtime-browser.json',
 )
 assert.deepEqual(runtime.manifest, wasm)
+if (lifetimePhase) assert.deepEqual(runtime.failures, [])
 combinations(
   runtime.results,
   browsers.flatMap((b) => backends.map((v) => b + '/' + v)),

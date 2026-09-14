@@ -25,3 +25,5 @@
 [更新夹具后的运行时专项 34848864432](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848864432) 已通过全部六个三浏览器/双后端组合；[同版夹具分配诊断 34848868196](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848868196) 也已通过。正式应用源码与 [78 项兼容专项 34848253401](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401) 完全一致；KAG 不引用该字节码生命周期夹具，报告将其版本分别绑定到完整回归和分配诊断。
 
 运行 `34847758637` 的完整浏览器结果为 638/639：WebKit JSPI 的原有 `native Debug classes and dump files survive a cold offline browser restart` 在冷启动后报告 `Page crashed`（约 5.35 秒），不是等待断言超时。原 JSON、截图、DOM/网络 trace 和持久上下文记录已归档；新增固定 20 次该原场景的 macOS 专项，收集 Playwright 浏览器进程日志与操作系统崩溃报告。该页面崩溃原因尚未确认，不能视为已由字节码所有权修复解释。
+
+最终 [Tests 34849454871](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871) 的全部 14 个作业已通过；此版包含 392 项 Node、639 项浏览器及 6 项直接运行时。[WebKit 离线崩溃专项 34849908821](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849908821) 的 20 个原场景均通过，没有重试、跳过或新 macOS 崩溃报告，仍未确认原页面崩溃的根因。完整报告将绑定该回归、78 项兼容性、188 次分配失败及这 20 次独立重启。
