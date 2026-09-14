@@ -1396,11 +1396,13 @@ static tTJSVariant VoidValue;
 // an object copy, not reference.
 //---------------------------------------------------------------------------
 void tTJSArrayObject::Finalize() {
-    tTJSArrayNI *ni;
-    if(TJS_FAILED(NativeInstanceSupport(TJS_NIS_GETINSTANCE, ClassID_Array,
-                                        (iTJSNativeInstance **)&ni)))
-        TJS_eTJSError(TJSNativeClassCrash);
-    Clear(ni);
+    tTJSArrayNI *ni = nullptr;
+    // CreateNew can unwind before class-name allocation or native-instance
+    // construction finishes. There are no array items to clear in that case,
+    // but the base object and any registered members still need finalization.
+    if(TJS_SUCCEEDED(NativeInstanceSupport(TJS_NIS_GETINSTANCE, ClassID_Array,
+                                        (iTJSNativeInstance **)&ni)) && ni)
+        Clear(ni);
 
     inherited::Finalize();
 }

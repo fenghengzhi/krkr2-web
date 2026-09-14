@@ -109,4 +109,5 @@ manifest.toolchain = readFileSync(
   .replaceAll('"', '')
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 console.log(`WASM manifest: ${manifestPath}`)
-run(process.execPath, ['scripts/build-fonts.mjs'])
+// Allocation diagnostics exercise only TJS; no font kernel is loaded there.
+if (!allocatorDiagnostic) run(process.execPath, ['scripts/build-fonts.mjs'])

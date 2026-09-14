@@ -63,9 +63,17 @@ const stable = (native: ReturnType<typeof observeNative>) => {
   assert.equal(state.delegations, 0)
   return state
 }
+const allocated = (native: ReturnType<typeof observeNative>) => {
+  assert.equal(native.call('krkr_test_live_allocation_stat', 2), 0, 'Allocation ledger overflow')
+  return {
+    bytes: native.call('krkr_test_live_allocation_stat', 0),
+    blocks: native.call('krkr_test_live_allocation_stat', 1),
+    strings: native.call('krkr_native_string_cells'),
+  }
+}
 for (const debugMode of [false, true])
   for (const fixture of fixtures) {
-    let baseline: { heap: number; strings: number } | undefined,
+    let baseline: ReturnType<typeof allocated> | undefined,
       completed = false
     // The first iteration is a successful control, then each iteration fails one
     // allocation without pre-warming the register/trace pool whose growth is tested.
@@ -86,6 +94,17 @@ for (const debugMode of [false, true])
           after,
         }
       try {
+        const initial = allocated(native)
+        assert(initial.bytes > 0 && initial.blocks > 0)
+        const sample = native.call('malloc', 257)
+        assert(sample > 0)
+        assert.deepEqual(allocated(native), {
+          ...initial,
+          bytes: initial.bytes + 257,
+          blocks: initial.blocks + 1,
+        })
+        native.call('free', sample)
+        assert.deepEqual(allocated(native), initial)
         await vm.execute(fixture.setup, 'fault-setup.tjs')
         const before = native.stats()
         if (after >= 0) native.call('krkr_test_fail_allocation', fixture.phase, after, 0)
@@ -133,10 +152,7 @@ for (const debugMode of [false, true])
         native.call('krkr_test_fail_allocation', 0, -1, 0)
         vm.dispose()
       }
-      const disposed = {
-        heap: native.call('krkr_native_heap_usage'),
-        strings: native.call('krkr_native_string_cells'),
-      }
+      const disposed = allocated(native)
       if (after === -1) baseline = disposed
       else if (JSON.stringify(disposed) !== JSON.stringify(baseline))
         failure = {
@@ -146,7 +162,12 @@ for (const debugMode of [false, true])
           disposed,
           prior: failure,
         }
-      outcome = { ...outcome, baseline, disposed }
+      outcome = {
+        ...outcome,
+        baseline,
+        disposed,
+        disposedHeap: native.call('krkr_native_heap_usage'),
+      }
       results.push(outcome)
       if (failure) {
         failures.push(failure)
