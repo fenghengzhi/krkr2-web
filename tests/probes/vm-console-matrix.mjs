@@ -772,8 +772,11 @@ function soundOwnership(rows, backend) {
     assert.deepEqual(Object.keys(row.stopped).sort(), Object.keys(row.baseline).sort())
     for (const value of Object.values(row.stopped)) assert.equal(value, 0)
     assert.equal(row.terminalCloses, 1)
-    assert.equal(row.closedIds.length, 5)
+    // The property case closes the first media resource before reopening the
+    // same sound ID, then closes its replacement when the owner retires.
+    assert.equal(row.closedIds.length, 6)
     assert.equal(new Set(row.closedIds).size, 5)
+    assert.equal(row.closedIds[2], row.closedIds[3])
   }
 }
 assert.deepEqual(runtime.manifest, wasm)
