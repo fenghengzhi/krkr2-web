@@ -1,0 +1,92 @@
+name: KAG and release compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Tests run ID with a successful build of the same application sources
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: 'true'
+  KRKR_KAG_FIXTURE: tests/fixtures/compatibility/kag3_template.xp3
+  KRKR_KAG_ZIP: tests/fixtures/compatibility/kag3_template.zip
+
+jobs:
+  compatibility:
+    name: Compatibility / ${{ matrix.browser }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            os: ubuntu-24.04
+            headed: '0'
+          - browser: firefox
+            os: ubuntu-24.04
+            headed: '1'
+          - browser: webkit
+            os: macos-15
+            headed: '0'
+    env:
+      KRKR_PROBE_BROWSER: ${{ matrix.browser }}
+      KRKR_TEST_HEADED: ${{ matrix.headed }}
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          build-run: ${{ inputs.build-run }}
+      - run: npm run typecheck
+      - name: Verify and unpack fixed compatibility fixtures
+        run: python3 tests/probes/prepare-compatibility.py 2>&1 | tee out/ci/fixtures.log
+      - run: npx playwright install --with-deps "${{ matrix.browser }}"
+      - name: Prepare Linux display and audio
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y xvfb libgl1-mesa-dri pulseaudio pulseaudio-utils
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=krkr_test_output rate=48000 channels=2
+          pactl set-default-sink krkr_test_output
+      - name: Verify Worker graphics
+        id: graphics
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/browser-capabilities.ts "${{ matrix.browser }}" 2>&1 | tee out/ci/capabilities.log
+      - name: Original KAG flow, saves and transitions in XP3 and ZIP
+        run: bash scripts/ci-browser.sh node tests/probes/system-kag-matrix.mjs "$KRKR_KAG_FIXTURE" out/verification/compatibility 2>&1 | tee out/ci/kag.log
+      - name: Original KAG debug menus
+        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/debug-panels-kag.ts out/verification/compatibility 2>&1 | tee out/ci/kag-panels.log
+      - name: Original KAG exceptions and recovery
+        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/debug-kag.ts out/verification/compatibility 2>&1 | tee out/ci/kag-diagnostics.log
+      - name: TJS ABI 1 to current release offline update
+        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/system-abi-pwa.ts out/verification/compatibility out/verification/compatibility-baselines/tjs-abi1 2>&1 | tee out/ci/tjs-abi1.log
+      - name: TJS ABI 2 to current release offline update
+        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/system-abi-pwa.ts out/verification/compatibility out/verification/compatibility-baselines/tjs-abi2 runtime 2>&1 | tee out/ci/tjs-abi2.log
+      - name: Font ABI 1 to current release offline update
+        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/system-abi-pwa.ts out/verification/compatibility out/verification/compatibility-baselines/font-abi1 font 2>&1 | tee out/ci/font-abi1.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: compatibility-${{ matrix.browser }}
+          path: |
+            out/ci/
+            out/verification/compatibility/
+          retention-days: 14

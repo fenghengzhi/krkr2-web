@@ -1,3 +1,4 @@
+import { browserLaunchOptions } from '../helpers/browser-launch.ts'
 // Opt-in browser verification of a local KAG fixture. The static server serves
 // only dist/ and closes with the browser; game bytes enter through file import.
 import { createServer } from 'node:http'
@@ -99,7 +100,7 @@ await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
 const address = server.address()
 if (!address || typeof address === 'string') throw new Error('No browser probe address')
 const browser = await { chromium, firefox, webkit }[engine as 'chromium']
-  .launch()
+  .launch(browserLaunchOptions)
   .catch(async (error) => {
     await new Promise<void>((resolve) => server.close(() => resolve()))
     throw error

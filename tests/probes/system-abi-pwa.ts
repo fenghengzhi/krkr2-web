@@ -1,5 +1,7 @@
-// Opt-in ABI 1 -> 2 deployment probe. Fourth argument "font" checks the font
-// kernel instead of TJS; both require a preserved ABI 1 release directory.
+import { probeBrowsers } from '../helpers/probe-browsers.ts'
+import { browserLaunchOptions } from '../helpers/browser-launch.ts'
+// Preserved release -> current deployment probe. Fourth argument "font" checks
+// font ABI 1; "runtime" checks TJS ABI 2. Default mode checks TJS ABI 1.
 // "protocol" instead checks a preserved protocol 8 shell against protocol 9,
 // with unchanged TJS/font binaries and actual offline old/new Worker execution.
 import assert from 'node:assert/strict'
@@ -59,7 +61,7 @@ if (protocol) {
 assert.notEqual(shells[0].build, shells[1].build)
 const results: unknown[] = []
 await mkdir(directory + '/' + reportName, { recursive: true })
-for (const name of ['chromium', 'firefox', 'webkit'] as const) {
+for (const name of probeBrowsers()) {
   for (const backend of ['asyncify', 'jspi']) {
     let version = 0,
       closed = false
@@ -99,7 +101,7 @@ for (const name of ['chromium', 'firefox', 'webkit'] as const) {
     const url = `http://127.0.0.1:${address.port}/?backend=${backend}`,
       profile = await mkdtemp(resolve(tmpdir(), 'krkr-abi-pwa-')),
       context = await { chromium, firefox, webkit }[name].launchPersistentContext(profile, {
-        headless: true,
+        ...browserLaunchOptions,
         viewport: { width: 1280, height: 800 },
       })
     const stopServer = async () => {

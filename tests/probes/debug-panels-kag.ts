@@ -1,3 +1,5 @@
+import { probeBrowsers } from '../helpers/probe-browsers.ts'
+import { browserLaunchOptions } from '../helpers/browser-launch.ts'
 // Use the template's own menu objects, handlers and keyboard shortcuts.
 import assert from 'node:assert/strict'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
@@ -10,7 +12,9 @@ import { evaluate } from '../helpers/browser-expression.ts'
 
 const out = process.argv[2] ?? 'out/verification/debug-panels',
   root = resolve('dist'),
-  source = await readFile('../kirikiroid2-web/tests/test_files/xp3/kag3_template.xp3'),
+  source = await readFile(
+    process.env.KRKR_KAG_FIXTURE ?? '../kirikiroid2-web/tests/test_files/xp3/kag3_template.xp3',
+  ),
   digest = (data: Uint8Array) => createHash('sha256').update(data).digest('hex'),
   sourceSha256 = digest(source),
   indexSha256 = digest(await readFile(root + '/index.html')),
@@ -41,9 +45,9 @@ await once(server, 'listening')
 const address = server.address()
 assert(address && typeof address !== 'string')
 try {
-  for (const name of ['chromium', 'firefox', 'webkit'] as const)
+  for (const name of probeBrowsers())
     for (const backend of ['asyncify', 'jspi']) {
-      const browser = await { chromium, firefox, webkit }[name].launch(),
+      const browser = await { chromium, firefox, webkit }[name].launch(browserLaunchOptions),
         context = await browser.newContext({ viewport: { width: 1280, height: 900 } }),
         page = await context.newPage(),
         errors: string[] = [],

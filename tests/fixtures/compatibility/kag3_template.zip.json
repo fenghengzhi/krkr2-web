@@ -1,0 +1,160 @@
+{
+  "source": "kag3_template.xp3",
+  "sourceSha256": "5a1bdb7d33b7077a47ebfb889524c381216c44b65e8dc69d6c9cbb3453458644",
+  "zip": "kag3_template.zip",
+  "zipSha256": "bc14c13281aa9d00e714e6b9d1053d8d0cbde639cf6b7c84d7715551baea00de",
+  "decodedBytes": 534627,
+  "entries": [
+    {
+      "name": "scenario/first.ks",
+      "size": 53,
+      "sha256": "f254e29a2cc800208a69352874b5c456dc494201c55d02aabef27e4d20c97105"
+    },
+    {
+      "name": "startup.tjs",
+      "size": 243,
+      "sha256": "2cc546db3f9430a94fbf222d5717f2bd61a042b2244420a238abbfaa0664c3ae"
+    },
+    {
+      "name": "system/AnimationLayer.tjs",
+      "size": 32088,
+      "sha256": "bf7fd19747ee0d6d2133d79ef9fefdc1b93524f0b8ae4052b52a63af93d82c97"
+    },
+    {
+      "name": "system/BGM.tjs",
+      "size": 18368,
+      "sha256": "97fc53c04ad60737a13f257fd26fcdc5546fea6396b57f709e10bf626d951936"
+    },
+    {
+      "name": "system/ButtonLayer.tjs",
+      "size": 9923,
+      "sha256": "a8771865a9603c41833f7345fa7db7b5e0c5904ad15412bf8f5742bda92aa3fa"
+    },
+    {
+      "name": "system/CheckBoxLayer.tjs",
+      "size": 6213,
+      "sha256": "fb033c26abb4f3d23cfca26319fcb1eebcdb84abcf82135a87b1fc4c23b162fd"
+    },
+    {
+      "name": "system/Conductor.tjs",
+      "size": 14236,
+      "sha256": "4ebd93a58a5ffba109a437f77668fde9d266eb1375a30c2e9d311595c0474bea"
+    },
+    {
+      "name": "system/Config.tjs",
+      "size": 19726,
+      "sha256": "65e042794e2f6ed03134c5643f41bf6fc57842f789843f4809d51a900cbf543e"
+    },
+    {
+      "name": "system/DefaultMover.tjs",
+      "size": 9954,
+      "sha256": "b2ab3822b3d18b999a93c89cab6c83e38a5fc3451a9ff75598e0737bc9c839bd"
+    },
+    {
+      "name": "system/EditLayer.tjs",
+      "size": 21191,
+      "sha256": "96a1c5f9da6562269af678a9724020241ab7f2467a760be861293204f6d6ac11"
+    },
+    {
+      "name": "system/GraphicLayer.tjs",
+      "size": 18111,
+      "sha256": "854738795628667660e258d1eeabc99c3769e114582442f1d4811d6917e96d58"
+    },
+    {
+      "name": "system/HistoryLayer.tjs",
+      "size": 32070,
+      "sha256": "5b62098ad56d7746b3751ae77dafb62a74a2dd342582f2c48d6f0983e07180cc"
+    },
+    {
+      "name": "system/Initialize.tjs",
+      "size": 7603,
+      "sha256": "01f2b1544a686dc77a4e24bcaf7ec50d564a8de92447c64f51615539b3b41cab"
+    },
+    {
+      "name": "system/KAGLayer.tjs",
+      "size": 16021,
+      "sha256": "9bdec953ab42615f40d5be34eec5d4a28ea93a6579ef733f6395242925eee7e9"
+    },
+    {
+      "name": "system/LineBreak.asd",
+      "size": 616,
+      "sha256": "02138934eb53848e1bcf76e7a50bdfe631734c49990bf1dd5e1b2ef493289891"
+    },
+    {
+      "name": "system/LineBreak.png",
+      "size": 81,
+      "sha256": "bf531cfe6b0719aa85ac4660bff0c6d6d6bde317e6439638eb99150b1ab2fa6f"
+    },
+    {
+      "name": "system/LineBreak_a.png",
+      "size": 1972,
+      "sha256": "4c3a73acd9264729cf0f11965497408df29e0571fc6019388c17235a4fa25983"
+    },
+    {
+      "name": "system/MainWindow.tjs",
+      "size": 184250,
+      "sha256": "8f850acfd1c87b77bb37c792e9f80630f4a15f9c5bd0d9aafce5ce59cfedcea7"
+    },
+    {
+      "name": "system/Menus.tjs",
+      "size": 9034,
+      "sha256": "e1a61450f4726a620b016c3d92ae77f29d729977a5347597b6a023a315b7dc48"
+    },
+    {
+      "name": "system/MessageLayer.tjs",
+      "size": 95720,
+      "sha256": "322022ef5ed50dd945519c33f16c93fea5d578d30c66252f3695571e5e9b9f36"
+    },
+    {
+      "name": "system/Movie.tjs",
+      "size": 9362,
+      "sha256": "c6d07d7c2ffcdf0c8ba00a7b0a3157ff087bc310159f26d001f7645d8fa55c6a"
+    },
+    {
+      "name": "system/PageBreak.asd",
+      "size": 616,
+      "sha256": "02138934eb53848e1bcf76e7a50bdfe631734c49990bf1dd5e1b2ef493289891"
+    },
+    {
+      "name": "system/PageBreak.png",
+      "size": 81,
+      "sha256": "bf531cfe6b0719aa85ac4660bff0c6d6d6bde317e6439638eb99150b1ab2fa6f"
+    },
+    {
+      "name": "system/PageBreak_a.png",
+      "size": 1768,
+      "sha256": "0731b7e753be87928a18c8966c3e28feed6af309c9d777f36cc94e9a38f4c893"
+    },
+    {
+      "name": "system/Plugin.tjs",
+      "size": 2931,
+      "sha256": "fbddd818d2aead851cf9611881d9e45be5e5d8efd0232e2fdf0e6040f600cbbe"
+    },
+    {
+      "name": "system/SE.tjs",
+      "size": 8101,
+      "sha256": "ea3a6e3ddde0eb779bd11b52c114f615c45a0f0d992a9a8004edf1dd09c4ee91"
+    },
+    {
+      "name": "system/UpdateConfig.tjs",
+      "size": 3644,
+      "sha256": "52f03ea0e05d26371b7ad6cbb6b0f23686357e9861bec7fb073cb8c4493052fd"
+    },
+    {
+      "name": "system/Utils.tjs",
+      "size": 4779,
+      "sha256": "615edc711dea532741aea9a01f51a2e8a895fce004210a311ec2bbcce96db324"
+    },
+    {
+      "name": "system/YesNoDialog.tjs",
+      "size": 5728,
+      "sha256": "e042fb2a668e876f85b95c22b7a7a55d30ac8dab69c381f022a9792bbd079331"
+    },
+    {
+      "name": "system/check.png",
+      "size": 144,
+      "sha256": "1c51abd56c19105747af286d63320399d4b9c52f5bf94bf2a0317a9679f4a5d3"
+    }
+  ],
+  "upstream": "https://github.com/fenghengzhi/kirikiroid2-web/blob/13dda190f8370d02b6cf59286a088529b355658c/tests/test_files/xp3/kag3_template.xp3"
+}

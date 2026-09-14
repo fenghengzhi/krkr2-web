@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "treeHashFormat": "SHA-256 of JSON array of [relative path, byte count, SHA-256], sorted by ordinal relative path",
+  "releases": [
+    {
+      "id": "tjs-abi1",
+      "archive": "tjs-abi1.tar.gz",
+      "archiveBytes": 1452095,
+      "archiveSha256": "68e252a8d21d5db8aa3323807b9447238b79e1e0da5ed19bb3f819f1f206107f",
+      "historicalDirectory": "out/verification/system-events/abi1-root",
+      "build": "af931e99383f099685e36ea8d382f57a2bb65de966833dd13bf6e49276ea27ed",
+      "tjsAbi": 1,
+      "fontAbi": null,
+      "tree": {
+        "files": 24,
+        "bytes": 4816153,
+        "sha256": "62236685bf67d325db259b334647f013a3348493e3695b690b1327d4e7cfc78c"
+      }
+    },
+    {
+      "id": "font-abi1",
+      "archive": "font-abi1.tar.gz",
+      "archiveBytes": 1733712,
+      "archiveSha256": "256e07977cfc5b2cd95ad446ff4dc2e67ee0cbaccf937a60405fc4b4e587fadb",
+      "historicalDirectory": "out/verification/text-layout/font-abi1-root",
+      "build": "336c04ffdbdb20209c7057c79861a7c9e214294533e2cf62d23565dcebfbd479",
+      "tjsAbi": 2,
+      "fontAbi": 1,
+      "tree": {
+        "files": 31,
+        "bytes": 5479360,
+        "sha256": "f9657e2c02b28e5ec60e5c873899b77ea2a287fc2d072398de9333f11a29bef6"
+      }
+    },
+    {
+      "id": "tjs-abi2",
+      "archive": "tjs-abi2.tar.gz",
+      "archiveBytes": 1743619,
+      "archiveSha256": "28a21194f8015a0701ee3c58bcf5bfc217f636a7223abcdcab62c1fd400e4609",
+      "historicalDirectory": "out/verification/vm-console/abi2-root",
+      "build": "9a29e94ad434d349d14f2bf24a2f52f142ecabfcf0517cf586b4ddb6c51cf096",
+      "tjsAbi": 2,
+      "fontAbi": 2,
+      "tree": {
+        "files": 32,
+        "bytes": 5513225,
+        "sha256": "e8593811f1f8591b95da36ab81d9671db7552d2ffa233363228f98ecf034953a"
+      }
+    }
+  ],
+  "historicalMatrices": {
+    "system-events": "f90391915bf96bdf4f731139d245887fd4d82ba0c9ab0f677a654e28c127662b",
+    "text-layout": "d47954c9fff4019b8d2301bb9f3fb6410bc0376ec5572c88f2e4a686baf73a85",
+    "debug-panels": "61a8177fe17b7bdac8c6be5c19a0eea110cac026a3927f6dfe3e6575d12a31fb"
+  }
+}

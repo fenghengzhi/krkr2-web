@@ -6,7 +6,7 @@ import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { createHash } from 'node:crypto'
 const source = process.argv[2] ?? '../kirikiroid2-web/tests/test_files/xp3/kag3_template.xp3',
-  zip = 'out/verification/zip/kag3_template.zip',
+  zip = process.env.KRKR_KAG_ZIP ?? 'out/verification/zip/kag3_template.zip',
   output = process.argv[3] ?? 'out/verification/system-events',
   directory = output + '/kag',
   hash = async (path) =>
@@ -18,12 +18,15 @@ const source = process.argv[2] ?? '../kirikiroid2-web/tests/test_files/xp3/kag3_
 assert.equal(await hash(source), repack.sourceSha256)
 assert.equal(await hash(zip), repack.zipSha256)
 await mkdir(directory, { recursive: true })
+const browsers = ['chromium', 'firefox', 'webkit']
+const selected = process.env.KRKR_PROBE_BROWSER
+if (selected && !browsers.includes(selected)) throw new Error('Unknown probe browser: ' + selected)
 const results = []
 for (const [container, filename] of [
   ['xp3', source],
   ['zip', zip],
 ])
-  for (const browser of ['chromium', 'firefox', 'webkit'])
+  for (const browser of selected ? [selected] : browsers)
     for (const backend of ['asyncify', 'jspi'])
       for (const mode of ['flow', 'save', 'transition']) {
         const log = `${directory}/${container}-${browser}-${backend}-${mode}.log`,

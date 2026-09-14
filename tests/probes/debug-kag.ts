@@ -1,3 +1,5 @@
+import { probeBrowsers } from '../helpers/probe-browsers.ts'
+import { browserLaunchOptions } from '../helpers/browser-launch.ts'
 // Original KAG exception handler, deliberate Conductor failure and recovery.
 import assert from 'node:assert/strict'
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
@@ -11,7 +13,9 @@ import { evaluate } from '../helpers/browser-expression.ts'
 const root = resolve('dist'),
   directory = process.argv[2] ?? 'out/verification/debug',
   out = directory + '/kag-diagnostics',
-  source = await readFile('../kirikiroid2-web/tests/test_files/xp3/kag3_template.xp3'),
+  source = await readFile(
+    process.env.KRKR_KAG_FIXTURE ?? '../kirikiroid2-web/tests/test_files/xp3/kag3_template.xp3',
+  ),
   indexSha256 = createHash('sha256')
     .update(await readFile(root + '/index.html'))
     .digest('hex'),
@@ -45,9 +49,9 @@ await once(server, 'listening')
 const address = server.address()
 assert(address && typeof address !== 'string')
 try {
-  for (const name of ['chromium', 'firefox', 'webkit'] as const)
+  for (const name of probeBrowsers())
     for (const backend of ['asyncify', 'jspi']) {
-      const browser = await { chromium, firefox, webkit }[name].launch(),
+      const browser = await { chromium, firefox, webkit }[name].launch(browserLaunchOptions),
         context = await browser.newContext({ viewport: { width: 1280, height: 900 } }),
         page = await context.newPage(),
         errors: string[] = [],
