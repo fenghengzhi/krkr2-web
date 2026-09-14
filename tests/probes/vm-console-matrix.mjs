@@ -132,6 +132,8 @@ const lifetimePhase = wasm.capabilities?.bytecodeLifecycle === 1
 const executionPhase = wasm.capabilities?.executionBudgets === 1
 const objectPhase = wasm.capabilities?.objectFinalization === 1
 const hostPhase = wasm.capabilities?.hostObjectLifetime === 1
+const soundPhase = wasm.capabilities?.soundObjectLifetime === 1
+if (soundPhase) assert(hostPhase)
 if (hostPhase) assert(objectPhase)
 if (objectPhase) assert(executionPhase)
 if (executionPhase) assert(lifetimePhase)
@@ -154,32 +156,36 @@ if (binaryPhase) assert(compilerPhase)
 const scriptsPhase = wasm.abi === 5
 if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
-const nodeCount = hostPhase
-  ? 594
-  : objectPhase
-    ? 466
-    : executionPhase
-      ? 398
-      : lifetimePhase
-        ? 392
-        : binaryPhase
-          ? 384
-          : compilerPhase
-            ? 371
-            : scriptsPhase
-              ? 362
-              : tracePhase
-                ? 351
-                : 346
-const browserCount = binaryPhase
-  ? 639
-  : compilerPhase
-    ? 621
-    : scriptsPhase
-      ? 615
-      : tracePhase
-        ? 609
-        : 603
+const nodeCount = soundPhase
+  ? 710
+  : hostPhase
+    ? 594
+    : objectPhase
+      ? 466
+      : executionPhase
+        ? 398
+        : lifetimePhase
+          ? 392
+          : binaryPhase
+            ? 384
+            : compilerPhase
+              ? 371
+              : scriptsPhase
+                ? 362
+                : tracePhase
+                  ? 351
+                  : 346
+const browserCount = soundPhase
+  ? 651
+  : binaryPhase
+    ? 639
+    : compilerPhase
+      ? 621
+      : scriptsPhase
+        ? 615
+        : tracePhase
+          ? 609
+          : 603
 const compatibilityCount = scriptsPhase ? 78 : tracePhase ? 72 : 66
 if (!tracePhase) assert(freeze, 'The historical VM console phase requires its freeze diagnostic')
 assert.equal(font.abi, 2)
@@ -677,6 +683,99 @@ function eventOwnership(rows, backend) {
     for (const value of Object.values(row.stopped)) assert.equal(value, 0)
   }
 }
+function dependentLifetimes(rows, backend) {
+  const expected = {
+    'owner-release': ['owner', 'child'],
+    'child-first': ['child', 'owner'],
+    'owner-retry': ['owner', 'owner', 'child'],
+    'child-error': ['owner', 'child', 'child'],
+    'primary-error': ['owner', 'child', 'child'],
+    'invalid-bindings': ['child', 'owner'],
+    'vm-dispose': [],
+  }
+  debugCombinations(rows, Object.keys(expected))
+  for (const row of rows) {
+    assert.equal(row.variant, backend)
+    assert.deepEqual(row.marks, expected[row.name])
+    assert.equal(row.owned.scriptObjects, row.baseline.scriptObjects + 2)
+    if (row.name === 'vm-dispose') {
+      assert.equal(row.disposed.scriptObjects, 0)
+      assert.deepEqual(row.disposed.marks, [])
+      continue
+    }
+    for (const field of ['handles', 'scriptObjects', 'blocks', 'contexts'])
+      assert.equal(row.after[field], row.baseline[field])
+    for (const field of ['weakOwners', 'dependents', 'pendingInvalidations', 'pendingHandles'])
+      assert.equal(row.after[field], 0)
+    if (row.name === 'invalid-bindings') {
+      combinations(
+        Object.keys(row.rejections),
+        [
+          'self',
+          'ownerFunction',
+          'childFunction',
+          'ownerClass',
+          'childClass',
+          'released',
+          'foreignOwner',
+          'foreignChild',
+          'invalidChild',
+          'invalidOwner',
+        ],
+        (key) => key,
+      )
+      for (const error of Object.values(row.rejections)) assert.equal(typeof error, 'string')
+    } else {
+      assert.equal(row.bound.dependents, 1)
+      assert.equal(row.bound.handles, 2)
+      assert.equal(row.retired.dependents, 0)
+      assert.equal(row.retired.pendingInvalidations, 0)
+    }
+    if (row.name === 'owner-retry') {
+      assert(row.error.includes('owner-finalizer'))
+      assert.equal(row.retry.dependents, 1)
+    }
+    if (row.name === 'child-error' || row.name === 'primary-error') {
+      assert(row.error.includes(row.name === 'child-error' ? 'child-finalizer' : 'primary-body'))
+      if (row.name === 'primary-error') assert(!row.error.includes('child-finalizer'))
+      assert.equal(row.failed.dependents, 0)
+      assert.equal(row.failed.pendingInvalidations, 0)
+    }
+  }
+}
+function soundOwnership(rows, backend) {
+  combinations(rows, ['false', 'true'], (row) => String(row.binary))
+  const expected = {
+    'implicit-resource-release': '1',
+    'queued-dynamic-member': 'sound-owner:cue,1,1',
+    'flags-labels-filters': '0,0,0,1,42,1',
+    'retry-invalidation': '2',
+    'await-asynchronous-close': 'closed',
+  }
+  for (const row of rows) {
+    assert.equal(row.variant, backend)
+    combinations(row.cases, Object.keys(expected), (item) => item.name)
+    for (const item of row.cases) {
+      assert.equal(item.result, expected[item.name])
+      assert.deepEqual(item.retired, row.baseline)
+      assert.equal(item.owned.voices, 1)
+      if (item.name === 'await-asynchronous-close') {
+        assert.equal(item.owned.soundSources, 0)
+        assert.equal(item.owned.pendingSoundCloses, 1)
+      } else {
+        assert.equal(item.owned.soundSources, row.baseline.soundSources + 1)
+        assert.equal(item.owned.weakOwners, row.baseline.weakOwners + 1)
+      }
+      if (item.name === 'flags-labels-filters')
+        assert.equal(item.owned.dependents, row.baseline.dependents + 1)
+    }
+    assert.deepEqual(Object.keys(row.stopped).sort(), Object.keys(row.baseline).sort())
+    for (const value of Object.values(row.stopped)) assert.equal(value, 0)
+    assert.equal(row.terminalCloses, 1)
+    assert.equal(row.closedIds.length, 5)
+    assert.equal(new Set(row.closedIds).size, 5)
+  }
+}
 assert.deepEqual(runtime.manifest, wasm)
 if (lifetimePhase) assert.deepEqual(runtime.failures, [])
 combinations(
@@ -691,6 +790,10 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (soundPhase) {
+    dependentLifetimes(row.dependentLifetimes, row.backend)
+    soundOwnership(row.soundOwnership, row.backend)
+  }
   if (hostPhase) {
     hostHandleLifetimes(row.hostHandles.cases, row.hostHandles.controls, row.backend)
     ownerObservations(row.ownerObservations, row.backend)
@@ -945,6 +1048,7 @@ const allocatorReports = []
 const executionAllocatorReports = []
 const finalizationAllocatorReports = []
 const ownerAllocatorReports = []
+const dependentAllocatorReports = []
 if (lifetimePhase) {
   allocations = await run('KRKR_ALLOCATIONS_RUN', 'Bytecode allocation diagnostic', 2, [
     '--pattern',
@@ -959,6 +1063,7 @@ if (lifetimePhase) {
       : []),
     ...(objectPhase ? ['tests/probes/finalization-allocation-faults.ts'] : []),
     ...(hostPhase ? ['tests/probes/owner-observation-allocations.ts'] : []),
+    ...(soundPhase ? ['tests/probes/dependent-allocation-faults.ts'] : []),
     '.github/workflows/bytecode-allocations.yml',
   ])
   for (const backend of backends) {
@@ -1127,6 +1232,67 @@ if (lifetimePhase) {
         })
       }
       ownerAllocatorReports.push(owners)
+    }
+    if (soundPhase) {
+      const dependents = await json(`${root}/out/ci/dependent-allocations-${backend}.json`)
+      assert.deepEqual(dependents.manifest, manifest)
+      assert.equal(dependents.variant, backend)
+      assert.equal(dependents.manifest.capabilities.soundObjectLifetime, 1)
+      assert.deepEqual(dependents.failures, [])
+      const groupKey = (item) => `${item.operation}/${item.debugMode}/${item.binary}`
+      const groups = ['register', 'invalidate'].flatMap((operation) =>
+        [false, true].flatMap((debugMode) =>
+          [false, true].map((binary) => `${operation}/${debugMode}/${binary}`),
+        ),
+      )
+      combinations([...new Set(dependents.results.map(groupKey))], groups, (key) => key)
+      for (const group of groups) {
+        const rows = dependents.results.filter((item) => groupKey(item) === group)
+        assert(rows.length >= 3)
+        rows.forEach((item, index) => {
+          assert.equal(item.after, index - 1)
+          assert.equal(item.hits, index === 0 || index === rows.length - 1 ? 0 : 1)
+          assert.equal(item.status, 'released')
+          assert.deepEqual(item.disposed, rows[0].disposed)
+          assert.deepEqual(item.baseline, rows[0].disposed)
+          assert.equal(item.disposed.objects, 0)
+          for (const field of [
+            'handles',
+            'pendingHandles',
+            'weakOwners',
+            'dependents',
+            'pendingInvalidations',
+          ])
+            assert.equal(item.released[field], 0)
+          assert.equal(item.released.scriptObjects, item.before.scriptObjects - 2)
+          for (const field of ['blocks', 'contexts'])
+            assert.equal(item.released[field], item.before[field])
+          if (item.hits) {
+            assert(item.failedBytes > 0)
+            assert(
+              item.allocationTrace.includes(
+                `Native allocation phase ${item.operation === 'register' ? 14 : 11}`,
+              ),
+            )
+            assert(
+              item.error.message.includes(
+                item.operation === 'register' ? 'Cannot bind' : 'bad_alloc',
+              ),
+            )
+          } else assert.equal(item.error, null)
+          if (item.operation === 'register') {
+            assert.equal(item.before.handles, 2)
+            assert.equal(item.current.handles, 2)
+            assert.equal(item.current.dependents, item.hits ? 0 : 1)
+            assert.equal(item.current.scriptObjects, item.before.scriptObjects)
+          } else {
+            assert.equal(item.before.handles, 1)
+            assert.equal(item.before.dependents, 1)
+            assert.deepEqual(item.current, item.released)
+          }
+        })
+      }
+      dependentAllocatorReports.push(dependents)
     }
   }
 }
@@ -1316,6 +1482,47 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(soundPhase
+      ? {
+          dependentLifetimes: runtime.results.reduce(
+            (sum, row) => sum + row.dependentLifetimes.length,
+            0,
+          ),
+          soundOwnershipSessions: runtime.results.reduce(
+            (sum, row) => sum + row.soundOwnership.length,
+            0,
+          ),
+          soundOwnershipCases: runtime.results.reduce(
+            (sum, row) =>
+              sum + row.soundOwnership.reduce((count, session) => count + session.cases.length, 0),
+            0,
+          ),
+          dependentAllocatorGroups: dependentAllocatorReports.reduce(
+            (sum, report) =>
+              sum +
+              new Set(
+                report.results.map((item) => `${item.operation}/${item.debugMode}/${item.binary}`),
+              ).size,
+            0,
+          ),
+          dependentAllocatorFailures: dependentAllocatorReports.reduce(
+            (sum, report) => sum + report.results.filter((item) => item.hits === 1).length,
+            0,
+          ),
+          dependentAllocatorFailuresByOperation: Object.fromEntries(
+            ['register', 'invalidate'].map((operation) => [
+              operation,
+              dependentAllocatorReports.reduce(
+                (sum, report) =>
+                  sum +
+                  report.results.filter((item) => item.operation === operation && item.hits === 1)
+                    .length,
+                0,
+              ),
+            ]),
+          ),
+        }
+      : {}),
     ...(hostPhase
       ? {
           hostHandleCases: runtime.results.reduce(
@@ -1435,6 +1642,7 @@ const matrix = {
   executionAllocatorReports,
   finalizationAllocatorReports,
   ownerAllocatorReports,
+  dependentAllocatorReports,
   hostHandleReports,
   objectReports,
   offlineRestarts,
@@ -1451,6 +1659,12 @@ const matrix = {
   evidence,
   previousMatrices: {
     ...fixtureManifest.historicalMatrices,
+    ...(soundPhase
+      ? {
+          'host-object-lifetime':
+            'e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c',
+        }
+      : {}),
     ...(hostPhase
       ? {
           'object-finalization': '0387418a08e9a011d261937358510575a31f10061efaaff1e67c7ae910217d51',
@@ -1473,6 +1687,15 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(soundPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34885096935',
+            reason:
+              'The first sound ownership run passed 679/682 Node cases, all 651 browser checks and all six direct runtimes. All 82 real Session sound lifecycle cases passed. Three fixture failures were corrected: the short-fade clock assertion now accounts for native-style immediate completion below 60 ms before separately exercising a 120 ms fade; two stopped-session expectations include the four new zero ownership counters. Original failed artifacts and metadata remain archived. This failed run is not counted as passing verification.',
+          },
+        ]
+      : []),
     ...(hostPhase
       ? [
           {
@@ -1800,15 +2023,17 @@ const matrix = {
           'Automatic legacy text detection and decoder latching, full bytecode validation and complete storage paths remain incomplete',
           ...(binaryPhase
             ? [
-                hostPhase
-                  ? 'Selected host handle drains, native weak observation and Timer/AsyncTrigger event leases are covered; Sound, Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Genuine registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
-                  : objectPhase
-                    ? 'Reference-counted cleanup, explicit cycle breaking and selected finalizer failures are covered; host object ownership and remaining VM semantics still require implementation. Arbitrary cycle collection is not part of the TJS2 reference behavior.'
-                    : executionPhase
-                      ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
-                      : lifetimePhase
-                        ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
-                        : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
+                soundPhase
+                  ? 'Selected Sound, Timer and AsyncTrigger weak ownership, dependent retirement, queued event leases and asynchronous audio resource closes are covered; Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                  : hostPhase
+                    ? 'Selected host handle drains, native weak observation and Timer/AsyncTrigger event leases are covered; Sound, Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Genuine registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                    : objectPhase
+                      ? 'Reference-counted cleanup, explicit cycle breaking and selected finalizer failures are covered; host object ownership and remaining VM semantics still require implementation. Arbitrary cycle collection is not part of the TJS2 reference behavior.'
+                      : executionPhase
+                        ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
+                        : lifetimePhase
+                          ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
+                          : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
               ]
             : [
                 'Serialized Array/Dictionary resource execution and prefixed bytecode remain incomplete',
@@ -1842,23 +2067,25 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = hostPhase
-  ? 'host-object-lifetime-matrix.json'
-  : objectPhase
-    ? 'object-finalization-matrix.json'
-    : executionPhase
-      ? 'execution-budgets-matrix.json'
-      : lifetimePhase
-        ? 'bytecode-lifetime-matrix.json'
-        : binaryPhase
-          ? 'binary-scripts-matrix.json'
-          : compilerPhase
-            ? 'compiler-matrix.json'
-            : scriptsPhase
-              ? 'native-scripts-matrix.json'
-              : tracePhase
-                ? 'stack-traces-matrix.json'
-                : 'vm-console-matrix.json'
+const reportName = soundPhase
+  ? 'sound-object-lifetime-matrix.json'
+  : hostPhase
+    ? 'host-object-lifetime-matrix.json'
+    : objectPhase
+      ? 'object-finalization-matrix.json'
+      : executionPhase
+        ? 'execution-budgets-matrix.json'
+        : lifetimePhase
+          ? 'bytecode-lifetime-matrix.json'
+          : binaryPhase
+            ? 'binary-scripts-matrix.json'
+            : compilerPhase
+              ? 'compiler-matrix.json'
+              : scriptsPhase
+                ? 'native-scripts-matrix.json'
+                : tracePhase
+                  ? 'stack-traces-matrix.json'
+                  : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(

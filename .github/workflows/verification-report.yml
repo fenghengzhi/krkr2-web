@@ -89,6 +89,7 @@ jobs:
             out/verification/execution-budgets-matrix.json
             out/verification/object-finalization-matrix.json
             out/verification/host-object-lifetime-matrix.json
+            out/verification/sound-object-lifetime-matrix.json
             out/verification/hosted-evidence/
             out/ci/
           if-no-files-found: error
