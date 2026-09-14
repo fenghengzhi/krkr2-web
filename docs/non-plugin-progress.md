@@ -1,6 +1,6 @@
 # 插件以外的实现进度
 
-声音生命周期的 [当前版本完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895849611) 已通过 **710 项 Node、651 项浏览器和 6 组直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34894024462) 另通过 **78 项**。最终证据报告正在生成，不能将待完成报告视为通过。
+声音生命周期的 [当前版本完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895849611) 已通过 **710 项 Node、651 项浏览器和 6 组直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34894024462) 另通过 **78 项**。[最终证据报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34897329847) 已通过，绑定 542 份证据，矩阵 SHA-256 为 `bd7c8848e1e0183457644d67a8f6dbfbf41a8a951576db2f608046e7e60307da`，可信冻结为 21,053.1 ms。
 
 声音实例现由服务弱观察，后台事件独立持有并支持动态成员替换，失效时取消事件并等待异步关闭。外部 flags、labels 的失效和 filters Array 的独立所有权已接通；后端阻止迟到解码重新加载关闭资源，Headless 空闲时钟会停止。三浏览器双后端覆盖 60 个真实声音场景、168 个从属对象场景；独立句柄 64 项、对象 120 项和分配诊断均通过，详见 [决策 040](decisions/040-sound-object-lifetime.md)。TJS ABI 5 新增 `soundObjectLifetime: 1`，字体 ABI 2、协议 9 不变。
 
