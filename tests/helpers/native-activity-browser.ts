@@ -130,11 +130,34 @@ export const test = base.extend<{ native: NativeActivity }>({
               body: JSON.stringify(events ?? [], null, 2),
               contentType: 'application/json',
             })
-            if (testInfo.status !== testInfo.expectedStatus)
+            if (testInfo.status !== testInfo.expectedStatus) {
+              const state = await page
+                .evaluate(() => ({
+                  at: performance.now(),
+                  visibility: document.visibilityState,
+                  status: document.querySelector('#status')?.textContent,
+                  logs: document.querySelector('#logs')?.textContent,
+                  sound: document.querySelector('#sound-status')?.textContent,
+                  audioState: (
+                    globalThis as typeof globalThis & { __audioProbe?: AudioWorkletNode }
+                  ).__audioProbe?.context.state,
+                  videos: [...document.querySelectorAll('video')].map((video) => ({
+                    currentTime: video.currentTime,
+                    paused: video.paused,
+                    readyState: video.readyState,
+                    error: video.error?.message,
+                  })),
+                }))
+                .catch((error) => ({ unavailable: String(error) }))
+              await testInfo.attach('native-page-state', {
+                body: JSON.stringify(state, null, 2),
+                contentType: 'application/json',
+              })
               await testInfo.attach('native-failure', {
                 body: await page.screenshot(),
                 contentType: 'image/png',
               })
+            }
           }
         }
       } finally {

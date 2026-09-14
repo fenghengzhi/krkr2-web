@@ -1,0 +1,67 @@
+name: Native lifecycle diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Completed build run ID whose application sources match this commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CI: 'true'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  freeze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: test-build
+          path: ${{ runner.temp }}/krkr-test-build
+          run-id: ${{ inputs.build-run }}
+          github-token: ${{ github.token }}
+      - name: Require matching application sources before reusing the build
+        run: |
+          tar -xzf "$RUNNER_TEMP/krkr-test-build/test-build.tar.gz"
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs'
+          import { execFileSync } from 'node:child_process'
+          const { commit } = JSON.parse(readFileSync('out/ci/build-info.json', 'utf8'))
+          if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('Invalid build provenance')
+          execFileSync('git', ['diff', '--exit-code', commit, 'HEAD', '--',
+            'src', 'native', 'third_party', 'public', 'examples', 'scripts',
+            'package.json', 'package-lock.json', 'index.html', 'vite.config.ts',
+            'tsconfig*.json'], { stdio: 'inherit' })
+          JS
+          npm run typecheck
+      - run: npx playwright install --with-deps chromium
+      - name: Repeat the real long-freeze scenario with failure diagnostics
+        run: npx playwright test -c playwright.activity.config.ts freeze-deadlines.spec.ts --repeat-each=3 2>&1 | tee out/ci/native-diagnostic.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: native-diagnostic-results
+          path: |
+            out/ci/
+            out/verification/activity/native-check.json
+            test-results-native-activity/
+          retention-days: 14
