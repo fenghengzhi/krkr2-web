@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { headless } from '../helpers/headless.ts'
 import type { SessionDependencies } from '../../src/engine/session.ts'
+import { readScript } from '../../src/backends/files/text-codecs.ts'
 
 class Clock {
   time = 0
@@ -471,8 +472,10 @@ class EventOwner extends AsyncTrigger {
 function createOwner(){global.owner=new EventOwner();}
 `,
         {
-          decodeScript(bytes) {
-            const source = new TextDecoder().decode(bytes)
+          async decodeScript(bytes, mode, encoding) {
+            // Keep compiled storage as bytes; only the marker's decoded text
+            // is replaced with a controllable asynchronous host completion.
+            const source = await readScript(bytes, mode, encoding)
             if (source === 'hold-lifetime-callback') {
               entered()
               return held

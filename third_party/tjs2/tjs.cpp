@@ -257,8 +257,11 @@ namespace TJS {
     void tTJS::Shutdown() {
         TJSVariantArrayStackCompactNow();
         Global->Clear();
-        if(Global)
-            Global->Release(), Global = nullptr;
+        if(Global) {
+            auto* global = Global;
+            Global = nullptr;
+            global->Release();
+        }
         if(Cache)
             delete Cache, Cache = nullptr;
     }

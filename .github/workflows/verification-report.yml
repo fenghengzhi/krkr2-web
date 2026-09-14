@@ -19,6 +19,10 @@ on:
         description: Successful isolated object lifetime diagnostic for the same sources
         required: false
         type: string
+      handles-run:
+        description: Successful isolated host handle lifetime diagnostic for the same sources
+        required: false
+        type: string
       pwa-run:
         description: Optional twenty-case native offline restart crash diagnostic
         required: false
@@ -61,6 +65,7 @@ jobs:
           KRKR_COMPATIBILITY_RUN: ${{ inputs.compatibility-run }}
           KRKR_ALLOCATIONS_RUN: ${{ inputs.allocations-run }}
           KRKR_OBJECTS_RUN: ${{ inputs.objects-run }}
+          KRKR_HANDLES_RUN: ${{ inputs.handles-run }}
           KRKR_PWA_RUN: ${{ inputs.pwa-run }}
           KRKR_FREEZE_RUN: ${{ inputs.freeze-run }}
           KRKR_INPUT_RUN: ${{ inputs.input-run }}
@@ -78,6 +83,7 @@ jobs:
             out/verification/bytecode-lifetime-matrix.json
             out/verification/execution-budgets-matrix.json
             out/verification/object-finalization-matrix.json
+            out/verification/host-object-lifetime-matrix.json
             out/verification/hosted-evidence/
             out/ci/
           if-no-files-found: error

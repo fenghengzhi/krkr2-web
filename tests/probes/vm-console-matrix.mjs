@@ -96,6 +96,11 @@ unchanged(compatibility.info.headSha, [
   ':(exclude)tests/helpers/bytecode-lifetime.ts',
   ':(exclude)tests/helpers/execution-budget.ts',
   ':(exclude)tests/helpers/object-lifetime.ts',
+  // These fixtures are imported only by the new regular/direct runtime and
+  // isolated host diagnostics, whose exact sources are checked separately.
+  ':(exclude)tests/helpers/host-handles.ts',
+  ':(exclude)tests/helpers/owner-observation.ts',
+  ':(exclude)tests/helpers/event-lifetime-runtime.ts',
   'tests/probes/system-abi-pwa.ts',
   'tests/probes/system-kag-matrix.mjs',
   'tests/probes/kag-browser.ts',
@@ -126,6 +131,8 @@ assert([3, 4, 5].includes(wasm.abi))
 const lifetimePhase = wasm.capabilities?.bytecodeLifecycle === 1
 const executionPhase = wasm.capabilities?.executionBudgets === 1
 const objectPhase = wasm.capabilities?.objectFinalization === 1
+const hostPhase = wasm.capabilities?.hostObjectLifetime === 1
+if (hostPhase) assert(objectPhase)
 if (objectPhase) assert(executionPhase)
 if (executionPhase) assert(lifetimePhase)
 const fontPortDownloads =
@@ -147,21 +154,23 @@ if (binaryPhase) assert(compilerPhase)
 const scriptsPhase = wasm.abi === 5
 if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
-const nodeCount = objectPhase
-  ? 466
-  : executionPhase
-    ? 398
-    : lifetimePhase
-      ? 392
-      : binaryPhase
-        ? 384
-        : compilerPhase
-          ? 371
-          : scriptsPhase
-            ? 362
-            : tracePhase
-              ? 351
-              : 346
+const nodeCount = hostPhase
+  ? 594
+  : objectPhase
+    ? 466
+    : executionPhase
+      ? 398
+      : lifetimePhase
+        ? 392
+        : binaryPhase
+          ? 384
+          : compilerPhase
+            ? 371
+            : scriptsPhase
+              ? 362
+              : tracePhase
+                ? 351
+                : 346
 const browserCount = binaryPhase
   ? 639
   : compilerPhase
@@ -449,6 +458,225 @@ function objectLifetimes(rows) {
     }
   }
 }
+const hostHandleNames = [
+  'batch-throwing',
+  'stale-during-finalize',
+  'duplicate-release',
+  'nested-release',
+  'primary-host-error',
+  'primary-storage-error',
+]
+const hostControlNames = ['paused-resume', 'paused-cancel']
+const ownerObservationNames = [
+  'implicit-release',
+  'observer-self-remove',
+  'observer-other-remove',
+  'explicit-retry',
+  'explicit-revoke',
+  'upgrade-owner',
+  'unobserve',
+  'vm-isolation',
+  'vm-dispose',
+  'invalid-owners',
+]
+function debugCombinations(rows, names) {
+  combinations(
+    rows,
+    names.flatMap((name) =>
+      [false, true].flatMap((debug) => [false, true].map((binary) => `${name}/${debug}/${binary}`)),
+    ),
+    (row) => `${row.name}/${row.debugMode}/${row.binary}`,
+  )
+}
+function handleBoundary(row, backend) {
+  assert.equal(row.variant, backend)
+  assert.equal(row.boundary.objects, row.before.objects)
+  assert.equal(row.boundary.blocks, row.before.blocks)
+  assert.equal(row.boundary.contexts, row.before.contexts)
+  assert.equal(row.boundary.handles, 0)
+  assert.equal(row.boundary.pendingDestructions, 0)
+  assert.equal(row.boundary.destructionDepth, 0)
+  releasedExecution(row.boundary.budget)
+}
+function hostHandleLifetimes(cases, controls, backend) {
+  debugCombinations(cases, hostHandleNames)
+  debugCombinations(controls, hostControlNames)
+  for (const row of cases) {
+    handleBoundary(row, backend)
+    const expectedError = {
+      'batch-throwing': 'release-A',
+      'primary-host-error': 'host-primary',
+      'primary-storage-error': 'storage-primary',
+    }[row.name]
+    if (expectedError) {
+      assert.equal(row.error.name, 'ScriptError')
+      assert(row.error.message.includes(expectedError))
+    } else {
+      assert.equal(row.error, null)
+      assert.equal(row.value, '42')
+    }
+    const primary = row.name.startsWith('primary-')
+    const expectedLog =
+      row.name === 'batch-throwing'
+        ? 'ABC'
+        : primary
+          ? 'AB'
+          : row.name === 'nested-release'
+            ? 'ABa'
+            : 'Aa'
+    assert.equal(row.log.split('').sort().join(''), expectedLog)
+    const callback = {
+      'stale-during-finalize': 'handle-inspect',
+      'duplicate-release': 'handle-duplicate',
+      'nested-release': 'handle-hold',
+      'primary-host-error': 'handle-primary',
+      'primary-storage-error': 'Storage.readText',
+    }[row.name]
+    assert.deepEqual(row.callbacks, callback ? [callback] : [])
+    if (row.name === 'stale-during-finalize') {
+      assert(row.stale.depth > 0)
+      assert.equal(row.stale.retained, undefined)
+      assert.equal(row.stale.identity, undefined)
+      for (const field of ['retainError', 'identityError', 'snapshotError']) {
+        assert.equal(row.stale[field].name, 'Error')
+        assert(
+          row.stale[field].message.includes(
+            field === 'snapshotError' ? 'Released object handle' : 'Released TJS object handle',
+          ),
+        )
+      }
+    }
+    if (row.name === 'duplicate-release') {
+      assert(row.duplicate.depth > 0)
+      assert.equal(row.duplicate.handles, 0)
+    }
+    if (row.name === 'nested-release') assert(row.suspended.destructionDepth > 0)
+    assert.equal(row.after.blocks, 0)
+    assert.equal(row.after.contexts, 0)
+    assert.equal(row.after.handles, 0)
+    releasedExecution(row.after.budget)
+  }
+  for (const row of controls) {
+    handleBoundary(row, backend)
+    assert.equal(row.cancel, row.name === 'paused-cancel')
+    assert.equal(row.heldMs, 25)
+    assert.equal(row.nativeReplyKind, row.cancel ? 1 : 0)
+    assert(row.suspended.destructionDepth > 0)
+    assert(row.paused.destructionDepth > 0)
+    assert.equal(row.paused.settled, false)
+    assert.equal(row.paused.paused, true)
+    assert.equal(row.paused.hostCalls, 1)
+    if (row.cancel) assert.equal(row.error.name, 'AbortError')
+    else {
+      assert.equal(row.error, null)
+      assert.equal(row.value, '42')
+      assert.equal(row.log, 'AB')
+    }
+  }
+}
+function ownerObservations(rows, backend) {
+  debugCombinations(rows, ownerObservationNames)
+  for (const row of rows) {
+    assert.equal(row.variant, backend)
+    for (const event of row.events) assert.deepEqual(event.upgraded, [])
+    if (row.watched) {
+      assert.equal(row.watched.handles, row.owned.handles)
+      assert.equal(row.watched.scriptObjects, row.owned.scriptObjects)
+      assert.equal(
+        row.watched.weakOwners,
+        ['upgrade-owner', 'unobserve'].includes(row.name) ? 1 : 2,
+      )
+    }
+    if (row.name === 'vm-dispose') {
+      assert.equal(row.eventsAfterDispose, 2)
+      assert.equal(row.events.length, 2)
+      assert.equal(row.events.at(-1).weakOwners, 0)
+      assert.equal(row.disposalReentries, 1)
+      continue
+    }
+    assert.equal(row.after.blocks, 0)
+    assert.equal(row.after.contexts, 0)
+    for (const field of [
+      'handles',
+      'pendingHandles',
+      'weakOwners',
+      'destructionDepth',
+      'pendingDestructions',
+    ])
+      assert.equal(row.after[field], 0, field)
+    releasedExecution(row.after.budget)
+    assert.equal(row.boundary.scriptObjects, row.before.scriptObjects)
+    if (row.name === 'vm-isolation') {
+      assert.equal(row.events.length, 1)
+      assert.equal(row.other.calls, 1)
+      assert.equal(row.other.after.scriptObjects, row.other.before.scriptObjects)
+      for (const field of ['handles', 'pendingHandles', 'weakOwners'])
+        assert.equal(row.other.after[field], 0)
+      combinations(
+        Object.keys(row.rejections),
+        ['observe', 'reverseObserve', 'upgrade', 'unobserve', 'reverseUpgrade'],
+        (key) => key,
+      )
+    } else if (row.name === 'invalid-owners') {
+      assert.equal(row.events.length, 0)
+      combinations(
+        Object.keys(row.rejections),
+        ['function', 'class', 'different-context', 'released', 'invalidated'],
+        (key) => key,
+      )
+    } else {
+      const expected =
+        row.name === 'unobserve'
+          ? 0
+          : ['observer-other-remove', 'upgrade-owner'].includes(row.name)
+            ? 1
+            : 2
+      assert.equal(row.events.length, expected)
+      assert.equal(row.finalizeCount, row.name === 'explicit-retry' ? '2' : '1')
+      if (row.name.startsWith('explicit-')) {
+        assert.equal(row.revoked.weakOwners, 0)
+        assert.equal(row.revoked.handles, 1)
+        assert.equal(row.revoked.scriptObjects, row.owned.scriptObjects)
+        assert(row.invalidatedObserve.includes('Cannot observe'))
+      }
+      if (row.name === 'explicit-retry') {
+        assert(row.retry.error.includes('owner-finalize-first'))
+        assert.equal(row.retry.after.weakOwners, 2)
+      }
+    }
+    for (const rejection of Object.values(row.rejections ?? {}))
+      assert.equal(typeof rejection, 'string')
+  }
+}
+function eventOwnership(rows, backend) {
+  combinations(rows, ['false', 'true'], (row) => String(row.binary))
+  const expected = {
+    'no-super-finalization': [2, '0,2'],
+    'queued-owner-dynamic-member': [1, 'event-owner,10,1'],
+    'direct-base-finalize': [2, '0,0,2'],
+    'queued-trigger-cancellation': [1, '0,1'],
+  }
+  for (const row of rows) {
+    assert.equal(row.variant, backend)
+    assert.equal(row.baseline.pendingHandles, 0)
+    assert.equal(row.baseline.clockTasks, 0)
+    combinations(row.cases, Object.keys(expected), (item) => item.name)
+    for (const item of row.cases) {
+      const [count, result] = expected[item.name]
+      assert.equal(item.result, result)
+      assert.equal(item.owned.eventSources, row.baseline.eventSources + count)
+      assert.equal(item.owned.weakOwners, row.baseline.weakOwners + count)
+      assert.deepEqual(item.after, row.baseline)
+      if (item.name === 'direct-base-finalize') {
+        assert.equal(item.retained.eventSources, item.owned.eventSources)
+        assert.equal(item.retained.weakOwners, item.owned.weakOwners)
+        assert.equal(item.retained.clockTasks, 1)
+      }
+    }
+    assert.deepEqual(Object.keys(row.stopped).sort(), Object.keys(row.baseline).sort())
+    for (const value of Object.values(row.stopped)) assert.equal(value, 0)
+  }
+}
 assert.deepEqual(runtime.manifest, wasm)
 if (lifetimePhase) assert.deepEqual(runtime.failures, [])
 combinations(
@@ -463,6 +691,11 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (hostPhase) {
+    hostHandleLifetimes(row.hostHandles.cases, row.hostHandles.controls, row.backend)
+    ownerObservations(row.ownerObservations, row.backend)
+    eventOwnership(row.eventOwnership, row.backend)
+  }
   if (objectPhase) {
     objectLifetimes(row.objects.cases)
     combinations(
@@ -711,6 +944,7 @@ let allocations
 const allocatorReports = []
 const executionAllocatorReports = []
 const finalizationAllocatorReports = []
+const ownerAllocatorReports = []
 if (lifetimePhase) {
   allocations = await run('KRKR_ALLOCATIONS_RUN', 'Bytecode allocation diagnostic', 2, [
     '--pattern',
@@ -724,6 +958,7 @@ if (lifetimePhase) {
       ? ['tests/helpers/execution-budget.ts', 'tests/probes/execution-allocation-faults.ts']
       : []),
     ...(objectPhase ? ['tests/probes/finalization-allocation-faults.ts'] : []),
+    ...(hostPhase ? ['tests/probes/owner-observation-allocations.ts'] : []),
     '.github/workflows/bytecode-allocations.yml',
   ])
   for (const backend of backends) {
@@ -812,6 +1047,87 @@ if (lifetimePhase) {
           }
       finalizationAllocatorReports.push(cleanup)
     }
+    if (hostPhase) {
+      const owners = await json(`${root}/out/ci/owner-observation-allocations-${backend}.json`)
+      assert.deepEqual(owners.manifest, manifest)
+      assert.equal(owners.variant, backend)
+      assert.equal(owners.manifest.capabilities.hostObjectLifetime, 1)
+      assert.deepEqual(owners.failures, [])
+      const groupKey = (item) => `${item.operation}/${item.debugMode}/${item.binary}`
+      const groups = ['register', 'dispose', 'upgrade'].flatMap((operation) =>
+        [false, true].flatMap((debugMode) =>
+          [false, true].map((binary) => `${operation}/${debugMode}/${binary}`),
+        ),
+      )
+      combinations([...new Set(owners.results.map(groupKey))], groups, (key) => key)
+      for (const group of groups) {
+        const rows = owners.results.filter((item) => groupKey(item) === group)
+        // Each group needs its successful control and a terminal no-hit sample.
+        // The number of intervening allocation sites comes from the actual run.
+        assert(rows.length >= 2)
+        rows.forEach((item, index) => {
+          assert.equal(item.after, index - 1)
+          assert.equal(item.hits, index === 0 || index === rows.length - 1 ? 0 : 1)
+          if (item.hits) assert(item.failedBytes > 0)
+          for (const field of ['bytes', 'blocks', 'strings', 'objects']) {
+            assert(Number.isSafeInteger(item.disposed[field]) && item.disposed[field] >= 0)
+            assert(Number.isSafeInteger(item.baseline[field]) && item.baseline[field] >= 0)
+          }
+          assert.deepEqual(item.disposed, rows[0].disposed)
+          assert.deepEqual(item.baseline, rows[0].disposed)
+          assert.equal(item.before.pendingHandles, 0)
+          if (item.operation === 'dispose') {
+            assert.equal(item.status, 'disposed')
+            assert.equal(item.before.weakOwners, 8)
+            assert.equal(item.before.handles, 4)
+            assert.equal(item.error, null)
+            assert.equal(item.notifications, 8)
+            assert.deepEqual(item.weakCounts, [7, 6, 5, 4, 3, 2, 1, 0])
+            assert.deepEqual(item.upgrades, [])
+            assert.equal(item.disposalReentries, 1)
+            assert.equal(item.disposed.objects, 0)
+            releasedExecution(item.budget)
+          } else {
+            assert.equal(item.before.handles, 1)
+            assert.equal(item.before.weakOwners, item.operation === 'upgrade' ? 1 : 0)
+            const current = item.operation === 'upgrade' ? item.upgraded : item.registered
+            assert.equal(current.pendingHandles, 0)
+            assert.equal(current.scriptObjects, item.before.scriptObjects)
+            assert.equal(current.blocks, item.before.blocks)
+            assert.equal(current.contexts, item.before.contexts)
+            assert.equal(item.notifications, 1)
+            for (const field of ['handles', 'pendingHandles', 'weakOwners'])
+              assert.equal(item.released[field], 0)
+            assert.equal(item.released.scriptObjects, item.before.scriptObjects - 1)
+            assert.equal(item.released.blocks, item.before.blocks)
+            assert.equal(item.released.contexts, item.before.contexts)
+            releasedExecution(item.released.budget)
+            if (item.operation === 'register') {
+              assert.equal(current.handles, item.before.handles)
+              assert.equal(current.weakOwners, item.hits ? 0 : 1)
+              if (item.hits) assert(item.error.includes('Cannot observe'))
+              else assert.equal(item.error, null)
+            } else {
+              assert.equal(item.status, 'upgraded')
+              assert.equal(current.weakOwners, 1)
+              assert.equal(current.handles, item.before.handles + (item.hits ? 0 : 1))
+              assert.equal(item.error, item.hits ? 'TJS owner upgrade allocation failed' : null)
+              if (item.hits) assert.equal(item.lease, undefined)
+              else assert(Number.isSafeInteger(item.lease) && item.lease > 0)
+              assert(Number.isSafeInteger(item.retry) && item.retry > 0)
+              assert.notEqual(item.retry, item.lease)
+              assert.equal(item.retried.handles, item.before.handles + (item.hits ? 1 : 2))
+              assert.equal(item.retried.weakOwners, 1)
+              assert.equal(item.leased.handles, 1)
+              assert.equal(item.leased.weakOwners, 1)
+              assert.equal(item.leased.pendingHandles, 0)
+              assert.equal(item.leased.scriptObjects, item.before.scriptObjects)
+            }
+          }
+        })
+      }
+      ownerAllocatorReports.push(owners)
+    }
   }
 }
 const objects = objectPhase
@@ -846,6 +1162,50 @@ if (objects) {
     }
     objectLifetimes(report.results.map((row) => row.outcome.result))
     objectReports.push(report)
+  }
+}
+const handles = hostPhase
+  ? await run('KRKR_HANDLES_RUN', 'Host handle lifetime diagnostic', 2, [
+      '--pattern',
+      'host-handles-*',
+    ])
+  : undefined
+const hostHandleReports = []
+if (handles) {
+  unchanged(handles.info.headSha, [
+    'tests/helpers/host-handles.ts',
+    'tests/helpers/bytecode-lifetime.ts',
+    'tests/helpers/execution-budget.ts',
+    'tests/probes/host-handles.ts',
+    'tests/probes/host-handles-case.ts',
+    '.github/workflows/host-handles.yml',
+    '.github/actions/prepare-tests/action.yml',
+  ])
+  for (const backend of backends) {
+    const report = await json(
+      `${handles.root}/artifacts/host-handles-${backend}/host-handles-${backend}.json`,
+    )
+    assert.equal(report.variant, backend)
+    assert.deepEqual(report.manifest, wasm)
+    debugCombinations(report.results, [...hostHandleNames, ...hostControlNames])
+    for (const row of report.results) {
+      assert.equal(row.status, 0)
+      assert.equal(row.signal, null)
+      assert.equal(row.error, null)
+      assert.equal(row.outcome.result.name, row.name)
+      assert.equal(row.outcome.result.debugMode, row.debugMode)
+      assert.equal(row.outcome.result.binary, row.binary)
+    }
+    hostHandleLifetimes(
+      report.results
+        .filter((row) => hostHandleNames.includes(row.name))
+        .map((row) => row.outcome.result),
+      report.results
+        .filter((row) => hostControlNames.includes(row.name))
+        .map((row) => row.outcome.result),
+      backend,
+    )
+    hostHandleReports.push(report)
   }
 }
 const pwaDiagnostic = process.env.KRKR_PWA_RUN
@@ -884,6 +1244,7 @@ const matrix = {
     compatibility.info,
     ...(allocations ? [allocations.info] : []),
     ...(objects ? [objects.info] : []),
+    ...(handles ? [handles.info] : []),
     ...(pwaDiagnostic ? [pwaDiagnostic.info] : []),
     ...(freeze ? [freeze.info] : []),
     ...(inputRun ? [inputRun.info] : []),
@@ -901,6 +1262,59 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(hostPhase
+      ? {
+          hostHandleCases: runtime.results.reduce(
+            (sum, row) => sum + row.hostHandles.cases.length,
+            0,
+          ),
+          hostHandleControls: runtime.results.reduce(
+            (sum, row) => sum + row.hostHandles.controls.length,
+            0,
+          ),
+          ownerObservations: runtime.results.reduce(
+            (sum, row) => sum + row.ownerObservations.length,
+            0,
+          ),
+          eventOwnershipSessions: runtime.results.reduce(
+            (sum, row) => sum + row.eventOwnership.length,
+            0,
+          ),
+          eventOwnershipCases: runtime.results.reduce(
+            (sum, row) =>
+              sum + row.eventOwnership.reduce((count, session) => count + session.cases.length, 0),
+            0,
+          ),
+          isolatedHostHandles: hostHandleReports.reduce(
+            (sum, report) => sum + report.results.length,
+            0,
+          ),
+          ownerAllocatorGroups: ownerAllocatorReports.reduce(
+            (sum, report) =>
+              sum +
+              new Set(
+                report.results.map((item) => `${item.operation}/${item.debugMode}/${item.binary}`),
+              ).size,
+            0,
+          ),
+          ownerAllocatorFailures: ownerAllocatorReports.reduce(
+            (sum, report) => sum + report.results.filter((item) => item.hits === 1).length,
+            0,
+          ),
+          ownerAllocatorFailuresByOperation: Object.fromEntries(
+            ['register', 'dispose', 'upgrade'].map((operation) => [
+              operation,
+              ownerAllocatorReports.reduce(
+                (sum, report) =>
+                  sum +
+                  report.results.filter((item) => item.operation === operation && item.hits === 1)
+                    .length,
+                0,
+              ),
+            ]),
+          ),
+        }
+      : {}),
     ...(objectPhase
       ? {
           objectLifetimes: 360,
@@ -965,6 +1379,8 @@ const matrix = {
   allocatorReports,
   executionAllocatorReports,
   finalizationAllocatorReports,
+  ownerAllocatorReports,
+  hostHandleReports,
   objectReports,
   offlineRestarts,
   external,
@@ -979,6 +1395,11 @@ const matrix = {
   evidence,
   previousMatrices: {
     ...fixtureManifest.historicalMatrices,
+    ...(hostPhase
+      ? {
+          'object-finalization': '0387418a08e9a011d261937358510575a31f10061efaaff1e67c7ae910217d51',
+        }
+      : {}),
     ...(objectPhase
       ? { 'execution-budgets': '2079d47f87fd1f035b7eb7626249a183fbef66a2b0723f93ebe458e80a78c109' }
       : {}),
@@ -996,6 +1417,16 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(hostPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34869766340',
+            commit: '4bc02b9f95a6ba4c398c1aa38dc90bca99e8012e',
+            reason:
+              'Initial isolated host handle diagnostics passed only the four nested-release debug/bytecode combinations out of 20 cases per backend. Batch release stranded later objects after a finalizer error, retiring handles remained accessible, and host primary errors were mishandled. Duplicate release caused WASM memory access out of bounds or a subprocess timeout. Full failed artifacts and metadata remain archived; timeouts are failures, not passing evidence.',
+          },
+        ]
+      : []),
     ...(objectPhase
       ? [
           {
@@ -1271,13 +1702,15 @@ const matrix = {
           'Automatic legacy text detection and decoder latching, full bytecode validation and complete storage paths remain incomplete',
           ...(binaryPhase
             ? [
-                objectPhase
-                  ? 'Reference-counted cleanup, explicit cycle breaking and selected finalizer failures are covered; host object ownership and remaining VM semantics still require implementation. Arbitrary cycle collection is not part of the TJS2 reference behavior.'
-                  : executionPhase
-                    ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
-                    : lifetimePhase
-                      ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
-                      : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
+                hostPhase
+                  ? 'Selected host handle drains, native weak observation and Timer/AsyncTrigger event leases are covered; Sound, Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Genuine registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                  : objectPhase
+                    ? 'Reference-counted cleanup, explicit cycle breaking and selected finalizer failures are covered; host object ownership and remaining VM semantics still require implementation. Arbitrary cycle collection is not part of the TJS2 reference behavior.'
+                    : executionPhase
+                      ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
+                      : lifetimePhase
+                        ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
+                        : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
               ]
             : [
                 'Serialized Array/Dictionary resource execution and prefixed bytecode remain incomplete',
@@ -1311,21 +1744,23 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = objectPhase
-  ? 'object-finalization-matrix.json'
-  : executionPhase
-    ? 'execution-budgets-matrix.json'
-    : lifetimePhase
-      ? 'bytecode-lifetime-matrix.json'
-      : binaryPhase
-        ? 'binary-scripts-matrix.json'
-        : compilerPhase
-          ? 'compiler-matrix.json'
-          : scriptsPhase
-            ? 'native-scripts-matrix.json'
-            : tracePhase
-              ? 'stack-traces-matrix.json'
-              : 'vm-console-matrix.json'
+const reportName = hostPhase
+  ? 'host-object-lifetime-matrix.json'
+  : objectPhase
+    ? 'object-finalization-matrix.json'
+    : executionPhase
+      ? 'execution-budgets-matrix.json'
+      : lifetimePhase
+        ? 'bytecode-lifetime-matrix.json'
+        : binaryPhase
+          ? 'binary-scripts-matrix.json'
+          : compilerPhase
+            ? 'compiler-matrix.json'
+            : scriptsPhase
+              ? 'native-scripts-matrix.json'
+              : tracePhase
+                ? 'stack-traces-matrix.json'
+                : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(
