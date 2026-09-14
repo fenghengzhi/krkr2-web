@@ -86,3 +86,12 @@ extracts unmodified LoadTLG5/6 functions and links TVP kernels only to validate
 Web-produced files; its allocator initializes the decoder's extra fetch padding.
 PNG output is independently decoded with Pillow. Provenance and output/row hashes
 are recorded in `tests/fixtures/image-writing-reference.json`.
+
+Execution-budget changes (`docs/decisions/037-execution-budgets.md`) bound native
+function/try/superclass recursion and temporary register/argument payloads.
+The variant register pool publishes growth only after allocation succeeds,
+restores compacted descriptors by element index, and clears exiting frames.
+Call argument preparation owns its buffers and validates expansion counts.
+Array expansion rejects null objects and copies only the available range.
+Cancellation uses the existing silent-unwind path while ordinary TJS errors
+remain catchable. Hosted verification is required for these changes.

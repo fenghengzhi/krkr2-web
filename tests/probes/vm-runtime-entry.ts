@@ -2,6 +2,7 @@ import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import { ExecutionControl } from '../../src/engine/scheduler/control.ts'
 import { exerciseTrace } from '../helpers/trace-runtime.ts'
 import { compilerPhases, exerciseCompiler } from '../helpers/compiler-runtime.ts'
+import { exerciseExecutionBudget, exerciseDeepContinuation } from '../helpers/execution-budget.ts'
 import { exerciseBinaryRuntime } from '../helpers/binary-runtime.ts'
 import {
   exerciseBytecodeLifetime,
@@ -145,6 +146,16 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
         await exerciseBytecodeControl(factory, wasmBinary, backend, bytecodeWork, phase, cancel),
       )
   return {
+    executionBudgets: {
+      checks: [
+        await exerciseExecutionBudget(factory, wasmBinary, backend, false),
+        await exerciseExecutionBudget(factory, wasmBinary, backend, true),
+      ],
+      continuations: [
+        await exerciseDeepContinuation(factory, wasmBinary, backend, false),
+        await exerciseDeepContinuation(factory, wasmBinary, backend, true),
+      ],
+    },
     bytecode: {
       lifetime: await exerciseBytecodeLifetime(factory, wasmBinary, backend),
       controls: bytecodeControls,

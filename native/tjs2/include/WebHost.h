@@ -10,6 +10,7 @@ extern "C" void krkr_compiler_checkpoint();
 // Phases: 1 = source preparation, 2 = parsing/code generation, 3 = export,
 // 5 = binary input validation/deserialization (4 is the independent dump sink).
 // 6 = bytecode pools, 7 = context materialization, 8 = ownership linking.
+// 9 = runtime frame preparation, 10 = call argument preparation.
 class KrkrCompilerScope {
     int previous;
 public:

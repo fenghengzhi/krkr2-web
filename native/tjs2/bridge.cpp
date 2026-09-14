@@ -16,6 +16,7 @@
 #include "tjsDebug.h"
 #include "tjsBinarySerializer.h"
 #include "scripts.h"
+#include "ExecutionBudget.h"
 
 using namespace TJS;
 #define API extern "C" EMSCRIPTEN_KEEPALIVE
@@ -65,12 +66,25 @@ struct Vm {
 
 // All VM execution is serialized by the owning Worker. Nested TJS callbacks
 // are invoked here, after the JS import returns, so no JS frame needs suspending.
-EM_ASYNC_JS(Reply*, dispatch_host, (Vm* vm, const tjs_char* name, unsigned length, int count, tTJSVariant** args), {
-    return await Module['hostCall'](vm, name, length, count, args);
+EM_JS(int, cancellation_requested, (), {
+    return Module['shouldCancel']() ? 1 : 0;
 });
+EM_ASYNC_JS(Reply*, dispatch_host_raw, (Vm* vm, const tjs_char* name, unsigned length, int count, tTJSVariant** args), {
+    try { return await Module['hostCall'](vm, name, length, count, args); }
+    catch(error) {
+        if(Module['shouldCancel']()) return 0;
+        throw error;
+    }
+});
+Reply* dispatch_host(Vm* vm, const tjs_char* name, unsigned length, int count, tTJSVariant** args) {
+    std::unique_ptr<Reply> reply(dispatch_host_raw(vm, name, length, count, args));
+    krkr_vm_check_cancellation();
+    return reply.release();
+}
 EM_ASYNC_JS(int, yield_host, (int phase), {
     await new Promise(resolve => setTimeout(resolve, 0));
-    await Module['onYield'](phase);
+    try { await Module['onYield'](phase); }
+    catch(error) { if(!Module['shouldCancel']()) throw error; }
     return Module['shouldCancel']() ? 1 : 0;
 });
 
@@ -116,7 +130,7 @@ public:
         text.append(message, length);
         text.append(u"\r\n");
         if(emscripten_get_now() >= deadline) {
-            if(yield_host(4)) TJS_eTJSError(u"Execution cancelled");
+            if(yield_host(4)) throw krkr::ExecutionCancelled{};
             deadline = emscripten_get_now() + 8;
         }
     }
@@ -142,18 +156,25 @@ void loadBinary(Vm* vm, const tjs_uint8* bytes, std::size_t length,
 void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
     if(reply.kind == 1) TJS_eTJSError(ttstr(reply.value));
     if(reply.kind == 2 || reply.kind == 7) {
+        krkr::ExecutionFrame delegation(2);
+        if(reply.args.size() > 1000000) TJS_eTJSError(u"VM call exceeds 1000000 arguments");
+        krkr::TemporaryMemory memory;
+        memory.reserve(reply.args.size(), sizeof(tTJSVariant*));
         auto closure = reply.value.AsObjectClosureNoAddRef();
         std::vector<tTJSVariant*> args;
+        args.reserve(reply.args.size());
         for(auto& arg : reply.args) args.push_back(&arg);
         auto status = closure.FuncCall(0, nullptr, nullptr, reply.kind == 7 ? nullptr : result,
             args.size(), args.data(), nullptr);
         if(reply.kind == 7) { if(result) *result = static_cast<tjs_int>(status); }
         else if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, nullptr);
     } else if(reply.kind == 3) {
+        krkr::ExecutionFrame delegation(2);
         auto context = reply.context.Type() == tvtObject ? reply.context.AsObjectNoAddRef() : nullptr;
         if(reply.expression) vm->engine->EvalExpression(ttstr(reply.value), result, context, &reply.name, reply.line);
         else vm->engine->ExecScript(ttstr(reply.value), result, context, &reply.name, reply.line);
     } else if(reply.kind == 4) {
+        krkr::ExecutionFrame delegation(2);
         auto* bytes = reply.value.AsOctetNoAddRef();
         loadBinary(vm, bytes ? bytes->GetData() : nullptr, bytes ? bytes->GetLength() : 0, result,
             reply.context.Type() == tvtObject ? reply.context.AsObjectNoAddRef() : nullptr, reply.name.c_str());
@@ -351,7 +372,10 @@ public:
 template<typename Fn> Reply* capture(Fn fn) {
     auto reply = std::make_unique<Reply>();
     try { fn(reply->value); }
-    catch(const eTJSScriptError& error) {
+    catch(const krkr::ExecutionCancelled&) {
+        reply->kind = 1;
+        reply->value = u"Execution cancelled";
+    } catch(const eTJSScriptError& error) {
         reply->kind = 1;
         reply->value = error.GetMessage();
         reply->name = error.GetBlockName() ? error.GetBlockName() : u"";
@@ -368,11 +392,14 @@ template<typename Fn> Reply* capture(Fn fn) {
 }
 }
 
+extern "C" void krkr_vm_check_cancellation() {
+    if(!shuttingDown && cancellation_requested()) throw krkr::ExecutionCancelled{};
+}
 extern "C" void krkr_vm_checkpoint() {
     if((++instructionCount & 2047) != 0) return;
     if(shuttingDown) return;
     if(emscripten_get_now() < deadline) return;
-    if(yield_host(0)) TJS_eTJSError(u"Execution cancelled");
+    if(yield_host(0)) throw krkr::ExecutionCancelled{};
     deadline = emscripten_get_now() + 8;
 }
 
@@ -389,7 +416,7 @@ API unsigned krkr_vm_script_blocks(Vm* vm) { return vm->engine->GetScriptBlockCo
 API unsigned krkr_vm_script_contexts(Vm* vm) { return vm->engine->GetScriptContextCount(); }
 extern "C" void krkr_compiler_checkpoint() {
     if(!compilerPhase || shuttingDown || emscripten_get_now() < deadline) return;
-    if(yield_host(compilerPhase)) TJS_eTJSError(u"Execution cancelled");
+    if(yield_host(compilerPhase)) throw krkr::ExecutionCancelled{};
     deadline = emscripten_get_now() + 8;
 }
 

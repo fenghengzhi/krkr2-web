@@ -10,6 +10,8 @@
 //---------------------------------------------------------------------------
 
 #include "tjsCommHead.h"
+#include "WebHost.h"
+#include <limits>
 
 #include <algorithm>
 #include <functional>
@@ -1849,10 +1851,12 @@ iTJSDispatch2 *TJSCreateArrayObject(iTJSDispatch2 **classout) {
 //---------------------------------------------------------------------------
 tjs_int TJSGetArrayElementCount(iTJSDispatch2 *dsp) {
     // returns array element count
+    if(!dsp) TJS_eTJSError(TJSSpecifyArray);
     tTJSArrayNI *ni;
     if(TJS_FAILED(dsp->NativeInstanceSupport(TJS_NIS_GETINSTANCE, ClassID_Array,
                                              (iTJSNativeInstance **)&ni)))
         TJS_eTJSError(TJSSpecifyArray);
+    if(ni->Items.size() > std::numeric_limits<tjs_int>::max()) TJS_eTJSError(TJSInsufficientMem);
     return (tjs_int)ni->Items.size();
 }
 
@@ -1861,21 +1865,21 @@ tjs_int TJSCopyArrayElementTo(iTJSDispatch2 *dsp, tTJSVariant *dest,
                               tjs_uint start, tjs_int count) {
     // copy array elements to specified variant array.
     // returns copied element count.
+    if(!dsp) TJS_eTJSError(TJSSpecifyArray);
     tTJSArrayNI *ni;
     if(TJS_FAILED(dsp->NativeInstanceSupport(TJS_NIS_GETINSTANCE, ClassID_Array,
                                              (iTJSNativeInstance **)&ni)))
         TJS_eTJSError(TJSSpecifyArray);
 
-    if(count < 0)
-        count = (tjs_int)ni->Items.size();
-
-    if(start >= ni->Items.size())
-        return 0;
-
-    tjs_uint limit = start + count;
-
-    for(tjs_uint i = start; i < limit; i++)
+    if(start >= ni->Items.size()) return 0;
+    const auto available = ni->Items.size() - start;
+    const auto copied = count < 0 ? available : std::min(available, std::size_t(count));
+    if(copied > std::numeric_limits<tjs_int>::max()) TJS_eTJSError(TJSInsufficientMem);
+    const auto limit = start + copied;
+    for(tjs_uint i = start; i < limit; i++) {
+        krkr_compiler_work(i);
         *(dest++) = ni->Items[i];
+    }
 
     return limit - start;
 }

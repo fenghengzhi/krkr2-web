@@ -36,6 +36,9 @@
 #include <spdlog/spdlog.h>
 #include "LogoTrace.h"
 #include "WebHost.h"
+#include "ExecutionBudget.h"
+#include "NativeOwnership.h"
+#include <exception>
 
 namespace TJS {
     //---------------------------------------------------------------------------
@@ -673,20 +676,21 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     void tTJSVariantArrayStack::IncreaseVariantArray(tjs_int num) {
-        // increase array block
-        NumArraysUsing++;
-        if(NumArraysUsing > NumArraysAllocated) {
-            Arrays = (tVariantArray *)TJS_realloc(
-                Arrays, sizeof(tVariantArray) * (NumArraysUsing));
-            NumArraysAllocated = NumArraysUsing;
-            Current = Arrays + NumArraysUsing - 1;
-            Current->Array = new tTJSVariant[num];
-        } else {
-            Current = Arrays + NumArraysUsing - 1;
+        if(NumArraysUsing == NumArraysAllocated) {
+            // Do not publish counts or discard the old descriptor table until
+            // both allocations succeed. Existing register pointers stay valid.
+            auto values = std::make_unique<tTJSVariant[]>(num);
+            auto* next = static_cast<tVariantArray*>(TJS_realloc(
+                Arrays, sizeof(tVariantArray) * (NumArraysUsing + 1)));
+            if(!next) TJS_eTJSError(TJSInsufficientMem);
+            Arrays = next;
+            Arrays[NumArraysUsing].Array = values.release();
+            Arrays[NumArraysUsing].Allocated = num;
+            ++NumArraysAllocated;
         }
-
-        Current->Allocated = num;
+        Current = Arrays + NumArraysUsing;
         Current->Using = 0;
+        ++NumArraysUsing;
     }
 
     //---------------------------------------------------------------------------
@@ -719,13 +723,6 @@ namespace TJS {
                     TJS_free(Arrays), Arrays = nullptr;
                 Current = nullptr;
             } else {
-                bool availableoffset = false;
-                size_t offset = 0;
-                if(Current != nullptr && Arrays != nullptr) {
-                    offset = (size_t)Current - (size_t)Arrays;
-                    availableoffset = true;
-                }
-
                 tVariantArray *arraytmp = (tVariantArray *)TJS_realloc(
                     Arrays, sizeof(tVariantArray) * (NumArraysUsing));
                 if(arraytmp != nullptr) {
@@ -734,11 +731,7 @@ namespace TJS {
                     TJS_eTJSError(TJSInternalError);
                 }
 
-                if(availableoffset && Arrays != nullptr) {
-                    Current = Arrays + offset;
-                } else {
-                    Current = nullptr;
-                }
+                Current = Arrays + NumArraysUsing - 1;
             }
         } catch(...) {
             OperationDisabledCount--;
@@ -764,25 +757,25 @@ namespace TJS {
     }
 
     //---------------------------------------------------------------------------
-    inline void tTJSVariantArrayStack::Deallocate(tjs_int num,
-                                                  tTJSVariant *ptr) {
-        //		tTJSCSH csh(CS);
-
+    inline void tTJSVariantArrayStack::Deallocate(tjs_int num, tTJSVariant *ptr) {
+        // Keep this frame registered while values are cleared: a finalizer can
+        // suspend or reenter TJS and allocate another frame above this one.
+        std::exception_ptr failure;
+        for(tjs_int i = 0; i < num; ++i) {
+            try { ptr[i].Clear(); }
+            catch(...) { if(!failure) failure = std::current_exception(); }
+        }
         if(!OperationDisabledCount && num < TJS_VA_ONE_ALLOC_MAX) {
             Current->Using -= num;
-            if(Current->Using == 0) {
-                DecreaseVariantArray();
-            }
+            if(Current->Using == 0) DecreaseVariantArray();
         } else {
-            delete[] ptr;
+            delete[] ptr; // Every element is now void, including throwing Clear.
         }
-
-        if(!OperationDisabledCount) {
-            if(CompactVariantArrayMagic != TJSCompactVariantArrayMagic) {
-                Compact();
-                CompactVariantArrayMagic = TJSCompactVariantArrayMagic;
-            }
+        if(!OperationDisabledCount && CompactVariantArrayMagic != TJSCompactVariantArrayMagic) {
+            try { Compact(); CompactVariantArrayMagic = TJSCompactVariantArrayMagic; }
+            catch(...) { if(!failure) failure = std::current_exception(); }
         }
+        if(failure) std::rethrow_exception(failure);
     }
 
     //---------------------------------------------------------------------------
@@ -806,146 +799,62 @@ namespace TJS {
     // tjsInterCodeGen.h )
     //---------------------------------------------------------------------------
     void tTJSInterCodeContext::ExecuteAsFunction(iTJSDispatch2 *objthis,
-                                                 tTJSVariant **args,
-                                                 tjs_int numargs,
-                                                 tTJSVariant *result,
-                                                 tjs_int start_ip) {
-        tjs_int num_alloc =
-            MaxVariableCount + VariableReserveCount + 1 + MaxFrameCount;
-        TJSVariantArrayStackAddRef();
-        //	AddRef();
-        //	if(objthis) objthis->AddRef();
+        tTJSVariant **args, tjs_int numargs, tTJSVariant *result, tjs_int start_ip) {
+        krkr::ExecutionFrame execution(0);
+        if(MaxVariableCount < 0 || MaxFrameCount < 0 || VariableReserveCount < 2 || numargs < 0)
+            ThrowInvalidVMCode();
+        const auto count = std::uint64_t(MaxVariableCount) + VariableReserveCount + 1 + MaxFrameCount;
+        krkr::TemporaryMemory memory;
+        memory.reserve(count, sizeof(tTJSVariant));
+        const auto num_alloc = static_cast<tjs_int>(count);
+        tTJSVariant* regs;
+        {
+            KrkrCompilerScope allocation(9);
+            regs = TJSVariantArrayStack->Allocate(num_alloc);
+        }
+        auto* ra = regs + MaxVariableCount + VariableReserveCount;
+        tTJSObjectProxy proxy;
+        bool traced = false;
+        std::exception_ptr failure;
         try {
-            tTJSVariant *regs = TJSVariantArrayStack->Allocate(num_alloc);
-            tTJSVariant *ra =
-                regs + MaxVariableCount + VariableReserveCount; // register area
-
-            // objthis-proxy
-
-            tTJSObjectProxy proxy;
-            if(objthis) {
-                proxy.SetObjects(objthis, Block->GetTJS()->GetGlobalNoAddRef());
-                // TODO: caching of objthis-proxy
-
-                ra[-2] = &proxy;
-            } else {
-                proxy.SetObjects(nullptr, nullptr);
-
-                iTJSDispatch2 *global = Block->GetTJS()->GetGlobalNoAddRef();
-
-                ra[-2].SetObject(global, global);
-            }
-
-            /*
-                            if(objthis)
-                            {
-                                    // TODO: caching of objthis-proxy
-                                    tTJSObjectProxy *proxy = new
-               tTJSObjectProxy(); proxy->SetObjects(objthis,
-               Block->GetTJS()->GetGlobalNoAddRef());
-
-                                    ra[-2] = proxy;
-
-                                    proxy->Release();
-                            }
-                            else
-                            {
-                                    iTJSDispatch2 *global =
-               Block->GetTJS()->GetGlobalNoAddRef();
-
-                                    ra[-2].SetObject(global, global);
-                            }
-            */
-            if(ShouldUseStackTracer())
-                TJSStackTracerPush(this, false);
-
-#ifdef _DEBUG
-            ScopeKey oldkey;
-            tTJSVariant *oldra = nullptr;
-#endif // _DEBUG
-            try {
-                // A warning can suspend or throw through a console observer.
-                // Keep it inside the frame cleanup boundary.
+            {
+                KrkrCompilerScope preparation(9);
+                if(objthis) {
+                    proxy.SetObjects(objthis, Block->GetTJS()->GetGlobalNoAddRef());
+                    ra[-2] = &proxy;
+                } else {
+                    proxy.SetObjects(nullptr, nullptr);
+                    auto* global = Block->GetTJS()->GetGlobalNoAddRef();
+                    ra[-2].SetObject(global, global);
+                }
+                if(ShouldUseStackTracer()) { TJSStackTracerPush(this, false); traced = true; }
                 if(TJSWarnOnExecutionOnDeletingObject && TJSObjectFlagEnabled() &&
-                   Block->GetTJS()->GetConsoleOutput())
+                    Block->GetTJS()->GetConsoleOutput())
                     TJSWarnIfObjectIsDeleting(Block->GetTJS()->GetConsoleOutput(), objthis);
                 ra[-1].SetObject(objthis, objthis);
                 ra[0].Clear();
-
-                // transfer arguments
-                if(numargs >= FuncDeclArgCount) {
-                    // given arguments are greater than or equal to
-                    // desired arguments
-                    if(FuncDeclArgCount) {
-                        tTJSVariant *r = ra - 3;
-                        tTJSVariant **a = args;
-                        tjs_int n = FuncDeclArgCount;
-                        while(true) {
-                            *r = **(a++);
-                            n--;
-                            if(!n)
-                                break;
-                            r--;
-                        }
-                    }
-                } else {
-                    // given arguments are less than desired arguments
-                    tTJSVariant *r = ra - 3;
-                    tTJSVariant **a = args;
-                    tjs_int i;
-                    for(i = 0; i < numargs; i++)
-                        *(r--) = **(a++);
-                    for(; i < FuncDeclArgCount; i++)
-                        (r--)->Clear();
+                for(tjs_int i = 0; i < FuncDeclArgCount; ++i) {
+                    krkr_compiler_work(i);
+                    if(i < numargs) ra[-3 - i] = *args[i];
+                    else ra[-3 - i].Clear();
                 }
-
-                // collapse into array when FuncDeclCollapseBase >= 0
                 if(FuncDeclCollapseBase >= 0) {
-                    tTJSVariant *r =
-                        ra - 3 - FuncDeclCollapseBase; // target variant
-                    iTJSDispatch2 *dsp = TJSCreateArrayObject();
-                    *r = tTJSVariant(dsp, dsp);
-                    dsp->Release();
-
-                    if(numargs > FuncDeclCollapseBase) {
-                        // there are arguments to store
-                        for(tjs_int c = 0, i = FuncDeclCollapseBase;
-                            i < numargs; i++, c++)
-                            dsp->PropSetByNum(0, c, args[i], dsp);
+                    memory.reserve(std::max(0, numargs - FuncDeclCollapseBase), sizeof(tTJSVariant));
+                    krkr::NativeOwner<iTJSDispatch2> array(TJSCreateArrayObject());
+                    ra[-3 - FuncDeclCollapseBase] = tTJSVariant(array.get(), array.get());
+                    for(tjs_int i = FuncDeclCollapseBase; i < numargs; ++i) {
+                        krkr_compiler_work(i);
+                        const auto status = array->PropSetByNum(0, i - FuncDeclCollapseBase, args[i], array.get());
+                        if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status);
                     }
                 }
-
-                // execute
-                ExecuteCode(ra, start_ip, args, numargs, result);
-            } catch(...) {
-                ra[-2].Clear(); // at least we must clear the object
-                                // placed at local stack
-                TJSVariantArrayStack->Deallocate(num_alloc, regs);
-                if(ShouldUseStackTracer())
-                    TJSStackTracerPop();
-                throw;
             }
-
-#ifdef _DEBUG
-            DebuggerScopeKey = oldkey;
-            DebuggerRegisterArea = oldra;
-#endif // _DEBUG
-            ra[-2].Clear(); // at least we must clear the object
-                            // placed at local stack
-
-            TJSVariantArrayStack->Deallocate(num_alloc, regs);
-
-            if(ShouldUseStackTracer())
-                TJSStackTracerPop();
-        } catch(...) {
-            //		if(objthis) objthis->Release();
-            //		Release();
-            TJSVariantArrayStackRelease();
-            throw;
-        }
-        //	if(objthis) objthis->Release();
-        //	Release();
-        TJSVariantArrayStackRelease();
+            ExecuteCode(ra, start_ip, args, numargs, result);
+        } catch(...) { failure = std::current_exception(); }
+        try { TJSVariantArrayStack->Deallocate(num_alloc, regs); }
+        catch(...) { if(!failure) failure = std::current_exception(); }
+        if(traced) TJSStackTracerPop();
+        if(failure) std::rethrow_exception(failure);
     }
 
     //---------------------------------------------------------------------------
@@ -1519,6 +1428,7 @@ namespace TJS {
         // execute codes in a try-protected block
 
         try {
+            krkr::ExecutionFrame execution(1);
             if(ShouldUseStackTracer())
                 TJSStackTracerPush(this, true);
             tjs_int ret;
@@ -2187,113 +2097,113 @@ namespace TJS {
 // the caller. -2 for expanding array to argument
 #define TJS_PASS_ARGS_PREPARED_ARRAY_COUNT 20
 
-#define TJS_BEGIN_FUNC_CALL_ARGS(_code)                                        \
-    tTJSVariant **pass_args;                                                   \
-    tTJSVariant *pass_args_p[TJS_PASS_ARGS_PREPARED_ARRAY_COUNT];              \
-    tTJSVariant *pass_args_v = nullptr;                                        \
-    tjs_int code_size;                                                         \
-    bool alloc_args = false;                                                   \
-    try {                                                                      \
-        tjs_int pass_args_count = (_code)[0];                                  \
-        if(pass_args_count == -1) {                                            \
-            /* omitting args; pass intact aguments from the caller             \
-             */                                                                \
-            pass_args = args;                                                  \
-            pass_args_count = numargs;                                         \
-            code_size = 1;                                                     \
-        } else if(pass_args_count == -2) {                                     \
-            tjs_int args_v_count = 0;                                          \
-            /* count total argument count */                                   \
-            pass_args_count = 0;                                               \
-            tjs_int arg_written_count = (_code)[1];                            \
-            code_size = arg_written_count * 2 + 2;                             \
-            for(tjs_int i = 0; i < arg_written_count; i++) {                   \
-                switch((_code)[i * 2 + 2]) {                                   \
-                    case fatNormal:                                            \
-                        pass_args_count++;                                     \
-                        break;                                                 \
-                    case fatExpand:                                            \
-                        args_v_count += TJSGetArrayElementCount(               \
-                            TJS_GET_VM_REG(ra, (_code)[i * 2 + 1 + 2])         \
-                                .AsObjectNoAddRef());                          \
-                        break;                                                 \
-                    case fatUnnamedExpand:                                     \
-                        pass_args_count +=                                     \
-                            (numargs > FuncDeclUnnamedArgArrayBase)            \
-                            ? (numargs - FuncDeclUnnamedArgArrayBase)          \
-                            : 0;                                               \
-                        break;                                                 \
-                }                                                              \
-            }                                                                  \
-            pass_args_count += args_v_count;                                   \
-            /* allocate temporary variant array for Array object */            \
-            pass_args_v = new tTJSVariant[args_v_count];                       \
-            /* allocate pointer array */                                       \
-            if(pass_args_count < TJS_PASS_ARGS_PREPARED_ARRAY_COUNT)           \
-                pass_args = pass_args_p;                                       \
-            else                                                               \
-                pass_args = new tTJSVariant *[pass_args_count],                \
-                alloc_args = true;                                             \
-            /* create pointer array to pass to callee function */              \
-            args_v_count = 0;                                                  \
-            pass_args_count = 0;                                               \
-            for(tjs_int i = 0; i < arg_written_count; i++) {                   \
-                switch((_code)[i * 2 + 2]) {                                   \
-                    case fatNormal:                                            \
-                        pass_args[pass_args_count++] =                         \
-                            TJS_GET_VM_REG_ADDR(ra, (_code)[i * 2 + 1 + 2]);   \
-                        break;                                                 \
-                    case fatExpand: {                                          \
-                        tjs_int count = TJSCopyArrayElementTo(                 \
-                            TJS_GET_VM_REG(ra, (_code)[i * 2 + 1 + 2])         \
-                                .AsObjectNoAddRef(),                           \
-                            pass_args_v + args_v_count, 0, -1);                \
-                        for(tjs_int j = 0; j < count; j++)                     \
-                            pass_args[pass_args_count++] =                     \
-                                pass_args_v + j + args_v_count;                \
-                                                                               \
-                        args_v_count += count;                                 \
-                                                                               \
-                        break;                                                 \
-                    }                                                          \
-                    case fatUnnamedExpand: {                                   \
-                        tjs_int count =                                        \
-                            (numargs > FuncDeclUnnamedArgArrayBase)            \
-                            ? (numargs - FuncDeclUnnamedArgArrayBase)          \
-                            : 0;                                               \
-                        for(tjs_int j = 0; j < count; j++)                     \
-                            pass_args[pass_args_count++] =                     \
-                                args[FuncDeclUnnamedArgArrayBase + j];         \
-                        break;                                                 \
-                    }                                                          \
-                }                                                              \
-            }                                                                  \
-        } else if(pass_args_count <= TJS_PASS_ARGS_PREPARED_ARRAY_COUNT) {     \
-            code_size = pass_args_count + 1;                                   \
-            pass_args = pass_args_p;                                           \
-            for(tjs_int i = 0; i < pass_args_count; i++)                       \
-                pass_args[i] = TJS_GET_VM_REG_ADDR(ra, (_code)[1 + i]);        \
-        } else {                                                               \
-            code_size = pass_args_count + 1;                                   \
-            pass_args = new tTJSVariant *[pass_args_count];                    \
-            alloc_args = true;                                                 \
-            for(tjs_int i = 0; i < pass_args_count; i++)                       \
-                pass_args[i] = TJS_GET_VM_REG_ADDR(ra, (_code)[1 + i]);        \
+    class tTJSCallArguments {
+        static constexpr tjs_int maximumArguments = 1000000;
+        krkr::TemporaryMemory memory;
+        std::unique_ptr<tTJSVariant[]> expanded;
+        std::unique_ptr<tTJSVariant*[]> pointers;
+        tTJSVariant* prepared[TJS_PASS_ARGS_PREPARED_ARRAY_COUNT]{};
+        tjs_int expandedCount = 0;
+        bool cleared = false;
+        static void add(tjs_int& count, tjs_int amount) {
+            if(amount < 0 || amount > maximumArguments - count)
+                TJS_eTJSError(u"VM call exceeds 1000000 arguments");
+            count += amount;
         }
+    public:
+        tjs_int Count = 0, CodeSize = 0;
+        tTJSVariant** Values = nullptr;
+        tTJSCallArguments(const tjs_int32* code, tTJSVariant* ra,
+            tTJSVariant** args, tjs_int numargs, tjs_int unnamedBase) {
+            KrkrCompilerScope preparation(10);
+            if(code[0] == -1) {
+                add(Count, numargs);
+                Values = args; CodeSize = 1;
+                return;
+            }
+            const bool expand = code[0] == -2;
+            if(expand) {
+                const auto written = code[1];
+                CodeSize = written * 2 + 2;
+                for(tjs_int i = 0; i < written; ++i) {
+                    krkr_compiler_work(i);
+                    switch(code[i * 2 + 2]) {
+                        case fatNormal: add(Count, 1); break;
+                        case fatExpand:
+                            add(expandedCount, TJSGetArrayElementCount(
+                                TJS_GET_VM_REG(ra, code[i * 2 + 3]).AsObjectNoAddRef()));
+                            break;
+                        case fatUnnamedExpand: add(Count, std::max(0, numargs - unnamedBase)); break;
+                        default: ThrowInvalidVMCode();
+                    }
+                }
+                add(Count, expandedCount);
+            } else {
+                add(Count, code[0]);
+                CodeSize = Count + 1;
+            }
+            memory.reserve(expandedCount, sizeof(tTJSVariant));
+            if(Count > TJS_PASS_ARGS_PREPARED_ARRAY_COUNT) memory.reserve(Count, sizeof(tTJSVariant*));
+            if(expandedCount) expanded = std::make_unique<tTJSVariant[]>(expandedCount);
+            if(Count > TJS_PASS_ARGS_PREPARED_ARRAY_COUNT) pointers = std::make_unique<tTJSVariant*[]>(Count);
+            Values = pointers ? pointers.get() : prepared;
+            if(!expand) {
+                for(tjs_int i = 0; i < Count; ++i) {
+                    krkr_compiler_work(i);
+                    Values[i] = TJS_GET_VM_REG_ADDR(ra, code[i + 1]);
+                }
+                return;
+            }
+            tjs_int out = 0, used = 0;
+            for(tjs_int i = 0; i < code[1]; ++i) {
+                krkr_compiler_work(i);
+                switch(code[i * 2 + 2]) {
+                    case fatNormal:
+                        if(out == Count) ThrowInvalidVMCode();
+                        Values[out++] = TJS_GET_VM_REG_ADDR(ra, code[i * 2 + 3]);
+                        break;
+                    case fatExpand: {
+                        auto* array = TJS_GET_VM_REG(ra, code[i * 2 + 3]).AsObjectNoAddRef();
+                        const auto count = TJSGetArrayElementCount(array);
+                        if(count > expandedCount - used || count > Count - out) ThrowInvalidVMCode();
+                        if(count && TJSCopyArrayElementTo(array, expanded.get() + used, 0, count) != count)
+                            ThrowInvalidVMCode();
+                        for(tjs_int j = 0; j < count; ++j) {
+                            krkr_compiler_work(j);
+                            Values[out++] = expanded.get() + used++;
+                        }
+                        break;
+                    }
+                    case fatUnnamedExpand:
+                        for(tjs_int j = unnamedBase; j < numargs; ++j) {
+                            krkr_compiler_work(j);
+                            if(out == Count) ThrowInvalidVMCode();
+                            Values[out++] = args[j];
+                        }
+                        break;
+                }
+            }
+            if(out != Count || used != expandedCount) ThrowInvalidVMCode();
+        }
+        void Clear() {
+            if(cleared) return;
+            cleared = true;
+            std::exception_ptr failure;
+            for(tjs_int i = 0; i < expandedCount; ++i) {
+                try { expanded[i].Clear(); }
+                catch(...) { if(!failure) failure = std::current_exception(); }
+            }
+            if(failure) std::rethrow_exception(failure);
+        }
+        ~tTJSCallArguments() { try { Clear(); } catch(...) {} }
+    };
 
-#define TJS_END_FUNC_CALL_ARGS                                                 \
-    }                                                                          \
-    catch(...) {                                                               \
-        if(alloc_args)                                                         \
-            delete[] pass_args;                                                \
-        if(pass_args_v)                                                        \
-            delete[] pass_args_v;                                              \
-        throw;                                                                 \
-    }                                                                          \
-    if(alloc_args)                                                             \
-        delete[] pass_args;                                                    \
-    if(pass_args_v)                                                            \
-        delete[] pass_args_v;
+#define TJS_BEGIN_FUNC_CALL_ARGS(_code)                                      \
+    tTJSCallArguments callArguments((_code), ra, args, numargs, FuncDeclUnnamedArgArrayBase); \
+    const auto code_size = callArguments.CodeSize;                            \
+    const auto pass_args_count = callArguments.Count;                         \
+    auto* pass_args = callArguments.Values;
+#define TJS_END_FUNC_CALL_ARGS callArguments.Clear();
 
     //---------------------------------------------------------------------------
     tjs_int tTJSInterCodeContext::CallFunction(tTJSVariant *ra,
@@ -2955,6 +2865,7 @@ namespace TJS {
 #define TJS_DO_SUPERCLASS_PROXY_BEGIN                                          \
     std::vector<tjs_int> &pointer = SuperClassGetter->SuperClassGetterPointer; \
     if(pointer.size() != 0) {                                                  \
+        krkr::ExecutionFrame delegation(2);                                    \
         std::vector<tjs_int>::reverse_iterator i;                              \
         for(i = pointer.rbegin(); i != pointer.rend(); i++) {                  \
             tTJSVariant res;                                                   \
