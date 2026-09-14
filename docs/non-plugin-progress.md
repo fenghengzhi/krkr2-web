@@ -2,6 +2,8 @@
 
 最新 [执行资源完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086) 通过 **398 项 Node、639 项浏览器及 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783) 另通过 **78 项**。已限制执行深度和临时寄存器/参数载荷，修复退出帧残留值、部分原生类/Array 构造回滚；暂停/取消覆盖实际参数复制及深层宿主挂起。双后端 [1,063 次执行分配失败与 188 次字节码分配失败](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858195933) 全部通过。TJS ABI 5 增加 `executionBudgets: 1`，字体 ABI 2、协议 9 不变。范围见 [决策 037](decisions/037-execution-budgets.md)，完整非插件目标仍在进行。
 
+[执行资源最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34860651997)绑定 519 份证据，矩阵 `out/verification/execution-budgets-matrix.json` 的 SHA-256 为 `2079d47f87fd1f035b7eb7626249a183fbef66a2b0723f93ebe458e80a78c109`。本轮可信冻结 21,052.5 ms；本地仅恢复经过验证的云端构建，未运行测试。任意对象环、隐式终结器异常、其他宿主生命周期及下表未完成能力继续保留在目标范围内。
+
 此前 [字节码生命周期完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871) 通过 **392 项 Node、639 项浏览器及 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401) 另通过 **78 项**。常量池、上下文构造和链接支持暂停/取消、失败回滚和构造预算；六组生命周期检查及 36 条控制路径验证了显式实例清理后的资源释放。两种后端共 **188 次分配失败**和 **20 次 WebKit 冷离线重启**通过。TJS ABI 5 新增能力标记 `bytecodeLifecycle: 1`，详见 [决策 036](decisions/036-bytecode-lifetime.md)。
 
 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242)已绑定 554 份证据；矩阵 `out/verification/bytecode-lifetime-matrix.json` 的 SHA-256 为 `c3c5c665b1de52cc989edc0a3abad39001c0db1fc560baa49b1dfe63f798089b`。本轮可信冻结为 21,059.7 ms，没有计入历史额外冻结；此前各阶段矩阵和失败记录继续保留。

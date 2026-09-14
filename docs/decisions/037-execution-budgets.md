@@ -35,3 +35,9 @@ Tests `34857699012` 同样在 Emscripten 安装阶段收到 HTTP 504，所有下
 Tests `34858757086` 的 398 项 Node 和六组直接运行时已通过。直接运行时覆盖 132 个预算边界（调试关闭/开启）、24 个源码/字节码临时实例自动终结场景、12 条深层函数/try 挂起控制及 12 条实际参数复制控制。普通深度执行保留结果，超限错误可捕获；各操作后执行额度归零，自动实例恰好终结一次且不保留脚本块/上下文。深层取消的原生 reply kind 为错误，证明脚本 catch 未吞掉取消；仅观察外层 AbortError 不足以得出这一结论。完整页面和 KAG 兼容结果另行绑定。
 
 最终 [Tests 34858757086](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086) 全部 14 个作业通过，包含上述 Node/运行时及 639 项浏览器测试。[兼容专项 34859159783](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783) 的 78 项 KAG 与跨 ABI 升级检查也全部通过，正式应用源码与分配运行一致；所选案例无失败、跳过或重试。本阶段没有把此前额外冷重启/冻结诊断计入新结果，历史原生页面异常仍未定位。
+
+[最终报告 34860651997](https://github.com/fenghengzhi/krkr2-web/actions/runs/34860651997) 已通过，绑定上述三个运行的源码、构建和 519 份证据。矩阵 `out/verification/execution-budgets-matrix.json` 的 SHA-256 为 `2079d47f87fd1f035b7eb7626249a183fbef66a2b0723f93ebe458e80a78c109`；前一字节码生命周期矩阵 `c3c5c665b1de52cc989edc0a3abad39001c0db1fc560baa49b1dfe63f798089b` 保持原样。
+
+正式 build token 为 `d3e7a8339d6721b91e87bb2d317e7c94d12fd129310c720d20172cf5803f54e7`，TJS 源身份为 `4545f4f8a440c625f6f3032bc71e11b1cefb1f6c4360bf33a3b6897fc2da85b4`，`diagnosticAllocator: false`。`src` 为 160 文件、900,658 字节，树摘要 `85db09839e03dff0d3ef70e3f84a539b3b15bfaf7d44347697e2f0b01fc4f874`；正式发布为 32 文件、5,725,844 字节，树摘要 `069ca18a115af2dc4b45e70b351147f6143dc1ecbeeb51587883e73badae3a71`。可信冻结 21,052.5 ms；原字节码控制 36 条、二进制控制 12 条、编译控制 36 条、页面控制 24 条继续通过。
+
+本地 `.generated` 与 `dist` 从 Tests 的精确 `test-build` artifact 恢复，原目录保存在 `out/verification/execution-budgets/prior-local-artifacts/`，没有运行本地测试或探测。报告之后的文档更新不改变应用或测试代码。执行预算和所选分配路径已验证，完整非插件目标仍保持进行中。

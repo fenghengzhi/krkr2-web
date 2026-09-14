@@ -8,6 +8,8 @@
 
 执行资源阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086) 通过 **398 项 Node、639 项浏览器**（516 常规、57 游戏库、59 PWA、7 原生生命周期）和 **6 项直接运行时**；[兼容专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783) 通过 **78 项**。[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858195933) 通过新增 **1,063 次执行分配失败**与原有 **188 次字节码分配失败**。直接运行时覆盖 132 个预算边界、24 个自动终结场景、12 条深层调用控制和 12 条参数复制控制；原字节码/编译/二进制与页面控制仍保留。范围、失败历史及构建下载修复见 [执行资源预算](decisions/037-execution-budgets.md)。所有所选案例无失败、跳过、flaky 或重试；历史额外冷重启诊断未计入本阶段。
 
+[执行资源最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34860651997)已通过，绑定 519 份证据；矩阵 `out/verification/execution-budgets-matrix.json` 的 SHA-256 为 `2079d47f87fd1f035b7eb7626249a183fbef66a2b0723f93ebe458e80a78c109`。可信冻结 21,052.5 ms；报告还保存字体依赖下载及校验记录。`.generated` 和 `dist` 已从对应 Tests 的精确产物恢复，旧本地产物保存在 `out/verification/execution-budgets/prior-local-artifacts/`，没有本地执行验证。
+
 字节码生命周期阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871) 通过 **392 项 Node、639 项浏览器**（516 常规、57 游戏库、59 PWA、7 原生生命周期）和 **6 项直接运行时**；[兼容专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401) 通过 **78 项**。另有 [188 次双后端分配失败](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848868196) 和 [20 次 WebKit JSPI 原生 Debug 冷离线重启](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849908821) 通过，所选测试没有失败、跳过、flaky 或重试。直接运行时包含 36 条字节码暂停/取消路径及六组重复加载/失败回滚检查；范围和原失败见 [字节码生命周期](decisions/036-bytecode-lifetime.md)。
 
 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242)已绑定 554 份证据；矩阵 `out/verification/bytecode-lifetime-matrix.json` 的 SHA-256 为 `c3c5c665b1de52cc989edc0a3abad39001c0db1fc560baa49b1dfe63f798089b`。本轮可信冻结为 21,059.7 ms，没有计入历史额外冻结；此前各阶段矩阵和失败记录继续保留。

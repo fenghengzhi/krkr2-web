@@ -2,6 +2,8 @@
 
 最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086)通过 **398 项 Node、639 项浏览器测试及 6 项直接运行时专项**，另有 [78 项兼容性检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783)通过。执行专项覆盖 **132 个预算边界、24 个自动终结场景、24 条暂停/取消路径**；[双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858195933)通过 **1,063 次执行分配失败和 188 次字节码分配失败**。历史 WebKit JSPI 页面崩溃与 KAG 成员名称异常仍无确定根因。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。
 
+[执行资源最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34860651997)已绑定当前应用、构建和 519 份证据。矩阵 `out/verification/execution-budgets-matrix.json` 的 SHA-256 为 `2079d47f87fd1f035b7eb7626249a183fbef66a2b0723f93ebe458e80a78c109`；当前本地生成目录来自这份已验证云端构建。
+
 [此前字节码生命周期报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242)按其历史源码和正式发布保留；执行资源阶段使用独立矩阵，不覆盖旧报告。
 
 字节码阶段加入 [构造与链接回滚](../decisions/036-bytecode-lifetime.md)、128 MiB 结构展开预算和原生分配/上下文计数，修正超类查询代码尾部的哨兵处理。后续 [执行资源预算](../decisions/037-execution-budgets.md) 已覆盖深层函数/try/超类/宿主调用、16 MiB 临时载荷和参数复制暂停/取消，退出帧清空寄存器并验证临时实例自动终结。任意对象环、隐式终结器异常和其他原生资源路径仍未完成。
