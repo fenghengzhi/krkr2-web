@@ -43,7 +43,7 @@ jobs:
       - name: Build isolated diagnostic kernel
         run: node scripts/build-wasm.mjs "${{ matrix.variant }}" 2>&1 | tee out/ci/build.log
       - name: Fail each native allocation during pool construction, context construction and linking
-        run: node --import tsx tests/probes/bytecode-allocation-faults.ts "${{ matrix.variant }}" 2>&1 | tee out/ci/allocations.log
+        run: node --experimental-wasm-jspi --import tsx tests/probes/bytecode-allocation-faults.ts "${{ matrix.variant }}" 2>&1 | tee out/ci/allocations.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

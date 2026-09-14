@@ -664,6 +664,11 @@ const matrix = {
     ...(lifetimePhase
       ? [
           {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34847308669',
+            reason:
+              'Asyncify passed 92 allocation-site failures and two string-heap growth failures; JSPI failed before module creation because Node 24 required the explicit experimental-wasm-jspi flag. This is a partial diagnostic, not a two-backend pass.',
+          },
+          {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34846307441',
             reason:
               'First lifecycle run failed three of 391 Node cases and the direct runtime. It exposed rejection of a superclass RET/NOP sentinel and instance-member self-reference retention. Sentinel validation was repaired; instances in explicit lifecycle tests are invalidated after checking their methods. Automatic cyclic instance reclamation remains incomplete. Preserve the original complete run and individual outcomes.',
