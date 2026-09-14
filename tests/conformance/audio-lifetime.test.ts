@@ -87,9 +87,15 @@ test('headless fades and live MIDI own the clock only while they have work', asy
   try {
     await audio.command({ op: 'create', id: 7, settings: defaultSoundSettings() })
     assert.equal(clock.tasks.size, 0)
-    await audio.command({ op: 'fade', id: 7, target: 0, time: 10, delay: 0 })
+    const immediate = await audio.command({ op: 'fade', id: 7, target: 0, time: 10, delay: 0 })
+    assert.deepEqual(
+      immediate.events.map((event) => event.type),
+      ['fade'],
+    )
+    assert.equal(clock.tasks.size, 0)
+    await audio.command({ op: 'fade', id: 7, target: 100000, time: 120, delay: 0 })
     assert.equal(clock.tasks.size, 1)
-    clock.advance(80)
+    clock.advance(140)
     assert.deepEqual(events, ['fade'])
     assert.equal(clock.tasks.size, 0)
     await audio.command({ op: 'close', id: 7 })

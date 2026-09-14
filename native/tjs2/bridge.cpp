@@ -930,6 +930,7 @@ API int krkr_owner_bind_dependent(Vm* vm, unsigned ownerHandle, unsigned depende
     auto* owner = instance(ownerHandle);
     auto* dependent = instance(dependentHandle);
     if(!owner || !dependent || owner == dependent) return 0;
+    KrkrCompilerScope dependentPhase(14);
     try {
         auto record = std::make_unique<DependentOwner>(dependent);
         if(!record->ownerObserver.Attach(owner) || !record->dependentObserver.Attach(dependent)) return 0;

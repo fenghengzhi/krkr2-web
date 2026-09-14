@@ -25,7 +25,7 @@ export interface ModuleOptions {
   ) => Promise<number>
   shouldCancel: () => boolean
   /** VM, source preparation, parse/codegen, export, diagnostic dump, or binary input. */
-  onYield: (phase?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13) => Promise<void>
+  onYield: (phase?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14) => Promise<void>
   queueWrite: (
     name: number,
     nameLength: number,

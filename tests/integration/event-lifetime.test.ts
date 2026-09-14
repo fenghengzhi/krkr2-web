@@ -529,6 +529,10 @@ function createOwner(){global.owner=new EventOwner();}
           assert.equal(session.snapshot().handles, 0)
           assert.deepEqual(session.inspectOwnership(), {
             eventSources: 0,
+            soundSources: 0,
+            pendingSoundCloses: 0,
+            dependents: 0,
+            pendingInvalidations: 0,
             weakOwners: 0,
             scriptObjects: 0,
             pendingHandles: 0,

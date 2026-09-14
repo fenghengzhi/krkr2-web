@@ -54,6 +54,9 @@ jobs:
       - name: Fail weak owner registration and VM shutdown allocations
         if: ${{ !cancelled() && steps.kernel.outcome == 'success' }}
         run: node --experimental-wasm-jspi --import tsx tests/probes/owner-observation-allocations.ts "${{ matrix.variant }}" 2>&1 | tee out/ci/owner-observation-allocations.log
+      - name: Fail dependent registration and deferred collection invalidation allocations
+        if: ${{ !cancelled() && steps.kernel.outcome == 'success' }}
+        run: node --experimental-wasm-jspi --import tsx tests/probes/dependent-allocation-faults.ts "${{ matrix.variant }}" 2>&1 | tee out/ci/dependent-allocations.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

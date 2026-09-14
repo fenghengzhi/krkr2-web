@@ -20,6 +20,7 @@ import {
 } from '../helpers/host-handles.ts'
 import { ownerObservationCases, exerciseOwnerObservation } from '../helpers/owner-observation.ts'
 import { exerciseEventLifetime } from '../helpers/event-lifetime-runtime.ts'
+import { dependentLifetimeCases, exerciseDependentLifetime } from '../helpers/dependent-lifetime.ts'
 import {
   exerciseBytecodeLifetime,
   makeBytecodeWork,
@@ -184,6 +185,13 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     }
   const objectCases = [],
     finalizerControls = []
+  const dependentLifetimes = []
+  for (const debug of [false, true])
+    for (const binary of [false, true])
+      for (const name of dependentLifetimeCases)
+        dependentLifetimes.push(
+          await exerciseDependentLifetime(factory, wasmBinary, backend, name, debug, binary),
+        )
   for (const debug of [false, true])
     for (const binary of [false, true])
       for (const fixture of objectLifetimeCases)
@@ -201,6 +209,7 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     hostHandles: { cases: handleCases, controls: handleControls },
     ownerObservations: ownerCases,
     eventOwnership,
+    dependentLifetimes,
     executionBudgets: {
       checks: [
         await exerciseExecutionBudget(factory, wasmBinary, backend, false),

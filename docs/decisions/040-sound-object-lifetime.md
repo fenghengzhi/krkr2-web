@@ -1,6 +1,10 @@
 # 040 — 声音对象生命周期：实现进行中
 
-本文件保留原始审计和实现方案。独立工作目录已接入声音弱观察、事件持有、异步关闭队列、flags 原生失效、labels 的延后失效队列以及后端迟到解码隔离，尚未构建或验证。不能把当前改动、现有音频测试或 [039 的通用宿主观察机制](039-host-object-lifetime.md) 视为声音生命周期阶段已经完成。后续所有构建、测试和可执行探测仍只在 GitHub-hosted Actions 运行。
+本文件保留原始审计和实现方案。独立工作目录已接入声音弱观察、事件持有、异步关闭队列、flags 原生失效、labels 的延后失效队列以及后端迟到解码隔离，已完成首轮构建，验证仍在进行。不能把当前改动、现有音频测试或 [039 的通用宿主观察机制](039-host-object-lifetime.md) 视为声音生命周期阶段已经完成。后续所有构建、测试和可执行探测仍只在 GitHub-hosted Actions 运行。
+
+首轮 [Tests 34885096935](https://github.com/fenghengzhi/krkr2-web/actions/runs/34885096935) 绑定 `66bfa5adacba647a198b63e348b40b7317292675`：构建和类型检查通过，651 项浏览器、6 项直接运行时通过，Node 为 679/682，完整运行仍记为失败。82 个新增声音 Session 用例通过；三个失败来自夹具：10 ms 淡出按现有语义同步完成，不应期待后续时钟任务；两个停止 Trigger 的旧预期尚未包含新增的声音/关联对象零值计数。已分别改为检查同步短淡出与实际异步淡出，并保留所有资源字段必须归零的精确断言。原始完整材料与元数据保存在 `out/verification/github-actions/34885096935/`。
+
+同一源码的 [双后端分配诊断 34885263390](https://github.com/fenghengzhi/krkr2-web/actions/runs/34885263390) 已通过原有字节码、执行、集合和弱观察故障检查，归档同样按 run ID 保留；它尚未证明新增关联对象注册和失效队列的全部分配边界。需要进一步专项验证后才能完成本阶段报告。
 
 当前 `src/engine/media/sounds.ts` 在创建时强持有绑定实例的 dispatch，`src/engine/tvp/sound.ts` 依赖脚本 finalize 调用 Sound.destroy。这会阻止隐式析构，也会遗漏不调用 super 的子类清理；直接调用 finalize 又过早关闭资源。原始 [SoundBufferBaseIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/SoundBufferBaseIntf.cpp) 将非持有 Owner 与强持有 ActionOwner 分开，native Invalidate 禁止事件、取消队列并释放 ActionOwner。[WaveIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/WaveIntf.cpp) 和 [MIDIIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/MIDIIntf.cpp) 都注册空的基础 finalize。实际停止播放及释放解码、线程或 MIDI 资源位于 [WaveImpl.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/win32/WaveImpl.cpp) 与 [MIDIImpl.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/win32/MIDIImpl.cpp) 的 native Invalidate 链。
 

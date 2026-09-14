@@ -14,6 +14,7 @@ extern "C" void krkr_compiler_checkpoint();
 // 11 = collection cleanup (allocation diagnostics; no extra yielding checkpoint).
 // 12 = host owner observation registration (allocation diagnostics only).
 // 13 = weak owner upgrade to a strong handle (allocation diagnostics only).
+// 14 = dependent lifetime registration (allocation diagnostics only).
 class KrkrCompilerScope {
     int previous;
 public:
