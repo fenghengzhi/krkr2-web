@@ -405,7 +405,14 @@ export class EngineSession {
           if (!this.control.cancelled) this.fail(error)
         },
         (source) => this.systemEvents!.cancelSource(source),
-        () => this.queue.drain(),
+        () => {
+          if (!this.control.cancelled && this.runtime?.inspect().pendingHandles)
+            return this.execute(async () => {
+              await this.runtime!.collect()
+              return undefined
+            }).then(() => undefined)
+          return this.queue.drain()
+        },
       )
       this.discard(await this.runtime.execute(tvpConstants, 'krkr2-web/constants.tjs'))
       this.discard(await this.runtime.execute(debugBridge, 'krkr2-web/debug.tjs'))

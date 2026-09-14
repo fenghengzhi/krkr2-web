@@ -568,6 +568,10 @@ export class TjsWasmRuntime implements ScriptRuntime {
       this.call('krkr_reply_delete', reply)
     }
   }
+  async collect(): Promise<void> {
+    this.assertAlive()
+    await this.run('krkr_collect', [this.vm])
+  }
   inspect() {
     this.assertAlive(true)
     return {

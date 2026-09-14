@@ -123,6 +123,8 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
     pendingInvalidations: number
   }
   flush(): Promise<void>
+  /** Drain queued native releases at a suspendable, serialized VM boundary. */
+  collect(): Promise<void>
   dispose(): void
 }
 

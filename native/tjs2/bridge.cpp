@@ -716,6 +716,10 @@ API Reply* krkr_invoke(Vm* vm, unsigned handle, Reply* arguments) {
         resolveReply(vm, call, &value);
     });
 }
+API Reply* krkr_collect(Vm* vm) {
+    deadline = emscripten_get_now() + 8;
+    return captureVm(vm, [](tTJSVariant&) {});
+}
 API Reply* krkr_reply_new(int kind) { auto r = new Reply(); r->kind = kind; return r; }
 API void krkr_reply_delete(Reply* r) { delete r; }
 API int krkr_reply_kind(Reply* r) { return r->kind; }

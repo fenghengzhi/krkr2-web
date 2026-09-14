@@ -7,7 +7,14 @@ import {
 } from '../../src/engine/script/runtime.ts'
 import { checkLifetime as check } from './bytecode-lifetime.ts'
 
-export const weakReturnCases = ['retained', 'invalidated', 'revoked', 'foreign'] as const
+export const weakReturnCases = [
+  'retained',
+  'invalidated',
+  'revoked',
+  'foreign',
+  'collect',
+  'collect-error',
+] as const
 
 /** Reply-owned references must not become invisible permanent host handles. */
 export async function exerciseWeakReturn(
@@ -19,11 +26,25 @@ export async function exerciseWeakReturn(
   binary: boolean,
 ) {
   let weak: ScriptWeakObject | undefined, reply: ScriptValue
-  const vm = await TjsWasmRuntime.create(factory, () => ({ kind: 'value', value: reply }), {
-    wasmBinary,
-    variant,
-    debugMode,
-  })
+  let finalizerCalls = 0
+  const collecting = name === 'collect' || name === 'collect-error'
+  const vm = await TjsWasmRuntime.create(
+    factory,
+    async (operation) => {
+      if (operation === 'CollectFinalizer') {
+        await Promise.resolve()
+        finalizerCalls++
+        if (name === 'collect-error') throw new Error('collected-finalizer')
+        return { kind: 'value', value: undefined }
+      }
+      return { kind: 'value', value: reply }
+    },
+    {
+      wasmBinary,
+      variant,
+      debugMode,
+    },
+  )
   const execute = async (source: string, expression = false) =>
     vm.execute(
       binary ? await vm.compile(source, 'weak-return.tjs', expression) : source,
@@ -32,7 +53,7 @@ export async function exerciseWeakReturn(
     )
   try {
     await execute(
-      'var finalized=0;try{throw new Exception("warm");}catch(e){};class WeakReturn {var marker=42;function value(){return this.marker;}function finalize(){finalized++;}}',
+      `var finalized=0;try{throw new Exception("warm");}catch(e){};class WeakReturn {var marker=42;function value(){return this.marker;}function finalize(){finalized++;${collecting ? '__host("CollectFinalizer");' : ''}}}`,
     )
     const baseline = vm.inspect()
     await execute('var origin=new WeakReturn();')
@@ -41,6 +62,42 @@ export async function exerciseWeakReturn(
     if (!isScriptObject(origin)) throw new Error('No native owner')
     weak = vm.observe(origin, () => {})
     reply = weak
+    if (collecting) {
+      await execute('delete global.origin;')
+      const owned = vm.inspect()
+      vm.release(origin)
+      check(vm.inspect().pendingHandles === 1, 'Collector did not receive a queued native handle')
+      let error: unknown
+      try {
+        await vm.collect()
+      } catch (caught) {
+        error = caught
+      }
+      check(
+        name === 'collect-error' ? String(error).includes('collected-finalizer') : !error,
+        'Collector did not preserve the suspended finalizer outcome',
+      )
+      check(finalizerCalls === 1, 'Collector did not execute its native finalizer once')
+      const after = vm.inspect()
+      for (const field of ['handles', 'scriptObjects', 'weakOwners', 'pendingHandles'] as const)
+        check(after[field] === baseline[field], `Collector retained ${field}`)
+      check((await execute('finalized', true)) === 1n, 'Collector lost finalizer state')
+      check(
+        (await execute('__host("Weak")===null', true)) === 1n,
+        'Collected weak owner remained valid',
+      )
+      return {
+        name,
+        variant,
+        debugMode,
+        binary,
+        baseline,
+        owned,
+        after,
+        finalizerCalls,
+        error: error ? String(error) : null,
+      }
+    }
     vm.release(origin)
     await execute('0', true)
     const owned = vm.inspect()
