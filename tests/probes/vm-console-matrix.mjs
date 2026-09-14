@@ -133,6 +133,8 @@ const executionPhase = wasm.capabilities?.executionBudgets === 1
 const objectPhase = wasm.capabilities?.objectFinalization === 1
 const hostPhase = wasm.capabilities?.hostObjectLifetime === 1
 const soundPhase = wasm.capabilities?.soundObjectLifetime === 1
+const videoPhase = wasm.capabilities?.videoObjectLifetime === 1
+if (videoPhase) assert(soundPhase)
 if (soundPhase) assert(hostPhase)
 if (hostPhase) assert(objectPhase)
 if (objectPhase) assert(executionPhase)
@@ -156,36 +158,40 @@ if (binaryPhase) assert(compilerPhase)
 const scriptsPhase = wasm.abi === 5
 if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
-const nodeCount = soundPhase
-  ? 710
-  : hostPhase
-    ? 594
-    : objectPhase
-      ? 466
-      : executionPhase
-        ? 398
-        : lifetimePhase
-          ? 392
-          : binaryPhase
-            ? 384
-            : compilerPhase
-              ? 371
-              : scriptsPhase
-                ? 362
-                : tracePhase
-                  ? 351
-                  : 346
-const browserCount = soundPhase
-  ? 651
-  : binaryPhase
-    ? 639
-    : compilerPhase
-      ? 621
-      : scriptsPhase
-        ? 615
-        : tracePhase
-          ? 609
-          : 603
+const nodeCount = videoPhase
+  ? 776
+  : soundPhase
+    ? 710
+    : hostPhase
+      ? 594
+      : objectPhase
+        ? 466
+        : executionPhase
+          ? 398
+          : lifetimePhase
+            ? 392
+            : binaryPhase
+              ? 384
+              : compilerPhase
+                ? 371
+                : scriptsPhase
+                  ? 362
+                  : tracePhase
+                    ? 351
+                    : 346
+const browserCount = videoPhase
+  ? 675
+  : soundPhase
+    ? 651
+    : binaryPhase
+      ? 639
+      : compilerPhase
+        ? 621
+        : scriptsPhase
+          ? 615
+          : tracePhase
+            ? 609
+            : 603
 const compatibilityCount = scriptsPhase ? 78 : tracePhase ? 72 : 66
 if (!tracePhase) assert(freeze, 'The historical VM console phase requires its freeze diagnostic')
 assert.equal(font.abi, 2)
@@ -278,6 +284,8 @@ const suites = [],
   contexts = [],
   mediaClocks = [],
   overlayFrames = [],
+  videoHostOwnership = [],
+  mediaAudioOwnership = [],
   browserControls = []
 for (const browser of browsers)
   for (const suite of ['browser', 'library', 'pwa']) {
@@ -285,22 +293,94 @@ for (const browser of browsers)
     const report = await json(root + '/out/ci/results.json')
     const count =
       suite === 'browser'
-        ? soundPhase
-          ? 176
-          : binaryPhase
-            ? 172
-            : compilerPhase
-              ? 166
-              : scriptsPhase
-                ? 164
-                : tracePhase
-                  ? 162
-                  : 160
+        ? videoPhase
+          ? 184
+          : soundPhase
+            ? 176
+            : binaryPhase
+              ? 172
+              : compilerPhase
+                ? 166
+                : scriptsPhase
+                  ? 164
+                  : tracePhase
+                    ? 162
+                    : 160
         : suite === 'pwa' && browser !== 'webkit'
           ? 20
           : 19
     const cases = playwright(report, count)
     assert(cases.every((row) => row.project === browser))
+    if (videoPhase && suite === 'browser') {
+      const attachment = (row, name) => {
+        const item = row.result.attachments.find((value) => value.name === name)
+        assert(item?.body, `Missing ${name} observation in ${row.title}`)
+        return JSON.parse(Buffer.from(item.body, 'base64').toString('utf8'))
+      }
+      const videoCases = cases.filter((row) => row.title.startsWith('browser video resources: '))
+      combinations(
+        videoCases,
+        [
+          'creation-after-audio',
+          'insertion-after-registration',
+          'close-first-frame',
+          'supersede-first-frame',
+          'shutdown-failure',
+        ],
+        (row) => row.title.slice('browser video resources: '.length),
+      )
+      for (const row of videoCases) {
+        const observed = attachment(row, 'video-host-ownership')
+        assert.equal(row.title, 'browser video resources: ' + observed.name)
+        assert.equal(
+          observed.connected,
+          ['shutdown-failure', 'supersede-first-frame'].includes(observed.name) ? 2 : 1,
+        )
+        assert.equal(observed.audioCloses, observed.connected)
+        assert.equal(observed.revokedUrls, observed.createdUrls)
+        assert.equal(observed.observerCloses, 1)
+        for (const key of ['pendingReplies', 'liveAudio', 'liveUrls', 'pendingFrames', 'videos'])
+          assert.equal(observed[key], 0)
+        assert.deepEqual(observed.messages, [])
+        videoHostOwnership.push({ browser, ...observed })
+      }
+      const audioCases = cases.filter((row) =>
+        row.title.startsWith('video audio graph cleans every '),
+      )
+      combinations(
+        audioCases,
+        ['create', 'connect', 'disconnect'],
+        (row) => attachment(row, 'media-audio-ownership').fault,
+      )
+      for (const row of audioCases) {
+        const observed = attachment(row, 'media-audio-ownership')
+        assert.equal(observed.device, 'controlled Web Audio API')
+        const expected = { create: 8, connect: 9, disconnect: 15 }[observed.fault]
+        combinations(
+          observed.results,
+          Array.from({ length: expected }, (_, index) => index + 1),
+          (item) => item.at,
+        )
+        assert.equal(observed.control.at, 0)
+        for (const item of [observed.control, ...observed.results]) {
+          assert.equal(item.fault, observed.fault)
+          assert.equal(item.contextCloses, 1)
+          assert.equal(item.intervals, 0)
+          for (const node of item.nodes) {
+            assert.equal(node.disconnects, 1)
+            assert.equal(node.connections, 0)
+          }
+          if (item.at)
+            assert(
+              (observed.fault === 'disconnect' ? item.closeError : item.error).includes(
+                `media-${observed.fault}-primary`,
+              ),
+            )
+          else assert.equal(item.error, null)
+        }
+        mediaAudioOwnership.push({ browser, ...observed })
+      }
+    }
     if (binaryPhase && suite === 'browser') {
       for (const [kind, title] of [
         ['menuUpdate', 'KAG callbacks, macros and script menus work in the Worker'],
@@ -745,6 +825,74 @@ function dependentLifetimes(rows, backend) {
     }
   }
 }
+function weakReturnOwnership(rows, backend) {
+  const names = ['retained', 'invalidated', 'revoked', 'foreign', 'collect', 'collect-error']
+  combinations(
+    rows,
+    names.flatMap((name) =>
+      [false, true].flatMap((debug) => [false, true].map((binary) => `${name}/${debug}/${binary}`)),
+    ),
+    (row) => `${row.name}/${row.debugMode}/${row.binary}`,
+  )
+  for (const row of rows) {
+    assert.equal(row.variant, backend)
+    const collecting = row.name === 'collect' || row.name === 'collect-error'
+    assert.equal(row.owned.handles, row.baseline.handles + (collecting ? 1 : 0))
+    for (const field of ['handles', 'scriptObjects', 'weakOwners', 'pendingHandles'])
+      assert.equal(row.after[field], row.baseline[field])
+    if (collecting) {
+      assert.equal(row.finalizerCalls, 1)
+      if (row.name === 'collect-error') assert(row.error.includes('collected-finalizer'))
+      else assert.equal(row.error, null)
+    }
+  }
+}
+function videoOwnership(rows, backend) {
+  combinations(rows, ['false', 'true'], (row) => String(row.binary))
+  const expected = {
+    'implicit-resource-release': '1',
+    'returned-object-release': '[TJS object]',
+    'queued-dynamic-member': 'movie-owner:stop,1,1',
+    'cancel-queued-event': '0,1',
+    'frame-last-reference': '1,1',
+    'period-last-reference': '1,1',
+    'retry-invalidation': '2',
+    'weak-layer-return': '1',
+    'await-asynchronous-close': 'closed',
+    'window-disconnect': '1,unload,0,0',
+  }
+  for (const row of rows) {
+    assert.equal(row.variant, backend)
+    combinations(row.cases, Object.keys(expected), (item) => item.name)
+    for (const item of row.cases) {
+      assert.equal(item.result, expected[item.name])
+      if (item.name === 'window-disconnect') {
+        // Invalidating the fixture window changes the baseline; teardown still
+        // must return every resource and native ownership counter to zero.
+        for (const field of ['videoSources', 'pendingVideoCloses', 'movies'])
+          assert.equal(item.retired[field], 0)
+      } else assert.deepEqual(item.retired, row.baseline)
+      if (item.name === 'returned-object-release') assert.deepEqual(item.owned, row.baseline)
+      else {
+        assert.equal(item.owned.movies, 1)
+        if (item.name === 'await-asynchronous-close') {
+          assert.equal(item.owned.videoSources, 0)
+          assert.equal(item.owned.pendingVideoCloses, 1)
+        } else {
+          assert.equal(item.owned.videoSources, row.baseline.videoSources + 1)
+          if (item.name !== 'weak-layer-return')
+            assert.equal(item.owned.weakOwners, row.baseline.weakOwners + 2)
+        }
+      }
+    }
+    assert.deepEqual(Object.keys(row.stopped).sort(), Object.keys(row.baseline).sort())
+    for (const value of Object.values(row.stopped)) assert.equal(value, 0)
+    assert.equal(row.terminalCloses, 1)
+    assert.equal(row.rendererCloses, 1)
+    assert.equal(row.closedIds.length, 10)
+    assert.equal(new Set(row.closedIds).size, 10)
+  }
+}
 function soundOwnership(rows, backend) {
   combinations(rows, ['false', 'true'], (row) => String(row.binary))
   const expected = {
@@ -795,6 +943,10 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (videoPhase) {
+    weakReturnOwnership(row.weakReturns, row.backend)
+    videoOwnership(row.videoOwnership, row.backend)
+  }
   if (soundPhase) {
     dependentLifetimes(row.dependentLifetimes, row.backend)
     soundOwnership(row.soundOwnership, row.backend)
@@ -1491,6 +1643,23 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(videoPhase
+      ? {
+          weakReturns: runtime.results.reduce((sum, row) => sum + row.weakReturns.length, 0),
+          videoOwnershipSessions: runtime.results.reduce(
+            (sum, row) => sum + row.videoOwnership.length,
+            0,
+          ),
+          videoOwnershipCases: runtime.results.reduce(
+            (sum, row) =>
+              sum + row.videoOwnership.reduce((count, session) => count + session.cases.length, 0),
+            0,
+          ),
+          videoHostOwnership: videoHostOwnership.length,
+          mediaAudioFaults: mediaAudioOwnership.reduce((sum, row) => sum + row.results.length, 0),
+          mediaAudioControls: mediaAudioOwnership.length,
+        }
+      : {}),
     ...(soundPhase
       ? {
           dependentLifetimes: runtime.results.reduce(
@@ -1648,6 +1817,7 @@ const matrix = {
   browserControls,
   runtime,
   allocatorReports,
+  ...(videoPhase ? { videoHostOwnership, mediaAudioOwnership } : {}),
   executionAllocatorReports,
   finalizationAllocatorReports,
   ownerAllocatorReports,
@@ -1668,6 +1838,12 @@ const matrix = {
   evidence,
   previousMatrices: {
     ...fixtureManifest.historicalMatrices,
+    ...(videoPhase
+      ? {
+          'sound-object-lifetime':
+            'bd7c8848e1e0183457644d67a8f6dbfbf41a8a951576db2f608046e7e60307da',
+        }
+      : {}),
     ...(soundPhase
       ? {
           'host-object-lifetime':
@@ -1696,6 +1872,20 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(videoPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34899772270',
+            reason:
+              'The first native video ownership implementation passed 762/764 Node cases, 651 browser cases and six direct runtimes. Cancelling a queued video event retained one native handle and object until a later VM entry. A suspendable collect entry now drains releases at the Session event boundary; the exact baseline assertions remain. Original failed artifacts are retained.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34901201286',
+            reason:
+              'The new collect entry was missing from JSPI_EXPORTS. JSPI ccall rejected its ordinary return with ret.then is not a function, including native media startup. The CMake export list was corrected. The same run also recorded 751 passing Node cases and one sound-lifetime.test.ts file failure with SIGSEGV; only 61 of its 82 cases completed. That process crash has no confirmed root cause. The unchanged sound file passed three independent 82-case diagnostic runs in 34902191020, which does not prove the crash fixed. Both complete original runs are archived, and future full Node failures retain native core hashes/backtraces on hosted runners.',
+          },
+        ]
+      : []),
     ...(soundPhase
       ? [
           {
@@ -2031,6 +2221,12 @@ const matrix = {
     },
   ],
   incomplete: [
+    ...(videoPhase
+      ? [
+          'Historical Node sound-lifetime.test.ts SIGSEGV has no confirmed cause; three isolated unchanged 82-case runs passed without reproducing it',
+          'Window disconnect currently silently closes video resources; native Window/Video event ordering needs further comparison with the complete native window lifecycle',
+        ]
+      : []),
     ...(binaryPhase
       ? [
           'The historical WebKit JSPI original KAG startup member-name corruption was not reproduced in forty diagnostic cases; its native cause remains unconfirmed',
@@ -2042,17 +2238,19 @@ const matrix = {
           'Automatic legacy text detection and decoder latching, full bytecode validation and complete storage paths remain incomplete',
           ...(binaryPhase
             ? [
-                soundPhase
-                  ? 'Selected Sound, Timer and AsyncTrigger weak ownership, dependent retirement, queued event leases and asynchronous audio resource closes are covered; Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
-                  : hostPhase
-                    ? 'Selected host handle drains, native weak observation and Timer/AsyncTrigger event leases are covered; Sound, Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Genuine registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
-                    : objectPhase
-                      ? 'Reference-counted cleanup, explicit cycle breaking and selected finalizer failures are covered; host object ownership and remaining VM semantics still require implementation. Arbitrary cycle collection is not part of the TJS2 reference behavior.'
-                      : executionPhase
-                        ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
-                        : lifetimePhase
-                          ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
-                          : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
+                videoPhase
+                  ? 'Selected Sound, VideoOverlay, Timer and AsyncTrigger weak ownership, queued event leases, dependent retirement and asynchronous media resource cleanup are covered. Layer, Window, MenuItem and remaining host/VM ownership semantics still require implementation. Registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                  : soundPhase
+                    ? 'Selected Sound, Timer and AsyncTrigger weak ownership, dependent retirement, queued event leases and asynchronous audio resource closes are covered; Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                    : hostPhase
+                      ? 'Selected host handle drains, native weak observation and Timer/AsyncTrigger event leases are covered; Sound, Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Genuine registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                      : objectPhase
+                        ? 'Reference-counted cleanup, explicit cycle breaking and selected finalizer failures are covered; host object ownership and remaining VM semantics still require implementation. Arbitrary cycle collection is not part of the TJS2 reference behavior.'
+                        : executionPhase
+                          ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
+                          : lifetimePhase
+                            ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
+                            : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
               ]
             : [
                 'Serialized Array/Dictionary resource execution and prefixed bytecode remain incomplete',
@@ -2086,25 +2284,27 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = soundPhase
-  ? 'sound-object-lifetime-matrix.json'
-  : hostPhase
-    ? 'host-object-lifetime-matrix.json'
-    : objectPhase
-      ? 'object-finalization-matrix.json'
-      : executionPhase
-        ? 'execution-budgets-matrix.json'
-        : lifetimePhase
-          ? 'bytecode-lifetime-matrix.json'
-          : binaryPhase
-            ? 'binary-scripts-matrix.json'
-            : compilerPhase
-              ? 'compiler-matrix.json'
-              : scriptsPhase
-                ? 'native-scripts-matrix.json'
-                : tracePhase
-                  ? 'stack-traces-matrix.json'
-                  : 'vm-console-matrix.json'
+const reportName = videoPhase
+  ? 'video-object-lifetime-matrix.json'
+  : soundPhase
+    ? 'sound-object-lifetime-matrix.json'
+    : hostPhase
+      ? 'host-object-lifetime-matrix.json'
+      : objectPhase
+        ? 'object-finalization-matrix.json'
+        : executionPhase
+          ? 'execution-budgets-matrix.json'
+          : lifetimePhase
+            ? 'bytecode-lifetime-matrix.json'
+            : binaryPhase
+              ? 'binary-scripts-matrix.json'
+              : compilerPhase
+                ? 'compiler-matrix.json'
+                : scriptsPhase
+                  ? 'native-scripts-matrix.json'
+                  : tracePhase
+                    ? 'stack-traces-matrix.json'
+                    : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(
