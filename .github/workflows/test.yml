@@ -10,7 +10,8 @@ permissions:
 
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Keep the running suite and its evidence when a follow-up fix is queued.
+  cancel-in-progress: false
 
 defaults:
   run:
