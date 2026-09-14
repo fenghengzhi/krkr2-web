@@ -284,6 +284,32 @@ export class TjsWasmRuntime implements ScriptRuntime {
     this.owners.delete(owner.id)
     this.call('krkr_owner_unobserve', this.vm, owner.id)
   }
+  registerNativeLifetime(owner: ScriptObject, operation: string, identifier: number): void {
+    this.assertObject(owner)
+    if (
+      !/^[A-Za-z][A-Za-z0-9_.]{0,127}$/.test(operation) ||
+      !Number.isSafeInteger(identifier) ||
+      identifier < 0 ||
+      identifier > 0xffffffff
+    )
+      throw new Error('Invalid native lifetime operation or identifier')
+    const name = this.textPointer(operation)
+    try {
+      if (
+        !this.call(
+          'krkr_owner_register_native',
+          this.vm,
+          owner.id,
+          name,
+          operation.length,
+          identifier,
+        )
+      )
+        throw new Error('Cannot register a native lifetime on this TJS instance')
+    } finally {
+      this.call('free', name)
+    }
+  }
   bindDependent(owner: ScriptObject, dependent: ScriptObject): ScriptDependent {
     this.assertObject(owner)
     this.assertObject(dependent)

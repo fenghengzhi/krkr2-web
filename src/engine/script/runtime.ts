@@ -111,6 +111,10 @@ export type HostHandler = (
 export type ConsoleHandler = (text: string) => HostReply | Promise<HostReply>
 
 export interface ScriptRuntime extends HostContext, HostObjectLifetime {
+  /** Attach a native instance without retaining its owner. Its host operation
+   * receives [identifier, owner] during native invalidation, before member deletion.
+   * Ordinary VM execution may suspend; terminal VM destruction runs no host script. */
+  registerNativeLifetime(owner: ScriptObject, operation: string, identifier: number): void
   /** Invalidate this owned dependent at a safe boundary after its owner expires. */
   bindDependent(owner: ScriptObject, dependent: ScriptObject): ScriptDependent
   /** Revoke before invalidation begins; release its lease at the next VM boundary.
