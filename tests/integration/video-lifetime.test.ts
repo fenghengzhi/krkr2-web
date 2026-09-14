@@ -5,6 +5,34 @@ const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeou
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
+  test(`${mode}: displaying a returned video object releases the last native result handle`, async () => {
+    const f = await videoFixture(
+      binary,
+      'function returnedMovie(){var result=new LifetimeMovie();result.open("movie.mp4");result.play();return result;}',
+    )
+    try {
+      assert.equal(await f.session.evaluate('returnedMovie()'), '[TJS object]')
+      await f.restored()
+      assert.equal(await f.session.evaluate('finalized'), '1')
+      assert.equal(f.video.closedIds.length, 1)
+    } finally {
+      await f.session.stop()
+    }
+  })
+  test(`${mode}: displaying a returned sound object drains its native handle and resource`, async () => {
+    const f = await videoFixture(
+      binary,
+      'class ReturnedSound extends WaveSoundBuffer {function ReturnedSound(){super.WaveSoundBuffer(null);open("tone.wav");play();}function finalize(){finalized++;}}',
+    )
+    try {
+      assert.equal(await f.session.evaluate('new ReturnedSound()'), '[TJS object]')
+      await f.restored()
+      assert.equal(f.audio.voices.size, 0)
+      assert.equal(await f.session.evaluate('finalized'), '1')
+    } finally {
+      await f.session.stop()
+    }
+  })
   for (const activity of ['unopened', 'opened', 'playing'])
     test(`${mode}: implicit ${activity} video release retires its native owner and media`, async () => {
       const f = await videoFixture(binary)

@@ -460,7 +460,8 @@ export class EngineSession {
       let failed = false,
         recorded = false
       try {
-        let value: ScriptValue
+        let value: ScriptValue = undefined,
+          display = 'undefined'
         try {
           value = await operation()
           if (this.dirty && !this.systemEvents?.disabled) {
@@ -468,6 +469,11 @@ export class EngineSession {
             if (reply.kind === 'invoke')
               this.discard(await this.runtime!.invoke(reply.callback, reply.args))
           }
+          display = isScriptObject(value)
+            ? '[TJS object]'
+            : value instanceof Uint8Array
+              ? `[octet: ${value.length} bytes]`
+              : String(value)
         } catch (error) {
           failed = true
           if (!this.control.cancelled) {
@@ -479,9 +485,17 @@ export class EngineSession {
           let closingError: unknown,
             closingFailed = false
           try {
-            await this.videos?.flushCloses()
+            this.discard(value)
+            if (!this.control.cancelled && this.runtime?.inspect().pendingHandles)
+              await this.runtime.collect()
           } catch (error) {
             closingError = error
+            closingFailed = true
+          }
+          try {
+            await this.videos?.flushCloses()
+          } catch (error) {
+            if (!closingFailed) closingError = error
             closingFailed = true
           }
           try {
@@ -498,15 +512,9 @@ export class EngineSession {
           }
           if (closingFailed) {
             if (!failed) throw closingError
-            this.log('Media cleanup failed: ' + String(closingError), 'error')
+            this.log('Deferred cleanup failed: ' + String(closingError), 'error')
           }
         }
-        const display = isScriptObject(value)
-          ? '[TJS object]'
-          : value instanceof Uint8Array
-            ? `[octet: ${value.length} bytes]`
-            : String(value)
-        this.discard(value)
         this.present()
         this.notify()
         return display

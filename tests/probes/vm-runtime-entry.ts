@@ -21,6 +21,7 @@ import {
 import { ownerObservationCases, exerciseOwnerObservation } from '../helpers/owner-observation.ts'
 import { exerciseEventLifetime } from '../helpers/event-lifetime-runtime.ts'
 import { exerciseSoundLifetime } from '../helpers/sound-lifetime-runtime.ts'
+import { exerciseVideoLifetime } from '../helpers/video-lifetime-runtime.ts'
 import { exerciseWeakReturn, weakReturnCases } from '../helpers/weak-return.ts'
 import { dependentLifetimeCases, exerciseDependentLifetime } from '../helpers/dependent-lifetime.ts'
 import {
@@ -189,9 +190,12 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     finalizerControls = []
   const dependentLifetimes = [],
     soundOwnership = [],
+    videoOwnership = [],
     weakReturns = []
   for (const binary of [false, true])
     soundOwnership.push(await exerciseSoundLifetime(factory, wasmBinary, backend, binary))
+  for (const binary of [false, true])
+    videoOwnership.push(await exerciseVideoLifetime(factory, wasmBinary, backend, binary))
   for (const debug of [false, true])
     for (const binary of [false, true])
       for (const name of weakReturnCases)
@@ -223,6 +227,7 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     eventOwnership,
     dependentLifetimes,
     soundOwnership,
+    videoOwnership,
     weakReturns,
     executionBudgets: {
       checks: [
