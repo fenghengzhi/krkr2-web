@@ -1,14 +1,16 @@
 # 当前实现范围
 
-最新 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809918318)通过 **346 项 Node、603 项浏览器测试及 6 项直接运行时专项**，无失败或跳过。另修复了真实页面冻结期间的媒体请求超时，三次超过 21 秒的可信冻结复测通过。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812505215)另通过 66 项原 KAG 与旧发布离线升级检查。完整非插件目标仍未完成。
+最新 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
+
+原生 `Scripts.getTraceString(limit=0)` 与“脚本调试”启动开关已接入，当前 TJS ABI **4**、字体 ABI **2**、会话协议 **9**。调用栈在异步挂起、嵌套回调、字节码和取消时保留已验证的位置与顺序；其他 TVP 桥帧、原生错误界面和隐式回收路径仍需继续对齐。设计和失败分析见 [脚本调用栈](../decisions/031-script-stack-traces.md)。[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34816691294)保存为 `out/verification/stack-traces-matrix.json`，绑定 503 份证据，SHA-256 为 `9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df`。
 
 当前实现包含独立 TJS2 VM、文件流、持久存档、部分 TVP 宿主、游戏库与离线应用。它可以运行内置示例、已验证的 KAG 流程和使用已实现 API 的脚本；尚未达到完整 KAG 或商业游戏兼容。
 
-[VM 控制台阶段报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)已在云端核对并绑定上述结果、应用/发布哈希和 487 份证据，保存为 `out/verification/vm-console-matrix.json`。历史失败和未覆盖范围继续保留，见 [测试说明](../testing.md)。
+[此前 VM 控制台阶段报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)绑定该阶段结果、应用/发布哈希和 487 份证据，保存在 `out/verification/vm-console-matrix.json`。历史失败和未覆盖范围继续保留，见 [测试说明](../testing.md)。
 
 平台限制：当前渲染要求 Worker OffscreenCanvas WebGL2。Playwright 1.63 的 Linux GTK WebKit 在云端无法创建该上下文，暂不能运行播放器；WebKit 的完整场景使用 GitHub 托管 macOS 验证。Linux Chromium/Firefox 与不依赖渲染的 Linux WebKit WASM 探测分别保留，见 [测试说明](../testing.md)。
 
-VM 控制台阶段已将 Console/Controller 对齐为原生类对象，接入编译警告、异步 compile、异常代码输出及独立 `Scripts.dump()` 文件。38 项 Node 专项、36 项浏览器面板/VM 检查、6 项独立运行时探测和 6 项冷离线检查通过；本地完整回归已按用户要求中止，后续验证改由 GitHub Actions 执行；新的完整回归已在 GitHub Actions 通过；另有 [GitHub Actions 兼容性运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812505215)通过全部 66 项原 KAG、菜单、异常恢复与 TJS/字体跨 ABI 离线升级检查。当前 TJS ABI 3、字体 ABI 2、会话协议 9，范围见 [VM 控制台](../decisions/029-vm-console.md)。
+此前 VM 控制台阶段已将 Console/Controller 对齐为原生类对象，接入编译警告、异步 compile、异常代码输出及独立 `Scripts.dump()` 文件。38 项 Node 专项、36 项浏览器面板/VM 检查、6 项独立运行时探测和 6 项冷离线检查通过；后续完整回归改由 GitHub Actions 执行并通过，另有 [66 项原 KAG 与离线升级检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812505215)通过。该阶段使用 TJS ABI 3、字体 ABI 2、会话协议 9，范围见 [VM 控制台](../decisions/029-vm-console.md)。
 
 调试面板已接入 `Debug.console/controller` 的只读对象与 `visible` 属性，脚本和页面按钮共用状态，暂停与失败时也可重新打开。原 KAG 菜单/快捷键 6 项已通过；完整回归通过 **331 项行为/集成与 579 项浏览器测试**，最终构建另通过 36 项 KAG 综合场景，以及 TJS ABI、字体 ABI、协议 8→9 各 6 项离线升级检查；完整证据见 `out/verification/debug-panels-matrix.json`。原生类身份/构造/静态成员语义已在后续 VM 控制台阶段对齐，范围见 [调试面板](../decisions/028-debug-panels.md)。TJS/字体 ABI 均保持 2。
 
@@ -55,7 +57,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 - `Debug.console/controller`：只读对象，独立 `visible` 属性与页面控制同步；无全局 Console/Controller 构造器。
 - `Debug.message/notice(...)`、`getLastLog`、`startLogToFile/logAsError`、`logLocation/logToFileOnError/clearLogFileOnError`、`addLoggingHandler/removeLoggingHandler`；另有 `System.inform(message)` 与 `System.getTickCount()`。
 - `System.createAppLock(key)`、`System.exit(code)`、`System.terminate(code)`；浏览器不能终止宿主页，退出表现为停止游戏会话。
-- `Scripts.dump()`：将原生上下文转储写入 `savedata/krkr2-web.dump.txt`，支持暂停/取消、导出和刷新恢复。`Scripts.getTraceString` 仍未接入。
+- `Scripts.dump()`：将原生上下文转储写入 `savedata/krkr2-web.dump.txt`，支持暂停/取消、导出和刷新恢复。`Scripts.getTraceString(limit=0)` 已接入原生调用栈，启动前启用“脚本调试”后返回文件、行号和上下文；默认返回空串。详见 [脚本调用栈](../decisions/031-script-stack-traces.md)。
 - `Scripts.execStorage/evalStorage(name, mode, context)` 和 `Scripts.exec/eval(source, name, lineOffset, context)`，支持嵌套执行、上下文和来源行偏移。
 - `Storages.isExistentStorage(name)`、`Storages.addAutoPath/removeAutoPath(directory)`、`getPlacedPath`、路径提取函数。
 - ZIP 支持 stored/deflate、ZIP64、UTF-8/CP437/Unicode Path、按需读取与 CRC 校验，提供普通名称和 `archive>entry` 地址。无效写入目标在 TJS 创建文本/二进制流时预检；原始归档保持只读。详见 [ZIP 资源决策](../decisions/015-zip-storage.md)。

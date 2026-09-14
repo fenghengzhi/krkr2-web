@@ -6,6 +6,12 @@
 
 ## 已完成的云端回归
 
+当前 [提交 `0eee21e` 的完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)全部通过：**351 项 Node、609 项浏览器测试**（486 常规、57 游戏库、59 PWA、7 原生生命周期）及 6 项直接运行时专项。原生调用栈在三浏览器双后端中检查，当前 TJS ABI 为 4。另有 [72 项兼容性](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)及 [30 次输入时序复测](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815498178)通过。所选测试无失败、跳过或 flaky，未使用测试重试；WebKit 原有网络模拟排除继续保留。
+
+本阶段 [最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34816691294)生成 `out/verification/stack-traces-matrix.json`，绑定 503 份证据，SHA-256 为 `9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df`。完整报告已下载至 `out/verification/github-actions/34816691294/`，构建与测试另按各自 run ID 归档。失败原因、确定性复现和中断记录见 [脚本调用栈决策](decisions/031-script-stack-traces.md)。
+
+以下保留上一阶段的记录：
+
 [提交 `0003038` 的完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809918318)全部通过：**346 项 Node、603 项浏览器测试**（480 常规、57 游戏库、59 PWA、7 原生生命周期），另有 6 项直接运行时专项与 9 次作业图形预检。所选用例无失败、跳过或 flaky，未使用测试重试。WebKit 原有网络模拟排除仍由配置明确保留。
 
 本次报告与构建产物已下载归档到 `out/verification/github-actions/34809918318/`，摘要为 `summary.json`，SHA-256 为 `1421ee1c8d5ed83895a893cedbc7db62b274b04f92958606b6d9dc1bdaf6633e`。外部 KAG 与旧 ABI 专项由下述独立工作流验证。
@@ -19,7 +25,7 @@
 | Node                       | `tests/conformance`、`tests/integration`，含真实 WASM                   |
 | Browser × 9                | Chromium、Firefox、WebKit × 常规浏览器、持久游戏库、PWA，各组合独立运行 |
 | Chromium trusted lifecycle | 独立浏览器进程的真实隐藏、恢复、冻结与取消                              |
-| Direct runtime             | 三浏览器 × Asyncify/JSPI，直接验证 compile、转储、异常和取消            |
+| Direct runtime             | 三浏览器 × Asyncify/JSPI，直接验证 compile、转储、调用栈、异常和取消    |
 | All tests                  | 要求所有上述作业成功；失败、取消或跳过均不能通过汇总门槛                |
 
 Chromium/Firefox 套件使用 Ubuntu 24.04，WebKit 套件使用 GitHub 托管的 macOS 15。Linux runner 上的 Firefox 使用 Xvfb 虚拟显示和 Mesa 软件渲染；所有持久浏览器重开都沿用同一显示模式。套件开始前先在 Worker 中创建 WebGL2 上下文、清屏并读取像素，同时检查 JSPI；能力缺失会明确失败，避免每个场景重复超时。Chromium 和 macOS WebKit 保持 headless。Linux 作业提供 PulseAudio 虚拟输出设备，让真实 AudioContext/AudioWorklet 推进音频时钟；不替换页面的音频 API。WebKit 保留 DOM/网络 trace 和失败截图，关闭会明显拖慢协议操作的连续截图采集。
@@ -45,7 +51,7 @@ gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 
 默认工作流不依赖相邻的 `kirikiroid2-web` 仓库，也不读取本机的 `out/verification` 历史目录。现有固定参考数据随 `tests/fixtures` 保存并由 Node/浏览器测试使用。
 
-原 KAG XP3、保留全部 30 个成员字节的 ZIP，以及三个完整旧发布包已固定在 [兼容样本](../tests/fixtures/compatibility/README.md) 中。**KAG and release compatibility** 工作流先核对压缩包、旧发布树、build token、实际 ABI 和 ZIP 成员摘要，再运行三浏览器、双 WASM 后端专项。
+原 KAG XP3、保留全部 30 个成员字节的 ZIP，以及四个完整旧发布包已固定在 [兼容样本](../tests/fixtures/compatibility/README.md) 中。**KAG and release compatibility** 工作流先核对压缩包、旧发布树、build token、实际 ABI 和 ZIP 成员摘要，再运行三浏览器、双 WASM 后端专项。当前 ABI 4 工作流包含 TJS ABI 1/2/3→4 和字体 ABI 1→2，共 72 项；以下 66 项结果保留为上一阶段记录。
 
 [提交 `c0d6ba3` 的云端运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812505215)通过全部 **66 项**：原 KAG 流程/存读档/转场 36 项、原菜单 6 项、原异常处理及恢复 6 项、TJS ABI 1→3 和 2→3 各 6 项、字体 ABI 1→2 共 6 项。升级检查实际关闭服务器，让旧标签页重建旧 Worker，新标签页运行新 Worker；TJS 检查还验证新发布原生类和独立 dump，字体检查读取字宽和位图像素。旧应用及其 manifest 保持原字节。
 
@@ -57,7 +63,7 @@ gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 gh workflow run compatibility.yml --ref main -f build-run=BUILD_RUN_ID
 ```
 
-复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流再读取已完成的 Tests、兼容性和三次原生冻结专项，逐项核对用例、构建、源码、样本及证据哈希，生成 `out/verification/vm-console-matrix.json`；它不会重新运行浏览器测试。阶段报告及其引用的已下载证据保存为 `vm-console-verification` artifact，保留 90 天。
+复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。当前 ABI 4 阶段要求输入时序专项，生成 `out/verification/stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
 
 [VM 控制台阶段汇总](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)已通过，绑定 487 份证据文件、116 份持久 context 预算记录及 6 份媒体时钟记录。生成时提交为 `d97a3c9`，报告 SHA-256 为 `81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d`。矩阵和引用的完整产物已下载到 `out/verification/github-actions/34812958010/`，矩阵另复制到上述标准路径；报告生成后的本次文档更新不改变应用或测试代码。
 
@@ -65,13 +71,21 @@ gh workflow run compatibility.yml --ref main -f build-run=BUILD_RUN_ID
 gh workflow run verification-report.yml --ref main \
   -f build-run=BUILD_RUN_ID \
   -f compatibility-run=COMPATIBILITY_RUN_ID \
-  -f freeze-run=FREEZE_RUN_ID
+  -f input-run=INPUT_RUN_ID
 ```
 
-协议 8→9 的同内核历史专项仍保留在调试面板阶段；本轮 TJS ABI 3 升级检查不能替代该历史结果。其他未迁移的独立参考/性能专项同样不能由默认工作流通过推断为已完成。
+`freeze-run` 仍可指定同应用源码的独立三次长冻结运行；未提供时不会把历史三次冻结计入当前阶段。完整 Tests 自身的 7 项原生生命周期仍包含一次超过 21 秒的真实冻结。
+
+协议 8→9 的同内核历史专项仍保留在调试面板阶段；跨 TJS ABI 升级检查不能替代该历史结果。其他未迁移的独立参考/性能专项同样不能由默认工作流通过推断为已完成。
 
 VM 控制台阶段的本地完整回归已按用户要求中止（退出码 143）。此前的专项通过记录与失败日志按历史证据保留；该阶段的新完整回归结果以实际 Actions 运行记录为准。
 
 ## 独立诊断
 
 `Native lifecycle diagnostic` 和 `WebKit startup diagnostic` 可手动指定已有构建 run ID，在云端重复特定场景并附加状态、Worker 等待记录和原生栈。复用前检查该构建与当前提交的应用源码、依赖及构建脚本完全一致；诊断允许修改测试代码，但不能以旧产物验证新的应用实现。这些诊断结果单独保存，不能替代完整 Tests 工作流。
+
+`Input activity diagnostic` 使用同样的来源检查，包含阻塞 VM 的确定性焦点验证，以及三浏览器双后端各 5 次后台输入清理。它保留原来的 12 秒断言、2 个并发 worker 和全部文字/按键/点击检查，不以自动重试替代失败。
+
+```sh
+gh workflow run input-activity.yml --ref main -f build-run=BUILD_RUN_ID
+```

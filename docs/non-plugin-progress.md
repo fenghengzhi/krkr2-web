@@ -1,6 +1,8 @@
 # 插件以外的实现进度
 
-最新 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809918318)通过 **346 项 Node、603 项浏览器测试及 6 项直接运行时专项**，无失败或跳过。另修复了真实页面冻结期间的媒体请求超时，三次超过 21 秒的可信冻结复测通过。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812505215)另通过 66 项原 KAG 与旧发布离线升级检查。完整非插件目标仍未完成。
+最新 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
+
+原生 `Scripts.getTraceString(limit=0)` 与“脚本调试”启动开关已接入，当前 TJS ABI **4**、字体 ABI **2**、会话协议 **9**。调用栈在异步挂起、嵌套回调、字节码和取消时保留已验证的位置与顺序；其他 TVP 桥帧、原生错误界面和隐式回收路径仍需继续对齐。设计和失败分析见 [脚本调用栈](decisions/031-script-stack-traces.md)。[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34816691294)保存为 `out/verification/stack-traces-matrix.json`，绑定 503 份证据，SHA-256 为 `9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df`。
 
 目标：完成架构规划中的非插件引擎与 Web 平台能力，不能以最小示例或部分测试通过替代完成。插件注册机制保留；原生 DLL、Emote/MotionPlayer 等插件实现不在当前目标内。
 
@@ -36,7 +38,7 @@ Debug 阶段完整日志为 `out/verification/debug/check.log`，最终证据由
 | 文件集合、XP3/ZIP、文本编码、资源查找、补丁/auto-path | 已修正 adlr/保护位解释，补限定归档路径、auto-path、文本编码与文件流；ZIP stored/deflate、ZIP64、Unicode、CRC 与 HTTP Range 已接入；嵌套包、其他归档变体及完整路径规则仍未完成 | 进行中 |
 | KAGParser：标签、宏、条件、调用栈、保存恢复、宿主回调 | 已实现 TS parser + TJS 回调桥，通过原有 Conductor 的宏/等待/异步/call/return；继续扩大边界差分与完整 KAG 流程验证 | 进行中 |
 | Timer/AsyncTrigger/事件、Window、完整输入与系统 API | 已补窗口、焦点/模态、鼠标/触摸捕获、脚本命中、键盘/提交文字和异步输入；已接入 System 事件/连续回调、异常处理与菜单门控；手势/完整 IME、多窗口、原生全屏和全部原生事件重入仍需补齐 | 未完成 |
-| Debug 历史、文件输出、回调与调试界面 | 日志历史、UTF-16LE 文件、异常观察与写入故障隔离已接通；Console/Controller 原生类、VM 控制台和独立脚本转储已接通；栈追踪、错误 UI 策略和其他异常/回收路径仍待实现 | 进行中 |
+| Debug 历史、文件输出、回调与调试界面 | 日志历史、UTF-16LE 文件、异常观察与写入故障隔离已接通；Console/Controller 原生类、VM 控制台、脚本转储和可选原生栈追踪已接通；错误 UI 策略和其他异常/回收路径仍待实现 | 进行中 |
 | Layer/Bitmap：图像坐标、排序、裁剪、像素/命中、混合、转场 | 已补 26 种像素混合、矩形/缩放/仿射、类型转换/灰度/模糊、整图翻转、Gamma、组透明度、转场、onPaint、截图和 BMP；其他像素方法、完整 Bitmap 能力与严格几何/转场差分仍未完成 | 进行中 |
 | 字体与文字：度量、布局、ruby、纵排、显示一致性 | 已补 FreeType、Rect/边界、预渲染、选择/样式、Unicode/GSUB 纵排、装饰线及 KAG ruby/纵中横场景；Windows 字体替换/字符集、复杂 OpenType、集合多 face、缓存生命周期与全部最终混合仍待验证 | 未完成 |
 | BGM/SE/语音、循环点、seek、fade、完成事件、流式 PCM | 已接通 Wave/MIDI、AudioWorklet 混音、SLI 标志/标签/循环、定位/淡出/完成事件，验证 WAV/Vorbis/MP3/MIDI；边解码边播放、完整 MIDI、CD 映射和精确滤波仍待完成 | 进行中 |
@@ -46,11 +48,11 @@ Debug 阶段完整日志为 `out/verification/debug/check.log`，最终证据由
 | TLG 等非插件图像格式与专用算法 | TLG5/TLG6、SDS、PNG/GIF、索引 BMP、伴随平面、颜色键、PNG/TLG 写出和加载缓存/预加载已接入；有读取/运算对照和 192 个独立解码写出验证；其他变体与统一内存预留仍待实现 | 进行中 |
 | 产品：游戏库、导入/恢复、设置、错误诊断、浏览器能力适配 | 已补本地/远程资源持久保存、库中启动与入口/后端设置、容量提示、取消/失败恢复和跨标签页删除保护；身份迁移、包导出与其他设置仍待实现 | 进行中 |
 | GPU 丢失恢复、Worker/媒体清理、后台/前台策略、PWA/静态发布 | 已补 GPU 恢复、用户/图形/页面暂停协调、后台设置与输入/媒体门控；PWA 外壳及更新已验证；移动系统/BFCache、后台长请求、实体 GPU/驱动压力和性能等仍待验证 | 进行中 |
-| 验证：参考 KAG 对话/选择/转场/声音/脚本存读档、三浏览器、差分与性能 | 当前云端 346 项 Node、603 项浏览器与 6 项直接运行时通过；另有原 KAG 36 项、菜单 6 项、异常恢复 6 项和三类跨 ABI 离线升级 18 项通过；原生日志、字体、像素、18 项排版等参考按历史阶段保留，完整原生差分和性能仍待验证 | 未完成 |
+| 验证：参考 KAG 对话/选择/转场/声音/脚本存读档、三浏览器、差分与性能 | 当前云端 351 项 Node、609 项浏览器与 6 项直接运行时通过；另有原 KAG 36 项、菜单 6 项、异常恢复 6 项、四类跨 ABI 离线升级 24 项及 30 次输入时序复测通过；原生日志、字体、像素、18 项排版等参考按历史阶段保留，完整原生差分和性能仍待验证 | 未完成 |
 
 WebGPU 是架构中的可选后端；应在正确性与性能证据支持时实施，不以它替代 WebGL2 的完整实现。PSB 若仅服务被排除的插件，跟随插件阶段；非插件资源格式需求仍属于当前目标。
 
-纵排调试发现的 `Debug.logAsError()` 缺口已在日志阶段处理。Console/Controller 的原生类语义与 VM 控制台也已接入；Scripts.getTraceString、原生错误 UI 策略与其他异常/隐式析构路径仍待完成。
+纵排调试发现的 `Debug.logAsError()` 缺口已在日志阶段处理。Console/Controller 的原生类语义与 VM 控制台也已接入；Scripts.getTraceString 已接入；原生错误 UI 策略与其他异常/隐式析构路径仍待完成。
 
 参考 `kag3_template.xp3` 已完成 KAGMainWindow 构造，并在浏览器显示 `first.ks` 的 “Hello, world!!”。本项目的场景由参考模板原有脚本处理：输入流程覆盖换行、历史层、翻页与文字选择；新增流程覆盖三种 trans/wt、变量/场景保存恢复、8 位/24 位缩略图和刷新读档。完整图形混合、复杂存档、媒体恢复及更复杂的输入/系统事件仍未证明完成。
 

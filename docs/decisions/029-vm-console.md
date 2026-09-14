@@ -40,6 +40,6 @@ VM 的原生诊断可能在游戏自己的 catch 之前出现，包含脚本位�
 
 ## 剩余范围
 
-`Scripts.getTraceString` 尚未接入，参考快照还在 Emscripten 下禁用了内部 StackTracer；需要先验证挂起期间的代码指针与栈记录所有权。原生错误 UI 的自动打开策略、调试模式的额外异常输出、其他隐式回收/异常路径和整个非插件目标仍未完成。当前的绿色检查只证明上面列明的行为。
+本阶段尚未接入的 `Scripts.getTraceString` 已在后续 [脚本调用栈阶段](031-script-stack-traces.md)实现，使用拥有的指令偏移处理挂起期间的栈记录所有权，也接通了调试模式的额外异常输出。原生错误 UI 的自动打开策略、其他隐式回收/异常路径和整个非插件目标仍未完成。当前的绿色检查只证明各阶段列明的行为。
 
 参考：[Scripts](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_Scripts.html)、[Debug.console](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_Debug_console.html)、[原 KRKR2 DebugIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/trunk/kirikiri2/src/core/utils/DebugIntf.cpp)、[原生调试类](https://github.com/krkrz/krkr2/blob/master/kirikiri2/trunk/kirikiri2/src/core/utils/win32/DebugImpl.cpp)。参考源码的副本和哈希继续保留于前一 Debug 阶段。
