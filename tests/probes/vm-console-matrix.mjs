@@ -129,7 +129,7 @@ const nodeCount = binaryPhase
         ? 351
         : 346
 const browserCount = binaryPhase
-  ? 627
+  ? 639
   : compilerPhase
     ? 621
     : scriptsPhase
@@ -236,7 +236,7 @@ for (const browser of browsers)
     const count =
       suite === 'browser'
         ? binaryPhase
-          ? 168
+          ? 172
           : compilerPhase
             ? 166
             : scriptsPhase
@@ -557,6 +557,23 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(binaryPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34837825141',
+            reason: 'Menu typecheck rejected focus() on a generic Element selector. The selector now explicitly returns HTMLButtonElement; no tests ran in this failed build.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34838160395',
+            reason: 'The new held-pointer menu fixture submitted multiple statements to the expression console, so its acknowledgement never ran. The fixture now uses a comma expression. Native build, 384 Node cases and six direct runtimes passed; failed or superseded browser jobs remain archived.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34837150688',
+            reason: 'The WebKit original-overlay diagnostic reproduced 15 failures in 40 cases: seeked/currentTime acknowledged 0.5 while pixels and presentation metadata remained at the initial frame. A first-frame barrier comparison passed all 40 initial pixel assertions but failed one later segment-loop case (39/40 overall); hidden-layer comparison also exposed transparent loadeddata readback. Open now awaits the first native frame and media-clock events supplement presentation for crossed periods and segment boundaries. These diagnostics remain failures and are not full-suite passes.',
+            comparisons: ['34838225383', '34838394481'],
+          },
+        ]
+      : []),
     ...(binaryPhase
       ? [
           {

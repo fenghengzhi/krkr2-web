@@ -28,7 +28,7 @@ open.onClick=function(){tools.popup(0,40,40);Debug.message("popup closed");};
       .setInputFiles({ name: 'startup.tjs', mimeType: 'text/plain', buffer: Buffer.from(script) })
     await expect(page.locator('#logs')).toContainText('KAG=AB')
     await expect(page.locator('#evaluate')).toBeEnabled()
-    await page.locator('#expression').fill('item.checked=true;Debug.message("menu-update-ready");')
+    await page.locator('#expression').fill('item.checked=true,Debug.message("menu-update-ready")')
     await page.getByText('Tools', { exact: true }).click()
     const countButton = page.getByRole('button', { name: 'Count', exact: false })
     const originalButton = await countButton.elementHandle()

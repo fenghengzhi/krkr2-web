@@ -242,45 +242,64 @@ export class WebVideoHost {
       movie.callback = undefined
       if (movie.disposed || this.isPaused || movie.seeking || movie.status !== 'play') return
       try {
-        const snapshot = this.snapshot(movie, metadata.mediaTime * 1000),
-          s = movie.settings
-        if (s.segmentLoopEndFrame > 0 && snapshot.frame >= s.segmentLoopEndFrame) {
-          void this.seek(
-            movie,
-            videoFrameTime(movie.timeline, Math.max(0, s.segmentLoopStartFrame)),
-          ).then(
-            () => {
-              this.emit({
-                type: 'period',
-                id: movie.id,
-                epoch: movie.epoch,
-                snapshot: this.snapshot(movie),
-                reason: 3,
-              })
-              this.play(movie)
-            },
-            (error) => this.fail(error),
-          )
-          return
-        }
+        if (this.advanceClock(movie)) return
+        const s = movie.settings
         if (movie.inFlight === undefined && (s.mode === 1 || s.mode === 2))
           this.emit(this.frame(movie, metadata.mediaTime * 1000), true, movie)
-        if (movie.periodArmed && s.periodEventFrame >= 0 && snapshot.frame >= s.periodEventFrame) {
-          s.periodEventFrame = -1
-          movie.periodArmed = false
-          this.emit({
-            type: 'period',
-            id: movie.id,
-            epoch: movie.epoch,
-            snapshot: this.snapshot(movie),
-            reason: 1,
-          })
-        }
       } catch (error) {
         this.fail(error)
       }
       this.arm(movie)
     })
+  }
+  private advanceClock(movie: Movie): boolean {
+    if (movie.disposed || this.isPaused || movie.seeking || movie.status !== 'play') return true
+    const s = movie.settings,
+      time = movie.element.currentTime * 1000
+    // Presentation callbacks can skip or lag behind the audio/media clock.
+    // Crossed events still occur, before wrapping a segment past their frame.
+    if (
+      movie.periodArmed &&
+      s.periodEventFrame >= 0 &&
+      this.snapshot(movie, time).frame >= s.periodEventFrame
+    ) {
+      s.periodEventFrame = -1
+      movie.periodArmed = false
+      this.emit({
+        type: 'period',
+        id: movie.id,
+        epoch: movie.epoch,
+        snapshot: this.snapshot(movie),
+        reason: 1,
+      })
+    }
+    if (s.segmentLoopEndFrame > 0 && movie.timeline) {
+      const end =
+        s.segmentLoopEndFrame === movie.timeline.times.length
+          ? movie.timeline.duration
+          : videoFrameTime(movie.timeline, s.segmentLoopEndFrame)
+      if (time >= end) {
+        void this.seek(
+          movie,
+          videoFrameTime(movie.timeline, Math.max(0, s.segmentLoopStartFrame)),
+        ).then(
+          () => {
+            if (movie.disposed) return
+            this.emit({
+              type: 'period',
+              id: movie.id,
+              epoch: movie.epoch,
+              snapshot: this.snapshot(movie),
+              reason: 3,
+            })
+            this.play(movie)
+          },
+          (error) => this.fail(error),
+        )
+        return true
+      }
+    }
+    return false
   }
   private fail(error: unknown): void {
     this.emit({ type: 'error', message: error instanceof Error ? error.message : String(error) })
@@ -368,6 +387,47 @@ export class WebVideoHost {
       this.arm(movie)
     }
   }
+  private loadFirstFrame(movie: Movie, load: () => Promise<void>): Promise<void> {
+    // loadeddata may precede the first decoded/presented image. In particular,
+    // an immediate paused seek can otherwise be overwritten by that initial
+    // image, and layer readback can copy transparent pixels instead of a frame.
+    return new Promise((resolve, reject) => {
+      let loaded = false,
+        presented = false,
+        settled = false
+      let callback: number | undefined
+      let cancelTimeout = () => {}
+      const done = (error?: unknown) => {
+        if (settled) return
+        settled = true
+        cancelTimeout()
+        if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback)
+        movie.abort.signal.removeEventListener('abort', cancel)
+        error ? reject(error) : resolve()
+      }
+      const complete = () => {
+        if (loaded && presented) done()
+      }
+      const cancel = () => done(new Error('Video operation cancelled'))
+      movie.abort.signal.addEventListener('abort', cancel, { once: true })
+      if (movie.abort.signal.aborted) return cancel()
+      cancelTimeout = this.timeouts.start(15000, () =>
+        done(new Error('Video first frame timed out')),
+      )
+      try {
+        callback = movie.element.requestVideoFrameCallback(() => {
+          presented = true
+          complete()
+        })
+        void load().then(() => {
+          loaded = true
+          complete()
+        }, done)
+      } catch (error) {
+        done(error)
+      }
+    })
+  }
   private settings(movie: Movie, settings: VideoSettings): void {
     if (settings.periodEventFrame >= 0 && !movie.timeline?.times.length)
       throw new Error('This video container has no supported frame index')
@@ -446,8 +506,16 @@ export class WebVideoHost {
     this.movies.set(movie.id, movie)
     this.plane.insertBefore(container, this.activation)
     this.layout()
+    element.ontimeupdate = () => {
+      try {
+        this.advanceClock(movie)
+      } catch (error) {
+        this.fail(error)
+      }
+    }
     element.onended = () => {
-      if (movie.disposed || movie.status !== 'play') return
+      if (movie.disposed || movie.status !== 'play' || !element.ended) return
+      if (this.advanceClock(movie)) return
       if (movie.settings.loop)
         void this.seek(movie, 0).then(
           () => {
@@ -474,14 +542,16 @@ export class WebVideoHost {
       }
     }
     try {
-      await this.wait(
-        movie,
-        'loadeddata',
-        () => element.readyState >= 2,
-        () => {
-          element.src = url
-          element.load()
-        },
+      await this.loadFirstFrame(movie, () =>
+        this.wait(
+          movie,
+          'loadeddata',
+          () => element.readyState >= 2,
+          () => {
+            element.src = url
+            element.load()
+          },
+        ),
       )
       if (
         !element.videoWidth ||
