@@ -14,6 +14,8 @@ export class PortVideoBackend implements VideoBackend {
   }
   private next = 1
   private closed = false
+  private closing?: Promise<void>
+  private readonly openings = new Map<number, object>()
   private pending = new Map<
     number,
     {
@@ -23,7 +25,10 @@ export class PortVideoBackend implements VideoBackend {
     }
   >()
   private listeners = new Set<(event: VideoEvent) => void | Promise<void>>()
-  constructor(private readonly port: MessagePort) {
+  constructor(
+    private readonly port: MessagePort,
+    private readonly readTimeline: typeof readVideoTimeline = readVideoTimeline,
+  ) {
     port.onmessage = (event: MessageEvent<VideoMessage>) => {
       const message = event.data
       if (message.type === 'reply') {
@@ -34,6 +39,7 @@ export class PortVideoBackend implements VideoBackend {
         if (message.error) pending.reject(new Error(message.error))
         else pending.resolve(message.result ?? { events: [] })
       } else if (message.type === 'event') {
+        if (this.closed) return
         void Promise.all([...this.listeners].map((listener) => listener(message.event)))
           .catch(() => {})
           .finally(() => {
@@ -44,14 +50,31 @@ export class PortVideoBackend implements VideoBackend {
     }
   }
   async command(command: VideoCommand): Promise<VideoResult> {
+    if (command.op === 'shutdown') {
+      await this.close()
+      return { events: [] }
+    }
     if (this.closed) throw new Error('Video backend is closed')
-    if (command.op === 'open')
-      command = {
-        ...command,
-        bytes: Uint8Array.from(command.bytes),
-        timeline: await readVideoTimeline(command.bytes),
+    if (command.op === 'close') this.openings.delete(command.id)
+    if (command.op === 'cancel') this.openings.clear()
+    if (command.op === 'open') {
+      const { id } = command,
+        ticket = {},
+        bytes = Uint8Array.from(command.bytes)
+      this.openings.set(id, ticket)
+      try {
+        const timeline = await this.readTimeline(bytes)
+        if (this.closed) throw new Error('Video backend closed while reading metadata')
+        if (this.openings.get(id) !== ticket)
+          throw new Error('Video open was closed or superseded while reading metadata')
+        return await this.send({ ...command, bytes, timeline })
+      } finally {
+        if (this.openings.get(id) === ticket) this.openings.delete(id)
       }
-    if (this.closed) throw new Error('Video backend closed while reading metadata')
+    }
+    return this.send(command)
+  }
+  private send(command: VideoCommand): Promise<VideoResult> {
     const serial = this.next++
     return new Promise((resolve, reject) => {
       const cancelTimeout = this.timeouts.start(20000, () => {
@@ -78,19 +101,23 @@ export class PortVideoBackend implements VideoBackend {
     }
   }
   async close(): Promise<void> {
-    if (this.closed) return
+    if (this.closing) return this.closing
+    this.closed = true
+    this.openings.clear()
     this.timeouts.setPaused(false)
-    try {
-      await this.command({ op: 'shutdown' })
-    } finally {
-      this.closed = true
-      this.port.close()
-      for (const pending of this.pending.values()) {
-        pending.cancelTimeout()
-        pending.reject(new Error('Video backend closed'))
+    this.closing = (async () => {
+      try {
+        await this.send({ op: 'shutdown' })
+      } finally {
+        this.port.close()
+        for (const pending of this.pending.values()) {
+          pending.cancelTimeout()
+          pending.reject(new Error('Video backend closed'))
+        }
+        this.pending.clear()
+        this.listeners.clear()
       }
-      this.pending.clear()
-      this.listeners.clear()
-    }
+    })()
+    return this.closing
   }
 }
