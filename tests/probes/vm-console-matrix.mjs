@@ -74,7 +74,12 @@ async function run(key, workflow, jobCount, downloadArgs) {
   })
   return { id, root, info }
 }
-const base = await run('KRKR_BUILD_RUN', 'Tests', 14, ['--pattern', '*-results*'])
+const base = await run('KRKR_BUILD_RUN', 'Tests', 14, [
+  '--pattern',
+  '*-results*',
+  '--pattern',
+  'build-logs',
+])
 unchanged(base.info.headSha, regularTestPaths)
 const compatibility = await run('KRKR_COMPATIBILITY_RUN', 'KAG and release compatibility', 3, [
   '--pattern',
@@ -120,6 +125,18 @@ assert([3, 4, 5].includes(wasm.abi))
 const lifetimePhase = wasm.capabilities?.bytecodeLifecycle === 1
 const executionPhase = wasm.capabilities?.executionBudgets === 1
 if (executionPhase) assert(lifetimePhase)
+const fontPortDownloads =
+  executionPhase && !buildInfo.kernels.cacheHit
+    ? await json(base.root + '/artifacts/build-logs/font-ports.json')
+    : []
+if (fontPortDownloads.length) {
+  assert.deepEqual(fontPortDownloads.map((item) => item.name).sort(), ['freetype', 'zlib'])
+  for (const item of fontPortDownloads) {
+    assert.match(item.url, /^https:\/\/codeload\.github\.com\//)
+    assert.match(item.sha512, /^[a-f0-9]{128}$/)
+    assert(item.bytes > 0)
+  }
+}
 if (lifetimePhase) assert.equal(wasm.diagnosticAllocator, false)
 const binaryPhase = wasm.capabilities?.binaryScripts === 1
 const compilerPhase = wasm.capabilities?.cooperativeCompilation === 1
@@ -730,6 +747,7 @@ const matrix = {
   build,
   wasm,
   font,
+  fontPortDownloads,
   sessionProtocol: 9,
   passed: {
     node: nodeCount,
@@ -865,7 +883,7 @@ const matrix = {
           {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34846307441',
             reason:
-              'First lifecycle run failed three of 391 Node cases and the direct runtime. It exposed rejection of a superclass RET/NOP sentinel and instance-member self-reference retention. Sentinel validation was repaired; instances in explicit lifecycle tests are invalidated after checking their methods. Automatic cyclic instance reclamation remains incomplete. Preserve the original complete run and individual outcomes.',
+              'First lifecycle run failed three of 391 Node cases and the direct runtime. It exposed rejection of a superclass RET/NOP sentinel and retained instance method contexts. Sentinel validation was repaired; instances in those lifecycle tests are explicitly invalidated. The initial self-reference explanation was a hypothesis: decision 037 records existing self-closure reference adjustment and fixes stale expression registers, with separate automatic-finalization cases. Arbitrary object cycles remain incomplete. Preserve the original complete run and individual outcomes.',
           },
           {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34846470235',
