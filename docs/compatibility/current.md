@@ -1,5 +1,9 @@
 # 当前实现范围
 
+最新 [对象终结完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866740979) 通过 **466 项 Node、639 项浏览器及 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867143808) 另通过 **78 项**。对象终结专项包含三浏览器双后端 360 个场景组合、48 条暂停/取消路径，以及 [120 个隔离进程用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867147315)。[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866791836) 通过 20 次清理、1,063 次执行和 188 次字节码分配失败。TJS ABI 5 新增 `objectFinalization: 1`，字体 ABI 2、协议 9 不变。实现和原始失败见 [对象终结](../decisions/038-object-finalization.md)。
+
+宿主对象隐式资源回收、完整图形/系统 API、流式媒体与其他未完成能力继续保留在目标内。原引擎引用计数不自动收集任意引用环，本轮验证按原语义显式断环。以下为此前阶段记录；当前范围以上述对象终结阶段及其决策为准。
+
 最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086)通过 **398 项 Node、639 项浏览器测试及 6 项直接运行时专项**，另有 [78 项兼容性检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783)通过。执行专项覆盖 **132 个预算边界、24 个自动终结场景、24 条暂停/取消路径**；[双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858195933)通过 **1,063 次执行分配失败和 188 次字节码分配失败**。历史 WebKit JSPI 页面崩溃与 KAG 成员名称异常仍无确定根因。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。
 
 [执行资源最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34860651997)已绑定当前应用、构建和 519 份证据。矩阵 `out/verification/execution-budgets-matrix.json` 的 SHA-256 为 `2079d47f87fd1f035b7eb7626249a183fbef66a2b0723f93ebe458e80a78c109`；当前本地生成目录来自这份已验证云端构建。

@@ -116,7 +116,7 @@ docs/             架构、已验证决策与兼容范围
 
 ## 验证
 
-测试统一由 [GitHub Actions](.github/workflows/test.yml) 执行，不在本机运行测试。[最近完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086)通过 398 项 Node、639 项浏览器测试及 6 项直接运行时专项；另有 [78 项 KAG/旧 ABI 兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783)通过。[双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858195933)通过 1,063 次执行分配失败和 188 次字节码分配失败；历史 WebKit 页面崩溃仍保留为未定位问题。推送代码、更新 PR 或手动触发 Tests 工作流后，云端构建两种 TJS WASM 和字体内核，并运行 Node、三浏览器、游戏库、PWA、原生生命周期及直接运行时探测。
+测试统一由 [GitHub Actions](.github/workflows/test.yml) 执行，不在本机运行测试。[最近完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866740979)通过 466 项 Node、639 项浏览器测试及 6 项直接运行时专项；另有 [78 项 KAG/旧 ABI 兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867143808)通过。[双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866791836)通过 1,063 次执行、188 次字节码及 20 次对象清理分配失败；历史 WebKit 页面崩溃仍保留为未定位问题。推送代码、更新 PR 或手动触发 Tests 工作流后，云端构建两种 TJS WASM 和字体内核，并运行 Node、三浏览器、游戏库、PWA、原生生命周期及直接运行时探测。
 
 所有测试使用同次工作流生成的产物；日志、JSON 报告、失败截图与 trace 可从 Actions 下载。操作方式、原 KAG/旧 ABI 专项与历史记录见 [测试说明](docs/testing.md)。
 

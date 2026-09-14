@@ -6,6 +6,10 @@
 
 ## 已完成的云端回归
 
+最新 [对象终结完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866740979) 通过 **466 项 Node、639 项浏览器及 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867143808) 另通过 **78 项**。对象终结专项包含三浏览器双后端 360 个场景组合、48 条暂停/取消路径，以及 [120 个隔离进程用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867147315)。[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866791836) 通过 20 次清理、1,063 次执行和 188 次字节码分配失败。TJS ABI 5 新增 `objectFinalization: 1`，字体 ABI 2、协议 9 不变。实现和原始失败见 [对象终结](decisions/038-object-finalization.md)。
+
+本轮历史失败 `34861822171`、`34863624702`、`34864904432`、`34865379657` 按 run ID 保存，编译失败与夹具错误不计为通过。完整回归含 516 常规、57 游戏库、59 PWA、7 原生生命周期；没有把历史额外冻结/冷重启计入本阶段。完整非插件兼容性仍未完成。
+
 执行资源阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086) 通过 **398 项 Node、639 项浏览器**（516 常规、57 游戏库、59 PWA、7 原生生命周期）和 **6 项直接运行时**；[兼容专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783) 通过 **78 项**。[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858195933) 通过新增 **1,063 次执行分配失败**与原有 **188 次字节码分配失败**。直接运行时覆盖 132 个预算边界、24 个自动终结场景、12 条深层调用控制和 12 条参数复制控制；原字节码/编译/二进制与页面控制仍保留。范围、失败历史及构建下载修复见 [执行资源预算](decisions/037-execution-budgets.md)。所有所选案例无失败、跳过、flaky 或重试；历史额外冷重启诊断未计入本阶段。
 
 [执行资源最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34860651997)已通过，绑定 519 份证据；矩阵 `out/verification/execution-budgets-matrix.json` 的 SHA-256 为 `2079d47f87fd1f035b7eb7626249a183fbef66a2b0723f93ebe458e80a78c109`。可信冻结 21,052.5 ms；报告还保存字体依赖下载及校验记录。`.generated` 和 `dist` 已从对应 Tests 的精确产物恢复，旧本地产物保存在 `out/verification/execution-budgets/prior-local-artifacts/`，没有本地执行验证。
