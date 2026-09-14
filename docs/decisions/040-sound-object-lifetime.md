@@ -1,10 +1,30 @@
 # 040 — 声音对象生命周期：实现进行中
 
-本文件保留原始审计和实现方案。独立工作目录已接入声音弱观察、事件持有、异步关闭队列、flags 原生失效、labels 的延后失效队列以及后端迟到解码隔离，已完成首轮构建，验证仍在进行。不能把当前改动、现有音频测试或 [039 的通用宿主观察机制](039-host-object-lifetime.md) 视为声音生命周期阶段已经完成。后续所有构建、测试和可执行探测仍只在 GitHub-hosted Actions 运行。
+独立工作目录已接入声音弱观察、事件持有、异步关闭队列、flags 原生失效、labels 的延后失效队列以及后端迟到解码隔离，验证仍在进行。本文件也保留实现前的审计依据。不能把当前改动、现有音频测试或 [039 的通用宿主观察机制](039-host-object-lifetime.md) 视为声音生命周期阶段已经完成。所有构建、测试和可执行探测只在 GitHub-hosted Actions 运行。
+
+## 当前实现
+
+`SoundService` 只弱观察声音实例，实际进入后台队列的 label、ended、fade 事件各自取得独立句柄，在投递、失败或取消后释放。投递时解析对应的成员，支持排队后替换事件方法。基础 finalize 为空；显式失效的脚本终结器失败时保留资源并允许重试，直接调用 finalize 不关闭资源。实际失效同步撤销源和排队事件，再通过微任务等待正在进行的音频操作并关闭后端资源。Session 执行边界、idle 和 stop 都等待关闭；关闭失败不覆盖已有脚本主异常。
+
+原生桥新增弱 owner 代理和从属对象登记。外部 flags 不保活声音，声音失效后代理拒绝访问；未打开媒体的 flags 写入忽略、读取为零。labels 缓存 Dictionary 在 reopen 时失效，并通过原生登记随 owner 失效；通知只排入待处理队列，后续可挂起的执行边界才运行 Dictionary 终结。先移除登记再执行脚本，避免终结重入；VM 退出则停止脚本终结并释放登记。外部 filters Array 继续有效，插件滤镜执行仍在当前范围之外。
+
+WebAudioHost、PortAudioBackend 和 HeadlessAudioBackend 使用每次创建操作的独立标记，取消与迟到解码不能重新加载已关闭的声音。Headless 的时钟仅在播放、淡出或实时 MIDI 音符仍需推进时运行，空闲时解除任务；新任务能重新启动。AudioWorklet 与 AudioContext 仍归 Session 所有，不能把最后一个声音关闭解释为整个音频设备关闭。
+
+当前新增 82 个真实声音 Session 用例、6 个后端用例、12 个三浏览器音频竞态用例和 28 个从属对象用例。直接运行时入口另接入三浏览器 × 两种 WASM 后端的 168 个从属对象场景，以及源码/编译存储两种加载方式的 60 个真实声音场景。新增场景的最终整体验证尚待报告绑定，不能由用例数量推断通过。
+
+## 托管验证进度
 
 首轮 [Tests 34885096935](https://github.com/fenghengzhi/krkr2-web/actions/runs/34885096935) 绑定 `66bfa5adacba647a198b63e348b40b7317292675`：构建和类型检查通过，651 项浏览器、6 项直接运行时通过，Node 为 679/682，完整运行仍记为失败。82 个新增声音 Session 用例通过；三个失败来自夹具：10 ms 淡出按现有语义同步完成，不应期待后续时钟任务；两个停止 Trigger 的旧预期尚未包含新增的声音/关联对象零值计数。已分别改为检查同步短淡出与实际异步淡出，并保留所有资源字段必须归零的精确断言。原始完整材料与元数据保存在 `out/verification/github-actions/34885096935/`。
 
 同一源码的 [双后端分配诊断 34885263390](https://github.com/fenghengzhi/krkr2-web/actions/runs/34885263390) 已通过原有字节码、执行、集合和弱观察故障检查，归档同样按 run ID 保留；它尚未证明新增关联对象注册和失效队列的全部分配边界。需要进一步专项验证后才能完成本阶段报告。
+
+后续 [分配诊断 34893165714](https://github.com/fenghengzhi/krkr2-web/actions/runs/34893165714) 绑定 `c07f1e532fb97dc0db0270c06fdfe968021ad007`，新增从属对象诊断在两种后端均通过。共 16 组、56 个样本包含各组无故障对照、逐点实际失败与最终无命中样本；24 个实际失败点为注册 16 个、延后 Dictionary 失效 8 个。注册失败不残留登记，恢复后重试成功；延后失效失败返回 `std::bad_alloc`，句柄、登记和待失效数归零，销毁后原生分配账本与对照一致。原始分配大小、栈、边界计数及元数据保存在对应 run 归档。
+
+[独立宿主句柄诊断 34894031736](https://github.com/fenghengzhi/krkr2-web/actions/runs/34894031736) 与 [独立对象诊断 34894027615](https://github.com/fenghengzhi/krkr2-web/actions/runs/34894027615) 也已通过。最终报告将核对这些运行与最终应用源码、各自测试源码和产物的一致性。
+
+## 实现前审计与设计依据
+
+以下“当前”和“计划”指实现前审计时的状态，保留原始依据与设计边界；当前代码状态以本文件上半部分为准。
 
 当前 `src/engine/media/sounds.ts` 在创建时强持有绑定实例的 dispatch，`src/engine/tvp/sound.ts` 依赖脚本 finalize 调用 Sound.destroy。这会阻止隐式析构，也会遗漏不调用 super 的子类清理；直接调用 finalize 又过早关闭资源。原始 [SoundBufferBaseIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/SoundBufferBaseIntf.cpp) 将非持有 Owner 与强持有 ActionOwner 分开，native Invalidate 禁止事件、取消队列并释放 ActionOwner。[WaveIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/WaveIntf.cpp) 和 [MIDIIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/MIDIIntf.cpp) 都注册空的基础 finalize。实际停止播放及释放解码、线程或 MIDI 资源位于 [WaveImpl.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/win32/WaveImpl.cpp) 与 [MIDIImpl.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/win32/MIDIImpl.cpp) 的 native Invalidate 链。
 
