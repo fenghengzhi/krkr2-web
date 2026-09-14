@@ -1701,6 +1701,11 @@ const matrix = {
             reason:
               'The first sound ownership run passed 679/682 Node cases, all 651 browser checks and all six direct runtimes. All 82 real Session sound lifecycle cases passed. Three fixture failures were corrected: the short-fade clock assertion now accounts for native-style immediate completion below 60 ms before separately exercising a 120 ms fade; two stopped-session expectations include the four new zero ownership counters. Original failed artifacts and metadata remain archived. This failed run is not counted as passing verification.',
           },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34894629812',
+            reason:
+              'Node passed 710/710 and all 651 browser tests passed, but only four of six direct runtime combinations passed. Chromium/JSPI and Firefox/JSPI completed the existing argument workload without entering its qualifying phase-10 suspension hook. The failure did not record physical copy duration. The fixture now advances its own temporary deadline clock until the real native argument buffer is observed, retaining the real 25 ms pause, cancellation, context and heap cleanup assertions and restoring the original clock in finally. This verifies controlled suspension without claiming a physical worst-case latency. The complete failed run and the earlier standalone passing run remain archived; no retry is counted as a pass.',
+          },
         ]
       : []),
     ...(hostPhase

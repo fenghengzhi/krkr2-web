@@ -26,7 +26,7 @@ WebAudioHost、PortAudioBackend 和 HeadlessAudioBackend 使用每次创建操�
 
 当前提交的后续完整回归 [34894629812](https://github.com/fenghengzhi/krkr2-web/actions/runs/34894629812) 中，直接运行时有两项失败：Chromium/JSPI 与 Firefox/JSPI 的既有参数准备暂停夹具报 `No materialized argument checkpoint: undefined`，其余四个组合通过。夹具执行正常返回，但未进入同时持有超过 8 MiB 临时参数缓冲的 phase-10 挂起回调。原始日志并未记录物理复制时长，不能据此声称测得了具体耗时；源码中的 deadline 门控允许较快操作完成而不挂起，这不适合作为暂停测试的前提。
 
-该参数夹具现仅在自身执行期间临时推进 `performance.now`，在真正观察到 phase-10 的原生临时内存与堆增长后停止推进，并在 finally 恢复原始属性。Emscripten 产物确实从此时钟读取 deadline。真实 25 ms 暂停等待、恢复/取消结果、上下文与堆回收断言保留，报告额外记录时钟模式与读取次数。产品代码和 8 ms 时间片没有改变；这项可控检查不构成物理最坏延迟证明。新夹具的托管验证正在进行，原始失败和通过的早期材料均保留。
+该参数夹具现仅在自身执行期间临时推进 `performance.now`，在真正观察到 phase-10 的原生临时内存与堆增长后停止推进，并在 finally 恢复原始属性。Emscripten 产物确实从此时钟读取 deadline。真实 25 ms 暂停等待、恢复/取消结果、上下文与堆回收断言保留，报告额外记录时钟模式与读取次数。产品代码和 8 ms 时间片没有改变；这项可控检查不构成物理最坏延迟证明。修正后的 [运行时专项 34895391871](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895391871) 六组通过；同一测试源码的 [分配诊断 34895417115](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895417115)、[对象诊断 34895421775](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895421775) 与 [句柄诊断 34895425697](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895425697) 也通过，完整回归和最终报告尚待完成。原始 34894629812 最终为 Node 710/710、浏览器 651/651、直接运行时 4/6，整个运行保留为失败。
 
 ## 实现前审计与设计依据
 
