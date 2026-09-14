@@ -130,6 +130,7 @@ public:
 
 void loadBinary(Vm* vm, const tjs_uint8* bytes, std::size_t length,
     tTJSVariant* result, iTJSDispatch2* context, const tjs_char* name) {
+    if(length > 64u * 1024 * 1024) TJS_eTJSError(TJSReadError);
     if(length >= tTJSBinarySerializer::HEADER_LENGTH && tTJSBinarySerializer::IsBinary(bytes)) {
         tTJSBinarySerializer reader;
         std::unique_ptr<tTJSVariant> value(reader.Read(bytes + 8, length - 8));

@@ -281,6 +281,12 @@ export class TjsWasmRuntime implements ScriptRuntime {
   }
   private buildReply(reply: HostReply): number {
     if (reply.kind === 'dump') return this.call('krkr_reply_new', 8)
+    if (
+      reply.kind === 'script' &&
+      typeof reply.source !== 'string' &&
+      reply.source.length > 64 * 1024 * 1024
+    )
+      throw new ScriptError('Binary script exceeds 64 MiB budget', reply.name)
     const kind =
       reply.kind === 'value'
         ? 0
@@ -426,6 +432,8 @@ export class TjsWasmRuntime implements ScriptRuntime {
     this.assertAlive()
     if (typeof source === 'string' && source.includes('\0'))
       throw new Error('Script source contains NUL')
+    if (typeof source !== 'string' && source.length > 64 * 1024 * 1024)
+      throw new ScriptError('Binary script exceeds 64 MiB budget', name)
     const input = typeof source === 'string' ? this.textPointer(source) : this.allocate(source)
     const label = this.textPointer(name)
     try {

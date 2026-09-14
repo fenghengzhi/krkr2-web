@@ -32,6 +32,18 @@ const runtime = () =>
     { wasmBinary },
   )
 
+test('oversized binary input is rejected before allocating native memory', async () => {
+  const vm = await runtime()
+  try {
+    const before = vm.inspect().memoryBytes
+    await assert.rejects(vm.execute(new Uint8Array(64 * 1024 * 1024 + 1)), /64 MiB budget/)
+    assert.equal(vm.inspect().memoryBytes, before)
+    assert.equal(await vm.execute('6*7', '', true), 42n)
+  } finally {
+    vm.dispose()
+  }
+})
+
 for (const cancel of [false, true])
   test(`native binary deserialization pauses and ${cancel ? 'cancels' : 'resumes'} without host I/O`, async (t) => {
     t.diagnostic(
@@ -39,11 +51,14 @@ for (const cancel of [false, true])
     )
   })
 
-test('compiled string constants preserve embedded NUL and lone UTF-16 surrogates', async () => {
+test('compiled strings follow native NUL termination and preserve lone UTF-16 surrogates', async () => {
   const vm = await runtime()
   try {
-    for (const source of ['"a\\x0000b"', '"\\xd800"']) {
-      const expected = await vm.execute(source, '', true)
+    for (const [source, expected] of [
+      ['"a\\x0000b"', 'a'],
+      ['"\\xd800"', '\ud800'],
+    ] as const) {
+      assert.equal(await vm.execute(source, '', true), expected)
       const code = await vm.compile(source, 'unicode-bytecode.tjs', true)
       assert.equal(await vm.execute(code), expected)
     }
@@ -93,13 +108,14 @@ test('serialized scalars preserve signed integers, booleans, floats, octets and 
       (1n << 63n) - 1n,
       1.25,
       Infinity,
-      '日😀\0x',
+      '日😀',
       '\ud800',
       '',
       new Uint8Array(),
       new Uint8Array([0, 255]),
     ])
       assert.deepEqual(await vm.execute(binaryValue(value)), value)
+    assert.equal(await vm.execute(binaryValue('日😀\0x')), '日😀')
     const tagged: [number[], ScriptValue][] = [
       [[0xc2], 1n],
       [[0xc3], 0n],
@@ -157,6 +173,7 @@ test('truncated and oversized binary values fail with recoverable script errors'
       [0xdd, 255, 255, 255, 255],
       [0xdf, 255, 255, 255, 255],
       [0x81, 1, 2],
+      [0x81, 0xa0, 2],
       [...new Array<number>(258).fill(0x91), 0],
     ])
       await assert.rejects(vm.execute(new Uint8Array([...binaryHeader, ...payload])), {
@@ -271,7 +288,7 @@ test('bytecode context references and control-flow destinations must point to va
   const vm = await runtime()
   try {
     const source =
-      'class Box {function value(){return 7;} property p {getter(){return 9;}}} var box=new Box; var result=box.value()+box.p; if(result>0)result+=26;'
+      'class Box {function value(){return 7;} property p {getter(){return 9;}}} var box=new Box(); var result=box.value()+box.p; if(result>0)result+=26;'
     const original = await vm.compile(source, 'objects.tjs'),
       layout = bytecodeOffsets(original)
     for (const object of layout.objects.slice(1)) {

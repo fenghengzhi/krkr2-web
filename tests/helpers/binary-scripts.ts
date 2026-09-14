@@ -80,13 +80,13 @@ export function binaryValue(value: BinaryFixture): Uint8Array {
 export const binaryScriptsFixture = () => ({
   'startup.tjs': `
 var binary=Scripts.evalStorage("independent.bin");
-if(!(binary instanceof Dictionary) || !(binary.items instanceof Array))throw "binary-native-types";
-if(binary.large!=9007199254740993 || binary.negative!=-32 || binary[""]!="empty")throw "binary-values";
+if(!(binary instanceof "Dictionary") || !(binary.items instanceof "Array"))throw "binary-native-types";
+if(binary.large!=9007199254740993 || binary.negative!=-32 || binary.empty!="")throw "binary-values";
 if(binary.items[0]!==void || binary.items[1]!==null || binary.items[2]!=1.25)throw "binary-elements";
 if(binary.text!="日😀" || binary.bytes[2]!=255)throw "binary-text-or-octet";
 (Dictionary.saveStruct incontextof binary)("savedata/roundtrip.bin","b");
 var roundtrip=Scripts.execStorage("savedata/roundtrip.bin");
-if(roundtrip.large!=binary.large || roundtrip[""]!="empty")throw "native-writer-roundtrip";
+if(roundtrip.large!=binary.large || roundtrip.empty!="")throw "native-writer-roundtrip";
 var offset=Scripts.evalStorage("prefixed.bin","o13");
 if(offset.negative!=-32)throw "prefixed-binary";
 var loaded=Dictionary.loadStruct("prefixed.bin","o13");
@@ -98,7 +98,7 @@ Debug.message("binary-scripts-ready");`,
     new Map([
       ['large', 9007199254740993n],
       ['negative', -32n],
-      ['', 'empty'],
+      ['empty', ''],
       ['text', '日😀'],
       ['items', [undefined, null, 1.25]],
       ['bytes', new Uint8Array([0, 127, 255])],

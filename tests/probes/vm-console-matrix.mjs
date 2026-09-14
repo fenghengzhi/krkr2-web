@@ -28,6 +28,7 @@ const applicationPaths = [
   'tsconfig*.json',
 ]
 const regularTestPaths = [
+  '.github/workflows/test.yml',
   'tests/conformance',
   'tests/integration',
   'tests/browser',
@@ -119,7 +120,7 @@ const scriptsPhase = wasm.abi === 5
 if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
 const nodeCount = binaryPhase
-  ? 383
+  ? 384
   : compilerPhase
     ? 371
     : scriptsPhase
@@ -556,6 +557,15 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(binaryPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34833337700',
+            reason:
+              'Native build passed. New fixture assumptions conflicted with native NUL-terminated strings, nonempty member names, class-name instanceof checks and constructor syntax. Expectations now follow inspected TJS source, with empty keys retained as rejection cases. The Node input test subprocess also ended early without useful spec-reporter detail; TAP output was added. Failed and superseded results remain archived.',
+          },
+        ]
+      : []),
     ...(binaryPhase
       ? [
           {

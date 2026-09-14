@@ -56,7 +56,8 @@ namespace TJS {
                 }
                 return;
             }
-            input.items(count, 2);
+            const auto* characters = input.items(count, 2);
+            if(key && (!count || (!characters[0] && !characters[1]))) input.fail();
         }
         struct ReleaseObject {
             void operator()(iTJSDispatch2* object) const { if(object) object->Release(); }
@@ -176,11 +177,9 @@ namespace TJS {
     void tTJSBinarySerializer::AddDictionary(tTJSDictionaryObject *dic,
                                              tTJSVariantString *name,
                                              tTJSVariant *value) {
-        if(value == nullptr)
+        if(name == nullptr || value == nullptr)
             TJS_eTJSError(TJSReadError);
-        // TJS represents the empty string with a null string object.
-        if(name) dic->PropSetByVS(TJS_MEMBERENSURE, name, value, dic);
-        else dic->PropSet(TJS_MEMBERENSURE, TJS_W(""), nullptr, value, dic);
+        dic->PropSetByVS(TJS_MEMBERENSURE, name, value, dic);
     }
 
     void tTJSBinarySerializer::InsertArray(tTJSArrayObject *array,

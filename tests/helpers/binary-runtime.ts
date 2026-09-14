@@ -45,7 +45,10 @@ export async function exerciseBinaryRuntime(
   let pending: Promise<void> | undefined
   try {
     check((await vm.execute(binaryValue(-32n))) === -32n, 'Negative fix integer changed')
-    check((await vm.execute(binaryValue('日😀\0x'))) === '日😀\0x', 'Binary UTF-16 changed')
+    check(
+      (await vm.execute(binaryValue('日😀\0x'))) === '日😀',
+      'Binary string did not follow native NUL termination',
+    )
     const compiled = await vm.compile('6*7', 'binary-validation.tjs', true)
     for (const invalid of [
       compiled.subarray(0, 8),
