@@ -95,6 +95,7 @@ unchanged(compatibility.info.headSha, [
   // Both exact versions are checked separately in this report.
   ':(exclude)tests/helpers/bytecode-lifetime.ts',
   ':(exclude)tests/helpers/execution-budget.ts',
+  ':(exclude)tests/helpers/object-lifetime.ts',
   'tests/probes/system-abi-pwa.ts',
   'tests/probes/system-kag-matrix.mjs',
   'tests/probes/kag-browser.ts',
@@ -124,6 +125,8 @@ const font = await json('dist/fonts/manifest.json')
 assert([3, 4, 5].includes(wasm.abi))
 const lifetimePhase = wasm.capabilities?.bytecodeLifecycle === 1
 const executionPhase = wasm.capabilities?.executionBudgets === 1
+const objectPhase = wasm.capabilities?.objectFinalization === 1
+if (objectPhase) assert(executionPhase)
 if (executionPhase) assert(lifetimePhase)
 const fontPortDownloads =
   executionPhase && !buildInfo.kernels.cacheHit
@@ -144,19 +147,21 @@ if (binaryPhase) assert(compilerPhase)
 const scriptsPhase = wasm.abi === 5
 if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
-const nodeCount = executionPhase
-  ? 398
-  : lifetimePhase
-    ? 392
-    : binaryPhase
-      ? 384
-      : compilerPhase
-        ? 371
-        : scriptsPhase
-          ? 362
-          : tracePhase
-            ? 351
-            : 346
+const nodeCount = objectPhase
+  ? 466
+  : executionPhase
+    ? 398
+    : lifetimePhase
+      ? 392
+      : binaryPhase
+        ? 384
+        : compilerPhase
+          ? 371
+          : scriptsPhase
+            ? 362
+            : tracePhase
+              ? 351
+              : 346
 const browserCount = binaryPhase
   ? 639
   : compilerPhase
@@ -390,6 +395,60 @@ function releasedExecution(state) {
   assert(state.peakDelegations <= state.delegationLimit)
   assert(state.peakBytes <= state.byteLimit)
 }
+const objectCases = [
+  'ordinary-scope',
+  'throwing-scope',
+  'primary-body',
+  'closure-pair',
+  'array-clear',
+  'dictionary-small',
+  'dictionary-large',
+  'primary-constructor',
+  'deep-array',
+  'deep-dictionary',
+  'deep-throwing-array',
+  'explicit-retry',
+  'caught-cleanup',
+  'resurrection',
+  'explicit-cycle',
+]
+function objectLifetimes(rows) {
+  combinations(
+    rows,
+    objectCases.flatMap((name) =>
+      [false, true].flatMap((debug) => [false, true].map((binary) => `${name}/${debug}/${binary}`)),
+    ),
+    (row) => `${row.name}/${row.debugMode}/${row.binary}`,
+  )
+  for (const row of rows) {
+    assert.equal(row.after.blocks, 0)
+    assert.equal(row.after.contexts, 0)
+    releasedExecution(row.budget)
+    assert.equal(row.destruction.pending, 0)
+    assert.equal(row.destruction.depth, 0)
+    assert(row.destruction.peakDepth <= 32)
+    assert.equal(row.destruction.objects, row.beforeObjects)
+    if (row.name.startsWith('deep-')) assert(row.destruction.queued > 0)
+    if (
+      [
+        'throwing-scope',
+        'closure-pair',
+        'array-clear',
+        'dictionary-small',
+        'dictionary-large',
+        'deep-throwing-array',
+        'primary-body',
+        'primary-constructor',
+      ].includes(row.name)
+    ) {
+      assert.equal(row.error.name, 'ScriptError')
+      assert(row.error.message.includes(row.name.startsWith('primary-') ? row.name : 'finalizer-A'))
+    } else {
+      assert.equal(row.error, null)
+      assert.equal(row.value, '42')
+    }
+  }
+}
 assert.deepEqual(runtime.manifest, wasm)
 if (lifetimePhase) assert.deepEqual(runtime.failures, [])
 combinations(
@@ -404,6 +463,28 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (objectPhase) {
+    objectLifetimes(row.objects.cases)
+    combinations(
+      row.objects.controls,
+      [false, true].flatMap((explicit) =>
+        [false, true].flatMap((binary) =>
+          [false, true].map((cancel) => `${explicit}/${binary}/${cancel}`),
+        ),
+      ),
+      (item) => `${item.explicit}/${item.binary}/${item.cancel}`,
+    )
+    for (const control of row.objects.controls) {
+      assert.equal(control.heldMs, 25)
+      if (!control.explicit) assert(control.heldDepth > 0)
+      assert.equal(control.nativeReplyKind, control.cancel ? 1 : 0)
+      assert.equal(control.error, control.cancel ? 'AbortError' : null)
+      assert.equal(control.after.contexts, control.before.contexts)
+      assert.equal(control.after.blocks, control.before.blocks)
+      assert.equal(control.objects, control.beforeObjects)
+      releasedExecution(control.budget)
+    }
+  }
   if (executionPhase) {
     const execution = row.executionBudgets
     combinations(execution.checks, ['false', 'true'], (item) => String(item.debugMode))
@@ -629,6 +710,7 @@ assert.equal(
 let allocations
 const allocatorReports = []
 const executionAllocatorReports = []
+const finalizationAllocatorReports = []
 if (lifetimePhase) {
   allocations = await run('KRKR_ALLOCATIONS_RUN', 'Bytecode allocation diagnostic', 2, [
     '--pattern',
@@ -641,6 +723,7 @@ if (lifetimePhase) {
     ...(executionPhase
       ? ['tests/helpers/execution-budget.ts', 'tests/probes/execution-allocation-faults.ts']
       : []),
+    ...(objectPhase ? ['tests/probes/finalization-allocation-faults.ts'] : []),
     '.github/workflows/bytecode-allocations.yml',
   ])
   for (const backend of backends) {
@@ -699,6 +782,70 @@ if (lifetimePhase) {
         }
       executionAllocatorReports.push(execution)
     }
+    if (objectPhase) {
+      const cleanup = await json(`${root}/out/ci/finalization-allocations-${backend}.json`)
+      assert.deepEqual(cleanup.manifest, manifest)
+      assert.equal(cleanup.variant, backend)
+      assert.equal(cleanup.manifest.capabilities.objectFinalization, 1)
+      assert.deepEqual(cleanup.failures, [])
+      for (const debugMode of [false, true])
+        for (const collection of ['array', 'dictionary'])
+          for (const implicit of [false, true]) {
+            const rows = cleanup.results.filter(
+              (item) =>
+                item.debugMode === debugMode &&
+                item.collection === collection &&
+                item.implicit === implicit,
+            )
+            assert(rows.length > 2)
+            rows.forEach((item, index) => {
+              assert.equal(item.after, index - 1)
+              assert.equal(item.hits, index === 0 || index === rows.length - 1 ? 0 : 1)
+              assert.deepEqual(item.disposed, rows[0].disposed)
+              assert.deepEqual(item.baseline, rows[0].disposed)
+              assert.equal(item.current.blocks, item.before.blocks)
+              assert.equal(item.current.contexts, item.before.contexts)
+              assert.equal(item.finalized, implicit || !item.hits ? 128 : 0)
+              assert.equal(item.objects, item.beforeObjects - (implicit || item.hits ? 0 : 128))
+              releasedExecution(item.budget)
+            })
+          }
+      finalizationAllocatorReports.push(cleanup)
+    }
+  }
+}
+const objects = objectPhase
+  ? await run('KRKR_OBJECTS_RUN', 'Object lifetime diagnostic', 2, [
+      '--pattern',
+      'object-lifetime-*',
+    ])
+  : undefined
+const objectReports = []
+if (objects) {
+  unchanged(objects.info.headSha, [
+    'tests/helpers/object-lifetime.ts',
+    'tests/helpers/execution-budget.ts',
+    'tests/helpers/bytecode-lifetime.ts',
+    'tests/probes/object-lifetime.ts',
+    'tests/probes/object-lifetime-case.ts',
+    '.github/workflows/object-lifetime.yml',
+  ])
+  for (const backend of backends) {
+    const report = await json(
+      `${objects.root}/artifacts/object-lifetime-${backend}/object-lifetime-${backend}.json`,
+    )
+    assert.equal(report.variant, backend)
+    assert.deepEqual(report.manifest, wasm)
+    for (const row of report.results) {
+      assert.equal(row.status, 0)
+      assert.equal(row.signal, null)
+      assert.equal(row.error, null)
+      assert.equal(row.outcome.result.name, row.name)
+      assert.equal(row.outcome.result.debugMode, row.debugMode)
+      assert.equal(row.outcome.result.binary, row.binary)
+    }
+    objectLifetimes(report.results.map((row) => row.outcome.result))
+    objectReports.push(report)
   }
 }
 const pwaDiagnostic = process.env.KRKR_PWA_RUN
@@ -736,6 +883,7 @@ const matrix = {
     base.info,
     compatibility.info,
     ...(allocations ? [allocations.info] : []),
+    ...(objects ? [objects.info] : []),
     ...(pwaDiagnostic ? [pwaDiagnostic.info] : []),
     ...(freeze ? [freeze.info] : []),
     ...(inputRun ? [inputRun.info] : []),
@@ -753,6 +901,20 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(objectPhase
+      ? {
+          objectLifetimes: 360,
+          finalizationControls: 48,
+          isolatedObjectLifetimes: objectReports.reduce(
+            (sum, report) => sum + report.results.length,
+            0,
+          ),
+          finalizationAllocatorFailures: finalizationAllocatorReports.reduce(
+            (sum, report) => sum + report.results.filter((item) => item.hits === 1).length,
+            0,
+          ),
+        }
+      : {}),
     ...(executionPhase
       ? {
           executionBudgets: 132,
@@ -802,6 +964,8 @@ const matrix = {
   runtime,
   allocatorReports,
   executionAllocatorReports,
+  finalizationAllocatorReports,
+  objectReports,
   offlineRestarts,
   external,
   fixtureManifest,
@@ -815,6 +979,9 @@ const matrix = {
   evidence,
   previousMatrices: {
     ...fixtureManifest.historicalMatrices,
+    ...(objectPhase
+      ? { 'execution-budgets': '2079d47f87fd1f035b7eb7626249a183fbef66a2b0723f93ebe458e80a78c109' }
+      : {}),
     ...(executionPhase
       ? { 'bytecode-lifetime': 'c3c5c665b1de52cc989edc0a3abad39001c0db1fc560baa49b1dfe63f798089b' }
       : {}),
@@ -829,6 +996,30 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(objectPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34861822171',
+            reason:
+              'Initial isolated object diagnostics passed only 4/32 cases per backend. Finalizer errors retained contexts, interrupted closure and array cleanup, or replaced constructor errors. Dictionary fixtures also used a nonexistent instance method and were corrected separately.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34863624702',
+            reason:
+              'The first cleanup implementation failed compilation because GetValue was defined later in the file. No tests ran; the complete build failure remains archived.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34864904432',
+            reason:
+              'Node passed 462/466 and all 639 browser tests passed. Four caught-cleanup cases and all direct runtime combinations failed because the fixture retained a constructor temporary beyond its try block. The fixture now establishes sole ownership in a separate setup execution; the failed run remains archived.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34865379657',
+            reason:
+              'The same caught-cleanup fixture failed all four debug/bytecode combinations per backend; each backend passed 56/60 isolated cases. Individual subprocess failures remain archived.',
+          },
+        ]
+      : []),
     ...(executionPhase
       ? [
           {
@@ -1080,11 +1271,13 @@ const matrix = {
           'Automatic legacy text detection and decoder latching, full bytecode validation and complete storage paths remain incomplete',
           ...(binaryPhase
             ? [
-                executionPhase
-                  ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
-                  : lifetimePhase
-                    ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
-                    : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
+                objectPhase
+                  ? 'Reference-counted cleanup, explicit cycle breaking and selected finalizer failures are covered; host object ownership and remaining VM semantics still require implementation. Arbitrary cycle collection is not part of the TJS2 reference behavior.'
+                  : executionPhase
+                    ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
+                    : lifetimePhase
+                      ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
+                      : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
               ]
             : [
                 'Serialized Array/Dictionary resource execution and prefixed bytecode remain incomplete',
@@ -1118,19 +1311,21 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = executionPhase
-  ? 'execution-budgets-matrix.json'
-  : lifetimePhase
-    ? 'bytecode-lifetime-matrix.json'
-    : binaryPhase
-      ? 'binary-scripts-matrix.json'
-      : compilerPhase
-        ? 'compiler-matrix.json'
-        : scriptsPhase
-          ? 'native-scripts-matrix.json'
-          : tracePhase
-            ? 'stack-traces-matrix.json'
-            : 'vm-console-matrix.json'
+const reportName = objectPhase
+  ? 'object-finalization-matrix.json'
+  : executionPhase
+    ? 'execution-budgets-matrix.json'
+    : lifetimePhase
+      ? 'bytecode-lifetime-matrix.json'
+      : binaryPhase
+        ? 'binary-scripts-matrix.json'
+        : compilerPhase
+          ? 'compiler-matrix.json'
+          : scriptsPhase
+            ? 'native-scripts-matrix.json'
+            : tracePhase
+              ? 'stack-traces-matrix.json'
+              : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(
