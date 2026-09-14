@@ -40,7 +40,7 @@ Debug 已支持历史与重要消息、同步日志回调、UTF-16LE 文件输�
 
 对象终结器抛错时仍完成引用释放，并保留原有执行或构造异常。深层 Array/Dictionary 链通过有界释放队列清理；显式失效重试、对象保留自身、断环、暂停/取消和清理分配失败已有专项验证。TJS2 使用引用计数，任意循环引用仍需由脚本显式断开。范围见 [对象终结](docs/decisions/038-object-finalization.md)。
 
-宿主句柄支持异常和重入清理。Timer/AsyncTrigger 使用原生弱观察，排队事件独立持有实例直到投递结束；基础 finalize 不再提前关闭资源，子类无需调用 super 即可回收。最新云端回归通过 594 项 Node、639 项浏览器、6 项直接运行时和 78 项兼容性检查；声音及其他宿主对象的隐式清理仍在实现。详见 [宿主生命周期](docs/decisions/039-host-object-lifetime.md)。
+宿主句柄支持异常和重入清理。Timer/AsyncTrigger 与声音对象使用原生弱观察，排队事件独立持有实例直到投递结束；基础 finalize 不提前关闭资源，子类无需调用 super 即可回收。声音关闭会等待异步操作，flags/labels 随声音失效，外部 filters 数组继续有效。最新云端回归通过 710 项 Node、651 项浏览器、6 项直接运行时和 78 项兼容性检查；Window、Layer、VideoOverlay 等其他宿主对象的隐式清理仍在实现。详见 [声音生命周期](docs/decisions/040-sound-object-lifetime.md)。
 
 菜单更新保留仍存在的项目节点，避免更新打断展开或点击。视频打开等待真实首帧，周期和区间事件使用媒体时钟补充呈现回调；错误历史和精度边界见 [视频首帧与时钟](docs/decisions/035-video-readiness.md)。
 
@@ -118,7 +118,7 @@ docs/             架构、已验证决策与兼容范围
 
 ## 验证
 
-测试统一由 [GitHub Actions](.github/workflows/test.yml) 执行，不在本机运行测试。[最近完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866740979)通过 466 项 Node、639 项浏览器测试及 6 项直接运行时专项；另有 [78 项 KAG/旧 ABI 兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867143808)通过。[双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866791836)通过 1,063 次执行、188 次字节码及 20 次对象清理分配失败；历史 WebKit 页面崩溃仍保留为未定位问题。推送代码、更新 PR 或手动触发 Tests 工作流后，云端构建两种 TJS WASM 和字体内核，并运行 Node、三浏览器、游戏库、PWA、原生生命周期及直接运行时探测。
+测试统一由 [GitHub Actions](.github/workflows/test.yml) 执行，不在本机运行测试。[最近完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895849611)通过 710 项 Node、651 项浏览器测试及 6 项直接运行时专项；另有 [78 项 KAG/旧 ABI 兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34894024462)通过。[双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895417115)通过 1,061 次执行、188 次字节码、20 次对象清理、600 次观察/升级/销毁及 24 次从属对象分配失败；历史失败与未定位问题继续保留。推送代码、更新 PR 或手动触发 Tests 工作流后，云端构建两种 TJS WASM 和字体内核，并运行 Node、三浏览器、游戏库、PWA、原生生命周期及直接运行时探测。
 
 所有测试使用同次工作流生成的产物；日志、JSON 报告、失败截图与 trace 可从 Actions 下载。操作方式、原 KAG/旧 ABI 专项与历史记录见 [测试说明](docs/testing.md)。
 
