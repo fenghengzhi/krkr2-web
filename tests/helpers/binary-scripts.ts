@@ -91,7 +91,9 @@ var offset=Scripts.evalStorage("prefixed.bin","o13");
 if(offset.negative!=-32)throw "prefixed-binary";
 var loaded=Dictionary.loadStruct("prefixed.bin","o13");
 if(loaded.large!=binary.large)throw "structured-offset";
+Scripts.compileStorage("prefix-source.tjs","savedata/prefix-code.cjs");
 Debug.message("binary-scripts-ready");`,
+  'prefix-source.tjs': 'global.prefixedResult=42;',
   'independent.bin': binaryValue(
     new Map([
       ['large', 9007199254740993n],

@@ -28,6 +28,23 @@ for (const backend of ['asyncify', 'jspi'])
       (file: { path: string }) => file.path === 'savedata/roundtrip.bin',
     )
     expect(Buffer.from(output.base64, 'base64').subarray(0, 8).toString('ascii')).toBe('KBAD100\0')
+    const code = backup.files.find(
+      (file: { path: string }) => file.path === 'savedata/prefix-code.cjs',
+    )
+    const prefixed = Buffer.concat([Buffer.alloc(13, 0xee), Buffer.from(code.base64, 'base64')])
+    await page.locator('#stop').click()
+    await expect(page.locator('#status')).toHaveText('待机')
+    await page.locator('#files').setInputFiles([
+      {
+        name: 'startup.tjs',
+        mimeType: 'text/plain',
+        buffer: Buffer.from(
+          'Scripts.execStorage("wrapped.cjs","o13");Debug.message("prefixed-bytecode:"+prefixedResult);',
+        ),
+      },
+      { name: 'wrapped.cjs', mimeType: 'application/octet-stream', buffer: prefixed },
+    ])
+    await expect(page.getByText('prefixed-bytecode:42', { exact: true })).toBeVisible()
     await page.locator('#stop').click()
     await expect(page.locator('#status')).toHaveText('待机')
   })

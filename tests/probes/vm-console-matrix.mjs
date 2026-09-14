@@ -112,12 +112,30 @@ const build = await verifyOfflineBuild('dist', '/')
 const wasm = await json('dist/wasm/manifest.json')
 const font = await json('dist/fonts/manifest.json')
 assert([3, 4, 5].includes(wasm.abi))
+const binaryPhase = wasm.capabilities?.binaryScripts === 1
 const compilerPhase = wasm.capabilities?.cooperativeCompilation === 1
+if (binaryPhase) assert(compilerPhase)
 const scriptsPhase = wasm.abi === 5
 if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
-const nodeCount = compilerPhase ? 371 : scriptsPhase ? 362 : tracePhase ? 351 : 346
-const browserCount = compilerPhase ? 621 : scriptsPhase ? 615 : tracePhase ? 609 : 603
+const nodeCount = binaryPhase
+  ? 383
+  : compilerPhase
+    ? 371
+    : scriptsPhase
+      ? 362
+      : tracePhase
+        ? 351
+        : 346
+const browserCount = binaryPhase
+  ? 627
+  : compilerPhase
+    ? 621
+    : scriptsPhase
+      ? 615
+      : tracePhase
+        ? 609
+        : 603
 const compatibilityCount = scriptsPhase ? 78 : tracePhase ? 72 : 66
 if (!tracePhase) assert(freeze, 'The historical VM console phase requires its freeze diagnostic')
 assert.equal(font.abi, 2)
@@ -216,13 +234,15 @@ for (const browser of browsers)
     const report = await json(root + '/out/ci/results.json')
     const count =
       suite === 'browser'
-        ? compilerPhase
-          ? 166
-          : scriptsPhase
-            ? 164
-            : tracePhase
-              ? 162
-              : 160
+        ? binaryPhase
+          ? 168
+          : compilerPhase
+            ? 166
+            : scriptsPhase
+              ? 164
+              : tracePhase
+                ? 162
+                : 160
         : suite === 'pwa' && browser !== 'webkit'
           ? 20
           : 19
@@ -321,6 +341,17 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (binaryPhase) {
+    combinations(row.binary, ['false', 'true'], (item) => String(item.cancel))
+    for (const item of row.binary) {
+      assert.equal(item.heldMs, 25)
+      assert(item.yields > 0)
+      assert.equal(item.elements, item.cancel ? 0 : 500000)
+      assert.equal(item.handles, 0)
+      assert.equal(item.invalidRejected, 2)
+      assert.equal(item.error, item.cancel ? 'AbortError' : null)
+    }
+  }
   if (compilerPhase) {
     combinations(
       row.compiler,
@@ -482,6 +513,7 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(binaryPhase ? { binaryInputControls: 12 } : {}),
     ...(compilerPhase ? { nativeCompilerControls: 36 } : {}),
     kag: 36,
     kagPanels: 6,
@@ -516,11 +548,23 @@ const matrix = {
   evidence,
   previousMatrices: {
     ...fixtureManifest.historicalMatrices,
+    ...(binaryPhase
+      ? { compiler: 'bd314e7bf7383553468685c6cea0db2d53998f265dd09b882d09733cdc7c55b9' }
+      : {}),
     ...(compilerPhase
       ? { 'native-scripts': '1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d' }
       : {}),
   },
   historicalFailures: [
+    ...(binaryPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34832886756',
+            reason:
+              'The initial native validator build referenced a global error-message constant as a TJS namespace member. Compilation failed before tests; the namespace was corrected and the original build log is retained.',
+          },
+        ]
+      : []),
     ...(compilerPhase
       ? [
           {
@@ -603,7 +647,14 @@ const matrix = {
     ...(tracePhase ? [] : ['Scripts.getTraceString']),
     ...(scriptsPhase
       ? [
-          'Automatic legacy text detection and decoder latching, serialized Array/Dictionary resource execution, prefixed bytecode, full bytecode validation and complete storage paths remain incomplete',
+          'Automatic legacy text detection and decoder latching, full bytecode validation and complete storage paths remain incomplete',
+          ...(binaryPhase
+            ? [
+                'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
+              ]
+            : [
+                'Serialized Array/Dictionary resource execution and prefixed bytecode remain incomplete',
+              ]),
           ...(compilerPhase
             ? [
                 'Compiler checkpoints do not preempt allocations, native library algorithms, UTF-16 bridge copies or destruction; exact worst-case latency and native allocation leak accounting remain unverified',
@@ -623,13 +674,15 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = compilerPhase
-  ? 'compiler-matrix.json'
-  : scriptsPhase
-    ? 'native-scripts-matrix.json'
-    : tracePhase
-      ? 'stack-traces-matrix.json'
-      : 'vm-console-matrix.json'
+const reportName = binaryPhase
+  ? 'binary-scripts-matrix.json'
+  : compilerPhase
+    ? 'compiler-matrix.json'
+    : scriptsPhase
+      ? 'native-scripts-matrix.json'
+      : tracePhase
+        ? 'stack-traces-matrix.json'
+        : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(

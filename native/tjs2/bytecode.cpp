@@ -230,7 +230,7 @@ void instructions(const Object& object) {
 
 void validateBytecode(const std::uint8_t* bytes, std::size_t length) {
     KrkrCompilerScope work(5);
-    BinaryInput input(bytes, length, TJS::TJSByteCodeBroken);
+    BinaryInput input(bytes, length, TJSByteCodeBroken);
     if(input.u32() != 0x32534a54 || input.u32() != 0x00303031 || input.u32() != length ||
        input.u32() != 0x41544144) broken();
     const auto dataLength = input.u32();

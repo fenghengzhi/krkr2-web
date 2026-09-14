@@ -180,6 +180,21 @@ test('script stream offsets apply before binary detection and preserve text deco
     assert.equal(await vm.execute(source), 42n)
     assert.equal(await readScript(new TextEncoder().encode('prefix6*7'), 'o6'), '6*7')
     await assert.rejects(readScript(prefixed, 'o999999'), /offset/)
+    const contextual = await vm.compile('(value+=2,value)', 'contextual.tjs', true)
+    const wrapped = new Uint8Array(13 + contextual.length)
+    wrapped.set(contextual, 13)
+    const { session } = await headless({
+      'startup.tjs':
+        'var scope=%[value:40];var result=Scripts.evalStorage("wrapped.cjs","o13",scope);',
+      'wrapped.cjs': wrapped,
+    })
+    try {
+      await session.start()
+      assert.equal(await session.evaluate('result'), '42')
+      assert.equal(await session.evaluate('scope.value'), '42')
+    } finally {
+      await session.stop()
+    }
   } finally {
     vm.dispose()
   }
