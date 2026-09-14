@@ -4,6 +4,33 @@ for (const backend of ['asyncify', 'jspi']) {
   test(`${backend}: KAG callbacks, macros and script menus work in the Worker`, async ({
     page,
   }) => {
+    await page.addInitScript(() => {
+      const post = Worker.prototype.postMessage
+      let pending: (() => void) | undefined
+      const gate = {
+        requests: 0,
+        release() {
+          pending?.()
+          pending = undefined
+        },
+      }
+      Reflect.set(window, 'menuUpdateGate', gate)
+      Worker.prototype.postMessage = function (
+        message: unknown,
+        transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+      ) {
+        const request = message as { type?: string; argumentList?: { value?: unknown }[] }
+        const send = () => Reflect.apply(post, this, [message, transferOrOptions])
+        if (
+          request.type === 'APPLY' &&
+          request.argumentList?.[0]?.value === 'evaluate' &&
+          gate.requests === 0
+        ) {
+          gate.requests++
+          pending = send
+        } else send()
+      }
+    })
     await page.goto(`/?backend=${backend}`)
     test.skip(
       backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)),
@@ -29,6 +56,10 @@ open.onClick=function(){tools.popup(0,40,40);Debug.message("popup closed");};
     await expect(page.locator('#logs')).toContainText('KAG=AB')
     await expect(page.locator('#evaluate')).toBeEnabled()
     await page.locator('#expression').fill('item.checked=true,Debug.message("menu-update-ready")')
+    // Complete console focus/scroll before pressing the menu. Only delivery of
+    // the existing request is held, so no later UI action moves the pointer's target.
+    await page.locator('#evaluate').click()
+    expect(await page.evaluate(() => Reflect.get(window, 'menuUpdateGate').requests)).toBe(1)
     await page.getByText('Tools', { exact: true }).click()
     const countButton = page.getByRole('button', { name: 'Count', exact: false })
     const originalButton = await countButton.elementHandle()
@@ -37,11 +68,20 @@ open.onClick=function(){tools.popup(0,40,40);Debug.message("popup closed");};
     await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2)
     await page.mouse.down()
     // Deliver a real TJS menu update while the original pointer remains down.
-    await page.evaluate(() => document.querySelector<HTMLButtonElement>('#evaluate')!.click())
+    await page.evaluate(() => Reflect.get(window, 'menuUpdateGate').release())
     await expect(page.getByText('menu-update-ready', { exact: true })).toBeVisible()
     await expect(countButton).toHaveAttribute('aria-pressed', 'true')
     expect(await originalButton!.evaluate((button) => button.isConnected)).toBe(true)
     await expect(page.locator('#game-menus details')).toHaveAttribute('open', '')
+    expect(
+      await originalButton!.evaluate(
+        (button, point) => button.contains(document.elementFromPoint(point.x, point.y)),
+        {
+          x: bounds!.x + bounds!.width / 2,
+          y: bounds!.y + bounds!.height / 2,
+        },
+      ),
+    ).toBe(true)
     await page.mouse.up()
     await expect(page.locator('#logs')).toContainText('menu-count=1')
     await page.locator('canvas').click()
