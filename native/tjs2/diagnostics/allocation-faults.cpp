@@ -6,6 +6,12 @@
 #include <emscripten/heap.h>
 #include "tjsVariantString.h"
 extern "C" int krkr_diagnostic_phase();
+EM_JS(void, capture_allocation_trace, (int phase, std::size_t bytes), {
+    const previous = Error.stackTraceLimit;
+    Error.stackTraceLimit = 64;
+    try { Module['krkrAllocationTrace'] = new Error('Native allocation phase ' + phase + ', bytes ' + bytes).stack; }
+    finally { Error.stackTraceLimit = previous; }
+});
 namespace {
 int phase = 0, remaining = -1, hits = 0;
 std::size_t sizeFilter = 0, failedBytes = 0;
@@ -45,6 +51,7 @@ bool fail(std::size_t bytes) {
     if(remaining >= 0 && phase == krkr_diagnostic_phase() && (!sizeFilter || bytes == sizeFilter) && remaining-- == 0) {
         remaining = -1; // A single failure leaves exception construction usable.
         ++hits; failedBytes = bytes;
+        capture_allocation_trace(phase, bytes);
         return true;
     }
     return false;

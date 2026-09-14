@@ -3,7 +3,11 @@ import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { ModuleFactory, WasmVariant } from '../../src/backends/script/tjs-wasm/module.ts'
+import type {
+  ModuleFactory,
+  NativeModule,
+  WasmVariant,
+} from '../../src/backends/script/tjs-wasm/module.ts'
 import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import {
   isScriptObject,
@@ -24,6 +28,14 @@ const { default: factory } = (await import(pathToFileURL(resolve(root, assets.mj
   default: ModuleFactory
 }
 const wasmBinary = new Uint8Array(readFileSync(resolve(root, assets.wasm.file)))
+function observeAllocator() {
+  let module!: NativeModule & { krkrAllocationTrace?: string }
+  const native = observeNative(async (options) => {
+    module = await factory(options)
+    return module
+  })
+  return { ...native, allocationTrace: () => module.krkrAllocationTrace ?? null }
+}
 const results: unknown[] = [],
   failures: unknown[] = []
 mkdirSync('out/ci', { recursive: true })
@@ -47,7 +59,7 @@ for (const debugMode of [false, true])
       completed = false,
       controlPassed = false
     for (let after = -1; after < 128; after++) {
-      const native = observeNative(factory)
+      const native = observeAllocator()
       const vm = await TjsWasmRuntime.create(
         native.factory,
         () => {
@@ -94,6 +106,7 @@ for (const debugMode of [false, true])
           ...outcome,
           before,
           registered,
+          allocationTrace: native.allocationTrace(),
           hits,
           failedBytes,
           error: error instanceof Error ? error.message : null,
@@ -188,7 +201,7 @@ for (const debugMode of [false, true])
       completed = false,
       controlPassed = false
     for (let after = -1; after < 512; after++) {
-      const native = observeNative(factory)
+      const native = observeAllocator()
       const vm = await TjsWasmRuntime.create(
         native.factory,
         () => {
@@ -258,6 +271,7 @@ for (const debugMode of [false, true])
         outcome = {
           ...outcome,
           status: 'disposed',
+          allocationTrace: native.allocationTrace(),
           hits,
           failedBytes,
           notifications,
@@ -332,7 +346,7 @@ for (const debugMode of [false, true])
       completed = false,
       controlPassed = false
     for (let after = -1; after < 128; after++) {
-      const native = observeNative(factory)
+      const native = observeAllocator()
       const vm = await TjsWasmRuntime.create(
         native.factory,
         () => {
