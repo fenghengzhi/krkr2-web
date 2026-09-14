@@ -33,14 +33,38 @@ const runtime = () =>
   )
 
 test('oversized binary input is rejected before allocating native memory', async () => {
+  const oversized = new Uint8Array(64 * 1024 * 1024 + 1)
   const vm = await runtime()
   try {
     const before = vm.inspect().memoryBytes
-    await assert.rejects(vm.execute(new Uint8Array(64 * 1024 * 1024 + 1)), /64 MiB budget/)
+    await assert.rejects(vm.execute(oversized), /64 MiB budget/)
     assert.equal(vm.inspect().memoryBytes, before)
     assert.equal(await vm.execute('6*7', '', true), 42n)
   } finally {
     vm.dispose()
+  }
+  const callback = await TjsWasmRuntime.create(
+    factory,
+    () => ({ kind: 'script', source: oversized, name: 'oversized.cjs' }),
+    { wasmBinary },
+  )
+  try {
+    await callback.execute('1', '', true)
+    const before = callback.inspect().memoryBytes
+    await assert.rejects(callback.execute('__host("oversized")', '', true), /64 MiB budget/)
+    assert.equal(callback.inspect().memoryBytes, before)
+  } finally {
+    callback.dispose()
+  }
+  const { session } = await headless({
+    'startup.tjs': 'Dictionary.loadStruct("oversized.bin");',
+    'oversized.bin': oversized,
+  })
+  try {
+    await assert.rejects(session.start(), /Binary stream exceeds 64 MiB budget/)
+    assert(session.snapshot().memoryBytes < oversized.length)
+  } finally {
+    await session.stop()
   }
 })
 
@@ -51,11 +75,11 @@ for (const cancel of [false, true])
     )
   })
 
-test('compiled strings follow native NUL termination and preserve lone UTF-16 surrogates', async () => {
+test('compiled strings follow native escape handling and preserve lone UTF-16 surrogates', async () => {
   const vm = await runtime()
   try {
     for (const [source, expected] of [
-      ['"a\\x0000b"', 'a'],
+      ['"a\\x0000b"', 'ab'],
       ['"\\xd800"', '\ud800'],
     ] as const) {
       assert.equal(await vm.execute(source, '', true), expected)
@@ -90,6 +114,15 @@ test('Scripts reads independent binary objects, native writer output and explici
     assert(logs.includes('binary-scripts-ready'))
   } finally {
     await session.stop()
+  }
+  const dataEntry = await headless({ 'startup.tjs': binaryValue([42n]) })
+  try {
+    const handles = dataEntry.session.snapshot().handles
+    await dataEntry.session.start()
+    assert.equal(await dataEntry.session.evaluate('6*7'), '42')
+    assert.equal(dataEntry.session.snapshot().handles, handles)
+  } finally {
+    await dataEntry.session.stop()
   }
 })
 

@@ -1258,6 +1258,8 @@ export class EngineSession {
         const bytes = await this.readResource(text(0)),
           offset = modeOffset(text(1))
         if (offset > bytes.length) throw new Error('Binary stream offset exceeds file length')
+        if (bytes.length - offset > 64 * 1024 * 1024)
+          throw new Error('Binary stream exceeds 64 MiB budget')
         value = bytes.subarray(offset)
         break
       }

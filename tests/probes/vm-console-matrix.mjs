@@ -560,6 +560,15 @@ const matrix = {
     ...(binaryPhase
       ? [
           {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34834878908',
+            reason:
+              'Node passed 383/384 cases and all seven unchanged input cases completed with TAP records. One new source-string expectation conflated zero-character escape append with binary NUL termination: native source yields ab, while a binary embedded NUL terminates the string. The distinct rules are now asserted explicitly. The earlier input-process failure remains unexplained; superseded jobs are not counted as passes.',
+          },
+        ]
+      : []),
+    ...(binaryPhase
+      ? [
+          {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34833337700',
             reason:
               'Native build passed. New fixture assumptions conflicted with native NUL-terminated strings, nonempty member names, class-name instanceof checks and constructor syntax. Expectations now follow inspected TJS source, with empty keys retained as rejection cases. The Node input test subprocess also ended early without useful spec-reporter detail; TAP output was added. Failed and superseded results remain archived.',
@@ -680,6 +689,11 @@ const matrix = {
         ]
       : []),
     'Historical one-shot committed-input failure has no proven product root cause; acknowledgement-based checks remain',
+    ...(binaryPhase
+      ? [
+          'The historical Node input.test.ts subprocess termination was not reproduced with TAP; its cause remains unconfirmed',
+        ]
+      : []),
     'Protocol 8 to 9 historical same-kernel probe was not rerun in this phase',
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
