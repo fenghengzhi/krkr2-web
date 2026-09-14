@@ -113,21 +113,25 @@ const build = await verifyOfflineBuild('dist', '/')
 const wasm = await json('dist/wasm/manifest.json')
 const font = await json('dist/fonts/manifest.json')
 assert([3, 4, 5].includes(wasm.abi))
+const lifetimePhase = wasm.capabilities?.bytecodeLifecycle === 1
+if (lifetimePhase) assert.equal(wasm.diagnosticAllocator, false)
 const binaryPhase = wasm.capabilities?.binaryScripts === 1
 const compilerPhase = wasm.capabilities?.cooperativeCompilation === 1
 if (binaryPhase) assert(compilerPhase)
 const scriptsPhase = wasm.abi === 5
 if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
-const nodeCount = binaryPhase
-  ? 384
-  : compilerPhase
-    ? 371
-    : scriptsPhase
-      ? 362
-      : tracePhase
-        ? 351
-        : 346
+const nodeCount = lifetimePhase
+  ? 392
+  : binaryPhase
+    ? 384
+    : compilerPhase
+      ? 371
+      : scriptsPhase
+        ? 362
+        : tracePhase
+          ? 351
+          : 346
 const browserCount = binaryPhase
   ? 639
   : compilerPhase
@@ -361,6 +365,29 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (lifetimePhase) {
+    const lifetime = row.bytecode.lifetime
+    assert.equal(lifetime.loads, 13)
+    assert.equal(lifetime.rejected, 39)
+    assert.deepEqual(lifetime.before, lifetime.after)
+    assert.equal(lifetime.after.contexts, 0)
+    assert.equal(lifetime.after.blocks, 0)
+    assert.equal(lifetime.handles, 0)
+    combinations(
+      row.bytecode.controls,
+      ['6/false', '6/true', '7/false', '7/true', '8/false', '8/true'],
+      (item) => item.phase + '/' + item.cancel,
+    )
+    for (const item of row.bytecode.controls) {
+      assert.equal(item.heldMs, 25)
+      assert.equal(item.yields, 1)
+      assert.equal(item.after.blocks, item.before.blocks)
+      assert.equal(item.after.contexts, item.before.contexts)
+      assert.equal(item.error, item.cancel ? 'AbortError' : null)
+      assert(item.observed.heap > item.before.heap)
+      if (item.phase !== 6) assert(item.observed.contexts > item.before.contexts)
+    }
+  }
   if (binaryPhase) {
     combinations(row.binary, ['false', 'true'], (item) => String(item.cancel))
     for (const item of row.binary) {
@@ -507,6 +534,48 @@ assert.equal(
   external.reduce((n, report) => n + report.results.length, 0),
   compatibilityCount,
 )
+let allocations
+const allocatorReports = []
+if (lifetimePhase) {
+  allocations = await run('KRKR_ALLOCATIONS_RUN', 'Bytecode allocation diagnostic', 2, [
+    '--pattern',
+    'bytecode-allocations-*',
+  ])
+  unchanged(allocations.info.headSha, [
+    'tests/helpers/bytecode-lifetime.ts',
+    'tests/helpers/binary-scripts.ts',
+    'tests/probes/bytecode-allocation-faults.ts',
+    '.github/workflows/bytecode-allocations.yml',
+  ])
+  for (const backend of backends) {
+    const root = `${allocations.root}/artifacts/bytecode-allocations-${backend}`
+    const report = await json(`${root}/out/ci/allocations-${backend}.json`)
+    assert.equal(report.variant, backend)
+    assert.equal(report.manifest.diagnosticAllocator, true)
+    assert.equal(report.manifest.capabilities.bytecodeLifecycle, 1)
+    assert.notEqual(report.manifest.source.sha256, wasm.source.sha256)
+    assert.deepEqual(report.failures, [])
+    for (const phase of [6, 7, 8]) {
+      const rows = report.results.filter((item) => item.phase === phase)
+      assert(rows.length > 1)
+      rows.forEach((item, index) => {
+        assert.equal(item.after, index)
+        assert.equal(item.hits, index === rows.length - 1 ? 0 : 1)
+        assert.deepEqual(item.current, item.before)
+        assert.equal(item.current.contexts, 0)
+        assert.equal(item.current.blocks, 0)
+      })
+    }
+    const growth = report.results.filter((item) => item.target)
+    combinations(growth, ['baseline', 'string_block', 'string_index'], (item) => item.target)
+    for (const item of growth) assert.deepEqual(item.disposed, growth[0].disposed)
+    const manifest = await json(`${root}/.generated/wasm/manifest.json`)
+    assert.deepEqual(manifest, report.manifest)
+    for (const asset of [manifest.variants[backend].mjs, manifest.variants[backend].wasm])
+      assert.equal(await hash(`${root}/.generated/wasm/${asset.file}`), asset.sha256)
+    allocatorReports.push(report)
+  }
+}
 const evidence = {}
 for (const path of await files(directory))
   evidence[relative(resolve(directory), path)] = await hash(path)
@@ -518,6 +587,7 @@ const matrix = {
   runs: [
     base.info,
     compatibility.info,
+    ...(allocations ? [allocations.info] : []),
     ...(freeze ? [freeze.info] : []),
     ...(inputRun ? [inputRun.info] : []),
   ],
@@ -533,6 +603,16 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(lifetimePhase
+      ? {
+          bytecodeControls: 36,
+          bytecodeLifetimes: 6,
+          allocatorFailures: allocatorReports.reduce(
+            (sum, report) => sum + report.results.filter((item) => item.hits === 1).length + 2,
+            0,
+          ),
+        }
+      : {}),
     ...(binaryPhase ? { binaryInputControls: 12, browserControls: browserControls.length } : {}),
     ...(compilerPhase ? { nativeCompilerControls: 36 } : {}),
     kag: 36,
@@ -557,6 +637,7 @@ const matrix = {
   overlayFrames,
   browserControls,
   runtime,
+  allocatorReports,
   external,
   fixtureManifest,
   fixture,
@@ -569,6 +650,9 @@ const matrix = {
   evidence,
   previousMatrices: {
     ...fixtureManifest.historicalMatrices,
+    ...(lifetimePhase
+      ? { 'binary-scripts': 'b941be09c8d5803d19a8c1014fad9b8dfa1a78351a17734808133117cd1c3041' }
+      : {}),
     ...(binaryPhase
       ? { compiler: 'bd314e7bf7383553468685c6cea0db2d53998f265dd09b882d09733cdc7c55b9' }
       : {}),
@@ -577,6 +661,20 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(lifetimePhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34846307441',
+            reason:
+              'First lifecycle run failed three of 391 Node cases and the direct runtime. It exposed rejection of a superclass RET/NOP sentinel and instance-member self-reference retention. Sentinel validation was repaired; instances in explicit lifecycle tests are invalidated after checking their methods. Automatic cyclic instance reclamation remains incomplete. Preserve the original complete run and individual outcomes.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34846470235',
+            reason:
+              'Both diagnostic kernels failed linking because --wrap=malloc removed the export required by generated glue. No allocation failure test ran. The diagnostic now uses the supported Emscripten builtin allocator aliases.',
+          },
+        ]
+      : []),
     ...(binaryPhase
       ? [
           {
@@ -765,7 +863,9 @@ const matrix = {
           'Automatic legacy text detection and decoder latching, full bytecode validation and complete storage paths remain incomplete',
           ...(binaryPhase
             ? [
-                'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
+                lifetimePhase
+                  ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
+                  : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
               ]
             : [
                 'Serialized Array/Dictionary resource execution and prefixed bytecode remain incomplete',
@@ -794,15 +894,17 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = binaryPhase
-  ? 'binary-scripts-matrix.json'
-  : compilerPhase
-    ? 'compiler-matrix.json'
-    : scriptsPhase
-      ? 'native-scripts-matrix.json'
-      : tracePhase
-        ? 'stack-traces-matrix.json'
-        : 'vm-console-matrix.json'
+const reportName = lifetimePhase
+  ? 'bytecode-lifetime-matrix.json'
+  : binaryPhase
+    ? 'binary-scripts-matrix.json'
+    : compilerPhase
+      ? 'compiler-matrix.json'
+      : scriptsPhase
+        ? 'native-scripts-matrix.json'
+        : tracePhase
+          ? 'stack-traces-matrix.json'
+          : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(

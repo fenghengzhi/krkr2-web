@@ -11,6 +11,10 @@ on:
         description: Successful KAG and release compatibility run for the current probes
         required: true
         type: string
+      allocations-run:
+        description: Successful non-release bytecode allocation diagnostic for the same sources
+        required: false
+        type: string
       freeze-run:
         description: Optional three-repeat native lifecycle diagnostic for the same application
         required: false
@@ -47,6 +51,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           KRKR_BUILD_RUN: ${{ inputs.build-run }}
           KRKR_COMPATIBILITY_RUN: ${{ inputs.compatibility-run }}
+          KRKR_ALLOCATIONS_RUN: ${{ inputs.allocations-run }}
           KRKR_FREEZE_RUN: ${{ inputs.freeze-run }}
           KRKR_INPUT_RUN: ${{ inputs.input-run }}
         run: node tests/probes/vm-console-matrix.mjs
@@ -60,6 +65,7 @@ jobs:
             out/verification/native-scripts-matrix.json
             out/verification/compiler-matrix.json
             out/verification/binary-scripts-matrix.json
+            out/verification/bytecode-lifetime-matrix.json
             out/verification/hosted-evidence/
             out/ci/
           if-no-files-found: error

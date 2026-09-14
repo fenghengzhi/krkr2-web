@@ -85,6 +85,11 @@ export async function verifyOfflineBuild(directory, base = '/') {
   const wasmPath = `wasm/manifest-${hash(wasmBytes).slice(0, 16)}.json`
   assert.deepEqual(await read(wasmPath), wasmBytes)
   const wasm = JSON.parse(wasmBytes)
+  assert.notEqual(
+    wasm.diagnosticAllocator,
+    true,
+    'Allocator diagnostic kernels cannot be published',
+  )
   for (const variant of Object.values(wasm.variants))
     for (const asset of [variant.mjs, variant.wasm])
       assert.equal(hash(await read(`wasm/${asset.file}`)), asset.sha256)

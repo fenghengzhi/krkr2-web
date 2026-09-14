@@ -121,6 +121,12 @@ export async function exerciseBytecodeLifetime(
     { wasmBinary, variant },
   )
   try {
+    await vm.execute(lifetimeSource)
+    await vm.execute(lifetimeCleanup)
+    checkLifetime(
+      native.stats().contexts === 0 && native.stats().blocks === 0,
+      'Explicit source instance cleanup retained contexts',
+    )
     const bytes = await vm.compile(lifetimeSource, 'lifetime.tjs'),
       invalid = lateLinkFailure(bytes)
     const cycle = bytes.slice(),
