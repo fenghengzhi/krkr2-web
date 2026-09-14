@@ -8,5 +8,5 @@ export default defineConfig({
   testMatch: 'startup-diagnostic.spec.ts',
   outputDir: resolve('test-results-webkit-diagnostic'),
   projects: shared.projects!.filter((project) => project.name === 'webkit'),
-  reporter: [['list'], ['json', { outputFile: 'out/ci/webkit-diagnostic.json' }]],
+  reporter: [['list'], ['json', { outputFile: resolve('out/ci/webkit-diagnostic.json') }]],
 })

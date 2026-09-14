@@ -7,6 +7,11 @@ on:
         description: Completed build run ID whose application sources match this commit
         required: true
         type: string
+      workers:
+        description: Concurrent browser workers for comparing hosted resource contention
+        type: choice
+        default: '2'
+        options: ['1', '2']
 
 permissions:
   contents: read
@@ -35,7 +40,9 @@ jobs:
       - run: npm run typecheck
       - run: npx playwright install --with-deps webkit
       - name: Record Worker startup spans and native stacks
-        run: npx playwright test -c tests/probes/playwright.startup.config.ts --repeat-each=3 2>&1 | tee out/ci/webkit-diagnostic.log
+        env:
+          KRKR_DIAGNOSTIC_WORKERS: ${{ inputs.workers }}
+        run: npx playwright test -c tests/probes/playwright.startup.config.ts --repeat-each=3 --workers="$KRKR_DIAGNOSTIC_WORKERS" 2>&1 | tee out/ci/webkit-diagnostic.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
