@@ -20,6 +20,14 @@ on:
         required: true
         default: false
         type: boolean
+      cases:
+        description: Overlay repetitions or hidden layer frame behavior
+        required: true
+        default: overlay
+        type: choice
+        options:
+          - overlay
+          - layer
 
 permissions:
   contents: read
@@ -55,12 +63,14 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=krkr_test_output rate=48000 channels=2
           pactl set-default-sink krkr_test_output
-      - name: Record forty original overlay cases with native event and frame observations
+      - name: Record original cases with native event and frame observations
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: out/ci/video-diagnostic.json
           KRKR_DIAGNOSTIC_BROWSER: ${{ inputs.browser }}
           KRKR_DIAGNOSTIC_WORKERS: ${{ inputs.browser == 'webkit' && '1' || '2' }}
-        run: npx playwright test tests/browser/video.spec.ts --project="$KRKR_DIAGNOSTIC_BROWSER" --grep 'overlay geometry' --repeat-each=20 --workers="$KRKR_DIAGNOSTIC_WORKERS" --reporter=list,json 2>&1 | tee out/ci/video-diagnostic.log
+          KRKR_DIAGNOSTIC_PATTERN: ${{ inputs.cases == 'layer' && 'video frames reach two layers' || 'overlay geometry' }}
+          KRKR_DIAGNOSTIC_REPEATS: ${{ inputs.cases == 'layer' && '1' || '20' }}
+        run: npx playwright test tests/browser/video.spec.ts --project="$KRKR_DIAGNOSTIC_BROWSER" --grep "$KRKR_DIAGNOSTIC_PATTERN" --repeat-each="$KRKR_DIAGNOSTIC_REPEATS" --workers="$KRKR_DIAGNOSTIC_WORKERS" --reporter=list,json 2>&1 | tee out/ci/video-diagnostic.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
