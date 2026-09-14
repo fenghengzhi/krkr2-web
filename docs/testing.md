@@ -6,9 +6,13 @@
 
 ## 已完成的云端回归
 
+二进制脚本阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34841387392)通过 **384 项 Node、639 项浏览器**（516 常规、57 游戏库、59 PWA、7 原生生命周期）与 **6 项直接运行时**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34840621607)通过 **78 项**。所选测试无失败、跳过、flaky 或重试。[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34842156097)已核对源码、发布树和逐项结果，矩阵 `out/verification/binary-scripts-matrix.json` 的 SHA-256 为 `b941be09c8d5803d19a8c1014fad9b8dfa1a78351a17734808133117cd1c3041`。
+
+本轮绑定 496 份证据、116 份持久 context 预算、6 份媒体时钟与 6 份遮盖像素记录，包含 12 条二进制、36 条编译和 24 条页面控制检查；可信冻结为 21,052.3 ms，没有计入历史额外三次冻结。40 次视频遮盖、2 次隐藏图层和 40 次原 KAG 诊断单独归档，不替代完整回归。一次未复现的 WebKit JSPI 异常成员名称仍待查。失败历史见 [二进制脚本](decisions/034-binary-scripts.md)和 [视频首帧](decisions/035-video-readiness.md)。
+
 原生 Scripts 阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)通过 **362 项 Node、615 项浏览器**（492 常规、57 游戏库、59 PWA、7 原生生命周期）与 **6 项直接运行时**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)通过 **78 项**。所选案例无失败、跳过、flaky 或重试。两者的应用源码和发布文件已由 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34825096969)绑定，历史失败与修复见 [原生 Scripts](decisions/032-native-scripts.md)。
 
-当前矩阵为 `out/verification/native-scripts-matrix.json`，SHA-256 为 `1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d`，绑定 495 份证据、116 份持久 context 预算和 6 份媒体时钟记录。可信冻结为 21,055.2 ms。报告与产物在 `out/verification/github-actions/34825096969/`，所有失败和被取代的运行仍按各自 run ID 保留。
+原生 Scripts 阶段矩阵为 `out/verification/native-scripts-matrix.json`，SHA-256 为 `1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d`，绑定 495 份证据、116 份持久 context 预算和 6 份媒体时钟记录。可信冻结为 21,055.2 ms。报告与产物在 `out/verification/github-actions/34825096969/`，所有失败和被取代的运行仍按各自 run ID 保留。
 
 此前 ABI 4 阶段 [提交 `0eee21e` 的完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)全部通过：**351 项 Node、609 项浏览器测试**（486 常规、57 游戏库、59 PWA、7 原生生命周期）及 6 项直接运行时专项。原生调用栈在三浏览器双后端中检查，该阶段 TJS ABI 为 4。另有 [72 项兼容性](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)及 [30 次输入时序复测](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815498178)通过。所选测试无失败、跳过或 flaky，未使用测试重试；WebKit 原有网络模拟排除继续保留。
 
@@ -67,7 +71,7 @@ gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 gh workflow run compatibility.yml --ref main -f build-run=BUILD_RUN_ID
 ```
 
-复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。当前 ABI 5 阶段生成 `out/verification/native-scripts-matrix.json`；此前 ABI 4 阶段要求输入时序专项，生成 `out/verification/stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
+复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。ABI 5 根据能力标记生成 `binary-scripts-matrix.json` 或 `compiler-matrix.json`，更早的原生 Scripts 阶段保留 `native-scripts-matrix.json`；此前 ABI 4 阶段要求输入时序专项，生成 `stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。这些文件位于 `out/verification/`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
 
 [VM 控制台阶段汇总](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)已通过，绑定 487 份证据文件、116 份持久 context 预算记录及 6 份媒体时钟记录。生成时提交为 `d97a3c9`，报告 SHA-256 为 `81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d`。矩阵和引用的完整产物已下载到 `out/verification/github-actions/34812958010/`，矩阵另复制到上述标准路径；报告生成后的本次文档更新不改变应用或测试代码。
 
@@ -88,6 +92,14 @@ VM 控制台阶段的本地完整回归已按用户要求中止（退出码 143�
 `Native lifecycle diagnostic` 和 `WebKit startup diagnostic` 可手动指定已有构建 run ID，在云端重复特定场景并附加状态、Worker 等待记录和原生栈。复用前检查该构建与当前提交的应用源码、依赖及构建脚本完全一致；诊断允许修改测试代码，但不能以旧产物验证新的应用实现。这些诊断结果单独保存，不能替代完整 Tests 工作流。
 
 `Input activity diagnostic` 使用同样的来源检查，包含阻塞 VM 的确定性焦点验证，以及三浏览器双后端各 5 次后台输入清理。它保留原来的 12 秒断言、2 个并发 worker 和全部文字/按键/点击检查，不以自动重试替代失败。
+
+`Video presentation diagnostic` 可选择 Chromium 或 macOS WebKit；`cases=overlay` 固定运行 40 次原遮盖案例，`cases=layer` 运行两个隐藏图层案例。`first-frame-barrier=true` 只用于比较首次 seek 的顺序，正式修复验证使用 `false`。`KAG native startup diagnostic` 则固定运行 WebKit JSPI 原 ZIP 转场场景，在关闭/开启脚本调用栈的配置下各 20 次，逐次保留结果，遇到失败也收齐剩余诊断，最终有任何失败便返回失败。
+
+```sh
+gh workflow run video-diagnostic.yml --ref main -f build-run=BUILD_RUN_ID \
+  -f browser=webkit -f cases=overlay -f first-frame-barrier=false
+gh workflow run kag-native-diagnostic.yml --ref main -f build-run=BUILD_RUN_ID
+```
 
 ```sh
 gh workflow run input-activity.yml --ref main -f build-run=BUILD_RUN_ID

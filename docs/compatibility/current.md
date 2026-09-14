@@ -1,8 +1,12 @@
 # 当前实现范围
 
-最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)通过 **362 项 Node、615 项浏览器测试及 6 项直接运行时专项**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)另通过 **78 项**原 KAG 和跨 ABI 离线升级。当前已接入原生 Scripts 类、compileStorage、反射/missing 和 textEncoding，修复字节码导出、编译重入/语法拒绝/元数据加载、字体预览布局与停止中导入游戏的竞态。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。全部验证在 GitHub 托管 runner 执行；完整非插件目标仍未完成，设计和限制见 [原生 Scripts](../decisions/032-native-scripts.md)。
+最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34841387392)通过 **384 项 Node、639 项浏览器测试及 6 项直接运行时专项**，另有 [78 项兼容性检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34840621607)通过。[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34842156097)已绑定源码、发布文件和逐项证据，所选测试无失败、跳过或重试。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。
 
-[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34825096969)已通过，矩阵为 `out/verification/native-scripts-matrix.json`，绑定 495 份证据，SHA-256 为 `1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d`。原生可信冻结为 21,055.2 ms，未把先前阶段的额外冻结/输入复测计入当前结果。
+新增 [KBAD 与字节码结构校验](../decisions/034-binary-scripts.md)、文件偏移和二进制读取暂停/取消；菜单快照保留现有节点，视频打开等待首帧，媒体时钟补充周期/区间事件，详见 [视频就绪](../decisions/035-video-readiness.md)。一次 WebKit JSPI 原 KAG 异常成员名称未在 40 次诊断中复现，原因仍待查；完整字节码资源审计和整体非插件兼容仍未完成。所有本轮测试在 GitHub 托管 runner 上执行。
+
+此前原生 Scripts 阶段的 [完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)通过 **362 项 Node、615 项浏览器测试及 6 项直接运行时专项**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)另通过 **78 项**。该阶段接入原生 Scripts 类、compileStorage、反射/missing 和 textEncoding，设计及限制见 [原生 Scripts](../decisions/032-native-scripts.md)。
+
+原生 Scripts 阶段的 [云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34825096969)保留为 `out/verification/native-scripts-matrix.json`，绑定 495 份证据，SHA-256 为 `1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d`。该阶段原生可信冻结为 21,055.2 ms，未把其他阶段的额外冻结/输入复测计入结果。
 
 上一轮完成的 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
 
@@ -28,7 +32,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 
 | 模块 | 当前实现 |
 | --- | --- |
-| TJS2 | 源码、表达式、编译/执行字节码、类/属性/闭包、数组/字典、正则等抽取 VM 原有能力；已验证范围以测试为准 |
+| TJS2 | 源码、表达式、编译/执行字节码、KBAD 资源、文件偏移、结构校验、类/属性/闭包、数组/字典、正则；长编译与二进制读取支持暂停/取消，资源与生命周期审计仍未完成 |
 | 值桥 | void、null、int64、real、UTF-16 字符串、octet、带上下文的对象句柄；显式 Array/Dictionary 构造与有预算的纯数据复制 |
 | 异步桥 | 读取资源后恢复脚本；在 WASM 内继续嵌套脚本与回调；错误带脚本位置；长循环预算让出与取消 |
 | 会话 | 显式 Worker；来源准备、初始化、挂载、启动、暂停、恢复、停止、重新创建；过期消息与旧快照隔离 |
@@ -43,13 +47,13 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 | 转场/截图 | 三种内置转场、脚本时钟/暂停、图层树交换与完成回调；onPaint、piledCopy、stretchCopy、BMP 图像存档 |
 | 计时与触发 | Timer 的间隔/容量/启停、AsyncTrigger 的缓存/取消与优先级队列；暂停时冻结计时 |
 | KAGParser | TypeScript 词法与状态机；标签、宏/参数转发、条件、emb、内嵌脚本、跳转/调用栈、store/restore/assign、回调与中断 |
-| 菜单 | MenuItem 树、Window.menu、顺序、可见/禁用、单选组、onClick、页面菜单/快捷键、弹出选择/取消 |
+| 菜单 | MenuItem 树、Window.menu、顺序、可见/禁用、单选组、onClick、页面菜单/快捷键、弹出选择/取消；按 ID 更新保留未移除项的展开、焦点与点击 |
 | 系统 | createAppLock 使用按游戏分区的 Web Locks，停止释放；exit/terminate 取消执行并提交待写存档 |
 | 窗口 | 单窗口的逻辑尺寸、缩放、显示偏移、外观、可见性、resize 通知、管理对象 add/remove、closeQuery/close；可退出的页面内全屏 |
 | 输入 | 鼠标/触摸、捕获、键盘/提交文字、物理按键状态、focus chain、模态栈、onHitTest、异步 postInputEvent、光标与 hint |
 | 字体 | 独立 FreeType 文件字体、Canvas 系统字体/缺字回退、预渲染版本 0/1 与共享映射、getGlyphDrawRect/Rect、样式与阴影；getList/doUserSelect；逻辑纵排家族、vert/vrt2、Unicode 朝向/呈现形式、按索引变换与竖向装饰线；普通文件路径保留原 FreeType 角度语义 |
 | 声音 | Wave/MIDI 宿主、AudioWorklet 混音、WAV/Vorbis/MP3、SLI 循环/标志/标签、定位、音量/声像、淡入淡出、完成事件及静音 |
-| 视频 | VideoOverlay 的 MP4 播放、显示时间帧索引、遮盖/双图层输出、seek/prepare、区间/周期事件、透明度、媒体声音及释放 |
+| 视频 | VideoOverlay 的 MP4 播放、首帧就绪、显示时间帧索引、遮盖/双图层输出、seek/prepare、区间/周期事件、透明度、媒体声音及释放；媒体时钟补充延迟/遗漏的呈现通知 |
 | 文本与文件流 | TJS Array.load/save、Array/Dictionary 的结构化读写流；UTF-8、UTF-16、UTF-32 读取、c0/c1 简单编码、zlib 压缩文本 |
 | 存档文件 | 写覆盖层、IndexedDB 事务、失败保留脏数据、备份导出/导入；已验证 KAG 变量/场景恢复、BMP 缩略图和刷新读档 |
 | 页面 | 示例、本地文件/目录导入、后端选择、TJS 表达式、日志、暂停/停止/重新开始 |

@@ -1,6 +1,6 @@
 # 二进制脚本资源与加载校验
 
-Scripts、启动入口和直接运行时现可识别 `KBAD100\0` 序列化数据，返回原生 TJS Array/Dictionary 或标量。字节码和序列化数据按各自格式加载，文件、归档、网络、编码和存档仍由 TypeScript 管理。新增实现已推送，云端验证进行中；本页不代表整体非插件兼容完成。
+Scripts、启动入口和直接运行时现可识别 `KBAD100\0` 序列化数据，返回原生 TJS Array/Dictionary 或标量。字节码和序列化数据按各自格式加载，文件、归档、网络、编码和存档仍由 TypeScript 管理。实现已通过本阶段的完整云端回归；本页不代表整体非插件兼容完成。
 
 ## 资源与偏移
 
@@ -26,6 +26,8 @@ Scripts、启动入口和直接运行时现可识别 `KBAD100\0` 序列化数据
 
 ## 验证范围与后续
 
+[完整回归 34841387392](https://github.com/fenghengzhi/krkr2-web/actions/runs/34841387392)通过 384 项 Node、639 项浏览器与 6 项直接运行时，另有 [78 项兼容性检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34840621607)通过。[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34842156097)绑定相同应用来源和发布文件，矩阵为 `out/verification/binary-scripts-matrix.json`，SHA-256 为 `b941be09c8d5803d19a8c1014fad9b8dfa1a78351a17734808133117cd1c3041`。496 份证据包含 12 条二进制控制路径、36 条编译控制路径与 24 条页面控制检查；所选测试无失败、跳过、flaky 或重试。发布标识为 `650be2aa46e67977e58c52b4517092b7e0543869668dc0318c8f82df1e2e6f36`。
+
 新增独立编码器覆盖原生写出器较少产生的数值/长度编码，另通过原生 `saveStruct` 回读检查实际互通。验证包括截断、超大声明长度、非法上下文/寄存器/常量/跳转、指令尾部、嵌套 try、转发与展开参数、浏览器存档和阶段 5 暂停取消。
 
 首轮 [34832886756](https://github.com/fenghengzhi/krkr2-web/actions/runs/34832886756) 在构建时发现新增校验器将全局错误消息常量写成 TJS 命名空间成员，编译失败，测试未执行。命名空间已修正；原构建日志按运行 ID 保留。
@@ -34,6 +36,10 @@ Scripts、启动入口和直接运行时现可识别 `KBAD100\0` 序列化数据
 
 [34834878908](https://github.com/fenghengzhi/krkr2-web/actions/runs/34834878908) 的 Node 结果为 383/384，输入文件的七项测试完整通过；Node 唯一失败是上述源码零字符转义预期，TAP 显示实际值为 `"ab"`。直接运行时通过；浏览器最终为 625/627，WebKit 两个视频遮盖案例在 seek 后一直观察到呈现时间 0，失败截图仍为初始红色帧。原日志、截图与 trace 已保留，并通过独立 WebKit 呈现专项继续定位。本轮不计为完整成功回归。此前输入进程提前结束未复现，也未认定已经找到产品原因。
 
-[34836507523](https://github.com/fenghengzhi/krkr2-web/actions/runs/34836507523) 的 384 项 Node、6 项直接运行时和 626/627 浏览器测试通过；WebKit Asyncify 再次停留于视频初始帧。[34836898714](https://github.com/fenghengzhi/krkr2-web/actions/runs/34836898714) 兼容性运行的 Firefox JSPI 原 KAG 菜单检查发现另一问题：收到菜单快照后，页面整棵替换 DOM，关闭已展开的 Debug 菜单并使 Controller 按钮脱离文档。菜单现按 ID 更新节点，保留未移除项的展开、焦点和点击状态；原 KAG 浏览器用例增加按住 Count 时交付真实 TJS 更新的检查。两项失败的原始证据继续保留，等待修复后的云端验证。
+[34836507523](https://github.com/fenghengzhi/krkr2-web/actions/runs/34836507523) 的 384 项 Node、6 项直接运行时和 626/627 浏览器测试通过；WebKit Asyncify 再次停留于视频初始帧。[34836898714](https://github.com/fenghengzhi/krkr2-web/actions/runs/34836898714) 兼容性运行的 Firefox JSPI 原 KAG 菜单检查发现另一问题：收到菜单快照后，页面整棵替换 DOM，关闭已展开的 Debug 菜单并使 Controller 按钮脱离文档。菜单现按 ID 更新节点，保留未移除项的展开、焦点和点击状态；原 KAG 浏览器用例增加按住 Count 时交付真实 TJS 更新的检查。两项失败的原始证据继续保留，修复后的结果见本节开头的完整回归。
+
+[34839357671](https://github.com/fenghengzhi/krkr2-web/actions/runs/34839357671) 另有一次 WebKit JSPI 原 KAG 启动报告异常成员名称。[独立诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34840243332)在关闭/开启脚本调用栈的配置下各运行 20 次，全部通过但未复现原错误；其根因仍待查。常规 KAG 探测现保留失败 JSON、截图和 trace，避免后续错误只留下过程日志。
+
+后续菜单用例已把真实求值请求扣在 Worker 边界，避免控制台聚焦滚动干扰按住点击。[34839918126](https://github.com/fenghengzhi/krkr2-web/actions/runs/34839918126) 的 638/639 浏览器结果中，唯一失败是 TLG 解码已经完成后再检查取消；最终用例在 4096×4096 展开缓冲分配后的实际让出点等待停止，保留原图片、1800 ms 停止断言及无完成标记检查。此前失败和被取代的运行均保留。
 
 结构检查不等于完成所有 VM 指令语义和资源审计。原字节码对象构造失败时的所有权、深度调用/try 栈预算、加载阶段原生分配统计与部分同步复制仍待继续；不能据此宣称任意输入都可在固定时间内中止，或已证明所有原生分配不泄漏。完整路径、自动编码策略和其余非插件需求继续在总进度中保留。

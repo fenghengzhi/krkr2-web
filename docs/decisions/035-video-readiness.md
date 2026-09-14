@@ -1,6 +1,6 @@
 # 视频首帧与媒体时钟
 
-本阶段正在云端验证，不能视为完整视频兼容已经完成。
+本阶段已通过 [完整云端回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34841387392)与 [78 项兼容性检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34840621607)，[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34842156097)已核对应用源码和发布文件。完整回归包含三浏览器双后端的首帧取消与媒体时钟补充检查；这不能视为完整视频兼容已经完成。
 
 `VideoOverlay.open` 原先只等待 `loadeddata`。WebKit 的失败记录表明，此时 `readyState` 已为 4，图像读取仍可能得到透明像素；首个时间戳为 0 的帧在之后才提交。如果立刻 seek 到 0.5 秒，`seeked` 和 `currentTime` 可能已经确认目标，而实际图像仍停在初始红色帧。
 
