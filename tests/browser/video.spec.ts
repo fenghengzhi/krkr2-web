@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { test, expect } from '../helpers/video-presentation-browser.ts'
+import { test, expect, observeVideoFrames } from '../helpers/video-presentation-browser.ts'
 import { readFileSync } from 'node:fs'
 import { evaluate } from '../helpers/browser-expression.ts'
 async function waitForPlayback(page: Page, marker: string): Promise<void> {
@@ -145,6 +145,7 @@ for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: overlay geometry, mixer alpha, segment loops and movie audio`, async ({
     page,
   }) => {
+    await observeVideoFrames(page)
     await page.goto(`/?backend=${backend}`)
     test.skip(
       backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)),
@@ -179,6 +180,17 @@ movie.audioVolume=50000;movie.audioBalance=-100000;Debug.message("overlay-ready=
       canvas = await page.locator('canvas').boundingBox()
     expect(bounds!.width / canvas!.width).toBeCloseTo(0.4, 2)
     expect((bounds!.x - canvas!.x) / canvas!.width).toBeCloseTo(0.125, 2)
+    await expect(video).toHaveAttribute('data-presented-time', '0.5')
+    const presentation = await video.evaluate((element) => {
+      const video = element as HTMLVideoElement
+      return {
+        mediaTime: Number(video.dataset.presentedTime),
+        presentedFrames: Number(video.dataset.presentedFrames),
+        position: video.currentTime,
+        seeking: video.seeking,
+        paused: video.paused,
+      }
+    })
     const png = await video.screenshot()
     const pixel = await page.evaluate(
       async (url) => {
@@ -196,6 +208,10 @@ movie.audioVolume=50000;movie.audioBalance=-100000;Debug.message("overlay-ready=
     expect(pixel[0]).toBeGreaterThan(100)
     expect(pixel[1]).toBeGreaterThan(100)
     expect(pixel[2]).toBeLessThan(30)
+    await test.info().attach('overlay-frame', {
+      body: JSON.stringify({ ...presentation, pixel }),
+      contentType: 'application/json',
+    })
     await evaluate(page, '(function(){window.setZoom(2,1);return window.zoomNumer;})()', '2')
     expect(
       (await video.boundingBox())!.width / (await page.locator('canvas').boundingBox())!.width,

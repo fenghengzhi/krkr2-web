@@ -208,7 +208,8 @@ for (const line of [
   assert(nodeLog.includes(line), line)
 const suites = [],
   contexts = [],
-  mediaClocks = []
+  mediaClocks = [],
+  overlayFrames = []
 for (const browser of browsers)
   for (const suite of ['browser', 'library', 'pwa']) {
     const root = `${base.root}/artifacts/browser-results-${browser}-${suite}`
@@ -227,6 +228,21 @@ for (const browser of browsers)
           : 19
     const cases = playwright(report, count)
     assert(cases.every((row) => row.project === browser))
+    if (compilerPhase && suite === 'browser') {
+      const overlays = cases.filter((row) => row.title.includes('overlay geometry, mixer alpha'))
+      assert.equal(overlays.length, 2)
+      for (const row of overlays) {
+        const attachment = row.result.attachments.find((item) => item.name === 'overlay-frame')
+        assert(attachment?.body)
+        const observed = JSON.parse(Buffer.from(attachment.body, 'base64').toString('utf8'))
+        assert.equal(observed.mediaTime, 0.5)
+        assert.equal(observed.seeking, false)
+        assert.equal(observed.paused, true)
+        assert(observed.presentedFrames > 0 && Math.abs(observed.position - 0.5) < 0.001)
+        assert(observed.pixel[0] > 100 && observed.pixel[1] > 100 && observed.pixel[2] < 30)
+        overlayFrames.push({ browser, title: row.title, ...observed })
+      }
+    }
     checkGraphics(await json(root + '/out/ci/capabilities.json'), browser)
     assert.deepEqual(await json(root + '/out/ci/build-info.json'), buildInfo)
     suites.push({ browser, suite, ...report.stats, workers: report.config.workers })
@@ -486,6 +502,7 @@ const matrix = {
   repeatedIntervals,
   persistentContexts: contexts,
   mediaClocks,
+  overlayFrames,
   runtime,
   external,
   fixtureManifest,
@@ -504,6 +521,16 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(compilerPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34827988522',
+            reason:
+              'All compiler and shutdown regressions passed. One Chromium Asyncify overlay screenshot still showed the initial red frame after the script seek acknowledgement; the original pixel assertion failed. Forty separately instrumented original cases passed without reproducing it and recorded distinct seeked/presentation events. The test now requires the target native frame callback before taking the same screenshot; browser-internal cause remains unconfirmed. Original logs and trace remain archived.',
+            diagnostic: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34828858754',
+          },
+        ]
+      : []),
     ...(compilerPhase
       ? [
           {
@@ -586,6 +613,11 @@ const matrix = {
       : []),
     'Native error UI policy, remaining exception and finalizer paths, TJS bridge frames in other TVP methods',
     'Historical WebKit paused-video position discontinuity remains unrootcaused',
+    ...(compilerPhase
+      ? [
+          'Historical Chromium overlay initial-frame screenshot cause remains unconfirmed; explicit native presentation readiness now precedes pixel assertions',
+        ]
+      : []),
     'Historical one-shot committed-input failure has no proven product root cause; acknowledgement-based checks remain',
     'Protocol 8 to 9 historical same-kernel probe was not rerun in this phase',
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',

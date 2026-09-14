@@ -1,4 +1,24 @@
-import { test as base, expect } from '@playwright/test'
+import { test as base, expect, type Page } from '@playwright/test'
+
+/** Observe the frame submitted for presentation, separately from seek completion. */
+export async function observeVideoFrames(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    document.addEventListener(
+      'loadedmetadata',
+      (event) => {
+        if (!(event.target instanceof HTMLVideoElement)) return
+        const video = event.target
+        const frame: VideoFrameRequestCallback = (_now, metadata) => {
+          video.dataset.presentedTime = String(metadata.mediaTime)
+          video.dataset.presentedFrames = String(metadata.presentedFrames)
+          if (video.isConnected) video.requestVideoFrameCallback(frame)
+        }
+        video.requestVideoFrameCallback(frame)
+      },
+      true,
+    )
+  })
+}
 
 type ProbeWindow = Window & { videoPresentation?: unknown[] }
 export const test = base.extend<{ presentation: void }>({
