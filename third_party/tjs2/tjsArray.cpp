@@ -1412,6 +1412,9 @@ void tTJSArrayObject::Clear(tTJSArrayNI *ni) {
     // clear members
 
     std::vector<iTJSDispatch2 *> vector;
+    const auto objects = std::count_if(ni->Items.begin(), ni->Items.end(),
+        [](const tTJSVariant& value) { return value.Type() == tvtObject; });
+    vector.reserve(static_cast<std::size_t>(objects) * 2);
     try {
         tjs_uint i;
         for(i = 0; i < ni->Items.size(); i++) {
@@ -1428,19 +1431,15 @@ void tTJSArrayObject::Clear(tTJSArrayNI *ni) {
         }
         ni->Items.clear();
     } catch(...) {
-        std::vector<iTJSDispatch2 *>::iterator i;
-        for(i = vector.begin(); i != vector.end(); i++) {
-            (*i)->Release();
-        }
-
-        throw;
+        auto primary = std::current_exception();
+        krkr::CleanupErrors secondary;
+        secondary.suppress();
+        try { krkr::releaseAll(vector.data(), vector.size()); } catch(...) {}
+        std::rethrow_exception(primary);
     }
 
     // release all objects
-    std::vector<iTJSDispatch2 *>::iterator i;
-    for(i = vector.begin(); i != vector.end(); i++) {
-        (*i)->Release();
-    }
+    krkr::releaseAll(vector.data(), vector.size());
 }
 
 //---------------------------------------------------------------------------
@@ -1837,13 +1836,11 @@ iTJSDispatch2 *TJSCreateArrayObject(iTJSDispatch2 **classout) {
         ~tHolder() { Obj->Release(); }
     } static arrayclass;
 
-    if(classout)
-        *classout = arrayclass.Obj, arrayclass.Obj->AddRef();
-
-    tTJSArrayObject *arrayobj;
-    (arrayclass.Obj)
-        ->CreateNew(0, nullptr, nullptr, (iTJSDispatch2 **)&arrayobj, 0,
+    iTJSDispatch2 *arrayobj = nullptr;
+    const auto status = arrayclass.Obj->CreateNew(0, nullptr, nullptr, &arrayobj, 0,
                     nullptr, arrayclass.Obj);
+    if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status);
+    if(classout) { *classout = arrayclass.Obj; arrayclass.Obj->AddRef(); }
     return arrayobj;
 }
 //---------------------------------------------------------------------------

@@ -35,7 +35,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/parser/tjsDateWordMap.inc
   WORKING_DIRECTORY "${TJS_ROOT}/script"
   DEPENDS "${TJS_ROOT}/script/create_world_map.py" VERBATIM)
 file(GLOB TJS_SOURCES CONFIGURE_DEPENDS "${TJS_ROOT}/*.cpp")
-add_executable(tjs ${TJS_SOURCES} ${PARSERS} "${CMAKE_CURRENT_BINARY_DIR}/parser/tjsDateWordMap.inc" tjs2/bridge.cpp tjs2/scripts.cpp tjs2/bytecode.cpp tjs2/execution.cpp)
+add_executable(tjs ${TJS_SOURCES} ${PARSERS} "${CMAKE_CURRENT_BINARY_DIR}/parser/tjsDateWordMap.inc" tjs2/bridge.cpp tjs2/scripts.cpp tjs2/bytecode.cpp tjs2/execution.cpp tjs2/lifetime.cpp)
 option(KRKR_TEST_ALLOCATION_FAILURES "Build a non-release allocator fault diagnostic" OFF)
 if(KRKR_TEST_ALLOCATION_FAILURES)
   target_sources(tjs PRIVATE tjs2/diagnostics/allocation-faults.cpp)

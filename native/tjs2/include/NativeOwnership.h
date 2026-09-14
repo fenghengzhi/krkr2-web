@@ -3,10 +3,14 @@
 #include <cstdint>
 #include "tjsConfig.h"
 #include "tjsError.h"
+#include "Cleanup.h"
 
 namespace krkr {
 struct ReleaseNative {
-    template<class T> void operator()(T* value) const { if(value) value->Release(); }
+    template<class T> void operator()(T* value) const noexcept {
+        try { if(value) value->Release(); }
+        catch(...) { deferCleanupError(std::current_exception()); }
+    }
 };
 template<class T> using NativeOwner = std::unique_ptr<T, ReleaseNative>;
 struct FreeTjs {

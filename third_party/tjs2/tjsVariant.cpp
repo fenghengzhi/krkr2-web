@@ -375,7 +375,10 @@ namespace TJS {
     }
 
     //---------------------------------------------------------------------------
-    tTJSVariant::~tTJSVariant() { Clear(); }
+    tTJSVariant::~tTJSVariant() {
+        try { Clear(); }
+        catch(...) { krkr::deferCleanupError(std::current_exception()); }
+    }
 
     //---------------------------------------------------------------------------
     void tTJSVariant::Clear() {
@@ -383,10 +386,7 @@ namespace TJS {
         vt = tvtVoid;
         switch(o_vt) {
             case tvtObject:
-                if(Object.Object)
-                    Object.Object->Release();
-                if(Object.ObjThis)
-                    Object.ObjThis->Release();
+                ReleaseObject();
                 break;
             case tvtString:
                 if(String)

@@ -800,6 +800,7 @@ namespace TJS {
     //---------------------------------------------------------------------------
     void tTJSInterCodeContext::ExecuteAsFunction(iTJSDispatch2 *objthis,
         tTJSVariant **args, tjs_int numargs, tTJSVariant *result, tjs_int start_ip) {
+        krkr::CleanupErrors cleanup;
         krkr::ExecutionFrame execution(0);
         if(MaxVariableCount < 0 || MaxFrameCount < 0 || VariableReserveCount < 2 || numargs < 0)
             ThrowInvalidVMCode();
@@ -854,7 +855,8 @@ namespace TJS {
         try { TJSVariantArrayStack->Deallocate(num_alloc, regs); }
         catch(...) { if(!failure) failure = std::current_exception(); }
         if(traced) TJSStackTracerPop();
-        if(failure) std::rethrow_exception(failure);
+        if(failure) { cleanup.suppress(); std::rethrow_exception(failure); }
+        cleanup.rethrow();
     }
 
     //---------------------------------------------------------------------------
@@ -3038,7 +3040,9 @@ namespace TJS {
                 ExecuteAsFunction(dsp, nullptr, 0, nullptr, 0);
                 FuncCall(0, Name, nullptr, nullptr, numparams, param, dsp);
             } catch(...) {
-                dsp->Release();
+                krkr::CleanupErrors secondary;
+                secondary.suppress();
+                try { dsp->Release(); } catch(...) {}
                 throw;
             }
 

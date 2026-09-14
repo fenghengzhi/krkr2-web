@@ -243,23 +243,7 @@ namespace TJS {
     }
 
     //---------------------------------------------------------------------------
-    tTJSNativeClass::~tTJSNativeClass() {
-        // A derived native-class constructor may throw after registering some
-        // C++ methods. Normal Finalize already cleared these; constructor
-        // rollback must release them without allocating another reference list.
-        for(tjs_int i = 0; i < HashSize; ++i) {
-            auto* child = Symbols[i].Next;
-            Symbols[i].Next = nullptr;
-            if(Symbols[i].SymFlags & TJS_SYMBOL_USING) Symbols[i].PostClear();
-            while(child) {
-                auto* next = child->Next;
-                if(child->SymFlags & TJS_SYMBOL_USING) child->Destory();
-                delete child;
-                child = next;
-            }
-        }
-        Count = 0;
-    }
+    tTJSNativeClass::~tTJSNativeClass() {}
 
     //---------------------------------------------------------------------------
     void tTJSNativeClass::RegisterNCM(const tjs_char *name, iTJSDispatch2 *dsp,
@@ -336,15 +320,19 @@ namespace TJS {
         }
 
         tTJSVariant name(ClassName);
-        objthis->ClassInstanceInfo(TJS_CII_ADD, 0,
-                                   &name); // add class name
+        auto status = objthis->ClassInstanceInfo(TJS_CII_ADD, 0, &name);
+        if(TJS_FAILED(status)) return status;
 
         // create base native object
         iTJSNativeInstance *nativeptr = CreateNativeInstance();
 
         // register native instance information to the object;
         // even if "nativeptr" is nullptr
-        objthis->NativeInstanceSupport(TJS_NIS_REGISTER, _ClassID, &nativeptr);
+        status = objthis->NativeInstanceSupport(TJS_NIS_REGISTER, _ClassID, &nativeptr);
+        if(TJS_FAILED(status)) {
+            if(nativeptr) nativeptr->Destruct();
+            return status;
+        }
 
         // register members to "objthis"
 
@@ -368,13 +356,15 @@ namespace TJS {
                             val.ChangeClosureObjThis(Dest);
                     }
 
-                    if(Dest->PropSetByVS(TJS_MEMBERENSURE | TJS_IGNOREPROP |
+                    auto status = Dest->PropSetByVS(TJS_MEMBERENSURE | TJS_IGNOREPROP |
                                              flags,
                                          param[0]->AsStringNoAddRef(), &val,
-                                         Dest) == TJS_E_NOTIMPL)
-                        Dest->PropSet(TJS_MEMBERENSURE | TJS_IGNOREPROP | flags,
+                                         Dest);
+                    if(status == TJS_E_NOTIMPL)
+                        status = Dest->PropSet(TJS_MEMBERENSURE | TJS_IGNOREPROP | flags,
                                       param[0]->GetString(), nullptr, &val,
                                       Dest);
+                    if(TJS_FAILED(status)) return status;
                 }
                 if(result)
                     *result = (tjs_int)(1); // returns true
@@ -387,9 +377,7 @@ namespace TJS {
 
         // enumerate members
         tTJSVariantClosure clo(&callback, (iTJSDispatch2 *)nullptr);
-        EnumMembers(TJS_IGNOREPROP, &clo, this);
-
-        return TJS_S_OK;
+        return EnumMembers(TJS_IGNOREPROP, &clo, this);
     }
 
     //---------------------------------------------------------------------------
@@ -399,20 +387,22 @@ namespace TJS {
                                          iTJSDispatch2 **result,
                                          tjs_int numparams, tTJSVariant **param,
                                          iTJSDispatch2 *objthis) {
-        // CreateNew
+        if(!result) return TJS_E_FAIL;
+        *result = nullptr;
+        krkr::CleanupErrors cleanup;
+        krkr::NativeOwner<iTJSDispatch2> superOwner;
+        krkr::NativeOwner<iTJSDispatch2> owner;
+        // Retain each unpublished instance until every stage succeeds.
         iTJSDispatch2 *superinst = nullptr;
-        if(SuperClass != nullptr && membername == nullptr) {
-            tjs_error hr = SuperClass->CreateNew(
-                flag, membername, hint, &superinst, numparams, param, objthis);
-            if(TJS_FAILED(hr)) {
-                superinst = nullptr;
-            }
-        }
-
-        iTJSDispatch2 *dsp = CreateBaseTJSObject();
-
         tjs_error hr;
         try {
+            if(SuperClass != nullptr && membername == nullptr) {
+                hr = SuperClass->CreateNew(flag, membername, hint, &superinst, numparams, param, objthis);
+                superOwner.reset(superinst);
+                if(TJS_FAILED(hr)) { cleanup.suppress(); return hr; }
+            }
+            owner.reset(CreateBaseTJSObject());
+            auto* dsp = owner.get();
             // set object type for debugging
             if(TJSObjectHashMapEnabled())
                 TJSObjectHashSetType(dsp,
@@ -422,13 +412,13 @@ namespace TJS {
             hr = FuncCall(0, nullptr, nullptr, nullptr, 0, nullptr,
                           dsp); // add member to dsp
 
-            if(TJS_FAILED(hr))
-                return hr;
+            if(TJS_FAILED(hr)) { cleanup.suppress(); return hr; }
 
             if(superinst != nullptr) {
                 tTJSVariant param(superinst, superinst);
-                dsp->ClassInstanceInfo(TJS_CII_SET_SUPRECLASS, 0, &param);
-                superinst->Release();
+                hr = dsp->ClassInstanceInfo(TJS_CII_SET_SUPRECLASS, 0, &param);
+                if(TJS_FAILED(hr)) { cleanup.suppress(); return hr; }
+                superOwner.reset();
                 superinst = nullptr;
             }
 
@@ -439,17 +429,14 @@ namespace TJS {
                 hr = TJS_S_OK;
             // missing constructor is OK ( is this ugly ? )
         } catch(...) {
-            dsp->Release();
-            if(superinst)
-                superinst->Release();
+            cleanup.suppress();
             throw;
         }
 
         if(TJS_SUCCEEDED(hr)) {
-            *result = dsp;
-        } else if(superinst) {
-            superinst->Release();
-        }
+            cleanup.rethrow();
+            *result = owner.release();
+        } else cleanup.suppress();
         return hr;
     }
 

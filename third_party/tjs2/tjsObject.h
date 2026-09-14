@@ -90,6 +90,7 @@ namespace TJS {
         // destruction
     private:
         tjs_uint RefCount;
+        tTJSDispatch* NextDestruction = nullptr;
 
     public:
         tTJSDispatch();

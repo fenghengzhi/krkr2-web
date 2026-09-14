@@ -21,6 +21,18 @@
 
 namespace TJS {
 
+    // Iterative overflow queue for reference-count destruction. It owns the
+    // transferred last reference; no allocation is needed while reclaiming.
+    static unsigned DestructionDepth = 0, PendingDestructions = 0;
+    static unsigned PeakDestructionDepth = 0, QueuedDestructions = 0;
+    static bool DrainingDestructions = false;
+    static tTJSDispatch* DestructionHead = nullptr;
+    static tTJSDispatch* DestructionTail = nullptr;
+    unsigned TJSGetPendingDestructions() { return PendingDestructions; }
+    unsigned TJSGetDestructionDepth() { return DestructionDepth; }
+    unsigned TJSGetPeakDestructionDepth() { return PeakDestructionDepth; }
+    unsigned TJSGetQueuedDestructions() { return QueuedDestructions; }
+
     //---------------------------------------------------------------------------
     // utility functions
     //---------------------------------------------------------------------------
@@ -116,22 +128,47 @@ namespace TJS {
 #ifdef TVP_IN_PLUGIN_STUB // TVP plug-in support
         TVPPluginGlobalRefCount--;
 #endif
-        if(RefCount ==
-           1) // avoid to call "BeforeDestruction" with RefCount == 0
-        {
-            // object destruction
-            if(!BeforeDestructionCalled) {
-                BeforeDestructionCalled = true;
-                BeforeDestruction();
-            }
-
-            if(RefCount == 1) // really ready to destruct ?
-            {
-                delete this;
-                return 0;
-            }
+        if(RefCount != 1) return --RefCount;
+        if(DestructionDepth >= 32) {
+            if(DestructionTail) DestructionTail->NextDestruction = this;
+            else DestructionHead = this;
+            DestructionTail = this;
+            ++PendingDestructions;
+            ++QueuedDestructions;
+            return 0;
         }
-        return --RefCount;
+        krkr::CleanupErrors cleanup;
+        std::exception_ptr primary;
+        ++DestructionDepth;
+        PeakDestructionDepth = std::max(PeakDestructionDepth, DestructionDepth);
+        if(!BeforeDestructionCalled) {
+            BeforeDestructionCalled = true;
+            try { BeforeDestruction(); }
+            catch(...) { primary = std::current_exception(); }
+        }
+        // Release always consumes its reference, including when a finalizer
+        // throws. A finalizer can resurrect the object by adding a new owner.
+        const auto remaining = RefCount - 1;
+        if(primary) cleanup.suppress();
+        if(!remaining) delete this;
+        else RefCount = remaining;
+        --DestructionDepth;
+        if(!DestructionDepth && !DrainingDestructions) {
+            DrainingDestructions = true;
+            while(DestructionHead) {
+                auto* pending = DestructionHead;
+                DestructionHead = pending->NextDestruction;
+                pending->NextDestruction = nullptr;
+                if(!DestructionHead) DestructionTail = nullptr;
+                --PendingDestructions;
+                try { pending->Release(); }
+                catch(...) { if(!primary) primary = std::current_exception(); }
+            }
+            DrainingDestructions = false;
+        }
+        if(primary) { cleanup.suppress(); std::rethrow_exception(primary); }
+        cleanup.rethrow();
+        return remaining;
     }
 
     //---------------------------------------------------------------------------
@@ -363,13 +400,39 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     tTJSCustomObject::~tTJSCustomObject() {
+        // A throwing finalizer can leave members behind. At actual destruction
+        // the object cannot accept new members, and every stored reference must
+        // be released even if another object's finalizer also fails.
+        IsInvalidated = true;
+        for(tjs_int i = 0; i < HashSize; ++i) {
+            auto clear = [this](tTJSSymbolData* data) {
+                if(!(data->SymFlags & TJS_SYMBOL_USING)) return;
+                auto& value = GetValue(data);
+                CheckObjectClosureRemove(value);
+                try { value.Clear(); }
+                catch(...) { krkr::deferCleanupError(std::current_exception()); }
+                data->PostClear();
+            };
+            auto* child = Symbols[i].Next;
+            Symbols[i].Next = nullptr;
+            clear(Symbols + i);
+            while(child) {
+                auto* next = child->Next;
+                clear(child);
+                delete child;
+                child = next;
+            }
+        }
+        Count = 0;
         // The native-instance container is a fixed four-slot array.  Native
         // instances are destructed in the reverse of registration/search
         // order (slot 3 down to slot 0); duplicate class IDs are possible.
         for(tjs_int i = TJS_MAX_NATIVE_CLASS - 1; i >= 0; i--) {
             if(ClassIDs[i] != -1) {
-                if(ClassInstances[i])
-                    ClassInstances[i]->Destruct();
+                if(ClassInstances[i]) {
+                    try { ClassInstances[i]->Destruct(); }
+                    catch(...) { krkr::deferCleanupError(std::current_exception()); }
+                }
             }
         }
         delete[] Symbols;
@@ -822,6 +885,8 @@ namespace TJS {
             return _DeleteAllMembers();
 
         std::vector<iTJSDispatch2 *> vector;
+        // Reserve before taking any additional references or modifying members.
+        vector.reserve(static_cast<std::size_t>(Count) * 2);
         try {
             tTJSSymbolData *lv1, *lv1lim;
 
@@ -893,19 +958,15 @@ namespace TJS {
 
             Count = 0;
         } catch(...) {
-            std::vector<iTJSDispatch2 *>::iterator i;
-            for(i = vector.begin(); i != vector.end(); i++) {
-                (*i)->Release();
-            }
-
-            throw;
+            auto primary = std::current_exception();
+            krkr::CleanupErrors secondary;
+            secondary.suppress();
+            try { krkr::releaseAll(vector.data(), vector.size()); } catch(...) {}
+            std::rethrow_exception(primary);
         }
 
         // release all objects
-        std::vector<iTJSDispatch2 *>::iterator i;
-        for(i = vector.begin(); i != vector.end(); i++) {
-            (*i)->Release();
-        }
+        krkr::releaseAll(vector.data(), vector.size());
     }
 
     //---------------------------------------------------------------------------
@@ -984,16 +1045,15 @@ namespace TJS {
 
             Count = 0;
         } catch(...) {
-            for(int i = 0; i < num_dsps; i++) {
-                dsps[i]->Release();
-            }
-            throw;
+            auto primary = std::current_exception();
+            krkr::CleanupErrors secondary;
+            secondary.suppress();
+            try { krkr::releaseAll(dsps, num_dsps); } catch(...) {}
+            std::rethrow_exception(primary);
         }
 
         // release all objects
-        for(int i = 0; i < num_dsps; i++) {
-            dsps[i]->Release();
-        }
+        krkr::releaseAll(dsps, num_dsps);
     }
 
     //---------------------------------------------------------------------------

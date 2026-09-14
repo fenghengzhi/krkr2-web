@@ -19,6 +19,12 @@
 #include "ExecutionBudget.h"
 
 using namespace TJS;
+namespace TJS {
+unsigned TJSGetPendingDestructions();
+unsigned TJSGetDestructionDepth();
+unsigned TJSGetPeakDestructionDepth();
+unsigned TJSGetQueuedDestructions();
+}
 #define API extern "C" EMSCRIPTEN_KEEPALIVE
 
 namespace {
@@ -41,6 +47,8 @@ struct Vm {
     std::set<unsigned> released;
     unsigned nextHandle = 1;
     ~Vm() {
+        krkr::CleanupErrors cleanup;
+        cleanup.suppress();
         // A stopped session must not start asynchronous host work while freeing
         // its memory. Explicit TJS invalidate still runs normally during execution.
         shuttingDown = true;
@@ -370,22 +378,28 @@ public:
 };
 
 template<typename Fn> Reply* capture(Fn fn) {
+    krkr::CleanupErrors cleanup;
     auto reply = std::make_unique<Reply>();
-    try { fn(reply->value); }
-    catch(const krkr::ExecutionCancelled&) {
+    auto errorReply = [&] {
+        cleanup.suppress();
         reply->kind = 1;
+        try { reply->value.Clear(); } catch(...) {}
+    };
+    try { cleanup.rethrow(); fn(reply->value); cleanup.rethrow(); }
+    catch(const krkr::ExecutionCancelled&) {
+        errorReply();
         reply->value = u"Execution cancelled";
     } catch(const eTJSScriptError& error) {
-        reply->kind = 1;
+        errorReply();
         reply->value = error.GetMessage();
         reply->name = error.GetBlockName() ? error.GetBlockName() : u"";
         reply->line = error.GetSourceLine() + 1;
         reply->trace = error.GetTrace();
     } catch(const eTJS& error) {
-        reply->kind = 1;
+        errorReply();
         reply->value = error.GetMessage();
     } catch(const std::exception& error) {
-        reply->kind = 1;
+        errorReply();
         reply->value = ttstr(error.what());
     }
     return reply.release();
@@ -396,6 +410,7 @@ extern "C" void krkr_vm_check_cancellation() {
     if(!shuttingDown && cancellation_requested()) throw krkr::ExecutionCancelled{};
 }
 extern "C" void krkr_vm_checkpoint() {
+    krkr::throwCleanupError();
     if((++instructionCount & 2047) != 0) return;
     if(shuttingDown) return;
     if(emscripten_get_now() < deadline) return;
@@ -412,6 +427,15 @@ extern "C" void krkr_compiler_leave(int previous) { compilerPhase = previous; }
 extern "C" int krkr_diagnostic_phase() { return compilerPhase; }
 API unsigned krkr_native_string_cells() { return TJSGetStringHeapAllocationCount(); }
 API unsigned krkr_native_heap_usage() { return mallinfo().uordblks; }
+API unsigned krkr_native_lifetime_stat(unsigned field) {
+    switch(field) {
+        case 0: return TJSGetPendingDestructions();
+        case 1: return TJSGetDestructionDepth();
+        case 2: return TJSGetPeakDestructionDepth();
+        case 3: return TJSGetQueuedDestructions();
+        default: return 0;
+    }
+}
 API unsigned krkr_vm_script_blocks(Vm* vm) { return vm->engine->GetScriptBlockCount(); }
 API unsigned krkr_vm_script_contexts(Vm* vm) { return vm->engine->GetScriptContextCount(); }
 extern "C" void krkr_compiler_checkpoint() {

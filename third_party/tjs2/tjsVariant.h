@@ -14,6 +14,7 @@
 #include "tjsInterface.h"
 #include "tjsVariantString.h"
 #include "tjsString.h"
+#include "Cleanup.h"
 
 namespace TJS {
     TJS_EXP_FUNC_DEF(void, TJSThrowNullAccess, ());
@@ -210,10 +211,7 @@ namespace TJS {
         }
 
         void Release() {
-            if(Object)
-                Object->Release();
-            if(ObjThis)
-                ObjThis->Release();
+            krkr::releaseClosure(Object, ObjThis);
         }
 
         tjs_error FuncCall(tjs_uint32 flag, const tjs_char *membername,
@@ -488,10 +486,8 @@ namespace TJS {
         void ReleaseObject() {
             iTJSDispatch2 *object = Object.Object;
             iTJSDispatch2 *objthis = Object.ObjThis;
-            if(object)
-                Object.Object = nullptr, object->Release();
-            if(objthis)
-                Object.ObjThis = nullptr, objthis->Release();
+            Object.Object = Object.ObjThis = nullptr;
+            krkr::releaseClosure(object, objthis);
             // does not release the string nor octet
         }
 
