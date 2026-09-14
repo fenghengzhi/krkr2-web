@@ -285,15 +285,17 @@ for (const browser of browsers)
     const report = await json(root + '/out/ci/results.json')
     const count =
       suite === 'browser'
-        ? binaryPhase
-          ? 172
-          : compilerPhase
-            ? 166
-            : scriptsPhase
-              ? 164
-              : tracePhase
-                ? 162
-                : 160
+        ? soundPhase
+          ? 176
+          : binaryPhase
+            ? 172
+            : compilerPhase
+              ? 166
+              : scriptsPhase
+                ? 164
+                : tracePhase
+                  ? 162
+                  : 160
         : suite === 'pwa' && browser !== 'webkit'
           ? 20
           : 19
@@ -1705,6 +1707,11 @@ const matrix = {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34894629812',
             reason:
               'Node passed 710/710 and all 651 browser tests passed, but only four of six direct runtime combinations passed. Chromium/JSPI and Firefox/JSPI completed the existing argument workload without entering its qualifying phase-10 suspension hook. The failure did not record physical copy duration. The fixture now advances its own temporary deadline clock until the real native argument buffer is observed, retaining the real 25 ms pause, cancellation, context and heap cleanup assertions and restoring the original clock in finally. This verifies controlled suspension without claiming a physical worst-case latency. The complete failed run and the earlier standalone passing run remain archived; no retry is counted as a pass.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34897104201',
+            reason:
+              'The first sound evidence report stopped because the per-browser suite expectation still used the previous 172 cases, although its total expected count had been updated to 651. Each browser now has 176 regular cases after adding four audio lifetime scenarios. The report expectation was corrected; the underlying complete regression remains 710 Node, 651 browser and six direct passes. This failed report and its downloaded evidence remain archived.',
           },
         ]
       : []),
