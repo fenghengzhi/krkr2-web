@@ -1,5 +1,9 @@
 # 038 — 对象终结、主异常与深层释放
 
+[最终报告 34868705139](https://github.com/fenghengzhi/krkr2-web/actions/runs/34868705139) 已在 GitHub 托管 runner 通过，绑定 530 份证据。标准矩阵 `out/verification/object-finalization-matrix.json` 的 SHA-256 为 `0387418a08e9a011d261937358510575a31f10061efaaff1e67c7ae910217d51`；TJS 原生源码 SHA-256 为 `6ec6de8e64ae16f23bc11008f3e159645a809ea9e795461879ab84537d85fbad`。正式构建标识为 `9e139eb5f451037c20f943e5d39294b6ab7d2c273e56963b0a5aae691cebb9cc`，发布树 32 文件的 SHA-256 为 `fee33376164f3aba10d731c4941800f93fda413b4ced8f8f48c1465c31cc89bd`。本轮可信冻结 21,055.1 ms，所选用例无跳过、flaky 或重试。
+
+本地 `.generated` 与 `dist` 直接恢复自 Tests `34866740979` 的精确构建，未本地执行；上一阶段目录移动至 `out/verification/object-finalization/prior-local-artifacts/`。各 run 的完整产物与元数据保存在 `out/verification/github-actions/<run>/`，报告没有把未运行的额外冻结/冷重启或后续宿主所有权工作计为已通过。
+
 兼容目标是 TJS2 的引用计数和显式失效语义。[原引擎调试文档](https://krkrz.github.io/krkr2doc/kr2doc/contents/Debug.html) 明确说明循环引用不会自动检测，应用可以用 `invalidate` 断开引用环；[类文档](https://krkrz.github.io/krkr2doc/tjs2doc/contents/class.html) 区分失效与删除，并未规定隐式终结的精确时间。此前进度文档把任意对象环的自动回收列为必需能力，这超出了参考行为；应验证原有引用/断环行为以及 Web 宿主资源的实际所有权，不能靠更换垃圾回收语义掩盖泄漏。
 
 首轮 [诊断 34861822171](https://github.com/fenghengzhi/krkr2-web/actions/runs/34861822171) 复用已验证的执行预算构建，在独立子进程中检查源码/字节码、调试开关和两种后端。每个后端仅 4/32 通过：普通作用域退出正常；抛错终结器保留脚本上下文，闭包双引用释放在第一处错误后中断并触发 WASM abort，数组清理遗漏后续对象，构造错误被终结器异常覆盖。字典用例还误用了不存在的实例 `clear` 方法，修正为绑定到实例的 `Dictionary.clear`，并按字典缺失成员的 void 语义检查清空；该夹具错误与产品问题分别保留。

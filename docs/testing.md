@@ -6,6 +6,8 @@
 
 ## 已完成的云端回归
 
+[对象终结最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34868705139)已通过，绑定 530 份证据。矩阵 `out/verification/object-finalization-matrix.json` 的 SHA-256 为 `0387418a08e9a011d261937358510575a31f10061efaaff1e67c7ae910217d51`；本轮可信冻结为 21,055.1 ms。历史矩阵与失败记录继续保留。
+
 最新 [对象终结完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866740979) 通过 **466 项 Node、639 项浏览器及 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867143808) 另通过 **78 项**。对象终结专项包含三浏览器双后端 360 个场景组合、48 条暂停/取消路径，以及 [120 个隔离进程用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867147315)。[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866791836) 通过 20 次清理、1,063 次执行和 188 次字节码分配失败。TJS ABI 5 新增 `objectFinalization: 1`，字体 ABI 2、协议 9 不变。实现和原始失败见 [对象终结](decisions/038-object-finalization.md)。
 
 本轮历史失败 `34861822171`、`34863624702`、`34864904432`、`34865379657` 按 run ID 保存，编译失败与夹具错误不计为通过。完整回归含 516 常规、57 游戏库、59 PWA、7 原生生命周期；没有把历史额外冻结/冷重启计入本阶段。完整非插件兼容性仍未完成。
@@ -37,6 +39,8 @@
 本次报告与构建产物已下载归档到 `out/verification/github-actions/34809918318/`，摘要为 `summary.json`，SHA-256 为 `1421ee1c8d5ed83895a893cedbc7db62b274b04f92958606b6d9dc1bdaf6633e`。外部 KAG 与旧 ABI 专项由下述独立工作流验证。
 
 ## 作业与产物
+
+当前 `.generated` 和 `dist` 来自对象终结阶段 Tests `34866740979` 的精确产物。上一阶段本地产物保存在 `out/verification/object-finalization/prior-local-artifacts/`，没有在本地重新构建或执行测试。
 
 构建作业固定 Node.js 24.19.0 和 Emscripten 6.0.9，使用锁文件安装依赖，编译 Asyncify、JSPI 和 FreeType 内核，执行类型检查、生产构建和离线发布文件校验，再生成两个 PWA 更新样本。原生源码、第三方源码、构建脚本与工具链版本完全匹配时复用云端内核缓存，应用和 PWA 样本每次重新构建。缓存 key 和是否命中写入构建信息。生成目录、应用和 PWA 样本打包为 `test-build`，同次运行的所有测试作业共享这一份构建。
 
