@@ -18,75 +18,120 @@ export function createGameMenus(
     eventDisabled = false,
     dimensions = { width: 800, height: 600 }
   let overlay: HTMLDivElement | undefined
+  let popupPanel: HTMLElement | undefined
+  let popupId: number | undefined
   let modal = false
   const select = (id: number) => {
     if (modal || !running || document.hidden || (eventDisabled && !current.popup)) return
     for (const details of container.querySelectorAll('details')) details.open = false
     choose(id)
   }
-  const build = (items: MenuView[], enabled = true, popup = false): HTMLElement => {
+  // A snapshot can arrive while a menu is open or a pointer is held down.
+  // Keep each item's DOM node so updates preserve focus and pending clicks.
+  const groups = new WeakMap<HTMLElement, Map<number, HTMLElement>>()
+  const groupElement = () => {
     const group = document.createElement('div')
     group.className = 'game-menu-group'
+    return group
+  }
+  const text = (element: Element, value: string) => {
+    if (element.textContent !== value) element.textContent = value
+  }
+  const build = (group: HTMLElement, items: MenuView[], enabled = true, popup = false) => {
+    let nodes = groups.get(group)
+    if (!nodes) groups.set(group, (nodes = new Map()))
+    const visible = new Set<number>()
+    let index = 0
     for (const item of items) {
       if (!item.visible) continue
+      visible.add(item.id)
       const active = !modal && enabled && item.enabled && running && (popup || !eventDisabled)
-      if (item.caption === '-') {
-        group.append(document.createElement('hr'))
-        continue
-      }
-      if (item.children.length) {
-        const details = document.createElement('details'),
-          summary = document.createElement('summary')
-        summary.textContent = caption(item.caption)
-        summary.setAttribute('aria-disabled', String(!active))
-        if (!active) summary.addEventListener('click', (event) => event.preventDefault())
-        details.append(summary, build(item.children, active, popup))
-        group.append(details)
-      } else {
-        const button = document.createElement('button')
-        button.type = 'button'
-        button.disabled = !active
-        button.textContent = `${item.checked ? (item.radio ? '● ' : '✓ ') : ''}${caption(item.caption)}`
-        if (item.checked || item.radio) button.setAttribute('aria-pressed', String(item.checked))
-        const key = shortcut(item)
-        if (key) {
-          const hint = document.createElement('kbd')
-          hint.textContent = key
-          button.append(hint)
+      const kind = item.caption === '-' ? 'HR' : item.children.length ? 'DETAILS' : 'BUTTON'
+      let node = nodes.get(item.id)
+      if (node?.tagName !== kind) {
+        node?.remove()
+        node = document.createElement(kind.toLowerCase())
+        nodes.set(item.id, node)
+        if (kind === 'DETAILS') {
+          const summary = document.createElement('summary')
+          summary.addEventListener('click', (event) => {
+            if (summary.getAttribute('aria-disabled') === 'true') event.preventDefault()
+          })
+          node.append(summary, groupElement())
+        } else if (kind === 'BUTTON') {
+          ;(node as HTMLButtonElement).type = 'button'
+          node.append(document.createElement('span'), document.createElement('kbd'))
+          node.addEventListener('click', () => select(item.id))
         }
-        button.addEventListener('click', () => select(item.id))
-        group.append(button)
       }
+      if (kind === 'DETAILS') {
+        const details = node as HTMLDetailsElement,
+          summary = details.firstElementChild!
+        text(summary, caption(item.caption))
+        summary.setAttribute('aria-disabled', String(!active))
+        if (!active) details.open = false
+        build(details.lastElementChild as HTMLElement, item.children, active, popup)
+      } else if (kind === 'BUTTON') {
+        const button = node as HTMLButtonElement
+        button.disabled = !active
+        text(
+          button.firstElementChild!,
+          `${item.checked ? (item.radio ? '● ' : '✓ ') : ''}${caption(item.caption)}`,
+        )
+        if (item.checked || item.radio) button.setAttribute('aria-pressed', String(item.checked))
+        else button.removeAttribute('aria-pressed')
+        const key = shortcut(item)
+        const hint = button.lastElementChild as HTMLElement
+        hint.hidden = !key
+        text(hint, key)
+      }
+      if (group.children[index] !== node) group.insertBefore(node, group.children[index] ?? null)
+      index++
     }
-    return group
+    for (const [id, node] of nodes) {
+      if (visible.has(id)) continue
+      node.remove()
+      nodes.delete(id)
+    }
   }
   const find = (item: MenuView | undefined, id: number): MenuView | undefined =>
     item?.id === id ? item : item?.children.map((child) => find(child, id)).find(Boolean)
+  const bar = groupElement()
+  container.replaceChildren(bar)
   const render = () => {
-    container.replaceChildren()
     const visible = current.root?.visible && current.root.children.some((item) => item.visible)
     container.hidden = !visible
-    if (visible) container.append(build(current.root!.children, current.root!.enabled))
-    overlay?.remove()
-    overlay = undefined
+    build(bar, visible ? current.root!.children : [], current.root?.enabled)
     const popup = current.popup,
       menu = popup && find(current.root, popup.id)
     if (popup && menu) {
-      overlay = document.createElement('div')
-      overlay.className = 'game-menu-overlay'
-      overlay.addEventListener('click', (event) => {
-        if (event.target === overlay) dismiss()
-      })
-      const panel = build(menu.children, menu.enabled, true)
-      panel.classList.add('game-menu-popup')
+      const fresh = !overlay || popupId !== popup.id
+      if (fresh) {
+        overlay?.remove()
+        overlay = document.createElement('div')
+        overlay.className = 'game-menu-overlay'
+        overlay.addEventListener('click', (event) => {
+          if (event.target === overlay) dismiss()
+        })
+        popupId = popup.id
+        popupPanel = groupElement()
+        popupPanel.classList.add('game-menu-popup')
+        overlay.append(popupPanel)
+        document.body.append(overlay)
+      }
+      const panel = popupPanel!
+      build(panel, menu.children, menu.enabled, true)
       panel.setAttribute('aria-label', caption(menu.caption))
       const bounds = canvas()?.getBoundingClientRect() ?? container.getBoundingClientRect()
       panel.style.left = `${Math.min(innerWidth - 20, Math.max(0, bounds.left + (popup.x * bounds.width) / dimensions.width))}px`
       panel.style.top = `${Math.min(innerHeight - 20, Math.max(0, bounds.top + (popup.y * bounds.height) / dimensions.height))}px`
       panel.style.transform = `translate(${popup.flags & 8 ? '-100%' : popup.flags & 4 ? '-50%' : '0'},${popup.flags & 32 ? '-100%' : popup.flags & 16 ? '-50%' : '0'})`
-      overlay.append(panel)
-      document.body.append(overlay)
-      panel.querySelector('button')?.focus()
+      if (fresh) panel.querySelector('button:not(:disabled)')?.focus()
+    } else {
+      overlay?.remove()
+      overlay = undefined
+      popupPanel = undefined
+      popupId = undefined
     }
   }
   const keydown = (event: KeyboardEvent) => {
@@ -153,7 +198,7 @@ export function createGameMenus(
       running = active
       eventDisabled = disabled
       dimensions = { width, height }
-      if (changed) render()
+      if (changed || current.popup) render()
     },
   }
 }

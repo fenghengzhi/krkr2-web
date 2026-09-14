@@ -560,9 +560,23 @@ const matrix = {
     ...(binaryPhase
       ? [
           {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34836507523',
+            reason:
+              'All 384 Node cases and six direct runtimes passed; browser results were 626/627. WebKit Asyncify again retained the initial video frame after seek. Original failure logs, screenshot and trace are retained with the independent WebKit presentation diagnostic.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34836898714',
+            reason:
+              'Firefox JSPI original KAG menu validation timed out because a new menu snapshot replaced the DOM and closed the open Debug menu before the Controller click. Menu rendering now reconciles stable item IDs, and a held-pointer browser regression delivers a real TJS update between press and release. The failed compatibility trace remains archived.',
+          },
+        ]
+      : []),
+    ...(binaryPhase
+      ? [
+          {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34834878908',
             reason:
-              'Node passed 383/384 cases and all seven unchanged input cases completed with TAP records. One new source-string expectation conflated zero-character escape append with binary NUL termination: native source yields ab, while a binary embedded NUL terminates the string. The distinct rules are now asserted explicitly. The earlier input-process failure remains unexplained; superseded jobs are not counted as passes.',
+              'Node passed 383/384 cases and all seven unchanged input cases completed with TAP records. One new source-string expectation conflated zero-character escape append with binary NUL termination: native source yields ab, while a binary embedded NUL terminates the string. The distinct rules are now asserted explicitly. Browser results were 625/627: both WebKit overlay cases retained presented time 0 after seek and the failure screenshots showed the initial red frame. Original logs, screenshots and traces remain archived; a separate WebKit presentation diagnostic investigates this failure. The earlier input-process termination remains unexplained.',
           },
         ]
       : []),
