@@ -1,0 +1,436 @@
+// This report validates and archives existing hosted results; it runs on Actions.
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { resolve, relative } from 'node:path'
+import { verifyOfflineBuild } from '../../scripts/verify-offline-build.mjs'
+
+assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Run verification reports on GitHub Actions')
+const directory = 'out/verification/hosted-evidence'
+const browsers = ['chromium', 'firefox', 'webkit']
+const backends = ['asyncify', 'jspi']
+const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
+const hash = async (path) => digest(await readFile(path))
+const json = async (path) => JSON.parse(await readFile(path, 'utf8'))
+const command = (name, args) => execFileSync(name, args, { encoding: 'utf8' })
+const applicationPaths = [
+  'src',
+  'native',
+  'third_party',
+  'public',
+  'examples',
+  'scripts',
+  'package.json',
+  'package-lock.json',
+  'index.html',
+  'vite.config.ts',
+  'tsconfig*.json',
+]
+const regularTestPaths = [
+  'tests/conformance',
+  'tests/integration',
+  'tests/browser',
+  'tests/library-browser',
+  'tests/pwa-browser',
+  'tests/activity-native-browser',
+  'tests/helpers',
+  'tests/fixtures',
+  'playwright*.ts',
+  'tests/probes/vm-runtime-browser.ts',
+  'tests/probes/vm-runtime-entry.ts',
+  ':(exclude)tests/helpers/probe-browsers.ts',
+  ':(exclude)tests/fixtures/compatibility',
+]
+function unchanged(commit, paths) {
+  assert.match(commit, /^[a-f0-9]{40}$/)
+  execFileSync('git', ['diff', '--exit-code', commit, 'HEAD', '--', ...paths], { stdio: 'inherit' })
+}
+await mkdir(directory, { recursive: true })
+async function run(key, workflow, jobCount, downloadArgs) {
+  const id = process.env[key]
+  assert.match(id ?? '', /^\d+$/)
+  const info = JSON.parse(
+    command('gh', [
+      'run',
+      'view',
+      id,
+      '--json',
+      'databaseId,status,conclusion,headSha,jobs,url,workflowName,attempt',
+    ]),
+  )
+  assert.equal(info.status, 'completed')
+  assert.equal(info.conclusion, 'success')
+  assert.equal(info.workflowName, workflow)
+  assert.equal(info.jobs.length, jobCount)
+  for (const job of info.jobs) assert.equal(job.conclusion, 'success', job.name)
+  unchanged(info.headSha, applicationPaths)
+  const root = `${directory}/${id}`
+  await mkdir(root, { recursive: true })
+  await writeFile(root + '/run.json', JSON.stringify(info, null, 2) + '\n')
+  execFileSync('gh', ['run', 'download', id, ...downloadArgs, '--dir', root + '/artifacts'], {
+    stdio: 'inherit',
+  })
+  return { id, root, info }
+}
+const base = await run('KRKR_BUILD_RUN', 'Tests', 14, ['--pattern', '*-results*'])
+unchanged(base.info.headSha, regularTestPaths)
+const compatibility = await run('KRKR_COMPATIBILITY_RUN', 'KAG and release compatibility', 3, [
+  '--pattern',
+  'compatibility-*',
+])
+unchanged(compatibility.info.headSha, [
+  'tests/fixtures',
+  'tests/helpers',
+  'tests/probes/system-abi-pwa.ts',
+  'tests/probes/system-kag-matrix.mjs',
+  'tests/probes/kag-browser.ts',
+  'tests/probes/debug-kag.ts',
+  'tests/probes/debug-panels-kag.ts',
+  'tests/probes/prepare-compatibility.py',
+  '.github/workflows/compatibility.yml',
+])
+const freeze = await run('KRKR_FREEZE_RUN', 'Native lifecycle diagnostic', 1, [
+  '--name',
+  'native-diagnostic-results',
+])
+unchanged(freeze.info.headSha, [
+  'tests/activity-native-browser/freeze-deadlines.spec.ts',
+  'tests/helpers/native-activity-browser.ts',
+])
+const buildInfo = await json('out/ci/build-info.json')
+assert.equal(buildInfo.commit, base.info.headSha)
+assert.equal(buildInfo.runId, base.id)
+assert.equal(Number(buildInfo.attempt), base.info.attempt)
+const build = await verifyOfflineBuild('dist', '/')
+const wasm = await json('dist/wasm/manifest.json')
+const font = await json('dist/fonts/manifest.json')
+assert.equal(wasm.abi, 3)
+assert.equal(font.abi, 2)
+assert((await readFile('src/protocol/session.ts', 'utf8')).includes('PROTOCOL_VERSION = 9'))
+const indexSha256 = await hash('dist/index.html')
+const fixture = await json('out/ci/compatibility-fixtures.json')
+const fixtureManifest = await json('tests/fixtures/compatibility/manifest.json')
+
+async function files(root) {
+  return (await readdir(root, { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => resolve(entry.parentPath, entry.name))
+    .sort()
+}
+async function tree(root) {
+  const entries = []
+  for (const path of await files(root)) {
+    const bytes = await readFile(path)
+    entries.push([relative(resolve(root), path), bytes.length, digest(bytes)])
+  }
+  return {
+    files: entries.length,
+    bytes: entries.reduce((n, row) => n + row[1], 0),
+    sha256: digest(JSON.stringify(entries)),
+  }
+}
+function combinations(rows, expected, key) {
+  assert.equal(rows.length, expected.length)
+  assert.deepEqual(rows.map(key).sort(), [...expected].sort())
+}
+function checkGraphics(report, browser) {
+  assert.equal(report.browser, browser)
+  assert.deepEqual(report.graphics.pixel, [255, 0, 0, 255])
+  assert.equal(report.graphics.error, 0)
+  assert.equal(report.graphics.jspi, true)
+}
+function playwright(report, count) {
+  assert.deepEqual(
+    [report.stats.expected, report.stats.unexpected, report.stats.flaky, report.stats.skipped],
+    [count, 0, 0, 0],
+  )
+  assert.deepEqual(report.errors, [])
+  const cases = []
+  function visit(suite) {
+    for (const spec of suite.specs ?? [])
+      for (const test of spec.tests) {
+        assert.equal(spec.ok, true)
+        assert.equal(test.expectedStatus, 'passed')
+        assert.equal(test.status, 'expected')
+        assert.equal(test.results.length, 1, 'No retry can replace a failing result')
+        const result = test.results[0]
+        assert.equal(result.status, 'passed')
+        assert.equal(result.retry, 0)
+        assert.deepEqual(result.errors, [])
+        cases.push({ title: spec.title, project: test.projectName, result })
+      }
+    for (const child of suite.suites ?? []) visit(child)
+  }
+  report.suites.forEach(visit)
+  assert.equal(cases.length, count)
+  return cases
+}
+function frozenIntervals(cases, count) {
+  const intervals = []
+  for (const row of cases.filter((row) =>
+    row.title.includes('longer than media request deadlines'),
+  )) {
+    const attachment = row.result.attachments.find((a) => a.name === 'trusted-lifecycle')
+    assert(attachment?.body)
+    const events = JSON.parse(Buffer.from(attachment.body, 'base64').toString('utf8'))
+    const frozen = events.find((e) => e.event === 'freeze')
+    const resumed = events.find((e) => e.event === 'resume')
+    assert(frozen.trusted && resumed.trusted && resumed.time - frozen.time > 21000)
+    intervals.push({ milliseconds: resumed.time - frozen.time, events })
+  }
+  assert.equal(intervals.length, count)
+  return intervals
+}
+
+const nodeLog = await readFile(base.root + '/artifacts/node-results/node.log', 'utf8')
+for (const line of [
+  'ℹ tests 346\n',
+  'ℹ pass 346\n',
+  'ℹ fail 0\n',
+  'ℹ skipped 0\n',
+  'ℹ cancelled 0\n',
+])
+  assert(nodeLog.includes(line), line)
+const suites = [],
+  contexts = [],
+  mediaClocks = []
+for (const browser of browsers)
+  for (const suite of ['browser', 'library', 'pwa']) {
+    const root = `${base.root}/artifacts/browser-results-${browser}-${suite}`
+    const report = await json(root + '/out/ci/results.json')
+    const count = suite === 'browser' ? 160 : suite === 'pwa' && browser !== 'webkit' ? 20 : 19
+    const cases = playwright(report, count)
+    assert(cases.every((row) => row.project === browser))
+    checkGraphics(await json(root + '/out/ci/capabilities.json'), browser)
+    assert.deepEqual(await json(root + '/out/ci/build-info.json'), buildInfo)
+    suites.push({ browser, suite, ...report.stats, workers: report.config.workers })
+    for (const path of await files(root)) {
+      if (path.endsWith('/persistent-context.json')) {
+        const record = await json(path)
+        assert(
+          record.fixtureTimeoutMs === 30000 &&
+            record.testTimeoutMs === 30000 &&
+            record.setupMs > 0 &&
+            record.setupMs < 30000,
+        )
+        contexts.push({ suite, ...record })
+      }
+      if (path.endsWith('/media-clock.json')) {
+        const record = await json(path)
+        assert(record.setter && record.records.some((e) => e.event === 'visibilitychange'))
+        mediaClocks.push({ browser, ...record })
+      }
+    }
+  }
+assert.equal(contexts.length, 116)
+assert.equal(mediaClocks.length, 6)
+const native = await json(
+  base.root + '/artifacts/native-activity-results/out/verification/activity/native-check.json',
+)
+const nativeIntervals = frozenIntervals(playwright(native, 7), 1)
+const repeatedFreeze = await json(
+  freeze.root + '/artifacts/out/verification/activity/native-check.json',
+)
+const repeatedIntervals = frozenIntervals(playwright(repeatedFreeze, 3), 3)
+const runtime = await json(
+  base.root + '/artifacts/runtime-results/verification/vm-console/runtime-browser.json',
+)
+assert.deepEqual(runtime.manifest, wasm)
+combinations(
+  runtime.results,
+  browsers.flatMap((b) => backends.map((v) => b + '/' + v)),
+  (row) => row.browser + '/' + row.backend,
+)
+for (const row of runtime.results) {
+  assert(row.compiledBytes > 0 && row.dumpBytes > 0 && row.held)
+  assert.equal(row.handles, 0)
+  assert.equal(row.shutdownMessages, 0)
+  assert.equal(row.cancelled, 'AbortError: Execution cancelled')
+  assert.match(row.primary, /browserPrimaryMissing/)
+  assert.deepEqual(row.errors, [])
+}
+assert.equal(
+  await hash(base.root + '/artifacts/runtime-results/verification/vm-console/runtime/runtime.mjs'),
+  runtime.bundleSha256,
+)
+
+const external = []
+for (const browser of browsers) {
+  const root = `${compatibility.root}/artifacts/compatibility-${browser}`
+  const reports = root + '/verification/compatibility'
+  assert.deepEqual(await json(root + '/ci/build-info.json'), buildInfo)
+  assert.deepEqual(await json(root + '/ci/compatibility-fixtures.json'), fixture)
+  checkGraphics(await json(root + '/ci/capabilities.json'), browser)
+  const pathFor = (path) => {
+    assert(path.startsWith('out/verification/compatibility/') && !path.split('/').includes('..'))
+    return root + '/' + path.slice(4)
+  }
+  for (const name of ['kag', 'kag-panels', 'kag-diagnostics']) {
+    const report = await json(`${reports}/${name}.json`)
+    assert.equal(report.indexSha256, indexSha256)
+    assert.equal(report.sourceSha256, fixture.kag.sourceSha256)
+    if (name === 'kag') {
+      assert.equal(report.zipSha256, fixture.kag.zipSha256)
+      combinations(
+        report.results,
+        ['xp3', 'zip'].flatMap((c) =>
+          backends.flatMap((b) => ['flow', 'save', 'transition'].map((m) => `${c}/${b}/${m}`)),
+        ),
+        (row) => `${row.container}/${row.backend}/${row.mode}`,
+      )
+    } else combinations(report.results, backends, (row) => row.backend)
+    for (const row of report.results) {
+      assert.equal(row.browser, browser)
+      if (name === 'kag') {
+        assert.equal(await hash(pathFor(row.report)), row.sha256)
+        assert.equal(await hash(pathFor(row.log)), row.logSha256)
+        const expected = {
+          flow: ['line', 'history', 'page', 'link', 'choice'],
+          save: ['plain-save', 'plain-load', 'thumbnail-8', 'thumbnail-24', 'reload'],
+          transition: ['crossfade', 'scroll', 'universal', 'done'],
+        }
+        assert.deepEqual(row.steps, expected[row.mode])
+      } else {
+        assert.deepEqual(row.errors, [])
+        if (name === 'kag-panels')
+          assert(row.originalMenuHandlers && row.originalShortcuts && row.independentVisibility)
+        else {
+          assert(row.originalHandler && row.primaryLogged && row.observersNotified && row.recovered)
+          assert.equal(await hash(pathFor(row.log)), row.logSha256)
+        }
+      }
+      assert((await readFile(pathFor(row.screenshot))).length > 0)
+    }
+    external.push({ browser, name, ...report })
+  }
+  for (const [name, id, manifestKind] of [
+    ['abi-pwa', 'tjs-abi1', 'wasm'],
+    ['runtime-abi-pwa', 'tjs-abi2', 'wasm'],
+    ['font-abi-pwa', 'font-abi1', 'fonts'],
+  ]) {
+    const report = await json(`${reports}/${name}.json`)
+    const old = fixtureManifest.releases.find((release) => release.id === id)
+    const oldManifest = await json(
+      `out/verification/compatibility-baselines/${id}/${manifestKind}/manifest.json`,
+    )
+    assert.deepEqual(report.manifests, [oldManifest, manifestKind === 'wasm' ? wasm : font])
+    combinations(report.results, backends, (row) => row.backend)
+    for (const row of report.results) {
+      assert.equal(row.browser, browser)
+      assert.equal(row.oldBuild, old.build)
+      assert.equal(row.newBuild, build.build)
+      assert.equal(row.oldAbi, oldManifest.abi)
+      assert.equal(row.newAbi, manifestKind === 'wasm' ? 3 : 2)
+      assert(row.oldWorkerRestartedOffline && row.newWorkerStartedOffline)
+      assert(row.caches.some((key) => key.endsWith(row.oldBuild)))
+      assert(row.caches.some((key) => key.endsWith(row.newBuild)))
+      assert.deepEqual(row.errors, [])
+      assert.equal(row.startupTimeoutMs, 12000)
+      assert.deepEqual(
+        row.startups.map(({ release, offline }) => ({ release, offline })),
+        [
+          { release: 'old', offline: false },
+          { release: 'old', offline: true },
+          { release: 'current', offline: true },
+        ],
+      )
+      assert(
+        row.startups.every(
+          (startup) => Number.isFinite(startup.milliseconds) && startup.milliseconds > 0,
+        ),
+      )
+      if (manifestKind === 'wasm') assert(row.nativeClassesAndDumpVerified)
+      else
+        for (const manifest of report.manifests)
+          assert(row.fontRequests.some((url) => url.endsWith('/' + manifest.assets.wasm.file)))
+    }
+    external.push({ browser, name, ...report })
+  }
+}
+assert.equal(
+  external.reduce((n, report) => n + report.results.length, 0),
+  66,
+)
+const evidence = {}
+for (const path of await files(directory))
+  evidence[relative(resolve(directory), path)] = await hash(path)
+const matrix = {
+  verifiedAt: new Date().toISOString(),
+  execution: 'GitHub-hosted GitHub Actions',
+  reportCommit: process.env.GITHUB_SHA,
+  reportRun: `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+  runs: [base.info, compatibility.info, freeze.info],
+  applicationSourcesMatchAllRuns: true,
+  regularTestsMatchBaseRun: true,
+  compatibilityProbesMatchRun: true,
+  buildInfo,
+  build,
+  wasm,
+  font,
+  sessionProtocol: 9,
+  passed: {
+    node: 346,
+    browser: 603,
+    directRuntime: 6,
+    kag: 36,
+    kagPanels: 6,
+    kagDiagnostics: 6,
+    tjsAbi1: 6,
+    tjsAbi2: 6,
+    fontAbi1: 6,
+    repeatedTrustedFreeze: 3,
+    selectedSkipped: 0,
+    flaky: 0,
+    retries: 0,
+  },
+  suites,
+  nativeIntervals,
+  repeatedIntervals,
+  persistentContexts: contexts,
+  mediaClocks,
+  runtime,
+  external,
+  fixtureManifest,
+  fixture,
+  source: await tree('src'),
+  tests: await tree('tests'),
+  scripts: await tree('scripts'),
+  documentation: await tree('docs'),
+  releaseTree: await tree('dist'),
+  treeHashFormat: fixtureManifest.treeHashFormat,
+  evidence,
+  previousMatrices: fixtureManifest.historicalMatrices,
+  historicalFailures: [
+    {
+      run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34811575232',
+      reason:
+        'Old font release startup on WebKit exceeded the standalone 5 s assertion. The failing trace already contains the ready marker at about 5.5 s after import; only startup now uses the regular suite 12 s budget. Old release bytes and upgrade assertions are unchanged.',
+    },
+    {
+      run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34808210462',
+      reason:
+        'Media RPC timers counted trusted frozen time. Pausable request budgets were implemented; original failed runs remain historical evidence.',
+    },
+    {
+      run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34809235409',
+      reason:
+        'Hosted WebKit concurrent startup was slow. Single-worker diagnosis and the subsequent complete regression passed; shared assertion budgets remain unchanged.',
+    },
+  ],
+  incomplete: [
+    'Scripts.getTraceString, native error UI policy, remaining exception and finalizer paths',
+    'Historical WebKit paused-video position discontinuity remains unrootcaused',
+    'Historical one-shot committed-input failure has no proven product root cause; acknowledgement-based checks remain',
+    'Protocol 8 to 9 historical same-kernel probe was not rerun in this ABI 3 phase',
+    'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
+  ],
+}
+const output = 'out/verification/vm-console-matrix.json'
+await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
+await appendFile(
+  process.env.GITHUB_STEP_SUMMARY,
+  `Verified **346 Node + 603 browser + 6 direct runtime + 66 compatibility + 3 repeated trusted freeze** cases.\n\n` +
+    `Sources, builds and individual results are bound in \`vm-console-matrix.json\`. SHA-256: \`${await hash(output)}\`.\n`,
+)
+console.log('WROTE ' + output)

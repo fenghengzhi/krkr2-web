@@ -1,0 +1,57 @@
+name: Verification report
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Successful Tests run for the current application sources
+        required: true
+        type: string
+      compatibility-run:
+        description: Successful KAG and release compatibility run for the current probes
+        required: true
+        type: string
+      freeze-run:
+        description: Successful three-repeat native lifecycle diagnostic for the same application
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          build-run: ${{ inputs.build-run }}
+      - name: Verify the original compatibility fixture bytes
+        run: python3 tests/probes/prepare-compatibility.py
+      - name: Bind completed hosted runs to sources, releases and individual results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KRKR_BUILD_RUN: ${{ inputs.build-run }}
+          KRKR_COMPATIBILITY_RUN: ${{ inputs.compatibility-run }}
+          KRKR_FREEZE_RUN: ${{ inputs.freeze-run }}
+        run: node tests/probes/vm-console-matrix.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: vm-console-verification
+          path: |
+            out/verification/vm-console-matrix.json
+            out/verification/hosted-evidence/
+            out/ci/
+          if-no-files-found: error
+          retention-days: 90
