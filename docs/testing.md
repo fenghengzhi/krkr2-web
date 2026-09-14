@@ -71,7 +71,7 @@ gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 gh workflow run compatibility.yml --ref main -f build-run=BUILD_RUN_ID
 ```
 
-复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。ABI 5 根据能力标记生成 `binary-scripts-matrix.json` 或 `compiler-matrix.json`，更早的原生 Scripts 阶段保留 `native-scripts-matrix.json`；此前 ABI 4 阶段要求输入时序专项，生成 `stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。这些文件位于 `out/verification/`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
+复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。ABI 5 根据能力标记生成 `bytecode-lifetime-matrix.json`、`binary-scripts-matrix.json` 或 `compiler-matrix.json`，更早的原生 Scripts 阶段保留 `native-scripts-matrix.json`；此前 ABI 4 阶段要求输入时序专项，生成 `stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。这些文件位于 `out/verification/`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
 
 [VM 控制台阶段汇总](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)已通过，绑定 487 份证据文件、116 份持久 context 预算记录及 6 份媒体时钟记录。生成时提交为 `d97a3c9`，报告 SHA-256 为 `81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d`。矩阵和引用的完整产物已下载到 `out/verification/github-actions/34812958010/`，矩阵另复制到上述标准路径；报告生成后的本次文档更新不改变应用或测试代码。
 
@@ -88,6 +88,15 @@ gh workflow run verification-report.yml --ref main \
 VM 控制台阶段的本地完整回归已按用户要求中止（退出码 143）。此前的专项通过记录与失败日志按历史证据保留；该阶段的新完整回归结果以实际 Actions 运行记录为准。
 
 ## 独立诊断
+
+`Bytecode allocation diagnostic` 在两个独立 GitHub-hosted Ubuntu 作业构建 Asyncify/JSPI 诊断内核，固定 Node 24.19.0 并显式启用 JSPI。每个内核逐点模拟池、上下文和链接的分配失败，另在新 VM 中模拟字符串堆块/索引扩容失败；记录原生字节、字符串单元、脚本块和上下文。诊断构建有独立身份和 `diagnosticAllocator: true` 标记，生产发布校验拒绝该标记。字节码生命周期报告必须提供同源码的 `allocations-run`，不会以正式构建的测试代替故障验证。
+
+```sh
+gh workflow run bytecode-allocations.yml --ref main
+gh workflow run verification-report.yml --ref main \
+  -f build-run=BUILD_RUN_ID -f compatibility-run=COMPATIBILITY_RUN_ID \
+  -f allocations-run=ALLOCATIONS_RUN_ID
+```
 
 `Native lifecycle diagnostic` 和 `WebKit startup diagnostic` 可手动指定已有构建 run ID，在云端重复特定场景并附加状态、Worker 等待记录和原生栈。复用前检查该构建与当前提交的应用源码、依赖及构建脚本完全一致；诊断允许修改测试代码，但不能以旧产物验证新的应用实现。这些诊断结果单独保存，不能替代完整 Tests 工作流。
 

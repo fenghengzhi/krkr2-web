@@ -189,6 +189,37 @@ export async function exerciseBytecodeLifetime(
   }
 }
 
+/** Many independent names exercise allocation/interning, beyond one fast copy. */
+function bytecodePoolWork(base: Uint8Array) {
+  const layout = bytecodeOffsets(base),
+    view = new DataView(base.buffer)
+  const count = 32700,
+    units = 256,
+    stride = 4 + units * 2
+  const names = new Uint8Array(count * stride),
+    namesView = new DataView(names.buffer)
+  for (let i = 0; i < count; i++) {
+    const name = String(i).padStart(5, '0') + '字'.repeat(units - 5)
+    namesView.setUint32(i * stride, units, true)
+    for (let j = 0; j < units; j++)
+      namesView.setUint16(i * stride + 4 + j * 2, name.charCodeAt(j), true)
+  }
+  const insert = layout.pools[6]!.count,
+    bytes = new Uint8Array(base.length + names.length),
+    output = new DataView(bytes.buffer)
+  bytes.set(base.subarray(0, insert))
+  bytes.set(names, insert)
+  bytes.set(base.subarray(insert), insert + names.length)
+  output.setUint32(8, bytes.length, true)
+  output.setUint32(16, view.getUint32(16, true) + names.length, true)
+  output.setUint32(
+    layout.pools[5]!.count,
+    view.getUint32(layout.pools[5]!.count, true) + count,
+    true,
+  )
+  return bytes
+}
+
 export const bytecodePhases = [6, 7, 8] as const
 export async function makeBytecodeWork(
   factory: ModuleFactory,
@@ -204,7 +235,7 @@ export async function makeBytecodeWork(
   )
   try {
     return {
-      pools: await vm.compile('"' + '字'.repeat(4 * 1024 * 1024) + '"', 'pool-work.tjs', true),
+      pools: bytecodePoolWork(await vm.compile('42', 'pool-work.tjs', true)),
       contexts: await vm.compile(
         'class LifetimeMany {' +
           Array.from({ length: 24000 }, (_, i) => `function f${i}(){return 42;}`).join('') +

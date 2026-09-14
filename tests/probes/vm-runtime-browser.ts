@@ -58,7 +58,8 @@ const bundleSha256 = hash(await readFile(bundleRoot + '/runtime.mjs')),
 await once(server, 'listening')
 const address = server.address()
 assert(address && typeof address !== 'string')
-const results: unknown[] = []
+const results: unknown[] = [],
+  failures: unknown[] = []
 try {
   for (const name of ['chromium', 'firefox', 'webkit'] as const)
     for (const backend of ['asyncify', 'jspi'] as const) {
@@ -78,6 +79,11 @@ try {
         console.log(
           `PASS ${name}/${backend}: direct async compile, callbacks, dump, primary error, pause and cancellation`,
         )
+      } catch (error) {
+        const failure = { browser: name, backend, error: String(error), errors }
+        results.push(failure)
+        failures.push(failure)
+        console.error(`FAIL ${name}/${backend}: ${String(error)}`)
       } finally {
         await browser.close()
       }
@@ -87,11 +93,12 @@ try {
   await writeFile(
     out + '/runtime-browser.json',
     JSON.stringify(
-      { verifiedAt: new Date().toISOString(), bundleSha256, manifest, results },
+      { verifiedAt: new Date().toISOString(), bundleSha256, manifest, results, failures },
       null,
       2,
     ) + '\n',
   )
+  assert.deepEqual(failures, [], 'Direct runtime failures remain failures; no retries')
 } finally {
   server.closeAllConnections()
   await new Promise<void>((r) => server.close(() => r()))

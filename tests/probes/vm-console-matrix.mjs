@@ -664,6 +664,11 @@ const matrix = {
     ...(lifetimePhase
       ? [
           {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34847758637',
+            reason:
+              'All 392 Node cases passed. The direct runtime failed in Chromium JSPI because copying one 8 MiB string finished within a time slice and never paused in phase 6. The fixed fixture now interns 32,700 independent strings while preserving pause/cancel/cleanup assertions; all six direct combinations are recorded without retry.',
+          },
+          {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34847308669',
             reason:
               'Asyncify passed 92 allocation-site failures and two string-heap growth failures; JSPI failed before module creation because Node 24 required the explicit experimental-wasm-jspi flag. This is a partial diagnostic, not a two-backend pass.',
