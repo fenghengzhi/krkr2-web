@@ -87,8 +87,8 @@ export const objectLifetimeCases = [
   },
   {
     name: 'caught-cleanup',
-    setup: `function lifetimeRun(){var message="";try{var object=new ThrowingFinal();delete object;}catch(e){message=e.message;}
-      if(message.indexOf("finalizer-A")<0)throw new Exception("cleanup-not-caught");return 42;}`,
+    setup: `var caughtObject=new ThrowingFinal();function lifetimeRun(){var message="";try{delete global.caughtObject;}catch(e){message=e.message;}
+      if(message.indexOf("finalizer-A")<0)throw new Exception("cleanup-not-caught:"+message+":"+lifetimeLog);return 42;}`,
     action: 'lifetimeRun()',
     error: null,
     log: 'A',
@@ -177,7 +177,7 @@ export async function exerciseObjectLifetime(
       )
     check((await vm.execute('6*7', '', true)) === 42n, 'Finalizer poisoned the VM')
     await vm.execute(
-      'delete lifetimeRun;delete lifetimeClosure;delete bucket;delete a;delete b;delete BrokenFinal;delete ThrowingFinal;delete OtherFinal;delete RetryFinal;delete ResurrectFinal;delete resurrected;delete makeResurrect;delete CycleFinal;delete lifetimeLog;',
+      'delete lifetimeRun;delete lifetimeClosure;delete bucket;delete a;delete b;delete BrokenFinal;delete ThrowingFinal;delete OtherFinal;delete RetryFinal;delete ResurrectFinal;delete resurrected;delete makeResurrect;delete CycleFinal;delete caughtObject;delete lifetimeLog;',
     )
     const after = native.stats(),
       budget = executionStats(native)

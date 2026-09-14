@@ -134,6 +134,9 @@ namespace TJS {
 #endif
         if(RefCount != 1) return --RefCount;
         if(DestructionDepth >= 32) {
+#ifdef TVP_IN_PLUGIN_STUB
+            ++TVPPluginGlobalRefCount; // the pending queue now owns this reference
+#endif
             if(DestructionTail) DestructionTail->NextDestruction = this;
             else DestructionHead = this;
             DestructionTail = this;
@@ -884,6 +887,7 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     void tTJSCustomObject::DeleteAllMembers() {
+        KrkrCompilerScope cleanupPhase(11);
         // delete all members
         if(Count <= 10)
             return _DeleteAllMembers();

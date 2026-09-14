@@ -11,6 +11,7 @@ extern "C" void krkr_compiler_checkpoint();
 // 5 = binary input validation/deserialization (4 is the independent dump sink).
 // 6 = bytecode pools, 7 = context materialization, 8 = ownership linking.
 // 9 = runtime frame preparation, 10 = call argument preparation.
+// 11 = collection cleanup (allocation diagnostics; no extra yielding checkpoint).
 class KrkrCompilerScope {
     int previous;
 public:

@@ -1409,6 +1409,7 @@ void tTJSArrayObject::Finalize() {
 
 //---------------------------------------------------------------------------
 void tTJSArrayObject::Clear(tTJSArrayNI *ni) {
+    KrkrCompilerScope cleanupPhase(11);
     // clear members
 
     std::vector<iTJSDispatch2 *> vector;

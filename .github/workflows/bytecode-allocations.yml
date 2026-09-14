@@ -48,6 +48,9 @@ jobs:
       - name: Fail allocations in register pools, stack traces and argument buffers
         if: ${{ !cancelled() && steps.kernel.outcome == 'success' }}
         run: node --experimental-wasm-jspi --import tsx tests/probes/execution-allocation-faults.ts "${{ matrix.variant }}" 2>&1 | tee out/ci/execution-allocations.log
+      - name: Fail allocations while explicitly clearing and implicitly destroying collections
+        if: ${{ !cancelled() && steps.kernel.outcome == 'success' }}
+        run: node --experimental-wasm-jspi --import tsx tests/probes/finalization-allocation-faults.ts "${{ matrix.variant }}" 2>&1 | tee out/ci/finalization-allocations.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
