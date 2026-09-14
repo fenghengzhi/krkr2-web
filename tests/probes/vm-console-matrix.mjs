@@ -228,7 +228,8 @@ for (const line of [
 const suites = [],
   contexts = [],
   mediaClocks = [],
-  overlayFrames = []
+  overlayFrames = [],
+  browserControls = []
 for (const browser of browsers)
   for (const suite of ['browser', 'library', 'pwa']) {
     const root = `${base.root}/artifacts/browser-results-${browser}-${suite}`
@@ -249,6 +250,24 @@ for (const browser of browsers)
           : 19
     const cases = playwright(report, count)
     assert(cases.every((row) => row.project === browser))
+    if (binaryPhase && suite === 'browser') {
+      for (const [kind, title] of [
+        ['menuUpdate', 'KAG callbacks, macros and script menus work in the Worker'],
+        [
+          'videoFirstFrame',
+          'video open waits for its first frame and stop releases the pending callback',
+        ],
+        [
+          'videoClock',
+          'media clock delivers period and EOF segment loops when presentation callbacks are withheld',
+        ],
+        ['tlgCancellation', 'stopping during TLG expansion cancels without terminating the worker'],
+      ]) {
+        const selected = cases.filter((row) => row.title.endsWith(title))
+        combinations(selected, backends, (row) => row.title.split(':')[0])
+        browserControls.push(...selected.map((row) => ({ browser, kind, title: row.title })))
+      }
+    }
     if (compilerPhase && suite === 'browser') {
       const overlays = cases.filter((row) => row.title.includes('overlay geometry, mixer alpha'))
       assert.equal(overlays.length, 2)
@@ -514,7 +533,7 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
-    ...(binaryPhase ? { binaryInputControls: 12 } : {}),
+    ...(binaryPhase ? { binaryInputControls: 12, browserControls: browserControls.length } : {}),
     ...(compilerPhase ? { nativeCompilerControls: 36 } : {}),
     kag: 36,
     kagPanels: 6,
@@ -536,6 +555,7 @@ const matrix = {
   persistentContexts: contexts,
   mediaClocks,
   overlayFrames,
+  browserControls,
   runtime,
   external,
   fixtureManifest,
@@ -557,6 +577,15 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(binaryPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34841341297',
+            reason:
+              'The initial TLG timer gate was superseded by a change selecting exactly one timer at registration. Build completed, test jobs were cancelled, and this run is not a verification pass.',
+          },
+        ]
+      : []),
     ...(binaryPhase
       ? [
           {
