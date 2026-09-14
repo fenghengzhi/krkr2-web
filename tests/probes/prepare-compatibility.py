@@ -91,4 +91,4 @@ assert sum(row['size'] for row in pair['entries']) == pair['decodedBytes']
 report = pathlib.Path('out/ci/compatibility-fixtures.json')
 report.parent.mkdir(parents=True, exist_ok=True)
 report.write_text(json.dumps({'releases': results, 'kag': pair}, ensure_ascii=False, indent=2) + '\n')
-print('Verified 3 original release trees and the 30-member KAG corpus')
+print(f'Verified {len(results)} original release trees and the 30-member KAG corpus')

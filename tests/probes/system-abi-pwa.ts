@@ -1,7 +1,7 @@
 import { probeBrowsers } from '../helpers/probe-browsers.ts'
 import { browserLaunchOptions } from '../helpers/browser-launch.ts'
 // Preserved release -> current deployment probe. Fourth argument "font" checks
-// font ABI 1; "runtime" checks TJS ABI 2. Default mode checks TJS ABI 1.
+// font ABI 1; "runtime"/"trace" check TJS ABI 2/3. Default checks TJS ABI 1.
 // "protocol" instead checks a preserved protocol 8 shell against protocol 9,
 // with unchanged TJS/font binaries and actual offline old/new Worker execution.
 import assert from 'node:assert/strict'
@@ -17,14 +17,17 @@ import { evaluate } from '../helpers/browser-expression.ts'
 const fontAbi = process.argv[4] === 'font',
   protocol = process.argv[4] === 'protocol',
   runtimeAbi = process.argv[4] === 'runtime',
+  traceAbi = process.argv[4] === 'trace',
   manifestKind = fontAbi ? 'fonts' : 'wasm',
-  reportName = runtimeAbi
-    ? 'runtime-abi-pwa'
-    : protocol
-      ? 'protocol-pwa'
-      : fontAbi
-        ? 'font-abi-pwa'
-        : 'abi-pwa',
+  reportName = traceAbi
+    ? 'trace-abi-pwa'
+    : runtimeAbi
+      ? 'runtime-abi-pwa'
+      : protocol
+        ? 'protocol-pwa'
+        : fontAbi
+          ? 'font-abi-pwa'
+          : 'abi-pwa',
   directory = process.argv[2] ?? 'out/verification/system-events',
   roots = [
     resolve(process.argv[3] ?? 'out/verification/system-events/abi1-root'),
@@ -43,11 +46,13 @@ const fontAbi = process.argv[4] === 'font',
   )
 const oldAbi = manifests[0].abi,
   newAbi = manifests[1].abi
-if (fontAbi || protocol || runtimeAbi)
-  assert.deepEqual([oldAbi, newAbi], fontAbi ? [1, 2] : protocol ? [2, 2] : [2, 3])
-else {
+if (fontAbi || protocol || runtimeAbi || traceAbi) {
+  assert.equal(oldAbi, fontAbi ? 1 : traceAbi ? 3 : 2)
+  if (fontAbi || protocol) assert.equal(newAbi, 2)
+  else assert([3, 4].includes(newAbi) && newAbi > oldAbi)
+} else {
   assert.equal(oldAbi, 1)
-  assert([2, 3].includes(newAbi))
+  assert([2, 3, 4].includes(newAbi))
 }
 if (protocol) {
   assert.deepEqual(manifests[0], manifests[1])
@@ -124,6 +129,7 @@ for (const name of probeBrowsers()) {
     const load = async (page: import('@playwright/test').Page, missing: boolean) => {
       const marker = 'abi-game-ready-' + ++loadSequence
       const started = performance.now()
+      if (traceAbi && !missing) await page.locator('#script-debug').check()
       await page.locator('#files').setInputFiles([
         {
           name: 'startup.tjs',
@@ -176,13 +182,13 @@ for (const name of probeBrowsers()) {
         }
         await evaluate(page, 'value', '64')
       } else {
-        if (!runtimeAbi)
+        if (!runtimeAbi && !traceAbi)
           await evaluate(page, 'System.addContinuousHandler===void', missing ? '1' : '0')
-        if (newAbi === 3) {
+        if (newAbi >= 3) {
           await evaluate(
             page,
             'typeof Debug.console=="Object" && Debug.console instanceof "Class"',
-            missing ? '0' : '1',
+            missing && !traceAbi ? '0' : '1',
           )
           if (!missing)
             await evaluate(
@@ -190,6 +196,11 @@ for (const name of probeBrowsers()) {
               '(function(){Scripts.dump();return [].load("savedata/krkr2-web.dump.txt").join("").indexOf("TJS Context Dump")>=0;})()',
               '1',
             )
+        }
+        if (traceAbi) {
+          await evaluate(page, 'typeof Scripts.getTraceString', missing ? 'undefined' : 'Object')
+          if (!missing)
+            await evaluate(page, 'Scripts.getTraceString().indexOf("top level script")>=0', '1')
         }
         await evaluate(page, 'value', '64')
       }
@@ -227,7 +238,8 @@ for (const name of probeBrowsers()) {
         newBuild: shells[1].build,
         oldAbi,
         newAbi,
-        ...(!fontAbi && !protocol && newAbi === 3 ? { nativeClassesAndDumpVerified: true } : {}),
+        ...(!fontAbi && !protocol && newAbi >= 3 ? { nativeClassesAndDumpVerified: true } : {}),
+        ...(traceAbi ? { nativeTraceVerified: true } : {}),
         ...(protocol ? { oldProtocol: 8, newProtocol: 9, panelsVerified: true } : {}),
         oldWorkerRestartedOffline: true,
         newWorkerStartedOffline: true,

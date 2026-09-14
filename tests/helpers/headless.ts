@@ -29,8 +29,8 @@ export async function headless(
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
     inflateImage,
     deflateImage,
-    createRuntime: (handler, control) =>
-      TjsWasmRuntime.create(factory, handler, { control, wasmBinary }),
+    createRuntime: (handler, control, options) =>
+      TjsWasmRuntime.create(factory, handler, { control, wasmBinary, ...options }),
     renderer: { present() {}, dispose() {} },
     graphics: {
       decode: async () => {

@@ -26,7 +26,7 @@ mkdirSync(output, { recursive: true })
 const manifestPath = resolve(output, 'manifest.json')
 const manifest = existsSync(manifestPath)
   ? JSON.parse(readFileSync(manifestPath, 'utf8'))
-  : { abi: 3, variants: {} }
+  : { abi: 4, variants: {} }
 const sourceHasher = createHash('sha256')
 function hashSources(directory) {
   for (const entry of readdirSync(resolve(root, directory), { withFileTypes: true }).sort((a, b) =>
@@ -86,7 +86,7 @@ for (const variant of variants) {
   }
   manifest.variants[variant] = { ...assets, sourceHash }
 }
-manifest.abi = 3
+manifest.abi = 4
 manifest.source = { tjs2Revision: '6622499f70c3b30240d34d73d757c8adff45248f', sha256: sourceHash }
 manifest.toolchain = readFileSync(
   resolve(sdk, 'upstream/emscripten/emscripten-version.txt'),

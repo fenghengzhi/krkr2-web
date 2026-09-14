@@ -111,7 +111,11 @@ export type EngineEvent =
 export interface SessionDependencies {
   systemFonts?: FontDescriptor[]
   activity?: ActivityState
-  createRuntime: (handler: HostHandler, control: ExecutionControl) => Promise<ScriptRuntime>
+  createRuntime: (
+    handler: HostHandler,
+    control: ExecutionControl,
+    options: { debugMode: boolean },
+  ) => Promise<ScriptRuntime>
   graphics: GraphicsDecoder
   inflateImage: Inflater
   deflateImage: (bytes: Uint8Array) => Promise<Uint8Array>
@@ -273,7 +277,9 @@ export class EngineSession {
   initialize(): Promise<void> {
     return this.queue.enqueue(async () => {
       await this.saves.initialize()
-      this.runtime = await this.deps.createRuntime((...args) => this.host(...args), this.control)
+      this.runtime = await this.deps.createRuntime((...args) => this.host(...args), this.control, {
+        debugMode: this.systemArguments.get('-debug') === 'yes',
+      })
       this.control.check()
       this.debug = new DebugService(this.diagnostics, this.runtime, this.systemArguments)
       this.runtime.setConsoleOutput((text) =>
@@ -1199,6 +1205,8 @@ export class EngineSession {
       }
       case 'Scripts.dump':
         return { kind: 'dump' }
+      case 'Scripts.traceFunction':
+        return { kind: 'value', value: { type: 'native-method', name: 'getTraceString' } }
       case 'Scripts.writeDump': {
         const bytes = args[0],
           requested = 'savedata/krkr2-web.dump.txt'

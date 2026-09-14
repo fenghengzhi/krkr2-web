@@ -42,6 +42,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       control?: ExecutionControl
       locateFile?: ModuleOptions['locateFile']
       wasmBinary?: Uint8Array
+      debugMode?: boolean
     } = {},
   ): Promise<TjsWasmRuntime> {
     const runtime = new TjsWasmRuntime(
@@ -65,8 +66,8 @@ export class TjsWasmRuntime implements ScriptRuntime {
         })
       },
     })
-    if (runtime.call('krkr_abi_version') !== 3) throw new Error('TJS WASM ABI mismatch')
-    runtime.vm = runtime.call('krkr_create')
+    if (runtime.call('krkr_abi_version') !== 4) throw new Error('TJS WASM ABI mismatch')
+    runtime.vm = runtime.call('krkr_create', Number(options.debugMode === true))
     if (!runtime.vm) throw new Error('TJS VM initialization failed')
     return runtime
   }
@@ -156,6 +157,9 @@ export class TjsWasmRuntime implements ScriptRuntime {
       } finally {
         this.call('free', bytes)
       }
+    } else if (value.type === 'native-method') {
+      if (value.name !== 'getTraceString') throw new Error('Unknown native method')
+      this.call('krkr_value_set_trace_function', pointer)
     } else if (value.type === 'proxy' || value.type === 'class') {
       if (
         value.type === 'class' &&

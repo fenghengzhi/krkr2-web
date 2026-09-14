@@ -57,11 +57,7 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     static bool ShouldUseStackTracer() {
-#ifdef __EMSCRIPTEN__
-        return false;
-#else
         return TJSStackTracerEnabled();
-#endif
     }
 
     static bool TJSLogoChainTraceEnabledForVM() {
@@ -863,17 +859,16 @@ namespace TJS {
             if(ShouldUseStackTracer())
                 TJSStackTracerPush(this, false);
 
-            // check whether the objthis is deleting
-            if(TJSWarnOnExecutionOnDeletingObject && TJSObjectFlagEnabled() &&
-               Block->GetTJS()->GetConsoleOutput())
-                TJSWarnIfObjectIsDeleting(Block->GetTJS()->GetConsoleOutput(),
-                                          objthis);
-
 #ifdef _DEBUG
             ScopeKey oldkey;
             tTJSVariant *oldra = nullptr;
 #endif // _DEBUG
             try {
+                // A warning can suspend or throw through a console observer.
+                // Keep it inside the frame cleanup boundary.
+                if(TJSWarnOnExecutionOnDeletingObject && TJSObjectFlagEnabled() &&
+                   Block->GetTJS()->GetConsoleOutput())
+                    TJSWarnIfObjectIsDeleting(Block->GetTJS()->GetConsoleOutput(), objthis);
                 ra[-1].SetObject(objthis, objthis);
                 ra[0].Clear();
 
@@ -1035,9 +1030,6 @@ namespace TJS {
         try {
             tjs_int32 *code = codesave = CodeArea + startip;
 
-            if(ShouldUseStackTracer())
-                TJSStackTracerSetCodePointer(CodeArea, &codesave);
-
             tTJSVariant *ra = ra_org;
             tTJSVariant *da = DataArea;
 
@@ -1045,6 +1037,8 @@ namespace TJS {
 
             while(true) {
                 codesave = code;
+                if(ShouldUseStackTracer())
+                    TJSStackTracerSetCodePosition(code - CodeArea);
                 krkr_vm_checkpoint();
                 switch(*code) {
                     case VM_NOP:

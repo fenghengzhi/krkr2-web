@@ -24,6 +24,7 @@ export interface InitializeRequest {
   events: MessagePort
   manifestUrl: string
   backend: BackendPreference
+  debugMode?: boolean
   gameId: string
   audio: MessagePort
   video: MessagePort

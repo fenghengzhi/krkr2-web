@@ -13,6 +13,7 @@ Local changes to the TJS snapshot:
 
 1. `tjsString.h` and `tjsConfig.cpp` include the specific Boost UTF conversion header instead of all Boost.Locale. No Boost binary library is required.
 2. `tjsInterCodeExec.cpp` calls `krkr_vm_checkpoint` at instruction dispatch for cooperative scheduling and cancellation.
+   Stack tracing in debug mode records owned instruction offsets before checkpoints instead of pointers to C++ stack locals. `tjsDebug.cpp/h` preserve native frame order and try-block collapsing without retaining an unwound Asyncify stack address. Deleting-object warnings are inside the frame cleanup boundary; `tjsError.cpp` preserves primary exceptions if debug output observers fail.
 3. `tjsObject.cpp` skips user finalizers only during final whole-VM teardown, as reported by `krkr_vm_is_shutting_down`. Explicit script invalidation is unchanged.
 4. The three native exception branches in `tjsInterCodeExec.cpp` preserve the primary exception if a console observer throws during diagnostic disassembly. The new console adapter uses native continuations; `Scripts.dump` temporarily collects the unchanged native dump into its own bounded UTF-16 sink without calling log observers during iteration.
 

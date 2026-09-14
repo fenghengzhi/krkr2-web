@@ -59,6 +59,7 @@ export class SessionClient {
     gameId: string,
     audio: MessagePort,
     video: MessagePort,
+    debugMode = false,
   ) {
     const offscreen = canvas.transferControlToOffscreen()
     const request = {
@@ -68,6 +69,7 @@ export class SessionClient {
       events: this.channel.port2,
       manifestUrl: new URL(wasmManifestFile, document.baseURI).href,
       backend,
+      debugMode,
       gameId,
       audio,
       video,

@@ -2,6 +2,7 @@
 // state; TJS retains its own class, property and closure semantics.
 export const bootstrap = String.raw`
 var Scripts = %[
+  getTraceString: __host("Scripts.traceFunction"),
   dump: function() { var data=__host("Scripts.dump");__host("Scripts.writeDump",data); },
   execStorage: function(name, mode="", context=void) { return __host("Scripts.execStorage", name, mode, context, 0); },
   evalStorage: function(name, mode="", context=void) { return __host("Scripts.execStorage", name, mode, context, 1); },

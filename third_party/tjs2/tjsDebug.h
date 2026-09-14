@@ -143,8 +143,8 @@ namespace TJS {
 
     extern void TJSStackTracerPush(tTJSInterCodeContext *context, bool in_try);
 
-    extern void TJSStackTracerSetCodePointer(const tjs_int32 *codebase,
-                                             tjs_int32 *const *codeptr);
+    // Own the offset: an Asyncify host import may unwind/reuse the C++ stack.
+    extern void TJSStackTracerSetCodePosition(tjs_int codepos);
 
     extern void TJSStackTracerPop();
 

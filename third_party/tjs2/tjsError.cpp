@@ -139,9 +139,10 @@ namespace TJS {
                                          tjs_int srcpos) {
         if(TJSEnableDebugMode) {
             tTJS *tjs = block->GetTJS();
-            tjs->OutputExceptionToConsole(
+            // Diagnostic observers must not replace the primary script error.
+            try { tjs->OutputExceptionToConsole(
                 (msg + TJS_W(" at ") + block->GetLineDescriptionString(srcpos))
-                    .c_str());
+                    .c_str()); } catch(...) {}
         }
     }
 
@@ -151,10 +152,11 @@ namespace TJS {
                                          tjs_int codepos) {
         if(TJSEnableDebugMode) {
             tTJS *tjs = context->GetBlock()->GetTJS();
-            tjs->OutputExceptionToConsole(
+            // Diagnostic observers must not replace the primary script error.
+            try { tjs->OutputExceptionToConsole(
                 (msg + TJS_W(" at ") +
                  context->GetPositionDescriptionString(codepos))
-                    .c_str());
+                    .c_str()); } catch(...) {}
         }
     }
 

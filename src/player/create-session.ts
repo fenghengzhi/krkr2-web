@@ -22,6 +22,7 @@ export function createSession(request: InitializeRequest): EngineSession {
   const session: EngineSession = new EngineSession({
     systemFonts: request.systemFonts,
     activity: request.activity,
+    arguments: new Map(request.debugMode ? [['-debug', 'yes']] : []),
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
     renderer: new WebGLRenderer(request.canvas),
     graphics: new BrowserGraphics(() =>
@@ -49,7 +50,7 @@ export function createSession(request: InitializeRequest): EngineSession {
       }
       request.events.postMessage(message)
     },
-    async createRuntime(handler, control) {
+    async createRuntime(handler, control, options) {
       const controller = new AbortController()
       const unsubscribe = control.onCancel(() => controller.abort())
       try {
@@ -59,7 +60,7 @@ export function createSession(request: InitializeRequest): EngineSession {
         })
         if (!response.ok) throw new Error('WASM assets are missing. Run npm run build:wasm.')
         const manifest = (await response.json()) as WasmManifest
-        if (manifest.abi !== 3) throw new Error('WASM manifest ABI mismatch')
+        if (manifest.abi !== 4) throw new Error('WASM manifest ABI mismatch')
         const supportsJspi = 'Suspending' in WebAssembly && 'promising' in WebAssembly
         const variant: WasmVariant =
           request.backend === 'auto'
@@ -77,6 +78,7 @@ export function createSession(request: InitializeRequest): EngineSession {
         control.check()
         return await TjsWasmRuntime.create(imported.default, handler, {
           variant,
+          debugMode: options.debugMode,
           control,
           locateFile: () => wasmUrl,
         })

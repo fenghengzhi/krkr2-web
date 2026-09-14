@@ -64,9 +64,21 @@ export function createPlayer(
   }, pauseWhenHidden)
   return {
     setPauseWhenHidden: (paused: boolean) => pageActivity.setPauseWhenHidden(paused),
-    async load(files: GameInput, entry = 'startup.tjs', backend: BackendPreference = 'auto') {
+    async load(
+      files: GameInput,
+      entry = 'startup.tjs',
+      backend: BackendPreference = 'auto',
+      debugMode = false,
+    ) {
       identity = await session.prepare(files)
-      await session.initialize(canvas, backend, identity, audioChannel.port2, videoChannel.port2)
+      await session.initialize(
+        canvas,
+        backend,
+        identity,
+        audioChannel.port2,
+        videoChannel.port2,
+        debugMode,
+      )
       await session.mount()
       const snapshot = await session.start(entry)
       return snapshot

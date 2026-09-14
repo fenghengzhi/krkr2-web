@@ -523,13 +523,11 @@ namespace TJS {
     //---------------------------------------------------------------------------
     struct tTJSStackRecord {
         tTJSInterCodeContext *Context;
-        const tjs_int *CodeBase;
-        tjs_int *const *CodePtr;
+        tjs_int CodePosition;
         bool InTry;
 
         tTJSStackRecord(tTJSInterCodeContext *context, bool in_try) {
-            CodeBase = nullptr;
-            CodePtr = nullptr;
+            CodePosition = 0;
             InTry = in_try;
             Context = context;
             if(Context)
@@ -554,8 +552,7 @@ namespace TJS {
                 if(Context)
                     Context->AddRef();
             }
-            CodeBase = rhs.CodeBase;
-            CodePtr = rhs.CodePtr;
+            CodePosition = rhs.CodePosition;
             InTry = rhs.InTry;
         }
     };
@@ -604,14 +601,12 @@ namespace TJS {
 
         void Pop() { Stack.pop_back(); }
 
-        void SetCodePointer(const tjs_int32 *codebase,
-                            tjs_int32 *const *codeptr) {
+        void SetCodePosition(tjs_int codepos) {
             tjs_uint size = (tjs_uint)Stack.size();
             if(size < 1)
                 return;
             tjs_uint top = size - 1;
-            Stack[top].CodeBase = codebase;
-            Stack[top].CodePtr = codeptr;
+            Stack[top].CodePosition = codepos;
         }
 
         ttstr GetTraceString(tjs_int limit, const tjs_char *delimiter) {
@@ -620,19 +615,15 @@ namespace TJS {
                 delimiter = TJS_W(" <-- ");
 
             ttstr ret;
-            tjs_int top = (tjs_int)(Stack.size() - 1);
+            tjs_int top = (tjs_int)Stack.size() - 1;
+            // Native negative limits produce one frame; avoid INT_MIN overflow.
+            if(limit < 0) limit = 1;
             while(top >= 0) {
                 if(!ret.IsEmpty())
                     ret += delimiter;
 
                 const tTJSStackRecord &rec = Stack[top];
-                ttstr str;
-                if(rec.CodeBase && rec.CodePtr) {
-                    str = rec.Context->GetPositionDescriptionString(
-                        (tjs_int)(*rec.CodePtr - rec.CodeBase));
-                } else {
-                    str = rec.Context->GetPositionDescriptionString(0);
-                }
+                ttstr str = rec.Context->GetPositionDescriptionString(rec.CodePosition);
 
                 ret += str;
 
@@ -669,10 +660,9 @@ namespace TJS {
     }
 
     //---------------------------------------------------------------------------
-    void TJSStackTracerSetCodePointer(const tjs_int32 *codebase,
-                                      tjs_int32 *const *codeptr) {
+    void TJSStackTracerSetCodePosition(tjs_int codepos) {
         if(TJSStackTracer)
-            TJSStackTracer->SetCodePointer(codebase, codeptr);
+            TJSStackTracer->SetCodePosition(codepos);
     }
 
     //---------------------------------------------------------------------------

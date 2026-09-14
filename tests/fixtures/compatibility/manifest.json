@@ -46,11 +46,27 @@
         "bytes": 5513225,
         "sha256": "e8593811f1f8591b95da36ab81d9671db7552d2ffa233363228f98ecf034953a"
       }
+    },
+    {
+      "id": "tjs-abi3",
+      "archive": "tjs-abi3.tar.gz",
+      "archiveBytes": 1758766,
+      "archiveSha256": "62f56c6a2ece90ad95da2a1f210ab008abe13560b9649ad49a74e341fac9e6d7",
+      "historicalDirectory": "GitHub Actions 34809918318 / test-build / dist",
+      "build": "2870471a3ad6c07f7420962f81702eed2727a3ba6919c08f20bd7425f763771a",
+      "tjsAbi": 3,
+      "fontAbi": 2,
+      "tree": {
+        "files": 32,
+        "bytes": 5560559,
+        "sha256": "5edb058bf8e602c79a77ab5740389ad5f3806aa5740fdbcde91b8dab078efb5b"
+      }
     }
   ],
   "historicalMatrices": {
     "system-events": "f90391915bf96bdf4f731139d245887fd4d82ba0c9ab0f677a654e28c127662b",
     "text-layout": "d47954c9fff4019b8d2301bb9f3fb6410bc0376ec5572c88f2e4a686baf73a85",
-    "debug-panels": "61a8177fe17b7bdac8c6be5c19a0eea110cac026a3927f6dfe3e6575d12a31fb"
+    "debug-panels": "61a8177fe17b7bdac8c6be5c19a0eea110cac026a3927f6dfe3e6575d12a31fb",
+    "vm-console": "81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d"
   }
 }

@@ -1,5 +1,6 @@
 import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import { ExecutionControl } from '../../src/engine/scheduler/control.ts'
+import { exerciseTrace } from '../helpers/trace-runtime.ts'
 
 export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
   const manifest = await (await fetch('/wasm/manifest.json')).json(),
@@ -125,6 +126,7 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     cancelledVm.dispose()
   }
   return {
+    trace: await exerciseTrace(factory, wasmBinary, backend),
     compiledBytes,
     dumpBytes,
     warnings,
