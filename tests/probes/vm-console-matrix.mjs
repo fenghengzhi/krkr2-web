@@ -871,6 +871,10 @@ for (const row of runtime.results) {
       assert.equal(control.nativeReplyKind, control.cancel ? 1 : 0)
     }
     for (const control of execution.arguments) {
+      if (soundPhase) {
+        assert.equal(control.clock, 'forced-native-checkpoint')
+        assert(control.checkpointClockReads > 0)
+      }
       assert(control.observed.bytes > 8 * 1024 * 1024)
       assert.equal(control.resources.blocks, control.before.blocks)
       assert.equal(control.resources.contexts, control.before.contexts)

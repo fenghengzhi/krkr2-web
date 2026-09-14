@@ -336,6 +336,25 @@ export async function exerciseArgumentControl(
     result: unknown,
     observed: ReturnType<typeof executionStats> | undefined
   let before: ReturnType<typeof native.stats>
+  // This case verifies a live native argument buffer across suspension, not
+  // whether one fast JSPI copy happens to exceed a physical 8 ms time slice.
+  // Emscripten reads performance.now for its deadline. Advance only this
+  // fixture's clock until the real phase-10 checkpoint observes the allocated
+  // buffer; all pause waiting continues to use the real setTimeout below.
+  const clockDescriptor = Object.getOwnPropertyDescriptor(performance, 'now'),
+    realNow = performance.now.bind(performance)
+  let clockOffset = 0,
+    checkpointClockReads = 0
+  Object.defineProperty(performance, 'now', {
+    configurable: true,
+    value: () => {
+      if (armed && !observed) {
+        clockOffset += 9
+        checkpointClockReads++
+      }
+      return realNow() + clockOffset
+    },
+  })
   const started = new Promise<void>((resolve) => (entered = resolve))
   const wrapped: ModuleFactory = (options) =>
     native.factory({
@@ -355,15 +374,16 @@ export async function exerciseArgumentControl(
         await options.onYield(phase)
       },
     })
-  const vm = await TjsWasmRuntime.create(
-    wrapped,
-    () => {
-      throw new Error('Unexpected host I/O')
-    },
-    { wasmBinary, variant, control },
-  )
+  let vm: TjsWasmRuntime | undefined
   let pending: Promise<void> | undefined
   try {
+    vm = await TjsWasmRuntime.create(
+      wrapped,
+      () => {
+        throw new Error('Unexpected host I/O')
+      },
+      { wasmBinary, variant, control },
+    )
     await vm.execute(
       'var argumentToken=%[];var argumentValues=[];argumentValues.count=700000;for(var i=0;i<700000;i++)argumentValues[i]=argumentToken;function argumentTarget(*){return 42;}',
     )
@@ -410,6 +430,8 @@ export async function exerciseArgumentControl(
     )
     return {
       cancel,
+      clock: 'forced-native-checkpoint',
+      checkpointClockReads,
       heldMs: 25,
       observed,
       after,
@@ -418,8 +440,13 @@ export async function exerciseArgumentControl(
       error: error instanceof Error ? error.name : null,
     }
   } finally {
-    control.cancel()
-    await pending
-    vm.dispose()
+    try {
+      control.cancel()
+      await pending
+      vm?.dispose()
+    } finally {
+      if (clockDescriptor) Object.defineProperty(performance, 'now', clockDescriptor)
+      else Reflect.deleteProperty(performance, 'now')
+    }
   }
 }
