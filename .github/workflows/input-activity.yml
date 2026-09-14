@@ -1,0 +1,75 @@
+name: Input activity diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Completed build run with identical application sources
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: 'true'
+
+jobs:
+  input:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            os: ubuntu-24.04
+            headed: '0'
+          - browser: firefox
+            os: ubuntu-24.04
+            headed: '1'
+          - browser: webkit
+            os: macos-15
+            headed: '0'
+    env:
+      KRKR_TEST_HEADED: ${{ matrix.headed }}
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          build-run: ${{ inputs.build-run }}
+      - run: npm run typecheck
+      - name: Reproduce an unestablished script focus behind a blocked VM
+        if: matrix.browser == 'chromium'
+        run: node --import tsx --test tests/integration/input-focus-activity.test.ts 2>&1 | tee out/ci/input-focus.log
+      - run: npx playwright install --with-deps "${{ matrix.browser }}"
+      - name: Prepare Linux display and audio
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y xvfb libgl1-mesa-dri pulseaudio pulseaudio-utils
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=krkr_test_output rate=48000 channels=2
+          pactl set-default-sink krkr_test_output
+      - name: Verify Worker graphics
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/browser-capabilities.ts "${{ matrix.browser }}"
+      - name: Repeat background composition and held-input cleanup
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/input-results.json
+        run: bash scripts/ci-browser.sh npx playwright test tests/browser/activity.spec.ts --project="${{ matrix.browser }}" --grep 'backgrounding drops held input' --repeat-each=5 --workers=2 --reporter=list,json,github 2>&1 | tee out/ci/input-browser.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: input-activity-${{ matrix.browser }}
+          path: |
+            out/ci/
+            test-results/
+          retention-days: 14

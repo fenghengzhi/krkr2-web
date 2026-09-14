@@ -67,6 +67,9 @@ for (const backend of ['asyncify', 'jspi']) {
       bounds = (await canvas.boundingBox())!
     await page.mouse.move(bounds.x + 10, bounds.y + 10)
     await page.mouse.down()
+    // DOM focus precedes the queued TJS onMouseDown/root.focus callback. Hiding
+    // before it runs correctly discards that packet, leaving no text recipient.
+    await expect(page.locator('.game-text-input')).toHaveAttribute('inputmode', 'text')
     await page.keyboard.down('a')
     await page.locator('.game-text-input').evaluate((element) => {
       const input = element as HTMLTextAreaElement
