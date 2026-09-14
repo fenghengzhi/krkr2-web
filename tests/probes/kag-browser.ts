@@ -23,7 +23,7 @@ if (
     'Usage: node --import tsx tests/probes/kag-browser.ts fixture.xp3 [chromium|firefox|webkit] [asyncify|jspi] [flow|save|transition]',
   )
 const root = resolve('dist'),
-  directory = resolve('out/verification'),
+  directory = resolve(process.env.KRKR_KAG_OUTPUT ?? 'out/verification'),
   reportName = `${basename(filename, '.xp3')}-${engine}-${backend}${mode === 'startup' ? '' : '-' + mode}`
 const files =
   mode !== 'startup'
@@ -108,6 +108,10 @@ const browser = await { chromium, firefox, webkit }[engine as 'chromium']
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }),
   errors: string[] = []
 page.on('pageerror', (error) => errors.push(error.message))
+const diagnostic = process.env.KRKR_KAG_DIAGNOSTIC === '1'
+const scriptDebug = process.env.KRKR_KAG_SCRIPT_DEBUG === '1'
+if (diagnostic)
+  await page.context().tracing.start({ screenshots: false, snapshots: true, sources: true })
 let report: Record<string, unknown> = {
   fixture: basename(filename),
   browser: engine,
@@ -115,6 +119,7 @@ let report: Record<string, unknown> = {
   date: new Date().toISOString(),
   observationMs: 1500,
   mode,
+  scriptDebug,
 }
 const steps: string[] = []
 let evaluation = 0
@@ -141,6 +146,7 @@ async function marker(name: string): Promise<void> {
 }
 try {
   await page.goto(`http://127.0.0.1:${address.port}/?backend=${backend}`)
+  if (scriptDebug) await page.locator('#script-debug').check()
   await page.locator('#files').setInputFiles(files)
   await page.waitForFunction(
     () => {
@@ -326,6 +332,16 @@ try {
     .screenshot({ path: resolve(directory, `${reportName}.png`), fullPage: true })
     .catch(() => {})
 } finally {
+  if (diagnostic) {
+    await mkdir(directory, { recursive: true })
+    await page.context().tracing.stop(
+      report.observedWithoutError
+        ? {}
+        : {
+            path: resolve(directory, `${reportName}-failure.zip`),
+          },
+    )
+  }
   await browser.close()
   await new Promise<void>((resolve) => server.close(() => resolve()))
   await mkdir(directory, { recursive: true })

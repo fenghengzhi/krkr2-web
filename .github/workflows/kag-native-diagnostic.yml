@@ -1,0 +1,47 @@
+name: KAG native startup diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Existing build with identical application sources
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+defaults:
+  run:
+    shell: bash
+env:
+  CI: 'true'
+jobs:
+  kag:
+    name: WebKit JSPI / script debug ${{ matrix.debug }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        debug: ['0', '1']
+    env:
+      KRKR_KAG_SCRIPT_DEBUG: ${{ matrix.debug }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          build-run: ${{ inputs.build-run }}
+      - run: npm run typecheck
+      - run: python3 tests/probes/prepare-compatibility.py
+      - run: npx playwright install --with-deps webkit
+      - run: node tests/probes/kag-native-diagnostic.mjs 2>&1 | tee out/ci/kag-native-diagnostic.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: kag-native-diagnostic-${{ matrix.debug }}
+          path: |
+            out/ci/
+            out/verification/kag-native-diagnostic/
+          retention-days: 90
