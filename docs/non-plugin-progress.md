@@ -1,5 +1,13 @@
 # 插件以外的实现进度
 
+[宿主生命周期最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)已通过，绑定 542 份证据。矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`，可信冻结为 21,059.1 ms。
+
+[完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882175516)通过 **594 项 Node、639 项浏览器和 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877215012)另通过 **78 项**。本轮还有 64 项隔离宿主句柄、120 项隔离对象终结和 20 次 WebKit 字体取消/重启检查。双后端分配诊断通过 600 次观察/升级/销毁、20 次集合清理、1,064 次执行和 188 次字节码分配失败。
+
+宿主句柄释放已处理异常、重入和主错误保留；Timer/AsyncTrigger 使用弱注册和实际事件的独立持有，支持隐式回收、失效重试及暂停/取消。VM 退出会继续清理关键字表和字符串池，Asyncify 在异步调用前检查挂起空间。TJS ABI 5 新增 `hostObjectLifetime: 1`，字体 ABI 2、协议 9 不变，范围见 [决策 039](decisions/039-host-object-lifetime.md)。
+
+声音生命周期正在独立工作目录实现，尚未验证；Layer、Window、VideoOverlay、MenuItem、完整图形/系统 API、流式媒体等仍未完成。原引擎引用计数不收集任意引用环。两次 WebKit 会话提前中断和一次缺少原始分配栈的历史故障仍无确定根因，重复通过不代表它们已被证明修复。以下保留历史阶段记录，当前状态以本段和决策 039 为准。
+
 [对象终结最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34868705139)已通过，绑定 530 份证据。矩阵 `out/verification/object-finalization-matrix.json` 的 SHA-256 为 `0387418a08e9a011d261937358510575a31f10061efaaff1e67c7ae910217d51`；本轮可信冻结为 21,055.1 ms。历史矩阵与失败记录继续保留。
 
 最新 [对象终结完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866740979) 通过 **466 项 Node、639 项浏览器及 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867143808) 另通过 **78 项**。对象终结专项包含三浏览器双后端 360 个场景组合、48 条暂停/取消路径，以及 [120 个隔离进程用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867147315)。[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866791836) 通过 20 次清理、1,063 次执行和 188 次字节码分配失败。TJS ABI 5 新增 `objectFinalization: 1`，字体 ABI 2、协议 9 不变。实现和原始失败见 [对象终结](decisions/038-object-finalization.md)。
@@ -94,7 +102,7 @@ WebGPU 是架构中的可选后端；应在正确性与性能证据支持时实�
 
 图层显示对需要整体透明度的子树先做隔离合成，普通图层仍独立上传 WebGL；含基础或 Photoshop 混合的可见树在 CPU 使用共享整数运算，并与 piledCopy 共用结果。已开放全部 26 种图像类型，binder/effect/filter 仍是无图像节点。独立参考标量对照已扩展到 94,464 组像素，浏览器检查 23 种依赖背景的模式；这不等于完整原生 SIMD/像素或复杂组语义一致。矩阵/三顶点仿射、20 种采样枚举、clear、自复制和可暂停/取消采样已接入，仍需严格几何/采样差分、其他像素方法与性能工作。详见 [仿射决策](decisions/009-affine-rasterization.md)、[像素混合决策](decisions/008-pixel-blending.md) 和 [场景与图像存档决策](decisions/007-scene-transitions-snapshots.md)。浏览器 fullScreen 仍是页面内全屏。
 
-仍需验证 Timer/AsyncTrigger 的隐式回收与所有权（目前已验证显式 invalidate 和整场销毁），System.eventDisabled、连续事件已有独立实现与参考轨迹验证，但完整立即异常、窗口更新尾部和宿主对象原生类型语义仍未完成；不能以当前事件测试通过认定全部生命周期已对齐。
+Timer/AsyncTrigger 的隐式回收与所有权已由决策 039 验证，包含实际事件的持有、暂停/取消和失败失效重试。System.eventDisabled、连续事件已有独立实现与参考轨迹验证，但完整立即异常、窗口更新尾部和其他宿主对象原生类型语义仍未完成；不能以当前事件测试通过认定全部生命周期已对齐。
 
 图像处理新增 convertType/doGrayScale/doBoxBlur，并修正翻转应覆盖整图与 province 的行为。333 个数值对照案例使用 TVP 标量及修复了未初始化读取的旧 CPU 模糊参考；具体来源、范围和限制见 [图像处理决策](decisions/010-image-processing.md)。
 

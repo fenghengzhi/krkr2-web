@@ -1,5 +1,13 @@
 # 当前实现范围
 
+[宿主生命周期最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)已通过，绑定 542 份证据。矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`，可信冻结为 21,059.1 ms。
+
+[完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882175516)通过 **594 项 Node、639 项浏览器和 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877215012)另通过 **78 项**。本轮还有 64 项隔离宿主句柄、120 项隔离对象终结和 20 次 WebKit 字体取消/重启检查。双后端分配诊断通过 600 次观察/升级/销毁、20 次集合清理、1,064 次执行和 188 次字节码分配失败。
+
+宿主句柄释放已处理异常、重入和主错误保留；Timer/AsyncTrigger 使用弱注册和实际事件的独立持有，支持隐式回收、失效重试及暂停/取消。VM 退出会继续清理关键字表和字符串池，Asyncify 在异步调用前检查挂起空间。TJS ABI 5 新增 `hostObjectLifetime: 1`，字体 ABI 2、协议 9 不变，范围见 [决策 039](../decisions/039-host-object-lifetime.md)。
+
+声音生命周期正在独立工作目录实现，尚未验证；Layer、Window、VideoOverlay、MenuItem、完整图形/系统 API、流式媒体等仍未完成。原引擎引用计数不收集任意引用环。两次 WebKit 会话提前中断和一次缺少原始分配栈的历史故障仍无确定根因，重复通过不代表它们已被证明修复。以下保留历史阶段记录，当前状态以本段和决策 039 为准。
+
 [对象终结最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34868705139)已通过，绑定 530 份证据。矩阵 `out/verification/object-finalization-matrix.json` 的 SHA-256 为 `0387418a08e9a011d261937358510575a31f10061efaaff1e67c7ae910217d51`；本轮可信冻结为 21,055.1 ms。历史矩阵与失败记录继续保留。
 
 最新 [对象终结完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866740979) 通过 **466 项 Node、639 项浏览器及 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867143808) 另通过 **78 项**。对象终结专项包含三浏览器双后端 360 个场景组合、48 条暂停/取消路径，以及 [120 个隔离进程用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867147315)。[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866791836) 通过 20 次清理、1,063 次执行和 188 次字节码分配失败。TJS ABI 5 新增 `objectFinalization: 1`，字体 ABI 2、协议 9 不变。实现和原始失败见 [对象终结](../decisions/038-object-finalization.md)。

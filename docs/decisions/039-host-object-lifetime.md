@@ -1,5 +1,11 @@
 # 039 — 宿主对象观察、句柄释放与事件所有权
 
+本阶段的 [最终报告 34883625695](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)已通过，报告与最终回归绑定提交 `056417a7f86f93c0bba76832c2d46ecfc2a96ac9`。矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`，包含 542 份证据。以下失败记录保留历史顺序；最终通过不抹除未确定根因的故障，也不代表完整非插件目标完成。
+
+[完整回归 34882175516](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882175516)通过 594 项 Node、639 项浏览器、6 项直接运行时；[兼容性 34877215012](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877215012)通过 78 项。独立 [宿主句柄 34877207118](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877207118)通过 64 项，[对象终结 34877210694](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877210694)通过 120 项。[分配诊断 34876790697](https://github.com/fenghengzhi/krkr2-web/actions/runs/34876790697)通过 600 次 owner 分配失败（注册 16、销毁 576、升级 8）、20 次集合清理、1,064 次执行和 188 次字节码分配失败。[字体重启 34882204693](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882204693)通过 20 次原用例重复，保留浏览器协议日志，没有增加等待期限或重试。
+
+正式构建 ID 为 `e53d491afaf98e2654c51923bed866b1836cc14cff4715267ef8ef9ee248e1a1`，TJS 源码摘要为 `66fba7f55e5bd1084d7e6e7810c9d547a0aedbe5484c835b0d6ec45fd3e33bac`，发布树摘要为 `c763292b28c63b1fb3102868fb6b79a8a49a8c7b807a070ffc76a993361be420`。TJS ABI 5、字体 ABI 2、协议 9；新增 `hostObjectLifetime: 1`，正式产物不含故障分配器。可信冻结为 21,059.1 ms。本地只恢复精确云端构建，旧产物和 038 矩阵保持保留。
+
 本阶段实现宿主句柄异常清理和 Timer / AsyncTrigger 的实际资源生命周期，未完成全部非插件对象。首轮完整 [Tests 34871902361](https://github.com/fenghengzhi/krkr2-web/actions/runs/34871902361) 的 Node 为 592/594，639 项浏览器与 6 项直接运行时通过；源码为 `7c08baa9951b114a1ae22eacb8a7e7a455dec93f`。两个字节码暂停/停止夹具使用无条件 TextDecoder，误把编译输出作为文本解析，已改用保留 TJS2/KBAD 二进制的 readScript，仅拦截等待标记。该失败整体仍是失败，不能由后续运行覆盖。全部构建、测试与可执行探测仅在 GitHub-hosted Actions 运行，未本地执行。
 
 修订后的 [Tests 34873398038](https://github.com/fenghengzhi/krkr2-web/actions/runs/34873398038) 已全部成功，绑定源码 `cf6248c0c9bb9fe6f60d1c5d5fd50586a2c1d50a`；14 个作业均成功，Node 为 594/594，包含上述字节码暂停/停止场景，浏览器、直接运行时和生产构建作业也成功。材料归档至 `out/verification/github-actions/34873398038/complete/`，元数据位于上级 `run.json`。该运行早于后述保留字表销毁修复，不能作为修复后源码或完整 039 阶段的通过证明。
@@ -21,7 +27,7 @@ DeleteAllMembers -> Finalize -> BeforeDestruction -> tTJSDispatch::Release
 
 [分配诊断 34875061460](https://github.com/fenghengzhi/krkr2-web/actions/runs/34875061460) 的两个后端均通过全部 324 条 owner 注册、升级和销毁记录，包括原来失败的销毁位置；实际每后端注入 300 次分配失败。但是 Asyncify 的既有集合清理探测在 debug/dictionary/implicit 的 `after=1` 记录一次“命中分配失败但执行没有抛错”，整轮仍为失败。旧探测在断言之前没有保存失败分配大小和原生栈，无法从这次记录确定分配来源。现已调整为先保存原始返回、异常、命中、字节数和分配栈，再作断言，保留原有判定要求。
 
-新增诊断记录后的 [34875659518](https://github.com/fenghengzhi/krkr2-web/actions/runs/34875659518) 在两个后端全部通过，源码为 `7bcf9ca79a2cd23cdd418d25b40b7eedb8352502`；这不能抹除上轮偶发错误或证明其根因已修复。正在专项检查 Asyncify 挂起缓冲区的分配失败行为；完整 039 报告尚未完成。两轮完整材料均按 run ID 保存在 `out/verification/github-actions/`。
+新增诊断记录后的 [34875659518](https://github.com/fenghengzhi/krkr2-web/actions/runs/34875659518) 在两个后端全部通过，源码为 `7bcf9ca79a2cd23cdd418d25b40b7eedb8352502`；这不能抹除上轮偶发错误或证明其根因已修复。后续检查并修复 Asyncify 挂起空间的分配边界，最终结果见本文开头；该重复运行自身不构成完整阶段证明。两轮完整材料均按 run ID 保存在 `out/verification/github-actions/`。
 
 源码检查发现固定版本 [Emscripten 6.0.9 的 Asyncify](https://github.com/emscripten-core/emscripten/blob/6.0.9/src/lib/libasync.js) 在异步操作开始、状态进入 Unwinding 后才分配挂起缓冲区，并直接使用返回地址。新增保护在 C++ 进入两个异步 import 之前检查并预留挂起空间，失败时沿现有脚本异常边界退出，避免先启动宿主操作；JSPI 不需要该缓冲区。受版本约束的 allocateData 适配只消费已预留的空间，原有 rewind 流程负责释放，未使用的预留由 C++ 作用域释放。头部大小、栈大小、执行状态和独占持有条件均检查。这个检查修复有明确源码依据，但没有据此反推此前缺少分配栈的偶发失败已被证明来自此处。
 
@@ -49,7 +55,7 @@ Timer / AsyncTrigger 注册时传入实例 `this`，服务保存弱 owner 和固
 
 这一划分来自原始 [TimerIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/TimerIntf.cpp) 和 [EventIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/base/EventIntf.cpp)：Timer / AsyncTrigger 的 Owner 为非持有指针，ActionOwner 单独保留用户对象，基础 finalize 为空；实际 `tTVPEvent` 才 AddRef Target/Source，投递或取消后释放。持续事件的用户注册 callback 则有明确强引用，不应随 Timer 注册表一起弱化。
 
-`session.inspectOwnership()` 独立返回 `eventSources`、`weakOwners`、`scriptObjects`、`pendingHandles`，用于对照资源数量与真实原生存活对象。它没有加入产品 UI 的 `SessionSnapshot`。用例检查注册、队列、暂停中的持有关系、释放边界、重入销毁与恢复执行；只有句柄数归零无法证明原生对象或宿主源已经释放。完整 Actions、独立双后端诊断和分配故障结果仍须绑定实际源码与产物后再记为通过。
+`session.inspectOwnership()` 独立返回 `eventSources`、`weakOwners`、`scriptObjects`、`pendingHandles`，用于对照资源数量与真实原生存活对象。它没有加入产品 UI 的 `SessionSnapshot`。用例检查注册、队列、暂停中的持有关系、释放边界、重入销毁与恢复执行；只有句柄数归零无法证明原生对象或宿主源已经释放。本轮完整 Actions、独立双后端诊断和分配故障结果已由最终报告绑定实际源码与产物；未列入验证的其他宿主类型继续实现。
 
 后续仍需按各类原有所有权实现，不能把所有引用统一改弱：
 

@@ -6,6 +6,12 @@
 
 ## 已完成的云端回归
 
+[宿主生命周期最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)绑定 542 份证据，矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`。最新 [完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882175516)通过 **594 Node、639 浏览器、6 直接运行时**；[兼容性](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877215012)通过 **78 项**，所选测试无失败、跳过、flaky 或重试。
+
+专项通过 [64 个隔离宿主句柄用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877207118)、[120 个隔离对象用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877210694)、[600 次 owner、20 次集合、1,064 次执行和 188 次字节码分配失败](https://github.com/fenghengzhi/krkr2-web/actions/runs/34876790697)，以及 [20 次 WebKit 字体取消/重启](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882204693)。直接运行时另记录 144 条宿主句柄、48 条控制、240 条弱观察和 48 条事件所有权场景；可信冻结 21,059.1 ms。
+
+本地产物仅从 `34882175516` 的精确构建恢复，旧 `.generated` 和 `dist` 保存在 `out/verification/host-object-lifetime/prior-local-artifacts/`，没有本地测试或探测。此前所有失败、中断和材料均保留；两次 WebKit 会话提前中断与一次缺少原始分配栈的故障仍无确定根因。实现、完整失败历史及验证边界见 [039](decisions/039-host-object-lifetime.md)。以下为历史阶段记录。
+
 [对象终结最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34868705139)已通过，绑定 530 份证据。矩阵 `out/verification/object-finalization-matrix.json` 的 SHA-256 为 `0387418a08e9a011d261937358510575a31f10061efaaff1e67c7ae910217d51`；本轮可信冻结为 21,055.1 ms。历史矩阵与失败记录继续保留。
 
 最新 [对象终结完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866740979) 通过 **466 项 Node、639 项浏览器及 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867143808) 另通过 **78 项**。对象终结专项包含三浏览器双后端 360 个场景组合、48 条暂停/取消路径，以及 [120 个隔离进程用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34867147315)。[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34866791836) 通过 20 次清理、1,063 次执行和 188 次字节码分配失败。TJS ABI 5 新增 `objectFinalization: 1`，字体 ABI 2、协议 9 不变。实现和原始失败见 [对象终结](decisions/038-object-finalization.md)。
