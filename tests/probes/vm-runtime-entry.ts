@@ -2,6 +2,7 @@ import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import { ExecutionControl } from '../../src/engine/scheduler/control.ts'
 import { exerciseTrace } from '../helpers/trace-runtime.ts'
 import { compilerPhases, exerciseCompiler } from '../helpers/compiler-runtime.ts'
+import { exerciseBinaryRuntime } from '../helpers/binary-runtime.ts'
 
 export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
   const manifest = await (await fetch('/wasm/manifest.json')).json(),
@@ -131,6 +132,10 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     for (const cancel of [false, true])
       compiler.push(await exerciseCompiler(factory, wasmBinary, backend, phase, cancel))
   return {
+    binary: [
+      await exerciseBinaryRuntime(factory, wasmBinary, backend, false),
+      await exerciseBinaryRuntime(factory, wasmBinary, backend, true),
+    ],
     compiler,
     trace: await exerciseTrace(factory, wasmBinary, backend),
     compiledBytes,

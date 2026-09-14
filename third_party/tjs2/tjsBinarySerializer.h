@@ -16,6 +16,8 @@
 #include "tjsGlobalStringMap.h"
 #include <vector>
 #include <limits.h>
+#include <memory>
+#include "WebHost.h"
 
 namespace TJS {
     /**
@@ -394,8 +396,8 @@ namespace TJS {
 
         static inline tjs_uint32 Read32(const tjs_uint8 *buff,
                                         tjs_uint &index) {
-            tjs_uint32 ret = buff[index] | (buff[index + 1] << 8) |
-                (buff[index + 2] << 16) | (buff[index + 3] << 24);
+            tjs_uint32 ret = tjs_uint32(buff[index]) | (tjs_uint32(buff[index + 1]) << 8) |
+                (tjs_uint32(buff[index + 2]) << 16) | (tjs_uint32(buff[index + 3]) << 24);
             index += sizeof(tjs_uint32);
             return ret;
         }
@@ -434,15 +436,15 @@ namespace TJS {
         ReadString(const tjs_uint8 *buff, tjs_uint len, tjs_uint &index) {
             tTJSVariantString *ret = nullptr;
             if(len > 0) {
-                auto *str = new tjs_char[len];
+                auto str = std::make_unique<tjs_char[]>(len);
                 for(tjs_uint i = 0; i < len; i++) {
+                    krkr_compiler_work(i);
                     str[i] = buff[index];
                     index++;
                     str[i] |= buff[index] << 8;
                     index++;
                 }
-                ret = TJSAllocVariantString(str, len);
-                delete[] str;
+                ret = TJSAllocVariantString(str.get(), len);
             }
             return ret;
         }
@@ -486,6 +488,7 @@ namespace TJS {
         ~tTJSBinarySerializer();
 
         tTJSVariant *Read(tTJSBinaryStream *stream);
+        tTJSVariant *Read(const tjs_uint8 *buffer, size_t size);
 
     private:
         iTJSDispatch2 *DicClass;

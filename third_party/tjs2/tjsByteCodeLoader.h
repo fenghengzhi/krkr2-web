@@ -100,8 +100,8 @@ namespace TJS {
         }
 
         static inline int read4byte(const tjs_uint8 *x) {
-            return (((x)[0]) | (((x)[1]) << 8) | (((x)[2]) << 16) |
-                    (((x)[3]) << 24));
+            return static_cast<tjs_int32>(tjs_uint32(x[0]) | (tjs_uint32(x[1]) << 8) |
+                (tjs_uint32(x[2]) << 16) | (tjs_uint32(x[3]) << 24));
         }
 
         static inline tjs_uint64 read8byte(const tjs_uint8 *x) {

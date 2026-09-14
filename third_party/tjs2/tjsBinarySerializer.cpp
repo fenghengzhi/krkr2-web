@@ -12,8 +12,59 @@
 #include "tjsBinarySerializer.h"
 #include "tjsDictionary.h"
 #include "tjsArray.h"
+#include "BinaryInput.h"
+#include "WebHost.h"
+#include <memory>
 
 namespace TJS {
+
+    namespace {
+        void ValidateValue(krkr::BinaryInput& input, unsigned depth,
+                           unsigned& nodes, bool key = false) {
+            if(depth > 256 || ++nodes > 1000000) input.fail();
+            krkr_compiler_work(nodes);
+            const auto type = input.u8();
+            unsigned count = 0;
+            if(type >= 0xa0 && type <= 0xbf) count = type - 0xa0;
+            else if(type == 0xc4) count = input.u8();
+            else if(type == 0xc5) count = input.u16();
+            else if(type == 0xc6) count = input.u32();
+            else {
+                if(key) input.fail();
+                if(type <= 0x7f || type >= 0xe0 || (type >= 0xc0 && type <= 0xc3)) return;
+                if(type >= 0xd4 && type <= 0xd9) { input.take(type - 0xd4); return; }
+                switch(type) {
+                    case 0xca: case 0xce: case 0xd2: input.take(4); return;
+                    case 0xcb: case 0xcf: case 0xd3: input.take(8); return;
+                    case 0xcc: case 0xd0: input.take(1); return;
+                    case 0xcd: case 0xd1: input.take(2); return;
+                    case 0xda: count = input.u16(); input.take(count); return;
+                    case 0xdb: count = input.u32(); input.take(count); return;
+                }
+                bool dictionary = false;
+                if(type >= 0x80 && type <= 0x8f) { dictionary = true; count = type - 0x80; }
+                else if(type >= 0x90 && type <= 0x9f) count = type - 0x90;
+                else if(type == 0xdc) count = input.u16();
+                else if(type == 0xdd) count = input.u32();
+                else if(type == 0xde) { dictionary = true; count = input.u16(); }
+                else if(type == 0xdf) { dictionary = true; count = input.u32(); }
+                else input.fail();
+                if(count > input.remaining() / (dictionary ? 2 : 1) || count > 1000000) input.fail();
+                for(unsigned i = 0; i < count; ++i) {
+                    if(dictionary) ValidateValue(input, depth + 1, nodes, true);
+                    ValidateValue(input, depth + 1, nodes);
+                }
+                return;
+            }
+            input.items(count, 2);
+        }
+        struct ReleaseObject {
+            void operator()(iTJSDispatch2* object) const { if(object) object->Release(); }
+        };
+        struct ReleaseString {
+            void operator()(tTJSVariantString* value) const { if(value) value->Release(); }
+        };
+    }
 
     const tjs_uint8
         tTJSBinarySerializer::HEADER[tTJSBinarySerializer::HEADER_LENGTH] = {
@@ -125,9 +176,11 @@ namespace TJS {
     void tTJSBinarySerializer::AddDictionary(tTJSDictionaryObject *dic,
                                              tTJSVariantString *name,
                                              tTJSVariant *value) {
-        if(name == nullptr || value == nullptr)
+        if(value == nullptr)
             TJS_eTJSError(TJSReadError);
-        dic->PropSetByVS(TJS_MEMBERENSURE, name, value, dic);
+        // TJS represents the empty string with a null string object.
+        if(name) dic->PropSetByVS(TJS_MEMBERENSURE, name, value, dic);
+        else dic->PropSet(TJS_MEMBERENSURE, TJS_W(""), nullptr, value, dic);
     }
 
     void tTJSBinarySerializer::InsertArray(tTJSArrayObject *array,
@@ -147,8 +200,8 @@ namespace TJS {
     tTJSVariant *tTJSBinarySerializer::ReadBasicType(const tjs_uint8 *buff,
                                                      const tjs_uint size,
                                                      tjs_uint &index) {
-        if(index > size)
-            return nullptr;
+        krkr_compiler_work(index);
+        if(index >= size) TJS_eTJSError(TJSReadError);
         tjs_uint8 type = buff[index];
         index++;
         switch(type) {
@@ -294,7 +347,7 @@ namespace TJS {
                     return new tTJSVariant(value);
                 } else if(type >= TYPE_NEGATIVE_FIX_NUM_MIN &&
                           type <= TYPE_NEGATIVE_FIX_NUM_MAX) {
-                    tjs_int value = type;
+                    tjs_int value = static_cast<tjs_int8>(type);
                     return new tTJSVariant(value);
                 } else if(type >= TYPE_FIX_RAW_MIN &&
                           type <= TYPE_FIX_RAW_MAX) { // octet
@@ -331,14 +384,14 @@ namespace TJS {
         if(index > size)
             return nullptr;
 
-        tTJSArrayObject *array = CreateArray(count);
+        std::unique_ptr<tTJSArrayObject, ReleaseObject> owner(CreateArray(count));
+        auto* array = owner.get();
         for(tjs_uint i = 0; i < count; i++) {
-            tTJSVariant *value = ReadBasicType(buff, size, index);
-            InsertArray(array, i, value);
-            delete value;
+            krkr_compiler_work(i);
+            std::unique_ptr<tTJSVariant> value(ReadBasicType(buff, size, index));
+            InsertArray(array, i, value.get());
         }
         auto *ret = new tTJSVariant(array, array);
-        array->Release();
         return ret;
     }
 
@@ -349,8 +402,10 @@ namespace TJS {
         if(index > size)
             return nullptr;
 
-        tTJSDictionaryObject *dic = CreateDictionary(count);
+        std::unique_ptr<tTJSDictionaryObject, ReleaseObject> owner(CreateDictionary(count));
+        auto* dic = owner.get();
         for(tjs_uint i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             tjs_uint8 type = buff[index];
             index++;
             // 最初に文字を読む
@@ -397,28 +452,34 @@ namespace TJS {
                     break;
             }
             // 次に要素を読む
-            tTJSVariant *value = ReadBasicType(buff, size, index);
-            AddDictionary(dic, name, value);
-            delete value;
-            if(name)
-                name->Release();
+            std::unique_ptr<tTJSVariantString, ReleaseString> key(name);
+            std::unique_ptr<tTJSVariant> value(ReadBasicType(buff, size, index));
+            AddDictionary(dic, key.get(), value.get());
         }
         auto *ret = new tTJSVariant(dic, dic);
-        dic->Release();
         return ret;
     }
 
     tTJSVariant *tTJSBinarySerializer::Read(tTJSBinaryStream *stream) {
-        tjs_uint64 pos = stream->GetPosition();
-        auto size = (tjs_uint)(stream->GetSize() - pos);
-        auto *buffstart = new tjs_uint8[size];
-        if(size != stream->Read(buffstart, size)) {
+        const auto pos = stream->GetPosition(), total = stream->GetSize();
+        if(pos > total || total - pos > 64u * 1024 * 1024) TJS_eTJSError(TJSReadError);
+        const auto size = static_cast<tjs_uint>(total - pos);
+        std::vector<tjs_uint8> buffer(size);
+        if(size != stream->Read(buffer.data(), size)) {
             TJS_eTJSError(TJSReadError);
         }
+        return Read(buffer.data(), size);
+    }
+
+    tTJSVariant *tTJSBinarySerializer::Read(const tjs_uint8 *buffer, size_t size) {
+        KrkrCompilerScope work(5);
+        krkr::BinaryInput input(buffer, size, TJSReadError);
+        unsigned nodes = 0;
+        ValidateValue(input, 0, nodes);
+        // Native structured streams contain one value; trailing file data is
+        // allowed (including data following an offset inside another resource).
         tjs_uint index = 0;
-        tTJSVariant *ret = ReadBasicType(buffstart, size, index);
-        delete[] buffstart;
-        return ret;
+        return ReadBasicType(buffer, static_cast<tjs_uint>(size), index);
     }
 
 } // namespace TJS

@@ -7,7 +7,8 @@ extern "C" void krkr_compiler_leave(int previous);
 extern "C" void krkr_compiler_checkpoint();
 
 // Scope is restored across nested compiler callbacks and exception unwinding.
-// Phases: 1 = source preparation, 2 = parsing/code generation, 3 = export.
+// Phases: 1 = source preparation, 2 = parsing/code generation, 3 = export,
+// 5 = binary input validation/deserialization (4 is the independent dump sink).
 class KrkrCompilerScope {
     int previous;
 public:

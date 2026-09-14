@@ -13,6 +13,7 @@
 #include "tjsArray.h"
 #include "tjsNative.h"
 #include "tjsDebug.h"
+#include "tjsBinarySerializer.h"
 #include "scripts.h"
 
 using namespace TJS;
@@ -127,6 +128,15 @@ public:
     ~ConsoleScope() { engine->SetConsoleOutput(previous); }
 };
 
+void loadBinary(Vm* vm, const tjs_uint8* bytes, std::size_t length,
+    tTJSVariant* result, iTJSDispatch2* context, const tjs_char* name) {
+    if(length >= tTJSBinarySerializer::HEADER_LENGTH && tTJSBinarySerializer::IsBinary(bytes)) {
+        tTJSBinarySerializer reader;
+        std::unique_ptr<tTJSVariant> value(reader.Read(bytes + 8, length - 8));
+        if(result) *result = *value;
+    } else vm->engine->LoadByteCode(bytes, length, result, context, name);
+}
+
 void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
     if(reply.kind == 1) TJS_eTJSError(ttstr(reply.value));
     if(reply.kind == 2 || reply.kind == 7) {
@@ -143,7 +153,7 @@ void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
         else vm->engine->ExecScript(ttstr(reply.value), result, context, &reply.name, reply.line);
     } else if(reply.kind == 4) {
         auto* bytes = reply.value.AsOctetNoAddRef();
-        vm->engine->LoadByteCode(bytes->GetData(), bytes->GetLength(), result,
+        loadBinary(vm, bytes ? bytes->GetData() : nullptr, bytes ? bytes->GetLength() : 0, result,
             reply.context.Type() == tvtObject ? reply.context.AsObjectNoAddRef() : nullptr, reply.name.c_str());
     } else if(reply.kind == 8) {
         // The original dump uses its own file sink, not log observers. Collect
@@ -404,7 +414,7 @@ API Reply* krkr_execute(Vm* vm, const void* source, unsigned length, const tjs_c
     deadline = emscripten_get_now() + 8;
     return capture([&](tTJSVariant& value) {
         vm->flushReleased();
-        if(mode == 2) vm->engine->LoadByteCode(static_cast<const tjs_uint8*>(source), length, &value, nullptr, name);
+        if(mode == 2) loadBinary(vm, static_cast<const tjs_uint8*>(source), length, &value, nullptr, name);
         else if(mode == 1) vm->engine->EvalExpression(static_cast<const tjs_char*>(source), &value, nullptr, name);
         else vm->engine->ExecScript(static_cast<const tjs_char*>(source), &value, nullptr, name);
     });

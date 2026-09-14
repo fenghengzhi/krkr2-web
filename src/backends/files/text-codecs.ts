@@ -1,4 +1,9 @@
-import { decodeTextStream, encodeTextStream, type TextCodecs } from '../../formats/text/stream.ts'
+import {
+  decodeTextStream,
+  encodeTextStream,
+  modeOffset,
+  type TextCodecs,
+} from '../../formats/text/stream.ts'
 import { inflate } from './blob-source.ts'
 const codecs: TextCodecs = {
   narrow(bytes, encoding) {
@@ -26,6 +31,11 @@ export async function readScript(
   mode = '',
   encoding?: string,
 ): Promise<string | Uint8Array> {
-  if (bytes[0] === 0x54 && bytes[1] === 0x4a && bytes[2] === 0x53 && bytes[3] === 0x32) return bytes
+  const offset = modeOffset(mode)
+  if (offset > bytes.length) throw new Error('Script stream offset exceeds file length')
+  const source = bytes.subarray(offset)
+  if (source.length > 64 * 1024 * 1024) throw new Error('Script stream exceeds 64 MiB budget')
+  const tag = String.fromCharCode(...source.subarray(0, 4))
+  if (tag === 'TJS2' || tag === 'KBAD') return source
   return readText(bytes, mode, encoding)
 }

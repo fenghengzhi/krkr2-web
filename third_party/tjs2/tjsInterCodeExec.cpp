@@ -1026,6 +1026,8 @@ namespace TJS {
                                       tTJSVariant **args, tjs_int numargs,
                                       tTJSVariant *result, bool tryCatch) {
         // execute VM codes
+        if(startip < 0 || startip >= CodeAreaSize)
+            TJS_eTJSScriptError(TJSByteCodeBroken, Block, 0);
         tjs_int32 *codesave;
         try {
             tjs_int32 *code = codesave = CodeArea + startip;
@@ -1036,6 +1038,10 @@ namespace TJS {
             bool flag = false;
 
             while(true) {
+                // A return from a nested try body can advance to one-past-end.
+                // Check before dereferencing, including dynamically resumed code.
+                if(code < CodeArea || code >= CodeArea + CodeAreaSize)
+                    TJS_eTJSScriptError(TJSByteCodeBroken, Block, 0);
                 codesave = code;
                 if(ShouldUseStackTracer())
                     TJSStackTracerSetCodePosition(code - CodeArea);

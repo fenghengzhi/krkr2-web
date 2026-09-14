@@ -3,6 +3,34 @@ import { readFile } from 'node:fs/promises'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { scriptsFixture, reentrantScriptsFixture } from '../helpers/scripts-fixture.ts'
 import { compilerSource } from '../helpers/compiler-runtime.ts'
+import { binaryScriptsFixture } from '../helpers/binary-scripts.ts'
+
+for (const backend of ['asyncify', 'jspi'])
+  test(`${backend}: binary Scripts resources preserve native objects, offsets and browser saves`, async ({
+    page,
+  }) => {
+    await page.goto('/?backend=' + backend)
+    await page.locator('#files').setInputFiles(
+      Object.entries(binaryScriptsFixture()).map(([name, data]) => ({
+        name,
+        mimeType: typeof data === 'string' ? 'text/plain' : 'application/octet-stream',
+        buffer: Buffer.from(data),
+      })),
+    )
+    await expect(page.getByText('binary-scripts-ready', { exact: true })).toBeVisible()
+    await evaluate(page, 'roundtrip.large', '9007199254740993')
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('#export-saves').click(),
+    ])
+    const backup = JSON.parse(await readFile((await download.path())!, 'utf8'))
+    const output = backup.files.find(
+      (file: { path: string }) => file.path === 'savedata/roundtrip.bin',
+    )
+    expect(Buffer.from(output.base64, 'base64').subarray(0, 8).toString('ascii')).toBe('KBAD100\0')
+    await page.locator('#stop').click()
+    await expect(page.locator('#status')).toHaveText('待机')
+  })
 
 for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: native Scripts execution, compilation and reflection reach browser saves`, async ({

@@ -12,6 +12,7 @@
 #include "tjsScriptBlock.h"
 #include "tjsByteCodeLoader.h"
 #include "tjsGlobalStringMap.h"
+#include "BytecodeValidation.h"
 
 namespace TJS {
 
@@ -31,6 +32,7 @@ namespace TJS {
                                                       const tjs_char *name,
                                                       const tjs_uint8 *buf,
                                                       size_t size) {
+        krkr::validateBytecode(buf, size);
         ReadBuffer = buf;
         ReadIndex = 0;
         ReadSize = (tjs_uint32)size;
@@ -137,7 +139,7 @@ namespace TJS {
                     offset += 2;
                 }
                 StringArray.push_back(
-                    TJSMapGlobalStringMap((const tjs_char *)&(ch[0])));
+                    TJSMapGlobalStringMap(ttstr((const tjs_char *)ch.data(), len)));
                 offset += (len & 1) << 1;
             }
         }
@@ -279,7 +281,7 @@ namespace TJS {
                         work.emplace_back(&(vdata[i]), index);
                         break;
                     case TYPE_STRING:
-                        vdata[i] = StringArray[index].c_str(); // tTJSString
+                        vdata[i] = StringArray[index];
                         break;
                     case TYPE_OCTET:
                         vdata[i] = OctetArray[index]; // tTJSVariantOctet

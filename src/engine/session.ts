@@ -1254,9 +1254,13 @@ export class EngineSession {
           this.textEncoding.codec,
         )
         break
-      case 'Storage.readBinary':
-        value = await this.readResource(text(0))
+      case 'Storage.readBinary': {
+        const bytes = await this.readResource(text(0)),
+          offset = modeOffset(text(1))
+        if (offset > bytes.length) throw new Error('Binary stream offset exceeds file length')
+        value = bytes.subarray(offset)
         break
+      }
       case 'Storage.validateWrite':
         if (text(0).includes('>')) throw new Error('Archive storage is read-only')
         normalizePath(text(0))
