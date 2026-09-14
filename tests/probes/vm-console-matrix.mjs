@@ -560,6 +560,16 @@ const matrix = {
     ...(binaryPhase
       ? [
           {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34839357671',
+            reason:
+              'One original ZIP/WebKit/JSPI KAG startup failed with an unreadable native member name after construction. Forty independent repetitions of that transition case, twenty each with script tracing disabled/enabled, passed without reproducing it; no product root cause is claimed. The regular KAG runner now retains failing JSON/screenshots/traces inside its uploaded directory. The original failure log remains archived.',
+            diagnostic: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34840243332',
+          },
+        ]
+      : []),
+    ...(binaryPhase
+      ? [
+          {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34839287423',
             reason:
               'The held-pointer menu fixture submitted the expression after pressing the menu; console focus scrolled the page and moved the physical mouse target. Node and direct runtimes passed, and Chromium video checks passed. The fixture now submits before opening the menu, holds only the outgoing evaluate request, and releases it after pointerdown. It verifies original node ownership and the physical hit target before release; original failed browser evidence remains archived.',
@@ -706,6 +716,11 @@ const matrix = {
     },
   ],
   incomplete: [
+    ...(binaryPhase
+      ? [
+          'The historical WebKit JSPI original KAG startup member-name corruption was not reproduced in forty diagnostic cases; its native cause remains unconfirmed',
+        ]
+      : []),
     ...(tracePhase ? [] : ['Scripts.getTraceString']),
     ...(scriptsPhase
       ? [

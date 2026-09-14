@@ -108,10 +108,8 @@ const browser = await { chromium, firefox, webkit }[engine as 'chromium']
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }),
   errors: string[] = []
 page.on('pageerror', (error) => errors.push(error.message))
-const diagnostic = process.env.KRKR_KAG_DIAGNOSTIC === '1'
 const scriptDebug = process.env.KRKR_KAG_SCRIPT_DEBUG === '1'
-if (diagnostic)
-  await page.context().tracing.start({ screenshots: false, snapshots: true, sources: true })
+await page.context().tracing.start({ screenshots: false, snapshots: true, sources: true })
 let report: Record<string, unknown> = {
   fixture: basename(filename),
   browser: engine,
@@ -332,21 +330,18 @@ try {
     .screenshot({ path: resolve(directory, `${reportName}.png`), fullPage: true })
     .catch(() => {})
 } finally {
-  if (diagnostic) {
-    await mkdir(directory, { recursive: true })
-    await page.context().tracing.stop(
-      report.observedWithoutError
-        ? {}
-        : {
-            path: resolve(directory, `${reportName}-failure.zip`),
-          },
+  await mkdir(directory, { recursive: true })
+  await page
+    .context()
+    .tracing.stop(
+      report.observedWithoutError ? {} : { path: resolve(directory, `${reportName}-failure.zip`) },
     )
-  }
   await browser.close()
   await new Promise<void>((resolve) => server.close(() => resolve()))
   await mkdir(directory, { recursive: true })
   await writeFile(resolve(directory, `${reportName}.json`), JSON.stringify(report, null, 2) + '\n')
 }
 console.log(JSON.stringify(report, null, 2))
+if (!report.observedWithoutError) process.exitCode = 1
 if (!report.observedWithoutError) process.exitCode = 1
 if (!report.observedWithoutError) process.exitCode = 1

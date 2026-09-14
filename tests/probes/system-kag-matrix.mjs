@@ -30,6 +30,7 @@ for (const [container, filename] of [
     for (const backend of ['asyncify', 'jspi'])
       for (const mode of ['flow', 'save', 'transition']) {
         const log = `${directory}/${container}-${browser}-${backend}-${mode}.log`,
+          name = `${basename(filename, '.xp3')}-${browser}-${backend}-${mode}`,
           fd = openSync(log, 'w')
         try {
           await new Promise((resolve, reject) => {
@@ -43,11 +44,22 @@ for (const [container, filename] of [
               code === 0 ? resolve() : reject(new Error('KAG scenario failed: ' + log)),
             )
           })
+        } catch (error) {
+          // Failed scenarios must retain the same source report/screenshot and
+          // native browser trace as passing scenarios, before aborting the matrix.
+          for (const suffix of ['.json', '.png', '-failure.zip']) {
+            await copyFile(
+              `out/verification/${name}${suffix}`,
+              `${directory}/${name}${suffix}`,
+            ).catch((copyError) => {
+              if (copyError.code !== 'ENOENT') throw copyError
+            })
+          }
+          throw error
         } finally {
           closeSync(fd)
         }
-        const name = `${basename(filename, '.xp3')}-${browser}-${backend}-${mode}`,
-          report = JSON.parse(await readFile(`out/verification/${name}.json`, 'utf8'))
+        const report = JSON.parse(await readFile(`out/verification/${name}.json`, 'utf8'))
         assert(report.observedWithoutError && !report.errors.length && report.steps.length)
         for (const ext of ['json', 'png'])
           await copyFile(`out/verification/${name}.${ext}`, `${directory}/${name}.${ext}`)
