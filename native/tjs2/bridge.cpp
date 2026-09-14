@@ -24,6 +24,7 @@ unsigned TJSGetPendingDestructions();
 unsigned TJSGetDestructionDepth();
 unsigned TJSGetPeakDestructionDepth();
 unsigned TJSGetQueuedDestructions();
+unsigned TJSGetLiveDispatchObjects();
 }
 #define API extern "C" EMSCRIPTEN_KEEPALIVE
 
@@ -433,6 +434,7 @@ API unsigned krkr_native_lifetime_stat(unsigned field) {
         case 1: return TJSGetDestructionDepth();
         case 2: return TJSGetPeakDestructionDepth();
         case 3: return TJSGetQueuedDestructions();
+        case 4: return TJSGetLiveDispatchObjects();
         default: return 0;
     }
 }

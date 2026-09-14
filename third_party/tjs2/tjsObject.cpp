@@ -25,6 +25,7 @@ namespace TJS {
     // transferred last reference; no allocation is needed while reclaiming.
     static unsigned DestructionDepth = 0, PendingDestructions = 0;
     static unsigned PeakDestructionDepth = 0, QueuedDestructions = 0;
+    static unsigned LiveDispatchObjects = 0;
     static bool DrainingDestructions = false;
     static tTJSDispatch* DestructionHead = nullptr;
     static tTJSDispatch* DestructionTail = nullptr;
@@ -32,6 +33,7 @@ namespace TJS {
     unsigned TJSGetDestructionDepth() { return DestructionDepth; }
     unsigned TJSGetPeakDestructionDepth() { return PeakDestructionDepth; }
     unsigned TJSGetQueuedDestructions() { return QueuedDestructions; }
+    unsigned TJSGetLiveDispatchObjects() { return LiveDispatchObjects; }
 
     //---------------------------------------------------------------------------
     // utility functions
@@ -97,6 +99,7 @@ namespace TJS {
     // tTJSDispatch
     //---------------------------------------------------------------------------
     tTJSDispatch::tTJSDispatch() {
+        ++LiveDispatchObjects;
         BeforeDestructionCalled = false;
         RefCount = 1;
 #ifdef TVP_IN_PLUGIN_STUB // TVP plug-in support
@@ -106,6 +109,7 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     tTJSDispatch::~tTJSDispatch() {
+        --LiveDispatchObjects;
         // Also handles a native method/property constructor that failed after
         // debug registration, before its derived destructor could run.
         if(TJSObjectHashMapEnabled()) TJSRemoveObjectHashRecord(this);
@@ -407,7 +411,7 @@ namespace TJS {
         for(tjs_int i = 0; i < HashSize; ++i) {
             auto clear = [this](tTJSSymbolData* data) {
                 if(!(data->SymFlags & TJS_SYMBOL_USING)) return;
-                auto& value = GetValue(data);
+                auto& value = *reinterpret_cast<tTJSVariant*>(&data->Value);
                 CheckObjectClosureRemove(value);
                 try { value.Clear(); }
                 catch(...) { krkr::deferCleanupError(std::current_exception()); }

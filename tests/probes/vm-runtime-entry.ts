@@ -7,6 +7,11 @@ import {
   exerciseDeepContinuation,
   exerciseArgumentControl,
 } from '../helpers/execution-budget.ts'
+import {
+  objectLifetimeCases,
+  exerciseObjectLifetime,
+  exerciseFinalizationControl,
+} from '../helpers/object-lifetime.ts'
 import { exerciseBinaryRuntime } from '../helpers/binary-runtime.ts'
 import {
   exerciseBytecodeLifetime,
@@ -149,7 +154,22 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
       bytecodeControls.push(
         await exerciseBytecodeControl(factory, wasmBinary, backend, bytecodeWork, phase, cancel),
       )
+  const objectCases = [],
+    finalizerControls = []
+  for (const debug of [false, true])
+    for (const binary of [false, true])
+      for (const fixture of objectLifetimeCases)
+        objectCases.push(
+          await exerciseObjectLifetime(factory, wasmBinary, backend, fixture.name, debug, binary),
+        )
+  for (const explicit of [false, true])
+    for (const binary of [false, true])
+      for (const cancel of [false, true])
+        finalizerControls.push(
+          await exerciseFinalizationControl(factory, wasmBinary, backend, explicit, binary, cancel),
+        )
   return {
+    objects: { cases: objectCases, controls: finalizerControls },
     executionBudgets: {
       checks: [
         await exerciseExecutionBudget(factory, wasmBinary, backend, false),

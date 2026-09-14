@@ -46,6 +46,7 @@ export interface WasmManifest {
     binaryScripts?: number
     bytecodeLifecycle?: number
     executionBudgets?: number
+    objectFinalization?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string

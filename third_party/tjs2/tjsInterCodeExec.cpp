@@ -1434,6 +1434,7 @@ namespace TJS {
         // execute codes in a try-protected block
 
         try {
+            krkr::CleanupErrors cleanup;
             krkr::ExecutionFrame execution(1);
             if(ShouldUseStackTracer())
                 TJSStackTracerPush(this, true);
@@ -1447,6 +1448,7 @@ namespace TJS {
             }
             if(ShouldUseStackTracer())
                 TJSStackTracerPop();
+            cleanup.rethrow();
             return ret;
         } catch(eTJSSilent &) {
             throw;
