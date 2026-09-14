@@ -843,6 +843,11 @@ const matrix = {
             reason:
               'Emscripten installation failed with HTTP 504 before the production build. All dependent tests were skipped; there is no test artifact and this run is not a verification pass. The workflow log and metadata remain archived.',
           },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34858181535',
+            reason:
+              'The production build again failed downloading zlib with HTTP 504 and no tests ran. Tests now prefetch the same font-port archives through GitHub codeload, require the exact pinned Emscripten SHA-512 hashes and record the URLs and archive bytes; dependency versions and compilation options remain unchanged.',
+          },
         ]
       : []),
     ...(lifetimePhase
