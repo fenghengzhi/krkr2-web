@@ -616,7 +616,17 @@ export class WebVideoHost {
     }
     if (command.op === 'cancel') {
       this.paused = true
-      for (const id of this.movies.keys()) this.remove(id)
+      let primary: unknown,
+        failed = false
+      for (const id of this.movies.keys()) {
+        try {
+          this.remove(id)
+        } catch (error) {
+          if (!failed) primary = error
+          failed = true
+        }
+      }
+      if (failed) throw primary
       return { events: [] }
     }
     if (this.closed) throw new Error('Video host is closed')

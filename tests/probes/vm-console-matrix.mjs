@@ -183,7 +183,7 @@ const nodeCount = videoPhase
                     ? 351
                     : 346
 const browserCount = videoPhase
-  ? 675
+  ? 678
   : soundPhase
     ? 651
     : binaryPhase
@@ -297,7 +297,7 @@ for (const browser of browsers)
     const count =
       suite === 'browser'
         ? videoPhase
-          ? 184
+          ? 185
           : soundPhase
             ? 176
             : binaryPhase
@@ -329,6 +329,7 @@ for (const browser of browsers)
           'close-first-frame',
           'supersede-first-frame',
           'shutdown-failure',
+          'cancel-failure',
         ],
         (row) => row.title.slice('browser video resources: '.length),
       )
@@ -337,7 +338,9 @@ for (const browser of browsers)
         assert.equal(row.title, 'browser video resources: ' + observed.name)
         assert.equal(
           observed.connected,
-          ['shutdown-failure', 'supersede-first-frame'].includes(observed.name) ? 2 : 1,
+          ['shutdown-failure', 'supersede-first-frame', 'cancel-failure'].includes(observed.name)
+            ? 2
+            : 1,
         )
         assert.equal(observed.audioCloses, observed.connected)
         assert.equal(observed.revokedUrls, observed.createdUrls)
@@ -345,6 +348,11 @@ for (const browser of browsers)
         for (const key of ['pendingReplies', 'liveAudio', 'liveUrls', 'pendingFrames', 'videos'])
           assert.equal(observed[key], 0)
         assert.deepEqual(observed.messages, [])
+        if (observed.name === 'cancel-failure') {
+          for (const field of ['audio', 'urls', 'frames', 'videos'])
+            assert.equal(observed.cancelledResources[field], 0)
+          assert(observed.cancelledResources.error.includes('video-audio-close'))
+        }
         videoHostOwnership.push({ browser, ...observed })
       }
       const audioCases = cases.filter((row) =>
@@ -892,6 +900,16 @@ function videoOwnership(rows, backend) {
     for (const value of Object.values(row.stopped)) assert.equal(value, 0)
     assert.equal(row.terminalCloses, 1)
     assert.equal(row.rendererCloses, 1)
+    assert(row.disconnectedError.includes('disconnected'))
+    assert.equal(
+      row.disconnectedDiagnostics.filter((line) => line.startsWith('==== An exception occurred'))
+        .length,
+      1,
+    )
+    assert(
+      row.disconnectedDiagnostics[0].includes('krkr2-web/video.tjs') &&
+        row.disconnectedDiagnostics[0].includes('__videoRun'),
+    )
     assert.equal(row.closedIds.length, 10)
     assert.equal(new Set(row.closedIds).size, 10)
   }
@@ -1877,6 +1895,11 @@ const matrix = {
   historicalFailures: [
     ...(videoPhase
       ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34904603674',
+            reason:
+              'After selecting mode before open, all six source Session fixtures completed their ten video cases, but the final blanket empty-log assertion rejected native VM disassembly emitted for the deliberately caught disconnected-video open error. Each fixture now requires no diagnostics before that deliberate error, verifies and archives its one native diagnostic together with the caught disconnected error, and still rejects any later cleanup diagnostics. The original run remains failed and archived; bytecode fixture and entire direct runtime coverage still required a fresh run.',
+          },
           {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34904119374',
             reason:

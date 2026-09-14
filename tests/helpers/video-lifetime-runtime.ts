@@ -284,10 +284,23 @@ export async function exerciseVideoLifetime(
       windowResult === '1,unload,0,0',
       'Window disconnect invalidated its video or called an event',
     )
-    await execute('try{movie.open("movie.mp4");}catch(e){caught=e.message;}')
     check(
-      (await session.evaluate('caught')).includes('disconnected'),
-      'Disconnected video reopened',
+      logs.length === 0,
+      'Video lifecycle logged an unexpected error before the deliberate disconnected open: ' +
+        logs.join('\n'),
+    )
+    await execute('try{movie.open("movie.mp4");}catch(e){caught=e.message;}')
+    const disconnectedError = await session.evaluate('caught')
+    check(disconnectedError.includes('disconnected'), 'Disconnected video reopened')
+    // TJS prints its VM diagnostic for this deliberately caught host error.
+    // Preserve that output separately; all other lifecycle operations stay quiet.
+    const disconnectedDiagnostics = logs.splice(0)
+    check(
+      disconnectedDiagnostics.filter((line) => line.startsWith('==== An exception occurred'))
+        .length === 1 &&
+        disconnectedDiagnostics[0]?.includes('krkr2-web/video.tjs') &&
+        disconnectedDiagnostics[0]?.includes('__videoRun'),
+      'Missing native diagnostic for the deliberate disconnected open',
     )
     await execute('invalidate movie;delete global.movie;')
     check(state().videoSources === 0, 'Disconnected video did not retire')
@@ -317,6 +330,8 @@ export async function exerciseVideoLifetime(
       closedIds: video.closedIds,
       terminalCloses: video.terminalCloses,
       rendererCloses,
+      disconnectedError,
+      disconnectedDiagnostics,
     }
   } catch (error) {
     throw new Error(

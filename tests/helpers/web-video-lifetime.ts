@@ -13,6 +13,7 @@ export type WebVideoLifetimeCase =
   | 'close-first-frame'
   | 'supersede-first-frame'
   | 'shutdown-failure'
+  | 'cancel-failure'
 const check = (value: unknown, message: string) => {
   if (!value) throw new Error(message)
 }
@@ -112,6 +113,8 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
     },
   } as unknown as WebAudioHost
   let host: WebVideoHost | undefined
+  let cancelledResources:
+    { audio: number; urls: number; frames: number; videos: number; error: string } | undefined
   const send = (command: VideoCommand) =>
     new Promise<VideoResult>((resolve, reject) => {
       const id = ++serial
@@ -195,6 +198,25 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
         audio.size === 1 && urls.size === 1 && node.querySelectorAll('video').length === 1,
         'Replacement did not retain exactly one resource',
       )
+    } else if (name === 'cancel-failure') {
+      await open(7)
+      await open(8)
+      failAudioClose = true
+      const error = await rejected(send({ op: 'cancel' }))
+      check(error.includes('video-audio-close'), 'Cancellation lost its first error')
+      cancelledResources = {
+        audio: audio.size,
+        urls: urls.size,
+        frames: frames.size,
+        videos: node.querySelectorAll('video').length,
+        error,
+      }
+      check(
+        !audio.size && !urls.size && !frames.size && !node.querySelector('video'),
+        'Cancellation skipped later movies after a close failure',
+      )
+      check(observerCloses === 0, 'Cancellation prematurely shut down the video host')
+      await send({ op: 'cancel' })
     } else {
       await open(7)
       await open(8)
@@ -235,6 +257,7 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
       pendingFrames: frames.size,
       videos: node.querySelectorAll('video').length,
       messages,
+      cancelledResources,
     }
   } finally {
     failContainer = false
