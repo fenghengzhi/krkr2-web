@@ -141,12 +141,15 @@ jobs:
           - browser: chromium
             os: ubuntu-24.04
             headed: '0'
+            workers: '2'
           - browser: firefox
             os: ubuntu-24.04
             headed: '1'
+            workers: '2'
           - browser: webkit
             os: macos-15
             headed: '0'
+            workers: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -172,6 +175,7 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/results.json
           KRKR_TEST_BROWSER: ${{ matrix.browser }}
           KRKR_TEST_SUITE: ${{ matrix.suite }}
+          KRKR_TEST_WORKERS: ${{ matrix.workers }}
         run: |
           case "$KRKR_TEST_SUITE" in
             browser) krkr_playwright_config=playwright.config.ts ;;
@@ -180,7 +184,7 @@ jobs:
             *) exit 1 ;;
           esac
           bash scripts/ci-browser.sh npx playwright test -c "$krkr_playwright_config" \
-            --project="$KRKR_TEST_BROWSER" --reporter=list,json,github 2>&1 | tee out/ci/results.log
+            --project="$KRKR_TEST_BROWSER" --workers="$KRKR_TEST_WORKERS" --reporter=list,json,github 2>&1 | tee out/ci/results.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

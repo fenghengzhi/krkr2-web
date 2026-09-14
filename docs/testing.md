@@ -20,7 +20,7 @@ Chromium/Firefox 套件使用 Ubuntu 24.04，WebKit 套件使用 GitHub 托管�
 
 Playwright 1.63 的 Linux WebKit 在本次云端检查中不能创建 Worker WebGL2，即使使用 Xvfb 也失败。其上游版本的 [OffscreenCanvas 创建路径](https://github.com/WebKit/WebKit/blob/4d05d732e5a84f32675bef4cc135a2e7a9269a87/Source/WebCore/html/OffscreenCanvas.cpp) 受 `allowWebGLInWorkers` 控制，[Cocoa 配置](https://github.com/WebKit/WebKit/blob/4d05d732e5a84f32675bef4cc135a2e7a9269a87/Source/WTF/wtf/PlatformEnableCocoa.h) 启用了该能力。因此 WebKit 图形和持久场景放在 macOS 上验证；不需要渲染的直接 WASM 探测仍覆盖 Linux WebKit。这不表示 Linux GTK WebKit 可以运行当前播放器。
 
-浏览器和套件形成九个独立作业，一个组合失败不会取消其他组合。每个组合完成后立即上传报告，不必等待同一浏览器的其他套件；GitHub reporter 同时提供错误注释。保留现有用例断言、并发和超时，不增加自动重试。原有 WebKit 网络模拟排除仍由 PWA 配置明确控制。
+浏览器和套件形成九个独立作业，一个组合失败不会取消其他组合。每个组合完成后立即上传报告，不必等待同一浏览器的其他套件；GitHub reporter 同时提供错误注释。保留现有用例断言和超时，不增加自动重试。Chromium、Firefox 与原生生命周期使用 2 个 worker；云端 WebKit 使用 1 个 worker。在相同构建和 macOS 镜像上，媒体启动诊断双并发 6 次有 2 次失败，单并发 6 次全部通过；记录显示争用期间 Blob 读取和媒体加载明显延迟，见 [双并发记录](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809235409) 和 [单并发对照](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809666778)。原有 WebKit 网络模拟排除仍由 PWA 配置明确控制。
 
 每个作业上传日志、JSON 报告以及可用的失败截图/trace，保留 14 天。`test-build` 含 commit、run ID 和运行次数，另含带哈希的 WASM manifest 与离线发布清单。Actions 详情页的 Artifacts 可下载这些文件；需要长期保存的阶段证据应另行归档。
 
@@ -42,3 +42,7 @@ gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 原 KAG 外部场景和 TJS/字体跨 ABI 升级探测仍需要固定的外部 XP3/ZIP 与旧版本发布包。这些材料尚未接入 Actions，不能将默认工作流通过解读为这些专项也通过。迁移时须提供可追溯的样本来源、旧发布树和哈希，并在云端运行对应 `tests/probes`，不能通过跳过或改写旧 manifest 代替真实升级验证。
 
 VM 控制台阶段的本地完整回归已按用户要求中止（退出码 143）。此前的专项通过记录与失败日志按历史证据保留；该阶段的新完整回归结果以实际 Actions 运行记录为准。
+
+## 独立诊断
+
+`Native lifecycle diagnostic` 和 `WebKit startup diagnostic` 可手动指定已有构建 run ID，在云端重复特定场景并附加状态、Worker 等待记录和原生栈。复用前检查该构建与当前提交的应用源码、依赖及构建脚本完全一致；诊断允许修改测试代码，但不能以旧产物验证新的应用实现。这些诊断结果单独保存，不能替代完整 Tests 工作流。
