@@ -1,6 +1,6 @@
 # 插件以外的实现进度
 
-当前源码已接入原生 Scripts 类、compileStorage、反射/missing 和 textEncoding，TJS ABI 为 **5**。首轮云端失败后已推送字节码导出及字体预览修复，但 [新一轮 Actions](https://github.com/fenghengzhi/krkr2-web/actions/runs/34821034573) 因账户付款/支出限制未能启动，修复尚未通过验证；下列 ABI 4 结果仅是先前基线。恢复 Actions 后继续完整云端回归，详见 [原生 Scripts](decisions/032-native-scripts.md)。
+当前源码已接入原生 Scripts 类、compileStorage、反射/missing 和 textEncoding，TJS ABI 为 **5**。字节码导出、编译重入、语法拒绝及元数据加载修复已通过 362 项 Node；随后补了原生测试启动等待与页面并发停止修复。[当前完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)与[当前兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)仍在执行，不能视为全部通过。此前计费拦截已解除，全部验证继续使用 GitHub 托管 runner；下列 ABI 4 结果作为历史基线保留。详见 [原生 Scripts](decisions/032-native-scripts.md)。
 
 上一轮完成的 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
 

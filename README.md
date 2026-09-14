@@ -28,7 +28,7 @@ Debug 已支持历史与重要消息、同步日志回调、UTF-16LE 文件输�
 
 启动前勾选“脚本调试”，`Scripts.getTraceString()` 可返回当前调用的文件、行号和函数名称；参数可限制深度。默认关闭，修改开关在下一次启动/重新开始时生效。原生调用栈已支持 Asyncify/JSPI 挂起，详见 [脚本调用栈](docs/decisions/031-script-stack-traces.md)。
 
-`Scripts` 已接入原生类，新增 `compileStorage`、`getClassNames`、`setCallMissing` 和 `textEncoding`。本轮修复已推送，但 GitHub Actions 因账户计费限制未能启动，尚待云端验证；完整非插件兼容仍在实现。详情见 [原生 Scripts](docs/decisions/032-native-scripts.md)。
+`Scripts` 已接入原生类，新增 `compileStorage`、`getClassNames`、`setCallMissing` 和 `textEncoding`。本轮修复已推送，当前完整回归在 GitHub Actions 执行；完整非插件兼容仍在实现。详情见 [原生 Scripts](docs/decisions/032-native-scripts.md)。
 
 页面现在也支持“远程文件链接”。支持 Range 和强 ETag 的 XP3/ZIP 服务器可按需读取；小文件可在预算内完整下载。跨域配置、版本与存档身份见 [HTTP 来源](docs/decisions/016-http-sources.md)。
 

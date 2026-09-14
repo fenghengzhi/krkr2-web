@@ -503,6 +503,11 @@ const matrix = {
             reason:
               'All 362 Node cases passed, but one native lifecycle fixture tried to create a CDP session before Chromium published its initial page. It now awaits that page within the original fixture budget. Other test jobs were superseded; this run is not a full pass.',
           },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34823107202',
+            reason:
+              'Importing the next game while stop was pending sent two stop RPCs; the first disposed the client before the second completed. App stop now shares one Promise. A browser gate holds stop until the next import, asserts one request, then verifies nested compilation and final shutdown. The original Firefox trace and superseded WebKit run remain archived.',
+          },
         ]
       : []),
     ...(tracePhase
@@ -534,7 +539,7 @@ const matrix = {
     ...(tracePhase ? [] : ['Scripts.getTraceString']),
     ...(scriptsPhase
       ? [
-          'Automatic legacy text detection and decoder latching, serialized Array/Dictionary resource execution, prefixed bytecode and complete storage paths remain incomplete',
+          'Automatic legacy text detection and decoder latching, serialized Array/Dictionary resource execution, prefixed bytecode, full bytecode validation and complete storage paths remain incomplete',
         ]
       : []),
     'Native error UI policy, remaining exception and finalizer paths, TJS bridge frames in other TVP methods',

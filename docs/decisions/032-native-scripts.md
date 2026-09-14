@@ -1,5 +1,7 @@
 # 原生 Scripts 宿主
 
+当前完整回归为 [34823979389](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)，对应兼容性专项为 [34824129905](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)，均尚在执行。下文较早的“待执行”和计费阻塞记录属于历史状态，不能代替当前任务结果。
+
 此前 `Scripts` 是 TJS 字典，exec/eval 等包装函数多出桥帧，缺少参数时仍会进入宿主，非对象 context 还会被忽略。本阶段使用原 `tTJSNativeClass` 和原生方法对象注册 Scripts，禁止创建实例，保留 Function/Class 身份和静态成员语义。
 
 ## 边界
@@ -33,5 +35,9 @@
 同轮 Firefox 字体选择失败的 trace 显示：异步 sample 到达后，canvas 从默认 300×150 变为 640×96，居中弹窗和按下的选项随之移动；字体缩略图也改变行高。界面现在预留实际 sample 比例、固定选项高度，并保留按钮子节点。原浏览器案例新增可控的预览请求门控，在按下后才放行所有预览，检查选项矩形不变，再释放鼠标并验证原有选择与像素结果。失败记录和截图保留，修复结果由后续 Actions 证明。
 
 首轮全部实际测试作业已结束：Node 353/359 通过，浏览器 614/615 通过，6 项直接运行时通过；失败为上述 6 项 Node 与 1 项 Firefox 字体选择。其汇总阶段与后续 push 重叠，GitHub 将整体运行记为 cancelled，不能视为完整成功。全部产物、逐项结果和 terminal 元数据保存在 `out/verification/github-actions/34819597478/`；计费失败运行的元数据和两份 annotation 保存在 `out/verification/github-actions/34821034573/`。ABI 4 的旧发布包已另按原字节保存；新增 78 项兼容性与 ABI 5 报告流程尚未执行。
+
+[34822580654](https://github.com/fenghengzhi/krkr2-web/actions/runs/34822580654) 的全部 362 项 Node 已通过；原生生命周期 fixture 在初始页面尚未发布时使用 `pages()[0]`，修正为在原 30 秒 fixture 预算内等待页面事件。[34823107202](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823107202) 中 Node、7 项可信生命周期和 6 项直接运行时已通过，但 Firefox 切换到第二个 Scripts 样本时出现 `RPC client has been disposed`：两次页面 stop 同时等待相同播放器，第一个完成后销毁了第二个请求。页面现共用正在进行的停止 Promise，并立即更新忙碌状态；回归门控旧 stop RPC，直到下一次文件 change 已请求启动后才放行，检查停止请求只有一次且第二个样本完成。未增加 Worker 的 2 秒停止期限或浏览器断言期限。
+
+两个中间构建的 [34822108506](https://github.com/fenghengzhi/krkr2-web/actions/runs/34822108506) 和 [34823023871](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823023871) 均通过 78 项原 KAG/跨 ABI 专项，但页面或内核继续修改后仍须验证当前构建。它们及各次失败/取消产物均按 run ID 保存在 `out/verification/github-actions/`。字节码完整边界校验和其他异常、回收与并发启动排列仍不属于这些选定案例已经证明的范围。
 
 参考：[KRKR2 Scripts 文档](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_Scripts.html)、[原 KRKR2 ScriptMgnIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/trunk/kirikiri2/src/core/base/ScriptMgnIntf.cpp)，以及固定参考快照的 ScriptMgnIntf.cpp/TextStream.cpp。完整非插件目标仍未完成。
