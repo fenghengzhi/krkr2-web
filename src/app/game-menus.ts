@@ -126,7 +126,7 @@ export function createGameMenus(
       panel.style.left = `${Math.min(innerWidth - 20, Math.max(0, bounds.left + (popup.x * bounds.width) / dimensions.width))}px`
       panel.style.top = `${Math.min(innerHeight - 20, Math.max(0, bounds.top + (popup.y * bounds.height) / dimensions.height))}px`
       panel.style.transform = `translate(${popup.flags & 8 ? '-100%' : popup.flags & 4 ? '-50%' : '0'},${popup.flags & 32 ? '-100%' : popup.flags & 16 ? '-50%' : '0'})`
-      if (fresh) panel.querySelector('button:not(:disabled)')?.focus()
+      if (fresh) panel.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
     } else {
       overlay?.remove()
       overlay = undefined
