@@ -10,7 +10,8 @@ permissions:
 
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Keep the running suite and its evidence when a follow-up fix is queued.
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -153,12 +154,29 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/prepare-tests
+      - name: Preserve native process crash diagnostics
+        run: |
+          mkdir -p out/native-cores
+          sudo sysctl -w "kernel.core_pattern=$GITHUB_WORKSPACE/out/native-cores/core.%e.%p" > out/ci/core-pattern.log
       - name: Run Node tests
         run: |
+          ulimit -c unlimited
           node --import tsx --test \
             --test-reporter=spec --test-reporter-destination=stdout \
             --test-reporter=tap --test-reporter-destination=out/ci/node.tap \
             tests/conformance/*.test.ts tests/integration/*.test.ts 2>&1 | tee out/ci/node.log
+      - name: Record backtraces for any terminated Node process
+        if: always()
+        run: |
+          if compgen -G 'out/native-cores/core.*' > /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y gdb
+            mkdir -p out/ci/node-crashes
+            for core in out/native-cores/core.*; do
+              sha256sum "$core" >> out/ci/node-crashes/core-sha256.txt
+              gdb --batch -ex 'set pagination off' -ex 'thread apply all bt' "$(command -v node)" "$core" > "out/ci/node-crashes/$(basename "$core").backtrace" 2>&1 || true
+            done
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

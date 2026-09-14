@@ -4,7 +4,9 @@ export interface ScriptObject {
   readonly runtime: number
 }
 
-/** A VM-owned observation token; it does not keep the script instance alive. */
+/** A VM-owned observation token; it does not keep the script instance alive.
+ * When returned to script, it resolves to a normal owning closure, or null
+ * after expiration/revocation, without allocating an extra host handle. */
 export interface ScriptWeakObject {
   readonly type: 'weak-object'
   readonly id: number
@@ -57,6 +59,7 @@ export type ScriptValue =
   | number
   | Uint8Array
   | ScriptObject
+  | ScriptWeakObject
   | ScriptRecord
   | ScriptList
   | ScriptProxy
@@ -120,6 +123,8 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
     pendingInvalidations: number
   }
   flush(): Promise<void>
+  /** Drain queued native releases at a suspendable, serialized VM boundary. */
+  collect(): Promise<void>
   dispose(): void
 }
 

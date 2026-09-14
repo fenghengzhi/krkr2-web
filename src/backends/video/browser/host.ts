@@ -40,6 +40,7 @@ export class WebVideoHost {
   }
   private movies = new Map<number, Movie>()
   private closed = false
+  private closing?: Promise<void>
   private paused = false
   private pagePaused = false
   private get isPaused(): boolean {
@@ -99,23 +100,27 @@ export class WebVideoHost {
             if (movie.inFlight === message.serial) movie.inFlight = undefined
         return
       }
-      void this.command(message.command).then(
-        (result) =>
-          port.postMessage(
-            { type: 'reply', serial: message.serial, result } satisfies VideoMessage,
-            result.events.flatMap((event) =>
-              event.type === 'frame' && event.pixels
-                ? [event.pixels.data.buffer as ArrayBuffer]
-                : [],
+      void this.command(message.command)
+        .then(
+          (result) =>
+            port.postMessage(
+              { type: 'reply', serial: message.serial, result } satisfies VideoMessage,
+              result.events.flatMap((event) =>
+                event.type === 'frame' && event.pixels
+                  ? [event.pixels.data.buffer as ArrayBuffer]
+                  : [],
+              ),
             ),
-          ),
-        (error) =>
-          port.postMessage({
-            type: 'reply',
-            serial: message.serial,
-            error: error instanceof Error ? error.message : String(error),
-          } satisfies VideoMessage),
-      )
+          (error) =>
+            port.postMessage({
+              type: 'reply',
+              serial: message.serial,
+              error: error instanceof Error ? error.message : String(error),
+            } satisfies VideoMessage),
+        )
+        .catch((error) => {
+          if (!this.closed) this.fail(error)
+        })
     }
   }
   setWindow(view: WindowView): void {
@@ -231,8 +236,9 @@ export class WebVideoHost {
   }
   private cancelFrame(movie: Movie): void {
     if (movie.callback !== undefined) {
-      movie.element.cancelVideoFrameCallback(movie.callback)
+      const callback = movie.callback
       movie.callback = undefined
+      movie.element.cancelVideoFrameCallback(callback)
     }
   }
   private arm(movie: Movie): void {
@@ -477,71 +483,68 @@ export class WebVideoHost {
     const url = URL.createObjectURL(
       new Blob([command.bytes as Uint8Array<ArrayBuffer>], { type: mime }),
     )
-    let audio: ReturnType<WebAudioHost['connectMedia']>
+    let audio: ReturnType<WebAudioHost['connectMedia']> | undefined,
+      container: HTMLDivElement | undefined,
+      owned: Movie | undefined
     try {
       audio = this.audio.connectMedia(element)
-    } catch (error) {
-      URL.revokeObjectURL(url)
-      throw error
-    }
-    const container = document.createElement('div')
-    container.append(element)
-    const movie: Movie = {
-      id: command.id,
-      epoch: command.epoch,
-      element,
-      container,
-      url,
-      bytes: command.bytes.length,
-      settings: { ...command.settings },
-      status: 'stop',
-      timeline: command.timeline,
-      blocked: false,
-      disposed: false,
-      periodArmed: false,
-      seeking: false,
-      abort: new AbortController(),
-      audio,
-    }
-    this.movies.set(movie.id, movie)
-    this.plane.insertBefore(container, this.activation)
-    this.layout()
-    element.ontimeupdate = () => {
-      try {
-        this.advanceClock(movie)
-      } catch (error) {
-        this.fail(error)
+      container = document.createElement('div')
+      container.append(element)
+      const movie: Movie = (owned = {
+        id: command.id,
+        epoch: command.epoch,
+        element,
+        container,
+        url,
+        bytes: command.bytes.length,
+        settings: { ...command.settings },
+        status: 'stop',
+        timeline: command.timeline,
+        blocked: false,
+        disposed: false,
+        periodArmed: false,
+        seeking: false,
+        abort: new AbortController(),
+        audio,
+      })
+      this.movies.set(movie.id, movie)
+      this.plane.insertBefore(container, this.activation)
+      this.layout()
+      element.ontimeupdate = () => {
+        try {
+          this.advanceClock(movie)
+        } catch (error) {
+          this.fail(error)
+        }
       }
-    }
-    element.onended = () => {
-      if (movie.disposed || movie.status !== 'play' || !element.ended) return
-      if (this.advanceClock(movie)) return
-      if (movie.settings.loop)
-        void this.seek(movie, 0).then(
-          () => {
-            this.emit({
-              type: 'period',
-              id: movie.id,
-              epoch: movie.epoch,
-              snapshot: this.snapshot(movie),
-              reason: 0,
-            })
-            this.play(movie)
-          },
-          (error) => this.fail(error),
-        )
-      else {
-        movie.status = 'stop'
-        this.cancelFrame(movie)
-        this.emit({
-          type: 'ended',
-          id: movie.id,
-          epoch: movie.epoch,
-          snapshot: this.snapshot(movie),
-        })
+      element.onended = () => {
+        if (movie.disposed || movie.status !== 'play' || !element.ended) return
+        if (this.advanceClock(movie)) return
+        if (movie.settings.loop)
+          void this.seek(movie, 0).then(
+            () => {
+              this.emit({
+                type: 'period',
+                id: movie.id,
+                epoch: movie.epoch,
+                snapshot: this.snapshot(movie),
+                reason: 0,
+              })
+              this.play(movie)
+            },
+            (error) => this.fail(error),
+          )
+        else {
+          movie.status = 'stop'
+          this.cancelFrame(movie)
+          this.emit({
+            type: 'ended',
+            id: movie.id,
+            epoch: movie.epoch,
+            snapshot: this.snapshot(movie),
+          })
+        }
       }
-    }
-    try {
       await this.loadFirstFrame(movie, () =>
         this.wait(
           movie,
@@ -553,6 +556,8 @@ export class WebVideoHost {
           },
         ),
       )
+      if (this.closed || movie.disposed || this.movies.get(movie.id) !== movie)
+        throw new Error('Video open was closed or superseded')
       if (
         !element.videoWidth ||
         element.videoWidth > 4096 ||
@@ -573,7 +578,34 @@ export class WebVideoHost {
       )
       return { snapshot: this.snapshot(movie), events: [] }
     } catch (error) {
-      if (this.movies.get(movie.id) === movie) this.remove(movie.id)
+      // A creation/presentation error remains primary. Cleanup also covers
+      // resources acquired before the Movie could enter the registry.
+      if (owned) {
+        if (this.movies.get(owned.id) === owned) this.movies.delete(owned.id)
+        try {
+          this.disposeMovie(owned)
+        } catch {}
+      } else {
+        try {
+          audio?.close()
+        } catch {}
+        try {
+          element.pause()
+        } catch {}
+        try {
+          element.removeAttribute('src')
+          element.load()
+        } catch {}
+        try {
+          container?.remove()
+        } catch {}
+        try {
+          URL.revokeObjectURL(url)
+        } catch {}
+      }
+      try {
+        this.layout()
+      } catch {}
       throw error
     }
   }
@@ -584,7 +616,17 @@ export class WebVideoHost {
     }
     if (command.op === 'cancel') {
       this.paused = true
-      for (const id of this.movies.keys()) this.remove(id)
+      let primary: unknown,
+        failed = false
+      for (const id of this.movies.keys()) {
+        try {
+          this.remove(id)
+        } catch (error) {
+          if (!failed) primary = error
+          failed = true
+        }
+      }
+      if (failed) throw primary
       return { events: [] }
     }
     if (this.closed) throw new Error('Video host is closed')
@@ -642,26 +684,81 @@ export class WebVideoHost {
     const movie = this.movies.get(id)
     if (!movie) return
     this.movies.delete(id)
-    movie.disposed = true
-    movie.abort.abort()
-    this.cancelFrame(movie)
-    movie.audio.close()
-    movie.element.pause()
-    movie.element.removeAttribute('src')
-    movie.element.load()
-    movie.container.remove()
-    if (movie.surface) {
-      movie.surface.width = 1
-      movie.surface.height = 1
+    let primary: unknown,
+      failed = false
+    try {
+      this.disposeMovie(movie)
+    } catch (error) {
+      primary = error
+      failed = true
     }
-    URL.revokeObjectURL(movie.url)
-    this.layout()
+    try {
+      this.layout()
+    } catch (error) {
+      if (!failed) {
+        primary = error
+        failed = true
+      }
+    }
+    if (failed) throw primary
   }
-  async close(): Promise<void> {
-    if (this.closed) return
+  private disposeMovie(movie: Movie): void {
+    if (movie.disposed) return
+    movie.disposed = true
+    movie.inFlight = undefined
+    let primary: unknown,
+      failed = false
+    const attempt = (action: () => void) => {
+      try {
+        action()
+      } catch (error) {
+        if (!failed) {
+          primary = error
+          failed = true
+        }
+      }
+    }
+    attempt(() => movie.abort.abort())
+    attempt(() => this.cancelFrame(movie))
+    attempt(() => {
+      movie.element.onended = movie.element.ontimeupdate = null
+    })
+    attempt(() => movie.audio.close())
+    attempt(() => movie.element.pause())
+    attempt(() => movie.element.removeAttribute('src'))
+    attempt(() => movie.element.load())
+    attempt(() => movie.container.remove())
+    attempt(() => {
+      if (movie.surface) {
+        movie.surface.width = 1
+        movie.surface.height = 1
+        movie.surface = undefined
+      }
+    })
+    attempt(() => URL.revokeObjectURL(movie.url))
+    if (failed) throw primary
+  }
+  close(): Promise<void> {
+    if (this.closing) return this.closing
     this.closed = true
-    for (const id of this.movies.keys()) this.remove(id)
-    this.observer.disconnect()
-    this.plane.remove()
+    this.closing = Promise.resolve().then(() => {
+      let primary: unknown,
+        failed = false
+      const attempt = (action: () => void) => {
+        try {
+          action()
+        } catch (error) {
+          if (!failed) {
+            primary = error
+            failed = true
+          }
+        }
+      }
+      for (const id of this.movies.keys()) attempt(() => this.remove(id))
+      attempt(() => this.observer.disconnect())
+      attempt(() => this.plane.remove())
+      if (failed) throw primary
+    })
+    return this.closing
   }
 }

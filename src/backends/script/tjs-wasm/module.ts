@@ -50,6 +50,7 @@ export interface WasmManifest {
     objectFinalization?: number
     hostObjectLifetime?: number
     soundObjectLifetime?: number
+    videoObjectLifetime?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string

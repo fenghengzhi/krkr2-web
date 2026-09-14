@@ -215,6 +215,10 @@ export class TjsWasmRuntime implements ScriptRuntime {
         this.call('free', namespace)
         this.call('free', name)
       }
+    } else if (value.type === 'weak-object') {
+      this.assertAlive()
+      this.assertWeakOwner(value)
+      this.call('krkr_value_set_owner', this.vm, pointer, value.id)
     } else if (value.type === 'array' || value.type === 'dictionary') {
       this.call('krkr_value_set_container', pointer, Number(value.type === 'array'))
       const entries = value.type === 'array' ? value.items.entries() : Object.entries(value.entries)
@@ -563,6 +567,10 @@ export class TjsWasmRuntime implements ScriptRuntime {
     } finally {
       this.call('krkr_reply_delete', reply)
     }
+  }
+  async collect(): Promise<void> {
+    this.assertAlive()
+    await this.run('krkr_collect', [this.vm])
   }
   inspect() {
     this.assertAlive(true)

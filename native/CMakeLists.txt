@@ -54,7 +54,7 @@ target_link_options(tjs PRIVATE
   "-sEXPORTED_RUNTIME_METHODS=['ccall','HEAPU8','HEAPU16','HEAPU32']")
 if(TJS_VARIANT STREQUAL "jspi")
   target_compile_definitions(tjs PRIVATE KRKR_ASYNCIFY=0)
-  target_link_options(tjs PRIVATE -fwasm-exceptions "-sJSPI=1" "-sJSPI_EXPORTS=['krkr_execute','krkr_invoke','krkr_compile']")
+  target_link_options(tjs PRIVATE -fwasm-exceptions "-sJSPI=1" "-sJSPI_EXPORTS=['krkr_execute','krkr_invoke','krkr_compile','krkr_collect']")
 elseif(TJS_VARIANT STREQUAL "asyncify")
   set(TJS_ASYNCIFY_STACK_SIZE 1048576)
   target_compile_definitions(tjs PRIVATE KRKR_ASYNCIFY=1 KRKR_ASYNCIFY_STACK_SIZE=${TJS_ASYNCIFY_STACK_SIZE})

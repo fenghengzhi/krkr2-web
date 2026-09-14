@@ -1,10 +1,14 @@
 # 插件以外的实现进度
 
-声音生命周期的 [当前版本完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895849611) 已通过 **710 项 Node、651 项浏览器和 6 组直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34894024462) 另通过 **78 项**。[最终证据报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34897329847) 已通过，绑定 542 份证据，矩阵 SHA-256 为 `bd7c8848e1e0183457644d67a8f6dbfbf41a8a951576db2f608046e7e60307da`，可信冻结为 21,053.1 ms。
+视频生命周期的[当前版本完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34905170428)已通过 **776 项 Node、678 项浏览器检查和 6 组直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34905448820)另通过 **78 项**。[最终证据报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34906206305)已通过，绑定 543 份证据；矩阵 SHA-256 为 `7996d5d822fbdbbc1acde1c019e247a3cb60b994f474cbe766d6fe78e2921a5d`。
+
+VideoOverlay 自身、窗口和图层引用现采用独立弱观察；后台事件按实际投递持有对象，完成或取消后回收。临时返回对象在显示后释放；视频打开竞态、创建回滚、异步关闭等待及取消/关闭过程中单项失败后的继续清理已接通。三浏览器双后端覆盖 120 个真实视频 Session 场景、144 个弱引用返回/collect 场景，另有 18 个浏览器视频宿主场景、96 个受控音频故障点和 9 个对照。独立对象、句柄、分配诊断也通过，详见[决策 041](decisions/041-video-object-lifetime.md)。Window、Layer、MenuItem、完整图形/系统 API、流式媒体等仍未完成；窗口断开事件的精确原生时序及历史 SIGSEGV/WebKit 中断仍需继续定位。全部非插件功能尚未完成。
+
+此前声音生命周期的[完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895849611)通过 **710 项 Node、651 项浏览器和 6 组直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34894024462)另通过 **78 项**。[声音阶段证据报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34897329847)通过，绑定 542 份证据，矩阵 SHA-256 为 `bd7c8848e1e0183457644d67a8f6dbfbf41a8a951576db2f608046e7e60307da`，可信冻结为 21,053.1 ms；原始证据继续保留。
 
 声音实例现由服务弱观察，后台事件独立持有并支持动态成员替换，失效时取消事件并等待异步关闭。外部 flags、labels 的失效和 filters Array 的独立所有权已接通；后端阻止迟到解码重新加载关闭资源，Headless 空闲时钟会停止。三浏览器双后端覆盖 60 个真实声音场景、168 个从属对象场景；独立句柄 64 项、对象 120 项和分配诊断均通过，详见 [决策 040](decisions/040-sound-object-lifetime.md)。TJS ABI 5 新增 `soundObjectLifetime: 1`，字体 ABI 2、协议 9 不变。
 
-视频对象生命周期在独立分支继续实现；Window、Layer、MenuItem、完整图形/系统 API、流式媒体等仍未完成。原引擎不收集任意引用环。历史 WebKit 会话中断等未定位问题保留，原始失败不会被后续通过覆盖。以下为历史阶段记录，当前声音状态以上述回归与决策 040 为准。
+原引擎不收集任意引用环。历史会话中断等未定位问题保留，原始失败不会被后续通过覆盖。以下为历史阶段记录，当前状态以上述视频回归与决策 041 为准。
 
 [宿主生命周期最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)已通过，绑定 542 份证据。矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`，可信冻结为 21,059.1 ms。
 
