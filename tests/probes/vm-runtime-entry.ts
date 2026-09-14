@@ -20,6 +20,7 @@ import {
 } from '../helpers/host-handles.ts'
 import { ownerObservationCases, exerciseOwnerObservation } from '../helpers/owner-observation.ts'
 import { exerciseEventLifetime } from '../helpers/event-lifetime-runtime.ts'
+import { exerciseSoundLifetime } from '../helpers/sound-lifetime-runtime.ts'
 import { dependentLifetimeCases, exerciseDependentLifetime } from '../helpers/dependent-lifetime.ts'
 import {
   exerciseBytecodeLifetime,
@@ -185,7 +186,10 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     }
   const objectCases = [],
     finalizerControls = []
-  const dependentLifetimes = []
+  const dependentLifetimes = [],
+    soundOwnership = []
+  for (const binary of [false, true])
+    soundOwnership.push(await exerciseSoundLifetime(factory, wasmBinary, backend, binary))
   for (const debug of [false, true])
     for (const binary of [false, true])
       for (const name of dependentLifetimeCases)
@@ -210,6 +214,7 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     ownerObservations: ownerCases,
     eventOwnership,
     dependentLifetimes,
+    soundOwnership,
     executionBudgets: {
       checks: [
         await exerciseExecutionBudget(factory, wasmBinary, backend, false),
