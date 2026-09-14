@@ -1,0 +1,45 @@
+name: Bytecode runtime diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Successful build job with matching application sources
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: 'true'
+
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          build-run: ${{ inputs.build-run }}
+      - run: npm run typecheck
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - name: Exercise every direct runtime combination and retain failures
+        run: node --import tsx tests/probes/vm-runtime-browser.ts 2>&1 | tee out/ci/runtime.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: bytecode-runtime-results
+          path: |
+            out/ci/
+            out/verification/vm-console/
+          retention-days: 30
