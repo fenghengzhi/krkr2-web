@@ -30,6 +30,8 @@ Debug 已支持历史与重要消息、同步日志回调、UTF-16LE 文件输�
 
 `Scripts` 已接入原生类，新增 `compileStorage`、`getClassNames`、`setCallMissing` 和 `textEncoding`。本轮通过 GitHub Actions 的完整回归与跨版本离线升级检查；完整非插件兼容仍在实现。详情见 [原生 Scripts](docs/decisions/032-native-scripts.md)。
 
+长脚本编译现支持源码准备、解析和导出期间的暂停、继续与取消，Asyncify/JSPI 共用会话控制。启动尚未结束时停止游戏，也会统一清理 Worker、输入和媒体。检查点与响应时间限制见 [长脚本编译](docs/decisions/033-cooperative-compilation.md)。
+
 页面现在也支持“远程文件链接”。支持 Range 和强 ETag 的 XP3/ZIP 服务器可按需读取；小文件可在预算内完整下载。跨域配置、版本与存档身份见 [HTTP 来源](docs/decisions/016-http-sources.md)。
 
 载入后可点击“保存当前游戏”，将资源保存在浏览器游戏库中。刷新或重开浏览器后，可直接从库中启动并继续使用原存档；也可修改启动设置、移除资源或取消正在进行的导入。远程来源会完整保存，之后读取游戏资源不再依赖原服务器。设计与存储限制见 [OPFS 游戏库](docs/decisions/017-game-library.md)。

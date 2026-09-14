@@ -55,6 +55,6 @@
 
 ## 仍未完成
 
-Scripts 资源接口读取二进制序列化 Array/Dictionary、带前缀字节码、完整存储路径和字节码边界校验仍需继续。编译暂停/取消案例目前依赖异步 I/O 或警告回调；无回调的大脚本解析/导出尚未接入主动检查点。其他 TVP 桥帧、原生错误 UI、隐式回收和更多并发启动排列也仍未完成。本阶段通过不代表完整非插件兼容目标完成。
+Scripts 资源接口读取二进制序列化 Array/Dictionary、带前缀字节码、完整存储路径和字节码边界校验仍需继续。本阶段的编译暂停/取消案例依赖异步 I/O 或警告回调；后续主动检查点与验证见 [长脚本编译](033-cooperative-compilation.md)。其他 TVP 桥帧、原生错误 UI、隐式回收和更多并发启动排列也仍未完成。本阶段通过不代表完整非插件兼容目标完成。
 
 参考：[KRKR2 Scripts 文档](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_Scripts.html)、[原 KRKR2 ScriptMgnIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/trunk/kirikiri2/src/core/base/ScriptMgnIntf.cpp)，以及固定参考快照的 ScriptMgnIntf.cpp、TextStream.cpp 和 TJS2 源码。
