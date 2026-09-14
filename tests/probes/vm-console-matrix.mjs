@@ -560,6 +560,15 @@ const matrix = {
     ...(binaryPhase
       ? [
           {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34839918126',
+            reason:
+              'All 384 Node and six direct runtime cases passed; browser results were 638/639. The original WebKit Asyncify TLG cancellation case had already logged completion when stop was checked. Its fixed 4096-square fixture now holds the actual zero-delay decoder yield after allocating the expansion buffer, and releases it after the real stop RPC listener runs. Original pixels, stop budget and cancellation assertions are unchanged; the original failure remains archived.',
+          },
+        ]
+      : []),
+    ...(binaryPhase
+      ? [
+          {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34839357671',
             reason:
               'One original ZIP/WebKit/JSPI KAG startup failed with an unreadable native member name after construction. Forty independent repetitions of that transition case, twenty each with script tracing disabled/enabled, passed without reproducing it; no product root cause is claimed. The regular KAG runner now retains failing JSON/screenshots/traces inside its uploaded directory. The original failure log remains archived.',

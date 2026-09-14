@@ -128,6 +128,53 @@ var tick=0,completed=0;five.onTransitionCompleted=function(dest,src){completed++
   test(`${backend}: stopping during TLG expansion cancels without terminating the worker`, async ({
     page,
   }) => {
+    await page.addInitScript(() => {
+      const NativeWorker = window.Worker
+      window.Worker = class extends NativeWorker {
+        constructor(input: string | URL, options?: WorkerOptions) {
+          const url = new URL(input, location.href)
+          if (url.pathname.includes('/assets/session.worker-'))
+            url.searchParams.set('tlg-stop-test', crypto.randomUUID())
+          super(url, options)
+        }
+      }
+    })
+    await page.route('**/assets/session.worker-*.js*', async (route) => {
+      const response = await route.fetch()
+      const gate = `(() => {
+        const state = self.__tlgStop = { allocated: false, held: false };
+        const Bytes = self.Uint8Array, schedule = self.setTimeout.bind(self);
+        let release;
+        self.Uint8Array = new Proxy(Bytes, {
+          construct(target, args, newTarget) {
+            const value = Reflect.construct(target, args, newTarget);
+            if (args[0] === 4096 * 4096 * 4) state.allocated = true;
+            return value;
+          }
+        });
+        self.setTimeout = (callback, delay, ...args) => {
+          if (state.allocated && !state.held && delay === 0 && typeof callback === 'function') {
+            return schedule(() => {
+              state.held = true;
+              release = () => callback(...args);
+            }, delay);
+          }
+          return schedule(callback, delay, ...args);
+        };
+        self.addEventListener('message', event => {
+          const request = event.data;
+          if (request?.type === 'APPLY' && request.argumentList?.[0]?.value === 'stop') {
+            // Run after the real RPC listener has cancelled the execution control.
+            schedule(() => { const resume = release; release = undefined; resume?.(); }, 0);
+          }
+        });
+      })();`
+      await route.fulfill({
+        response,
+        headers: { ...response.headers(), 'cache-control': 'no-store' },
+        body: gate + '\n' + (await response.text()),
+      })
+    })
     await page.goto(`/?backend=${backend}`)
     test.skip(
       backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)),
@@ -144,6 +191,17 @@ var tick=0,completed=0;five.onTransitionCompleted=function(dest,src){completed++
       },
     ])
     await expect(page.locator('#logs')).toContainText('tlg-start')
+    await expect
+      .poll(() => page.workers().some((worker) => worker.url().includes('/assets/session.worker-')))
+      .toBe(true)
+    const worker = page
+      .workers()
+      .find((worker) => worker.url().includes('/assets/session.worker-'))!
+    await expect
+      .poll(() => worker.evaluate(() => Reflect.get(globalThis, '__tlgStop').held))
+      .toBe(true)
+    expect(await worker.evaluate(() => Reflect.get(globalThis, '__tlgStop').allocated)).toBe(true)
+    await expect(page.locator('#logs')).not.toContainText('tlg-finished')
     await page.locator('#stop').click()
     await expect(page.locator('#stop')).toBeDisabled({ timeout: 1800 })
     await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
