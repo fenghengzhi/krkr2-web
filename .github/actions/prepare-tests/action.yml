@@ -1,5 +1,10 @@
 name: Prepare tests
 description: Install locked dependencies and restore the build from this workflow run
+inputs:
+  build-run:
+    description: Optional earlier run; checkout must include its commit for source comparison
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
@@ -10,11 +15,33 @@ runs:
     - run: npm ci
       shell: bash
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      if: inputs.build-run == ''
       with:
         name: test-build
         path: ${{ runner.temp }}/krkr-test-build
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      if: inputs.build-run != ''
+      with:
+        name: test-build
+        path: ${{ runner.temp }}/krkr-test-build
+        run-id: ${{ inputs.build-run }}
+        github-token: ${{ github.token }}
     - name: Restore generated kernels, app and PWA releases
       shell: bash
       run: |
         tar -xzf "$RUNNER_TEMP/krkr-test-build/test-build.tar.gz"
         mkdir -p out/ci
+    - name: Require matching application sources when reusing an earlier build
+      if: inputs.build-run != ''
+      shell: bash
+      run: |
+        node --input-type=module <<'JS'
+        import { readFileSync } from 'node:fs'
+        import { execFileSync } from 'node:child_process'
+        const { commit } = JSON.parse(readFileSync('out/ci/build-info.json', 'utf8'))
+        if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('Invalid build provenance')
+        execFileSync('git', ['diff', '--exit-code', commit, 'HEAD', '--',
+          'src', 'native', 'third_party', 'public', 'examples', 'scripts',
+          'package.json', 'package-lock.json', 'index.html', 'vite.config.ts',
+          'tsconfig*.json'], { stdio: 'inherit' })
+        JS

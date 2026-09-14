@@ -143,4 +143,5 @@ test.afterEach(async ({ page }, info) => {
     contentType: 'application/json',
   })
 })
-await import('../browser/image-writing.spec.ts')
+if (process.env.KRKR_STARTUP_MEDIA === '1') await import('../browser/activity-media.spec.ts')
+else await import('../browser/image-writing.spec.ts')

@@ -1,4 +1,4 @@
-name: Native lifecycle diagnostic
+name: WebKit startup diagnostic
 
 on:
   workflow_dispatch:
@@ -14,15 +14,16 @@ permissions:
 
 env:
   CI: 'true'
+  KRKR_STARTUP_MEDIA: '1'
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  freeze:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+  startup:
+    runs-on: macos-15
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,15 +33,14 @@ jobs:
         with:
           build-run: ${{ inputs.build-run }}
       - run: npm run typecheck
-      - run: npx playwright install --with-deps chromium
-      - name: Repeat the real long-freeze scenario with failure diagnostics
-        run: npx playwright test -c playwright.activity.config.ts freeze-deadlines.spec.ts --repeat-each=3 2>&1 | tee out/ci/native-diagnostic.log
+      - run: npx playwright install --with-deps webkit
+      - name: Record Worker startup spans and native stacks
+        run: npx playwright test -c tests/probes/playwright.startup.config.ts --repeat-each=3 2>&1 | tee out/ci/webkit-diagnostic.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: native-diagnostic-results
+          name: webkit-diagnostic-results
           path: |
             out/ci/
-            out/verification/activity/native-check.json
-            test-results-native-activity/
+            test-results-webkit-diagnostic/
           retention-days: 14
