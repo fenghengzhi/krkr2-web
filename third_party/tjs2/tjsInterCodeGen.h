@@ -252,9 +252,6 @@ namespace TJS {
 
         ~tTJSInterCodeContext() override;
 
-        // is bytecode export
-        static bool IsBytecodeCompile;
-
     protected:
         void Finalize() override;
         //-------------------------------------------------------
@@ -387,7 +384,7 @@ namespace TJS {
             }
         };
 
-        std::vector<tProperty *> *Properties;
+        std::vector<tProperty> Properties;
 
         tjs_int FrameBase;
 

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { setTimeout as delay } from 'node:timers/promises'
 import { headless } from '../helpers/headless.ts'
-import { scriptsFixture } from '../helpers/scripts-fixture.ts'
+import { scriptsFixture, reentrantScriptsFixture } from '../helpers/scripts-fixture.ts'
 import { MemorySaveStore, type SaveFile } from '../../src/engine/ports/saves.ts'
 import type { EngineSession } from '../../src/engine/session.ts'
 
@@ -29,6 +29,29 @@ test('Scripts has native class/method, coercion, reflection and missing-member b
     )
   } finally {
     await session.stop()
+  }
+})
+
+test('nested successful and failed compilation preserves outer class metadata in a fresh VM', async () => {
+  const { session, logs } = await headless(reentrantScriptsFixture)
+  let output: Uint8Array
+  try {
+    await session.start()
+    assert(logs.includes('reentrant-scripts-ready'))
+    output = bytes(session.exportSaves(), 'savedata/outer-reentrant.cjs')
+  } finally {
+    await session.stop()
+  }
+  const fresh = await headless({
+    'startup.tjs': 'var sourceRuns=0;Scripts.execStorage("outer.cjs");',
+    'outer.cjs': output!,
+  })
+  try {
+    await fresh.session.start()
+    assert.equal(await fresh.session.evaluate('outerResult'), '84')
+    assert.equal(await fresh.session.evaluate('sourceRuns'), '1')
+  } finally {
+    await fresh.session.stop()
   }
 })
 

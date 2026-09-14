@@ -160,15 +160,11 @@ namespace TJS // following is in the namespace
     }
 
     //---------------------------------------------------------------------------
-    // is bytecode export
-    bool tTJSInterCodeContext::IsBytecodeCompile = false;
-
-    //---------------------------------------------------------------------------
     tTJSInterCodeContext::tTJSInterCodeContext(tTJSInterCodeContext *parent,
                                                const tjs_char *name,
                                                tTJSScriptBlock *block,
                                                tTJSContextType type) :
-        inherited(TJSGetContextHashSize(type)), Properties(nullptr) {
+        inherited(TJSGetContextHashSize(type)) {
         inherited::CallFinalize = false;
         // this notifies to the class ancestor - "tTJSCustomObject",
         // not to call "finalize" TJS method at the invalidation.
@@ -299,7 +295,7 @@ namespace TJS // following is in the namespace
         tjs_int argcount, tjs_int arraybase, tjs_int colbase, bool srcsorted,
         tSourcePos *srcPos, tjs_int srcPosSize,
         std::vector<tjs_int> &superpointer) :
-        inherited(TJSGetContextHashSize(type)), Properties(nullptr) {
+        inherited(TJSGetContextHashSize(type)) {
         inherited::CallFinalize = false;
         Parent = nullptr;
         PropGetter = PropSetter = SuperClassGetter = nullptr;
@@ -932,11 +928,8 @@ namespace TJS // following is in the namespace
 
         if(Parent->ContextType == ctFunction ||
            Parent->ContextType == ctClass) {
-            if(IsBytecodeCompile) { // for bytecode export
-                if(Properties == nullptr)
-                    Properties = new std::vector<tProperty *>();
-                Properties->push_back(new tProperty(Name, this));
-            }
+            if(Block->IsBytecodeCompile())
+                Properties.emplace_back(Name, this);
 
             // register members to the parent object
             tTJSVariant val = this;
@@ -4036,8 +4029,7 @@ namespace TJS // following is in the namespace
             (CodeAreaSize % 2) == 1 ? CodeAreaSize * 2 + 2 : CodeAreaSize * 2;
         int datasize = DataAreaSize * 4;
         int scgpsize = (int)(SuperClassGetterPointer.size() * 4);
-        int propsize =
-            (int)((Properties != nullptr ? Properties->size() * 8 : 0) + 4);
+        int propsize = (int)(Properties.size() * 8 + 4);
         int size = 12 * 4 + srcpossize + codesize + datasize + scgpsize +
             propsize + 4 * 4;
         std::vector<tjs_uint8> *result = new std::vector<tjs_uint8>();
@@ -4091,26 +4083,12 @@ namespace TJS // following is in the namespace
             int v = SuperClassGetterPointer.at(i);
             Add4ByteToVector(result, v);
         }
-        count = 0;
-        if(Properties != nullptr) {
-            count = (int)Properties->size();
-            Add4ByteToVector(result, count);
-            if(count > 0) {
-                for(int i = 0; i < count; i++) {
-                    tProperty *prop = (*Properties).at(i);
-                    int propname = constarray.PutString(prop->Name);
-                    int propobj = -1;
-                    if(prop->Value != nullptr) {
-                        propobj = block->GetCodeIndex(prop->Value);
-                    }
-                    Add4ByteToVector(result, propname);
-                    Add4ByteToVector(result, propobj);
-                    delete prop;
-                }
-            }
-            delete Properties;
-        } else {
-            Add4ByteToVector(result, count);
+        Add4ByteToVector(result, (int)Properties.size());
+        for(const auto& prop : Properties) {
+            const int propname = constarray.PutString(prop.Name);
+            const int propobj = prop.Value ? block->GetCodeIndex(prop.Value) : -1;
+            Add4ByteToVector(result, propname);
+            Add4ByteToVector(result, propobj);
         }
         return result;
     }

@@ -599,7 +599,7 @@ namespace TJS {
         if(!text[0])
             return;
 
-        tTJSInterCodeContext::IsBytecodeCompile = true;
+        BytecodeCompile = true;
         try {
             Script = new tjs_char[TJS_strlen(text) + 1];
             TJS_strcpy(Script, text);
@@ -636,7 +636,6 @@ namespace TJS {
                     ContextStack.pop();
                 }
             }
-            tTJSInterCodeContext::IsBytecodeCompile = false;
             throw;
         }
         if(InterCodeContextList.size() != 1) {
@@ -647,7 +646,6 @@ namespace TJS {
                 ContextStack.pop();
             }
         }
-        tTJSInterCodeContext::IsBytecodeCompile = false;
     }
 
     inline void OffsetReg(tjs_int32 &x) { x = TJS_FROM_VM_REG_ADDR(x); }

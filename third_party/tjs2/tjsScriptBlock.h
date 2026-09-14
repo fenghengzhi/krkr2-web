@@ -56,11 +56,14 @@ namespace TJS {
         tjs_int FirstErrorPos;
 
         bool UsingPreProcessor;
+        // Console callbacks may compile other blocks before this one resumes.
+        bool BytecodeCompile = false;
 
     public:
         tjs_int CompileErrorCount;
 
         [[nodiscard]] tTJS *GetTJS() const { return Owner; }
+        [[nodiscard]] bool IsBytecodeCompile() const { return BytecodeCompile; }
 
         void AddRef();
         void Release();
