@@ -12,8 +12,12 @@ on:
         required: true
         type: string
       freeze-run:
-        description: Successful three-repeat native lifecycle diagnostic for the same application
-        required: true
+        description: Optional three-repeat native lifecycle diagnostic for the same application
+        required: false
+        type: string
+      input-run:
+        description: Input activity diagnostic for the stack trace phase
+        required: false
         type: string
 
 permissions:
@@ -44,13 +48,15 @@ jobs:
           KRKR_BUILD_RUN: ${{ inputs.build-run }}
           KRKR_COMPATIBILITY_RUN: ${{ inputs.compatibility-run }}
           KRKR_FREEZE_RUN: ${{ inputs.freeze-run }}
+          KRKR_INPUT_RUN: ${{ inputs.input-run }}
         run: node tests/probes/vm-console-matrix.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: vm-console-verification
+          name: runtime-verification
           path: |
             out/verification/vm-console-matrix.json
+            out/verification/stack-traces-matrix.json
             out/verification/hosted-evidence/
             out/ci/
           if-no-files-found: error

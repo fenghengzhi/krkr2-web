@@ -90,14 +90,17 @@ unchanged(compatibility.info.headSha, [
   'tests/probes/prepare-compatibility.py',
   '.github/workflows/compatibility.yml',
 ])
-const freeze = await run('KRKR_FREEZE_RUN', 'Native lifecycle diagnostic', 1, [
-  '--name',
-  'native-diagnostic-results',
-])
-unchanged(freeze.info.headSha, [
-  'tests/activity-native-browser/freeze-deadlines.spec.ts',
-  'tests/helpers/native-activity-browser.ts',
-])
+const freeze = process.env.KRKR_FREEZE_RUN
+  ? await run('KRKR_FREEZE_RUN', 'Native lifecycle diagnostic', 1, [
+      '--name',
+      'native-diagnostic-results',
+    ])
+  : undefined
+if (freeze)
+  unchanged(freeze.info.headSha, [
+    'tests/activity-native-browser/freeze-deadlines.spec.ts',
+    'tests/helpers/native-activity-browser.ts',
+  ])
 const buildInfo = await json('out/ci/build-info.json')
 assert.equal(buildInfo.commit, base.info.headSha)
 assert.equal(buildInfo.runId, base.id)
@@ -105,7 +108,11 @@ assert.equal(Number(buildInfo.attempt), base.info.attempt)
 const build = await verifyOfflineBuild('dist', '/')
 const wasm = await json('dist/wasm/manifest.json')
 const font = await json('dist/fonts/manifest.json')
-assert.equal(wasm.abi, 3)
+assert([3, 4].includes(wasm.abi))
+const tracePhase = wasm.abi === 4
+const nodeCount = tracePhase ? 351 : 346
+const browserCount = tracePhase ? 609 : 603
+if (!tracePhase) assert(freeze, 'The historical VM console phase requires its freeze diagnostic')
 assert.equal(font.abi, 2)
 assert((await readFile('src/protocol/session.ts', 'utf8')).includes('PROTOCOL_VERSION = 9'))
 const indexSha256 = await hash('dist/index.html')
@@ -185,8 +192,8 @@ function frozenIntervals(cases, count) {
 
 const nodeLog = await readFile(base.root + '/artifacts/node-results/node.log', 'utf8')
 for (const line of [
-  'ℹ tests 346\n',
-  'ℹ pass 346\n',
+  `ℹ tests ${nodeCount}\n`,
+  `ℹ pass ${nodeCount}\n`,
   'ℹ fail 0\n',
   'ℹ skipped 0\n',
   'ℹ cancelled 0\n',
@@ -199,7 +206,14 @@ for (const browser of browsers)
   for (const suite of ['browser', 'library', 'pwa']) {
     const root = `${base.root}/artifacts/browser-results-${browser}-${suite}`
     const report = await json(root + '/out/ci/results.json')
-    const count = suite === 'browser' ? 160 : suite === 'pwa' && browser !== 'webkit' ? 20 : 19
+    const count =
+      suite === 'browser'
+        ? tracePhase
+          ? 162
+          : 160
+        : suite === 'pwa' && browser !== 'webkit'
+          ? 20
+          : 19
     const cases = playwright(report, count)
     assert(cases.every((row) => row.project === browser))
     checkGraphics(await json(root + '/out/ci/capabilities.json'), browser)
@@ -229,10 +243,40 @@ const native = await json(
   base.root + '/artifacts/native-activity-results/out/verification/activity/native-check.json',
 )
 const nativeIntervals = frozenIntervals(playwright(native, 7), 1)
-const repeatedFreeze = await json(
-  freeze.root + '/artifacts/out/verification/activity/native-check.json',
-)
-const repeatedIntervals = frozenIntervals(playwright(repeatedFreeze, 3), 3)
+const repeatedIntervals = freeze
+  ? frozenIntervals(
+      playwright(
+        await json(freeze.root + '/artifacts/out/verification/activity/native-check.json'),
+        3,
+      ),
+      3,
+    )
+  : []
+const inputRun = tracePhase
+  ? await run('KRKR_INPUT_RUN', 'Input activity diagnostic', 3, ['--pattern', 'input-activity-*'])
+  : undefined
+if (inputRun) {
+  unchanged(inputRun.info.headSha, [
+    'tests/browser/activity.spec.ts',
+    'tests/integration/input-focus-activity.test.ts',
+    'tests/helpers/activity-browser.ts',
+    '.github/workflows/input-activity.yml',
+  ])
+  for (const browser of browsers) {
+    const root = `${inputRun.root}/artifacts/input-activity-${browser}/out/ci`
+    const cases = playwright(await json(root + '/input-results.json'), 10)
+    assert(
+      cases.every(
+        (row) => row.project === browser && row.title.includes('backgrounding drops held input'),
+      ),
+    )
+    if (browser === 'chromium') {
+      const log = await readFile(root + '/input-focus.log', 'utf8')
+      for (const line of ['tests 1', 'pass 1', 'fail 0', 'cancelled 0', 'skipped 0'])
+        assert(log.includes('ℹ ' + line + '\n'))
+    }
+  }
+}
 const runtime = await json(
   base.root + '/artifacts/runtime-results/verification/vm-console/runtime-browser.json',
 )
@@ -249,6 +293,13 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (tracePhase) {
+    assert(row.trace.nativeMethod && row.trace.defaultDisabled)
+    assert.equal(row.trace.cancelled, 'AbortError: Execution cancelled')
+    assert.equal(row.trace.traces.recovered, 'trace-recovery.tjs(1)[(top level script) global]')
+    assert.equal(row.trace.traces.fresh, 'fresh-trace.tjs(1)[(top level script) global]')
+    assert.equal(Object.keys(row.trace.traces).length, 7)
+  }
 }
 assert.equal(
   await hash(base.root + '/artifacts/runtime-results/verification/vm-console/runtime/runtime.mjs'),
@@ -259,7 +310,10 @@ const external = []
 for (const browser of browsers) {
   const root = `${compatibility.root}/artifacts/compatibility-${browser}`
   const reports = root + '/verification/compatibility'
-  assert.deepEqual(await json(root + '/ci/build-info.json'), buildInfo)
+  // Compatibility may reuse an earlier build while the full suite fixes tests.
+  // Its application sources and complete release digests must still match.
+  const compatibilityBuild = await json(root + '/ci/build-info.json')
+  unchanged(compatibilityBuild.commit, applicationPaths)
   assert.deepEqual(await json(root + '/ci/compatibility-fixtures.json'), fixture)
   checkGraphics(await json(root + '/ci/capabilities.json'), browser)
   const pathFor = (path) => {
@@ -308,6 +362,7 @@ for (const browser of browsers) {
     ['abi-pwa', 'tjs-abi1', 'wasm'],
     ['runtime-abi-pwa', 'tjs-abi2', 'wasm'],
     ['font-abi-pwa', 'font-abi1', 'fonts'],
+    ...(tracePhase ? [['trace-abi-pwa', 'tjs-abi3', 'wasm']] : []),
   ]) {
     const report = await json(`${reports}/${name}.json`)
     const old = fixtureManifest.releases.find((release) => release.id === id)
@@ -321,7 +376,8 @@ for (const browser of browsers) {
       assert.equal(row.oldBuild, old.build)
       assert.equal(row.newBuild, build.build)
       assert.equal(row.oldAbi, oldManifest.abi)
-      assert.equal(row.newAbi, manifestKind === 'wasm' ? 3 : 2)
+      assert.equal(row.newAbi, manifestKind === 'wasm' ? wasm.abi : 2)
+      if (id === 'tjs-abi3') assert(row.nativeTraceVerified)
       assert(row.oldWorkerRestartedOffline && row.newWorkerStartedOffline)
       assert(row.caches.some((key) => key.endsWith(row.oldBuild)))
       assert(row.caches.some((key) => key.endsWith(row.newBuild)))
@@ -350,7 +406,7 @@ for (const browser of browsers) {
 }
 assert.equal(
   external.reduce((n, report) => n + report.results.length, 0),
-  66,
+  tracePhase ? 72 : 66,
 )
 const evidence = {}
 for (const path of await files(directory))
@@ -360,7 +416,12 @@ const matrix = {
   execution: 'GitHub-hosted GitHub Actions',
   reportCommit: process.env.GITHUB_SHA,
   reportRun: `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
-  runs: [base.info, compatibility.info, freeze.info],
+  runs: [
+    base.info,
+    compatibility.info,
+    ...(freeze ? [freeze.info] : []),
+    ...(inputRun ? [inputRun.info] : []),
+  ],
   applicationSourcesMatchAllRuns: true,
   regularTestsMatchBaseRun: true,
   compatibilityProbesMatchRun: true,
@@ -370,16 +431,17 @@ const matrix = {
   font,
   sessionProtocol: 9,
   passed: {
-    node: 346,
-    browser: 603,
+    node: nodeCount,
+    browser: browserCount,
     directRuntime: 6,
     kag: 36,
     kagPanels: 6,
     kagDiagnostics: 6,
     tjsAbi1: 6,
     tjsAbi2: 6,
+    ...(tracePhase ? { tjsAbi3: 6, inputFocusReproduction: 1, repeatedInputCleanup: 30 } : {}),
     fontAbi1: 6,
-    repeatedTrustedFreeze: 3,
+    repeatedTrustedFreeze: repeatedIntervals.length,
     selectedSkipped: 0,
     flaky: 0,
     retries: 0,
@@ -402,6 +464,15 @@ const matrix = {
   evidence,
   previousMatrices: fixtureManifest.historicalMatrices,
   historicalFailures: [
+    ...(tracePhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34814477725',
+            reason:
+              'The background composition test hid the page before queued onMouseDown established script focus. The trace retained inputmode=none. The test now waits for the script focus acknowledgement; a blocked-VM reproduction and 30 original browser cleanup repetitions passed without changing production input handling.',
+          },
+        ]
+      : []),
     {
       run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34811575232',
       reason:
@@ -419,18 +490,20 @@ const matrix = {
     },
   ],
   incomplete: [
-    'Scripts.getTraceString, native error UI policy, remaining exception and finalizer paths',
+    ...(tracePhase ? [] : ['Scripts.getTraceString']),
+    'Native error UI policy, remaining exception and finalizer paths, TJS bridge frames in other TVP methods',
     'Historical WebKit paused-video position discontinuity remains unrootcaused',
     'Historical one-shot committed-input failure has no proven product root cause; acknowledgement-based checks remain',
-    'Protocol 8 to 9 historical same-kernel probe was not rerun in this ABI 3 phase',
+    'Protocol 8 to 9 historical same-kernel probe was not rerun in this phase',
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const output = 'out/verification/vm-console-matrix.json'
+const reportName = tracePhase ? 'stack-traces-matrix.json' : 'vm-console-matrix.json'
+const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(
   process.env.GITHUB_STEP_SUMMARY,
-  `Verified **346 Node + 603 browser + 6 direct runtime + 66 compatibility + 3 repeated trusted freeze** cases.\n\n` +
-    `Sources, builds and individual results are bound in \`vm-console-matrix.json\`. SHA-256: \`${await hash(output)}\`.\n`,
+  `Verified **${nodeCount} Node + ${browserCount} browser + 6 direct runtime + ${tracePhase ? 72 : 66} compatibility** cases.\n\n` +
+    `Sources, builds and individual results are bound in \`${reportName}\`. SHA-256: \`${await hash(output)}\`.\n`,
 )
 console.log('WROTE ' + output)
