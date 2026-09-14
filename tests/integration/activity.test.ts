@@ -11,6 +11,59 @@ const activity = (
   pauseWhenHidden = true,
 ): ActivityState => ({ sequence, state, pauseWhenHidden })
 
+test('freeze suspends media request budgets before sending pause commands and ignores stale states', async () => {
+  const calls: string[] = []
+  const backend = (name: string) => ({
+    setRequestTimeoutsPaused(paused: boolean) {
+      calls.push(`${name}:deadline:${paused}`)
+    },
+    async command(command: { op: string; paused?: boolean }) {
+      if (command.op === 'pauseAll') calls.push(`${name}:pause:${command.paused}`)
+      return { events: [] }
+    },
+    listen() {
+      return () => {}
+    },
+    async close() {},
+  })
+  const { session } = await headless(
+    { 'startup.tjs': scene },
+    {
+      audio: backend('audio'),
+      video: backend('video'),
+    },
+  )
+  try {
+    assert.deepEqual(calls.slice(0, 2), ['audio:deadline:false', 'video:deadline:false'])
+    await session.start()
+    calls.length = 0
+    session.setActivity(activity(2, 'frozen', false))
+    assert.deepEqual(calls, [
+      'audio:deadline:true',
+      'video:deadline:true',
+      'audio:pause:true',
+      'video:pause:true',
+    ])
+    session.setActivity(activity(1, 'visible'))
+    assert.equal(calls.length, 4)
+    calls.length = 0
+    session.setActivity(activity(3, 'hidden', false))
+    assert.deepEqual(calls, [
+      'audio:deadline:false',
+      'video:deadline:false',
+      'audio:pause:false',
+      'video:pause:false',
+    ])
+    session.setActivity(activity(4, 'visible'))
+    calls.length = 0
+    session.pause()
+    session.resume()
+    assert(calls.every((call) => !call.includes('deadline:')))
+  } finally {
+    await session.stop()
+  }
+})
+
 test('page suspension preserves modified VM state and user pause across reordered signals', async () => {
   let frames = 0
   const { session } = await headless(

@@ -75,6 +75,7 @@ export interface VideoResult {
   events: VideoEvent[]
 }
 export interface VideoBackend {
+  setRequestTimeoutsPaused?(paused: boolean): void
   command(command: VideoCommand): Promise<VideoResult>
   listen(callback: (event: VideoEvent) => void | Promise<void>): () => void
   close(): Promise<void>

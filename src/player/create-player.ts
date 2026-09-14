@@ -53,6 +53,9 @@ export function createPlayer(
   const pageActivity = new PageActivityMonitor((state) => {
     activity = state
     const paused = activityPaused(state)
+    const suspended = state.state === 'frozen' || state.state === 'away'
+    audio.setRequestTimeoutsPaused(suspended)
+    video.setRequestTimeoutsPaused(suspended)
     video.setPagePaused(paused)
     void audio.setPagePaused(paused).catch(onError)
     void session.setActivity(state).catch(onError)

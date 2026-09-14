@@ -1,3 +1,4 @@
+import { PausableTimeouts } from '../../shared/pausable-timeouts.ts'
 import {
   emptyVideoSnapshot,
   type VideoCommand,
@@ -33,6 +34,10 @@ interface Movie {
   surface?: OffscreenCanvas
 }
 export class WebVideoHost {
+  private readonly timeouts = new PausableTimeouts()
+  setRequestTimeoutsPaused(paused: boolean): void {
+    this.timeouts.setPaused(paused)
+  }
   private movies = new Map<number, Movie>()
   private closed = false
   private paused = false
@@ -308,7 +313,7 @@ export class WebVideoHost {
     if (ready() && !start) return
     return new Promise((resolve, reject) => {
       const done = (error?: unknown) => {
-        clearTimeout(timer)
+        cancelTimeout()
         movie.element.removeEventListener(name, success)
         movie.element.removeEventListener('error', failure)
         movie.abort.signal.removeEventListener('abort', cancel)
@@ -322,7 +327,9 @@ export class WebVideoHost {
             ),
           ),
         cancel = () => done(new Error('Video operation cancelled'))
-      const timer = setTimeout(() => done(new Error(`Video ${name} timed out`)), 15000)
+      const cancelTimeout = this.timeouts.start(15000, () =>
+        done(new Error(`Video ${name} timed out`)),
+      )
       movie.element.addEventListener(name, success, { once: true })
       movie.element.addEventListener('error', failure, { once: true })
       movie.abort.signal.addEventListener('abort', cancel, { once: true })

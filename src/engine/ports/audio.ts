@@ -91,6 +91,7 @@ export interface AudioResult {
   events: AudioEvent[]
 }
 export interface AudioBackend {
+  setRequestTimeoutsPaused?(paused: boolean): void
   command(command: AudioCommand): Promise<AudioResult>
   listen(callback: (event: AudioEvent) => void): () => void
   close(): Promise<void>

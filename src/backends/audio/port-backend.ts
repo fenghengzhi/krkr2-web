@@ -1,3 +1,4 @@
+import { PausableTimeouts } from '../shared/pausable-timeouts.ts'
 import type {
   AudioBackend,
   AudioCommand,
@@ -7,6 +8,10 @@ import type {
 import type { AudioMessage, AudioRequest } from '../../protocol/audio.ts'
 import { decodePortableAudio } from './decode.ts'
 export class PortAudioBackend implements AudioBackend {
+  private readonly timeouts = new PausableTimeouts()
+  setRequestTimeoutsPaused(paused: boolean): void {
+    this.timeouts.setPaused(paused)
+  }
   private next = 1
   private closed = false
   private pending = new Map<
@@ -14,7 +19,7 @@ export class PortAudioBackend implements AudioBackend {
     {
       resolve(result: AudioResult): void
       reject(error: Error): void
-      timer: ReturnType<typeof setTimeout>
+      cancelTimeout(): void
     }
   >()
   private listeners = new Set<(event: AudioEvent) => void>()
@@ -26,7 +31,7 @@ export class PortAudioBackend implements AudioBackend {
       } else if (message.type === 'reply') {
         const job = this.pending.get(message.serial)
         if (!job) return
-        clearTimeout(job.timer)
+        job.cancelTimeout()
         this.pending.delete(message.serial)
         if (message.error) job.reject(new Error(message.error))
         else job.resolve(message.result ?? { events: [] })
@@ -51,11 +56,11 @@ export class PortAudioBackend implements AudioBackend {
     }
     const serial = this.next++
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const cancelTimeout = this.timeouts.start(20000, () => {
         this.pending.delete(serial)
         reject(new Error(`Audio ${command.op} timed out`))
-      }, 20000)
-      this.pending.set(serial, { resolve, reject, timer })
+      })
+      this.pending.set(serial, { resolve, reject, cancelTimeout })
       const request: AudioRequest = { serial, command }
       // File bytes remain owned by the resource cache; transfer only a private copy.
       if (command.op === 'load' && command.asset.kind === 'pcm') {
@@ -78,13 +83,14 @@ export class PortAudioBackend implements AudioBackend {
   }
   async close(): Promise<void> {
     if (this.closed) return
+    this.timeouts.setPaused(false)
     try {
       await this.command({ op: 'shutdown' })
     } finally {
       this.closed = true
       this.port.close()
       for (const job of this.pending.values()) {
-        clearTimeout(job.timer)
+        job.cancelTimeout()
         job.reject(new Error('Audio backend closed'))
       }
       this.pending.clear()

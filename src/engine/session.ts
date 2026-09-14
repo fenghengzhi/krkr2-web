@@ -228,6 +228,7 @@ export class EngineSession {
       validateActivity(deps.activity)
       this.activity = { ...deps.activity }
     }
+    this.pauseMediaRequestTimeouts()
     this.saves = new SaveOverlay(deps.saveStore ?? new MemorySaveStore(), (path) =>
       this.images.invalidate(path),
     )
@@ -612,6 +613,8 @@ export class EngineSession {
     if (this.control.cancelled || activity.sequence <= this.activity.sequence) return
     const previous = this.activity
     this.activity = { ...activity }
+    // Freeze transport deadlines before applyPause sends pauseAll requests.
+    this.pauseMediaRequestTimeouts()
     if (activityPaused(activity) && !activityPaused(previous) && this.state === 'paused')
       this.events?.pause(true)
     if (previous.state === 'visible' && activity.state !== 'visible') {
@@ -633,6 +636,11 @@ export class EngineSession {
     if (activity.state === 'visible') this.dirty = true
     this.applyPause()
     this.notify()
+  }
+  private pauseMediaRequestTimeouts(): void {
+    const paused = this.activity.state === 'frozen' || this.activity.state === 'away'
+    this.deps.audio?.setRequestTimeoutsPaused?.(paused)
+    this.deps.video?.setRequestTimeoutsPaused?.(paused)
   }
   private applyPause(): void {
     if (!['running', 'paused'].includes(this.state)) return

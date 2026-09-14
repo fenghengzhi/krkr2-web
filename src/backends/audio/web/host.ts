@@ -1,3 +1,4 @@
+import { PausableTimeouts } from '../../shared/pausable-timeouts.ts'
 import workletUrl from './mixer.worklet.ts?worker&url'
 import type {
   AudioAsset,
@@ -17,6 +18,10 @@ import type {
 } from '../../../protocol/audio.ts'
 
 export class WebAudioHost {
+  private readonly timeouts = new PausableTimeouts()
+  setRequestTimeoutsPaused(paused: boolean): void {
+    this.timeouts.setPaused(paused)
+  }
   private context?: AudioContext
   private node?: AudioWorkletNode
   private gain?: GainNode
@@ -256,17 +261,16 @@ export class WebAudioHost {
     if (this.failure) return Promise.reject(this.failure)
     const serial = this.next++
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(
-        () => this.fail(new Error(`AudioWorklet ${command.op} timed out`)),
-        15000,
+      const cancelTimeout = this.timeouts.start(15000, () =>
+        this.fail(new Error(`AudioWorklet ${command.op} timed out`)),
       )
       this.pending.set(serial, {
         resolve: (result) => {
-          clearTimeout(timer)
+          cancelTimeout()
           resolve(result)
         },
         reject: (error) => {
-          clearTimeout(timer)
+          cancelTimeout()
           reject(error)
         },
       })
@@ -279,7 +283,7 @@ export class WebAudioHost {
         node.port.postMessage(message, transfer)
       } catch (error) {
         this.pending.delete(serial)
-        clearTimeout(timer)
+        cancelTimeout()
         reject(error)
       }
     })
