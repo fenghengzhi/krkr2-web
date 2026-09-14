@@ -6,7 +6,9 @@
 
 ## 已完成的云端回归
 
-当前 [提交 `0eee21e` 的完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)全部通过：**351 项 Node、609 项浏览器测试**（486 常规、57 游戏库、59 PWA、7 原生生命周期）及 6 项直接运行时专项。原生调用栈在三浏览器双后端中检查，当前 TJS ABI 为 4。另有 [72 项兼容性](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)及 [30 次输入时序复测](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815498178)通过。所选测试无失败、跳过或 flaky，未使用测试重试；WebKit 原有网络模拟排除继续保留。
+原生 Scripts 阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)通过 **362 项 Node、615 项浏览器**（492 常规、57 游戏库、59 PWA、7 原生生命周期）与 **6 项直接运行时**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)通过 **78 项**。所选案例无失败、跳过、flaky 或重试。两者的应用源码和发布文件由 Verification report 进一步绑定，历史失败与修复见 [原生 Scripts](decisions/032-native-scripts.md)。
+
+此前 ABI 4 阶段 [提交 `0eee21e` 的完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)全部通过：**351 项 Node、609 项浏览器测试**（486 常规、57 游戏库、59 PWA、7 原生生命周期）及 6 项直接运行时专项。原生调用栈在三浏览器双后端中检查，该阶段 TJS ABI 为 4。另有 [72 项兼容性](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)及 [30 次输入时序复测](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815498178)通过。所选测试无失败、跳过或 flaky，未使用测试重试；WebKit 原有网络模拟排除继续保留。
 
 本阶段 [最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34816691294)生成 `out/verification/stack-traces-matrix.json`，绑定 503 份证据，SHA-256 为 `9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df`。完整报告已下载至 `out/verification/github-actions/34816691294/`，构建与测试另按各自 run ID 归档。失败原因、确定性复现和中断记录见 [脚本调用栈决策](decisions/031-script-stack-traces.md)。
 
@@ -51,7 +53,7 @@ gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 
 默认工作流不依赖相邻的 `kirikiroid2-web` 仓库，也不读取本机的 `out/verification` 历史目录。现有固定参考数据随 `tests/fixtures` 保存并由 Node/浏览器测试使用。
 
-原 KAG XP3、保留全部 30 个成员字节的 ZIP，以及四个完整旧发布包已固定在 [兼容样本](../tests/fixtures/compatibility/README.md) 中。**KAG and release compatibility** 工作流先核对压缩包、旧发布树、build token、实际 ABI 和 ZIP 成员摘要，再运行三浏览器、双 WASM 后端专项。当前 ABI 4 工作流包含 TJS ABI 1/2/3→4 和字体 ABI 1→2，共 72 项；以下 66 项结果保留为上一阶段记录。
+原 KAG XP3、保留全部 30 个成员字节的 ZIP，以及五个完整旧发布包已固定在 [兼容样本](../tests/fixtures/compatibility/README.md) 中。**KAG and release compatibility** 工作流先核对压缩包、旧发布树、build token、实际 ABI 和 ZIP 成员摘要，再运行三浏览器、双 WASM 后端专项。当前 ABI 5 工作流包含 TJS ABI 1/2/3/4→5 和字体 ABI 1→2，共 78 项；ABI 4 的 72 项和以下 ABI 3 的 66 项结果作为历史记录保留。
 
 [提交 `c0d6ba3` 的云端运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812505215)通过全部 **66 项**：原 KAG 流程/存读档/转场 36 项、原菜单 6 项、原异常处理及恢复 6 项、TJS ABI 1→3 和 2→3 各 6 项、字体 ABI 1→2 共 6 项。升级检查实际关闭服务器，让旧标签页重建旧 Worker，新标签页运行新 Worker；TJS 检查还验证新发布原生类和独立 dump，字体检查读取字宽和位图像素。旧应用及其 manifest 保持原字节。
 
@@ -63,18 +65,17 @@ gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 gh workflow run compatibility.yml --ref main -f build-run=BUILD_RUN_ID
 ```
 
-复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。当前 ABI 4 阶段要求输入时序专项，生成 `out/verification/stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
+复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。当前 ABI 5 阶段生成 `out/verification/native-scripts-matrix.json`；此前 ABI 4 阶段要求输入时序专项，生成 `out/verification/stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
 
 [VM 控制台阶段汇总](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)已通过，绑定 487 份证据文件、116 份持久 context 预算记录及 6 份媒体时钟记录。生成时提交为 `d97a3c9`，报告 SHA-256 为 `81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d`。矩阵和引用的完整产物已下载到 `out/verification/github-actions/34812958010/`，矩阵另复制到上述标准路径；报告生成后的本次文档更新不改变应用或测试代码。
 
 ```sh
 gh workflow run verification-report.yml --ref main \
   -f build-run=BUILD_RUN_ID \
-  -f compatibility-run=COMPATIBILITY_RUN_ID \
-  -f input-run=INPUT_RUN_ID
+  -f compatibility-run=COMPATIBILITY_RUN_ID
 ```
 
-`freeze-run` 仍可指定同应用源码的独立三次长冻结运行；未提供时不会把历史三次冻结计入当前阶段。完整 Tests 自身的 7 项原生生命周期仍包含一次超过 21 秒的真实冻结。
+`input-run` 可附带同源码的输入时序专项，ABI 5 不把 ABI 4 的历史复测计为本轮结果。`freeze-run` 仍可指定同应用源码的独立三次长冻结运行；未提供时不会把历史三次冻结计入当前阶段。完整 Tests 自身的 7 项原生生命周期仍包含一次超过 21 秒的真实冻结。
 
 协议 8→9 的同内核历史专项仍保留在调试面板阶段；跨 TJS ABI 升级检查不能替代该历史结果。其他未迁移的独立参考/性能专项同样不能由默认工作流通过推断为已完成。
 

@@ -539,7 +539,7 @@ const matrix = {
     ...(tracePhase ? [] : ['Scripts.getTraceString']),
     ...(scriptsPhase
       ? [
-          'Automatic legacy text detection and decoder latching, serialized Array/Dictionary resource execution, prefixed bytecode, full bytecode validation and complete storage paths remain incomplete',
+          'Automatic legacy text detection and decoder latching, serialized Array/Dictionary resource execution, prefixed bytecode, full bytecode validation, cooperative long compilation and complete storage paths remain incomplete',
         ]
       : []),
     'Native error UI policy, remaining exception and finalizer paths, TJS bridge frames in other TVP methods',
