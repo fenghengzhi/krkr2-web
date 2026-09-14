@@ -478,7 +478,7 @@ const matrix = {
           {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34819597478',
             reason:
-              'The first native Scripts run exposed omitted member/property variants in bytecode export. The exporter now converts all four forms. New statement fixtures now call Scripts.exec instead of the single-expression console; anonymous names and protected native exceptions follow the original VM semantics. Original failure evidence remains archived.',
+              'The first native Scripts run exposed omitted member/property variants in bytecode export. The exporter now converts all four forms. New statement fixtures now call Scripts.exec instead of the single-expression console; anonymous names and protected native exceptions follow the original VM semantics. The same run also exposed font selection moving during async previews; final bitmap geometry is now reserved before opening the dialog, with a held-pointer regression. Original failure evidence remains archived.',
           },
         ]
       : []),

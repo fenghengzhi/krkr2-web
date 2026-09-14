@@ -24,9 +24,11 @@ Debug 已支持历史与重要消息、同步日志回调、UTF-16LE 文件输�
 
 `Debug.console.visible` 和 `Debug.controller.visible` 已接入页面的运行记录与调试控制区。隐藏后可从画面下方重新打开，暂停或脚本长循环时也能操作。原 KAG 的调试菜单与快捷键使用同一套状态，详见 [调试面板](docs/decisions/028-debug-panels.md)。
 
-调试对象现使用原生类语义；VM 编译警告和异常诊断也会进入 Debug。`Scripts.dump()` 可生成随备份导出的 UTF-16LE 转储文件。TJS ABI 现为 4，直接使用运行时 API 时须等待异步 `compile()`；范围见 [VM 控制台与转储](docs/decisions/029-vm-console.md)。
+调试对象现使用原生类语义；VM 编译警告和异常诊断也会进入 Debug。`Scripts.dump()` 可生成随备份导出的 UTF-16LE 转储文件。当前源码 TJS ABI 为 5，直接使用运行时 API 时须等待异步 `compile()`；范围见 [VM 控制台与转储](docs/decisions/029-vm-console.md)。
 
 启动前勾选“脚本调试”，`Scripts.getTraceString()` 可返回当前调用的文件、行号和函数名称；参数可限制深度。默认关闭，修改开关在下一次启动/重新开始时生效。原生调用栈已支持 Asyncify/JSPI 挂起，详见 [脚本调用栈](docs/decisions/031-script-stack-traces.md)。
+
+`Scripts` 已接入原生类，新增 `compileStorage`、`getClassNames`、`setCallMissing` 和 `textEncoding`。本轮修复已推送，但 GitHub Actions 因账户计费限制未能启动，尚待云端验证；完整非插件兼容仍在实现。详情见 [原生 Scripts](docs/decisions/032-native-scripts.md)。
 
 页面现在也支持“远程文件链接”。支持 Range 和强 ETag 的 XP3/ZIP 服务器可按需读取；小文件可在预算内完整下载。跨域配置、版本与存档身份见 [HTTP 来源](docs/decisions/016-http-sources.md)。
 

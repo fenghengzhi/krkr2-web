@@ -1,8 +1,10 @@
 # 当前实现范围
 
-最新 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
+当前源码已接入原生 Scripts 类、compileStorage、反射/missing 和 textEncoding，TJS ABI 为 **5**。首轮云端失败后已推送字节码导出及字体预览修复，但 [新一轮 Actions](https://github.com/fenghengzhi/krkr2-web/actions/runs/34821034573) 因账户付款/支出限制未能启动，修复尚未通过验证；下列 ABI 4 结果仅是先前基线。恢复 Actions 后继续完整云端回归，详见 [原生 Scripts](../decisions/032-native-scripts.md)。
 
-原生 `Scripts.getTraceString(limit=0)` 与“脚本调试”启动开关已接入，当前 TJS ABI **4**、字体 ABI **2**、会话协议 **9**。调用栈在异步挂起、嵌套回调、字节码和取消时保留已验证的位置与顺序；其他 TVP 桥帧、原生错误界面和隐式回收路径仍需继续对齐。设计和失败分析见 [脚本调用栈](../decisions/031-script-stack-traces.md)。[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34816691294)保存为 `out/verification/stack-traces-matrix.json`，绑定 503 份证据，SHA-256 为 `9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df`。
+上一轮完成的 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
+
+原生 `Scripts.getTraceString(limit=0)` 与“脚本调试”启动开关已接入，该已验证阶段 TJS ABI **4**、字体 ABI **2**、会话协议 **9**。调用栈在异步挂起、嵌套回调、字节码和取消时保留已验证的位置与顺序；其他 TVP 桥帧、原生错误界面和隐式回收路径仍需继续对齐。设计和失败分析见 [脚本调用栈](../decisions/031-script-stack-traces.md)。[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34816691294)保存为 `out/verification/stack-traces-matrix.json`，绑定 503 份证据，SHA-256 为 `9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df`。
 
 当前实现包含独立 TJS2 VM、文件流、持久存档、部分 TVP 宿主、游戏库与离线应用。它可以运行内置示例、已验证的 KAG 流程和使用已实现 API 的脚本；尚未达到完整 KAG 或商业游戏兼容。
 
@@ -202,4 +204,4 @@ GPU 丢失/恢复使用浏览器的 WEBGL_lose_context 扩展触发真实资源�
 页面策略阶段完整 `npm run check` 已通过 **230 项行为/集成与 438 项浏览器测试**；选中案例无失败或跳过，既有 WebKit PWA 网络模拟排除项保持单独记录。新增 14 项 Node 与 52 项浏览器案例，覆盖暂停的异步结果/错误、Timer 与输入、媒体、存档、设置，以及原生隐藏/冻结和按钮按住期间的更新。日志为 `out/verification/activity/check.log`，最终源码/测试/配置/构建/WASM、原生可信事件与中间失败证据见 `out/verification/activity-matrix.json`。外部 KAG 36 场景矩阵未在本阶段重跑。
 
 
-System 事件使用独立 TypeScript 队列，`eventDisabled` 不暂停 VM 或媒体时钟。支持 add/removeContinuousHandler、精确绑定闭包去重、活列表增删、`-contfreq`、事件异常处理和重新启用时的同步派发。菜单/快捷键检查页面可见性及 epoch，禁用时 popup 仍可返回但不通知 onClick。当前 TJS WASM ABI 为 3，会话协议为 9。
+System 事件使用独立 TypeScript 队列，`eventDisabled` 不暂停 VM 或媒体时钟。支持 add/removeContinuousHandler、精确绑定闭包去重、活列表增删、`-contfreq`、事件异常处理和重新启用时的同步派发。菜单/快捷键检查页面可见性及 epoch，禁用时 popup 仍可返回但不通知 onClick。System 阶段使用 TJS WASM ABI 3、会话协议 9；当前版本与待验证状态见文首。
