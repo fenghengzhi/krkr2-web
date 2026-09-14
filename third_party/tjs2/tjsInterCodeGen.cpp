@@ -45,7 +45,9 @@ namespace TJS // following is in the namespace
     }
 
     void parser::error(const std::string &msg) {
-        spdlog::get("tjs2")->critical(msg);
+        // Bison syntax errors must participate in the same failure accounting
+        // as lexer and semantic errors; logging alone permits partial output.
+        _yyerror(ttstr(msg).c_str(), ptr);
     }
 
     //---------------------------------------------------------------------------

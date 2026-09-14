@@ -111,7 +111,7 @@ const font = await json('dist/fonts/manifest.json')
 assert([3, 4, 5].includes(wasm.abi))
 const scriptsPhase = wasm.abi === 5
 const tracePhase = wasm.abi >= 4
-const nodeCount = scriptsPhase ? 361 : tracePhase ? 351 : 346
+const nodeCount = scriptsPhase ? 362 : tracePhase ? 351 : 346
 const browserCount = scriptsPhase ? 615 : tracePhase ? 609 : 603
 const compatibilityCount = scriptsPhase ? 78 : tracePhase ? 72 : 66
 if (!tracePhase) assert(freeze, 'The historical VM console phase requires its freeze diagnostic')

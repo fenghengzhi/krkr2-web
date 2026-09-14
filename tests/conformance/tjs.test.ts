@@ -78,7 +78,7 @@ test('bytecode compilation awaits console continuations and the result executes 
   }
 })
 
-test('exported compound and increment instructions preserve register, member and property operands', async () => {
+test('exported compound and increment instructions preserve register, member and property operands', async (t) => {
   const vm = await runtime()
   try {
     for (const operator of [
@@ -100,6 +100,7 @@ test('exported compound and increment instructions preserve register, member and
       '--',
     ]) {
       for (const target of ['local', 'object.value', 'object[key]', '(*accessor)']) {
+        t.diagnostic(`bytecode round trip: ${target} ${operator}`)
         const mutation = ['++', '--'].includes(operator)
           ? target + operator
           : target + operator + '3'
@@ -123,6 +124,30 @@ var exportedResult=exercise();`
         )
       }
     }
+  } finally {
+    vm.dispose()
+  }
+})
+
+test('syntax failures never execute a parsed prefix or return partial compiled code', async () => {
+  const vm = await runtime()
+  try {
+    await vm.execute('var parsed=0;')
+    for (const source of [
+      'parsed=1; function {',
+      'parsed=2; var broken=; parsed=3;',
+      'class Partial {function method(){return 1;}} class Broken {',
+      'parsed=4; if (',
+    ]) {
+      await assert.rejects(vm.execute(source, 'invalid-source.tjs'), { name: 'ScriptError' })
+      assert.equal(await vm.execute('parsed', '', true), 0n)
+      await assert.rejects(vm.compile(source, 'invalid-compile.tjs'), { name: 'ScriptError' })
+      assert.equal(await vm.execute('parsed', '', true), 0n)
+    }
+    await assert.rejects(vm.execute('1 +', 'invalid-expression.tjs', true), { name: 'ScriptError' })
+    await assert.rejects(vm.compile('1 +', 'invalid-expression.tjs', true), { name: 'ScriptError' })
+    const recovered = await vm.compile('6*7', 'syntax-recovery.tjs', true)
+    assert.equal(await vm.execute(recovered, 'syntax-recovery.tjs'), 42n)
   } finally {
     vm.dispose()
   }

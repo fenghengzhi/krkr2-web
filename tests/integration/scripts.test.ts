@@ -17,6 +17,25 @@ const bytes = (files: SaveFile[], name: string) => {
 }
 const text = (hex: string, prefix = '', suffix = '') =>
   Buffer.concat([Buffer.from(prefix), Buffer.from(hex, 'hex'), Buffer.from(suffix)])
+function debugPositions(bytes: Uint8Array) {
+  const data = Buffer.from(bytes)
+  const objects = 12 + data.readUInt32LE(16)
+  assert.equal(data.toString('ascii', objects, objects + 4), 'OBJS')
+  const count = data.readUInt32LE(objects + 12),
+    positions: number[] = []
+  let offset = objects + 16
+  for (let i = 0; i < count; i++) {
+    assert.equal(data.toString('ascii', offset, offset + 4), 'TJS2')
+    const size = data.readUInt32LE(offset + 4),
+      start = offset + 8
+    const entries = data.readUInt32LE(start + 12 * 4)
+    for (let entry = 0; entry < entries; entry++)
+      positions.push(data.readUInt32LE(start + 13 * 4 + entries * 4 + entry * 4))
+    offset += size + 8
+  }
+  assert.equal(offset, bytes.length)
+  return positions
+}
 
 test('Scripts has native class/method, coercion, reflection and missing-member behavior', async () => {
   const { session, logs } = await headless(scriptsFixture, debug)
@@ -122,9 +141,13 @@ test('compileStorage honors result, debug and expression flags and does not exec
       await session.evaluate(
         `Scripts.compileStorage("trace.tjs","savedata/trace.cjs",true,${outputDebug},true)`,
       )
+      const positions = debugPositions(bytes(session.exportSaves(), 'savedata/trace.cjs'))
+      if (outputDebug) assert(positions.length > 0 && positions.some((position) => position >= 2))
+      else assert.deepEqual(positions, [])
+      // Native bytecode stores character positions but no original line table.
       assert.match(
         await session.evaluate('Scripts.evalStorage("savedata/trace.cjs")'),
-        new RegExp(`^trace.cjs\\(${outputDebug ? 3 : 1}\\)`),
+        /^trace.cjs\(1\)/,
       )
     }
   } finally {

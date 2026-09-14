@@ -431,7 +431,8 @@ namespace TJS {
             new tTJSLexicalAnalyzer(this, script, isexpr, resultneeded);
 
         try {
-            parser{ this }.parse();
+            if(parser{ this }.parse() != 0 && !CompileErrorCount)
+                _yyerror(TJS_W("syntax error"), this);
         } catch(...) {
             delete LexicalAnalyzer;
             LexicalAnalyzer = nullptr;

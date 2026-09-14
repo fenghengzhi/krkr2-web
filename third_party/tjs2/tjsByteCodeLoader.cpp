@@ -187,6 +187,10 @@ namespace TJS {
             offset += 4;
             int name = read4byte(&(buff[offset]));
             offset += 4;
+            // Anonymous contexts (including property getter/setter bodies)
+            // use -1, the same sentinel emitted by ExportByteCode.
+            if(name < -1 || (name >= 0 && static_cast<size_t>(name) >= StringArray.size()))
+                TJS_eTJSScriptError(TJSByteCodeBroken, block, 0);
             int contextType = read4byte(&(buff[offset]));
             offset += 4;
             int maxVariableCount = read4byte(&(buff[offset]));
@@ -215,7 +219,11 @@ namespace TJS {
             tTJSInterCodeContext::tSourcePos *srcPos = nullptr;
             tjs_int srcPosArraySize = 0;
             if(count > 0) {
-                srcPos = new tTJSInterCodeContext::tSourcePos[count];
+                // The context releases this table with TJS_free, which expects
+                // the size prefix installed by TJS_malloc rather than new[].
+                srcPos = static_cast<tTJSInterCodeContext::tSourcePos*>(
+                    TJS_malloc(count * sizeof(tTJSInterCodeContext::tSourcePos)));
+                if(!srcPos) TJS_eTJSScriptError(TJSInsufficientMem, block, 0);
                 srcPosArraySize = count;
                 for(int i = 0; i < count; i++) {
                     srcPos[i].CodePos = read4byte(&(buff[offset]));
@@ -319,7 +327,7 @@ namespace TJS {
             }
 
             tTJSInterCodeContext *obj = new tTJSInterCodeContext(
-                block, StringArray[name].c_str(), (tTJSContextType)contextType,
+                block, name < 0 ? nullptr : StringArray[name].c_str(), (tTJSContextType)contextType,
                 code, codeSize, vdata, datacount, maxVariableCount,
                 variableReserveCount, maxFrameCount, funcDeclArgCount,
                 funcDeclUnnamedArgArrayBase, funcDeclCollapseBase, true, srcPos,
