@@ -3,7 +3,7 @@ class VideoOverlay {
   var __videoId,__videoWindow;
   function VideoOverlay(window){
     if(window===null || !(window instanceof "Window"))throw new Exception("VideoOverlay requires a Window");
-    __videoWindow=window;__videoId=__host("Video.create",this,window);
+    __videoWindow=window;__videoId=__host("Video.create",this,window,window.__windowId);
   }
   function finalize(){}
   function __videoDispatch(events,immediate=false){for(var i=0;i<events.count;i++){var event=events[i];if(!immediate || !System.eventDisabled)this[event[0]](event[1]*);}}

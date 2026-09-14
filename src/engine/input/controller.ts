@@ -35,9 +35,18 @@ export class InputController {
   constructor(
     readonly layers: LayerTree,
     private readonly window: () => WindowView,
+    private readonly windowId?: () => number,
   ) {}
   root(): number {
-    return this.layers.ids().find((id) => this.layers.get(id).primary) ?? 0
+    return (
+      this.layers
+        .ids()
+        .find(
+          (id) =>
+            this.layers.get(id).primary &&
+            (!this.windowId || this.layers.get(id).windowId === this.windowId()),
+        ) ?? 0
+    )
   }
   attached(id: number): boolean {
     return this.layers.has(id) && this.layers.contains(this.root(), id)

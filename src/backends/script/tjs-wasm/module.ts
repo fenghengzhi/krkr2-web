@@ -53,6 +53,7 @@ export interface WasmManifest {
     videoObjectLifetime?: number
     dependentRevocation?: number
     nativeLifetimeHooks?: number
+    windowObjectLifetime?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string

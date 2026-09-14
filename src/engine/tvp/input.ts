@@ -5,8 +5,7 @@ function __krkrInputPump(token){
       var step=__host("Input.resume",token);
       if(step.done)return step.value;
       if(!System.eventDisabled){
-        if(step.window)step.target(step.method,step.args);
-        else if(isvalid step.target)step.target[step.method](step.args*);
+        if(isvalid step.target)step.target[step.method](step.args*);
       }
     }
   }catch(error){__host("Input.abort",token);throw error;}

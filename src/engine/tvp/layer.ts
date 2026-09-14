@@ -32,8 +32,8 @@ class Layer {
   function Layer(window,parent) {
     __layerWindow=window;__parent=parent;__children=[];__font=new __KrkrFont();
     if(parent!==null && parent.__layerWindow!==window) throw new Exception("Parent belongs to another window");
-    __id=__host("Layer.create",parent!==null?parent.__id:0);
-    if(parent===null)window.primaryLayer=this;else parent.__children.add(this);
+    __id=__host("Layer.create",parent!==null?parent.__id:0,window.__windowId);
+    if(parent!==null)parent.__children.add(this);
     __host("Layer.bind",__id,this);
   }
   function finalize() {
@@ -41,7 +41,6 @@ class Layer {
     if(__parent!==null)__parent.__children.remove(this);
     for(var i=0;i<__children.count;i++)__children[i].__parent=null;
     __children.clear();
-    if(__layerWindow.primaryLayer===this)__layerWindow.primaryLayer=null;
     __host("Layer.destroy",__id);
     invalidate __font;
     __layerWindow=null;__parent=null;
@@ -51,7 +50,7 @@ class Layer {
     for(var i=0;i<__children.count;i++){var found=__children[i].__findLayer(id);if(found!==null)return found;}
     return null;
   }
-  function __syncTree(){var tree=__host("Layer.relations",__id);__parent=tree.parent;__children=tree.children;if(tree.primary)__layerWindow.primaryLayer=this;}
+  function __syncTree(){var tree=__host("Layer.relations",__id);__parent=tree.parent;__children=tree.children;}
   function __transitionTick(token){var clock=__host("Transition.callback",token);if(clock!==void)__host("Transition.tick",token,clock());}
   function beginTransition(name,withchildren=true,transsrc=null,options=%[]){
     if(transsrc===null)throw new Exception("Transition source is required");

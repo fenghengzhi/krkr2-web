@@ -358,7 +358,14 @@ export class SceneComposer {
       }
     return result
   }
-  frame(width: number, height: number, offsetX = 0, offsetY = 0, zoom = 1): FrameLayer[] {
+  frame(
+    width: number,
+    height: number,
+    offsetX = 0,
+    offsetY = 0,
+    zoom = 1,
+    windowId?: number,
+  ): FrameLayer[] {
     const result: FrameLayer[] = []
     const visit = (layer: LayerState, x: number, y: number, clip: Rect) => {
       if (!layer.visible || !layer.opacity) return
@@ -412,7 +419,8 @@ export class SceneComposer {
     }
     for (const id of this.layers.ids()) {
       const layer = this.layers.get(id)
-      if (layer.primary) visit(layer, offsetX, offsetY, { x: 0, y: 0, width, height })
+      if (layer.primary && (windowId === undefined || layer.windowId === windowId))
+        visit(layer, offsetX, offsetY, { x: 0, y: 0, width, height })
     }
     for (const [key, value] of this.cache)
       if (!this.layers.has(Number(key.split(':')[1]))) {

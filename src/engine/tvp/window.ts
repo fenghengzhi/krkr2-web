@@ -1,25 +1,42 @@
 export const windowClass = String.raw`
-class Window {
-  var primaryLayer=null, menu, __windowObjects, __windowClosing=false, __windowCanClose=false;
-  function Window() {
-    __windowObjects=[];
-    __host("Window.create", __windowDispatch);
-    menu=new MenuItem(this);
-    __host("Menu.root", menu.__menuId, __menuClick);
-  }
-  function finalize() {
-    __windowClosing=true;
-    for(var i=0;i<__windowObjects.count;i++) {
-      try { invalidate __windowObjects[i]; } catch(error) { Debug.message(error.message); }
+function __krkrWindowInvalidate(window,id) {
+  try {
+    window.__windowClosing=true;
+    var objects=window.__windowObjects;
+    if(objects!==void) {
+      for(var i=0;i<objects.count;i++) {
+        try { invalidate objects[i]; } catch(error) { Debug.message(error.message); }
+      }
+      objects.clear();
     }
-    __windowObjects.clear();
-    if(primaryLayer!==null) invalidate primaryLayer;
-    primaryLayer=null;
-    invalidate menu;
-    __host("Window.destroy");
+    if(window.__windowMenu!==null && window.__windowMenu!==void) invalidate window.__windowMenu;
+  } finally { __host("Window.finish",id); }
+}
+class Window {
+  var __windowId, __windowMenu=null, __windowObjects, __windowKeys, __windowClosing=false, __windowCanClose=false;
+  function Window() {
+    __windowObjects=[];__windowKeys=[];
+    __windowId=__host("Window.create",this,__krkrWindowInvalidate);
   }
-  function add(object) { if(!__windowClosing && __windowObjects.find(object)<0) __windowObjects.add(object); }
-  function remove(object) { if(!__windowClosing) __windowObjects.remove(object); }
+  function finalize() {}
+  function add(object) {
+    if(__windowClosing)return;
+    var key=__host("Window.identity",object);
+    if(__windowKeys.find(key)<0){__windowKeys.add(key);__windowObjects.add(object);}
+  }
+  function remove(object) {
+    if(__windowClosing)return;
+    var index=__windowKeys.find(__host("Window.identity",object));
+    if(index>=0){__windowKeys.erase(index);__windowObjects.erase(index);}
+  }
+  property menu { getter() {
+    if(__windowMenu===null) {
+      __windowMenu=new MenuItem(this);
+      __host("Menu.root",__windowMenu.__menuId,__windowId);
+    }
+    return __windowMenu;
+  } }
+  property primaryLayer { getter() { return __host("Window.primary",__windowId); } }
   function __menuClick(id) { var item=menu.__menuFind(id);if(item!==null)item.onClick(); }
   function __windowDispatch(name,args) { return this[name](args*); }
   function close() {
@@ -28,19 +45,19 @@ class Window {
     if(__windowCanClose) { var exit=global.System.exit incontextof global; invalidate this; exit(); }
   }
   function onCloseQuery(canClose) { __windowCanClose=!!canClose; }
-  function setInnerSize(width,height) { __host("Window.resize", int(width),int(height)); }
+  function setInnerSize(width,height) { __host("Window.resize",__windowId,int(width),int(height)); }
   function setSize(width,height) { setInnerSize(width,height); }
   function setPos(left,top) { this.left=left;this.top=top; }
   function setLayerPos(left,top) { layerLeft=left;layerTop=top; }
-  function setZoom(numer,denom) { __host("Window.zoom", int(numer),int(denom)); }
+  function setZoom(numer,denom) { __host("Window.zoom",__windowId,int(numer),int(denom)); }
   function setMinSize(width,height) { minWidth=width;minHeight=height; }
   function setMaxSize(width,height) { maxWidth=width;maxHeight=height; }
-  function update(type=utNormal) { __host("Window.update"); }
+  function update(type=utNormal) { __host("Window.update",__windowId); }
   function hideMouseCursor() { mouseCursorState=mcsTempHidden; }
   function postInputEvent(name,params=null) {
     if(name!="onKeyDown" && name!="onKeyUp" && name!="onKeyPress")throw new Exception("Unknown input event: "+name);
     if(params===null || params.key===void)throw new Exception("Input event requires key");
-    __host("Window.postInput",string(name),name=="onKeyPress"?string(params.key):int(params.key),int(params.shift));
+    __host("Window.postInput",__windowId,string(name),name=="onKeyPress"?string(params.key):int(params.key),int(params.shift));
   }
   function onResize() {}
   ${[
@@ -107,8 +124,8 @@ class Window {
   ]
     .map(
       (name) => `property ${name} {
-    getter() { return __host("Window.get", "${name}"); }
-    setter(value) { __host("Window.set", "${name}", ${name === 'caption' ? 'string' : 'int'}(value)); }
+    getter() { return __host("Window.get",__windowId,"${name}"); }
+    setter(value) { __host("Window.set",__windowId,"${name}",${name === 'caption' ? 'string' : 'int'}(value)); }
   }`,
     )
     .join('\n')}

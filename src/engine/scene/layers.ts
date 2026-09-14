@@ -3,6 +3,7 @@ import { Bitmap, dimension } from '../graphics/bitmap.ts'
 import { imageTypes, autoFace, neutralColor } from '../graphics/blend.ts'
 
 export interface LayerState {
+  windowId: number
   id: number
   parent: number
   primary: boolean
@@ -117,12 +118,13 @@ export class LayerTree {
     ;[a.visible, b.visible] = [b.visible, a.visible]
     ;[a.absolute, b.absolute] = [b.absolute, a.absolute]
   }
-  create(parent: number): number {
+  create(parent: number, windowId = 0): number {
     if (parent) this.get(parent)
     if (this.layers.size >= 1024) throw new Error('Layer limit exceeded')
     this.budget(32 * 32 * 4)
     const id = this.nextId++,
       layer: LayerState = {
+        windowId: parent ? this.get(parent).windowId : windowId,
         id,
         parent,
         primary: !parent,

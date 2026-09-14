@@ -36,6 +36,7 @@ import { kagClass } from './tvp/kag.ts'
 import { menuClass } from './tvp/menus.ts'
 import { MenuTree, type MenuSnapshot } from './scene/menus.ts'
 import { WindowState, type WindowView } from './scene/window.ts'
+import { WindowService, type WindowRecord } from './scene/windows.ts'
 import { windowClass } from './tvp/window.ts'
 import { layerClass } from './tvp/layer.ts'
 import { rectClass } from './tvp/rect.ts'
@@ -170,9 +171,12 @@ export class EngineSession {
   private readonly kag: KagService
   private readonly menus = new MenuTree()
   private menuRevision = -1
-  private menuCallback?: ScriptObject
   private readonly layers = new LayerTree()
-  private readonly inputController = new InputController(this.layers, () => this.window)
+  private readonly inputController = new InputController(
+    this.layers,
+    () => this.window,
+    () => this.windowId,
+  )
   private inputs?: InputService
   private inputView = ''
   private transitions?: SceneTransitions
@@ -193,6 +197,8 @@ export class EngineSession {
   private graphicsStatus: RendererStatus = { state: 'ready', generation: 0 }
   private detachRenderer?: () => void
   private window = new WindowState()
+  private windows?: WindowService
+  private windowId = 0
   private get width(): number {
     return this.window.width
   }
@@ -203,12 +209,9 @@ export class EngineSession {
     return this.window.caption
   }
   private windowRevision = -1
-  private windowCallback?: ScriptObject
-  private windowResizePending = false
   private postedInputPending = 0
   private pointer = { x: 0, y: 0 }
   private readonly fonts: FontService
-  private windowCreated = false
   private dirty = true
   private stopPromise?: Promise<void>
   private disposalPromise?: Promise<void>
@@ -323,7 +326,7 @@ export class EngineSession {
         this.inputController,
         this.runtime,
         (id) => this.callbacks.get(id),
-        () => this.windowCallback,
+        () => this.windows?.active?.owner,
       )
       this.transitions = new SceneTransitions(
         this.layers,
@@ -412,6 +415,33 @@ export class EngineSession {
               return undefined
             }).then(() => undefined)
           return this.queue.drain()
+        },
+      )
+      this.windows = new WindowService(
+        this.runtime,
+        (window) => {
+          this.inputController.clear()
+          this.menus.hideRoot()
+          this.window = window.state
+          this.windowId = window.id
+          this.windowRevision = -1
+          this.dirty = true
+        },
+        async (window) => {
+          this.systemEvents!.cancelSource(window)
+          window.resizePending = false
+          this.videos?.disconnectWindow(window.id)
+          await this.videos?.flushCloses()
+        },
+        (window) => {
+          this.systemEvents?.cancelSource(window)
+          this.videos?.disconnectWindow(window.id)
+          if (window.menu && this.menus.has(window.menu)) this.menus.destroy(window.menu)
+          if (this.windowId === window.id) {
+            this.windowId = 0
+            this.inputController.clear()
+          }
+          this.dirty = true
         },
       )
       this.discard(await this.runtime.execute(tvpConstants, 'krkr2-web/constants.tjs'))
@@ -782,30 +812,33 @@ export class EngineSession {
         this.pointerState(packet.x, packet.y)
     }
     if (this.state !== 'running') return Promise.resolve()
-    const epoch = this.inputController.epoch
+    const epoch = this.inputController.epoch,
+      window = this.windows?.active
     return this.systemEvents!.post(() => this.inputs!.packet(packet), {
       valid: () =>
+        this.windows?.active === window &&
         epoch === this.inputController.epoch &&
         this.state === 'running' &&
         this.activity.state === 'visible',
       priority: 1,
       discardable: packet.type === 'move',
+      source: window,
     }).then(() => this.queue.drain())
   }
-  private postInput(packet: InputPacket): void {
-    if (!this.windowCallback) return
+  private postInput(packet: InputPacket, window: WindowRecord): void {
+    if (this.windows?.active !== window) return
     if (this.postedInputPending >= 256) throw new Error('Posted input queue budget exceeded')
-    const window = this.windowCallback,
-      epoch = this.inputController.epoch
+    const epoch = this.inputController.epoch
     this.postedInputPending++
     // Queue a VM call, never reenter the active TJS host import. A destroyed
     // window cannot deliver its pending input to a newly created window.
     void this.systemEvents!.post(() => this.inputs!.packet(packet), {
       valid: () =>
-        this.windowCallback === window &&
+        this.windows?.active === window &&
         epoch === this.inputController.epoch &&
         this.activity.state === 'visible',
       priority: 1,
+      source: window,
     })
       .catch((error) => {
         if (!this.control.cancelled) this.fail(error)
@@ -845,6 +878,7 @@ export class EngineSession {
             this.window.layerLeft,
             this.window.layerTop,
             this.window.zoomNumer / this.window.zoomDenom,
+            this.windowId,
           )
         : [],
       this.width,
@@ -852,21 +886,32 @@ export class EngineSession {
     )
     if (presented !== false) this.dirty = false
   }
-  private queueResize(): void {
-    if (this.windowResizePending || !this.windowCallback) return
-    this.windowResizePending = true
-    const callback = this.windowCallback
+  private queueResize(window: WindowRecord): void {
+    if (window.resizePending || this.windows?.active !== window) return
+    window.resizePending = true
+    let lease: ScriptObject | undefined
     void this.systemEvents!.post(
       () => {
-        this.windowResizePending = false
-        return this.windowCallback === callback && !this.systemEvents!.disabled
-          ? { kind: 'invoke', callback, args: ['onResize', scriptList([])] }
+        lease = this.runtime!.upgrade(window.owner)
+        return lease
+          ? { kind: 'invoke', callback: lease, member: 'onResize', args: [] }
           : { kind: 'value', value: undefined }
       },
-      { priority: 1 },
-    ).catch((error) => {
-      if (!this.control.cancelled) this.fail(error)
-    })
+      {
+        priority: 1,
+        source: window,
+        valid: () => this.windows?.active === window && !this.systemEvents!.disabled,
+        onTaken: () => {
+          window.resizePending = false
+        },
+      },
+    )
+      .finally(() => {
+        if (lease) this.runtime?.release(lease)
+      })
+      .catch((error) => {
+        if (!this.control.cancelled) this.fail(error)
+      })
   }
   private presentMenus(): void {
     if (this.menuRevision === this.menus.revision) return
@@ -883,9 +928,15 @@ export class EngineSession {
       return Promise.resolve()
     }
     const epoch = this.inputController.epoch,
-      callback = this.menuCallback
+      window = this.windows?.active
+    let lease: ScriptObject | undefined
     return this.systemEvents!.post(
-      () => ({ kind: 'invoke', callback: callback!, args: [BigInt(id)] }),
+      () => {
+        lease = window && this.runtime!.upgrade(window.owner)
+        return lease
+          ? { kind: 'invoke', callback: lease, member: '__menuClick', args: [BigInt(id)] }
+          : { kind: 'value', value: undefined }
+      },
       {
         valid: () =>
           epoch === this.inputController.epoch &&
@@ -894,12 +945,17 @@ export class EngineSession {
           !this.systemEvents!.disabled &&
           this.window.visible &&
           this.menus.selectable(id) &&
-          !!callback &&
-          callback === this.menuCallback,
+          !!window?.menu &&
+          this.windows?.active === window,
         priority: 1,
         discardable: true,
+        source: window,
       },
-    ).then(() => this.queue.drain())
+    )
+      .finally(() => {
+        if (lease) this.runtime?.release(lease)
+      })
+      .then(() => this.queue.drain())
   }
   menuDismiss(): void {
     this.menus.dismiss()
@@ -963,6 +1019,8 @@ export class EngineSession {
     pendingSoundCloses: number
     videoSources: number
     pendingVideoCloses: number
+    windowSources: number
+    closingWindows: number
     dependents: number
     pendingInvalidations: number
     weakOwners: number
@@ -976,6 +1034,8 @@ export class EngineSession {
       pendingSoundCloses: this.sounds?.pendingCloses ?? 0,
       videoSources: this.videos?.count ?? 0,
       pendingVideoCloses: this.videos?.pendingCloses ?? 0,
+      windowSources: this.windows?.count ?? 0,
+      closingWindows: this.windows?.closing ?? 0,
       dependents: runtime?.dependents ?? 0,
       pendingInvalidations: runtime?.pendingInvalidations ?? 0,
       weakOwners: runtime?.weakOwners ?? 0,
@@ -1081,8 +1141,7 @@ export class EngineSession {
       this.callbacks.clear()
       await attempt(() => this.kag.clear())
       await attempt(() => this.menus.clear())
-      this.menuCallback = undefined
-      this.windowCallback = undefined
+      await attempt(() => this.windows?.dispose())
       await attempt(() => this.presentMenus())
       const runtime = this.runtime
       this.runtime = undefined
@@ -1420,11 +1479,10 @@ export class EngineSession {
         value = BigInt(this.menus.create(text(0)))
         break
       case 'Menu.root': {
-        this.menus.setRoot(number(0))
-        const callback = args[1]
-        if (!isScriptObject(callback)) throw new Error('Expected Window menu handler')
-        if (this.menuCallback) context.release(this.menuCallback)
-        this.menuCallback = context.retain(callback)
+        const window = this.windows!.get(number(1))
+        this.menus.get(number(0))
+        window.menu = number(0)
+        if (this.windowId === window.id) this.menus.setRoot(window.menu)
         break
       }
       case 'Menu.get': {
@@ -1483,69 +1541,92 @@ export class EngineSession {
       case 'Events.destroy':
         this.events!.destroy(number(0))
         break
-      case 'Window.create':
-        if (this.windowCreated) throw new Error('Multiple Window instances are not yet supported')
-        if (!isScriptObject(args[0])) throw new Error('Expected Window callback')
-        this.window = new WindowState()
-        this.windowRevision = -1
-        this.windowCallback = context.retain(args[0])
-        this.windowCreated = true
+      case 'Window.create': {
+        if (!isScriptObject(args[0]) || !isScriptObject(args[1]))
+          throw new Error('Expected Window instance and native cleanup')
+        value = BigInt(this.windows!.create(args[0], args[1], context).id)
         break
+      }
+      case 'Window.invalidate':
+        if (!isScriptObject(args[1])) throw new Error('Expected native Window owner')
+        return this.windows!.invalidate(number(0), args[1])
+      case 'Window.finish':
+        this.windows!.finish(number(0))
+        break
+      case 'Window.identity':
+        if (args[0] === null) value = 'null'
+        else {
+          if (!isScriptObject(args[0]))
+            throw new Error('Window registration requires an object closure')
+          value = this.runtime!.objectIdentity(args[0])
+        }
+        break
+      case 'Window.primary': {
+        const window = this.windows!.get(number(0))
+        const id = this.layers
+          .ids()
+          .find((id) => this.layers.get(id).primary && this.layers.get(id).windowId === window.id)
+        value = id === undefined || window.finished ? null : (this.callbacks.get(id) ?? null)
+        break
+      }
       case 'Window.resize': {
-        this.window.resize(number(0), number(1))
-        this.queueResize()
+        const window = this.windows!.get(number(0))
+        window.state.resize(number(1), number(2))
+        this.queueResize(window)
         this.dirty = true
         break
       }
       case 'Window.postInput': {
-        const name = text(0)
-        if (name === 'onKeyPress') this.postInput({ type: 'text', text: text(1).slice(0, 1) })
+        const window = this.windows!.get(number(0)),
+          name = text(1)
+        if (name === 'onKeyPress')
+          this.postInput({ type: 'text', text: text(2).slice(0, 1) }, window)
         else if (name === 'onKeyDown' || name === 'onKeyUp')
-          this.postInput({
-            type: name === 'onKeyDown' ? 'keyDown' : 'keyUp',
-            key: number(1) & 65535,
-            shift: number(2),
-          })
+          this.postInput(
+            {
+              type: name === 'onKeyDown' ? 'keyDown' : 'keyUp',
+              key: number(2) & 65535,
+              shift: number(3),
+            },
+            window,
+          )
         else throw new Error('Unknown input event')
         break
       }
       case 'Window.get': {
-        const field = this.window[text(0) as keyof WindowState]
+        const field = this.windows!.get(number(0)).state[text(1) as keyof WindowState]
         if (typeof field !== 'string' && typeof field !== 'boolean' && typeof field !== 'number')
           throw new Error('Unsupported window property')
         value = typeof field === 'string' ? field : BigInt(Number(field))
         break
       }
       case 'Window.set': {
-        const before = [this.width, this.height]
-        this.window.set(text(0), typeof args[1] === 'string' ? text(1) : number(1))
-        if (before[0] !== this.width || before[1] !== this.height) this.queueResize()
+        const window = this.windows!.get(number(0)),
+          before = [window.state.width, window.state.height]
+        window.state.set(text(1), typeof args[2] === 'string' ? text(2) : number(2))
+        if (before[0] !== window.state.width || before[1] !== window.state.height)
+          this.queueResize(window)
         this.dirty = true
         break
       }
-      case 'Window.zoom':
-        this.window.set('zoomNumer', number(0))
-        this.window.set('zoomDenom', number(1))
+      case 'Window.zoom': {
+        const window = this.windows!.get(number(0))
+        window.state.set('zoomNumer', number(1))
+        window.state.set('zoomDenom', number(2))
         this.dirty = true
         break
+      }
       case 'Window.update':
+        this.windows!.get(number(0))
         this.dirty = true
         break
-      case 'Window.destroy':
-        this.inputController.clear()
-        this.windowCreated = false
-        this.windowResizePending = false
-        this.window.set('visible', 0)
-        if (this.windowCallback) context.release(this.windowCallback)
-        this.windowCallback = undefined
-        if (this.menuCallback) context.release(this.menuCallback)
-        this.menuCallback = undefined
+      case 'Layer.create': {
+        const window = this.windows!.get(number(1))
+        if (window.finished) throw new Error('Cannot create a Layer on a closed Window')
+        value = BigInt(this.layers.create(number(0), window.id))
         this.dirty = true
         break
-      case 'Layer.create':
-        value = BigInt(this.layers.create(number(0)))
-        this.dirty = true
-        break
+      }
       case 'Layer.bind': {
         const id = number(0)
         this.layers.get(id)
