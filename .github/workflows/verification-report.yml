@@ -58,6 +58,7 @@ jobs:
             out/verification/vm-console-matrix.json
             out/verification/stack-traces-matrix.json
             out/verification/native-scripts-matrix.json
+            out/verification/compiler-matrix.json
             out/verification/hosted-evidence/
             out/ci/
           if-no-files-found: error

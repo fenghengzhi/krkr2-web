@@ -307,12 +307,12 @@ export function mountApp(root: HTMLDivElement): void {
         requested === 'asyncify' || requested === 'jspi' ? requested : preference,
         el<HTMLInputElement>('script-debug').checked,
       )
-      if (current === generation) {
+      if (current === generation && !stopping) {
         acceptSnapshot(loaded)
         log('会话就绪。点击画面继续。')
       }
     } catch (error) {
-      if (current === generation) {
+      if (current === generation && !stopping) {
         report(error)
         try {
           await instance.stop()
@@ -323,7 +323,7 @@ export function mountApp(root: HTMLDivElement): void {
         if (snapshot) snapshot = { ...snapshot, state: 'failed' }
       }
     } finally {
-      if (current === generation) {
+      if (current === generation && !stopping) {
         busy = false
         update()
       }

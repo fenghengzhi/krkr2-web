@@ -18,6 +18,7 @@ export function createPlayer(
   const videoChannel = new MessageChannel()
   const video = new WebVideoHost(videoChannel.port1, canvas, audio)
   let identity = ''
+  let stopping: Promise<void> | undefined
   let input: BrowserInput | undefined
   let activity = initialActivity()
   let workerPaused = true
@@ -91,23 +92,30 @@ export function createPlayer(
     get gameId() {
       return identity
     },
-    async stop() {
-      video.setPagePaused(true)
-      void audio.setPagePaused(true).catch(onError)
-      input?.close()
-      try {
-        await session.stop()
-      } finally {
-        if (session.isDisposed) {
-          pageActivity.close()
-          await video.close()
-          videoChannel.port1.close()
-          videoChannel.port2.close()
-          await audio.close()
-          audioChannel.port1.close()
-          audioChannel.port2.close()
+    stop(): Promise<void> {
+      if (stopping) return stopping
+      stopping = (async () => {
+        video.setPagePaused(true)
+        void audio.setPagePaused(true).catch(onError)
+        input?.close()
+        try {
+          await session.stop()
+        } finally {
+          if (session.isDisposed) {
+            pageActivity.close()
+            await video.close()
+            videoChannel.port1.close()
+            videoChannel.port2.close()
+            await audio.close()
+            audioChannel.port1.close()
+            audioChannel.port2.close()
+          }
         }
-      }
+      })().catch((error: unknown) => {
+        stopping = undefined
+        throw error
+      })
+      return stopping
     },
   }
 }

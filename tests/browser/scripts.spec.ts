@@ -102,6 +102,20 @@ for (const backend of ['asyncify', 'jspi'])
   }) => {
     const errors: string[] = []
     page.on('pageerror', (error) => errors.push(error.message))
+    await page.addInitScript(() => {
+      const observed = { requests: 0 }
+      Object.assign(window, { compilerStop: observed })
+      const original = Worker.prototype.postMessage
+      Worker.prototype.postMessage = function (
+        message: unknown,
+        transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+      ) {
+        const request = message as { type?: string; argumentList?: { value?: unknown }[] }
+        if (request.type === 'APPLY' && request.argumentList?.[0]?.value === 'stop')
+          observed.requests++
+        Reflect.apply(original, this, [message, transferOrOptions])
+      }
+    })
     await page.goto('/?backend=' + backend)
     await page.locator('#files').setInputFiles([
       {
@@ -122,6 +136,12 @@ for (const backend of ['asyncify', 'jspi'])
     await expect(page.locator('#status')).toHaveText('待机')
     await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
     await expect(page.locator('#logs')).not.toContainText('RPC client has been disposed')
+    await expect(page.locator('#logs')).not.toContainText('Execution cancelled')
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { compilerStop: { requests: number } }).compilerStop.requests,
+      ),
+    ).toBe(1)
     // Starting a fresh VM after cancellation also checks teardown of its Worker.
     await page.locator('#files').setInputFiles({
       name: 'startup.tjs',

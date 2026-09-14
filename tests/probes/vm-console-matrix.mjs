@@ -112,10 +112,12 @@ const build = await verifyOfflineBuild('dist', '/')
 const wasm = await json('dist/wasm/manifest.json')
 const font = await json('dist/fonts/manifest.json')
 assert([3, 4, 5].includes(wasm.abi))
+const compilerPhase = wasm.capabilities?.cooperativeCompilation === 1
 const scriptsPhase = wasm.abi === 5
+if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
-const nodeCount = scriptsPhase ? 362 : tracePhase ? 351 : 346
-const browserCount = scriptsPhase ? 615 : tracePhase ? 609 : 603
+const nodeCount = compilerPhase ? 371 : scriptsPhase ? 362 : tracePhase ? 351 : 346
+const browserCount = compilerPhase ? 621 : scriptsPhase ? 615 : tracePhase ? 609 : 603
 const compatibilityCount = scriptsPhase ? 78 : tracePhase ? 72 : 66
 if (!tracePhase) assert(freeze, 'The historical VM console phase requires its freeze diagnostic')
 assert.equal(font.abi, 2)
@@ -213,11 +215,13 @@ for (const browser of browsers)
     const report = await json(root + '/out/ci/results.json')
     const count =
       suite === 'browser'
-        ? scriptsPhase
-          ? 164
-          : tracePhase
-            ? 162
-            : 160
+        ? compilerPhase
+          ? 166
+          : scriptsPhase
+            ? 164
+            : tracePhase
+              ? 162
+              : 160
         : suite === 'pwa' && browser !== 'webkit'
           ? 20
           : 19
@@ -301,6 +305,24 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (compilerPhase) {
+    combinations(
+      row.compiler,
+      ['1/false', '1/true', '2/false', '2/true', '3/false', '3/true'],
+      (item) => item.phase + '/' + item.cancel,
+    )
+    for (const item of row.compiler) {
+      assert.equal(item.handles, 0)
+      assert.equal(item.heldMs, 25)
+      assert(item.yields[item.phase] > 0)
+      assert.equal(item.error, item.cancel ? 'AbortError' : null)
+      if (item.cancel) assert.equal(item.bytes, 0)
+      else {
+        assert(item.bytes > 8 * 1024 * 1024)
+        for (const phase of [1, 2, 3]) assert(item.yields[phase] > 0)
+      }
+    }
+  }
   if (tracePhase) {
     assert(row.trace.nativeMethod && row.trace.defaultDisabled)
     assert.equal(row.trace.cancelled, 'AbortError: Execution cancelled')
@@ -444,6 +466,7 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(compilerPhase ? { nativeCompilerControls: 36 } : {}),
     kag: 36,
     kagPanels: 6,
     kagDiagnostics: 6,
@@ -474,8 +497,22 @@ const matrix = {
   releaseTree: await tree('dist'),
   treeHashFormat: fixtureManifest.treeHashFormat,
   evidence,
-  previousMatrices: fixtureManifest.historicalMatrices,
+  previousMatrices: {
+    ...fixtureManifest.historicalMatrices,
+    ...(compilerPhase
+      ? { 'native-scripts': '1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d' }
+      : {}),
+  },
   historicalFailures: [
+    ...(compilerPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34827073341',
+            reason:
+              'All 371 Node cases, six direct browser runtimes with 36 compiler controls and native lifecycle checks passed. New page tests exposed startup rejection racing with user stop: both cleanup paths sent a stop RPC, so one disposed the other. Launch now leaves pending stop in charge of cleanup and UI state; Player also shares shutdown work. Failed browser logs and any superseded jobs remain historical evidence.',
+          },
+        ]
+      : []),
     ...(scriptsPhase
       ? [
           {
@@ -539,7 +576,12 @@ const matrix = {
     ...(tracePhase ? [] : ['Scripts.getTraceString']),
     ...(scriptsPhase
       ? [
-          'Automatic legacy text detection and decoder latching, serialized Array/Dictionary resource execution, prefixed bytecode, full bytecode validation, cooperative long compilation and complete storage paths remain incomplete',
+          'Automatic legacy text detection and decoder latching, serialized Array/Dictionary resource execution, prefixed bytecode, full bytecode validation and complete storage paths remain incomplete',
+          ...(compilerPhase
+            ? [
+                'Compiler checkpoints do not preempt allocations, native library algorithms, UTF-16 bridge copies or destruction; exact worst-case latency and native allocation leak accounting remain unverified',
+              ]
+            : ['Cooperative long compilation remains incomplete']),
         ]
       : []),
     'Native error UI policy, remaining exception and finalizer paths, TJS bridge frames in other TVP methods',
@@ -549,11 +591,13 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = scriptsPhase
-  ? 'native-scripts-matrix.json'
-  : tracePhase
-    ? 'stack-traces-matrix.json'
-    : 'vm-console-matrix.json'
+const reportName = compilerPhase
+  ? 'compiler-matrix.json'
+  : scriptsPhase
+    ? 'native-scripts-matrix.json'
+    : tracePhase
+      ? 'stack-traces-matrix.json'
+      : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(
