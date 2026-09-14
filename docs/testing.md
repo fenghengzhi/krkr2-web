@@ -4,6 +4,12 @@
 
 推送分支、创建/更新 PR 或手动运行 **Tests** 工作流都会启动验证。工作流定义见 [test.yml](../.github/workflows/test.yml)。
 
+## 已完成的云端回归
+
+[提交 `0003038` 的完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809918318)全部通过：**346 项 Node、603 项浏览器测试**（480 常规、57 游戏库、59 PWA、7 原生生命周期），另有 6 项直接运行时专项与 9 次作业图形预检。所选用例无失败、跳过或 flaky，未使用测试重试。WebKit 原有网络模拟排除仍由配置明确保留。
+
+本次报告与构建产物已下载归档到 `out/verification/github-actions/34809918318/`，摘要为 `summary.json`，SHA-256 为 `1421ee1c8d5ed83895a893cedbc7db62b274b04f92958606b6d9dc1bdaf6633e`。这次通过覆盖当前工作流，尚不包括下文的外部 KAG 与旧 ABI 专项。
+
 ## 作业与产物
 
 构建作业固定 Node.js 24.19.0 和 Emscripten 6.0.9，使用锁文件安装依赖，编译 Asyncify、JSPI 和 FreeType 内核，执行类型检查、生产构建和离线发布文件校验，再生成两个 PWA 更新样本。原生源码、第三方源码、构建脚本与工具链版本完全匹配时复用云端内核缓存，应用和 PWA 样本每次重新构建。缓存 key 和是否命中写入构建信息。生成目录、应用和 PWA 样本打包为 `test-build`，同次运行的所有测试作业共享这一份构建。

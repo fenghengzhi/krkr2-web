@@ -1,10 +1,12 @@
 # 插件以外的实现进度
 
+最新 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809918318)通过 **346 项 Node、603 项浏览器测试及 6 项直接运行时专项**，无失败或跳过。另修复了真实页面冻结期间的媒体请求超时，三次超过 21 秒的可信冻结复测通过。完整非插件目标仍未完成。
+
 目标：完成架构规划中的非插件引擎与 Web 平台能力，不能以最小示例或部分测试通过替代完成。插件注册机制保留；原生 DLL、Emote/MotionPlayer 等插件实现不在当前目标内。
 
 本文件记录完整范围和证据缺口。此前的首个实现属于实际进展，但远未证明当前目标完成。
 
-VM 控制台阶段已补原生 Console/Controller 类、编译警告与诊断回调、可挂起的 compile 和独立 Scripts.dump 文件。38 项 Node 专项、36 项浏览器面板/VM 检查、6 项直接运行时探测和 6 项冷离线检查通过；本地完整回归已按用户要求中止，后续验证改由 GitHub Actions 执行；新的完整回归与跨 ABI 验证仍待完成。TJS ABI 升到 3，字体 ABI 2、会话协议 9 不变。范围见 [VM 控制台](decisions/029-vm-console.md)。
+VM 控制台阶段已补原生 Console/Controller 类、编译警告与诊断回调、可挂起的 compile 和独立 Scripts.dump 文件。38 项 Node 专项、36 项浏览器面板/VM 检查、6 项直接运行时探测和 6 项冷离线检查通过；本地完整回归已按用户要求中止，后续验证改由 GitHub Actions 执行；新的完整回归已在 GitHub Actions 通过；跨 ABI 与外部 KAG 专项仍待迁移。TJS ABI 升到 3，字体 ABI 2、会话协议 9 不变。范围见 [VM 控制台](decisions/029-vm-console.md)。
 
 调试面板阶段已接通 Console/Controller 的只读对象、独立显示状态、暂停/失败中的页面操作和焦点恢复。新增 3 项 Node 和 18 项浏览器测试；完整 `npm run check` 通过 **331 项行为/集成与 579 项浏览器测试**（462 常规、57 游戏库、53 PWA、7 原生生命周期），无失败或跳过，原生 trusted 冻结为 **21,055.2 ms**。原 KAG 菜单/快捷键 6 项、综合场景 36 项，以及 TJS ABI、字体 ABI、协议 8→9 各 6 项离线升级检查通过。权威日志为 `out/verification/debug-panels/check.log`，最终证据见 `out/verification/debug-panels-matrix.json`。会话协议为 9，TJS/字体 ABI 均保持 2。范围见 [调试面板](decisions/028-debug-panels.md)。
 
