@@ -10,6 +10,7 @@
 //---------------------------------------------------------------------------
 #include "tjsCommHead.h"
 #include "WebHost.h"
+#include "NativeOwnership.h"
 #include <memory>
 
 #include "tjsInterCodeGen.h"
@@ -893,8 +894,13 @@ namespace TJS {
         TJSReservedWordHashRefCount--;
 
         if(TJSReservedWordHashRefCount == 0) {
-            TJSReservedWordHash->Release();
+            auto* hash = TJSReservedWordHash;
             TJSReservedWordHash = nullptr;
+            TJSReservedWordHashInit = false;
+            // Release consumes the reference even if member cleanup throws.
+            // This table is released from tTJS's destructor: defer that error
+            // so string pools, regex state and debug registrations still retire.
+            krkr::ReleaseNative{}(hash);
         }
     }
 
