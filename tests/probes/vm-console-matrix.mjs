@@ -82,6 +82,9 @@ const compatibility = await run('KRKR_COMPATIBILITY_RUN', 'KAG and release compa
 unchanged(compatibility.info.headSha, [
   'tests/fixtures',
   'tests/helpers',
+  // Only the full/native lifecycle suites import this helper. Their exact
+  // version is checked with regularTestPaths (and the optional freeze run).
+  ':(exclude)tests/helpers/native-activity-browser.ts',
   'tests/probes/system-abi-pwa.ts',
   'tests/probes/system-kag-matrix.mjs',
   'tests/probes/kag-browser.ts',
@@ -479,6 +482,26 @@ const matrix = {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34819597478',
             reason:
               'The first native Scripts run exposed omitted member/property variants in bytecode export. The exporter now converts all four forms. New statement fixtures now call Scripts.exec instead of the single-expression console; anonymous names and protected native exceptions follow the original VM semantics. The same run also exposed font selection moving during async previews; final bitmap geometry is now reserved before opening the dialog, with a held-pointer regression. Original failure evidence remains archived.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34821034573',
+            reason:
+              'GitHub billing prevented any build or test step from starting. A later source-changing run was admitted; this terminal run is not verification evidence.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34821659023',
+            reason:
+              'Native compilation passed, then typecheck rejected the font test gate because it omitted the transfer-array postMessage overload. The test now forwards both signatures.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34822033340',
+            reason:
+              'New compile cases exposed ignored Bison syntax errors and invalid bytecode metadata loading. Syntax errors now prevent execution/export; unnamed context indices and debug-table allocation use their correct native representations. Debug-output tests inspect character-position tables; native bytecode contains no original line table. Superseded tests remain recorded as cancelled.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34822580654',
+            reason:
+              'All 362 Node cases passed, but one native lifecycle fixture tried to create a CDP session before Chromium published its initial page. It now awaits that page within the original fixture budget. Other test jobs were superseded; this run is not a full pass.',
           },
         ]
       : []),
