@@ -1,0 +1,40 @@
+name: Host handle lifetime diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Tests run with a successful build of the same application sources
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  handles:
+    name: Host handles / ${{ matrix.variant }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [asyncify, jspi]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          build-run: ${{ inputs.build-run }}
+      - name: Isolate native handle finalization and host callback reentry
+        shell: bash
+        run: node --import tsx tests/probes/host-handles.ts "${{ matrix.variant }}" 2>&1 | tee out/ci/host-handles.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: host-handles-${{ matrix.variant }}
+          path: out/ci/
+          retention-days: 30
