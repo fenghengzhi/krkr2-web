@@ -15,6 +15,10 @@ on:
         description: Successful non-release bytecode allocation diagnostic for the same sources
         required: false
         type: string
+      pwa-run:
+        description: Optional twenty-case native offline restart crash diagnostic
+        required: false
+        type: string
       freeze-run:
         description: Optional three-repeat native lifecycle diagnostic for the same application
         required: false
@@ -52,6 +56,7 @@ jobs:
           KRKR_BUILD_RUN: ${{ inputs.build-run }}
           KRKR_COMPATIBILITY_RUN: ${{ inputs.compatibility-run }}
           KRKR_ALLOCATIONS_RUN: ${{ inputs.allocations-run }}
+          KRKR_PWA_RUN: ${{ inputs.pwa-run }}
           KRKR_FREEZE_RUN: ${{ inputs.freeze-run }}
           KRKR_INPUT_RUN: ${{ inputs.input-run }}
         run: node tests/probes/vm-console-matrix.mjs

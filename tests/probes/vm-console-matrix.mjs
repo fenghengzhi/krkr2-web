@@ -579,6 +579,29 @@ if (lifetimePhase) {
     allocatorReports.push(report)
   }
 }
+const pwaDiagnostic = process.env.KRKR_PWA_RUN
+  ? await run('KRKR_PWA_RUN', 'PWA native crash diagnostic', 1, [
+      '--name',
+      'pwa-native-crash-results',
+    ])
+  : undefined
+let offlineRestarts = []
+if (pwaDiagnostic) {
+  unchanged(pwaDiagnostic.info.headSha, [
+    ...regularTestPaths,
+    '.github/workflows/pwa-native-diagnostic.yml',
+  ])
+  const report = await json(`${pwaDiagnostic.root}/artifacts/out/ci/results.json`)
+  // A named single artifact extracts its contents directly into artifacts/.
+  offlineRestarts = playwright(report, 20)
+  for (const row of offlineRestarts) {
+    assert.equal(
+      row.title,
+      'jspi: native Debug classes and dump files survive a cold offline browser restart',
+    )
+    assert.equal(row.project, 'webkit')
+  }
+}
 const evidence = {}
 for (const path of await files(directory))
   evidence[relative(resolve(directory), path)] = await hash(path)
@@ -591,6 +614,7 @@ const matrix = {
     base.info,
     compatibility.info,
     ...(allocations ? [allocations.info] : []),
+    ...(pwaDiagnostic ? [pwaDiagnostic.info] : []),
     ...(freeze ? [freeze.info] : []),
     ...(inputRun ? [inputRun.info] : []),
   ],
@@ -606,6 +630,7 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(pwaDiagnostic ? { coldOfflineRestartDiagnostics: offlineRestarts.length } : {}),
     ...(lifetimePhase
       ? {
           bytecodeControls: 36,
@@ -641,6 +666,7 @@ const matrix = {
   browserControls,
   runtime,
   allocatorReports,
+  offlineRestarts,
   external,
   fixtureManifest,
   fixture,
