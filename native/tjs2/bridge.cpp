@@ -13,10 +13,12 @@
 #include "tjsDictionary.h"
 #include "tjsArray.h"
 #include "tjsNative.h"
+#include "tjsInterCodeGen.h"
 #include "tjsDebug.h"
 #include "tjsBinarySerializer.h"
 #include "scripts.h"
 #include "ExecutionBudget.h"
+#include "WebHost.h"
 
 using namespace TJS;
 namespace TJS {
@@ -41,37 +43,96 @@ struct Reply {
     bool expression = false;
 };
 
+struct Vm;
+struct WeakOwner {
+    Vm* vm;
+    unsigned id;
+    tTJSCustomObject* owner;
+    bool boundContext;
+    tTJSObjectObserver observer;
+    WeakOwner(Vm* vm, unsigned id, tTJSCustomObject* owner, bool boundContext)
+        : vm(vm), id(id), owner(owner), boundContext(boundContext), observer(Expired, this) {}
+    static void Expired(void* context) noexcept;
+};
+
 struct Vm {
     tTJS* engine = nullptr;
     std::unique_ptr<iTJSConsoleOutput> console;
     std::map<unsigned, tTJSVariant> handles;
     std::set<unsigned> released;
+    bool drainingReleased = false;
     unsigned nextHandle = 1;
+    std::map<unsigned, std::unique_ptr<WeakOwner>> owners;
+    unsigned nextOwner = 1;
+    bool ownerUpgradeFailed = false;
     ~Vm() {
         krkr::CleanupErrors cleanup;
         cleanup.suppress();
         // A stopped session must not start asynchronous host work while freeing
         // its memory. Explicit TJS invalidate still runs normally during execution.
+        const bool previousShutdown = shuttingDown;
         shuttingDown = true;
+        struct ShutdownScope {
+            bool previous;
+            ~ShutdownScope() { shuttingDown = previous; }
+        } shutdown{previousShutdown};
         if(engine) engine->SetConsoleOutput(nullptr);
+        // Revoke host registrations before dropping the VM's remaining roots.
+        // The synchronous signal only detaches host state, never executes TJS.
+        while(!owners.empty()) {
+            const auto id = owners.begin()->first;
+            WeakOwner::Expired(owners.begin()->second.get());
+            owners.erase(id); // the host may already have removed this token
+        }
         handles.clear();
-        if(engine) { engine->Shutdown(); engine->Release(); }
-        shuttingDown = false;
+        if(engine) {
+            // Clearing globals may fail to allocate its temporary release
+            // list. Engine destruction still performs the final forced release.
+            auto* owned = engine;
+            engine = nullptr;
+            try { owned->Shutdown(); } catch(...) {}
+            owned->Release();
+        }
     }
     void flushReleased() {
+        if(drainingReleased) return;
+        drainingReleased = true;
+        struct DrainScope {
+            bool& active;
+            ~DrainScope() { active = false; }
+        } drain{drainingReleased};
+        krkr::CleanupErrors cleanup;
+        std::exception_ptr primary;
         while(!released.empty()) {
             const auto id = *released.begin();
             released.erase(id);
-            auto it = handles.find(id);
-            if(it == handles.end()) continue;
-            // Clear may run a throwing script finalizer. Do it outside the
-            // container's noexcept destruction path and propagate through capture.
-            try { it->second.Clear(); }
-            catch(...) { handles.erase(it); throw; }
-            handles.erase(it);
+            // Revoke the ID before finalization. A host callback can retain,
+            // inspect or release handles while Clear is suspended; none may
+            // find the retiring node or invalidate an iterator held here.
+            auto node = handles.extract(id);
+            if(node.empty()) continue;
+            try { node.mapped().Clear(); }
+            catch(...) { if(!primary) primary = std::current_exception(); }
         }
+        // A failed finalizer must not strand later releases. Nested host calls
+        // append work for this same drain instead of recursively draining it.
+        if(primary) { cleanup.suppress(); std::rethrow_exception(primary); }
+        cleanup.rethrow();
     }
 };
+
+EM_JS(void, owner_invalidated, (Vm* vm, unsigned id), {
+    Module['objectInvalidated']?.(vm, id);
+});
+void WeakOwner::Expired(void* context) noexcept {
+    auto* record = static_cast<WeakOwner*>(context);
+    record->observer.Detach();
+    record->owner = nullptr;
+    auto* vm = record->vm;
+    const auto id = record->id;
+    // JavaScript may synchronously erase this record. Do not touch it again.
+    owner_invalidated(vm, id);
+}
 
 // All VM execution is serialized by the owning Worker. Nested TJS callbacks
 // are invoked here, after the JS import returns, so no JS frame needs suspending.
@@ -86,8 +147,20 @@ EM_ASYNC_JS(Reply*, dispatch_host_raw, (Vm* vm, const tjs_char* name, unsigned l
     }
 });
 Reply* dispatch_host(Vm* vm, const tjs_char* name, unsigned length, int count, tTJSVariant** args) {
-    std::unique_ptr<Reply> reply(dispatch_host_raw(vm, name, length, count, args));
-    krkr_vm_check_cancellation();
+    krkr::CleanupErrors cleanup;
+    std::unique_ptr<Reply> reply;
+    try {
+        reply.reset(dispatch_host_raw(vm, name, length, count, args));
+        krkr_vm_check_cancellation();
+        if(reply && reply->kind == 1) TJS_eTJSError(ttstr(reply->value));
+    } catch(...) {
+        auto primary = std::current_exception();
+        cleanup.suppress();
+        try { vm->flushReleased(); } catch(...) {}
+        std::rethrow_exception(primary);
+    }
+    vm->flushReleased();
+    cleanup.rethrow();
     return reply.release();
 }
 EM_ASYNC_JS(int, yield_host, (int phase), {
@@ -173,10 +246,10 @@ void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
         std::vector<tTJSVariant*> args;
         args.reserve(reply.args.size());
         for(auto& arg : reply.args) args.push_back(&arg);
-        auto status = closure.FuncCall(0, nullptr, nullptr, reply.kind == 7 ? nullptr : result,
-            args.size(), args.data(), nullptr);
+        auto status = closure.FuncCall(0, reply.name.GetLen() ? reply.name.c_str() : nullptr, nullptr, reply.kind == 7 ? nullptr : result,
+            args.size(), args.data(), reply.name.GetLen() ? closure.Object : nullptr);
         if(reply.kind == 7) { if(result) *result = static_cast<tjs_int>(status); }
-        else if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, nullptr);
+        else if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, reply.name.GetLen() ? reply.name.c_str() : nullptr);
     } else if(reply.kind == 3) {
         krkr::ExecutionFrame delegation(2);
         auto context = reply.context.Type() == tvtObject ? reply.context.AsObjectNoAddRef() : nullptr;
@@ -208,7 +281,6 @@ public:
         const ttstr operation(u"Runtime.console");
         std::unique_ptr<Reply> reply(dispatch_host(vm, operation.c_str(), operation.GetLen(), 1, args));
         if(!reply) TJS_eTJSError(u"Console returned no response");
-        vm->flushReleased();
         resolveReply(vm, *reply, nullptr);
     }
 };
@@ -288,7 +360,6 @@ public:
         ttstr name(*args[0]);
         std::unique_ptr<Reply> reply(dispatch_host(vm, name.c_str(), name.GetLen(), count - 1, args + 1));
         if(!reply) TJS_eTJSError(u"Host returned no response");
-        vm->flushReleased();
         resolveReply(vm, *reply, result);
         return TJS_S_OK;
     }
@@ -312,7 +383,6 @@ class HostProxy final : public tTJSDispatch {
         for(int i=0;i<count;i++) args.push_back(params[i]);
         std::unique_ptr<Reply> reply(dispatch_host(vm, name.c_str(), name.GetLen(), args.size(), args.data()));
         if(!reply) TJS_eTJSError(u"Host proxy returned no response");
-        vm->flushReleased();
         resolveReply(vm, *reply, result);
         return TJS_S_OK;
     }
@@ -352,7 +422,6 @@ class HostProperty final : public tTJSDispatch {
         }
         std::unique_ptr<Reply> reply(dispatch_host(vm, operation.c_str(), operation.GetLen(), args.size(), args.data()));
         if(!reply) TJS_eTJSError(u"Host property returned no response");
-        vm->flushReleased();
         resolveReply(vm, *reply, result);
         return TJS_S_OK;
     }
@@ -495,7 +564,7 @@ API Reply* krkr_invoke(Vm* vm, unsigned handle, Reply* arguments) {
         auto it = vm->handles.find(handle);
         if(it == vm->handles.end()) TJS_eTJSError(u"Invalid object handle");
         Reply call; call.kind = 2; call.value = it->second;
-        if(arguments) call.args = arguments->args;
+        if(arguments) { call.args = arguments->args; call.name = arguments->name; }
         resolveReply(vm, call, &value);
     });
 }
@@ -540,7 +609,6 @@ API void krkr_value_set_scripts_class(Vm* vm, tTJSVariant* value) {
             for(auto& arg : values) args.push_back(&arg);
             std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), args.size(), args.data()));
             if(!reply) TJS_eTJSError(u"Scripts host returned no response");
-            vm->flushReleased();
             resolveReply(vm, *reply, result);
         });
     *value = tTJSVariant(object);
@@ -643,3 +711,47 @@ API int krkr_value_set_handle(Vm* vm, tTJSVariant* v, unsigned id) {
     *v = it->second; return 1;
 }
 API unsigned krkr_handle_count(Vm* vm) { return vm->handles.size() - vm->released.size(); }
+API unsigned krkr_pending_handle_count(Vm* vm) { return vm->released.size(); }
+
+// Observe an actual instance, not an arbitrary function/context closure. Tokens
+// are never reused within this VM; they cannot accidentally name a new object
+// when the native allocator reuses an address.
+API unsigned krkr_owner_observe(Vm* vm, unsigned handle) {
+    if(shuttingDown || !vm->nextOwner || vm->released.count(handle)) return 0;
+    auto found = vm->handles.find(handle);
+    if(found == vm->handles.end() || found->second.Type() != tvtObject) return 0;
+    const auto closure = found->second.AsObjectClosureNoAddRef();
+    if(closure.ObjThis && closure.ObjThis != closure.Object) return 0;
+    auto* owner = dynamic_cast<tTJSCustomObject*>(closure.Object);
+    if(!owner || !owner->IsLifetimeValid()) return 0;
+    if(dynamic_cast<tTJSInterCodeContext*>(owner) || dynamic_cast<tTJSNativeClass*>(owner)) return 0;
+    KrkrCompilerScope observationPhase(12);
+    try {
+        const auto id = vm->nextOwner++;
+        auto record = std::make_unique<WeakOwner>(vm, id, owner, closure.ObjThis != nullptr);
+        if(!record->observer.Attach(owner)) return 0;
+        vm->owners.emplace(id, std::move(record));
+        return id;
+    } catch(...) { return 0; }
+}
+API unsigned krkr_owner_upgrade(Vm* vm, unsigned token) {
+    vm->ownerUpgradeFailed = false;
+    if(shuttingDown) return 0;
+    auto found = vm->owners.find(token);
+    if(found == vm->owners.end()) return 0;
+    auto* owner = found->second->owner;
+    if(!owner || !owner->IsLifetimeValid()) return 0;
+    KrkrCompilerScope upgradePhase(13);
+    try {
+        tTJSVariant value(owner, found->second->boundContext ? owner : nullptr);
+        return krkr_value_pin(vm, &value);
+    } catch(...) {
+        // This synchronous export cannot unwind an allocation exception through
+        // the JavaScript scheduler. Distinguish failure from an expired token.
+        vm->ownerUpgradeFailed = true;
+        return 0;
+    }
+}
+API int krkr_owner_upgrade_failed(Vm* vm) { return vm->ownerUpgradeFailed; }
+API void krkr_owner_unobserve(Vm* vm, unsigned token) { vm->owners.erase(token); }
+API unsigned krkr_owner_count(Vm* vm) { return vm->owners.size(); }

@@ -99,6 +99,7 @@ manifest.capabilities = {
   bytecodeLifecycle: 1,
   executionBudgets: 1,
   objectFinalization: 1,
+  hostObjectLifetime: 1,
 }
 manifest.diagnosticAllocator = allocatorDiagnostic
 manifest.source = { tjs2Revision: '6622499f70c3b30240d34d73d757c8adff45248f', sha256: sourceHash }

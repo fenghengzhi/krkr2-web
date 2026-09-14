@@ -6,6 +6,7 @@ import {
   type ConsoleHandler,
   type HostReply,
   type ScriptObject,
+  type ScriptWeakObject,
   type ScriptRuntime,
   type ScriptValue,
   scriptRecord,
@@ -24,9 +25,12 @@ export class TjsWasmRuntime implements ScriptRuntime {
   private readonly identity = nextRuntime++
   private busy = false
   private disposed = false
+  private disposing = false
   private pendingWrites: { name: string; mode: string; value: string | Uint8Array }[] = []
   private flushing?: Promise<void>
   private consoleOutput: ConsoleHandler | null = null
+  private readonly owners = new Map<number, () => void>()
+  private ownerFailure?: Error
 
   private constructor(
     private readonly handler: HostHandler,
@@ -56,6 +60,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       hostCall: (...args) => runtime.hostCall(...args),
       shouldCancel: () => runtime.control.cancelled,
       onYield: () => runtime.control.wait(),
+      objectInvalidated: (vm, token) => runtime.objectInvalidated(vm, token),
       queueWrite: (name, nameLength, mode, modeLength, data, length, text) => {
         runtime.pendingWrites.push({
           name: runtime.readText(name, nameLength),
@@ -75,8 +80,9 @@ export class TjsWasmRuntime implements ScriptRuntime {
   private call(name: string, ...args: (number | bigint)[]): number {
     return Number(this.module[`_${name}`]!(...args))
   }
-  private assertAlive(): void {
-    if (this.disposed) throw new Error('TJS runtime is disposed')
+  private assertAlive(allowDisposing = false): void {
+    if (this.disposed || (this.disposing && !allowDisposing))
+      throw new Error('TJS runtime is disposed')
   }
   private allocate(bytes: Uint8Array): number {
     const pointer = this.call('malloc', Math.max(1, bytes.length))
@@ -237,8 +243,58 @@ export class TjsWasmRuntime implements ScriptRuntime {
     return { type: 'object', id, runtime: this.identity }
   }
   release(object: ScriptObject): void {
-    this.assertObject(object)
+    this.assertAlive(true)
+    if (object.runtime !== this.identity)
+      throw new Error('Object belongs to a different TJS runtime')
     this.call('krkr_handle_release', this.vm, object.id)
+  }
+  observe(owner: ScriptObject, invalidated: () => void): ScriptWeakObject {
+    this.assertObject(owner)
+    const id = this.call('krkr_owner_observe', this.vm, owner.id)
+    if (!id) throw new Error('Cannot observe a released, invalid or non-instance TJS owner')
+    try {
+      this.owners.set(id, invalidated)
+    } catch (error) {
+      this.call('krkr_owner_unobserve', this.vm, id)
+      throw error
+    }
+    return { type: 'weak-object', id, runtime: this.identity }
+  }
+  upgrade(owner: ScriptWeakObject): ScriptObject | undefined {
+    this.assertWeakOwner(owner)
+    if (this.disposed || this.disposing || !this.owners.has(owner.id)) return undefined
+    const id = this.call('krkr_owner_upgrade', this.vm, owner.id)
+    if (!id && this.call('krkr_owner_upgrade_failed', this.vm))
+      throw new Error('TJS owner upgrade allocation failed')
+    return id ? { type: 'object', id, runtime: this.identity } : undefined
+  }
+  unobserve(owner: ScriptWeakObject): void {
+    this.assertWeakOwner(owner)
+    if (this.disposed) return
+    this.owners.delete(owner.id)
+    this.call('krkr_owner_unobserve', this.vm, owner.id)
+  }
+  private assertWeakOwner(owner: ScriptWeakObject): void {
+    if (owner.runtime !== this.identity) throw new Error('Owner belongs to a different TJS runtime')
+  }
+  private objectInvalidated(vm: number, token: number): void {
+    // Called from native invalidation/destruction. Revoke before notifying so
+    // resource cleanup cannot upgrade the same token or deliver another event.
+    // Never throw across the native noexcept observer notification.
+    try {
+      if (vm !== this.vm) throw new Error('Owner invalidation VM identity mismatch')
+      const invalidated = this.owners.get(token)
+      this.owners.delete(token)
+      this.call('krkr_owner_unobserve', vm, token)
+      invalidated?.()
+    } catch (error) {
+      this.ownerFailure ??= error instanceof Error ? error : new Error(String(error))
+    }
+  }
+  private checkOwnerFailure(): void {
+    const failure = this.ownerFailure
+    this.ownerFailure = undefined
+    if (failure) throw failure
   }
   objectIdentity(object: ScriptObject): string {
     this.assertObject(object)
@@ -307,8 +363,19 @@ export class TjsWasmRuntime implements ScriptRuntime {
             ? reply.callback
             : reply.source,
       )
-      if (reply.kind === 'invoke')
+      if (reply.kind === 'invoke') {
         for (const arg of reply.args) this.writeValue(this.call('krkr_reply_arg', pointer), arg)
+        if (reply.member !== undefined) {
+          if (!reply.member || reply.member.includes('\0'))
+            throw new Error('Invalid TJS callback member')
+          const member = this.textPointer(reply.member)
+          try {
+            this.call('krkr_reply_name', pointer, member)
+          } finally {
+            this.call('free', member)
+          }
+        }
+      }
       if (reply.kind === 'script') {
         this.writeValue(this.call('krkr_reply_context', pointer), reply.context)
         this.call(
@@ -340,6 +407,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
     const temporary: ScriptObject[] = []
     try {
       if (vm !== this.vm) throw new Error('VM identity mismatch')
+      this.checkOwnerFailure()
       await this.flush()
       await this.control.wait()
       this.control.check()
@@ -412,11 +480,13 @@ export class TjsWasmRuntime implements ScriptRuntime {
       } finally {
         await this.flush()
       }
+      this.checkOwnerFailure()
       if (this.control.cancelled) {
         this.control.check()
       }
       return result
     } catch (error) {
+      this.ownerFailure = undefined // retain the primary execution/host error
       if (isScriptObject(result)) this.release(result)
       this.control.check()
       throw error
@@ -470,21 +540,28 @@ export class TjsWasmRuntime implements ScriptRuntime {
     this.consoleOutput = handler
     this.call('krkr_set_console', this.vm, Number(!!handler))
   }
-  async invoke(callback: ScriptObject, args: ScriptValue[] = []): Promise<ScriptValue> {
+  async invoke(
+    callback: ScriptObject,
+    args: ScriptValue[] = [],
+    member?: string,
+  ): Promise<ScriptValue> {
     this.assertObject(callback)
-    const reply = this.buildReply({ kind: 'invoke', callback, args })
+    const reply = this.buildReply({ kind: 'invoke', callback, args, member })
     try {
       return await this.run('krkr_invoke', [this.vm, callback.id, reply])
     } finally {
       this.call('krkr_reply_delete', reply)
     }
   }
-  inspect(): { handles: number; memoryBytes: number; backend: string } {
-    this.assertAlive()
+  inspect() {
+    this.assertAlive(true)
     return {
       handles: this.call('krkr_handle_count', this.vm),
       memoryBytes: this.module.HEAPU8.byteLength,
       backend: this.variant,
+      weakOwners: this.call('krkr_owner_count', this.vm),
+      scriptObjects: this.call('krkr_native_lifetime_stat', 4),
+      pendingHandles: this.call('krkr_pending_handle_count', this.vm),
     }
   }
   flush(): Promise<void> {
@@ -505,11 +582,18 @@ export class TjsWasmRuntime implements ScriptRuntime {
     return this.flushing
   }
   dispose(): void {
-    if (this.disposed) return
+    if (this.disposed || this.disposing) return
     if (this.busy) throw new Error('Cancel and await execution before disposing the VM')
-    this.call('krkr_destroy', this.vm)
-    this.consoleOutput = null
-    this.vm = 0
-    this.disposed = true
+    this.disposing = true
+    try {
+      this.call('krkr_destroy', this.vm)
+    } finally {
+      this.owners.clear()
+      this.consoleOutput = null
+      this.vm = 0
+      this.disposed = true
+      this.disposing = false
+    }
+    this.checkOwnerFailure()
   }
 }

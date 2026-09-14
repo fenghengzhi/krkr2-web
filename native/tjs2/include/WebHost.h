@@ -12,6 +12,8 @@ extern "C" void krkr_compiler_checkpoint();
 // 6 = bytecode pools, 7 = context materialization, 8 = ownership linking.
 // 9 = runtime frame preparation, 10 = call argument preparation.
 // 11 = collection cleanup (allocation diagnostics; no extra yielding checkpoint).
+// 12 = host owner observation registration (allocation diagnostics only).
+// 13 = weak owner upgrade to a strong handle (allocation diagnostics only).
 class KrkrCompilerScope {
     int previous;
 public:

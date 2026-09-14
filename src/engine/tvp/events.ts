@@ -3,10 +3,10 @@ class Timer {
   var __eventId, __action, __actionName;
   function Timer(action, actionName="action") {
     __action = action; __actionName = actionName;
-    __eventId = __host("Events.create", "timer", function() { this.onTimer(); } incontextof this);
+    __eventId = __host("Events.create", "timer", this);
   }
   function onTimer() { if(__actionName == "") return __action(); return __action[__actionName](); }
-  function finalize() { __host("Events.destroy", __eventId); }
+  function finalize() {} // Native invalidation closes the registered event source.
   ${['interval', 'enabled', 'capacity', 'mode']
     .map(
       (property) => `property ${property} {
@@ -20,12 +20,12 @@ class AsyncTrigger {
   var __eventId, __action, __actionName;
   function AsyncTrigger(action, actionName="action") {
     __action = action; __actionName = actionName;
-    __eventId = __host("Events.create", "trigger", function() { this.onFire(); } incontextof this);
+    __eventId = __host("Events.create", "trigger", this);
   }
   function onFire() { if(__actionName == "") return __action(); return __action[__actionName](); }
   function trigger() { __host("Events.trigger", __eventId); }
   function cancel() { __host("Events.cancel", __eventId); }
-  function finalize() { __host("Events.destroy", __eventId); }
+  function finalize() {} // A direct finalize() call does not invalidate the instance.
   ${['cached', 'mode']
     .map(
       (property) => `property ${property} {

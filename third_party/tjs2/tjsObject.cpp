@@ -360,6 +360,57 @@ namespace TJS {
     static ttstr MissingName;
 
     //---------------------------------------------------------------------------
+    tTJSObjectObserver::tTJSObjectObserver(void (*notify)(void *) noexcept,
+                                         void *context) noexcept :
+        Notify(notify), Context(context) {}
+
+    tTJSObjectObserver::~tTJSObjectObserver() { Detach(); }
+
+    bool tTJSObjectObserver::Attach(tTJSCustomObject *owner) noexcept {
+        if(!owner || owner->IsInvalidated || owner->ObserversClosed)
+            return false;
+        if(Owner == owner)
+            return true;
+        Detach();
+        Owner = owner;
+        Next = owner->Observers;
+        if(Next)
+            Next->Previous = this;
+        owner->Observers = this;
+        return true;
+    }
+
+    void tTJSObjectObserver::Detach() noexcept {
+        if(!Owner)
+            return;
+        if(Previous)
+            Previous->Next = Next;
+        else
+            Owner->Observers = Next;
+        if(Next)
+            Next->Previous = Previous;
+        Owner = nullptr;
+        Previous = Next = nullptr;
+    }
+
+    void tTJSCustomObject::NotifyObservers() noexcept {
+        // Close before notifying: a callback cannot reattach to this object
+        // and keep the drain alive. Its native resources remain invalidated
+        // even if subsequent member deletion throws and _Finalize is retried.
+        ObserversClosed = true;
+        while(Observers) {
+            auto *observer = Observers;
+            auto notify = observer->Notify;
+            auto *context = observer->Context;
+            observer->Detach();
+            // The callback can delete this observer or any later entry. Read
+            // the object's current head again; never touch observer afterward.
+            if(notify)
+                notify(context);
+        }
+    }
+
+    //---------------------------------------------------------------------------
     void tTJSCustomObject::tTJSSymbolData::ReShare() {
         // search shared string map using TJSMapGlobalStringMap,
         // and share the name string (if it can)
@@ -407,6 +458,10 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     tTJSCustomObject::~tTJSCustomObject() {
+        // An implicit finalizer or partially constructed object's cleanup may
+        // have failed before the normal invalidation boundary. Actual deletion
+        // must revoke every remaining observation, including during shutdown.
+        NotifyObservers();
         // A throwing finalizer can leave members behind. At actual destruction
         // the object cannot accept new members, and every stored reference must
         // be released even if another object's finalizer also fails.
@@ -486,6 +541,10 @@ namespace TJS {
         // Member deletion is deliberately after every native Invalidate, so
         // script dispatches retained by native code remain present throughout
         // native destructor callbacks.
+        // A throwing script finalizer preserves observers for explicit retry.
+        // Successful script/native invalidation revokes them before members
+        // are removed, independently of any overridden script finalize method.
+        NotifyObservers();
         DeleteAllMembers();
     }
 

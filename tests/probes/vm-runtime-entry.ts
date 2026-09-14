@@ -14,6 +14,13 @@ import {
 } from '../helpers/object-lifetime.ts'
 import { exerciseBinaryRuntime } from '../helpers/binary-runtime.ts'
 import {
+  hostHandleCases,
+  exerciseHostHandles,
+  exerciseHostHandleControl,
+} from '../helpers/host-handles.ts'
+import { ownerObservationCases, exerciseOwnerObservation } from '../helpers/owner-observation.ts'
+import { exerciseEventLifetime } from '../helpers/event-lifetime-runtime.ts'
+import {
   exerciseBytecodeLifetime,
   makeBytecodeWork,
   bytecodePhases,
@@ -154,6 +161,27 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
       bytecodeControls.push(
         await exerciseBytecodeControl(factory, wasmBinary, backend, bytecodeWork, phase, cancel),
       )
+  const handleCases = [],
+    handleControls = [],
+    ownerCases = []
+  const eventOwnership = []
+  for (const binary of [false, true])
+    eventOwnership.push(await exerciseEventLifetime(factory, wasmBinary, backend, binary))
+  for (const debug of [false, true])
+    for (const binary of [false, true]) {
+      for (const name of ownerObservationCases)
+        ownerCases.push(
+          await exerciseOwnerObservation(factory, wasmBinary, backend, name, debug, binary),
+        )
+      for (const name of hostHandleCases)
+        handleCases.push(
+          await exerciseHostHandles(factory, wasmBinary, backend, name, debug, binary),
+        )
+      for (const cancel of [false, true])
+        handleControls.push(
+          await exerciseHostHandleControl(factory, wasmBinary, backend, debug, binary, cancel),
+        )
+    }
   const objectCases = [],
     finalizerControls = []
   for (const debug of [false, true])
@@ -170,6 +198,9 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
         )
   return {
     objects: { cases: objectCases, controls: finalizerControls },
+    hostHandles: { cases: handleCases, controls: handleControls },
+    ownerObservations: ownerCases,
+    eventOwnership,
     executionBudgets: {
       checks: [
         await exerciseExecutionBudget(factory, wasmBinary, backend, false),

@@ -360,10 +360,13 @@ export class EngineSession {
         { now: this.deps.now, schedule: this.deps.schedule },
         this.runtime,
         (event) =>
-          this.systemEvents!.post(() => ({ kind: 'invoke', callback: event.callback, args: [] }), {
-            ...event,
-            priority: event.priority === 0 ? 0 : event.priority === 2 ? 3 : 2,
-          }),
+          this.systemEvents!.post(
+            () => ({ kind: 'invoke', callback: event.callback, member: event.member, args: [] }),
+            {
+              ...event,
+              priority: event.priority === 0 ? 0 : event.priority === 2 ? 3 : 2,
+            },
+          ),
         (error) => {
           if (!this.control.cancelled) this.fail(error)
         },
@@ -907,7 +910,22 @@ export class EngineSession {
       this.fontPreviewBusy = false
     }
   }
+  inspectOwnership(): {
+    eventSources: number
+    weakOwners: number
+    scriptObjects: number
+    pendingHandles: number
+  } {
+    const runtime = this.runtime?.inspect()
+    return {
+      eventSources: this.events?.count ?? 0,
+      weakOwners: runtime?.weakOwners ?? 0,
+      scriptObjects: runtime?.scriptObjects ?? 0,
+      pendingHandles: runtime?.pendingHandles ?? 0,
+    }
+  }
   snapshot(): SessionSnapshot {
+    const runtime = this.runtime?.inspect()
     return {
       debug: this.debugPanels.snapshot(),
       eventDisabled: this.systemEvents?.disabled ?? false,
@@ -918,7 +936,9 @@ export class EngineSession {
       activity: { ...this.activity },
       resources: this.storage.count,
       ...this.layers.inspect(),
-      ...(this.runtime?.inspect() ?? { handles: 0, memoryBytes: 0, backend: 'loading' }),
+      handles: runtime?.handles ?? 0,
+      memoryBytes: runtime?.memoryBytes ?? 0,
+      backend: runtime?.backend ?? 'loading',
       width: this.width,
       height: this.height,
       title: this.title,

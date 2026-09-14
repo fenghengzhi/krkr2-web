@@ -3,6 +3,7 @@ import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import { isScriptObject, type ScriptObject } from '../../src/engine/script/runtime.ts'
 import { checkLifetime as check, observeNative } from './bytecode-lifetime.ts'
 import { executionStats } from './execution-budget.ts'
+import { ExecutionControl } from '../../src/engine/scheduler/control.ts'
 
 export const hostHandleCases = [
   'batch-throwing',
@@ -10,7 +11,9 @@ export const hostHandleCases = [
   'duplicate-release',
   'nested-release',
   'primary-host-error',
+  'primary-storage-error',
 ] as const
+export const hostHandleControlCases = ['paused-resume', 'paused-cancel'] as const
 
 const source = `
 var hostHandleLog="";
@@ -27,7 +30,11 @@ class HostHandleFinal {
 }
 `
 const describeError = (error: unknown) =>
-  error instanceof Error ? { name: error.name, message: error.message } : String(error)
+  error === undefined
+    ? null
+    : error instanceof Error
+      ? { name: error.name, message: error.message }
+      : String(error)
 
 /** Observe the release boundary before any recovery execute can drain a missed handle. */
 export async function exerciseHostHandles(
@@ -60,6 +67,8 @@ export async function exerciseHostHandles(
   vm = await TjsWasmRuntime.create(
     native.factory,
     async (operation) => {
+      if (operation === 'handle-scripts-class')
+        return { kind: 'value', value: { type: 'native-class', name: 'Scripts' } }
       callbacks.push(operation)
       if (operation === 'handle-inspect') {
         // These calls are synchronous and must reject while finalize is still active.
@@ -120,6 +129,9 @@ export async function exerciseHostHandles(
       } else if (operation === 'handle-primary') {
         for (const object of objects) vm.release(object)
         throw new Error('host-primary')
+      } else if (operation === 'Storage.readText') {
+        for (const object of objects) vm.release(object)
+        throw new Error('storage-primary')
       } else throw new Error('Unexpected host handle operation: ' + operation)
       return { kind: 'value', value: undefined }
     },
@@ -136,7 +148,14 @@ export async function exerciseHostHandles(
   try {
     await vm.execute('var handleWarm=new Exception("warm");delete handleWarm;')
     await vm.execute(binary ? await vm.compile(source, 'host-handles.tjs') : source)
-    const action = name === 'primary-host-error' ? '__host("handle-primary")' : '6*7'
+    if (name === 'primary-storage-error')
+      await vm.execute('var Scripts=__host("handle-scripts-class");var hostHandleStorage=[];')
+    const action =
+      name === 'primary-host-error'
+        ? '__host("handle-primary")'
+        : name === 'primary-storage-error'
+          ? 'Scripts.eval("hostHandleStorage.load(\\"missing-release.txt\\")")'
+          : '6*7'
     // Compiling after release would itself flush the queue and hide the tested boundary.
     const preparedAction = binary ? await vm.compile(action, 'handle-boundary.tjs', true) : action
     const before = stats()
@@ -144,7 +163,7 @@ export async function exerciseHostHandles(
     const behaviors =
       name === 'batch-throwing'
         ? [1, 0, 0]
-        : name === 'primary-host-error'
+        : name === 'primary-host-error' || name === 'primary-storage-error'
           ? [1, 0]
           : name === 'nested-release'
             ? [4, 0]
@@ -168,7 +187,8 @@ export async function exerciseHostHandles(
     )
     check(vm.inspect().handles === objects.length, 'Fixture did not acquire one handle per object')
     if (name === 'nested-release') vm.release(objects[0]!)
-    else if (name !== 'primary-host-error') for (const object of objects) vm.release(object)
+    else if (name !== 'primary-host-error' && name !== 'primary-storage-error')
+      for (const object of objects) vm.release(object)
     pending = vm.execute(preparedAction, 'handle-boundary.tjs', true).then(
       (result) => {
         value = result
@@ -219,7 +239,9 @@ export async function exerciseHostHandles(
         ? 'release-A'
         : name === 'primary-host-error'
           ? 'host-primary'
-          : null
+          : name === 'primary-storage-error'
+            ? 'storage-primary'
+            : null
     if (expectedError)
       check(
         failure instanceof Error &&
@@ -233,7 +255,7 @@ export async function exerciseHostHandles(
     const expectedLog =
       name === 'batch-throwing'
         ? 'ABC'
-        : name === 'primary-host-error'
+        : name === 'primary-host-error' || name === 'primary-storage-error'
           ? 'AB'
           : name === 'nested-release'
             ? 'ABa'
@@ -251,7 +273,9 @@ export async function exerciseHostHandles(
             ? 'handle-hold'
             : name === 'primary-host-error'
               ? 'handle-primary'
-              : undefined
+              : name === 'primary-storage-error'
+                ? 'Storage.readText'
+                : undefined
     check(
       callbacks.length === (expectedCallback ? 1 : 0) &&
         (!expectedCallback || callbacks[0] === expectedCallback),
@@ -262,6 +286,8 @@ export async function exerciseHostHandles(
       'Released handle error poisoned the VM',
     )
     await vm.execute('delete HostHandleFinal;delete hostHandleLog;')
+    if (name === 'primary-storage-error')
+      await vm.execute('delete hostHandleStorage;delete Scripts;')
     observed.after = stats()
     check(
       native.stats().blocks === 0 && native.stats().contexts === 0 && vm.inspect().handles === 0,
@@ -272,6 +298,177 @@ export async function exerciseHostHandles(
     throw new Error(`${String(error)}; host handle observations=${JSON.stringify(observed)}`)
   } finally {
     resume()
+    await pending
+    vm.dispose()
+  }
+}
+
+/** A paused host return must not let queued destruction escape a cancel or resume boundary. */
+export async function exerciseHostHandleControl(
+  factory: ModuleFactory,
+  wasmBinary: Uint8Array,
+  variant: WasmVariant,
+  debugMode: boolean,
+  binary: boolean,
+  cancel: boolean,
+) {
+  const native = observeNative(factory),
+    control = new ExecutionControl()
+  const name = cancel ? 'paused-cancel' : 'paused-resume'
+  const observed: Record<string, unknown> = { name, variant, debugMode, binary, cancel }
+  let nativeReplyKind = -1
+  const wrapped: ModuleFactory = async (options) => {
+    const module = await native.factory(options),
+      ccall = module.ccall.bind(module)
+    module.ccall = async (...args) => {
+      const reply = await ccall(...args)
+      nativeReplyKind = Number(module._krkr_reply_kind!(reply))
+      return reply
+    }
+    return module
+  }
+  let entered!: () => void, resume!: () => void
+  const started = new Promise<void>((resolve) => {
+      entered = resolve
+    }),
+    gate = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+  let hostCalls = 0
+  const vm = await TjsWasmRuntime.create(
+    wrapped,
+    async (operation) => {
+      check(operation === 'handle-control-hold', 'Unexpected handle control callback')
+      hostCalls++
+      entered()
+      await gate
+      return { kind: 'value', value: undefined }
+    },
+    { wasmBinary, variant, debugMode, control },
+  )
+  const stats = () => ({
+    ...native.stats(),
+    objects: native.call('krkr_native_lifetime_stat', 4),
+    pendingDestructions: native.call('krkr_native_lifetime_stat', 0),
+    destructionDepth: native.call('krkr_native_lifetime_stat', 1),
+    budget: executionStats(native),
+    handles: vm.inspect().handles,
+  })
+  let pending: Promise<void> | undefined,
+    value: unknown,
+    failure: unknown,
+    settled = false
+  try {
+    await vm.execute('var controlWarm=new Exception("warm");delete controlWarm;')
+    const setup = `var hostHandleControlLog="";class HostHandleControlFinal {
+      var label;function HostHandleControlFinal(n){label=n;}
+      function finalize(){if(label==="A")__host("handle-control-hold");hostHandleControlLog+=label;}
+    }`
+    await vm.execute(binary ? await vm.compile(setup, 'host-handle-control.tjs') : setup)
+    const action = binary ? await vm.compile('6*7', 'handle-control-boundary.tjs', true) : '6*7'
+    const before = stats()
+    observed.before = before
+    const objects: ScriptObject[] = []
+    for (const label of ['A', 'B']) {
+      const expression = `new HostHandleControlFinal("${label}")`
+      const object = await vm.execute(
+        binary ? await vm.compile(expression, 'handle-control-owner.tjs', true) : expression,
+        'handle-control-owner.tjs',
+        true,
+      )
+      check(isScriptObject(object), 'Control fixture did not return an object handle')
+      objects.push(object as ScriptObject)
+    }
+    observed.owned = stats()
+    check(
+      native.call('krkr_native_lifetime_stat', 4) === before.objects + 2 &&
+        vm.inspect().handles === 2,
+      'Control fixture did not acquire exactly two native objects',
+    )
+    vm.release(objects[0]!)
+    pending = vm.execute(action, 'handle-control-boundary.tjs', true).then(
+      (result) => {
+        value = result
+        settled = true
+      },
+      (error: unknown) => {
+        failure = error
+        settled = true
+      },
+    )
+    await Promise.race([
+      started,
+      pending.then(() => {
+        throw new Error('Control finalizer never suspended: ' + String(failure))
+      }),
+    ])
+    observed.suspended = stats()
+    check(
+      !settled && native.call('krkr_native_lifetime_stat', 1) > 0,
+      'Control finalizer has no active release frame',
+    )
+    control.pause()
+    vm.release(objects[1]!)
+    observed.appended = stats()
+    resume()
+    await new Promise<void>((resolve) => setTimeout(resolve, 25))
+    observed.paused = { ...stats(), settled, paused: control.paused, hostCalls }
+    check(
+      !settled && control.paused && native.call('krkr_native_lifetime_stat', 1) > 0,
+      'Paused finalizer advanced before resume or cancel',
+    )
+    if (cancel) control.cancel()
+    else control.resume()
+    await pending
+    const boundary = stats()
+    observed.boundary = boundary
+    observed.nativeReplyKind = nativeReplyKind
+    observed.error = describeError(failure)
+    observed.value = typeof value === 'bigint' ? String(value) : value
+    observed.heldMs = 25
+    check(
+      boundary.objects === before.objects && boundary.handles === 0,
+      'Control boundary returned with live queued objects or handles',
+    )
+    check(
+      boundary.blocks === before.blocks && boundary.contexts === before.contexts,
+      'Control boundary retained script contexts',
+    )
+    check(
+      boundary.pendingDestructions === 0 &&
+        boundary.destructionDepth === 0 &&
+        boundary.budget.depth === 0 &&
+        boundary.budget.bytes === 0,
+      'Control boundary retained native frames',
+    )
+    check(
+      nativeReplyKind === (cancel ? 1 : 0),
+      'Control cancellation did not unwind through a native error reply',
+    )
+    if (cancel)
+      check(
+        failure instanceof Error && failure.name === 'AbortError',
+        'Queued release cancellation was not reported',
+      )
+    else {
+      check(!failure && value === 42n, 'Paused release did not resume successfully')
+      const log = await vm.execute('hostHandleControlLog', 'handle-control-log.tjs', true)
+      observed.log = log
+      check(log === 'AB', 'Resumed finalizers did not finish once in release order')
+      check(
+        (await vm.execute('6*7', 'handle-control-recovery.tjs', true)) === 42n,
+        'Resumed release poisoned the VM',
+      )
+    }
+    check(hostCalls === 1, 'Control finalizer host call was missed or repeated')
+    return observed
+  } catch (error) {
+    throw new Error(
+      `${String(error)}; host handle control observations=${JSON.stringify(observed)}`,
+    )
+  } finally {
+    resume()
+    control.cancel()
     await pending
     vm.dispose()
   }

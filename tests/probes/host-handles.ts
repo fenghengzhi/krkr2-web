@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { hostHandleCases } from '../helpers/host-handles.ts'
+import { hostHandleCases, hostHandleControlCases } from '../helpers/host-handles.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 const variant = process.argv[2]!
@@ -12,7 +12,7 @@ const results = []
 mkdirSync('out/ci', { recursive: true })
 for (const debugMode of [false, true])
   for (const binary of [false, true])
-    for (const name of hostHandleCases) {
+    for (const name of [...hostHandleCases, ...hostHandleControlCases]) {
       const child = spawnSync(
         process.execPath,
         [

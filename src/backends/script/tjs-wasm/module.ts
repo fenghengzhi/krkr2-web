@@ -13,6 +13,7 @@ export interface NativeModule {
 }
 
 export interface ModuleOptions {
+  objectInvalidated?: (vm: number, token: number) => void
   locateFile?: (name: string) => string
   wasmBinary?: Uint8Array
   hostCall: (
@@ -24,7 +25,7 @@ export interface ModuleOptions {
   ) => Promise<number>
   shouldCancel: () => boolean
   /** VM, source preparation, parse/codegen, export, diagnostic dump, or binary input. */
-  onYield: (phase?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11) => Promise<void>
+  onYield: (phase?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13) => Promise<void>
   queueWrite: (
     name: number,
     nameLength: number,
@@ -47,6 +48,7 @@ export interface WasmManifest {
     bytecodeLifecycle?: number
     executionBudgets?: number
     objectFinalization?: number
+    hostObjectLifetime?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string

@@ -256,8 +256,43 @@ namespace TJS {
        TJS Object is limited as the number above.
     */
 
+    class tTJSCustomObject;
+
+    // An intrusive, non-owning lifetime observation. The embedding record must
+    // remain at a stable address while attached. No native-instance slot or
+    // additional object reference is consumed. Callbacks are synchronous,
+    // noexcept signals: they must not execute TJS or release the observed
+    // object's references. They may detach or delete any observer, including
+    // the observer whose callback is currently running.
+    class tTJSObjectObserver {
+        friend class tTJSCustomObject;
+        tTJSCustomObject *Owner = nullptr;
+        tTJSObjectObserver *Previous = nullptr;
+        tTJSObjectObserver *Next = nullptr;
+        void (*Notify)(void *) noexcept;
+        void *Context;
+
+    public:
+        tTJSObjectObserver(void (*notify)(void *) noexcept, void *context) noexcept;
+        ~tTJSObjectObserver();
+        tTJSObjectObserver(const tTJSObjectObserver &) = delete;
+        tTJSObjectObserver &operator=(const tTJSObjectObserver &) = delete;
+        tTJSObjectObserver(tTJSObjectObserver &&) = delete;
+        tTJSObjectObserver &operator=(tTJSObjectObserver &&) = delete;
+
+        // A rejected attachment leaves an existing attachment unchanged. Once
+        // an object's resource invalidation has begun, it cannot accept new
+        // observers even if later member cleanup leaves the object valid.
+        bool Attach(tTJSCustomObject *owner) noexcept;
+        void Detach() noexcept;
+    };
+
     class tTJSCustomObject : public tTJSDispatch {
         typedef tTJSDispatch inherited;
+        friend class tTJSObjectObserver;
+        tTJSObjectObserver *Observers = nullptr;
+        bool ObserversClosed = false;
+        void NotifyObservers() noexcept;
 
         // tTJSSymbolData
         // -----------------------------------------------------
@@ -373,6 +408,12 @@ namespace TJS {
         tTJSCustomObject(tjs_int hashbits = TJS_NAMESPACE_DEFAULT_HASH_BITS);
 
         ~tTJSCustomObject() override;
+
+        // Revocation is visible to every weak-token upgrade before the first
+        // observer callback runs, without dispatching a script IsValid method.
+        [[nodiscard]] bool IsLifetimeValid() const noexcept {
+            return !IsInvalidated && !ObserversClosed;
+        }
 
     private:
         void BeforeDestruction() override;

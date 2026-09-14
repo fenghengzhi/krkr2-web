@@ -4,6 +4,21 @@ export interface ScriptObject {
   readonly runtime: number
 }
 
+/** A VM-owned observation token; it does not keep the script instance alive. */
+export interface ScriptWeakObject {
+  readonly type: 'weak-object'
+  readonly id: number
+  readonly runtime: number
+}
+
+export interface HostObjectLifetime {
+  /** Invalidation must only detach host resources, without executing script. */
+  observe(owner: ScriptObject, invalidated: () => void): ScriptWeakObject
+  /** Acquire an independent strong lease, or undefined after invalidation. */
+  upgrade(owner: ScriptWeakObject): ScriptObject | undefined
+  unobserve(owner: ScriptWeakObject): void
+}
+
 export interface ScriptRecord {
   readonly type: 'dictionary'
   readonly entries: Record<string, ScriptValue>
@@ -52,7 +67,13 @@ export const scriptList = (items: ScriptValue[]): ScriptList => ({ type: 'array'
 export type HostReply =
   | { kind: 'dump' }
   | { kind: 'value'; value: ScriptValue }
-  | { kind: 'invoke'; callback: ScriptObject; args: ScriptValue[]; statusOnly?: boolean }
+  | {
+      kind: 'invoke'
+      callback: ScriptObject
+      args: ScriptValue[]
+      member?: string
+      statusOnly?: boolean
+    }
   | {
       kind: 'script'
       source: string | Uint8Array
@@ -77,14 +98,21 @@ export type HostHandler = (
 ) => HostReply | Promise<HostReply>
 export type ConsoleHandler = (text: string) => HostReply | Promise<HostReply>
 
-export interface ScriptRuntime extends HostContext {
+export interface ScriptRuntime extends HostContext, HostObjectLifetime {
   /** Exact function/object plus bound context identity, stable while retained. */
   objectIdentity(object: ScriptObject): string
   execute(source: string | Uint8Array, name?: string, expression?: boolean): Promise<ScriptValue>
   compile(source: string, name?: string, expression?: boolean): Promise<Uint8Array>
   setConsoleOutput(handler: ConsoleHandler | null): void
-  invoke(callback: ScriptObject, args?: ScriptValue[]): Promise<ScriptValue>
-  inspect(): { handles: number; memoryBytes: number; backend: string }
+  invoke(callback: ScriptObject, args?: ScriptValue[], member?: string): Promise<ScriptValue>
+  inspect(): {
+    handles: number
+    memoryBytes: number
+    backend: string
+    weakOwners: number
+    scriptObjects: number
+    pendingHandles: number
+  }
   flush(): Promise<void>
   dispose(): void
 }

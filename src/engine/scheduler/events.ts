@@ -1,4 +1,9 @@
-import type { HostContext, ScriptObject } from '../script/runtime.ts'
+import type {
+  HostContext,
+  HostObjectLifetime,
+  ScriptObject,
+  ScriptWeakObject,
+} from '../script/runtime.ts'
 
 export interface EventClock {
   now(): number
@@ -7,7 +12,7 @@ export interface EventClock {
 interface EventSource {
   id: number
   type: 'timer' | 'trigger'
-  callback: ScriptObject
+  owner: ScriptWeakObject
   version: number
   pending: number
   enabled: boolean
@@ -19,6 +24,7 @@ interface EventSource {
 }
 export interface ScriptEventPost {
   callback: ScriptObject
+  member: string
   priority: 0 | 1 | 2
   valid(): boolean
   discardable: boolean
@@ -30,33 +36,49 @@ export class ScriptEvents {
   private sources = new Map<number, EventSource>()
   private nextId = 1
   private cancelWake?: () => void
+  private wakeVersion = 0
   private pausedAt?: number
   private disposed = false
   constructor(
     private readonly clock: EventClock,
-    private readonly objects: HostContext,
+    private readonly objects: HostContext & HostObjectLifetime,
     private readonly dispatch: (event: ScriptEventPost) => Promise<void>,
     private readonly onError: (error: unknown) => void,
     private readonly cancelQueued: (source: object) => void = () => {},
   ) {}
 
-  create(type: 'timer' | 'trigger', callback: ScriptObject): number {
+  get count(): number {
+    return this.sources.size
+  }
+
+  create(type: 'timer' | 'trigger', object: ScriptObject): number {
     if (this.disposed) throw new Error('Event scheduler is disposed')
     const id = this.nextId++
-    this.sources.set(id, {
-      id,
-      type,
-      callback: this.objects.retain(callback),
-      version: 0,
-      pending: 0,
-      enabled: false,
-      interval: 1000 / 65536,
-      capacity: 6,
-      mode: 0,
-      cached: true,
-      next: 0,
+    let invalidated = false
+    const owner = this.objects.observe(object, () => {
+      invalidated = true
+      this.destroy(id)
     })
-    return id
+    try {
+      if (this.disposed || invalidated) throw new Error('Event owner has been invalidated')
+      this.sources.set(id, {
+        id,
+        type,
+        owner,
+        version: 0,
+        pending: 0,
+        enabled: false,
+        interval: 1000 / 65536,
+        capacity: 6,
+        mode: 0,
+        cached: true,
+        next: 0,
+      })
+      return id
+    } catch (error) {
+      this.objects.unobserve(owner)
+      throw error
+    }
   }
   get(id: number): EventSource {
     const source = this.sources.get(id)
@@ -107,6 +129,7 @@ export class ScriptEvents {
     if (source.cached) {
       source.version++
       source.pending = 0
+      this.cancelQueued(source)
     }
     this.post(source)
   }
@@ -121,13 +144,33 @@ export class ScriptEvents {
     if (!source) return
     source.version++
     this.sources.delete(id)
-    this.cancelQueued(source)
-    this.objects.release(source.callback)
-    this.arm()
+    try {
+      this.cancelQueued(source)
+    } finally {
+      this.objects.unobserve(source.owner)
+      this.arm()
+    }
   }
   private post(source: EventSource): void {
-    const version = source.version
+    if (this.disposed || this.sources.get(source.id) !== source) return
     if (source.pending >= (source.type === 'trigger' ? 65535 : source.capacity || 65535)) return
+    let callback: ScriptObject | undefined
+    try {
+      callback = this.objects.upgrade(source.owner)
+    } catch (error) {
+      this.onError(error)
+      return
+    }
+    if (!callback) {
+      this.destroy(source.id)
+      return
+    }
+    if (this.disposed || this.sources.get(source.id) !== source) {
+      this.objects.release(callback)
+      return
+    }
+    const version = source.version,
+      lease = callback
     source.pending++
     const valid = () =>
       !this.disposed && this.sources.get(source.id) === source && source.version === version
@@ -137,19 +180,33 @@ export class ScriptEvents {
       queued = false
       if (valid()) source.pending--
     }
-    void this.dispatch({
-      callback: source.callback,
-      priority: source.mode === 1 ? 0 : source.mode === 2 ? 2 : 1,
-      valid,
-      source,
-      onTaken,
-      discardable: source.type === 'timer',
-      replace: source.type === 'trigger' && source.cached,
-    })
-      .catch(this.onError)
-      .finally(onTaken)
+    // The registry is weak; each queued/running event owns this separate lease.
+    // Taking a job only changes capacity accounting. Keep its owner alive until
+    // the suspendable callback completes, including cancellation/error paths.
+    const settled = () => {
+      onTaken()
+      this.objects.release(lease)
+    }
+    try {
+      void this.dispatch({
+        callback: lease,
+        member: source.type === 'timer' ? 'onTimer' : 'onFire',
+        priority: source.mode === 1 ? 0 : source.mode === 2 ? 2 : 1,
+        valid,
+        source,
+        onTaken,
+        discardable: source.type === 'timer',
+        replace: source.type === 'trigger' && source.cached,
+      })
+        .finally(settled)
+        .catch(this.onError)
+    } catch (error) {
+      settled()
+      this.onError(error)
+    }
   }
   private arm(): void {
+    const version = ++this.wakeVersion
     this.cancelWake?.()
     this.cancelWake = undefined
     if (this.disposed || this.pausedAt !== undefined) return
@@ -160,6 +217,7 @@ export class ScriptEvents {
     if (!Number.isFinite(next)) return
     this.cancelWake = this.clock.schedule(
       () => {
+        if (version !== this.wakeVersion) return
         this.cancelWake = undefined
         const now = this.clock.now()
         for (const source of this.sources.values()) {
@@ -201,8 +259,9 @@ export class ScriptEvents {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.wakeVersion++
     this.cancelWake?.()
-    for (const source of this.sources.values()) this.objects.release(source.callback)
-    this.sources.clear()
+    this.cancelWake = undefined
+    for (const id of this.sources.keys()) this.destroy(id)
   }
 }

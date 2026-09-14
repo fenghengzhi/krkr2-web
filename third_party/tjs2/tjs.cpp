@@ -210,13 +210,21 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     void tTJS::Cleanup() {
+        krkr::CleanupErrors cleanup;
+        cleanup.suppress();
         TJSVariantArrayStackCompactNow();
         //	TJSVariantArrayStackRelease();
         delete VariantArrayStack;
         VariantArrayStack = nullptr;
 
-        if(Global)
-            Global->Release(), Global = nullptr;
+        if(Global) {
+            auto* global = Global;
+            Global = nullptr;
+            // Cleanup also runs after a failed Shutdown/constructor. Release
+            // consumes the reference even when forced finalization fails;
+            // still destroy the cache, pools and global native registrations.
+            try { global->Release(); } catch(...) {}
+        }
 
         delete PPValues;
         delete Cache;
