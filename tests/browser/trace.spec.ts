@@ -24,6 +24,7 @@ for (const backend of ['asyncify', 'jspi']) {
     await evaluate(page, 'captured', '')
     await page.locator('#script-debug').check()
     await evaluate(page, 'Scripts.getTraceString()', '')
+    await page.locator('#clear-log').click()
     await page.locator('#restart').click()
     await expect(page.getByText('trace-game-ready', { exact: true })).toBeVisible()
     await evaluate(
@@ -34,6 +35,7 @@ for (const backend of ['asyncify', 'jspi']) {
     await evaluate(page, 'System.getArgument("-debug")', 'yes')
     await evaluate(page, 'Scripts.getTraceString(1).indexOf("krkr2-web/")', '-1')
     await page.locator('#script-debug').uncheck()
+    await page.locator('#clear-log').click()
     await page.locator('#restart').click()
     await expect(page.getByText('trace-game-ready', { exact: true })).toBeVisible()
     await evaluate(page, 'captured', '')
