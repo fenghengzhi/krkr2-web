@@ -120,8 +120,10 @@ for (const name of probeBrowsers()) {
     context.on('page', (page) => page.on('pageerror', (error) => errors.push(error.message)))
     page.on('pageerror', (error) => errors.push(error.message))
     let loadSequence = 0
+    const startups: { release: 'old' | 'current'; offline: boolean; milliseconds: number }[] = []
     const load = async (page: import('@playwright/test').Page, missing: boolean) => {
       const marker = 'abi-game-ready-' + ++loadSequence
+      const started = performance.now()
       await page.locator('#files').setInputFiles([
         {
           name: 'startup.tjs',
@@ -144,7 +146,14 @@ for (const name of probeBrowsers()) {
             ]
           : []),
       ])
-      await expect(page.locator('#logs')).toContainText(marker)
+      // Match the main browser suite's startup budget. A hosted WebKit trace
+      // reached the old font release's ready marker after the default 5 s expired.
+      await expect(page.locator('#logs')).toContainText(marker, { timeout: 12_000 })
+      startups.push({
+        release: missing ? 'old' : 'current',
+        offline: closed,
+        milliseconds: performance.now() - started,
+      })
       if (fontAbi) {
         await evaluate(
           page,
@@ -222,6 +231,8 @@ for (const name of probeBrowsers()) {
         ...(protocol ? { oldProtocol: 8, newProtocol: 9, panelsVerified: true } : {}),
         oldWorkerRestartedOffline: true,
         newWorkerStartedOffline: true,
+        startupTimeoutMs: 12_000,
+        startups,
         caches,
         errors,
         ...(fontAbi ? { fontRequests } : {}),
