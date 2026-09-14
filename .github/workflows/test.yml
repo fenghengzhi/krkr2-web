@@ -125,7 +125,7 @@ jobs:
           retention-days: 14
 
   browser:
-    name: Browser / ${{ matrix.browser }} (${{ matrix.os }})
+    name: Browser / ${{ matrix.browser }} / ${{ matrix.suite }} (${{ matrix.os }})
     needs: build
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -135,6 +135,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        browser: [chromium, firefox, webkit]
+        suite: [browser, library, pwa]
         include:
           - browser: chromium
             os: ubuntu-24.04
@@ -153,32 +155,36 @@ jobs:
       - name: Install browser and system dependencies
         id: browser-install
         run: npx playwright install --with-deps "${{ matrix.browser }}"
-      - name: Install virtual display and software graphics
+      - name: Install virtual display, graphics and audio output
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y xvfb libgl1-mesa-dri mesa-utils
+          sudo apt-get install -y xvfb libgl1-mesa-dri mesa-utils pulseaudio pulseaudio-utils
           xvfb-run -a glxinfo -B
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=krkr_test_output rate=48000 channels=2
+          pactl set-default-sink krkr_test_output
+          pactl info
       - name: Verify Worker graphics before running game scenarios
         id: graphics
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/browser-capabilities.ts "${{ matrix.browser }}" 2>&1 | tee out/ci/capabilities.log
-      - name: Regular browser tests
+      - name: Run browser suite
         env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/browser.json
-        run: bash scripts/ci-browser.sh npx playwright test --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/browser.log
-      - name: Persistent game library tests
-        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/library.json
-        run: bash scripts/ci-browser.sh npx playwright test -c playwright.library.config.ts --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/library.log
-      - name: Offline app and update tests
-        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/pwa.json
-        run: bash scripts/ci-browser.sh npx playwright test -c playwright.pwa.config.ts --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/pwa.log
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/results.json
+          KRKR_TEST_BROWSER: ${{ matrix.browser }}
+          KRKR_TEST_SUITE: ${{ matrix.suite }}
+        run: |
+          case "$KRKR_TEST_SUITE" in
+            browser) krkr_playwright_config=playwright.config.ts ;;
+            library) krkr_playwright_config=playwright.library.config.ts ;;
+            pwa) krkr_playwright_config=playwright.pwa.config.ts ;;
+            *) exit 1 ;;
+          esac
+          bash scripts/ci-browser.sh npx playwright test -c "$krkr_playwright_config" \
+            --project="$KRKR_TEST_BROWSER" --reporter=list,json,github 2>&1 | tee out/ci/results.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: browser-results-${{ matrix.browser }}
+          name: browser-results-${{ matrix.browser }}-${{ matrix.suite }}
           path: |
             out/ci/
             test-results/

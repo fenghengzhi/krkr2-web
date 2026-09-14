@@ -14,7 +14,20 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+    {
+      name: 'webkit',
+      use: {
+        ...devices['Desktop Safari'],
+        // Continuous screencasts delay protocol actions on hosted macOS.
+        // Retain DOM/network traces and the separate failure screenshot.
+        trace: {
+          mode: 'retain-on-failure',
+          screenshots: false,
+          snapshots: true,
+          sources: true,
+        },
+      },
+    },
   ],
   webServer: {
     command: 'npm run preview -- --host 127.0.0.1 --port 5175 --strictPort',

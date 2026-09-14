@@ -138,12 +138,26 @@ export const test = base.extend<{ native: NativeActivity }>({
           }
         }
       } finally {
-        await browser?.close().catch(() => {})
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+        // connectOverCDP().close() disconnects this client. Ask the owned
+        // browser to shut down gracefully so its profile writers can finish.
         const timer = setTimeout(() => child.kill('SIGKILL'), 3000)
-        await exited
-        clearTimeout(timer)
-        await rm(profile, { recursive: true, force: true })
+        try {
+          if (child.exitCode === null && child.signalCode === null) {
+            if (browser?.isConnected()) {
+              await browser
+                .newBrowserCDPSession()
+                .then((session) => session.send('Browser.close'))
+                .catch(() => {})
+            } else child.kill('SIGTERM')
+          }
+          await exited
+        } finally {
+          clearTimeout(timer)
+          await browser?.close().catch(() => {})
+        }
+        // Filesystem cleanup may briefly race the last subprocess write even
+        // after the browser exits. This retries removal, never the test body.
+        await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
       }
     },
     { timeout: 30_000 },

@@ -11,16 +11,16 @@
 | 作业                       | 范围                                                                    |
 | -------------------------- | ----------------------------------------------------------------------- |
 | Node                       | `tests/conformance`、`tests/integration`，含真实 WASM                   |
-| Browser × 3                | Chromium、Firefox、WebKit 各自顺序执行常规浏览器、持久游戏库和 PWA 测试 |
+| Browser × 9                | Chromium、Firefox、WebKit × 常规浏览器、持久游戏库、PWA，各组合独立运行 |
 | Chromium trusted lifecycle | 独立浏览器进程的真实隐藏、恢复、冻结与取消                              |
 | Direct runtime             | 三浏览器 × Asyncify/JSPI，直接验证 compile、转储、异常和取消            |
 | All tests                  | 要求所有上述作业成功；失败、取消或跳过均不能通过汇总门槛                |
 
-Chromium/Firefox 套件使用 Ubuntu 24.04，WebKit 套件使用 GitHub 托管的 macOS 15。Linux runner 上的 Firefox 使用 Xvfb 虚拟显示和 Mesa 软件渲染；所有持久浏览器重开都沿用同一显示模式。套件开始前先在 Worker 中创建 WebGL2 上下文、清屏并读取像素，同时检查 JSPI；能力缺失会明确失败，避免每个场景重复超时。Chromium 和 macOS WebKit 保持 headless。
+Chromium/Firefox 套件使用 Ubuntu 24.04，WebKit 套件使用 GitHub 托管的 macOS 15。Linux runner 上的 Firefox 使用 Xvfb 虚拟显示和 Mesa 软件渲染；所有持久浏览器重开都沿用同一显示模式。套件开始前先在 Worker 中创建 WebGL2 上下文、清屏并读取像素，同时检查 JSPI；能力缺失会明确失败，避免每个场景重复超时。Chromium 和 macOS WebKit 保持 headless。Linux 作业提供 PulseAudio 虚拟输出设备，让真实 AudioContext/AudioWorklet 推进音频时钟；不替换页面的音频 API。WebKit 保留 DOM/网络 trace 和失败截图，关闭会明显拖慢协议操作的连续截图采集。
 
 Playwright 1.63 的 Linux WebKit 在本次云端检查中不能创建 Worker WebGL2，即使使用 Xvfb 也失败。其上游版本的 [OffscreenCanvas 创建路径](https://github.com/WebKit/WebKit/blob/4d05d732e5a84f32675bef4cc135a2e7a9269a87/Source/WebCore/html/OffscreenCanvas.cpp) 受 `allowWebGLInWorkers` 控制，[Cocoa 配置](https://github.com/WebKit/WebKit/blob/4d05d732e5a84f32675bef4cc135a2e7a9269a87/Source/WTF/wtf/PlatformEnableCocoa.h) 启用了该能力。因此 WebKit 图形和持久场景放在 macOS 上验证；不需要渲染的直接 WASM 探测仍覆盖 Linux WebKit。这不表示 Linux GTK WebKit 可以运行当前播放器。
 
-浏览器矩阵不在某一种浏览器失败后取消其他浏览器；通过图形检查的作业也会继续执行后面的游戏库与 PWA 套件。保留现有用例断言、并发和超时，不增加自动重试。原有 WebKit 网络模拟排除仍由 PWA 配置明确控制。
+浏览器和套件形成九个独立作业，一个组合失败不会取消其他组合。每个组合完成后立即上传报告，不必等待同一浏览器的其他套件；GitHub reporter 同时提供错误注释。保留现有用例断言、并发和超时，不增加自动重试。原有 WebKit 网络模拟排除仍由 PWA 配置明确控制。
 
 每个作业上传日志、JSON 报告以及可用的失败截图/trace，保留 14 天。`test-build` 含 commit、run ID 和运行次数，另含带哈希的 WASM manifest 与离线发布清单。Actions 详情页的 Artifacts 可下载这些文件；需要长期保存的阶段证据应另行归档。
 
