@@ -833,6 +833,16 @@ const matrix = {
             reason:
               'The corrected depth cases progressed, but Node passed 394/396 and all six direct combinations failed the argument-memory fixture: one million expanded arguments fit in the 16 MiB budget because native variants are smaller than the fixture assumed. The fixture now includes a collapsed-argument callee so the combined live copies actually exceed the budget. All 639 browser cases passed; this remains an overall failed run.',
           },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34857464849',
+            reason:
+              'Asyncify did not run allocation tests because a font dependency download returned HTTP 504; allocator builds now omit unused font kernels. JSPI exposed six positive retained-heap differences in Array construction cleanup and 417 smaller-than-control malloc chunk totals. Array finalization now tolerates interruption before native instance registration; a diagnostic live-request ledger distinguishes ownership from allocator chunk rounding and is checked for overflow and real malloc/free accounting.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34857699012',
+            reason:
+              'Emscripten installation failed with HTTP 504 before the production build. All dependent tests were skipped; there is no test artifact and this run is not a verification pass. The workflow log and metadata remain archived.',
+          },
         ]
       : []),
     ...(lifetimePhase
