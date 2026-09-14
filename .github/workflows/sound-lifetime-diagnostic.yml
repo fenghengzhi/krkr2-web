@@ -1,0 +1,60 @@
+name: Sound lifetime process diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Build with matching application sources for the original sound process failure
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sound:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          build-run: ${{ inputs.build-run }}
+      - name: Enable hosted process crash backtraces
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdb
+          mkdir -p out/native-cores out/ci/sound-process
+          sudo sysctl -w "kernel.core_pattern=$GITHUB_WORKSPACE/out/native-cores/core.%e.%p"
+      - name: Repeat the unchanged sound file in independent Node processes
+        shell: bash
+        run: |
+          ulimit -c unlimited
+          status=0
+          for attempt in 1 2 3; do
+            if node --import tsx --test --test-reporter=tap tests/integration/sound-lifetime.test.ts > "out/ci/sound-process/attempt-$attempt.tap" 2> "out/ci/sound-process/attempt-$attempt.stderr"; then
+              result=0
+            else
+              result=$?
+              status=1
+            fi
+            printf '%s\n' "$result" > "out/ci/sound-process/attempt-$attempt.exit"
+          done
+          for core in out/native-cores/core.*; do
+            if [ -f "$core" ]; then
+              sha256sum "$core" >> out/ci/sound-process/core-sha256.txt
+              gdb --batch -ex 'set pagination off' -ex 'thread apply all bt' "$(command -v node)" "$core" > "out/ci/sound-process/$(basename "$core").backtrace" 2>&1 || true
+            fi
+          done
+          exit "$status"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: sound-process-diagnostic
+          path: out/ci/
+          retention-days: 90
