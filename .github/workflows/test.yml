@@ -55,6 +55,44 @@ jobs:
         if: steps.kernels.outputs.cache-hit != 'true'
         run: |
           mkdir -p out/ci
+          # GitHub archive redirects intermittently return 504. Fetch from its
+          # codeload endpoint and require the exact Emscripten port hashes.
+          python3 - <<'PY' 2>&1 | tee out/ci/font-ports.log
+          import ast, hashlib, json, os, pathlib, shutil, subprocess, tempfile, urllib.request
+          emscripten = pathlib.Path(os.environ['EMSDK']) / 'upstream/emscripten'
+          ports = pathlib.Path(subprocess.check_output([str(emscripten / 'em-config'), 'PORTS'], text=True).strip())
+          ports.mkdir(parents=True, exist_ok=True)
+          evidence = []
+          for name, repo, extension in [('zlib', 'madler/zlib', 'tar.gz'), ('freetype', 'freetype/freetype', 'zip')]:
+              source = (emscripten / 'tools/ports' / (name + '.py')).read_text()
+              values = {}
+              for item in ast.parse(source).body:
+                  if isinstance(item, ast.Assign) and len(item.targets) == 1 and isinstance(item.targets[0], ast.Name):
+                      key = item.targets[0].id
+                      if key in ('VERSION', 'TAG', 'HASH'):
+                          values[key] = ast.literal_eval(item.value)
+              tag = 'v' + values['VERSION'] if name == 'zlib' else values['TAG']
+              original = f'https://github.com/{repo}/archive/refs/tags/{tag}.tar.gz' if name == 'zlib' else f'https://github.com/{repo}/archive/{tag}.zip'
+              url = f'https://codeload.github.com/{repo}/{extension}/refs/tags/{tag}'
+              with urllib.request.urlopen(url, timeout=90) as response:
+                  data = response.read()
+              actual = hashlib.sha512(data).hexdigest()
+              if actual != values['HASH']:
+                  raise RuntimeError(f'{name} archive differs from pinned Emscripten SHA-512: {actual}')
+              with tempfile.TemporaryDirectory(dir=ports) as temporary:
+                  archive = pathlib.Path(temporary) / ('source.' + extension)
+                  archive.write_bytes(data)
+                  unpacked = pathlib.Path(temporary) / 'unpacked'
+                  shutil.unpack_archive(archive, unpacked)
+                  (unpacked / '.emscripten_url').write_text(original + '\n')
+                  destination = ports / name
+                  if destination.exists():
+                      shutil.rmtree(destination)
+                  os.replace(unpacked, destination)
+              evidence.append({'name': name, 'tag': tag, 'url': url, 'bytes': len(data), 'sha512': actual})
+              print(f'Prepared {name} {tag}: {actual}', flush=True)
+          pathlib.Path('out/ci/font-ports.json').write_text(json.dumps(evidence, indent=2) + '\n')
+          PY
           npm run build:wasm 2>&1 | tee out/ci/wasm.log
       - name: Cache compiled kernels
         if: steps.kernels.outputs.cache-hit != 'true'
