@@ -1,12 +1,14 @@
 # 插件以外的实现进度
 
-最新 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809918318)通过 **346 项 Node、603 项浏览器测试及 6 项直接运行时专项**，无失败或跳过。另修复了真实页面冻结期间的媒体请求超时，三次超过 21 秒的可信冻结复测通过。完整非插件目标仍未完成。
+最新 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809918318)通过 **346 项 Node、603 项浏览器测试及 6 项直接运行时专项**，无失败或跳过。另修复了真实页面冻结期间的媒体请求超时，三次超过 21 秒的可信冻结复测通过。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812505215)另通过 66 项原 KAG 与旧发布离线升级检查。完整非插件目标仍未完成。
 
 目标：完成架构规划中的非插件引擎与 Web 平台能力，不能以最小示例或部分测试通过替代完成。插件注册机制保留；原生 DLL、Emote/MotionPlayer 等插件实现不在当前目标内。
 
 本文件记录完整范围和证据缺口。此前的首个实现属于实际进展，但远未证明当前目标完成。
 
-VM 控制台阶段已补原生 Console/Controller 类、编译警告与诊断回调、可挂起的 compile 和独立 Scripts.dump 文件。38 项 Node 专项、36 项浏览器面板/VM 检查、6 项直接运行时探测和 6 项冷离线检查通过；本地完整回归已按用户要求中止，后续验证改由 GitHub Actions 执行；新的完整回归已在 GitHub Actions 通过；跨 ABI 与外部 KAG 专项仍待迁移。TJS ABI 升到 3，字体 ABI 2、会话协议 9 不变。范围见 [VM 控制台](decisions/029-vm-console.md)。
+VM 控制台阶段的 [最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)已通过，标准矩阵为 `out/verification/vm-console-matrix.json`，绑定完整回归、66 项兼容性、3 次可信长冻结与 487 份证据。报告 SHA-256 为 `81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d`；详细归档与执行方式见 [测试说明](testing.md)。
+
+VM 控制台阶段已补原生 Console/Controller 类、编译警告与诊断回调、可挂起的 compile 和独立 Scripts.dump 文件。38 项 Node 专项、36 项浏览器面板/VM 检查、6 项直接运行时探测和 6 项冷离线检查通过；本地完整回归已按用户要求中止，后续验证改由 GitHub Actions 执行；新的完整回归已在 GitHub Actions 通过；另有 [GitHub Actions 兼容性运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812505215)通过全部 66 项原 KAG、菜单、异常恢复与 TJS/字体跨 ABI 离线升级检查。TJS ABI 升到 3，字体 ABI 2、会话协议 9 不变。范围见 [VM 控制台](decisions/029-vm-console.md)。
 
 调试面板阶段已接通 Console/Controller 的只读对象、独立显示状态、暂停/失败中的页面操作和焦点恢复。新增 3 项 Node 和 18 项浏览器测试；完整 `npm run check` 通过 **331 项行为/集成与 579 项浏览器测试**（462 常规、57 游戏库、53 PWA、7 原生生命周期），无失败或跳过，原生 trusted 冻结为 **21,055.2 ms**。原 KAG 菜单/快捷键 6 项、综合场景 36 项，以及 TJS ABI、字体 ABI、协议 8→9 各 6 项离线升级检查通过。权威日志为 `out/verification/debug-panels/check.log`，最终证据见 `out/verification/debug-panels-matrix.json`。会话协议为 9，TJS/字体 ABI 均保持 2。范围见 [调试面板](decisions/028-debug-panels.md)。
 
@@ -44,7 +46,7 @@ Debug 阶段完整日志为 `out/verification/debug/check.log`，最终证据由
 | TLG 等非插件图像格式与专用算法 | TLG5/TLG6、SDS、PNG/GIF、索引 BMP、伴随平面、颜色键、PNG/TLG 写出和加载缓存/预加载已接入；有读取/运算对照和 192 个独立解码写出验证；其他变体与统一内存预留仍待实现 | 进行中 |
 | 产品：游戏库、导入/恢复、设置、错误诊断、浏览器能力适配 | 已补本地/远程资源持久保存、库中启动与入口/后端设置、容量提示、取消/失败恢复和跨标签页删除保护；身份迁移、包导出与其他设置仍待实现 | 进行中 |
 | GPU 丢失恢复、Worker/媒体清理、后台/前台策略、PWA/静态发布 | 已补 GPU 恢复、用户/图形/页面暂停协调、后台设置与输入/媒体门控；PWA 外壳及更新已验证；移动系统/BFCache、后台长请求、实体 GPU/驱动压力和性能等仍待验证 | 进行中 |
-| 验证：参考 KAG 对话/选择/转场/声音/脚本存读档、三浏览器、差分与性能 | 当前 331 项行为/集成与 579 项浏览器测试通过；原生日志、字体与像素参考继续保留；调试菜单/快捷键 6 项、综合 KAG 36 项和三类跨版本离线升级共 18 项通过；异常恢复、18 项排版等外部证据按历史阶段保留，完整原生差分和性能仍待验证 | 未完成 |
+| 验证：参考 KAG 对话/选择/转场/声音/脚本存读档、三浏览器、差分与性能 | 当前云端 346 项 Node、603 项浏览器与 6 项直接运行时通过；另有原 KAG 36 项、菜单 6 项、异常恢复 6 项和三类跨 ABI 离线升级 18 项通过；原生日志、字体、像素、18 项排版等参考按历史阶段保留，完整原生差分和性能仍待验证 | 未完成 |
 
 WebGPU 是架构中的可选后端；应在正确性与性能证据支持时实施，不以它替代 WebGL2 的完整实现。PSB 若仅服务被排除的插件，跟随插件阶段；非插件资源格式需求仍属于当前目标。
 

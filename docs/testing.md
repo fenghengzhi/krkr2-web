@@ -8,7 +8,7 @@
 
 [提交 `0003038` 的完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809918318)全部通过：**346 项 Node、603 项浏览器测试**（480 常规、57 游戏库、59 PWA、7 原生生命周期），另有 6 项直接运行时专项与 9 次作业图形预检。所选用例无失败、跳过或 flaky，未使用测试重试。WebKit 原有网络模拟排除仍由配置明确保留。
 
-本次报告与构建产物已下载归档到 `out/verification/github-actions/34809918318/`，摘要为 `summary.json`，SHA-256 为 `1421ee1c8d5ed83895a893cedbc7db62b274b04f92958606b6d9dc1bdaf6633e`。这次通过覆盖当前工作流，尚不包括下文的外部 KAG 与旧 ABI 专项。
+本次报告与构建产物已下载归档到 `out/verification/github-actions/34809918318/`，摘要为 `summary.json`，SHA-256 为 `1421ee1c8d5ed83895a893cedbc7db62b274b04f92958606b6d9dc1bdaf6633e`。外部 KAG 与旧 ABI 专项由下述独立工作流验证。
 
 ## 作业与产物
 
@@ -41,11 +41,34 @@ gh run view RUN_ID --log-failed
 gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 ```
 
-## 尚未迁移的历史专项
+## KAG 与旧发布兼容性
 
 默认工作流不依赖相邻的 `kirikiroid2-web` 仓库，也不读取本机的 `out/verification` 历史目录。现有固定参考数据随 `tests/fixtures` 保存并由 Node/浏览器测试使用。
 
-原 KAG 外部场景和 TJS/字体跨 ABI 升级探测仍需要固定的外部 XP3/ZIP 与旧版本发布包。这些材料尚未接入 Actions，不能将默认工作流通过解读为这些专项也通过。迁移时须提供可追溯的样本来源、旧发布树和哈希，并在云端运行对应 `tests/probes`，不能通过跳过或改写旧 manifest 代替真实升级验证。
+原 KAG XP3、保留全部 30 个成员字节的 ZIP，以及三个完整旧发布包已固定在 [兼容样本](../tests/fixtures/compatibility/README.md) 中。**KAG and release compatibility** 工作流先核对压缩包、旧发布树、build token、实际 ABI 和 ZIP 成员摘要，再运行三浏览器、双 WASM 后端专项。
+
+[提交 `c0d6ba3` 的云端运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812505215)通过全部 **66 项**：原 KAG 流程/存读档/转场 36 项、原菜单 6 项、原异常处理及恢复 6 项、TJS ABI 1→3 和 2→3 各 6 项、字体 ABI 1→2 共 6 项。升级检查实际关闭服务器，让旧标签页重建旧 Worker，新标签页运行新 Worker；TJS 检查还验证新发布原生类和独立 dump，字体检查读取字宽和位图像素。旧应用及其 manifest 保持原字节。
+
+[初次迁移运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34811575232)中，WebKit 的旧字体发布在约 5.5 秒时出现启动标记，超过独立探测默认的 5 秒断言。失败 trace 的结束快照已包含该标记与绘制画面。启动断言现与常规浏览器套件的 12 秒标准一致，并记录旧版在线、旧版离线重启、新版离线启动各自耗时；没有修改旧发布字节或升级断言，也没有增加测试重试。初次失败记录继续保留。
+
+手动复用成功 Tests 构建运行专项：
+
+```sh
+gh workflow run compatibility.yml --ref main -f build-run=BUILD_RUN_ID
+```
+
+复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流再读取已完成的 Tests、兼容性和三次原生冻结专项，逐项核对用例、构建、源码、样本及证据哈希，生成 `out/verification/vm-console-matrix.json`；它不会重新运行浏览器测试。阶段报告及其引用的已下载证据保存为 `vm-console-verification` artifact，保留 90 天。
+
+[VM 控制台阶段汇总](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)已通过，绑定 487 份证据文件、116 份持久 context 预算记录及 6 份媒体时钟记录。生成时提交为 `d97a3c9`，报告 SHA-256 为 `81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d`。矩阵和引用的完整产物已下载到 `out/verification/github-actions/34812958010/`，矩阵另复制到上述标准路径；报告生成后的本次文档更新不改变应用或测试代码。
+
+```sh
+gh workflow run verification-report.yml --ref main \
+  -f build-run=BUILD_RUN_ID \
+  -f compatibility-run=COMPATIBILITY_RUN_ID \
+  -f freeze-run=FREEZE_RUN_ID
+```
+
+协议 8→9 的同内核历史专项仍保留在调试面板阶段；本轮 TJS ABI 3 升级检查不能替代该历史结果。其他未迁移的独立参考/性能专项同样不能由默认工作流通过推断为已完成。
 
 VM 控制台阶段的本地完整回归已按用户要求中止（退出码 143）。此前的专项通过记录与失败日志按历史证据保留；该阶段的新完整回归结果以实际 Actions 运行记录为准。
 
