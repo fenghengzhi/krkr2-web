@@ -1,0 +1,8 @@
+{
+  "semi": false,
+  "singleQuote": true,
+  "printWidth": 100,
+  "overrides": [
+    { "files": "tests/probes/kag-text-layout.ts", "options": { "parser": "babel-ts" } }
+  ]
+}

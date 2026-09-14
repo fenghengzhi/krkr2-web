@@ -1,0 +1,750 @@
+{
+  "generator": {
+    "python": "3.9.6",
+    "zlib": "1.2.12",
+    "sourceSha256": "25ff02620599388f84659b463ddd83ffc7240534d79f37cec643e02b02f2fe00"
+  },
+  "cases": [
+    {
+      "file": "0-stream0-local640-zip640.zip",
+      "size": 132360,
+      "sha256": "23ab76678fe733643396e71387307b3833bee45531114938abe45a59a5465eb2",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 0
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 0
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 0
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 0
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 0
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 0
+        }
+      ]
+    },
+    {
+      "file": "0-stream1-local640-zip640.zip",
+      "size": 132472,
+      "sha256": "7cd474a0ac40723ea4acdfe010e41e3594bc308d127dcff76e3232c1d1c1195a",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 0
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 0
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 0
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 0
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 0
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 0
+        }
+      ]
+    },
+    {
+      "file": "0-stream0-local641-zip640.zip",
+      "size": 132480,
+      "sha256": "7219cf849ae8d5e5027d0f67e58f707db26e8858a80a73be7ba84d0f7c6b298c",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 0
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 0
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 0
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 0
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 0
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 0
+        }
+      ]
+    },
+    {
+      "file": "0-stream1-local641-zip640.zip",
+      "size": 132640,
+      "sha256": "94725319e22188816e6dc25913c6f81f833cf5ec12bf3ecdff181b75b2e611f0",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 0
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 0
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 0
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 0
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 0
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 0
+        }
+      ]
+    },
+    {
+      "file": "0-stream0-local640-zip641.zip",
+      "size": 132708,
+      "sha256": "a57b24555d4db379d46d2f8bd2500149d80322d48d2f7bd8c92131001c023a26",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 0
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 0
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 0
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 0
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 0
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 0
+        }
+      ]
+    },
+    {
+      "file": "0-stream1-local640-zip641.zip",
+      "size": 132868,
+      "sha256": "a9537334d47eff3bb66b78af9ca2ee1c5ed36b7d5bbf36e668043c25ddb452ea",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 0
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 0
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 0
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 0
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 0
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 0
+        }
+      ]
+    },
+    {
+      "file": "8-stream0-local640-zip640.zip",
+      "size": 1376,
+      "sha256": "cd797a8a18a6111c6cf2ab65e70c6e8a826b347162f8aaa8068e3745a12f77c9",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 8
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 8
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 8
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 8
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 8
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 8
+        }
+      ]
+    },
+    {
+      "file": "8-stream1-local640-zip640.zip",
+      "size": 1488,
+      "sha256": "97dcc24059ac44d8472268249aba8bf668afc5a4b651af03f565ef7ac4d30456",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 8
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 8
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 8
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 8
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 8
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 8
+        }
+      ]
+    },
+    {
+      "file": "8-stream0-local641-zip640.zip",
+      "size": 1496,
+      "sha256": "d5f18174144ee3d0377fcb2033bdb0eff20cdc51200eb08c24c917f98adc375a",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 8
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 8
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 8
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 8
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 8
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 8
+        }
+      ]
+    },
+    {
+      "file": "8-stream1-local641-zip640.zip",
+      "size": 1656,
+      "sha256": "7d5aa395452f6bf4c73bff5cccb48000fe4e163369d2ba46c564eee7c8dbd41d",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 8
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 8
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 8
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 8
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 8
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 8
+        }
+      ]
+    },
+    {
+      "file": "8-stream0-local640-zip641.zip",
+      "size": 1740,
+      "sha256": "a5176097cef7fc5343c4b96db7e9a28f8e7d66f2ccf5dd6da5f71c91e93b23ff",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 8
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 8
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 8
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 8
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 8
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 8
+        }
+      ]
+    },
+    {
+      "file": "8-stream1-local640-zip641.zip",
+      "size": 1900,
+      "sha256": "fe553d5f9cff526b6455e506f9a21215d7b87324605a8480238e2eecab708089",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 8
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 8
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 8
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 8
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 8
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 8
+        }
+      ]
+    },
+    {
+      "file": "cp437.zip",
+      "size": 1374,
+      "sha256": "44bbfea00f5e79b66e583a35d0772a9d09d42ff0fc860575f78eb7d1e2bab1fc",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 8
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 8
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 8
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 8
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 8
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 8
+        }
+      ]
+    },
+    {
+      "file": "comment.zip",
+      "size": 66911,
+      "sha256": "52cc64f1d1e28d4655ac4bec971d9ce01d3b4079343ea322fcc6e6095e455fea",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 8
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 8
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 8
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 8
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 8
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 8
+        }
+      ]
+    },
+    {
+      "file": "empty.zip",
+      "size": 22,
+      "sha256": "8739c76e681f900923b900c9df0ef75cf421d39cabb54650c4b9ad19b6a76d85",
+      "entries": []
+    },
+    {
+      "file": "optional-zip64.zip",
+      "size": 1740,
+      "sha256": "a5176097cef7fc5343c4b96db7e9a28f8e7d66f2ccf5dd6da5f71c91e93b23ff",
+      "entries": [
+        {
+          "name": "startup.tjs",
+          "size": 476,
+          "sha256": "5ffe24fcbacf3017e048ca96995ad89f064880f58d09702ae9cdfd97f936fbf0",
+          "crc32": 3546618096,
+          "method": 8
+        },
+        {
+          "name": "シーン/value.tjs",
+          "size": 2,
+          "sha256": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049",
+          "crc32": 841265288,
+          "method": 8
+        },
+        {
+          "name": "art/pixel.bmp",
+          "size": 58,
+          "sha256": "356a0a38e9beb4b381be6457ce136f8ecfd5aa785f4d098ddf9ed153e3d6bdd7",
+          "crc32": 3238314759,
+          "method": 8
+        },
+        {
+          "name": "folder/café.txt",
+          "size": 24,
+          "sha256": "a42e4d6fdcfcc1ba24c86eea4cf5a418b574d98728d5f33bb59e274c9bd4defb",
+          "crc32": 1522793300,
+          "method": 8
+        },
+        {
+          "name": "empty.bin",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "crc32": 0,
+          "method": 8
+        },
+        {
+          "name": "repeated.bin",
+          "size": 131072,
+          "sha256": "110f31053d39528b974fb419a8d1dca651f40bc9d65b20f02b259836289a5079",
+          "crc32": 2895328425,
+          "method": 8
+        }
+      ]
+    }
+  ]
+}

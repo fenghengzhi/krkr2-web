@@ -1,0 +1,11 @@
+node_modules/
+.codex/
+dist/
+*.local
+*.log
+.DS_Store
+.generated/
+out/
+test-results/
+test-results-native-activity/
+playwright-report/

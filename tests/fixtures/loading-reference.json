@@ -1,0 +1,11 @@
+{
+  "description": "Unmodified TVP scalar AlphaColorMat, MakeAlphaFromKey and BindMaskToMain; one pixel per call; all 256 alpha/mask values and positive/negative channel deltas.",
+  "cases": 12288,
+  "sha256": "eca3889c0aee328517c3f6977e8c4e26cc4d8fdfdb99a3582e45ffae95cc4510",
+  "sources": {
+    "tvpgl.cpp": "57c8e65c2a3c93a402a886335368a0cae1629f76a74b64481015758a67949a75",
+    "tvpgl.h": "bfac34e8d17d049b275fe124f50a487e14bffffd70118e2758e4edce75ab9e1b",
+    "gl/blend_function.cpp": "3efd50446567b8d0fc41b394ed0607a913bab144986a3a47b2c1ca9ea525043c"
+  },
+  "adapterSha256": "d803f05bfd14b07f82818ba947cf9cff1c079a987565a3a27794af1be366b2a5"
+}

@@ -1,0 +1,14 @@
+{
+  "description": "TVPInitTVPGL dispatch, one pixel per call; scalar tail semantics, not SIMD block/alignment shortcuts. Excludes unavailable bmAddAlphaOnAlpha. Generated from the local kirikiroid2-web reference.",
+  "cases": 94464,
+  "sha256": "e4f3c78084ec5ccad585042f80c7b44de740321c82a41004db1772a2da3d9d78",
+  "sources": {
+    "tvpgl.cpp": "57c8e65c2a3c93a402a886335368a0cae1629f76a74b64481015758a67949a75",
+    "tvpgl.h": "bfac34e8d17d049b275fe124f50a487e14bffffd70118e2758e4edce75ab9e1b",
+    "gl/blend_function.cpp": "3efd50446567b8d0fc41b394ed0607a913bab144986a3a47b2c1ca9ea525043c",
+    "gl/blend_functor_c.h": "8032b5575d0723cf4299ec05868eed6d7798ba2bb0fb878d9d23816eee5b7bc9",
+    "gl/blend_variation.h": "e5235f1b443066d9ccbedb203d6896dba03b6ed6d9762f9e14b173ef658a1dd5",
+    "gl/blend_util_func.h": "195b47be21f3455281625acc6259db27fddc76de49deb8cd42c00889a448db2c"
+  },
+  "adapterSha256": "0fe62ebe49faa75704e1a11e771fcae8c2203bd4c4d8a2d063a90cc646803457"
+}

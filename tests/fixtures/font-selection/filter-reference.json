@@ -1,0 +1,2842 @@
+{
+  "scope": "Original enumeration callback only, on synthetic Win32 metadata; not GDI enumeration or SFNT charset inference.",
+  "source": "kirikiroid2-web/cpp/core/visual/impl/TVPSysFont.cpp",
+  "sourceSha256": "929a60a1059b9906b9ac3626cd3713ba4a12e34f249431c201e9839dd59431be",
+  "extractedSha256": "f2522c7deacb67f8aa45ea7500690bff590187849d6983ed4d0930a5da01e6c5",
+  "sanitizers": [
+    "address",
+    "undefined"
+  ],
+  "rows": [
+    {
+      "name": "Latin",
+      "source": "system",
+      "fixedPitch": false,
+      "outline": true,
+      "charsets": [
+        0
+      ],
+      "vertical": false
+    },
+    {
+      "name": "Mono",
+      "source": "system",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        128
+      ],
+      "vertical": false
+    },
+    {
+      "name": "@Mono",
+      "source": "system",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        128
+      ],
+      "vertical": true
+    },
+    {
+      "name": "Symbols",
+      "source": "system",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        2
+      ],
+      "vertical": false
+    },
+    {
+      "name": "Bitmap",
+      "source": "system",
+      "fixedPitch": true,
+      "outline": false,
+      "charsets": [
+        0
+      ],
+      "vertical": false
+    },
+    {
+      "name": "PostScriptOpenType",
+      "source": "system",
+      "fixedPitch": false,
+      "outline": true,
+      "charsets": [
+        0
+      ],
+      "vertical": false
+    },
+    {
+      "name": "TrueTypeOpenType",
+      "source": "system",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        128
+      ],
+      "vertical": false
+    },
+    {
+      "name": "DefaultCharset",
+      "source": "system",
+      "fixedPitch": false,
+      "outline": true,
+      "charsets": [
+        1
+      ],
+      "vertical": false
+    },
+    {
+      "name": "MultiCharset",
+      "source": "system",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        2
+      ],
+      "vertical": false
+    },
+    {
+      "name": "MultiCharset",
+      "source": "system",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        128
+      ],
+      "vertical": false
+    },
+    {
+      "name": "DuplicateAfterFilter",
+      "source": "system",
+      "fixedPitch": false,
+      "outline": true,
+      "charsets": [
+        0
+      ],
+      "vertical": false
+    },
+    {
+      "name": "DuplicateAfterFilter",
+      "source": "system",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        128
+      ],
+      "vertical": false
+    },
+    {
+      "name": "Latin",
+      "source": "system",
+      "fixedPitch": false,
+      "outline": true,
+      "charsets": [
+        0
+      ],
+      "vertical": false
+    },
+    {
+      "name": "@Symbols",
+      "source": "system",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        2
+      ],
+      "vertical": true
+    }
+  ],
+  "cases": [
+    {
+      "flags": 0,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 0,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 0,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 0,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 1,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 1,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 1,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 1,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 2,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Bitmap",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 2,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 2,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 2,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 3,
+      "charset": 0,
+      "names": [
+        "Bitmap"
+      ]
+    },
+    {
+      "flags": 3,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 3,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 3,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 4,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 4,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 4,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 4,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 5,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 5,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 5,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 5,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 6,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Bitmap",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 6,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 6,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset"
+      ]
+    },
+    {
+      "flags": 6,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 7,
+      "charset": 0,
+      "names": [
+        "Bitmap"
+      ]
+    },
+    {
+      "flags": 7,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 7,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset"
+      ]
+    },
+    {
+      "flags": 7,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 8,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 8,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 8,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 8,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 9,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 9,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 9,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 9,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 10,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 10,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 10,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 10,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 11,
+      "charset": 0,
+      "names": []
+    },
+    {
+      "flags": 11,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 11,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 11,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 12,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 12,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 12,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 12,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 13,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 13,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 13,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 13,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 14,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 14,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 14,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset"
+      ]
+    },
+    {
+      "flags": 14,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 15,
+      "charset": 0,
+      "names": []
+    },
+    {
+      "flags": 15,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 15,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset"
+      ]
+    },
+    {
+      "flags": 15,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 16,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 16,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 16,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 16,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 17,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 17,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 17,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 17,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 18,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Bitmap",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 18,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 18,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 18,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 19,
+      "charset": 0,
+      "names": [
+        "Bitmap"
+      ]
+    },
+    {
+      "flags": 19,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 19,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 19,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 20,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 20,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 20,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 20,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 21,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 21,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 21,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 21,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 22,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Bitmap",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 22,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 22,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 22,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 23,
+      "charset": 0,
+      "names": [
+        "Bitmap"
+      ]
+    },
+    {
+      "flags": 23,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 23,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 23,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 24,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 24,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 24,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 24,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 25,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 25,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 25,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 25,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 26,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 26,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 26,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 26,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 27,
+      "charset": 0,
+      "names": []
+    },
+    {
+      "flags": 27,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 27,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 27,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 28,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 28,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 28,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 28,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 29,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 29,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 29,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 29,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 30,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 30,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 30,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 30,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 31,
+      "charset": 0,
+      "names": []
+    },
+    {
+      "flags": 31,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 31,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 31,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 256,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 256,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 256,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 256,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 257,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 257,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 257,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 257,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 258,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Bitmap",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 258,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 258,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 258,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 259,
+      "charset": 0,
+      "names": [
+        "Bitmap"
+      ]
+    },
+    {
+      "flags": 259,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 259,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 259,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 260,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 260,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 260,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 260,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 261,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 261,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 261,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 261,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "Symbols",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 262,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Bitmap",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 262,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 262,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset"
+      ]
+    },
+    {
+      "flags": 262,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 263,
+      "charset": 0,
+      "names": [
+        "Bitmap"
+      ]
+    },
+    {
+      "flags": 263,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 263,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset"
+      ]
+    },
+    {
+      "flags": 263,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 264,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 264,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 264,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 264,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 265,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 265,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 265,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 265,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 266,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 266,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 266,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 266,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 267,
+      "charset": 0,
+      "names": []
+    },
+    {
+      "flags": 267,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 267,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset",
+        "@Symbols"
+      ]
+    },
+    {
+      "flags": 267,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 268,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 268,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 268,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 268,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "Symbols",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 269,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 269,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 269,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 269,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "Symbols",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 270,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 270,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 270,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset"
+      ]
+    },
+    {
+      "flags": 270,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 271,
+      "charset": 0,
+      "names": []
+    },
+    {
+      "flags": 271,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 271,
+      "charset": 2,
+      "names": [
+        "Symbols",
+        "MultiCharset"
+      ]
+    },
+    {
+      "flags": 271,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 272,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 272,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 272,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 272,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 273,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 273,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 273,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 273,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "@Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 274,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Bitmap",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 274,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 274,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 274,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 275,
+      "charset": 0,
+      "names": [
+        "Bitmap"
+      ]
+    },
+    {
+      "flags": 275,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 275,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 275,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 276,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 276,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 276,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 276,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "Bitmap",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 277,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 277,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 277,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 277,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "Bitmap",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 278,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Bitmap",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 278,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 278,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 278,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 279,
+      "charset": 0,
+      "names": [
+        "Bitmap"
+      ]
+    },
+    {
+      "flags": 279,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 279,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 279,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 280,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 280,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 280,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 280,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "@Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 281,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 281,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 281,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 281,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 282,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 282,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 282,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 282,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 283,
+      "charset": 0,
+      "names": []
+    },
+    {
+      "flags": 283,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "@Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 283,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 283,
+      "charset": 1,
+      "names": []
+    },
+    {
+      "flags": 284,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 284,
+      "charset": 128,
+      "names": [
+        "Latin",
+        "Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 284,
+      "charset": 2,
+      "names": [
+        "Latin",
+        "Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 284,
+      "charset": 1,
+      "names": [
+        "Latin",
+        "Mono",
+        "PostScriptOpenType",
+        "TrueTypeOpenType",
+        "DefaultCharset",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 285,
+      "charset": 0,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 285,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 285,
+      "charset": 2,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 285,
+      "charset": 1,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 286,
+      "charset": 0,
+      "names": [
+        "Latin",
+        "PostScriptOpenType",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 286,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 286,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 286,
+      "charset": 1,
+      "names": [
+        "DefaultCharset"
+      ]
+    },
+    {
+      "flags": 287,
+      "charset": 0,
+      "names": []
+    },
+    {
+      "flags": 287,
+      "charset": 128,
+      "names": [
+        "Mono",
+        "TrueTypeOpenType",
+        "MultiCharset",
+        "DuplicateAfterFilter"
+      ]
+    },
+    {
+      "flags": 287,
+      "charset": 2,
+      "names": []
+    },
+    {
+      "flags": 287,
+      "charset": 1,
+      "names": []
+    }
+  ]
+}

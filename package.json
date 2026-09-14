@@ -1,0 +1,36 @@
+{
+  "name": "krkr2-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:fonts": "node scripts/build-fonts.mjs",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json && tsc -p tsconfig.engine.json && tsc -p tsconfig.tools.json",
+    "build": "npm run typecheck && vite build && node scripts/verify-offline-build.mjs",
+    "preview": "vite preview",
+    "test": "node --import tsx --test tests/conformance/*.test.ts tests/integration/*.test.ts",
+    "test:browser": "npm run build && playwright test && playwright test -c playwright.library.config.ts && node scripts/build-pwa-fixtures.mjs && playwright test -c playwright.pwa.config.ts && playwright test -c playwright.activity.config.ts",
+    "check": "npm run build && npm test && playwright test && playwright test -c playwright.library.config.ts && node scripts/build-pwa-fixtures.mjs && playwright test -c playwright.pwa.config.ts && playwright test -c playwright.activity.config.ts",
+    "test:library": "npm run build && playwright test -c playwright.library.config.ts",
+    "test:pwa": "npm run build && node scripts/build-pwa-fixtures.mjs && playwright test -c playwright.pwa.config.ts",
+    "test:activity": "npm run build && playwright test tests/browser/activity && playwright test -c playwright.activity.config.ts"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.20.2",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vite-plugin-worker-rpc": "^0.4.0"
+  },
+  "dependencies": {
+    "@wasm-audio-decoders/ogg-vorbis": "0.1.20",
+    "mp4box": "2.4.1"
+  }
+}

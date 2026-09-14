@@ -1,0 +1,23 @@
+var window = new Window();
+window.caption = "浏览器里的吉里吉里";
+window.setInnerSize(800, 600);
+window.visible = true;
+var scene = new Layer(window, null);
+scene.loadImages("background.png");
+scene.setSizeToImageSize();
+var clicks = 0;
+function draw() {
+  scene.fillRect(52, 376, 696, 170, 0xff111d2e);
+  scene.font.height = 28;
+  scene.drawText(80, 399, "A new story, in your browser.", 0xe8eff8);
+  scene.font.height = 18;
+  scene.drawText(80, 453, "Click anywhere to continue.", 0xa2bad0);
+  scene.drawText(80, 494, "TJS callbacks: " + clicks, 0x72e0c2);
+}
+scene.onClick = function(x, y) {
+  clicks += 1;
+  draw();
+  Debug.message("点击 " + clicks + " · 坐标 " + x + ", " + y);
+};
+draw();
+Debug.message("startup.tjs → scene.tjs → PNG → Layer：启动完成");

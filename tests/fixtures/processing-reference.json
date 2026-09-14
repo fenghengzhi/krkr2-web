@@ -1,0 +1,24 @@
+{
+  "description": "TVP scalar conversions/grayscale and original CPU DoBoxBlurLoop (retained under #if 0 in the local reference), with its short-clip ring capped to clip height to remove uninitialized reads. Excludes the modern OpenCV/no-op and OGL approximations.",
+  "referenceRepairs": [
+    "Added C++17 dependent typename",
+    "Bound destination ring size to clip height; original averaging and source sampling unchanged",
+    "Zero-initialized the spare vertical-sum sentinel used after the final output pixel"
+  ],
+  "cases": 333,
+  "pixels": 280032,
+  "sha256": "298171c2fc725ce29272a3ea4fc0d1d82ca4b3fe518a35cd814ccd2ca0bae4fc",
+  "inputSha256": "c7eae966d684175437572eee650ab438299a98d16f8162241fd9e4e1f72d4358",
+  "sources": {
+    "LayerBitmapIntf.cpp": "7988602be5f514dfda577afa34c8be2e70b3c9c9a54f6b4588d416e46c349e3a",
+    "LayerIntf.cpp": "9e04e9712ba77ea1ba940c936615dc28b652db5741951e68ab811bd66ea76a39",
+    "argb.h": "431ba3de59da2b6ba4f80813c3e7417aee39bad201ac3de13ab323bf033824fb",
+    "argb.cpp": "8b54b4e317304d565abbc5aef924d481cf7fbaade4c3766f61252b4afe8aee57",
+    "tvpgl.cpp": "57c8e65c2a3c93a402a886335368a0cae1629f76a74b64481015758a67949a75",
+    "tvpgl.h": "bfac34e8d17d049b275fe124f50a487e14bffffd70118e2758e4edce75ab9e1b",
+    "gl/blend_function.cpp": "3efd50446567b8d0fc41b394ed0607a913bab144986a3a47b2c1ca9ea525043c",
+    "gl/blend_functor_c.h": "8032b5575d0723cf4299ec05868eed6d7798ba2bb0fb878d9d23816eee5b7bc9"
+  },
+  "extractedSha256": "46b7d9fdc7af86a4c3cad3c506f350ce85fcdd3fd42c528e75ca6dd0f1f5e364",
+  "adapterSha256": "10b7f67f602075d2117890e5f3f37c766ccc0cf39f55fa38f1428ee4c969a128"
+}

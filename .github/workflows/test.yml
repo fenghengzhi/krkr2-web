@@ -1,0 +1,205 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: 'true'
+
+jobs:
+  build:
+    name: WASM, types and production build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - name: Install native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bison cmake ninja-build python3
+      - uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
+        with:
+          version: '6.0.9'
+      - name: Build Asyncify, JSPI and font kernels
+        run: |
+          mkdir -p out/ci
+          npm run build:wasm 2>&1 | tee out/ci/wasm.log
+      - name: Check types and production release
+        run: npm run build 2>&1 | tee out/ci/build.log
+      - name: Build offline update fixtures
+        run: node scripts/build-pwa-fixtures.mjs 2>&1 | tee out/ci/pwa-build.log
+      - name: Package the exact build for all test jobs
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs'
+          writeFileSync('out/ci/build-info.json', JSON.stringify({
+            commit: process.env.GITHUB_SHA,
+            runId: process.env.GITHUB_RUN_ID,
+            attempt: process.env.GITHUB_RUN_ATTEMPT,
+            node: process.version,
+            platform: process.platform,
+            arch: process.arch,
+          }, null, 2) + '\n')
+          JS
+          tar -czf "$RUNNER_TEMP/test-build.tar.gz" \
+            .generated dist out/ci/build-info.json \
+            out/verification/pwa/site-a out/verification/pwa/site-b \
+            out/verification/pwa/fixture-artifacts.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-build
+          path: ${{ runner.temp }}/test-build.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: build-logs
+          path: out/ci/
+          retention-days: 14
+
+  node:
+    name: Node conformance and integration
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - name: Run Node tests
+        run: npm test 2>&1 | tee out/ci/node.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: node-results
+          path: out/ci/
+          retention-days: 14
+
+  browser:
+    name: Browser / ${{ matrix.browser }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - name: Install browser and system dependencies
+        id: browser-install
+        run: npx playwright install --with-deps "${{ matrix.browser }}"
+      - name: Regular browser tests
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/browser.json
+        run: npx playwright test --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/browser.log
+      - name: Persistent game library tests
+        if: ${{ !cancelled() && steps.browser-install.outcome == 'success' }}
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/library.json
+        run: npx playwright test -c playwright.library.config.ts --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/library.log
+      - name: Offline app and update tests
+        if: ${{ !cancelled() && steps.browser-install.outcome == 'success' }}
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/pwa.json
+        run: npx playwright test -c playwright.pwa.config.ts --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/pwa.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: browser-results-${{ matrix.browser }}
+          path: |
+            out/ci/
+            test-results/
+            out/verification/graphics/
+          retention-days: 14
+
+  native-activity:
+    name: Chromium trusted lifecycle
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - run: npx playwright install --with-deps chromium
+      - name: Run native visibility and freeze tests
+        run: npx playwright test -c playwright.activity.config.ts 2>&1 | tee out/ci/native-activity.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: native-activity-results
+          path: |
+            out/ci/
+            out/verification/activity/native-check.json
+            test-results-native-activity/
+          retention-days: 14
+
+  runtime:
+    name: Direct runtime / three browsers
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run direct compile, dump, exception and cancellation probes
+        run: node --import tsx tests/probes/vm-runtime-browser.ts 2>&1 | tee out/ci/runtime.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: runtime-results
+          path: |
+            out/ci/
+            out/verification/vm-console/
+          retention-days: 14
+
+  tests:
+    name: All tests
+    if: always()
+    needs: [build, node, browser, native-activity, runtime]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          results = json.loads(os.environ['RESULTS'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('| Job | Result |\n| --- | --- |\n')
+              for name, job in results.items():
+                  summary.write(f"| {name} | {job['result']} |\n")
+          sys.exit(0 if all(job['result'] == 'success' for job in results.values()) else 1)
+          PY

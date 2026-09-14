@@ -1,0 +1,4 @@
+FreeType VER-2-14-3
+Portions of this software are copyright (c) The FreeType Project (https://freetype.org). All rights reserved.
+FreeType is distributed here under the FreeType Project License; see FTL.TXT.
+Source: https://github.com/freetype/freetype/tree/VER-2-14-3

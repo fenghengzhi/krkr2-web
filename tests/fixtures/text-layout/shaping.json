@@ -1,0 +1,801 @@
+{
+  "uharfbuzz": "0.56.1",
+  "harfbuzz": "14.4.0",
+  "nativeLibrarySha256": "501b115918bc22a2fa89e51ad8cf16360353d8403185eea11e53b1960ce59b95",
+  "scope": "Native HarfBuzz single-character hani/ja vertical shaping with mutually exclusive vert/vrt2. Rotation and KRKR anchoring are not provided by HarfBuzz.",
+  "fonts": {
+    "vert.ttf": "d503dea64ad992dc9b42101d29800160c51b1cc9bac28ed4d70eb40585423906",
+    "vrt2.ttf": "b4205ed64f8ec7b070561e1d620adb108fa03dd438ab685bd629c5a4a8d339b9",
+    "none.ttf": "c5a75771525d79e1f5ad411836418f02f50cc167b4791ff5b22e77d8592fa537",
+    "extension.ttf": "2ed3bf83aa97afa56fa7d0e3d14433ac07ddd6133f1a35f044fbc2be59fc636f",
+    "delta.ttf": "af87a7bcb9162a292283393598a8684196e34bd7dc1fc3dcd5826e3527dd3229",
+    "split.ttf": "544557a780a3fb4356b5d1be4e338725488e2a40b82ffe92f155a3943db84790",
+    "novmetrics.ttf": "5a591fee6160d0831030662308f5270101774a10c1e5c04133b6213d75dfec15"
+  },
+  "cases": [
+    {
+      "file": "vert.ttf",
+      "feature": "vert",
+      "code": 32,
+      "nominal": 1,
+      "glyph": 1,
+      "substitution": 1,
+      "position": [
+        -250,
+        0,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vert.ttf",
+      "feature": "vert",
+      "code": 65,
+      "nominal": 2,
+      "glyph": 2,
+      "substitution": 2,
+      "position": [
+        -300,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vert.ttf",
+      "feature": "vert",
+      "code": 28450,
+      "nominal": 3,
+      "glyph": 3,
+      "substitution": 3,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vert.ttf",
+      "feature": "vert",
+      "code": 12289,
+      "nominal": 4,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vert.ttf",
+      "feature": "vert",
+      "code": 65288,
+      "nominal": 5,
+      "glyph": 8,
+      "substitution": 8,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vert.ttf",
+      "feature": "vert",
+      "code": 12353,
+      "nominal": 6,
+      "glyph": 9,
+      "substitution": 9,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vert.ttf",
+      "feature": "vert",
+      "code": 57345,
+      "nominal": 7,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vert.ttf",
+      "feature": "vert",
+      "code": 57348,
+      "nominal": 10,
+      "glyph": 10,
+      "substitution": 10,
+      "position": [
+        -500,
+        -800,
+        0,
+        -600
+      ]
+    },
+    {
+      "file": "vrt2.ttf",
+      "feature": "vrt2",
+      "code": 32,
+      "nominal": 1,
+      "glyph": 1,
+      "substitution": 1,
+      "position": [
+        -250,
+        0,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vrt2.ttf",
+      "feature": "vrt2",
+      "code": 65,
+      "nominal": 2,
+      "glyph": 10,
+      "substitution": 10,
+      "position": [
+        -500,
+        -800,
+        0,
+        -600
+      ]
+    },
+    {
+      "file": "vrt2.ttf",
+      "feature": "vrt2",
+      "code": 28450,
+      "nominal": 3,
+      "glyph": 3,
+      "substitution": 3,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vrt2.ttf",
+      "feature": "vrt2",
+      "code": 12289,
+      "nominal": 4,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vrt2.ttf",
+      "feature": "vrt2",
+      "code": 65288,
+      "nominal": 5,
+      "glyph": 8,
+      "substitution": 8,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vrt2.ttf",
+      "feature": "vrt2",
+      "code": 12353,
+      "nominal": 6,
+      "glyph": 9,
+      "substitution": 9,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vrt2.ttf",
+      "feature": "vrt2",
+      "code": 57345,
+      "nominal": 7,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "vrt2.ttf",
+      "feature": "vrt2",
+      "code": 57348,
+      "nominal": 10,
+      "glyph": 10,
+      "substitution": 10,
+      "position": [
+        -500,
+        -800,
+        0,
+        -600
+      ]
+    },
+    {
+      "file": "none.ttf",
+      "feature": null,
+      "code": 32,
+      "nominal": 1,
+      "glyph": 1,
+      "substitution": 1,
+      "position": [
+        -250,
+        0,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "none.ttf",
+      "feature": null,
+      "code": 65,
+      "nominal": 2,
+      "glyph": 2,
+      "substitution": 2,
+      "position": [
+        -300,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "none.ttf",
+      "feature": null,
+      "code": 28450,
+      "nominal": 3,
+      "glyph": 3,
+      "substitution": 3,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "none.ttf",
+      "feature": null,
+      "code": 12289,
+      "nominal": 4,
+      "glyph": 7,
+      "substitution": 4,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "none.ttf",
+      "feature": null,
+      "code": 65288,
+      "nominal": 5,
+      "glyph": 8,
+      "substitution": 5,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "none.ttf",
+      "feature": null,
+      "code": 12353,
+      "nominal": 6,
+      "glyph": 6,
+      "substitution": 6,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "none.ttf",
+      "feature": null,
+      "code": 57345,
+      "nominal": 7,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "none.ttf",
+      "feature": null,
+      "code": 57348,
+      "nominal": 10,
+      "glyph": 10,
+      "substitution": 10,
+      "position": [
+        -500,
+        -800,
+        0,
+        -600
+      ]
+    },
+    {
+      "file": "extension.ttf",
+      "feature": "vert",
+      "code": 32,
+      "nominal": 1,
+      "glyph": 1,
+      "substitution": 1,
+      "position": [
+        -250,
+        0,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "extension.ttf",
+      "feature": "vert",
+      "code": 65,
+      "nominal": 2,
+      "glyph": 2,
+      "substitution": 2,
+      "position": [
+        -300,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "extension.ttf",
+      "feature": "vert",
+      "code": 28450,
+      "nominal": 3,
+      "glyph": 3,
+      "substitution": 3,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "extension.ttf",
+      "feature": "vert",
+      "code": 12289,
+      "nominal": 4,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "extension.ttf",
+      "feature": "vert",
+      "code": 65288,
+      "nominal": 5,
+      "glyph": 8,
+      "substitution": 8,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "extension.ttf",
+      "feature": "vert",
+      "code": 12353,
+      "nominal": 6,
+      "glyph": 9,
+      "substitution": 9,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "extension.ttf",
+      "feature": "vert",
+      "code": 57345,
+      "nominal": 7,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "extension.ttf",
+      "feature": "vert",
+      "code": 57348,
+      "nominal": 10,
+      "glyph": 10,
+      "substitution": 10,
+      "position": [
+        -500,
+        -800,
+        0,
+        -600
+      ]
+    },
+    {
+      "file": "delta.ttf",
+      "feature": "vert",
+      "code": 32,
+      "nominal": 1,
+      "glyph": 1,
+      "substitution": 1,
+      "position": [
+        -250,
+        0,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "delta.ttf",
+      "feature": "vert",
+      "code": 65,
+      "nominal": 2,
+      "glyph": 3,
+      "substitution": 3,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "delta.ttf",
+      "feature": "vert",
+      "code": 28450,
+      "nominal": 3,
+      "glyph": 4,
+      "substitution": 4,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "delta.ttf",
+      "feature": "vert",
+      "code": 12289,
+      "nominal": 4,
+      "glyph": 5,
+      "substitution": 5,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "delta.ttf",
+      "feature": "vert",
+      "code": 65288,
+      "nominal": 5,
+      "glyph": 6,
+      "substitution": 6,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "delta.ttf",
+      "feature": "vert",
+      "code": 12353,
+      "nominal": 6,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "delta.ttf",
+      "feature": "vert",
+      "code": 57345,
+      "nominal": 7,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "delta.ttf",
+      "feature": "vert",
+      "code": 57348,
+      "nominal": 10,
+      "glyph": 10,
+      "substitution": 10,
+      "position": [
+        -500,
+        -800,
+        0,
+        -600
+      ]
+    },
+    {
+      "file": "split.ttf",
+      "feature": "vert",
+      "code": 32,
+      "nominal": 1,
+      "glyph": 1,
+      "substitution": 1,
+      "position": [
+        -250,
+        0,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "split.ttf",
+      "feature": "vert",
+      "code": 65,
+      "nominal": 2,
+      "glyph": 3,
+      "substitution": 3,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "split.ttf",
+      "feature": "vert",
+      "code": 28450,
+      "nominal": 3,
+      "glyph": 4,
+      "substitution": 4,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "split.ttf",
+      "feature": "vert",
+      "code": 12289,
+      "nominal": 4,
+      "glyph": 5,
+      "substitution": 5,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "split.ttf",
+      "feature": "vert",
+      "code": 65288,
+      "nominal": 5,
+      "glyph": 6,
+      "substitution": 6,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "split.ttf",
+      "feature": "vert",
+      "code": 12353,
+      "nominal": 6,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "split.ttf",
+      "feature": "vert",
+      "code": 57345,
+      "nominal": 7,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -800,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "split.ttf",
+      "feature": "vert",
+      "code": 57348,
+      "nominal": 10,
+      "glyph": 10,
+      "substitution": 10,
+      "position": [
+        -500,
+        -800,
+        0,
+        -600
+      ]
+    },
+    {
+      "file": "novmetrics.ttf",
+      "feature": "vert",
+      "code": 32,
+      "nominal": 1,
+      "glyph": 1,
+      "substitution": 1,
+      "position": [
+        -250,
+        -500,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "novmetrics.ttf",
+      "feature": "vert",
+      "code": 65,
+      "nominal": 2,
+      "glyph": 2,
+      "substitution": 2,
+      "position": [
+        -300,
+        -850,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "novmetrics.ttf",
+      "feature": "vert",
+      "code": 28450,
+      "nominal": 3,
+      "glyph": 3,
+      "substitution": 3,
+      "position": [
+        -500,
+        -850,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "novmetrics.ttf",
+      "feature": "vert",
+      "code": 12289,
+      "nominal": 4,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -1225,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "novmetrics.ttf",
+      "feature": "vert",
+      "code": 65288,
+      "nominal": 5,
+      "glyph": 8,
+      "substitution": 8,
+      "position": [
+        -500,
+        -1050,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "novmetrics.ttf",
+      "feature": "vert",
+      "code": 12353,
+      "nominal": 6,
+      "glyph": 9,
+      "substitution": 9,
+      "position": [
+        -500,
+        -1025,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "novmetrics.ttf",
+      "feature": "vert",
+      "code": 57345,
+      "nominal": 7,
+      "glyph": 7,
+      "substitution": 7,
+      "position": [
+        -500,
+        -1225,
+        0,
+        -1000
+      ]
+    },
+    {
+      "file": "novmetrics.ttf",
+      "feature": "vert",
+      "code": 57348,
+      "nominal": 10,
+      "glyph": 10,
+      "substitution": 10,
+      "position": [
+        -500,
+        -1000,
+        0,
+        -1000
+      ]
+    }
+  ]
+}

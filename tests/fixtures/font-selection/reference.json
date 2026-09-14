@@ -1,0 +1,103 @@
+{
+  "generator": "scripts/generate-font-selection-fixtures.py",
+  "license": "Derived only from project-owned synthetic font outlines.",
+  "cases": [
+    {
+      "file": "latin.ttf",
+      "family": "Selection Latin",
+      "fixedPitch": false,
+      "outline": true,
+      "charsets": [
+        0,
+        "unicode"
+      ],
+      "vertical": false,
+      "bold": false,
+      "italic": false,
+      "sha256": "e8c273fc26ebeea9be1d174322682aa32202aa58a4d663b8cd63f6f09436f88d"
+    },
+    {
+      "file": "latin-bold.ttf",
+      "family": "Selection Latin",
+      "fixedPitch": false,
+      "outline": true,
+      "charsets": [
+        0,
+        "unicode"
+      ],
+      "vertical": false,
+      "bold": true,
+      "italic": false,
+      "sha256": "5552839cc0c7a88920a412eab00bcf50ed0c46e557749d0e7a7e3032c1be44d1"
+    },
+    {
+      "file": "mono.ttf",
+      "family": "Selection Mono",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        128,
+        "unicode"
+      ],
+      "vertical": true,
+      "bold": false,
+      "italic": false,
+      "sha256": "f56c6487666354e5f6345fa3b3850ffd58d00ed93660718326896aa8e6e2d48b"
+    },
+    {
+      "file": "symbol.ttf",
+      "family": "Selection Symbols",
+      "fixedPitch": true,
+      "outline": true,
+      "charsets": [
+        2
+      ],
+      "vertical": false,
+      "bold": false,
+      "italic": false,
+      "sha256": "be745fa0ca7c5a1c7e0dbeb9a2aeb2c6093a8331c98fd468a48cb76cc3e53c23"
+    },
+    {
+      "file": "mac.ttf",
+      "family": "Caf\u00e9 \u03a9",
+      "fixedPitch": false,
+      "outline": true,
+      "charsets": [
+        0,
+        "unicode"
+      ],
+      "vertical": false,
+      "bold": false,
+      "italic": false,
+      "sha256": "efc9bced5ce3fdb1dac02a034a8dfd7a10df127722be7a8a5cb9d37de9f5c8f2"
+    },
+    {
+      "file": "unknown.ttf",
+      "family": "Selection Unknown Pitch",
+      "fixedPitch": null,
+      "outline": true,
+      "charsets": [
+        0,
+        "unicode"
+      ],
+      "vertical": false,
+      "bold": false,
+      "italic": false,
+      "sha256": "27f816f14a35c4a0530f0dde630ca714fa66354e9a5382a15dc91e9fbc066cbf"
+    },
+    {
+      "file": "collection.ttc",
+      "family": "Selection Latin",
+      "fixedPitch": false,
+      "outline": true,
+      "charsets": [
+        0,
+        "unicode"
+      ],
+      "vertical": false,
+      "bold": false,
+      "italic": false,
+      "sha256": "b48a02dac418db91a4f7dc9ad627048cc184d66cca9341205326ae22bbfe0c64"
+    }
+  ]
+}

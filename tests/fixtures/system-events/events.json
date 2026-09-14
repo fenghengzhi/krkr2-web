@@ -1,0 +1,78 @@
+{
+  "source": "kirikiroid2-web/cpp/core/base/EventIntf.cpp",
+  "sourceSha256": "1e09e1c792f316526beb47e7b444299b588e69cd98d9058459c1a42f7b26ea52",
+  "extractedSha256": "85d4de2cec14088342ff12883d1f1f61ec5ef66e2348f6a55337eacc4bef2347",
+  "functions": [
+    "TVPPostEvent",
+    "_TVPDeliverEventByPrio",
+    "_TVPDeliverAllEvents2",
+    "_TVPDeliverAllEvents",
+    "TVPDeliverAllEvents",
+    "TVPPostInputEvent",
+    "_TVPDeliverContinuousEvent",
+    "TVPDeliverContinuousEvent",
+    "TVPAddContinuousHandler",
+    "TVPRemoveContinuousHandler"
+  ],
+  "cases": {
+    "groups": [
+      "E",
+      "K",
+      "N",
+      "I",
+      "C"
+    ],
+    "normal-exclusive": [
+      "A",
+      "B",
+      "P",
+      "X"
+    ],
+    "exclusive-exclusive": [
+      "A",
+      "B",
+      "P",
+      "X"
+    ],
+    "idle-exclusive": [
+      "A",
+      "B",
+      "P",
+      "X"
+    ],
+    "input-exclusive": [
+      "A",
+      "P",
+      "X",
+      "B"
+    ],
+    "nested-generation": [
+      "A",
+      "X",
+      "B",
+      "a",
+      "M",
+      "P"
+    ],
+    "live-continuous": [
+      "A",
+      "C"
+    ],
+    "continuous-reentry": [
+      "A",
+      "a",
+      "B"
+    ],
+    "idle-before-continuous": [
+      "I",
+      "A",
+      "P",
+      "X"
+    ],
+    "disabled-posting": [
+      "P",
+      "N"
+    ]
+  },
+  "scope": "Exact extracted reference queue and continuous functions; inert platform/TJS invocation stubs, no GUI, VM or clock correctness claim."
+}

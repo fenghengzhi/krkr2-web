@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "lib": ["ES2022", "WebWorker"], "types": [] },
+  "include": [
+    "src/workers",
+    "src/player/create-session.ts",
+    "src/backends",
+    "src/pwa/service-worker.ts"
+  ],
+  "exclude": [
+    "src/backends/audio/web/host.ts",
+    "src/backends/video/browser/host.ts",
+    "src/backends/input/browser.ts"
+  ]
+}

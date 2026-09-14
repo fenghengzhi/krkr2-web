@@ -1,0 +1,6 @@
+{
+  "generator": "scripts/generate-font-geometry-fixtures.py",
+  "fontToolsVersion": "4.60.2",
+  "license": "Project-owned synthetic outlines; no external glyphs copied.",
+  "sha256": "409635894aac1eb9e22911a7baf306ee9add11e15c75a1ad176d06c2d0a00077"
+}

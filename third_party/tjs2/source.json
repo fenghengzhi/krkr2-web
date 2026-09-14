@@ -1,0 +1,327 @@
+{
+  "repository": "kirikiroid2-web",
+  "revision": "6622499f70c3b30240d34d73d757c8adff45248f",
+  "path": "cpp/core/tjs2",
+  "files": [
+    {
+      "path": "CMakeLists.txt",
+      "sha256": "a36ee887e11e8f3e0b8d0adf3ab31aa784eacd7e7c6fc743b08910609d7bbef3"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "31887f008d3666961adb51572add59709c12eb56d39066fed62b5267d380042d"
+    },
+    {
+      "path": "bison/tjs.y",
+      "sha256": "e1641f6021a61e978ce3b0fb27a551f0f8bad5c9eb025c6dec02f22ebe27b952"
+    },
+    {
+      "path": "bison/tjsdate.y",
+      "sha256": "8f91238ecbd12bbb800eb68a97a498333f109d4df94ce984903eb6e37e7bc6b0"
+    },
+    {
+      "path": "bison/tjspp.y",
+      "sha256": "97eb67b0b9e0c026b569f87bbe99cfdb1e638090f6e937daeba8f6d39d42fcee"
+    },
+    {
+      "path": "script/create_world_map.py",
+      "sha256": "5ca1a50f38e39219f75110c73e4907568a6e5f301d04bd33f6b1992d6f22aff7"
+    },
+    {
+      "path": "script/dp_word_table.txt",
+      "sha256": "c8ba7f21e4616db4fe375e92ebfda65e1af7f3d815740d39d84493c93971e007"
+    },
+    {
+      "path": "tjs.cpp",
+      "sha256": "4a1ab298a48997dcda6a38cdd31672942da7e133018db0cd4bf8eb6d5f0a45ba"
+    },
+    {
+      "path": "tjs.h",
+      "sha256": "d5c68d7798b312ddc90603c19366b7fa3afb8bde739b02981ccc906d82d65883"
+    },
+    {
+      "path": "tjsArray.cpp",
+      "sha256": "513e3d94e4089ac6e45dbfe32ca9d0d35b1d8077c79f2d1d0b69b1f40a321023"
+    },
+    {
+      "path": "tjsArray.h",
+      "sha256": "5673e7e3d696f2064c8826431d0ee3b02d9f1bd111e3a52bbfe61ef2f94957bb"
+    },
+    {
+      "path": "tjsBinarySerializer.cpp",
+      "sha256": "5e52b991e4347d9c8459d5affa4c4f3904a88b12d01fa93f60465b940c43cc9f"
+    },
+    {
+      "path": "tjsBinarySerializer.h",
+      "sha256": "893b9d7faf73f60ea0c07e89f89bd698e40f1ceaa13b4c30328c80bde199095f"
+    },
+    {
+      "path": "tjsByteCodeLoader.cpp",
+      "sha256": "dbf342e2530dda967af6e45225ca30c4bcfb3127ed513504d6f9d627f3711fe3"
+    },
+    {
+      "path": "tjsByteCodeLoader.h",
+      "sha256": "504db12082f69fea456a5117ecccd379e2e0b7faa26f6e981c3337df5a24cec8"
+    },
+    {
+      "path": "tjsCommHead.h",
+      "sha256": "c1a8ec249078cc7a3331857f39948a62fe25ab559731f9532fb9d5c9e9c50495"
+    },
+    {
+      "path": "tjsCompileControl.cpp",
+      "sha256": "cece3cc09c50a5d3d5d127413ecb72c055069af301e2c54b5352eebc3ab6d529"
+    },
+    {
+      "path": "tjsCompileControl.h",
+      "sha256": "ecb4ab7f542c63e97cf35dd619196266765ae60f2dc7397c624bed8f061454d3"
+    },
+    {
+      "path": "tjsConfig.cpp",
+      "sha256": "efcce5f25532e0c21546742d607f728cd4c82c482b45174ea732675661163b31"
+    },
+    {
+      "path": "tjsConfig.h",
+      "sha256": "3a889f0067a2ea132e66d5727a6378b362cc3b01eeee8e98d6c52a1b57faf7d8"
+    },
+    {
+      "path": "tjsConstArrayData.cpp",
+      "sha256": "2129a889a69565a3000fb800b06971235f714835af8f5dc552291e4b9ec1836d"
+    },
+    {
+      "path": "tjsConstArrayData.h",
+      "sha256": "c55f0af606b8f3c12213545f2434494dd41d7035c5799ecbb5ba57f26a05bbe3"
+    },
+    {
+      "path": "tjsDate.cpp",
+      "sha256": "c9cf318a0998dbf148b51c3687422391f8e784f4230260125cc493d0f6431b70"
+    },
+    {
+      "path": "tjsDate.h",
+      "sha256": "4c4cf796a34b747d0ed45ae32dcf702c29344458b0baf3577dee0c0f46cb8bde"
+    },
+    {
+      "path": "tjsDateParser.cpp",
+      "sha256": "636dd5114e68f48714cc6ffec7dfc7968b200c2d39646bc7756f89323244a6ad"
+    },
+    {
+      "path": "tjsDateParser.h",
+      "sha256": "c3c336e4dc87e75666406f9dab247d5d21d301907d19c3d46555575490a74aa5"
+    },
+    {
+      "path": "tjsDebug.cpp",
+      "sha256": "98d087cf21a62dfc9554cbfa05ba7f133dd6ccff19eea9fe321b2eab957b26a7"
+    },
+    {
+      "path": "tjsDebug.h",
+      "sha256": "c092f904853ee2e15b6ef439863063f41f59e8c5944418b1c55cc48d52f32038"
+    },
+    {
+      "path": "tjsDictionary.cpp",
+      "sha256": "695c4b95446dcb8d404b1f7b2e8abd13acbe5ae6228d0b1a31d37d023a19e4e0"
+    },
+    {
+      "path": "tjsDictionary.h",
+      "sha256": "1d19eb07374dbdaae0ee681896b6dfa6a3ea90f8a84696caecb18d495fec5954"
+    },
+    {
+      "path": "tjsDisassemble.cpp",
+      "sha256": "86834bc6867b32c10a7b48eacd6303bd7548a8584dafc20a51d0af1715efd117"
+    },
+    {
+      "path": "tjsError.cpp",
+      "sha256": "e3b5a691cd8b4b53558d2cb8286545a6ec284eb5b71cd1450db5812bc01d0c84"
+    },
+    {
+      "path": "tjsError.h",
+      "sha256": "3fe9d5e36dd6d3edc2974985d1dd07f550ad03561208dc6df2b88c0db15e3c65"
+    },
+    {
+      "path": "tjsErrorDefs.h",
+      "sha256": "4ab448360f4d58ec928a7143bdc47c91701ddec578fce05c6555d6a1f0d4a83d"
+    },
+    {
+      "path": "tjsException.cpp",
+      "sha256": "98b4363f22832f4e8df066ed91e79bd4825cc6b9e31f11caec0fc503e483eac0"
+    },
+    {
+      "path": "tjsException.h",
+      "sha256": "e9e58c13b89c24adba1cf4e049fcedccc8500cf3b3926f340a9883042c0e1e99"
+    },
+    {
+      "path": "tjsGlobalStringMap.cpp",
+      "sha256": "45c244607c8a583aff45c35b139ee57c3a983c044aff2eb1da87202adfa5888c"
+    },
+    {
+      "path": "tjsGlobalStringMap.h",
+      "sha256": "f1dc043748864ade4123671302dc2a443110fb8f7da883b9eaf72beee73bf490"
+    },
+    {
+      "path": "tjsHashSearch.h",
+      "sha256": "40a5427e7754112ebf996ceecd0054c0171d52ee41b27b20d20a3c83bbe7f577"
+    },
+    {
+      "path": "tjsInterCodeExec.cpp",
+      "sha256": "b4149df5235dd4d33975e2a1c6136f53bcc24095681d009ad24b953500099d1d"
+    },
+    {
+      "path": "tjsInterCodeExec.h",
+      "sha256": "7df5258889b255238f6a21f0a46de320dcb3149dcc622283e44eb0d8dd2d5e7b"
+    },
+    {
+      "path": "tjsInterCodeGen.cpp",
+      "sha256": "d1dd193c9d4ba0849005eb35b2fc8d1c3af2414e10ce1d58316ee2be2eae7057"
+    },
+    {
+      "path": "tjsInterCodeGen.h",
+      "sha256": "043da3949cb6fce4428d2fc116a51c8b09ea294bbe40b7f4cb64c8f6dbf143a0"
+    },
+    {
+      "path": "tjsInterface.cpp",
+      "sha256": "13bf8ed89e98dddc6a46528f876e9d8287eadf2bb7574a763a860b08c765fc7e"
+    },
+    {
+      "path": "tjsInterface.h",
+      "sha256": "df24af43e9490a8f9da977c8dc95e010fd1e678acca2c950b2066dbbef5c8957"
+    },
+    {
+      "path": "tjsLex.cpp",
+      "sha256": "fad3810f29428e6614495aa67932b4e4e49757602496ee1e615bc46c598e6d04"
+    },
+    {
+      "path": "tjsLex.h",
+      "sha256": "4ca6cfe945381e60f7e4bfba7284f3ea0dbafb24359d265b0081aa71bfa6b1e7"
+    },
+    {
+      "path": "tjsMT19937ar-cok.cpp",
+      "sha256": "f13963e588350fce9ae6f7dcad2db89a500201d1f0eb4344ad2f0b434d91f451"
+    },
+    {
+      "path": "tjsMT19937ar-cok.h",
+      "sha256": "8fbc1fe34d4445154f718acdaec81d688eb12b95ed5ddf885bb9f7ac150e024c"
+    },
+    {
+      "path": "tjsMath.cpp",
+      "sha256": "07c1c624509b951af0833441d75592828e91293e71bdc5f6d6f818f82ccf618a"
+    },
+    {
+      "path": "tjsMath.h",
+      "sha256": "7eefae081a47ddeb5c336e38ff577f95fff56142cc5767c8ccf2dc5758511790"
+    },
+    {
+      "path": "tjsMessage.cpp",
+      "sha256": "58d2bc9b0888790da9fba0eb821077288e1a6c7cac8b6b1e3ce0f4cd85c31493"
+    },
+    {
+      "path": "tjsMessage.h",
+      "sha256": "c2ae49c53894cfb252fa88dbcceb2f02daee8d6b420beabd9f6723418b9ea760"
+    },
+    {
+      "path": "tjsNamespace.cpp",
+      "sha256": "dfad247a596d69b5ee4cec5ccfc3fb46e14ed8660b65c9115a94694eb956cc26"
+    },
+    {
+      "path": "tjsNamespace.h",
+      "sha256": "68786a16316a03db7e263f292c51a46bc39c5fa01c812bf243f9498d9608a7c3"
+    },
+    {
+      "path": "tjsNative.cpp",
+      "sha256": "10c71fd50533a77337a87ffdbf946dab8af38c94eb851436561d367a5d35e25e"
+    },
+    {
+      "path": "tjsNative.h",
+      "sha256": "d0c2f5ac7a033b7629c9614f13861fb0688d8565df4a36c77cbf1812a7432d3b"
+    },
+    {
+      "path": "tjsObject.cpp",
+      "sha256": "f956bf0c92a9c55174c4f6a33d42e20c076726bb0bde67e4423ec5b9e2f8f401"
+    },
+    {
+      "path": "tjsObject.h",
+      "sha256": "702d650ae5e02ad5871c5925b52fde190beac4fe21c72034a26994935f385daa"
+    },
+    {
+      "path": "tjsObjectExtendable.cpp",
+      "sha256": "b593ba247bed8efd1d70f1c78dfa3e885d0954a3b672ea363eed9cf5f691da27"
+    },
+    {
+      "path": "tjsObjectExtendable.h",
+      "sha256": "6968b3faf8d451b40ed78172ef93a9c02e7abb91c8e4fd78f138c147cae07b20"
+    },
+    {
+      "path": "tjsOctPack.cpp",
+      "sha256": "1b763f8356243d92a1d10c63c5d5846a076e42b7af9fb66a4ff10ea92779d27e"
+    },
+    {
+      "path": "tjsOctPack.h",
+      "sha256": "326438ae850103a955ca52b082a89e4bbfe214ee6f2918349a0ffcdcbcd61c97"
+    },
+    {
+      "path": "tjsRandomGenerator.cpp",
+      "sha256": "11aaeda02ed593c6bf0d352d8f405e5026b1d5334d45384f32c98d19da931459"
+    },
+    {
+      "path": "tjsRandomGenerator.h",
+      "sha256": "7c3099b3548ca745357905ec76acf9da71ecae604987897a520041f45e6a0b7e"
+    },
+    {
+      "path": "tjsRegExp.cpp",
+      "sha256": "efa82e7a7e7df71aaf3a50c865c5a4a7105d491c41b639dd10c5f794bd4ba013"
+    },
+    {
+      "path": "tjsRegExp.h",
+      "sha256": "68070e2a0025e5c87f8ce989cc5391bbf933515ea431fc7364d1b40f6b51efbd"
+    },
+    {
+      "path": "tjsScriptBlock.cpp",
+      "sha256": "0be4c814262f21d64d021997ca246aeb9d68f2ac606c699dd72678ae7f164dbe"
+    },
+    {
+      "path": "tjsScriptBlock.h",
+      "sha256": "6ecfa3bdd8b75402db4b3847426309e8b9b5310c37f72e877ed557c0a45f8a11"
+    },
+    {
+      "path": "tjsScriptCache.cpp",
+      "sha256": "919239e8a338fbcfff44cc4432d94607b8c8833c4093985a2142533600b8748f"
+    },
+    {
+      "path": "tjsScriptCache.h",
+      "sha256": "f56c786a571c8ec29360bb041d468bcc944edba517cba31f8eff619b70ec51ea"
+    },
+    {
+      "path": "tjsString.cpp",
+      "sha256": "86293d83ca851946660befb95a879b5c7af9a377ae08e0994dca0f6351462538"
+    },
+    {
+      "path": "tjsString.h",
+      "sha256": "5b367d6c3a23b93347a9c9a2f40c1701082c0d511f3f0baae1d852caac19446a"
+    },
+    {
+      "path": "tjsTypes.h",
+      "sha256": "6986606e78bbebd22e427ee8be916b7e7a53f5f73bee51f1460cdf81d5eba972"
+    },
+    {
+      "path": "tjsUtils.cpp",
+      "sha256": "286f542c8af795738fb06b18f4065b59710b1fc16a4c0ffa17ba253e948f9cd7"
+    },
+    {
+      "path": "tjsUtils.h",
+      "sha256": "c5964e13920cb69fab5507001f8f4548f7278fd671f8ef64c63f62c0518b006d"
+    },
+    {
+      "path": "tjsVariant.cpp",
+      "sha256": "7b7c60cdd8a824569d8a54e6f1056ed6150d41d754b73095fa5b72136ca40964"
+    },
+    {
+      "path": "tjsVariant.h",
+      "sha256": "f6b453a19a084c192bc7eaa1ab43ba73bba899b893f1cd45a9ab7641af821be0"
+    },
+    {
+      "path": "tjsVariantString.cpp",
+      "sha256": "c0fc004292c97d55f2888a3c24fd4beab78cc27e3c13585e14a4de6040ad704b"
+    },
+    {
+      "path": "tjsVariantString.h",
+      "sha256": "eabe02d21e923fbdabdedcb4876bcf69d9b6d62a4cb191f1b32c3afd4dd1ef77"
+    }
+  ]
+}

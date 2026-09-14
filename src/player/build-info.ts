@@ -1,0 +1,4 @@
+declare const __KRKR_WASM_MANIFEST_FILE__: string
+export const wasmManifestFile = __KRKR_WASM_MANIFEST_FILE__
+declare const __KRKR_FONT_MANIFEST_FILE__: string
+export const fontManifestFile = __KRKR_FONT_MANIFEST_FILE__

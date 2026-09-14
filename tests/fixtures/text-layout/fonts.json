@@ -1,0 +1,200 @@
+{
+  "generator": "scripts/generate-vertical-font-fixtures.py",
+  "fontToolsVersion": "4.60.2",
+  "license": "All glyph outlines are project-owned synthetic test data.",
+  "glyphOrder": [
+    ".notdef",
+    "space",
+    "A",
+    "han",
+    "comma",
+    "paren",
+    "kana",
+    "comma.vert",
+    "paren.vert",
+    "kana.vert",
+    "A.rot"
+  ],
+  "cmap": {
+    "32": "space",
+    "65": "A",
+    "28450": "han",
+    "12289": "comma",
+    "65288": "paren",
+    "12353": "kana",
+    "57345": "comma.vert",
+    "57346": "paren.vert",
+    "57347": "kana.vert",
+    "57348": "A.rot",
+    "65041": "comma.vert",
+    "65077": "paren.vert"
+  },
+  "rectangles": {
+    ".notdef": [
+      [
+        100,
+        100,
+        700,
+        700
+      ]
+    ],
+    "space": [],
+    "A": [
+      [
+        100,
+        0,
+        250,
+        700
+      ],
+      [
+        100,
+        550,
+        500,
+        700
+      ]
+    ],
+    "han": [
+      [
+        100,
+        0,
+        250,
+        700
+      ],
+      [
+        100,
+        550,
+        800,
+        700
+      ],
+      [
+        500,
+        100,
+        700,
+        250
+      ]
+    ],
+    "comma": [
+      [
+        100,
+        0,
+        250,
+        150
+      ]
+    ],
+    "paren": [
+      [
+        100,
+        0,
+        250,
+        800
+      ],
+      [
+        100,
+        650,
+        400,
+        800
+      ]
+    ],
+    "kana": [
+      [
+        100,
+        0,
+        250,
+        450
+      ],
+      [
+        100,
+        300,
+        550,
+        450
+      ]
+    ],
+    "comma.vert": [
+      [
+        650,
+        650,
+        800,
+        800
+      ]
+    ],
+    "paren.vert": [
+      [
+        100,
+        550,
+        900,
+        700
+      ],
+      [
+        100,
+        400,
+        250,
+        700
+      ]
+    ],
+    "kana.vert": [
+      [
+        400,
+        300,
+        550,
+        750
+      ],
+      [
+        400,
+        600,
+        850,
+        750
+      ]
+    ],
+    "A.rot": [
+      [
+        100,
+        550,
+        800,
+        700
+      ],
+      [
+        650,
+        300,
+        800,
+        700
+      ]
+    ]
+  },
+  "cases": [
+    {
+      "file": "vert.ttf",
+      "family": "Krkr Vertical vert",
+      "sha256": "d503dea64ad992dc9b42101d29800160c51b1cc9bac28ed4d70eb40585423906"
+    },
+    {
+      "file": "vrt2.ttf",
+      "family": "Krkr Vertical vrt2",
+      "sha256": "b4205ed64f8ec7b070561e1d620adb108fa03dd438ab685bd629c5a4a8d339b9"
+    },
+    {
+      "file": "none.ttf",
+      "family": "Krkr Vertical none",
+      "sha256": "c5a75771525d79e1f5ad411836418f02f50cc167b4791ff5b22e77d8592fa537"
+    },
+    {
+      "file": "extension.ttf",
+      "family": "Krkr Vertical extension",
+      "sha256": "2ed3bf83aa97afa56fa7d0e3d14433ac07ddd6133f1a35f044fbc2be59fc636f"
+    },
+    {
+      "file": "delta.ttf",
+      "family": "Krkr Vertical delta",
+      "sha256": "af87a7bcb9162a292283393598a8684196e34bd7dc1fc3dcd5826e3527dd3229"
+    },
+    {
+      "file": "split.ttf",
+      "family": "Krkr Vertical split",
+      "sha256": "544557a780a3fb4356b5d1be4e338725488e2a40b82ffe92f155a3943db84790"
+    },
+    {
+      "file": "novmetrics.ttf",
+      "family": "Krkr Vertical novmetrics",
+      "sha256": "5a591fee6160d0831030662308f5270101774a10c1e5c04133b6213d75dfec15"
+    }
+  ]
+}
