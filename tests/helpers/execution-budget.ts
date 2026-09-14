@@ -59,7 +59,14 @@ export async function exerciseExecutionBudget(
   const native = observeNative(factory)
   const vm = await TjsWasmRuntime.create(
     native.factory,
-    () => {
+    (operation, args) => {
+      if (operation === 'budget-host' && typeof args[0] === 'bigint')
+        return {
+          kind: 'script',
+          source: `budgetHost(${args[0]})`,
+          name: 'host-budget.tjs',
+          expression: true,
+        }
       throw new Error('Unexpected host I/O')
     },
     { wasmBinary, variant, debugMode },
@@ -133,6 +140,14 @@ export async function exerciseExecutionBudget(
       state: idle(native),
     })
     await vm.execute('delete BudgetCycleA;delete BudgetCycleB;')
+    await vm.execute('function budgetHost(n){if(n<=0)return 42;return __host("budget-host",n-1);}')
+    check((await vm.execute('budgetHost(16)', '', true)) === 42n, 'Ordinary host reentry changed')
+    results.push({
+      scenario: 'host-continuations',
+      message: await caught('budgetHost(4096);', depthError),
+      state: idle(native),
+    })
+    await vm.execute('delete budgetHost;')
     const wide = await vm.compile(definition, 'wide-frame.tjs'),
       layout = bytecodeOffsets(wide),
       view = new DataView(wide.buffer)
@@ -150,7 +165,7 @@ export async function exerciseExecutionBudget(
       state: idle(native),
     })
     await vm.execute(
-      'delete budgetRecurse;var budgetCalled=0;function budgetCall(a,b){budgetCalled++;return a+b;}',
+      'delete budgetRecurse;var budgetCalled=0;function budgetCall(values*){budgetCalled++;return values[0]+values[1];}',
     )
     check(
       (await vm.execute('budgetCall([20,22]*)', '', true)) === 42n,
@@ -158,7 +173,7 @@ export async function exerciseExecutionBudget(
     )
     await vm.execute('var budgetValues=[];budgetValues.count=1000000;budgetCalled=0;')
     results.push({
-      scenario: 'expanded-arguments',
+      scenario: 'argument-memory',
       message: await caught('budgetCall(budgetValues*);', memoryError),
       state: idle(native),
     })
@@ -300,6 +315,109 @@ export async function exerciseDeepContinuation(
     }
   } finally {
     release()
+    control.cancel()
+    await pending
+    vm.dispose()
+  }
+}
+
+export async function exerciseArgumentControl(
+  factory: ModuleFactory,
+  wasmBinary: Uint8Array,
+  variant: WasmVariant,
+  cancel: boolean,
+) {
+  const native = observeNative(factory),
+    control = new ExecutionControl()
+  let entered!: () => void,
+    armed = false,
+    settled = false,
+    error: unknown,
+    result: unknown,
+    observed: ReturnType<typeof executionStats> | undefined
+  let before: ReturnType<typeof native.stats>
+  const started = new Promise<void>((resolve) => (entered = resolve))
+  const wrapped: ModuleFactory = (options) =>
+    native.factory({
+      ...options,
+      onYield: async (phase) => {
+        if (armed && !observed && phase === 10) {
+          const state = executionStats(native)
+          if (
+            state.bytes > 8 * 1024 * 1024 &&
+            native.stats().heap > before.heap + 8 * 1024 * 1024
+          ) {
+            observed = state
+            control.pause()
+            entered()
+          }
+        }
+        await options.onYield(phase)
+      },
+    })
+  const vm = await TjsWasmRuntime.create(
+    wrapped,
+    () => {
+      throw new Error('Unexpected host I/O')
+    },
+    { wasmBinary, variant, control },
+  )
+  let pending: Promise<void> | undefined
+  try {
+    await vm.execute(
+      'var argumentToken=%[];var argumentValues=[];argumentValues.count=700000;for(var i=0;i<700000;i++)argumentValues[i]=argumentToken;function argumentTarget(*){return 42;}',
+    )
+    before = native.stats()
+    armed = true
+    pending = vm.execute('argumentTarget(argumentValues*)', 'argument-control.tjs', true).then(
+      (value) => {
+        settled = true
+        result = value
+      },
+      (failure: unknown) => {
+        settled = true
+        error = failure
+      },
+    )
+    await Promise.race([
+      started,
+      pending.then(() => {
+        throw new Error(`No materialized argument checkpoint: ${String(error)}`)
+      }),
+    ])
+    await new Promise<void>((resolve) => setTimeout(resolve, 25))
+    check(!settled, 'Argument preparation advanced while paused')
+    if (cancel) control.cancel()
+    else control.resume()
+    await pending
+    if (cancel)
+      check(
+        error instanceof Error && error.name === 'AbortError',
+        `Argument cancellation failed: ${String(error)}`,
+      )
+    else check(result === 42n && !error, `Argument resume failed: ${String(error)}`)
+    const after = idle(native),
+      resources = native.stats()
+    check(
+      resources.blocks === before.blocks && resources.contexts === before.contexts,
+      'Argument preparation retained call contexts',
+    )
+    // The large source array remains intentionally global; only the temporary
+    // copied arguments and frame storage must be gone after this operation.
+    check(
+      resources.heap <= before.heap + 64 * 1024,
+      `Argument buffers were retained: ${JSON.stringify({ before, resources })}`,
+    )
+    return {
+      cancel,
+      heldMs: 25,
+      observed,
+      after,
+      before,
+      resources,
+      error: error instanceof Error ? error.name : null,
+    }
+  } finally {
     control.cancel()
     await pending
     vm.dispose()

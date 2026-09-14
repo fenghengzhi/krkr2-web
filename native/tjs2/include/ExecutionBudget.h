@@ -11,6 +11,10 @@ extern "C" void krkr_vm_release_temporary(std::uint64_t bytes);
 
 namespace krkr {
 struct ExecutionCancelled : TJS::eTJSSilent {};
+class ExecutionLimitError : public TJS::eTJSError {
+public:
+    explicit ExecutionLimitError(const tjs_char* message) : TJS::eTJSError(TJS::ttstr(message)) {}
+};
 // Functions, try bodies and superclass delegation share one nesting budget.
 class ExecutionFrame {
     unsigned kind;

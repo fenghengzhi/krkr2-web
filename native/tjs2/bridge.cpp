@@ -157,7 +157,7 @@ void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
     if(reply.kind == 1) TJS_eTJSError(ttstr(reply.value));
     if(reply.kind == 2 || reply.kind == 7) {
         krkr::ExecutionFrame delegation(2);
-        if(reply.args.size() > 1000000) TJS_eTJSError(u"VM call exceeds 1000000 arguments");
+        if(reply.args.size() > 1000000) throw krkr::ExecutionLimitError(u"VM call exceeds 1000000 arguments");
         krkr::TemporaryMemory memory;
         memory.reserve(reply.args.size(), sizeof(tTJSVariant*));
         auto closure = reply.value.AsObjectClosureNoAddRef();

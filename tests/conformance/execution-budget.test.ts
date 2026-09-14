@@ -4,7 +4,11 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { ModuleFactory, WasmManifest } from '../../src/backends/script/tjs-wasm/module.ts'
-import { exerciseExecutionBudget, exerciseDeepContinuation } from '../helpers/execution-budget.ts'
+import {
+  exerciseExecutionBudget,
+  exerciseDeepContinuation,
+  exerciseArgumentControl,
+} from '../helpers/execution-budget.ts'
 
 const directory = resolve('.generated/wasm')
 const manifest: WasmManifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8'))
@@ -31,6 +35,17 @@ for (const cancel of [false, true])
     async (t) => {
       t.diagnostic(
         JSON.stringify(await exerciseDeepContinuation(factory, wasmBinary, 'asyncify', cancel)),
+      )
+    },
+  )
+
+for (const cancel of [false, true])
+  test(
+    `materialized call arguments pause and ${cancel ? 'cancel' : 'resume'}`,
+    { timeout: 120000 },
+    async (t) => {
+      t.diagnostic(
+        JSON.stringify(await exerciseArgumentControl(factory, wasmBinary, 'asyncify', cancel)),
       )
     },
   )

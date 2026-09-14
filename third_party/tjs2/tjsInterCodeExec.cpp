@@ -1391,6 +1391,10 @@ namespace TJS {
             }
         } catch(eTJSSilent &) {
             throw;
+        } catch(krkr::ExecutionLimitError &e) {
+            // Do not disassemble every live register at an exhausted resource
+            // boundary. Preserve the source location and ordinary TJS catch.
+            TJS_eTJSScriptError(e.GetMessage(), this, codesave - CodeArea);
         } catch(eTJSScriptError &e) {
             e.AddTrace(this, codesave - CodeArea);
             throw;
@@ -2107,7 +2111,7 @@ namespace TJS {
         bool cleared = false;
         static void add(tjs_int& count, tjs_int amount) {
             if(amount < 0 || amount > maximumArguments - count)
-                TJS_eTJSError(u"VM call exceeds 1000000 arguments");
+                throw krkr::ExecutionLimitError(u"VM call exceeds 1000000 arguments");
             count += amount;
         }
     public:

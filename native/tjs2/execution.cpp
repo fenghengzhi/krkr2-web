@@ -15,13 +15,13 @@ unsigned kinds[3]{}, peaks[3]{};
 }
 extern "C" void krkr_vm_enter_frame(unsigned kind) {
     krkr_vm_check_cancellation();
-    if(kind == 0 && kinds[0] >= functionLimit) TJS::TJS_eTJSError(u"VM function depth exceeds 128 frames");
-    if(kind == 2 && kinds[2] >= delegationLimit) TJS::TJS_eTJSError(u"VM delegation depth exceeds 128 frames");
-    if(depth >= depthLimit) TJS::TJS_eTJSError(u"VM execution depth exceeds 256 frames");
+    if(kind == 0 && kinds[0] >= functionLimit) throw krkr::ExecutionLimitError(u"VM function depth exceeds 128 frames");
+    if(kind == 2 && kinds[2] >= delegationLimit) throw krkr::ExecutionLimitError(u"VM delegation depth exceeds 128 frames");
+    if(depth >= depthLimit) throw krkr::ExecutionLimitError(u"VM execution depth exceeds 256 frames");
     const auto free = emscripten_stack_get_free();
     minimumStackFree = std::min(minimumStackFree, unsigned(free));
     if(free < stackReserve)
-        TJS::TJS_eTJSError(u"VM native stack reserve exhausted");
+        throw krkr::ExecutionLimitError(u"VM native stack reserve exhausted");
     ++depth;
     ++kinds[kind];
     peaks[kind] = std::max(peaks[kind], kinds[kind]);
@@ -30,7 +30,7 @@ extern "C" void krkr_vm_enter_frame(unsigned kind) {
 extern "C" void krkr_vm_leave_frame(unsigned kind) { --depth; --kinds[kind]; }
 extern "C" void krkr_vm_reserve_temporary(std::uint64_t bytes) {
     if(bytes > temporaryLimit - temporary)
-        TJS::TJS_eTJSError(u"VM temporary registers and arguments exceed 16 MiB budget");
+        throw krkr::ExecutionLimitError(u"VM temporary registers and arguments exceed 16 MiB budget");
     temporary += bytes;
     peakTemporary = std::max(peakTemporary, temporary);
 }
