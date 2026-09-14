@@ -211,6 +211,7 @@ export class EngineSession {
   private windowCreated = false
   private dirty = true
   private stopPromise?: Promise<void>
+  private disposalPromise?: Promise<void>
   private exitRequested = false
   constructor(private readonly deps: SessionDependencies) {
     this.fonts = new FontService(
@@ -386,16 +387,25 @@ export class EngineSession {
           this.layers.resize(id, pixels.width, pixels.height)
           this.dirty = true
         },
-        (callback, args, valid, before, immediate) => {
+        (callback, member, args, valid, before, immediate, source) => {
           if (valid()) before()
-          return this.systemEvents!.post(() => ({ kind: 'invoke', callback, args }), {
-            valid: () => valid() && (!immediate || !this.systemEvents!.disabled),
-            discardable: immediate,
-          }).then(() => this.queue.drain())
+          return this.systemEvents!.post(
+            () =>
+              member
+                ? { kind: 'invoke', callback, member, args }
+                : { kind: 'value', value: undefined },
+            {
+              valid: () => valid() && (!immediate || !this.systemEvents!.disabled),
+              discardable: immediate,
+              source,
+            },
+          )
         },
         (error) => {
           if (!this.control.cancelled) this.fail(error)
         },
+        (source) => this.systemEvents!.cancelSource(source),
+        () => this.queue.drain(),
       )
       this.discard(await this.runtime.execute(tvpConstants, 'krkr2-web/constants.tjs'))
       this.discard(await this.runtime.execute(debugBridge, 'krkr2-web/debug.tjs'))
@@ -462,9 +472,15 @@ export class EngineSession {
           let closingError: unknown,
             closingFailed = false
           try {
-            await this.sounds?.flushCloses()
+            await this.videos?.flushCloses()
           } catch (error) {
             closingError = error
+            closingFailed = true
+          }
+          try {
+            await this.sounds?.flushCloses()
+          } catch (error) {
+            if (!closingFailed) closingError = error
             closingFailed = true
           }
           try {
@@ -475,7 +491,7 @@ export class EngineSession {
           }
           if (closingFailed) {
             if (!failed) throw closingError
-            this.log('Sound cleanup failed: ' + String(closingError), 'error')
+            this.log('Media cleanup failed: ' + String(closingError), 'error')
           }
         }
         const display = isScriptObject(value)
@@ -930,6 +946,8 @@ export class EngineSession {
     eventSources: number
     soundSources: number
     pendingSoundCloses: number
+    videoSources: number
+    pendingVideoCloses: number
     dependents: number
     pendingInvalidations: number
     weakOwners: number
@@ -941,6 +959,8 @@ export class EngineSession {
       eventSources: this.events?.count ?? 0,
       soundSources: this.sounds?.count ?? 0,
       pendingSoundCloses: this.sounds?.pendingCloses ?? 0,
+      videoSources: this.videos?.count ?? 0,
+      pendingVideoCloses: this.videos?.pendingCloses ?? 0,
       dependents: runtime?.dependents ?? 0,
       pendingInvalidations: runtime?.pendingInvalidations ?? 0,
       weakOwners: runtime?.weakOwners ?? 0,
@@ -1011,22 +1031,7 @@ export class EngineSession {
       .drain()
       .then(async () => {
         await this.flushFiles(true, true)
-        await this.appLocks.close()
-        await this.videos?.dispose()
-        await this.sounds?.dispose()
-        this.inputs?.dispose()
-        this.callbacks.clear()
-        this.kag.clear()
-        this.menus.clear()
-        this.menuCallback = undefined
-        this.windowCallback = undefined
-        this.presentMenus()
-        this.runtime?.dispose()
-        this.runtime = undefined
-        this.layers.clear()
-        this.storage.clear()
-        this.deps.renderer.dispose()
-        this.saves.close()
+        await this.disposeResources()
         this.setState('stopped')
       })
       .catch((error) => {
@@ -1036,12 +1041,52 @@ export class EngineSession {
       })
     return this.stopPromise
   }
+  private disposeResources(): Promise<void> {
+    if (this.disposalPromise) return this.disposalPromise
+    this.disposalPromise = (async () => {
+      let primary: unknown,
+        failed = false
+      const attempt = async (action: () => unknown) => {
+        try {
+          await action()
+        } catch (error) {
+          if (!failed) {
+            primary = error
+            failed = true
+          }
+        }
+      }
+      // Saving is a separate, retryable gate before entering this terminal
+      // cleanup. Once here, one media failure must not retain the VM or other
+      // resources. Cache the outcome so a retry never disposes a device twice.
+      await attempt(() => this.appLocks.close())
+      await attempt(() => this.videos?.dispose())
+      await attempt(() => this.sounds?.dispose())
+      await attempt(() => this.inputs?.dispose())
+      this.callbacks.clear()
+      await attempt(() => this.kag.clear())
+      await attempt(() => this.menus.clear())
+      this.menuCallback = undefined
+      this.windowCallback = undefined
+      await attempt(() => this.presentMenus())
+      const runtime = this.runtime
+      this.runtime = undefined
+      await attempt(() => runtime?.dispose())
+      await attempt(() => this.layers.clear())
+      await attempt(() => this.storage.clear())
+      await attempt(() => this.deps.renderer.dispose())
+      await attempt(() => this.saves.close())
+      if (failed) throw primary
+    })()
+    return this.disposalPromise
+  }
   exportSaves(): SaveFile[] {
     this.materializeLogs()
     return this.saves.export()
   }
   async idle(): Promise<void> {
     await this.queue.drain()
+    await this.videos?.flushCloses()
     await this.sounds?.flushCloses()
     await this.queue.drain()
   }

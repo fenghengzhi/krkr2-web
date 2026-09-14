@@ -911,6 +911,20 @@ API unsigned krkr_owner_upgrade(Vm* vm, unsigned token) {
         return 0;
     }
 }
+// A freshly constructed reply owns this closure directly. Returning a weak
+// reference must not allocate a host handle whose release would outlive the
+// native reply. Expired or explicitly revoked references become script null.
+API void krkr_value_set_owner(Vm* vm, tTJSVariant* value, unsigned token) {
+    auto found = vm->owners.find(token);
+    if(!shuttingDown && found != vm->owners.end()) {
+        auto* owner = found->second->owner;
+        if(owner && owner->IsLifetimeValid()) {
+            *value = tTJSVariant(owner, found->second->boundContext ? owner : nullptr);
+            return;
+        }
+    }
+    *value = tTJSVariant(static_cast<iTJSDispatch2*>(nullptr));
+}
 API int krkr_owner_upgrade_failed(Vm* vm) { return vm->ownerUpgradeFailed; }
 API void krkr_owner_unobserve(Vm* vm, unsigned token) { vm->owners.erase(token); }
 API unsigned krkr_owner_count(Vm* vm) { return vm->owners.size(); }

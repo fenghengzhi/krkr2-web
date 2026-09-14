@@ -531,6 +531,8 @@ function createOwner(){global.owner=new EventOwner();}
             eventSources: 0,
             soundSources: 0,
             pendingSoundCloses: 0,
+            videoSources: 0,
+            pendingVideoCloses: 0,
             dependents: 0,
             pendingInvalidations: 0,
             weakOwners: 0,
