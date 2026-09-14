@@ -51,7 +51,7 @@ var lifetimeOctet=<%00 ff 2a%>;
 var lifetimeLong="long bytecode string with native allocation beyond short storage";
 `
 export const lifetimeCleanup =
-  'delete lifetimeBox;delete LifetimeBox;delete LifetimeBase;delete lifetimeOctet;delete lifetimeLong;'
+  'invalidate lifetimeBox;delete lifetimeBox;delete LifetimeBox;delete LifetimeBase;delete lifetimeOctet;delete lifetimeLong;'
 
 /** Empty property names pass the container bounds checks but fail native PropSet. */
 export function lateLinkFailure(original: Uint8Array) {
@@ -67,6 +67,46 @@ export function lateLinkFailure(original: Uint8Array) {
   data.setUint16(offset + 4, 0, true)
   return bytes
 }
+/** Repeated references to one long name amplify a small file into large contexts. */
+export function expandedBytecodeNames(original: Uint8Array) {
+  const layout = bytecodeOffsets(original),
+    originalView = new DataView(original.buffer, original.byteOffset, original.byteLength)
+  const stringCount = layout.pools[5]!.count,
+    stringEnd = layout.pools[6]!.count
+  const stringIndex = originalView.getUint32(stringCount, true),
+    units = 512 * 1024,
+    count = 256
+  const extra = new Uint8Array(4 + units * 2),
+    extraView = new DataView(extra.buffer)
+  extraView.setUint32(0, units, true)
+  for (let i = 0; i < units; i++) extraView.setUint16(4 + i * 2, 0x61, true)
+  const root = layout.objects[0]!,
+    object = original.slice(
+      root.start - 8,
+      root.length + 4 + originalView.getUint32(root.length, true),
+    )
+  const start = layout.objectsStart + extra.length,
+    bytes = new Uint8Array(start + 16 + object.length * count),
+    view = new DataView(bytes.buffer)
+  bytes.set(original.subarray(0, stringEnd))
+  bytes.set(extra, stringEnd)
+  bytes.set(original.subarray(stringEnd, layout.objectsStart + 16), stringEnd + extra.length)
+  view.setUint32(8, bytes.length, true)
+  view.setUint32(16, originalView.getUint32(16, true) + extra.length, true)
+  view.setUint32(stringCount, stringIndex + 1, true)
+  view.setUint32(start + 4, 16 + object.length * count, true)
+  view.setUint32(start + 8, 0, true)
+  view.setUint32(start + 12, count, true)
+  for (let i = 0; i < count; i++) {
+    const at = start + 16 + i * object.length
+    bytes.set(object, at)
+    view.setInt32(at + 8, i ? 0 : -1, true)
+    view.setInt32(at + 12, stringIndex, true)
+    view.setInt32(at + 16, i ? 1 : 0, true)
+  }
+  return bytes
+}
+
 export async function exerciseBytecodeLifetime(
   factory: ModuleFactory,
   wasmBinary: Uint8Array,
@@ -250,11 +290,12 @@ export async function exerciseBytecodeControl(
     else {
       checkLifetime(!error, `Bytecode resume failed: ${String(error)}`)
       if (phase !== 6) {
+        await vm.execute('var lifetimeMany=new LifetimeMany();')
         checkLifetime(
-          (await vm.execute('(new LifetimeMany()).f23999()', '', true)) === 42n,
+          (await vm.execute('lifetimeMany.f23999()', '', true)) === 42n,
           'Linked function changed',
         )
-        await vm.execute('delete LifetimeMany;')
+        await vm.execute('invalidate lifetimeMany;delete lifetimeMany;delete LifetimeMany;')
       }
     }
     const after = native.stats()

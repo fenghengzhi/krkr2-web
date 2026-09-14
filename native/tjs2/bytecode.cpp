@@ -145,6 +145,7 @@ void instructions(const Object& object) {
     std::vector<std::uint8_t> boundaries(object.codeSize);
     std::vector<int> destinations = object.superPointers;
     unsigned work = 0;
+    int previousOpcode = -1;
     for(unsigned ip = 0; ip < object.codeSize;) {
         krkr_compiler_work(work++);
         boundaries[ip] = 1;
@@ -164,6 +165,13 @@ void instructions(const Object& object) {
         };
         const auto jump = [&]() { destinations.push_back(int(ip) + at(1)); };
         const int opcode = at(0);
+        // The native compiler terminates superclass proxy tables with a NOP
+        // after RET. It is a sentinel, never a callable/jumpable instruction.
+        if(object.type == ctSuperClassGetter && ip + 1 == object.codeSize && opcode == VM_NOP) {
+            if(previousOpcode != VM_RET) broken();
+            boundaries[ip] = 0;
+            break;
+        }
         unsigned size = 0;
         if(opcode >= VM_LOR && opcode <= VM_MULP) {
             const int form = (opcode - VM_LOR) % 4;
@@ -244,6 +252,7 @@ void instructions(const Object& object) {
         // Ordinary fallthrough must reach another complete instruction.
         if(ip + size == object.codeSize && opcode != VM_RET && opcode != VM_EXTRY &&
            opcode != VM_THROW && opcode != VM_JMP) broken();
+        previousOpcode = opcode;
         ip += size;
     }
     for(unsigned i = 0; i < destinations.size(); ++i) {

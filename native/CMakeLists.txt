@@ -39,7 +39,6 @@ add_executable(tjs ${TJS_SOURCES} ${PARSERS} "${CMAKE_CURRENT_BINARY_DIR}/parser
 option(KRKR_TEST_ALLOCATION_FAILURES "Build a non-release allocator fault diagnostic" OFF)
 if(KRKR_TEST_ALLOCATION_FAILURES)
   target_sources(tjs PRIVATE tjs2/diagnostics/allocation-faults.cpp)
-  target_link_options(tjs PRIVATE "-Wl,--wrap=malloc")
 endif()
 target_include_directories(tjs PRIVATE "${TJS_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/parser" tjs2/include ../third_party/boost/include)
 target_compile_definitions(tjs PRIVATE BOOST_ALL_NO_LIB TJS_TEXT_OUT_CRLF)
