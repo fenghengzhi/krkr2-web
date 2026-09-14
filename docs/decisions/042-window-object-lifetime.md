@@ -10,6 +10,8 @@ Window 原生登记强持有对象，remove 必须释放这项登记而不失效
 
 第二项实现为原生实例失效入口：附着在 TJS 对象的 native instance slot 中，弱指向所属对象，通过已有可挂起宿主桥调用清理操作。时序为脚本 finalize → native Invalidate → 弱观察通知 → 成员删除；它不把 Window 清理推迟到成员已经不可访问的阶段。原生入口成功后不重复执行，失败允许显式失效重试；VM 终止时不调用宿主脚本。新增源码/字节码和普通/调试模式验证成员可见性、直接 finalize、脚本/原生异常重试、四个 slot 的逆序、非法登记、重入、暂停/取消和 VM 销毁。原生入口也仍在验证中，尚未接入 Window 的实际对象服务。
 
+[34908290232](https://github.com/fenghengzhi/krkr2-web/actions/runs/34908290232) 的 Node 856 项和 6 组直接运行时已通过，直接报告逐项记录 264 个原生实例场景及 216 个撤销登记场景，无失败。该完整运行仍等待 WebKit 常规任务；包含模糊取消 fixture 修正的 [34908959155](https://github.com/fenghengzhi/krkr2-web/actions/runs/34908959155) 已排队，尚不能计入通过。当前应用实现对应 `8a2ceb474038ef1c63c2a687cf899c80ddaadeab`，后续提交只更新测试或说明。
+
 后续继续实现 Window 原生失效顺序、弱注册与实际事件持有、可移除的托管对象登记，以及惰性菜单。基础 Window.finalize 应为空，子类 finalize 失败时仍能保持原生对象有效并重试；直接调用 finalize 不应代替原生失效。托管对象失效失败的记录/继续处理策略，需区别于 Sound labels 的错误传播。Window.add 接受的 closure 及 bound context 也不能无条件缩减为当前从属实例 API 支持的类型。
 
 Window/Layer/Menu 的关系分别处理：Window 不应额外强持有 primaryLayer；Layer 原生 parent 为弱指针，children Array 有独立的惰性强引用；Menu 具有强子节点登记和弱 parent，并使用稳定的惰性 children Array。聚焦、捕获、悬停、模态和转场角色本身的强引用需保留。原引擎不回收任意脚本引用环。
