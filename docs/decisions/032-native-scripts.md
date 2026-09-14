@@ -22,4 +22,8 @@
 
 增加原生 Scripts 类构造桥，TJS WASM ABI 升到 **5**；字体 ABI **2**、会话协议 **9** 不变。验证仅在 GitHub Actions 执行，覆盖原生类和参数、反射/missing、准确调用栈、编译标志、输出生命周期、编码、暂停/取消、浏览器与冷离线恢复。云端结果待补齐。
 
+首轮 [Actions 34819597478](https://github.com/fenghengzhi/krkr2-web/actions/runs/34819597478) 的 Node 检查发现字节码导出表只登记复合赋值、自增/自减的寄存器形式，漏掉直接成员、索引成员和属性对象形式。现按原 VM 连续枚举登记四种形式，并把组起始指令传给转换函数；新增 64 组源码/导出执行比较。测试中的多语句命令改用 `Scripts.exec`，避免表达式接口隐式 return 导致后续语句不执行；匿名调用栈保留原生地址名称，直接在 try 中捕获的原生异常不再产生已移除包装帧的诊断。
+
+同轮 Firefox 字体选择失败的 trace 显示：异步 sample 到达后，canvas 从默认 300×150 变为 640×96，居中弹窗和按下的选项随之移动；字体缩略图也改变行高。界面现在预留实际 sample 比例、固定选项高度，并保留按钮子节点。原浏览器案例新增可控的预览请求门控，在按下后才放行所有预览，检查选项矩形不变，再释放鼠标并验证原有选择与像素结果。失败记录和截图保留，修复结果由后续 Actions 证明。
+
 参考：[KRKR2 Scripts 文档](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_Scripts.html)、[原 KRKR2 ScriptMgnIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/trunk/kirikiri2/src/core/base/ScriptMgnIntf.cpp)，以及固定参考快照的 ScriptMgnIntf.cpp/TextStream.cpp。完整非插件目标仍未完成。

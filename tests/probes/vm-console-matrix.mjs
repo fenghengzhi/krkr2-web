@@ -108,10 +108,12 @@ assert.equal(Number(buildInfo.attempt), base.info.attempt)
 const build = await verifyOfflineBuild('dist', '/')
 const wasm = await json('dist/wasm/manifest.json')
 const font = await json('dist/fonts/manifest.json')
-assert([3, 4].includes(wasm.abi))
-const tracePhase = wasm.abi === 4
-const nodeCount = tracePhase ? 351 : 346
-const browserCount = tracePhase ? 609 : 603
+assert([3, 4, 5].includes(wasm.abi))
+const scriptsPhase = wasm.abi === 5
+const tracePhase = wasm.abi >= 4
+const nodeCount = scriptsPhase ? 360 : tracePhase ? 351 : 346
+const browserCount = scriptsPhase ? 615 : tracePhase ? 609 : 603
+const compatibilityCount = scriptsPhase ? 78 : tracePhase ? 72 : 66
 if (!tracePhase) assert(freeze, 'The historical VM console phase requires its freeze diagnostic')
 assert.equal(font.abi, 2)
 assert((await readFile('src/protocol/session.ts', 'utf8')).includes('PROTOCOL_VERSION = 9'))
@@ -208,9 +210,11 @@ for (const browser of browsers)
     const report = await json(root + '/out/ci/results.json')
     const count =
       suite === 'browser'
-        ? tracePhase
-          ? 162
-          : 160
+        ? scriptsPhase
+          ? 164
+          : tracePhase
+            ? 162
+            : 160
         : suite === 'pwa' && browser !== 'webkit'
           ? 20
           : 19
@@ -252,9 +256,10 @@ const repeatedIntervals = freeze
       3,
     )
   : []
-const inputRun = tracePhase
-  ? await run('KRKR_INPUT_RUN', 'Input activity diagnostic', 3, ['--pattern', 'input-activity-*'])
-  : undefined
+const inputRun =
+  (tracePhase && !scriptsPhase) || process.env.KRKR_INPUT_RUN
+    ? await run('KRKR_INPUT_RUN', 'Input activity diagnostic', 3, ['--pattern', 'input-activity-*'])
+    : undefined
 if (inputRun) {
   unchanged(inputRun.info.headSha, [
     'tests/browser/activity.spec.ts',
@@ -363,6 +368,7 @@ for (const browser of browsers) {
     ['runtime-abi-pwa', 'tjs-abi2', 'wasm'],
     ['font-abi-pwa', 'font-abi1', 'fonts'],
     ...(tracePhase ? [['trace-abi-pwa', 'tjs-abi3', 'wasm']] : []),
+    ...(scriptsPhase ? [['scripts-abi-pwa', 'tjs-abi4', 'wasm']] : []),
   ]) {
     const report = await json(`${reports}/${name}.json`)
     const old = fixtureManifest.releases.find((release) => release.id === id)
@@ -378,6 +384,7 @@ for (const browser of browsers) {
       assert.equal(row.oldAbi, oldManifest.abi)
       assert.equal(row.newAbi, manifestKind === 'wasm' ? wasm.abi : 2)
       if (id === 'tjs-abi3') assert(row.nativeTraceVerified)
+      if (id === 'tjs-abi4') assert(row.nativeScriptsClassAndCompilerVerified)
       assert(row.oldWorkerRestartedOffline && row.newWorkerStartedOffline)
       assert(row.caches.some((key) => key.endsWith(row.oldBuild)))
       assert(row.caches.some((key) => key.endsWith(row.newBuild)))
@@ -406,7 +413,7 @@ for (const browser of browsers) {
 }
 assert.equal(
   external.reduce((n, report) => n + report.results.length, 0),
-  tracePhase ? 72 : 66,
+  compatibilityCount,
 )
 const evidence = {}
 for (const path of await files(directory))
@@ -439,7 +446,9 @@ const matrix = {
     kagDiagnostics: 6,
     tjsAbi1: 6,
     tjsAbi2: 6,
-    ...(tracePhase ? { tjsAbi3: 6, inputFocusReproduction: 1, repeatedInputCleanup: 30 } : {}),
+    ...(tracePhase ? { tjsAbi3: 6 } : {}),
+    ...(scriptsPhase ? { tjsAbi4: 6, exportedOperatorCombinations: 64 } : {}),
+    ...(inputRun ? { inputFocusReproduction: 1, repeatedInputCleanup: 30 } : {}),
     fontAbi1: 6,
     repeatedTrustedFreeze: repeatedIntervals.length,
     selectedSkipped: 0,
@@ -464,6 +473,15 @@ const matrix = {
   evidence,
   previousMatrices: fixtureManifest.historicalMatrices,
   historicalFailures: [
+    ...(scriptsPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34819597478',
+            reason:
+              'The first native Scripts run exposed omitted member/property variants in bytecode export. The exporter now converts all four forms. New statement fixtures now call Scripts.exec instead of the single-expression console; anonymous names and protected native exceptions follow the original VM semantics. Original failure evidence remains archived.',
+          },
+        ]
+      : []),
     ...(tracePhase
       ? [
           {
@@ -491,6 +509,11 @@ const matrix = {
   ],
   incomplete: [
     ...(tracePhase ? [] : ['Scripts.getTraceString']),
+    ...(scriptsPhase
+      ? [
+          'Automatic legacy text detection and decoder latching, serialized Array/Dictionary resource execution, prefixed bytecode and complete storage paths remain incomplete',
+        ]
+      : []),
     'Native error UI policy, remaining exception and finalizer paths, TJS bridge frames in other TVP methods',
     'Historical WebKit paused-video position discontinuity remains unrootcaused',
     'Historical one-shot committed-input failure has no proven product root cause; acknowledgement-based checks remain',
@@ -498,12 +521,16 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = tracePhase ? 'stack-traces-matrix.json' : 'vm-console-matrix.json'
+const reportName = scriptsPhase
+  ? 'native-scripts-matrix.json'
+  : tracePhase
+    ? 'stack-traces-matrix.json'
+    : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(
   process.env.GITHUB_STEP_SUMMARY,
-  `Verified **${nodeCount} Node + ${browserCount} browser + 6 direct runtime + ${tracePhase ? 72 : 66} compatibility** cases.\n\n` +
+  `Verified **${nodeCount} Node + ${browserCount} browser + 6 direct runtime + ${compatibilityCount} compatibility** cases.\n\n` +
     `Sources, builds and individual results are bound in \`${reportName}\`. SHA-256: \`${await hash(output)}\`.\n`,
 )
 console.log('WROTE ' + output)

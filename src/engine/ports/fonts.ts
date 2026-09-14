@@ -23,3 +23,8 @@ export interface FontPreview extends Pixels {
   requestId: number
   face: string
 }
+export function fontPreviewSize(kind: 'sample' | 'label', height: number) {
+  return kind === 'label'
+    ? { width: 360, height: 40 }
+    : { width: 640, height: Math.max(96, Math.min(64, Math.abs(height)) * 2 + 32) }
+}

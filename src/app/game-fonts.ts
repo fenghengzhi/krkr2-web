@@ -1,4 +1,5 @@
 import type { FontDescriptor, FontPreview, FontSelectionRequest } from '../engine/ports/fonts.ts'
+import { fontPreviewSize } from '../engine/ports/fonts.ts'
 import { canReadLocalFonts, readLocalFonts } from '../backends/text/browser/local-fonts.ts'
 import { cssFontFamily } from '../backends/text/browser/families.ts'
 
@@ -62,11 +63,11 @@ export function createGameFonts(actions: FontActions) {
       if (kind === 'sample' && selected === face && preview) paint(preview, image)
       else if (kind === 'label') {
         const row = rows.get(face)
-        if (row) {
-          const canvas = element('canvas')
-          canvas.setAttribute('aria-hidden', 'true')
+        const canvas = row?.querySelector('canvas')
+        if (row && canvas) {
           paint(canvas, image)
-          row.replaceChildren(canvas)
+          canvas.style.visibility = 'visible'
+          row.querySelector('span')!.hidden = true
         }
       }
     } catch (error) {
@@ -110,7 +111,8 @@ export function createGameFonts(actions: FontActions) {
     labels.length = 0
     choices.replaceChildren()
     for (const font of current.choices) {
-      const row = element('button', font.name)
+      const row = element('button')
+      row.append(element('span', font.name))
       row.type = 'button'
       row.className = 'font-choice'
       row.setAttribute('role', 'option')
@@ -126,8 +128,16 @@ export function createGameFonts(actions: FontActions) {
         if (current) void actions.choose(current.id, font.name)?.catch(showError)
       })
       if (current.flags & 256) {
-        if (font.source === 'game') labels.push(font.name)
-        else row.style.fontFamily = cssFontFamily(font.name) + ', sans-serif'
+        if (font.source === 'game') {
+          const canvas = element('canvas'),
+            size = fontPreviewSize('label', current.font.height)
+          canvas.width = size.width
+          canvas.height = size.height
+          canvas.style.visibility = 'hidden'
+          canvas.setAttribute('aria-hidden', 'true')
+          row.append(canvas)
+          labels.push(font.name)
+        } else row.style.fontFamily = cssFontFamily(font.name) + ', sans-serif'
       }
       rows.set(font.name, row)
       choices.append(row)
@@ -183,6 +193,11 @@ export function createGameFonts(actions: FontActions) {
         }
       })
       preview = element('canvas')
+      // Reserve the final bitmap geometry before opening the centered dialog.
+      // Async samples and labels must not move a pressed choice before mouseup.
+      const size = fontPreviewSize('sample', request.font.height)
+      preview.width = size.width
+      preview.height = size.height
       preview.className = 'font-sample'
       preview.setAttribute('aria-label', '字体预览')
       status = element('p')

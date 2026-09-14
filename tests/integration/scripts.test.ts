@@ -4,8 +4,12 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { headless } from '../helpers/headless.ts'
 import { scriptsFixture } from '../helpers/scripts-fixture.ts'
 import { MemorySaveStore, type SaveFile } from '../../src/engine/ports/saves.ts'
+import type { EngineSession } from '../../src/engine/session.ts'
 
 const debug = { arguments: new Map([['-debug', 'yes']]) }
+// The console evaluates one expression; explicitly use script mode for statements.
+const execute = (session: EngineSession, source: string) =>
+  session.evaluate(`Scripts.exec(${JSON.stringify(source)},"test-commands.tjs")`)
 const bytes = (files: SaveFile[], name: string) => {
   const file = files.find((file) => file.path === name)
   assert(file, 'Missing output ' + name)
@@ -55,7 +59,7 @@ test('native exec/eval and storage calls preserve exact caller frames without bo
     )
     assert.match(
       await session.evaluate('unnamed'),
-      /^\(1\)\[\(top level script\) global\] <-- startup.tjs\(6\)/,
+      /^anonymous@0x0x[0-9a-f]+\(1\)\[\(top level script\) global\] <-- startup.tjs\(6\)\[\(top level script\) global\]$/,
     )
   } finally {
     await session.stop()
@@ -84,7 +88,7 @@ test('compileStorage honors result, debug and expression flags and does not exec
           )
           assert.equal(await session.evaluate('executed'), String(executed))
           const value = await session.evaluate(`Scripts.evalStorage("${output}")`)
-          if (expression) assert.equal(value, result ? '42' : '')
+          if (expression) assert.equal(value, result ? '42' : 'undefined')
           assert.equal(await session.evaluate('executed'), String(++executed))
           assert.equal(
             Buffer.from(bytes(session.exportSaves(), output).subarray(0, 4)).toString(),
@@ -114,19 +118,22 @@ test('compileStorage preserves unread inputs and truncates an opened output on c
   )
   try {
     await session.start()
-    await session.evaluate(
+    await execute(
+      session,
       'try{Scripts.compileStorage("absent.tjs","savedata/output.cjs");}catch(e){caught++;}',
     )
     assert.equal(
       Buffer.from(bytes(session.exportSaves(), 'savedata/output.cjs')).toString(),
       'old-output',
     )
-    await session.evaluate(
+    await execute(
+      session,
       'try{Scripts.compileStorage("bad.tjs","savedata/output.cjs");}catch(e){caught++;}',
     )
     assert.equal(bytes(session.exportSaves(), 'savedata/output.cjs').length, 0)
     assert.equal(bytes(await store.load(), 'savedata/output.cjs').length, 0)
-    await session.evaluate(
+    await execute(
+      session,
       'try{Scripts.compileStorage("bad.tjs","data.xp3>out.cjs");}catch(e){caught++;}',
     )
     assert.equal(await session.evaluate('caught'), '3')
@@ -144,19 +151,21 @@ test('textEncoding controls script, native text, KAG and compile reads while BOM
     'gbk.ks': text('d6d0cec4'),
     'gbk-expression.tjs': text('d6d0cec4', '"', '"'),
     'bom.tjs': Buffer.from('\ufeff"😀"'),
+    'double-bom.txt': Buffer.from('\ufeff\ufefftext'),
     'utf8.tjs': '"日本語😀"',
   })
   try {
     await session.start()
     assert.equal(await session.evaluate('initialEncoding'), 'UTF-8')
     for (const alias of ['SJIS', 'shiftjis', 'shift_jis', 'shift-jis']) {
-      await session.evaluate(`Scripts.textEncoding="${alias}";Scripts.execStorage("sjis.tjs");`)
+      await execute(session, `Scripts.textEncoding="${alias}";Scripts.execStorage("sjis.tjs");`)
       assert.equal(await session.evaluate('japanese'), '日本語')
       assert.equal(await session.evaluate('Scripts.textEncoding'), alias)
     }
-    await session.evaluate('Scripts.textEncoding="GBK";var lines=[].load("gbk.txt");')
+    await execute(session, 'Scripts.textEncoding="GBK";var lines=[].load("gbk.txt");')
     assert.equal(await session.evaluate('lines[0]'), '中文')
-    await session.evaluate(
+    await execute(
+      session,
       'var parser=new KAGParser();parser.debugLevel=tkdlNone;parser.loadScenario("gbk.ks");',
     )
     assert.equal(
@@ -168,8 +177,10 @@ test('textEncoding controls script, native text, KAG and compile reads while BOM
     )
     assert.equal(await session.evaluate('Scripts.evalStorage("savedata/chinese.cjs")'), '中文')
     assert.equal(await session.evaluate('Scripts.evalStorage("bom.tjs")'), '😀')
+    assert.equal(await session.evaluate('[].load("double-bom.txt")[0]'), '\ufefftext')
     assert.equal(await session.evaluate('Scripts.evalStorage("utf8.tjs","utf-8")'), '日本語😀')
-    await session.evaluate(
+    await execute(
+      session,
       'var rejected=false;try{Scripts.textEncoding="unsupported";}catch(e){rejected=true;}',
     )
     assert.equal(await session.evaluate('rejected'), '1')
@@ -211,18 +222,19 @@ for (const cancelled of [false, true])
     let settled = false
     try {
       await session.start()
-      const pending = session
-        .evaluate('Scripts.compileStorage("warning-source.tjs","savedata/warning.cjs");finished=1;')
-        .then(
-          (value) => {
-            settled = true
-            return value
-          },
-          (error: unknown) => {
-            settled = true
-            return error
-          },
-        )
+      const pending = execute(
+        session,
+        'Scripts.compileStorage("warning-source.tjs","savedata/warning.cjs");finished=1;',
+      ).then(
+        (value) => {
+          settled = true
+          return value
+        },
+        (error: unknown) => {
+          settled = true
+          return error
+        },
+      )
       await started
       session.pause()
       release()

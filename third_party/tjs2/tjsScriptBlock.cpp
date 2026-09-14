@@ -849,16 +849,24 @@ namespace TJS {
                         } };
 
         // INC/DEC family -> handler
-        m[VM_INC] = { 0, 0, false, HandleIncDec };
-        m[VM_DEC] = { 0, 0, false, HandleIncDec };
+        for(int base : { VM_INC, VM_DEC })
+            for(int variant = 0; variant < 4; ++variant)
+                m[base + variant] = { 0, 0, false,
+                    [base](tjs_int32 *code, int i, int, int size) {
+                        return HandleIncDec(code, i, base, size);
+                    } };
 
-        // for simplicity assume the OP2 group members are represented by
-        // distinct enum values
+        // Each group contains register, direct member, indexed member and
+        // property-object forms. Pass the base opcode to the shared decoder.
         int op2_group[] = { VM_LOR, VM_LAND, VM_BOR,  VM_BXOR, VM_BAND,
                             VM_SAR, VM_SAL,  VM_SR,   VM_ADD,  VM_SUB,
                             VM_MOD, VM_DIV,  VM_IDIV, VM_MUL };
-        for(int op : op2_group)
-            m[op] = { 0, 0, false, HandleOp2 };
+        for(int base : op2_group)
+            for(int variant = 0; variant < 4; ++variant)
+                m[base + variant] = { 0, 0, false,
+                    [base](tjs_int32 *code, int i, int, int size) {
+                        return HandleOp2(code, i, base, size);
+                    } };
 
         // CALL/NEW family use HandleCallOp
         m[VM_CALL] = { 0, 0, false, HandleCallOp };

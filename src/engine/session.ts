@@ -46,6 +46,7 @@ import { FontSelection } from './graphics/font-selection.ts'
 import { cancelable } from './scheduler/cancelable.ts'
 import { Bitmap } from './graphics/bitmap.ts'
 import type { FontDescriptor, FontPreview, FontSelectionRequest } from './ports/fonts.ts'
+import { fontPreviewSize } from './ports/fonts.ts'
 import type { AudioBackend } from './ports/audio.ts'
 import { SoundService } from './media/sounds.ts'
 import { soundClasses } from './tvp/sound.ts'
@@ -880,10 +881,8 @@ export class EngineSession {
           ...request.font,
           height: kind === 'label' ? 18 : Math.min(64, Math.abs(request.font.height)),
         },
-        bitmap = new Bitmap(
-          kind === 'label' ? 360 : 640,
-          kind === 'label' ? 40 : Math.max(96, font.height * 2 + 32),
-        ),
+        size = fontPreviewSize(kind, font.height),
+        bitmap = new Bitmap(size.width, size.height),
         draws = await this.fonts.draw(kind === 'label' ? face : request.sample, font, 0x202124, {
           antialiased: true,
           shadowLevel: 0,

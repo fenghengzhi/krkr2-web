@@ -88,7 +88,7 @@ export async function decodeTextStream(
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return decodeUtf16(bytes.subarray(2))
   if (bytes[0] === 0xfe && bytes[1] === 0xff) return decodeUtf16(bytes.subarray(2), false)
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf)
-    return codecs.narrow(bytes.subarray(3), 'utf-8')
+    return codecs.narrow(bytes, 'utf-8')
   return codecs.narrow(bytes, /utf-?8/i.test(mode) ? 'utf-8' : defaultEncoding)
 }
 

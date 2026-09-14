@@ -78,6 +78,56 @@ test('bytecode compilation awaits console continuations and the result executes 
   }
 })
 
+test('exported compound and increment instructions preserve register, member and property operands', async () => {
+  const vm = await runtime()
+  try {
+    for (const operator of [
+      '||=',
+      '&&=',
+      '|=',
+      '^=',
+      '&=',
+      '>>=',
+      '<<=',
+      '>>>=',
+      '+=',
+      '-=',
+      '%=',
+      '/=',
+      '\\=',
+      '*=',
+      '++',
+      '--',
+    ]) {
+      for (const target of ['local', 'object.value', 'object[key]', '(*accessor)']) {
+        const mutation = ['++', '--'].includes(operator)
+          ? target + operator
+          : target + operator + '3'
+        const source = `
+var backing=29;
+property exportedValue {getter(){return backing;} setter(v){backing=v;}}
+function exercise(){
+  var local=29,object=%[value:29],key="value",accessor=&exportedValue;
+  var returned=(${mutation});
+  return [returned,local,object.value,backing].join(",");
+}
+var exportedResult=exercise();`
+        await vm.execute(source, 'operator-source.tjs')
+        const expected = await vm.execute('exportedResult', '', true)
+        const compiled = await vm.compile(source, 'operator-compiled.tjs')
+        await vm.execute(compiled, 'operator-compiled.tjs')
+        assert.equal(
+          await vm.execute('exportedResult', '', true),
+          expected,
+          `${target} ${operator}`,
+        )
+      }
+    }
+  } finally {
+    vm.dispose()
+  }
+})
+
 test('a paused compiler warning can be cancelled and concurrent native entry is rejected', async () => {
   const control = new ExecutionControl(),
     vm = await runtime(undefined, control)

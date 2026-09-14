@@ -367,9 +367,9 @@ for (const mode of ['startup', 'error', 'cancel'] as const)
         session.setActivity(activity(2, 'visible'))
         assert.equal(await result, undefined)
         if (mode === 'error') {
-          assert.match(logs[0]!, /An exception occurred at startup.tjs/)
-          assert(logs.includes('-- Disassembled VM code --'))
-          assert.deepEqual(logs.slice(-2), ['caught', 'finished'])
+          // The native method throws directly into the caller's protected try
+          // block. There is no unprotected bootstrap frame to emit a dump.
+          assert.deepEqual(logs, ['caught', 'finished'])
         } else assert.deepEqual(logs, mode === 'startup' ? ['decoded'] : ['caught', 'finished'])
       }
     } finally {

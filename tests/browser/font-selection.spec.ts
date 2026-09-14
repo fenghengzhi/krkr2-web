@@ -33,6 +33,24 @@ for (const backend of ['asyncify', 'jspi']) {
   test(`${backend}: font dialog filters game faces, previews their pixels and preserves font settings`, async ({
     page,
   }) => {
+    await page.addInitScript(() => {
+      const original = Worker.prototype.postMessage
+      const pending: (() => void)[] = []
+      let held = true
+      Worker.prototype.postMessage = function (...args: Parameters<Worker['postMessage']>) {
+        const message = args[0] as { type?: string; argumentList?: { value?: unknown }[] }
+        const send = () => original.apply(this, args)
+        if (held && message.type === 'APPLY' && message.argumentList?.[0]?.value === 'previewFont')
+          pending.push(send)
+        else send()
+      }
+      Object.assign(window, {
+        releaseFontPreviews() {
+          held = false
+          for (const send of pending.splice(0)) send()
+        },
+      })
+    })
     await page.goto('/?backend=' + backend)
     await page.locator('#files').setInputFiles([
       {
@@ -62,7 +80,20 @@ for (const backend of ['asyncify', 'jspi']) {
     await expect(dialog.getByRole('option')).toHaveCount(2)
     await expect(dialog.locator('img')).toHaveCount(0)
     const mono = dialog.getByRole('option', { name: 'Selection Mono', exact: true })
-    await mono.click()
+    const before = await mono.boundingBox()
+    expect(before).not.toBeNull()
+    await page.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2)
+    await page.mouse.down()
+    await page.evaluate(() =>
+      (window as unknown as { releaseFontPreviews(): void }).releaseFontPreviews(),
+    )
+    await expect(dialog.locator('.font-sample')).toHaveAttribute(
+      'data-font-face',
+      'Selection Latin',
+    )
+    await expect(mono.locator('canvas')).toHaveAttribute('data-font-face', 'Selection Mono')
+    expect(await mono.boundingBox()).toEqual(before)
+    await page.mouse.up()
     await expect(mono).toHaveAttribute('aria-selected', 'true')
     const preview = dialog.locator('.font-sample')
     await expect(preview).toHaveAttribute('data-font-face', 'Selection Mono')

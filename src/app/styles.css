@@ -756,14 +756,27 @@ footer {
   border-radius: 6px;
 }
 .font-choice {
+  position: relative;
   display: block;
   width: 100%;
-  min-height: 38px;
+  height: 56px;
+  padding: 8px 12px;
   border: 0;
   border-radius: 0;
   text-align: left;
   background: transparent;
   color: #202124;
+}
+.font-choice span {
+  pointer-events: none;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .font-choice[aria-selected='true'] {
   background: #dbeafe;
@@ -771,9 +784,12 @@ footer {
   outline-offset: -2px;
 }
 .font-choice canvas {
+  pointer-events: none;
+  display: block;
   width: min(360px, 100%);
-  height: auto;
-  vertical-align: middle;
+  height: 40px;
+  object-fit: contain;
+  object-position: left center;
 }
 .font-sample {
   display: block;
