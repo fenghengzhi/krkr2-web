@@ -1,3 +1,4 @@
+import { browserLaunchOptions } from './browser-launch.ts'
 import { test as base, expect, type Page } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -18,7 +19,7 @@ export const test = base.extend<{ libraryProfile: string }>({
     async ({ playwright, browserName, baseURL, libraryProfile }, use, testInfo) => {
       const started = performance.now(),
         context = await playwright[browserName].launchPersistentContext(libraryProfile, {
-          headless: true,
+          ...browserLaunchOptions,
           baseURL,
           viewport: { width: 1280, height: 720 },
         })

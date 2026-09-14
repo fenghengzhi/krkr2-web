@@ -1,3 +1,4 @@
+import { browserLaunchOptions } from '../helpers/browser-launch.ts'
 import type { Page } from '@playwright/test'
 import {
   test,
@@ -106,7 +107,7 @@ test('library resources survive closing and reopening the complete browser profi
   await save(page, 'Restarted browser')
   await context.close()
   const reopened = await playwright[browserName].launchPersistentContext(libraryProfile, {
-    headless: true,
+    ...browserLaunchOptions,
     baseURL,
   })
   try {

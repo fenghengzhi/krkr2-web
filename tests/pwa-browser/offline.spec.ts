@@ -1,3 +1,4 @@
+import { browserLaunchOptions } from '../helpers/browser-launch.ts'
 import { test, expect } from '../helpers/library-browser.ts'
 import { prepareOffline, reloadOffline, pageBuild } from '../helpers/offline-browser.ts'
 import { zipFixture } from '../helpers/zip-fixtures.ts'
@@ -64,7 +65,7 @@ test('cached application cold-starts from a closed browser while the server rema
     await context.close()
     await server.close()
     const reopened = await playwright[browserName].launchPersistentContext(libraryProfile, {
-      headless: true,
+      ...browserLaunchOptions,
     })
     try {
       const next = reopened.pages()[0] ?? (await reopened.newPage())
