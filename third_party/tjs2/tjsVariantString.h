@@ -17,6 +17,7 @@
 #include <atomic>
 
 namespace TJS {
+    tjs_uint TJSGetStringHeapAllocationCount();
     class tTJSVariant;
 // #define TJS_DEBUG_UNRELEASED_STRING
 // #define TJS_DEBUG_CHECK_STRING_HEAP_INTEGRITY

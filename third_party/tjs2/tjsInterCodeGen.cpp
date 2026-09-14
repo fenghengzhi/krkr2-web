@@ -208,16 +208,14 @@ namespace TJS // following is in the namespace
 
 #ifdef _DEBUG
         DebuggerRegisterArea = nullptr;
-        if(Parent)
-            Parent->AddRef();
 #endif // _DEBUG
 
+        std::unique_ptr<tjs_char[]> ownedName;
         if(name) {
-            Name = new tjs_char[TJS_strlen(name) + 1];
-            TJS_strcpy(Name, name);
-        } else {
-            Name = nullptr;
+            ownedName.reset(new tjs_char[TJS_strlen(name) + 1]);
+            TJS_strcpy(ownedName.get(), name);
         }
+        Name = ownedName.get();
 
         try {
             AsGlobalContextMode = false;
@@ -254,12 +252,7 @@ namespace TJS // following is in the namespace
             }
 
             Block = block;
-            block->Add(this);
             TJSVariantArrayStack = block->GetTJS()->GetVariantArrayStack();
-            if(ContextType != ctTopLevel)
-                Block->AddRef();
-            // owner ScriptBlock hooks global object, so to avoid
-            // mutual reference lock.
 
             if(ContextType == ctClass) {
                 // add class information to the class instance
@@ -284,8 +277,18 @@ namespace TJS // following is in the namespace
                 FunctionRegisterCodePoint =
                     CodeAreaSize; // update FunctionRegisterCodePoint
             }
+            // Publish only a fully constructed context. Registration may allocate.
+            block->Add(this);
+            if(ContextType != ctTopLevel) Block->AddRef();
+#ifdef _DEBUG
+            if(Parent) Parent->AddRef();
+#endif
+            ownedName.release();
         } catch(...) {
-            delete[] Name;
+            TJS_free(CodeArea);
+            for(tjs_int i = 0; i < _DataAreaSize; ++i) delete _DataArea[i];
+            TJS_free(_DataArea);
+            TJS_free(SourcePosArray);
             throw;
         }
     }
@@ -314,12 +317,8 @@ namespace TJS // following is in the namespace
         DataArea = data;
         DataAreaSize = dataSize;
 
-        // copy
-        size_t size = superpointer.size();
-        SuperClassGetterPointer.reserve(size);
-        for(size_t i = 0; i < size; i++) {
-            SuperClassGetterPointer.push_back(superpointer[i]);
-        }
+        // The loader owns all buffers until construction returns successfully.
+        SuperClassGetterPointer = std::move(superpointer);
 
         FrameBase = 1; // for code generate
         SuperClassExpr = nullptr; // for code generate
@@ -344,22 +343,19 @@ namespace TJS // following is in the namespace
         DebuggerRegisterArea = nullptr;
 #endif // _DEBUG
 
+        std::unique_ptr<tjs_char[]> ownedName;
         if(name) {
-            Name = new tjs_char[TJS_strlen(name) + 1];
-            TJS_strcpy(Name, name);
-        } else {
-            Name = nullptr;
+            ownedName.reset(new tjs_char[TJS_strlen(name) + 1]);
+            TJS_strcpy(ownedName.get(), name);
         }
-
-        try {
-            AsGlobalContextMode = false;
-            ContextType = type;
-            Block = block;
-            TJSVariantArrayStack = block->GetTJS()->GetVariantArrayStack();
-        } catch(...) {
-            delete[] Name;
-            throw;
-        }
+        AsGlobalContextMode = false;
+        ContextType = type;
+        Block = block;
+        TJSVariantArrayStack = block->GetTJS()->GetVariantArrayStack();
+        // Registration may allocate. No throwing operation follows adoption.
+        block->Add(this);
+        if(ContextType != ctTopLevel) block->AddRef();
+        Name = ownedName.release();
     }
 
     //---------------------------------------------------------------------------
@@ -595,10 +591,11 @@ namespace TJS // following is in the namespace
         if(CodeAreaSize != 0) krkr_compiler_work(CodeAreaSize);
         if(CodeAreaSize >= CodeAreaCapa) {
             // must inflate the code area
-            CodeArea = (tjs_int32 *)TJS_realloc(
+            auto* resizedCode = (tjs_int32 *)TJS_realloc(
                 CodeArea, sizeof(tjs_int32) * (CodeAreaCapa + TJS_INC_SIZE));
-            if(!CodeArea)
+            if(!resizedCode)
                 TJS_eTJSScriptError(TJSInsufficientMem, Block, pos);
+            CodeArea = resizedCode;
             CodeAreaCapa += TJS_INC_SIZE;
         }
 
@@ -615,12 +612,13 @@ namespace TJS // following is in the namespace
                     SourcePosArraySize = 0;
                 }
                 if(SourcePosArraySize >= SourcePosArrayCapa) {
-                    SourcePosArray = (tSourcePos *)TJS_realloc(
+                    auto* resizedPositions = (tSourcePos *)TJS_realloc(
                         SourcePosArray,
                         (SourcePosArrayCapa + TJS_INC_SIZE) *
                             sizeof(tSourcePos));
-                    if(!SourcePosArray)
+                    if(!resizedPositions)
                         TJS_eTJSScriptError(TJSInsufficientMem, Block, pos);
+                    SourcePosArray = resizedPositions;
                     SourcePosArrayCapa += TJS_INC_SIZE;
                 }
                 SourcePosArray[SourcePosArraySize].CodePos = CodeAreaSize;
@@ -648,11 +646,12 @@ namespace TJS // following is in the namespace
 
         if(_DataAreaSize >= _DataAreaCapa) {
             // inflation of data area
-            _DataArea = (tTJSVariant **)TJS_realloc(
+            auto* resizedData = (tTJSVariant **)TJS_realloc(
                 _DataArea,
                 sizeof(tTJSVariant *) * (_DataAreaCapa + TJS_INC_SIZE));
-            if(!_DataArea)
+            if(!resizedData)
                 TJS_eTJSScriptError(TJSInsufficientMem, Block, LEX_POS);
+            _DataArea = resizedData;
             _DataAreaCapa += TJS_INC_SIZE;
         }
 
@@ -814,12 +813,13 @@ namespace TJS // following is in the namespace
             // move the code
             if(fix->NewSize > fix->Size) {
                 // when code inflates on fixing
-                CodeArea = (tjs_int32 *)TJS_realloc(
+                auto* resizedCode = (tjs_int32 *)TJS_realloc(
                     CodeArea,
                     sizeof(tjs_int32) *
                         (CodeAreaSize + (fix->NewSize - fix->Size)));
-                if(!CodeArea)
+                if(!resizedCode)
                     TJS_eTJSScriptError(TJSInsufficientMem, Block, 0);
+                CodeArea = resizedCode;
             }
 
             if(CodeAreaSize - (fix->StartIP + fix->Size) > 0) {
@@ -1012,20 +1012,22 @@ namespace TJS // following is in the namespace
 
         // compact SourcePosArray to just size
         if(SourcePosArraySize && SourcePosArray) {
-            SourcePosArray = (tSourcePos *)TJS_realloc(
+            auto* resizedPositions = (tSourcePos *)TJS_realloc(
                 SourcePosArray, SourcePosArraySize * sizeof(tSourcePos));
-            if(!SourcePosArray)
+            if(!resizedPositions)
                 TJS_eTJSScriptError(TJSInsufficientMem, Block, 0);
+            SourcePosArray = resizedPositions;
             SourcePosArrayCapa = SourcePosArraySize;
         }
 
         // compact CodeArea to just size
         if(CodeAreaSize && CodeArea) {
             // must inflate the code area
-            CodeArea = (tjs_int32 *)TJS_realloc(
+            auto* resizedCode = (tjs_int32 *)TJS_realloc(
                 CodeArea, sizeof(tjs_int32) * CodeAreaSize);
-            if(!CodeArea)
+            if(!resizedCode)
                 TJS_eTJSScriptError(TJSInsufficientMem, Block, 0);
+            CodeArea = resizedCode;
             CodeAreaCapa = CodeAreaSize;
         }
 

@@ -9,6 +9,7 @@
 // string heap management used by tTJSVariant and tTJSString
 //---------------------------------------------------------------------------
 #include "tjsCommHead.h"
+#include "NativeOwnership.h"
 
 #include "tjsVariantString.h"
 #include "tjsError.h"
@@ -117,34 +118,34 @@ namespace TJS {
     // static tjs_uint TJSStringHeapFreeCellListCapacity = 0;
     static tjs_uint TJSStringHeapFreeCellListPointer = 0;
     static tjs_uint TJSStringHeapAllocCount = 0;
+    tjs_uint TJSGetStringHeapAllocationCount() { return TJSStringHeapAllocCount; }
 
     static tjs_uint TJSStringHeapLastCheckedFreeBlock = 0;
     //---------------------------------------------------------------------------
 
     //---------------------------------------------------------------------------
     static void TJSAddStringHeapBlock() {
-        // allocate StringHeapBlock
-        tTJSVariantString *h;
-        h = new tTJSVariantString[HEAP_CAPACITY_INC];
-        memset(h, 0, sizeof(tTJSVariantString) * HEAP_CAPACITY_INC);
-        TJSStringHeapList->push_back(h);
-
-        // re-allocate TJSFreeCellList
-
+        // Preserve both the heap list and its free-cell index until every
+        // allocation succeeds. The old index remains valid on exceptions.
+        auto block = std::make_unique<tTJSVariantString[]>(HEAP_CAPACITY_INC);
+        memset(block.get(), 0, sizeof(tTJSVariantString) * HEAP_CAPACITY_INC);
+        auto freeCells = std::make_unique<tTJSVariantString*[]>(
+            (TJSStringHeapList->size() + 1) * HEAP_CAPACITY_INC);
+        TJSStringHeapList->push_back(block.get());
+        for(tjs_int i = HEAP_CAPACITY_INC - 1; i >= 0; --i)
+            freeCells[i] = block.get() + i;
         delete[] TJSStringHeapFreeCellList;
-        TJSStringHeapFreeCellList = new tTJSVariantString
-            *[TJSStringHeapList->size() * HEAP_CAPACITY_INC];
-
-        // prepare free list
-        for(tjs_int i = HEAP_CAPACITY_INC - 1; i >= 0; i--)
-            TJSStringHeapFreeCellList[i] = h + i;
+        TJSStringHeapFreeCellList = freeCells.release();
         TJSStringHeapFreeCellListPointer = HEAP_CAPACITY_INC;
+        block.release();
     }
 
-    //---------------------------------------------------------------------------
     static void TJSInitStringHeap() {
-        TJSStringHeapList = new std::vector<tTJSVariantString *>();
-        TJSAddStringHeapBlock(); // initial block
+        auto list = std::make_unique<std::vector<tTJSVariantString*>>();
+        TJSStringHeapList = list.get();
+        try { TJSAddStringHeapBlock(); }
+        catch(...) { TJSStringHeapList = nullptr; throw; }
+        list.release();
     }
 
     //---------------------------------------------------------------------------
@@ -524,7 +525,7 @@ namespace TJS {
         tjs_intptr_t len1 = ref1 ? TJS_strlen(ref1) : 0;
         tjs_intptr_t len2 = ref2 ? TJS_strlen(ref2) : 0;
 
-        tTJSVariantString *ret = TJSAllocStringHeap();
+        krkr::NativeOwner<tTJSVariantString> ret(TJSAllocStringHeap());
 
         if(len1 + len2 > TJS_VS_SHORT_LEN) {
             ret->LongString = TJSVS_malloc((tjs_uint)(len1 + len2 + 1));
@@ -539,7 +540,7 @@ namespace TJS {
                 TJS_strcpy(ret->ShortString + len1, ref2);
         }
         ret->Length = (tjs_int)(len1 + len2);
-        return ret;
+        return ret.release();
     }
 
     //---------------------------------------------------------------------------
@@ -548,9 +549,9 @@ namespace TJS {
             return nullptr;
         if(ref[0] == 0)
             return nullptr;
-        tTJSVariantString *ret = TJSAllocStringHeap();
+        krkr::NativeOwner<tTJSVariantString> ret(TJSAllocStringHeap());
         ret->SetString(ref);
-        return ret;
+        return ret.release();
     }
 
     //---------------------------------------------------------------------------
@@ -561,9 +562,9 @@ namespace TJS {
             return nullptr;
         if(ref[0] == 0)
             return nullptr;
-        tTJSVariantString *ret = TJSAllocStringHeap();
+        krkr::NativeOwner<tTJSVariantString> ret(TJSAllocStringHeap());
         ret->SetString(ref, static_cast<ssize_t>(n));
-        return ret;
+        return ret.release();
     }
 
     //---------------------------------------------------------------------------
@@ -572,9 +573,9 @@ namespace TJS {
             return nullptr;
         if(ref[0] == 0)
             return nullptr;
-        tTJSVariantString *ret = TJSAllocStringHeap();
+        krkr::NativeOwner<tTJSVariantString> ret(TJSAllocStringHeap());
         ret->SetString(ref);
-        return ret;
+        return ret.release();
     }
 
     //---------------------------------------------------------------------------
@@ -584,10 +585,10 @@ namespace TJS {
         if(!size)
             return nullptr;
         *src += sizeof(tjs_uint);
-        tTJSVariantString *ret = TJSAllocStringHeap();
+        krkr::NativeOwner<tTJSVariantString> ret(TJSAllocStringHeap());
         ret->SetString((const tjs_char *)src, size);
         *src += sizeof(tjs_char) * size;
-        return ret;
+        return ret.release();
     }
 
     //---------------------------------------------------------------------------
@@ -595,9 +596,9 @@ namespace TJS {
         /* note that you must call FixLength if you allocate larger
         than the actual string size */
 
-        tTJSVariantString *ret = TJSAllocStringHeap();
+        krkr::NativeOwner<tTJSVariantString> ret(TJSAllocStringHeap());
         ret->AllocBuffer(len);
-        return ret;
+        return ret.release();
     }
 
     //---------------------------------------------------------------------------

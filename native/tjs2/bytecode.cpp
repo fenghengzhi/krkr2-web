@@ -20,8 +20,21 @@ struct Object {
     const std::uint8_t* code = nullptr;
     unsigned codeSize = 0;
     std::vector<unsigned> types;
+    std::vector<int> references;
     std::vector<int> superPointers;
     std::vector<std::pair<int, int>> properties;
+};
+struct LoadBudget {
+    std::size_t remaining = 128u * 1024 * 1024;
+    void add(std::size_t count, std::size_t width) {
+        if(width && count > remaining / width)
+            TJS_eTJSError(u"Bytecode materialization exceeds 128 MiB budget");
+        remaining -= count * width;
+    }
+};
+struct Pools {
+    std::array<unsigned, 11> counts{};
+    std::vector<unsigned> strings;
 };
 void index(int value, unsigned count, bool optional = false) {
     if(value < (optional ? -1 : 0) || (value >= 0 && unsigned(value) >= count)) broken();
@@ -31,34 +44,42 @@ unsigned poolCount(BinaryInput& input) {
     if(count > maximumIndexCount) broken();
     return count;
 }
-std::array<unsigned, 11> readPools(BinaryInput& input) {
-    std::array<unsigned, 11> counts{};
+Pools readPools(BinaryInput& input, LoadBudget& budget) {
+    Pools pools;
+    auto& counts = pools.counts;
     for(const auto& [type, width] : {std::pair{6, 1}, {7, 2}, {8, 4}, {9, 8}, {5, 8}}) {
         const auto count = counts[type] = poolCount(input);
+        budget.add(count, width);
         input.items(count, width);
         const auto bytes = count * width;
         input.take((4 - bytes % 4) % 4);
     }
     for(const auto& [type, width] : {std::pair{3, 2}, {4, 1}}) {
         const auto count = counts[type] = poolCount(input);
+        budget.add(count, 64); // native string/octet headers and vector entries
+        if(type == 3) pools.strings.reserve(count);
         for(unsigned i = 0; i < count; ++i) {
             krkr_compiler_work(i);
             const auto units = input.u32();
             input.items(units, width);
+            budget.add(units, width * 2); // bounded temporary and retained value
+            if(type == 3) pools.strings.push_back(units);
             input.take((4 - (units * width) % 4) % 4);
         }
     }
     input.finish();
-    return counts;
+    return pools;
 }
-Object readObject(BinaryInput& input, const std::array<unsigned, 11>& pools, unsigned count) {
+Object readObject(BinaryInput& input, const Pools& pools, unsigned count, LoadBudget& budget) {
     Object object;
     object.parent = input.i32(); object.name = input.i32(); object.type = input.i32();
     object.variables = input.i32(); object.reserved = input.i32(); object.frames = input.i32();
     object.args = input.i32(); object.unnamed = input.i32(); object.collapse = input.i32();
     object.setter = input.i32(); object.getter = input.i32(); object.superclass = input.i32();
     for(int value : {object.parent, object.setter, object.getter, object.superclass}) index(value, count, true);
-    index(object.name, pools[3], true);
+    index(object.name, pools.counts[3], true);
+    budget.add(1, sizeof(tTJSInterCodeContext) + 8 * sizeof(tTJSCustomObject::tTJSSymbolData) + sizeof(Object));
+    if(object.name >= 0) budget.add(pools.strings[object.name] + 1, sizeof(tjs_char));
     if(object.type < ctTopLevel || object.type > ctSuperClassGetter ||
        object.variables < 0 || object.variables > 32766 || object.frames < 0 || object.frames > 32767 ||
        object.reserved != (object.type == ctProperty ? 0 : 2) ||
@@ -67,8 +88,10 @@ Object readObject(BinaryInput& input, const std::array<unsigned, 11>& pools, uns
 
     const auto positions = input.u32();
     const auto* debug = input.items(positions, 8);
+    budget.add(positions, sizeof(tTJSInterCodeContext::tSourcePos));
     object.codeSize = input.u32();
     object.code = input.items(object.codeSize, 2);
+    budget.add(object.codeSize, sizeof(tjs_int32));
     input.take((object.codeSize & 1) * 2);
     if(!object.codeSize && object.type != ctProperty) broken();
     BinaryInput sourcePositions(debug, positions * 8, TJSByteCodeBroken);
@@ -84,13 +107,14 @@ Object readObject(BinaryInput& input, const std::array<unsigned, 11>& pools, uns
     const auto data = poolCount(input);
     if(data > input.remaining() / 4) broken();
     object.types.reserve(data);
+    budget.add(data, sizeof(tTJSVariant) + 2 * sizeof(void*));
     for(unsigned i = 0; i < data; ++i) {
         krkr_compiler_work(i);
         const int type = static_cast<std::int16_t>(input.u16());
         const int value = static_cast<std::int16_t>(input.u16());
         if(type < 0 || type > 10) broken();
-        if(type == 2 || type == 10) index(value, count);
-        else if(type >= 3) index(value, pools[type]);
+        if(type == 2 || type == 10) { index(value, count); object.references.push_back(value); }
+        else if(type >= 3) index(value, pools.counts[type]);
         // Null object constants may use -1 to encode an unavailable native object.
         else if(value != 0 && !(type == 1 && value == -1)) broken();
         object.types.push_back(type);
@@ -98,6 +122,7 @@ Object readObject(BinaryInput& input, const std::array<unsigned, 11>& pools, uns
     const auto superCount = input.u32();
     if(superCount > input.remaining() / 4) broken();
     object.superPointers.reserve(superCount);
+    budget.add(superCount, sizeof(tjs_int));
     for(unsigned i = 0; i < superCount; ++i) {
         krkr_compiler_work(i);
         object.superPointers.push_back(input.i32());
@@ -105,10 +130,12 @@ Object readObject(BinaryInput& input, const std::array<unsigned, 11>& pools, uns
     const auto properties = input.u32();
     if(properties > input.remaining() / 8 || (properties && object.parent < 0)) broken();
     object.properties.reserve(properties);
+    budget.add(properties, 3 * sizeof(tTJSCustomObject::tTJSSymbolData));
     for(unsigned i = 0; i < properties; ++i) {
         krkr_compiler_work(i);
         const int name = input.i32(), target = input.i32();
-        index(name, pools[3]); index(target, count);
+        index(name, pools.counts[3]); index(target, count);
+        budget.add(pools.strings[name] + 1, sizeof(tjs_char));
         object.properties.emplace_back(name, target);
     }
     input.finish();
@@ -236,7 +263,8 @@ void validateBytecode(const std::uint8_t* bytes, std::size_t length) {
     const auto dataLength = input.u32();
     if(dataLength < 8) broken();
     auto data = input.chunk(dataLength - 8);
-    const auto pools = readPools(data);
+    LoadBudget budget;
+    const auto pools = readPools(data, budget);
     if(input.u32() != 0x534a424f) broken();
     const auto objectLength = input.u32();
     if(objectLength < 16) broken();
@@ -252,14 +280,17 @@ void validateBytecode(const std::uint8_t* bytes, std::size_t length) {
         krkr_compiler_work(i);
         if(area.u32() != 0x32534a54) broken();
         auto object = area.chunk(area.u32());
-        objects.push_back(readObject(object, pools, count));
+        objects.push_back(readObject(object, pools, count, budget));
         instructions(objects.back());
     }
     area.finish();
     std::vector<std::uint8_t> parents(count);
+    std::vector<std::vector<int>> ownership(count);
     for(unsigned i = 0; i < count; ++i) {
         krkr_compiler_work(i);
         const auto& object = objects[i];
+        ownership[i].insert(ownership[i].end(), object.references.begin(), object.references.end());
+        for(const auto& [name, target] : object.properties) ownership[object.parent].push_back(target);
         if(int(i) == top && (object.type != TJS::ctTopLevel || object.parent != -1)) broken();
         if(object.type == TJS::ctTopLevel && int(i) != top) broken();
         for(const auto& [target, kind, owner] : {
@@ -268,6 +299,7 @@ void validateBytecode(const std::uint8_t* bytes, std::size_t length) {
                 std::array{object.superclass, int(TJS::ctSuperClassGetter), int(TJS::ctClass)}}) {
             if(target >= 0 && (object.type != owner || objects[target].type != kind ||
                               objects[target].parent != int(i))) broken();
+            if(target >= 0) ownership[i].push_back(target);
         }
         // Parent chains must terminate; the native VM walks them without a
         // script checkpoint while resolving ownership and diagnostic names.
@@ -282,5 +314,26 @@ void validateBytecode(const std::uint8_t* bytes, std::size_t length) {
             parents[parent] = 2; parent = objects[parent].parent;
         }
     }
+    // Compiler-produced code owns contexts through constants, accessors and
+    // registered properties. Orphans and strong cycles cannot be reclaimed by
+    // this native reference-counted graph, so reject them before construction.
+    struct Visit { unsigned object, next; };
+    std::vector<Visit> stack;
+    std::vector<std::uint8_t> visited(count);
+    if(top >= 0) { visited[top] = 1; stack.push_back({unsigned(top), 0}); }
+    unsigned operations = 0;
+    while(!stack.empty()) {
+        krkr_compiler_work(operations++);
+        auto& visit = stack.back();
+        if(visit.next == ownership[visit.object].size()) {
+            visited[visit.object] = 2;
+            stack.pop_back();
+            continue;
+        }
+        const auto target = ownership[visit.object][visit.next++];
+        if(visited[target] == 1) broken();
+        if(visited[target] == 0) { visited[target] = 1; stack.push_back({unsigned(target), 0}); }
+    }
+    for(auto value : visited) if(value != 2) broken();
 }
 }

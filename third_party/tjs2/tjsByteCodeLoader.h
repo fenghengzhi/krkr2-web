@@ -14,6 +14,7 @@
 #include <vector>
 #include "tjsVariant.h"
 #include "tjsScriptBlock.h"
+#include "NativeOwnership.h"
 
 namespace TJS {
     /**
@@ -89,11 +90,7 @@ namespace TJS {
         std::vector<tjs_int64> LongLongArray;
         std::vector<double> DoubleArray;
         std::vector<ttstr> StringArray; // typedef tTJSString ttstr
-        std::vector<tTJSVariantOctet *> OctetArray;
-
-        const tjs_uint8 *ReadBuffer;
-        tjs_uint32 ReadIndex;
-        tjs_uint32 ReadSize;
+        std::vector<krkr::NativeOwner<tTJSVariantOctet>> OctetArray;
 
         static inline tjs_uint16 read2byte(const tjs_uint8 *x) {
             return ((tjs_uint16)(x[0]) | ((tjs_uint16)(x[1]) << 8));
@@ -112,16 +109,9 @@ namespace TJS {
         }
 
     public:
-        tTJSByteCodeLoader() : ReadBuffer(nullptr), ReadIndex(0), ReadSize(0) {}
+        tTJSByteCodeLoader() = default;
 
-        ~tTJSByteCodeLoader() {
-            size_t len = OctetArray.size();
-            for(size_t i = 0; i < len; i++) {
-                tTJSVariantOctet *o = OctetArray[i];
-                o->Release();
-                OctetArray[i] = nullptr;
-            }
-        }
+        ~tTJSByteCodeLoader() = default;
 
         tTJSScriptBlock *ReadByteCode(tTJS *owner, const tjs_char *name,
                                       const tjs_uint8 *buf, size_t size);
@@ -132,10 +122,10 @@ namespace TJS {
         static bool IsTJS2ByteCode(const tjs_uint8 *buff);
 
     private:
-        void ReadDataArea(const tjs_uint8 *buff, int offset, size_t size);
+        void ClearPools();
+        void ReadDataArea(const tjs_uint8 *buff, int offset);
 
-        void ReadObjects(tTJSScriptBlock *block, const tjs_uint8 *buff,
-                         int offset, int size);
+        void ReadObjects(tTJSScriptBlock *block, const tjs_uint8 *buff, int offset);
 
         void TranslateCodeAddress(tTJSScriptBlock *block, tjs_int32 *code,
                                   tjs_int32 size);

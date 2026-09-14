@@ -24,7 +24,6 @@ namespace TJS {
     tTJSScriptBlock::tTJSScriptBlock(tTJS *owner) {
         RefCount = 1;
         Owner = owner;
-        Owner->AddRef();
 
         Script = nullptr;
         Name = nullptr;
@@ -38,6 +37,7 @@ namespace TJS {
         LineOffset = 0;
 
         Owner->AddScriptBlock(this);
+        Owner->AddRef();
     }
 
     //---------------------------------------------------------------------------
@@ -46,11 +46,10 @@ namespace TJS {
                                      tjs_int lineoffset) {
         RefCount = 1;
         Owner = owner;
-        Owner->AddRef();
-        Name = nullptr;
+        std::unique_ptr<tjs_char[]> ownedName;
         if(name) {
-            Name = new tjs_char[TJS_strlen(name) + 1];
-            TJS_strcpy(Name, name);
+            ownedName.reset(new tjs_char[TJS_strlen(name) + 1]);
+            TJS_strcpy(ownedName.get(), name);
         }
         LineOffset = lineoffset;
         Script = nullptr;
@@ -62,6 +61,8 @@ namespace TJS {
         UsingPreProcessor = false;
 
         Owner->AddScriptBlock(this);
+        Owner->AddRef();
+        Name = ownedName.release();
     }
 
     //---------------------------------------------------------------------------
@@ -106,12 +107,12 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     void tTJSScriptBlock::Add(tTJSInterCodeContext *cntx) {
-        InterCodeContextList.push_back(cntx);
+        cntx->BlockPosition = InterCodeContextList.insert(InterCodeContextList.end(), cntx);
     }
 
     //---------------------------------------------------------------------------
     void tTJSScriptBlock::Remove(tTJSInterCodeContext *cntx) {
-        InterCodeContextList.remove(cntx);
+        InterCodeContextList.erase(cntx->BlockPosition);
     }
 
     //---------------------------------------------------------------------------

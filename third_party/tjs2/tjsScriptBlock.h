@@ -146,16 +146,9 @@ namespace TJS {
         // for Bytecode
         tTJSScriptBlock(tTJS *owner, const tjs_char *name, tjs_int lineoffset);
 
-        void SetObjects(tTJSInterCodeContext *toplevel,
-                        std::vector<tTJSInterCodeContext *> &objs, int count) {
+        void SetBytecodeTopLevel(tTJSInterCodeContext *toplevel) {
             TopLevelContext = toplevel;
-            for(int i = 0; i < count; i++) {
-                Add(objs[i]);
-                if(objs[i] != toplevel) {
-                    AddRef();
-                }
-                objs[i] = nullptr;
-            }
+            if(toplevel) toplevel->AddRef();
         }
         void ExecuteTopLevel(tTJSVariant *result, iTJSDispatch2 *context);
 

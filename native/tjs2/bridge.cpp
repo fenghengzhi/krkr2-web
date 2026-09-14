@@ -1,6 +1,7 @@
 #include <emscripten.h>
 #include <algorithm>
 #include <cstring>
+#include <malloc.h>
 #include <map>
 #include <set>
 #include <memory>
@@ -381,6 +382,11 @@ extern "C" int krkr_compiler_enter(int phase) {
     return previous;
 }
 extern "C" void krkr_compiler_leave(int previous) { compilerPhase = previous; }
+extern "C" int krkr_diagnostic_phase() { return compilerPhase; }
+API unsigned krkr_native_string_cells() { return TJSGetStringHeapAllocationCount(); }
+API unsigned krkr_native_heap_usage() { return mallinfo().uordblks; }
+API unsigned krkr_vm_script_blocks(Vm* vm) { return vm->engine->GetScriptBlockCount(); }
+API unsigned krkr_vm_script_contexts(Vm* vm) { return vm->engine->GetScriptContextCount(); }
 extern "C" void krkr_compiler_checkpoint() {
     if(!compilerPhase || shuttingDown || emscripten_get_now() < deadline) return;
     if(yield_host(compilerPhase)) TJS_eTJSError(u"Execution cancelled");

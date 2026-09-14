@@ -245,6 +245,8 @@ namespace TJS {
 
     class tTJSInterCodeContext : public tTJSCustomObject {
         typedef tTJSCustomObject inherited;
+        friend class tTJSScriptBlock;
+        std::list<tTJSInterCodeContext*>::iterator BlockPosition;
 
     public:
         tTJSInterCodeContext(tTJSInterCodeContext *parant, const tjs_char *name,
@@ -837,6 +839,8 @@ namespace TJS {
             if(getter)
                 getter->AddRef();
             SuperClassGetter = superclass;
+            if(superclass)
+                superclass->AddRef();
 #ifdef _DEBUG
             if(Parent)
                 Parent->AddRef();

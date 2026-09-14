@@ -24,7 +24,7 @@ export interface ModuleOptions {
   ) => Promise<number>
   shouldCancel: () => boolean
   /** VM, source preparation, parse/codegen, export, diagnostic dump, or binary input. */
-  onYield: (phase?: 0 | 1 | 2 | 3 | 4 | 5) => Promise<void>
+  onYield: (phase?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8) => Promise<void>
   queueWrite: (
     name: number,
     nameLength: number,
@@ -41,7 +41,12 @@ export type WasmVariant = 'asyncify' | 'jspi'
 
 export interface WasmManifest {
   abi: number
-  capabilities?: { cooperativeCompilation?: number; binaryScripts?: number }
+  capabilities?: {
+    cooperativeCompilation?: number
+    binaryScripts?: number
+    bytecodeLifecycle?: number
+  }
+  diagnosticAllocator?: boolean
   toolchain: string
   variants: Partial<
     Record<

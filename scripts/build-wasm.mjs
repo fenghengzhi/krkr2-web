@@ -28,6 +28,8 @@ const manifest = existsSync(manifestPath)
   ? JSON.parse(readFileSync(manifestPath, 'utf8'))
   : { abi: 5, variants: {} }
 const sourceHasher = createHash('sha256')
+const allocatorDiagnostic = process.env.KRKR_TEST_ALLOCATOR === '1'
+sourceHasher.update(allocatorDiagnostic ? 'allocator-diagnostic\0' : 'release\0')
 function hashSources(directory) {
   for (const entry of readdirSync(resolve(root, directory), { withFileTypes: true }).sort((a, b) =>
     a.name.localeCompare(b.name, 'en'),
@@ -61,7 +63,10 @@ function run(command, args) {
   if (result.status !== 0) throw new Error(`${command} failed (${result.status})`)
 }
 for (const variant of variants) {
-  const build = resolve(root, `out/native/${variant}`)
+  const build = resolve(
+    root,
+    `out/native/${variant}${allocatorDiagnostic ? '-allocator-diagnostic' : ''}`,
+  )
   run('cmake', [
     '-S',
     'native',
@@ -73,6 +78,7 @@ for (const variant of variants) {
     '-DCMAKE_BUILD_TYPE=Release',
     `-DBISON_EXECUTABLE=${bison}`,
     `-DTJS_VARIANT=${variant}`,
+    `-DKRKR_TEST_ALLOCATION_FAILURES=${allocatorDiagnostic ? 'ON' : 'OFF'}`,
     ...(python ? [`-DPython3_EXECUTABLE=${python}`] : []),
   ])
   run('cmake', ['--build', build, '--parallel', process.env.KRKR_BUILD_JOBS || '4'])
@@ -87,7 +93,8 @@ for (const variant of variants) {
   manifest.variants[variant] = { ...assets, sourceHash }
 }
 manifest.abi = 5
-manifest.capabilities = { cooperativeCompilation: 1, binaryScripts: 1 }
+manifest.capabilities = { cooperativeCompilation: 1, binaryScripts: 1, bytecodeLifecycle: 1 }
+manifest.diagnosticAllocator = allocatorDiagnostic
 manifest.source = { tjs2Revision: '6622499f70c3b30240d34d73d757c8adff45248f', sha256: sourceHash }
 manifest.toolchain = readFileSync(
   resolve(sdk, 'upstream/emscripten/emscripten-version.txt'),

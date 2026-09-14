@@ -268,6 +268,11 @@ namespace TJS {
     void tTJS::AddScriptBlock(tTJSScriptBlock *block) {
         ScriptBlocks.push_back(block);
     }
+    size_t tTJS::GetScriptContextCount() const {
+        size_t count = 0;
+        for(const auto* block : ScriptBlocks) count += block->GetContextCount();
+        return count;
+    }
 
     //---------------------------------------------------------------------------
     void tTJS::RemoveScriptBlock(tTJSScriptBlock *block) {

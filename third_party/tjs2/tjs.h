@@ -126,6 +126,8 @@ namespace TJS {
         iTJSDispatch2 *GetGlobal();
 
         [[nodiscard]] iTJSDispatch2 *GetGlobalNoAddRef() const;
+        [[nodiscard]] size_t GetScriptBlockCount() const { return ScriptBlocks.size(); }
+        [[nodiscard]] size_t GetScriptContextCount() const;
 
         tTJSVariantArrayStack *GetVariantArrayStack() {
             return VariantArrayStack;

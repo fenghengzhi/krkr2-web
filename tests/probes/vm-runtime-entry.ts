@@ -3,6 +3,12 @@ import { ExecutionControl } from '../../src/engine/scheduler/control.ts'
 import { exerciseTrace } from '../helpers/trace-runtime.ts'
 import { compilerPhases, exerciseCompiler } from '../helpers/compiler-runtime.ts'
 import { exerciseBinaryRuntime } from '../helpers/binary-runtime.ts'
+import {
+  exerciseBytecodeLifetime,
+  makeBytecodeWork,
+  bytecodePhases,
+  exerciseBytecodeControl,
+} from '../helpers/bytecode-lifetime.ts'
 
 export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
   const manifest = await (await fetch('/wasm/manifest.json')).json(),
@@ -131,7 +137,18 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
   for (const phase of compilerPhases)
     for (const cancel of [false, true])
       compiler.push(await exerciseCompiler(factory, wasmBinary, backend, phase, cancel))
+  const bytecodeWork = await makeBytecodeWork(factory, wasmBinary, backend),
+    bytecodeControls = []
+  for (const phase of bytecodePhases)
+    for (const cancel of [false, true])
+      bytecodeControls.push(
+        await exerciseBytecodeControl(factory, wasmBinary, backend, bytecodeWork, phase, cancel),
+      )
   return {
+    bytecode: {
+      lifetime: await exerciseBytecodeLifetime(factory, wasmBinary, backend),
+      controls: bytecodeControls,
+    },
     binary: [
       await exerciseBinaryRuntime(factory, wasmBinary, backend, false),
       await exerciseBinaryRuntime(factory, wasmBinary, backend, true),
