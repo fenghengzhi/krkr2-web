@@ -1,5 +1,11 @@
 # 插件以外的实现进度
 
+声音生命周期的 [当前版本完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895849611) 已通过 **710 项 Node、651 项浏览器和 6 组直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34894024462) 另通过 **78 项**。最终证据报告正在生成，不能将待完成报告视为通过。
+
+声音实例现由服务弱观察，后台事件独立持有并支持动态成员替换，失效时取消事件并等待异步关闭。外部 flags、labels 的失效和 filters Array 的独立所有权已接通；后端阻止迟到解码重新加载关闭资源，Headless 空闲时钟会停止。三浏览器双后端覆盖 60 个真实声音场景、168 个从属对象场景；独立句柄 64 项、对象 120 项和分配诊断均通过，详见 [决策 040](decisions/040-sound-object-lifetime.md)。TJS ABI 5 新增 `soundObjectLifetime: 1`，字体 ABI 2、协议 9 不变。
+
+视频对象生命周期在独立分支继续实现；Window、Layer、MenuItem、完整图形/系统 API、流式媒体等仍未完成。原引擎不收集任意引用环。历史 WebKit 会话中断等未定位问题保留，原始失败不会被后续通过覆盖。以下为历史阶段记录，当前声音状态以上述回归与决策 040 为准。
+
 [宿主生命周期最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)已通过，绑定 542 份证据。矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`，可信冻结为 21,059.1 ms。
 
 [完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882175516)通过 **594 项 Node、639 项浏览器和 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877215012)另通过 **78 项**。本轮还有 64 项隔离宿主句柄、120 项隔离对象终结和 20 次 WebKit 字体取消/重启检查。双后端分配诊断通过 600 次观察/升级/销毁、20 次集合清理、1,064 次执行和 188 次字节码分配失败。
