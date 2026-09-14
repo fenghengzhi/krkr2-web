@@ -1,4 +1,4 @@
-// Exercise weak-owner registration and VM disposal on GitHub-hosted runners.
+// Exercise weak-owner registration, upgrade and disposal on GitHub-hosted runners.
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -324,6 +324,173 @@ for (const debugMode of [false, true])
         debugMode,
         binary,
         error: 'Disposal allocation enumeration exceeded 512 sites',
+      })
+  }
+for (const debugMode of [false, true])
+  for (const binary of [false, true]) {
+    let baseline: ReturnType<typeof allocated> | undefined,
+      completed = false,
+      controlPassed = false
+    for (let after = -1; after < 128; after++) {
+      const native = observeNative(factory)
+      const vm = await TjsWasmRuntime.create(
+        native.factory,
+        () => {
+          throw new Error('Unexpected upgrade allocator host call')
+        },
+        { wasmBinary, variant, debugMode },
+      )
+      let outcome: Record<string, unknown> = { operation: 'upgrade', debugMode, binary, after },
+        failure: unknown
+      const index = results.length
+      results.push({ ...outcome, status: 'preparing' })
+      try {
+        await vm.execute('try{missingOwnerUpgradeWarm();}catch(e){}')
+        const setup =
+          'var upgradeOwnerFinalized=0;class UpgradeOwner {function finalize(){upgradeOwnerFinalized++;}}'
+        await vm.execute(binary ? await vm.compile(setup, 'owner-upgrade.tjs') : setup)
+        const expression = 'new UpgradeOwner()'
+        const value = await vm.execute(
+          binary ? await vm.compile(expression, 'owner-upgrade-instance.tjs', true) : expression,
+          'owner-upgrade-instance.tjs',
+          true,
+        )
+        assert(isScriptObject(value))
+        const owner = value as ScriptObject,
+          identity = vm.objectIdentity(owner)
+        let notifications = 0
+        const token = vm.observe(owner, () => {
+          notifications++
+        })
+        const before = { ...native.stats(), ...vm.inspect(), allocations: allocated(native) }
+        assert.equal(before.weakOwners, 1)
+        assert.equal(before.handles, 1)
+        assert.equal(before.pendingHandles, 0)
+        outcome = { ...outcome, before, identity, status: 'upgrading' }
+        results[index] = outcome
+        save()
+        let lease: ScriptObject | undefined, error: unknown
+        if (after >= 0) native.call('krkr_test_fail_allocation', 13, after, 0)
+        try {
+          lease = vm.upgrade(token)
+        } catch (caught) {
+          error = caught
+        }
+        const hits = native.call('krkr_test_allocation_hits'),
+          failedBytes = native.call('krkr_test_failed_bytes')
+        native.call('krkr_test_fail_allocation', 0, -1, 0)
+        const upgraded = { ...native.stats(), ...vm.inspect(), allocations: allocated(native) }
+        outcome = {
+          ...outcome,
+          status: 'upgraded',
+          upgraded,
+          hits,
+          failedBytes,
+          error: error instanceof Error ? error.message : null,
+          lease: lease?.id,
+        }
+        assert.equal(upgraded.weakOwners, 1)
+        assert.equal(upgraded.pendingHandles, 0)
+        assert.equal(upgraded.scriptObjects, before.scriptObjects)
+        assert.equal(upgraded.blocks, before.blocks)
+        assert.equal(upgraded.contexts, before.contexts)
+        assert.equal(vm.objectIdentity(owner), identity)
+        assert.equal(notifications, 0)
+        if (hits) {
+          assert(
+            error instanceof Error && error.message === 'TJS owner upgrade allocation failed',
+            'Upgrade allocation failure was confused with owner expiry',
+          )
+          assert.equal(lease, undefined)
+          assert.equal(upgraded.handles, before.handles)
+        } else {
+          assert.equal(error, undefined)
+          assert(lease)
+          assert.equal(vm.objectIdentity(lease), identity)
+          assert.equal(upgraded.handles, before.handles + 1)
+          completed = after >= 0
+        }
+        // A retry must retain the exact closure and reset the native error flag.
+        const retry = vm.upgrade(token)
+        assert(retry)
+        assert.equal(vm.objectIdentity(retry), identity)
+        assert.notEqual(retry.id, owner.id)
+        if (lease) assert.notEqual(retry.id, lease.id)
+        const retried = { ...native.stats(), ...vm.inspect() }
+        outcome = { ...outcome, retried, retry: retry.id }
+        assert.equal(retried.handles, before.handles + (lease ? 2 : 1))
+        assert.equal(retried.weakOwners, 1)
+        assert.equal(retried.scriptObjects, before.scriptObjects)
+        vm.release(owner)
+        if (lease) vm.release(lease)
+        assert.equal(await vm.execute('6*7', 'owner-upgrade-lease-boundary.tjs', true), 42n)
+        const leased = { ...native.stats(), ...vm.inspect() }
+        outcome = { ...outcome, leased }
+        assert.equal(leased.handles, 1)
+        assert.equal(leased.pendingHandles, 0)
+        assert.equal(leased.weakOwners, 1)
+        assert.equal(leased.scriptObjects, before.scriptObjects)
+        assert.equal(notifications, 0)
+        vm.release(retry)
+        assert.equal(await vm.execute('6*7', 'owner-upgrade-release.tjs', true), 42n)
+        const released = { ...native.stats(), ...vm.inspect(), budget: executionStats(native) }
+        outcome = { ...outcome, released, notifications }
+        assert.equal(notifications, 1)
+        assert.equal(released.weakOwners, 0)
+        assert.equal(released.handles, 0)
+        assert.equal(released.pendingHandles, 0)
+        assert.equal(released.scriptObjects, before.scriptObjects - 1)
+        assert.equal(released.blocks, before.blocks)
+        assert.equal(released.contexts, before.contexts)
+        assert.equal(released.budget.depth, 0)
+        assert.equal(released.budget.bytes, 0)
+        assert.equal(native.call('krkr_native_lifetime_stat', 0), 0)
+        assert.equal(native.call('krkr_native_lifetime_stat', 1), 0)
+        assert.equal(vm.upgrade(token), undefined)
+        vm.unobserve(token)
+        assert.equal(
+          await vm.execute('upgradeOwnerFinalized', 'owner-upgrade-finalized.tjs', true),
+          1n,
+        )
+      } catch (error) {
+        failure = {
+          ...outcome,
+          error: String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        }
+      } finally {
+        native.call('krkr_test_fail_allocation', 0, -1, 0)
+        vm.dispose()
+      }
+      const disposed = allocated(native)
+      if (after === -1) {
+        baseline = disposed
+        controlPassed = !failure
+      } else if (JSON.stringify(disposed) !== JSON.stringify(baseline))
+        failure = {
+          ...outcome,
+          error: 'Owner upgrade retained live allocations after disposal',
+          baseline,
+          disposed,
+          prior: failure,
+        }
+      results[index] = { ...outcome, baseline, disposed }
+      if (failure) {
+        failures.push(failure)
+        console.error(failure)
+      } else
+        console.log(
+          `PASS ${variant}/owner-upgrade/debug=${debugMode}/binary=${binary}/allocation=${after}`,
+        )
+      save()
+      if (!controlPassed || completed) break
+    }
+    if (controlPassed && !completed)
+      failures.push({
+        operation: 'upgrade',
+        debugMode,
+        binary,
+        error: 'Owner upgrade allocation enumeration exceeded 128 sites',
       })
   }
 save()
