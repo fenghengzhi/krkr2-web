@@ -25,6 +25,7 @@
 #include "scripts.h"
 #include "ExecutionBudget.h"
 #include "WebHost.h"
+#include "NativeOwnership.h"
 
 using namespace TJS;
 namespace TJS {
@@ -61,6 +62,29 @@ struct WeakOwner {
     static void Expired(void* context) noexcept;
 };
 
+// The owner is observed, while the dependent has an independent native lease.
+// Notifications only mark work; invalidation can run script and belongs in a
+// normal host/VM boundary, never in the observer's noexcept callback.
+struct DependentOwner {
+    krkr::NativeOwner<tTJSCustomObject> object;
+    bool queued = false;
+    bool invalidate = true;
+    tTJSObjectObserver ownerObserver;
+    tTJSObjectObserver dependentObserver;
+    explicit DependentOwner(tTJSCustomObject* value)
+        : object(value), ownerObserver(OwnerExpired, this), dependentObserver(DependentExpired, this) {
+        value->AddRef();
+    }
+    static void OwnerExpired(void* context) noexcept {
+        static_cast<DependentOwner*>(context)->queued = true;
+    }
+    static void DependentExpired(void* context) noexcept {
+        auto* record = static_cast<DependentOwner*>(context);
+        record->invalidate = false;
+        record->queued = true;
+    }
+};
+
 struct Vm {
     tTJS* engine = nullptr;
     std::unique_ptr<iTJSConsoleOutput> console;
@@ -71,6 +95,8 @@ struct Vm {
     std::map<unsigned, std::unique_ptr<WeakOwner>> owners;
     unsigned nextOwner = 1;
     bool ownerUpgradeFailed = false;
+    unsigned nextDependent = 1;
+    std::map<unsigned, std::unique_ptr<DependentOwner>> dependents;
     ~Vm() {
         krkr::CleanupErrors cleanup;
         cleanup.suppress();
@@ -90,6 +116,9 @@ struct Vm {
             WeakOwner::Expired(owners.begin()->second.get());
             owners.erase(id); // the host may already have removed this token
         }
+        // All script execution is suppressed for terminal VM disposal. Detach
+        // both notifications before releasing the dependent's extra reference.
+        dependents.clear();
         handles.clear();
         if(engine) {
             // Clearing globals may fail to allocate its temporary release
@@ -109,7 +138,23 @@ struct Vm {
         } drain{drainingReleased};
         krkr::CleanupErrors cleanup;
         std::exception_ptr primary;
-        while(!released.empty()) {
+        while(true) {
+            auto pending = std::find_if(dependents.begin(), dependents.end(),
+                [](const auto& item) { return item.second->queued; });
+            if(pending != dependents.end()) {
+                auto node = dependents.extract(pending);
+                auto& record = *node.mapped();
+                record.ownerObserver.Detach();
+                record.dependentObserver.Detach();
+                try {
+                    if(record.invalidate) {
+                        auto status = record.object->Invalidate(0, nullptr, nullptr, record.object.get());
+                        if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, nullptr);
+                    }
+                } catch(...) { if(!primary) primary = std::current_exception(); }
+                continue;
+            }
+            if(released.empty()) break;
             const auto id = *released.begin();
             released.erase(id);
             // Revoke the ID before finalization. A host callback can retain,
@@ -455,6 +500,10 @@ class HostProxy final : public tTJSDispatch {
     ttstr prefix, className;
     tjs_int id;
     bool valid = true;
+    static void OwnerInvalidated(void* context) noexcept {
+        static_cast<HostProxy*>(context)->valid = false;
+    }
+    tTJSObjectObserver ownerObserver;
     tjs_error dispatch(const tjs_char* operation, const tjs_char* member, tTJSVariant* result, tjs_int count, tTJSVariant** params) {
         if(!valid || shuttingDown) return TJS_E_INVALIDOBJECT;
         // A dispatch object is not a default property. TJSDefaultPropGet must
@@ -470,11 +519,12 @@ class HostProxy final : public tTJSDispatch {
         return TJS_S_OK;
     }
 public:
-    HostProxy(Vm* vm, const tjs_char* prefix, int id, const tjs_char* className) : vm(vm),prefix(prefix),className(className),id(id) {}
+    HostProxy(Vm* vm, const tjs_char* prefix, int id, const tjs_char* className) : vm(vm),prefix(prefix),className(className),id(id),ownerObserver(OwnerInvalidated,this) {}
+    bool BindOwner(tTJSCustomObject* owner) noexcept { return valid && ownerObserver.Attach(owner); }
     tjs_error PropGet(tjs_uint32, const tjs_char* member, tjs_uint32*, tTJSVariant* result, iTJSDispatch2*) override { return dispatch(u".get",member,result,0,nullptr); }
     tjs_error PropSet(tjs_uint32, const tjs_char* member, tjs_uint32*, const tTJSVariant* value, iTJSDispatch2*) override { auto p=const_cast<tTJSVariant*>(value);return dispatch(u".set",member,nullptr,1,&p); }
     tjs_error FuncCall(tjs_uint32, const tjs_char* member, tjs_uint32*, tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2*) override { return dispatch(u".call",member,result,count,args); }
-    tjs_error Invalidate(tjs_uint32, const tjs_char* member, tjs_uint32*, iTJSDispatch2*) override { if(member)return TJS_E_MEMBERNOTFOUND;valid=false;return TJS_S_TRUE; }
+    tjs_error Invalidate(tjs_uint32, const tjs_char* member, tjs_uint32*, iTJSDispatch2*) override { if(member)return TJS_E_MEMBERNOTFOUND;valid=false;ownerObserver.Detach();return TJS_S_TRUE; }
     tjs_error IsValid(tjs_uint32, const tjs_char* member, tjs_uint32*, iTJSDispatch2*) override { if(member)return TJS_E_MEMBERNOTFOUND;return valid?TJS_S_TRUE:TJS_S_FALSE; }
     tjs_error IsInstanceOf(tjs_uint32, const tjs_char*, tjs_uint32*, const tjs_char* name, iTJSDispatch2*) override { return className==ttstr(name)||ttstr(name)==u"Object"?TJS_S_TRUE:TJS_S_FALSE; }
 };
@@ -557,6 +607,24 @@ template<typename Fn> Reply* capture(Fn fn) {
     }
     return reply.release();
 }
+template<typename Fn> Reply* captureVm(Vm* vm, Fn fn) {
+    return capture([&](tTJSVariant& value) {
+        try {
+            vm->flushReleased();
+            fn(value);
+            krkr::throwCleanupError();
+        } catch(...) {
+            auto primary = std::current_exception();
+            krkr::CleanupErrors secondary;
+            secondary.suppress();
+            try { vm->flushReleased(); } catch(...) {}
+            std::rethrow_exception(primary);
+        }
+        // A finalizer can retire dependents without another host call. Finish
+        // that work before returning this execution's reply to JavaScript.
+        vm->flushReleased();
+    });
+}
 }
 
 extern "C" void krkr_vm_check_cancellation() {
@@ -624,8 +692,7 @@ API void krkr_set_console(Vm* vm, int enabled) { vm->engine->SetConsoleOutput(en
 API int krkr_abi_version() { return 5; }
 API Reply* krkr_execute(Vm* vm, const void* source, unsigned length, const tjs_char* name, int mode) {
     deadline = emscripten_get_now() + 8;
-    return capture([&](tTJSVariant& value) {
-        vm->flushReleased();
+    return captureVm(vm, [&](tTJSVariant& value) {
         if(mode == 2) loadBinary(vm, static_cast<const tjs_uint8*>(source), length, &value, nullptr, name);
         else if(mode == 1) vm->engine->EvalExpression(static_cast<const tjs_char*>(source), &value, nullptr, name);
         else vm->engine->ExecScript(static_cast<const tjs_char*>(source), &value, nullptr, name);
@@ -633,8 +700,7 @@ API Reply* krkr_execute(Vm* vm, const void* source, unsigned length, const tjs_c
 }
 API Reply* krkr_compile(Vm* vm, const tjs_char* source, const tjs_char* name, int expression) {
     deadline = emscripten_get_now() + 8;
-    return capture([&](tTJSVariant& value) {
-        vm->flushReleased();
+    return captureVm(vm, [&](tTJSVariant& value) {
         MemoryStream stream;
         vm->engine->CompileScript(source, &stream, true, true, expression != 0, name);
         value = tTJSVariant(stream.data.data(), stream.data.size());
@@ -642,8 +708,7 @@ API Reply* krkr_compile(Vm* vm, const tjs_char* source, const tjs_char* name, in
 }
 API Reply* krkr_invoke(Vm* vm, unsigned handle, Reply* arguments) {
     deadline = emscripten_get_now() + 8;
-    return capture([&](tTJSVariant& value) {
-        vm->flushReleased();
+    return captureVm(vm, [&](tTJSVariant& value) {
         auto it = vm->handles.find(handle);
         if(it == vm->handles.end()) TJS_eTJSError(u"Invalid object handle");
         Reply call; call.kind = 2; call.value = it->second;
@@ -700,6 +765,17 @@ API void krkr_value_set_scripts_class(Vm* vm, tTJSVariant* value) {
 API void krkr_value_set_proxy(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* className) {
     auto proxy=new HostProxy(vm,prefix,id,className);
     *value=tTJSVariant(proxy,proxy);proxy->Release();
+}
+API int krkr_proxy_bind_owner(Vm* vm, tTJSVariant* value, unsigned handle) {
+    if(shuttingDown || vm->released.count(handle) || value->Type() != tvtObject) return 0;
+    auto found = vm->handles.find(handle);
+    if(found == vm->handles.end() || found->second.Type() != tvtObject) return 0;
+    const auto closure = found->second.AsObjectClosureNoAddRef();
+    if(closure.ObjThis && closure.ObjThis != closure.Object) return 0;
+    auto* owner = dynamic_cast<tTJSCustomObject*>(closure.Object);
+    auto* proxy = dynamic_cast<HostProxy*>(value->AsObjectNoAddRef());
+    if(!owner || !proxy || dynamic_cast<tTJSInterCodeContext*>(owner) || dynamic_cast<tTJSNativeClass*>(owner)) return 0;
+    return proxy->BindOwner(owner);
 }
 API void krkr_value_set_class(Vm*, tTJSVariant* value, const tjs_char*, int, const tjs_char* className) {
     auto object = new HostClass(className);
@@ -838,3 +914,31 @@ API unsigned krkr_owner_upgrade(Vm* vm, unsigned token) {
 API int krkr_owner_upgrade_failed(Vm* vm) { return vm->ownerUpgradeFailed; }
 API void krkr_owner_unobserve(Vm* vm, unsigned token) { vm->owners.erase(token); }
 API unsigned krkr_owner_count(Vm* vm) { return vm->owners.size(); }
+API int krkr_owner_bind_dependent(Vm* vm, unsigned ownerHandle, unsigned dependentHandle) {
+    if(shuttingDown || !vm->nextDependent || vm->dependents.size() >= 4096) return 0;
+    const auto instance = [&](unsigned handle) -> tTJSCustomObject* {
+        if(vm->released.count(handle)) return nullptr;
+        auto found = vm->handles.find(handle);
+        if(found == vm->handles.end() || found->second.Type() != tvtObject) return nullptr;
+        const auto closure = found->second.AsObjectClosureNoAddRef();
+        if(closure.ObjThis && closure.ObjThis != closure.Object) return nullptr;
+        auto* object = dynamic_cast<tTJSCustomObject*>(closure.Object);
+        if(!object || !object->IsLifetimeValid() || dynamic_cast<tTJSInterCodeContext*>(object) ||
+            dynamic_cast<tTJSNativeClass*>(object)) return nullptr;
+        return object;
+    };
+    auto* owner = instance(ownerHandle);
+    auto* dependent = instance(dependentHandle);
+    if(!owner || !dependent || owner == dependent) return 0;
+    try {
+        auto record = std::make_unique<DependentOwner>(dependent);
+        if(!record->ownerObserver.Attach(owner) || !record->dependentObserver.Attach(dependent)) return 0;
+        vm->dependents.emplace(vm->nextDependent++, std::move(record));
+        return 1;
+    } catch(...) { return 0; }
+}
+API unsigned krkr_dependent_count(Vm* vm) { return vm->dependents.size(); }
+API unsigned krkr_pending_invalidation_count(Vm* vm) {
+    return std::count_if(vm->dependents.begin(), vm->dependents.end(),
+        [](const auto& item) { return item.second->queued; });
+}

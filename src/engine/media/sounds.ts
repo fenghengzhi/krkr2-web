@@ -13,16 +13,20 @@ import {
   scriptList,
   scriptRecord,
   type HostContext,
+  type ScriptRuntime,
   type ScriptObject,
+  type ScriptWeakObject,
   type ScriptValue,
 } from '../script/runtime.ts'
 import { parseSli } from '../../formats/audio/sli.ts'
 interface Sound {
   id: number
   kind: SoundKind
-  callback: ScriptObject
+  owner: ScriptWeakObject
   snapshot: SoundSnapshot
   ready: boolean
+  resourceRequested: boolean
+  inflight: Set<Promise<AudioResult>>
   version: number
   labels: ScriptValue
 }
@@ -33,20 +37,71 @@ export class SoundService {
   private unsubscribe?: () => void
   private globalVolume = 100000
   private globalFocusMode = 0
+  private disposed = false
+  private closes = new Set<Promise<void>>()
+  private closeErrors: unknown[] = []
   constructor(
-    private readonly objects: HostContext,
+    private readonly objects: ScriptRuntime,
     private readonly backend: AudioBackend | undefined,
     private readonly read: (name: string) => Promise<Uint8Array>,
     private readonly exists: (name: string) => boolean,
     private readonly text: (bytes: Uint8Array) => Promise<string>,
     private readonly dispatch: (
       callback: ScriptObject,
+      member: string,
       args: ScriptValue[],
       valid: () => boolean,
+      source: object,
     ) => Promise<void>,
     private readonly error: (error: unknown) => void,
+    private readonly cancelQueued: (source: object) => void = () => {},
   ) {
     this.unsubscribe = backend?.listen((event) => this.receive(event))
+  }
+  get count(): number {
+    return this.buffers.size
+  }
+  get pendingCloses(): number {
+    return this.closes.size
+  }
+  private cancelEvents(sound: Sound): void {
+    sound.version++
+    this.cancelQueued(sound)
+  }
+  private retire(id: number): void {
+    const sound = this.buffers.get(id)
+    if (!sound) return
+    this.buffers.delete(id)
+    try {
+      this.cancelEvents(sound)
+    } finally {
+      this.objects.unobserve(sound.owner)
+    }
+    if (!sound.resourceRequested) return
+    // Invalidation is a synchronous native notification. Starting a backend
+    // command here could synchronously emit events; defer it until we return.
+    const closing = Promise.resolve().then(async () => {
+      await Promise.allSettled([...sound.inflight])
+      await this.command({ op: 'close', id })
+    })
+    this.closes.add(closing)
+    void closing.then(
+      () => {
+        this.closes.delete(closing)
+      },
+      (error) => {
+        this.closes.delete(closing)
+        this.closeErrors.push(error)
+      },
+    )
+  }
+  async flushCloses(): Promise<void> {
+    while (this.closes.size) await Promise.allSettled([...this.closes])
+    if (this.closeErrors.length) {
+      const error = this.closeErrors[0]
+      this.closeErrors.length = 0
+      throw error
+    }
   }
   private get(id: number): Sound {
     const sound = this.buffers.get(id)
@@ -57,9 +112,22 @@ export class SoundService {
     if (!this.backend) throw new Error('This environment has no audio backend')
     return this.backend.command(command)
   }
+  private async voiceCommand(sound: Sound, command: AudioCommand): Promise<AudioResult> {
+    if (this.buffers.get(sound.id) !== sound) throw new Error('SoundBuffer has been invalidated')
+    if (command.op === 'create' || command.op === 'open') sound.resourceRequested = true
+    const pending = this.command(command)
+    sound.inflight.add(pending)
+    try {
+      const result = await pending
+      if (this.buffers.get(sound.id) !== sound) throw new Error('SoundBuffer has been invalidated')
+      return result
+    } finally {
+      sound.inflight.delete(pending)
+    }
+  }
   private async prepare(sound: Sound): Promise<void> {
     if (sound.ready) return
-    const result = await this.command({
+    const result = await this.voiceCommand(sound, {
       op: 'create',
       id: sound.id,
       settings: sound.snapshot,
@@ -85,14 +153,30 @@ export class SoundService {
             : 'onLabel'
     const args: ScriptValue[] =
       event.type === 'ended' ? ['stop'] : event.type === 'label' ? [event.label ?? ''] : []
-    void this.dispatch(
-      sound.callback,
-      [name, scriptList(args)],
-      () =>
-        this.buffers.get(sound.id) === sound &&
-        sound.version === version &&
-        sound.snapshot.epoch === event.epoch,
-    ).catch(this.error)
+    let lease: ScriptObject | undefined
+    try {
+      lease = this.objects.upgrade(sound.owner)
+    } catch (error) {
+      this.error(error)
+      return
+    }
+    if (!lease) {
+      this.retire(sound.id)
+      return
+    }
+    const held = lease
+    const valid = () =>
+      this.buffers.get(sound.id) === sound &&
+      sound.version === version &&
+      sound.snapshot.epoch === event.epoch
+    try {
+      void this.dispatch(held, name, args, valid, sound)
+        .finally(() => this.objects.release(held))
+        .catch(this.error)
+    } catch (error) {
+      this.objects.release(held)
+      this.error(error)
+    }
   }
   private result(value: ScriptValue, callbacks: Callback[]): ScriptValue {
     return scriptRecord({
@@ -109,32 +193,41 @@ export class SoundService {
       return value
     }
     if (operation === 'Sound.create') {
+      if (this.disposed) throw new Error('Sound service is disposed')
       const kind = args[0],
         callback = args[1]
       if (!['wave', 'midi', 'cdda'].includes(String(kind)) || !isScriptObject(callback))
         throw new Error('Invalid sound constructor')
       if (this.buffers.size >= 256) throw new Error('Sound buffer budget exceeded')
       const id = this.nextId++
-      this.buffers.set(id, {
-        id,
-        kind: kind as SoundKind,
-        callback: context.retain(callback),
-        ready: false,
-        version: 0,
-        labels: scriptRecord({}),
-        snapshot: {
+      const owner = this.objects.observe(callback, () => this.retire(id))
+      try {
+        this.buffers.set(id, {
           id,
-          epoch: 0,
-          ...defaultSoundSettings(),
-          status: 'unload',
-          fading: false,
-          flags: Array(16).fill(0),
-          sampleRate: 0,
-          sampleCount: 0,
-          channels: 0,
-          bits: 0,
-        },
-      })
+          kind: kind as SoundKind,
+          owner,
+          ready: false,
+          resourceRequested: false,
+          inflight: new Set(),
+          version: 0,
+          labels: scriptRecord({}),
+          snapshot: {
+            id,
+            epoch: 0,
+            ...defaultSoundSettings(),
+            status: 'unload',
+            fading: false,
+            flags: Array(16).fill(0),
+            sampleRate: 0,
+            sampleCount: 0,
+            channels: 0,
+            bits: 0,
+          },
+        })
+      } catch (error) {
+        this.objects.unobserve(owner)
+        throw error
+      }
       return BigInt(id)
     }
     if (operation === 'Sound.global') {
@@ -163,34 +256,50 @@ export class SoundService {
       throw new Error('Unsupported sound global property')
     }
     const sound = this.get(number(0))
-    if (operation === 'Sound.flags')
-      return { type: 'proxy', namespace: 'Sound.flags', id: sound.id, className: 'WaveFlags' }
+    if (operation === 'Sound.bindLabels') {
+      if (!isScriptObject(args[1]) || !isScriptObject(args[2]))
+        throw new Error('Sound labels require their sound owner and Dictionary')
+      this.objects.bindDependent(args[1], args[2])
+      return
+    }
+    if (operation === 'Sound.flags') {
+      if (!isScriptObject(args[1])) throw new Error('WaveFlags requires its sound owner')
+      return {
+        type: 'proxy',
+        namespace: 'Sound.flags',
+        id: sound.id,
+        className: 'WaveFlags',
+        owner: args[1],
+      }
+    }
     if (operation.startsWith('Sound.flags.')) {
       const property = String(args[1]),
         action = operation.slice('Sound.flags.'.length)
       if (action === 'get' && property === 'count') return 16n
       if (action === 'call' && property === 'reset') {
         sound.snapshot.flags.fill(0)
-        if (sound.ready)
+        if (sound.snapshot.status !== 'unload')
           for (let index = 0; index < 16; index++)
-            await this.command({ op: 'flag', id: sound.id, index, value: 0 })
+            await this.voiceCommand(sound, { op: 'flag', id: sound.id, index, value: 0 })
         return
       }
       const index = Number(property)
       if (!Number.isInteger(index) || index < 0 || index >= 16)
         throw new Error('Wave flag index is outside 0..15')
       if (action === 'get') {
+        if (sound.snapshot.status === 'unload') return 0n
         if (sound.ready) {
-          const result = await this.command({ op: 'inspect', id: sound.id })
+          const result = await this.voiceCommand(sound, { op: 'inspect', id: sound.id })
           if (result.snapshot) sound.snapshot = result.snapshot
         }
         return BigInt(sound.snapshot.flags[index]!)
       }
       if (action === 'set') {
+        if (sound.snapshot.status === 'unload') return
         const value = Math.max(0, Math.min(9999, number(2)))
         sound.snapshot.flags[index] = value
         if (sound.ready) {
-          const result = await this.command({ op: 'flag', id: sound.id, index, value })
+          const result = await this.voiceCommand(sound, { op: 'flag', id: sound.id, index, value })
           if (result.snapshot) sound.snapshot = result.snapshot
         }
         return
@@ -198,10 +307,8 @@ export class SoundService {
       throw new Error('Unsupported wave flag operation')
     }
     if (operation === 'Sound.destroy') {
-      sound.version++
-      this.buffers.delete(sound.id)
-      context.release(sound.callback)
-      if (sound.ready) await this.command({ op: 'close', id: sound.id })
+      this.retire(sound.id)
+      await this.flushCloses()
       return
     }
     if (operation !== 'Sound.call' || typeof args[1] !== 'string' || !isScriptObject(args[2]))
@@ -223,7 +330,7 @@ export class SoundService {
     const callbacks: Callback[] = []
     let value: ScriptValue
     const apply = async (command: AudioCommand) => {
-      const result = await this.command(command)
+      const result = await this.voiceCommand(sound, command)
       if (result.snapshot) sound.snapshot = result.snapshot
       for (const event of result.events) {
         if (event.type === 'error') throw new Error(event.message)
@@ -241,8 +348,9 @@ export class SoundService {
     }
     if (method === 'unload') {
       const previous = sound.snapshot.status
-      sound.version++
-      if (sound.ready) await this.command({ op: 'close', id: sound.id })
+      this.cancelEvents(sound)
+      if (sound.resourceRequested) await this.voiceCommand(sound, { op: 'close', id: sound.id })
+      sound.resourceRequested = false
       sound.ready = false
       sound.labels = scriptRecord({})
       sound.snapshot = {
@@ -261,7 +369,7 @@ export class SoundService {
       }
       if (previous !== 'unload') callbacks.push({ name: 'onStatusChanged', args: ['unload'] })
     } else if (method === 'open') {
-      sound.version++
+      this.cancelEvents(sound)
       const name = text(0),
         previous = sound.snapshot.status
       const bytes = await this.read(name),
@@ -296,7 +404,7 @@ export class SoundService {
       const previous = sound.snapshot.status
       if (sound.ready) await apply({ op: method, id: sound.id })
       if (sound.snapshot.status !== previous) {
-        sound.version++
+        this.cancelEvents(sound)
         callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
       }
     } else if (method === 'fade') {
@@ -314,7 +422,7 @@ export class SoundService {
       const property = text(0)
       if (property === 'labels') return this.result(sound.labels, callbacks)
       if (sound.ready) {
-        const result = await this.command({ op: 'inspect', id: sound.id })
+        const result = await this.voiceCommand(sound, { op: 'inspect', id: sound.id })
         if (result.snapshot) sound.snapshot = result.snapshot
       }
       const state = sound.snapshot
@@ -356,12 +464,26 @@ export class SoundService {
     if (this.backend) await this.command({ op: 'pauseAll', paused })
   }
   async dispose(): Promise<void> {
-    this.unsubscribe?.()
-    for (const sound of this.buffers.values()) {
-      sound.version++
-      this.objects.release(sound.callback)
+    if (this.disposed) {
+      await this.flushCloses()
+      return
     }
-    this.buffers.clear()
-    await this.backend?.close()
+    this.disposed = true
+    this.unsubscribe?.()
+    for (const id of [...this.buffers.keys()]) this.retire(id)
+    let primary: unknown,
+      failed = false
+    try {
+      await this.flushCloses()
+    } catch (error) {
+      primary = error
+      failed = true
+    }
+    try {
+      await this.backend?.close()
+    } catch (error) {
+      if (!failed) throw error
+    }
+    if (failed) throw primary
   }
 }

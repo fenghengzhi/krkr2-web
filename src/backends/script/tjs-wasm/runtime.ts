@@ -187,6 +187,11 @@ export class TjsWasmRuntime implements ScriptRuntime {
           value.id,
           name,
         )
+        if (value.type === 'proxy' && value.owner) {
+          this.assertObject(value.owner)
+          if (!this.call('krkr_proxy_bind_owner', this.vm, pointer, value.owner.id))
+            throw new Error('Cannot bind a proxy to a released or invalid TJS owner')
+        }
         if (value.type === 'class')
           for (const property of value.properties) {
             const key = this.textPointer(property.name)
@@ -273,6 +278,12 @@ export class TjsWasmRuntime implements ScriptRuntime {
     if (this.disposed) return
     this.owners.delete(owner.id)
     this.call('krkr_owner_unobserve', this.vm, owner.id)
+  }
+  bindDependent(owner: ScriptObject, dependent: ScriptObject): void {
+    this.assertObject(owner)
+    this.assertObject(dependent)
+    if (!this.call('krkr_owner_bind_dependent', this.vm, owner.id, dependent.id))
+      throw new Error('Cannot bind a released, invalid or unavailable TJS dependent')
   }
   private assertWeakOwner(owner: ScriptWeakObject): void {
     if (owner.runtime !== this.identity) throw new Error('Owner belongs to a different TJS runtime')
@@ -562,6 +573,8 @@ export class TjsWasmRuntime implements ScriptRuntime {
       weakOwners: this.call('krkr_owner_count', this.vm),
       scriptObjects: this.call('krkr_native_lifetime_stat', 4),
       pendingHandles: this.call('krkr_pending_handle_count', this.vm),
+      dependents: this.call('krkr_dependent_count', this.vm),
+      pendingInvalidations: this.call('krkr_pending_invalidation_count', this.vm),
     }
   }
   flush(): Promise<void> {

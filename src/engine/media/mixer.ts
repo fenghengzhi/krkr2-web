@@ -63,6 +63,22 @@ export class AudioMixer {
   constructor(readonly sampleRate: number) {
     if (sampleRate < 1000 || sampleRate > 384000) throw new Error('Invalid output sample rate')
   }
+  get hasClockWork(): boolean {
+    if (this.paused) return false
+    if (this.liveMidi.activeNotes) return true
+    for (const voice of this.voices.values())
+      if (voice.fade || (voice.asset && voice.status === 'play' && !voice.settings.paused))
+        return true
+    return false
+  }
+  inspect(): { voices: number; fadingVoices: number; liveMidiNotes: number; clockWork: boolean } {
+    return {
+      voices: this.voices.size,
+      fadingVoices: [...this.voices.values()].filter((voice) => voice.fade).length,
+      liveMidiNotes: this.liveMidi.activeNotes,
+      clockWork: this.hasClockWork,
+    }
+  }
   private get(id: number): Voice {
     const voice = this.voices.get(id)
     if (!voice) throw new Error('Audio voice is closed')

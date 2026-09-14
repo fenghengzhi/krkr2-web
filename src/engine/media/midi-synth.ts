@@ -44,6 +44,9 @@ export class MidiSynth {
   left = 0
   right = 0
   constructor(private readonly asset?: MidiAsset) {}
+  get activeNotes(): number {
+    return this.notes.length
+  }
   reset(): void {
     this.channels = Array.from({ length: 16 }, channel)
     this.notes = []

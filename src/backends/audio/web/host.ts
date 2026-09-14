@@ -10,6 +10,7 @@ import { emptyLoops } from '../../../engine/ports/audio.ts'
 import { decodeWav } from '../../../formats/audio/wav.ts'
 import { decodeMidi } from '../../../formats/audio/midi.ts'
 import { encodedSampleRate } from '../../../formats/audio/encoded-rate.ts'
+import { VoiceOperations } from '../voice-operations.ts'
 import type {
   AudioMessage,
   AudioRequest,
@@ -28,6 +29,7 @@ export class WebAudioHost {
   private media = new Set<{ peak: number; close(): void }>()
   private workletPeak = 0
   private loading?: Promise<AudioWorkletNode>
+  private readonly operations = new VoiceOperations()
   private next = 1
   private closed = false
   private failure?: Error
@@ -214,17 +216,20 @@ export class WebAudioHost {
     if (this.closed) throw new Error('Audio host is closed')
     if (this.failure) throw this.failure
     if (this.loading) return this.loading
+    let initializingNode: AudioWorkletNode | undefined
     this.loading = (async () => {
       const context = this.context
       if (!context?.audioWorklet)
         throw new Error('AudioWorklet is unavailable in this browser context')
       await context.audioWorklet.addModule(workletUrl)
       if (this.closed) throw new Error('Audio host closed during initialization')
+      if (this.failure) throw this.failure
       const node = new AudioWorkletNode(context, 'krkr2-mixer', {
         numberOfInputs: 0,
         numberOfOutputs: 1,
         outputChannelCount: [2],
       })
+      initializingNode = node
       this.node = node
       node.connect(this.output())
       node.onprocessorerror = () => this.fail(new Error('AudioWorklet processor failed'))
@@ -252,6 +257,11 @@ export class WebAudioHost {
     try {
       return await this.loading
     } catch (error) {
+      if (initializingNode && this.node === initializingNode) {
+        initializingNode.disconnect()
+        initializingNode.port.close()
+        this.node = undefined
+      }
       this.loading = undefined
       throw error
     }
@@ -293,6 +303,8 @@ export class WebAudioHost {
       await this.close()
       return { events: [] }
     }
+    if (this.closed) throw new Error('Audio host is closed')
+    if (this.failure) throw this.failure
     if (command.op === 'focusMode') {
       this.focusMode = command.mode
       return this.updateFocus()
@@ -307,9 +319,22 @@ export class WebAudioHost {
       this.globalVolume = command.volume
       if (!this.node) return { events: [] }
     }
-    if (command.op === 'close' && !this.node) return { events: [] }
-    const node = await this.initialize()
-    if (command.op === 'open') {
+    if (command.op === 'close') {
+      this.operations.cancel(command.id)
+      if (!this.node) return { events: [] }
+    }
+    if (command.op === 'open' || command.op === 'load' || command.op === 'create')
+      return this.createVoice(command)
+    return this.send(await this.initialize(), command)
+  }
+  private async createVoice(
+    command: Extract<AudioCommand, { op: 'open' | 'load' | 'create' }>,
+  ): Promise<AudioResult> {
+    const ticket = this.operations.begin(command.id)
+    try {
+      const node = await this.initialize()
+      this.operations.assertCurrent(command.id, ticket)
+      if (command.op !== 'open') return await this.send(node, command)
       let asset: AudioAsset | undefined =
         command.kind === 'midi' ? decodeMidi(command.bytes) : decodeWav(command.bytes)
       if (!asset) {
@@ -320,6 +345,9 @@ export class WebAudioHost {
           )
         const decoder = rate === undefined ? this.context! : new OfflineAudioContext(2, 1, rate)
         const buffer = await decoder.decodeAudioData(Uint8Array.from(command.bytes).buffer)
+        // close may overtake a decode, including one whose caller already
+        // timed out. Check at the decoder before retaining or posting PCM.
+        this.operations.assertCurrent(command.id, ticket)
         if (
           buffer.numberOfChannels > 8 ||
           buffer.length * buffer.numberOfChannels * 4 > 128 * 1024 * 1024
@@ -338,19 +366,21 @@ export class WebAudioHost {
         }
       }
       if (command.loops.links.length || command.loops.labels.length) asset.loops = command.loops
-      return this.send(node, {
+      return await this.send(node, {
         op: 'load',
         id: command.id,
         asset,
         settings: command.settings,
         kind: command.kind,
       })
+    } finally {
+      this.operations.finish(command.id, ticket)
     }
-    return this.send(node, command)
   }
   async close(): Promise<void> {
     if (this.closing) return this.closing
     this.closed = true
+    this.operations.clear()
     for (const source of this.media) source.close()
     this.workletPeak = 0
     this.node?.disconnect()

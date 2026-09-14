@@ -1,6 +1,6 @@
-# 040 — 声音对象生命周期：待实现设计
+# 040 — 声音对象生命周期：实现进行中
 
-本文件记录对当前 SoundService、TJS bootstrap 和音频后端的只读审计及实现方案。以下声音生命周期改动尚未实现或验证；不能把本设计、现有音频测试或 [039 的通用宿主观察机制](039-host-object-lifetime.md) 视为声音资源回收已经完成。后续所有构建、测试和可执行探测仍只在 GitHub-hosted Actions 运行。
+本文件保留原始审计和实现方案。独立工作目录已接入声音弱观察、事件持有、异步关闭队列、flags 原生失效、labels 的延后失效队列以及后端迟到解码隔离，尚未构建或验证。不能把当前改动、现有音频测试或 [039 的通用宿主观察机制](039-host-object-lifetime.md) 视为声音生命周期阶段已经完成。后续所有构建、测试和可执行探测仍只在 GitHub-hosted Actions 运行。
 
 当前 `src/engine/media/sounds.ts` 在创建时强持有绑定实例的 dispatch，`src/engine/tvp/sound.ts` 依赖脚本 finalize 调用 Sound.destroy。这会阻止隐式析构，也会遗漏不调用 super 的子类清理；直接调用 finalize 又过早关闭资源。原始 [SoundBufferBaseIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/SoundBufferBaseIntf.cpp) 将非持有 Owner 与强持有 ActionOwner 分开，native Invalidate 禁止事件、取消队列并释放 ActionOwner。[WaveIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/WaveIntf.cpp) 和 [MIDIIntf.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/MIDIIntf.cpp) 都注册空的基础 finalize。实际停止播放及释放解码、线程或 MIDI 资源位于 [WaveImpl.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/win32/WaveImpl.cpp) 与 [MIDIImpl.cpp](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/win32/MIDIImpl.cpp) 的 native Invalidate 链。
 

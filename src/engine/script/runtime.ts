@@ -32,6 +32,8 @@ export interface ScriptProxy {
   readonly namespace: string
   readonly id: number
   readonly className: string
+  /** Optional native observation; the proxy does not keep this instance alive. */
+  readonly owner?: ScriptObject
 }
 export interface ScriptClass {
   readonly type: 'class'
@@ -99,6 +101,8 @@ export type HostHandler = (
 export type ConsoleHandler = (text: string) => HostReply | Promise<HostReply>
 
 export interface ScriptRuntime extends HostContext, HostObjectLifetime {
+  /** Invalidate this owned dependent at a safe boundary after its owner expires. */
+  bindDependent(owner: ScriptObject, dependent: ScriptObject): void
   /** Exact function/object plus bound context identity, stable while retained. */
   objectIdentity(object: ScriptObject): string
   execute(source: string | Uint8Array, name?: string, expression?: boolean): Promise<ScriptValue>
@@ -112,6 +116,8 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
     weakOwners: number
     scriptObjects: number
     pendingHandles: number
+    dependents: number
+    pendingInvalidations: number
   }
   flush(): Promise<void>
   dispose(): void

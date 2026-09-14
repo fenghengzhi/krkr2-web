@@ -350,11 +350,15 @@ export class EngineSession {
         (name) => this.readResource(name),
         (name) => this.resourceExists(name),
         this.deps.readText,
-        (callback, args, valid) =>
-          this.systemEvents!.post(() => ({ kind: 'invoke', callback, args }), { valid }),
+        (callback, member, args, valid, source) =>
+          this.systemEvents!.post(() => ({ kind: 'invoke', callback, member, args }), {
+            valid,
+            source,
+          }),
         (error) => {
           if (!this.control.cancelled) this.fail(error)
         },
+        (source) => this.systemEvents!.cancelSource(source),
       )
       this.events = new ScriptEvents(
         { now: this.deps.now, schedule: this.deps.schedule },
@@ -455,11 +459,23 @@ export class EngineSession {
           }
           throw error
         } finally {
+          let closingError: unknown,
+            closingFailed = false
+          try {
+            await this.sounds?.flushCloses()
+          } catch (error) {
+            closingError = error
+            closingFailed = true
+          }
           try {
             await this.flushFiles()
           } catch (error) {
-            if (!failed) throw error
+            if (!failed && !closingFailed) throw error
             this.reportFlushFailure(error)
+          }
+          if (closingFailed) {
+            if (!failed) throw closingError
+            this.log('Sound cleanup failed: ' + String(closingError), 'error')
           }
         }
         const display = isScriptObject(value)
@@ -912,6 +928,10 @@ export class EngineSession {
   }
   inspectOwnership(): {
     eventSources: number
+    soundSources: number
+    pendingSoundCloses: number
+    dependents: number
+    pendingInvalidations: number
     weakOwners: number
     scriptObjects: number
     pendingHandles: number
@@ -919,6 +939,10 @@ export class EngineSession {
     const runtime = this.runtime?.inspect()
     return {
       eventSources: this.events?.count ?? 0,
+      soundSources: this.sounds?.count ?? 0,
+      pendingSoundCloses: this.sounds?.pendingCloses ?? 0,
+      dependents: runtime?.dependents ?? 0,
+      pendingInvalidations: runtime?.pendingInvalidations ?? 0,
       weakOwners: runtime?.weakOwners ?? 0,
       scriptObjects: runtime?.scriptObjects ?? 0,
       pendingHandles: runtime?.pendingHandles ?? 0,
@@ -1017,6 +1041,8 @@ export class EngineSession {
     return this.saves.export()
   }
   async idle(): Promise<void> {
+    await this.queue.drain()
+    await this.sounds?.flushCloses()
     await this.queue.drain()
   }
   async importSaves(files: SaveFile[]): Promise<void> {
