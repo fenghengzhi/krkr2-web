@@ -1,0 +1,54 @@
+name: Video presentation diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Existing build with identical application sources
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CI: 'true'
+  KRKR_VIDEO_DIAGNOSTIC: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  video:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          build-run: ${{ inputs.build-run }}
+      - run: npm run typecheck
+      - run: npx playwright install --with-deps chromium
+      - name: Prepare audio output
+        run: |
+          sudo apt-get install -y pulseaudio pulseaudio-utils
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=krkr_test_output rate=48000 channels=2
+          pactl set-default-sink krkr_test_output
+      - name: Record forty original overlay cases with native event and frame observations
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: out/ci/video-diagnostic.json
+        run: npx playwright test tests/browser/video.spec.ts --project=chromium --grep 'overlay geometry' --repeat-each=20 --workers=2 --reporter=list,json 2>&1 | tee out/ci/video-diagnostic.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: video-diagnostic-results
+          path: |
+            out/ci/
+            test-results/
+          retention-days: 14

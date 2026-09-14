@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import { test, expect } from '../helpers/video-presentation-browser.ts'
 import { readFileSync } from 'node:fs'
 import { evaluate } from '../helpers/browser-expression.ts'
 async function waitForPlayback(page: Page, marker: string): Promise<void> {
