@@ -7,6 +7,8 @@
 */
 //---------------------------------------------------------------------------
 #include "tjsCommHead.h"
+#include "WebHost.h"
+#include <memory>
 
 #include "tjs.h"
 #include "tjsConstArrayData.h"
@@ -31,6 +33,7 @@ namespace TJS {
         tjs_uint size = (tjs_uint)ByteBuffer.size();
         int index = -1;
         for(tjs_uint i = 0; i < size; i++) {
+            krkr_compiler_work(i);
             tjs_uint datalen = (tjs_uint)ByteBuffer[i]->size();
             if(len == datalen) {
                 if(len == 0) {
@@ -47,12 +50,15 @@ namespace TJS {
         if(index >= 0)
             return index;
         index = (int)ByteBuffer.size();
-        auto *buf = new std::vector<tjs_uint8>();
+        auto ownedBuffer = std::make_unique<std::vector<tjs_uint8>>();
+        auto* buf = ownedBuffer.get();
         buf->reserve(len);
         for(tjs_uint i = 0; i < len; i++) {
+            krkr_compiler_work(i);
             buf->push_back(data[i]);
         }
         ByteBuffer.push_back(buf);
+        ownedBuffer.release();
         return index;
     }
 
@@ -191,7 +197,7 @@ namespace TJS {
             case TYPE_STRING:
                 return PutString(v.GetString());
             case TYPE_OCTET:
-                return PutByteBuffer(v.AsOctet());
+                return PutByteBuffer(v.AsOctetNoAddRef());
             case TYPE_REAL:
                 return PutDouble(v.AsReal());
             case TYPE_BYTE:
@@ -214,6 +220,7 @@ namespace TJS {
         // string
         int count = (int)String.size();
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             int len = (int)String[i].length();
             len = ((len + 1) / 2) * 2;
             stralllen += len * 2;
@@ -225,6 +232,7 @@ namespace TJS {
         int bytealllen = 0;
         count = (int)ByteBuffer.size();
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             int len = (int)ByteBuffer[i]->size();
             len = ((len + 3) / 4) * 4;
             bytealllen += len;
@@ -251,17 +259,20 @@ namespace TJS {
         // double
         size += (int)(Double.size() * 8 + 4);
 
-        std::vector<tjs_uint8> *buf = new std::vector<tjs_uint8>();
+        auto ownedBuffer = std::make_unique<std::vector<tjs_uint8>>();
+        auto* buf = ownedBuffer.get();
         buf->reserve(size);
 
         // byte write
         count = (int)Byte.size();
         Add4ByteToVector(buf, count);
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             buf->push_back(Byte[i]);
         }
         count = (((count + 3) / 4) * 4) - count; // アライメント差分
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             buf->push_back(0);
         }
 
@@ -269,11 +280,13 @@ namespace TJS {
         count = (int)Short.size();
         Add4ByteToVector(buf, count);
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             Add2ByteToVector(buf, Short[i]);
         }
         count *= 2;
         count = (((count + 3) / 4) * 4) - count; // アライメント差分
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             buf->push_back(0);
         }
 
@@ -281,6 +294,7 @@ namespace TJS {
         count = (int)Integer.size();
         Add4ByteToVector(buf, count);
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             Add4ByteToVector(buf, Integer[i]);
         }
 
@@ -288,6 +302,7 @@ namespace TJS {
         count = (int)Long.size();
         Add4ByteToVector(buf, count);
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             Add8ByteToVector(buf, Long[i]);
         }
 
@@ -295,6 +310,7 @@ namespace TJS {
         count = (int)Double.size();
         Add4ByteToVector(buf, count);
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             double dval = Double[i];
             Add8ByteToVector(buf, *(tjs_int64 *)&dval);
         }
@@ -303,10 +319,12 @@ namespace TJS {
         count = (int)String.size();
         Add4ByteToVector(buf, count);
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             std::basic_string<tjs_char> &str = String[i];
             int len = (int)str.length();
             Add4ByteToVector(buf, len);
             for(int s = 0; s < len; s++) {
+                krkr_compiler_work(s);
                 Add2ByteToVector(buf, str[s]);
             }
             if((len % 2) == 1) { // アライメント差分
@@ -318,18 +336,21 @@ namespace TJS {
         count = (int)ByteBuffer.size();
         Add4ByteToVector(buf, count);
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             std::vector<tjs_uint8> *by = ByteBuffer[i];
             int cap = (int)by->size();
             Add4ByteToVector(buf, cap);
             for(int b = 0; b < cap; b++) {
+                krkr_compiler_work(b);
                 buf->push_back((*by)[b]);
             }
             cap = ((cap + 3) / 4) * 4 - cap; // アライメント差分
             for(int b = 0; b < cap; b++) {
+                krkr_compiler_work(b);
                 buf->push_back(0);
             }
         }
-        return buf;
+        return ownedBuffer.release();
     }
 
 } // namespace TJS

@@ -14,6 +14,7 @@
 #include "tjsConfig.h"
 #include "tjsVariant.h"
 #include <vector>
+#include <memory>
 #include <deque>
 
 extern bool tjsEnableDicFuncQuickHack;
@@ -111,7 +112,8 @@ namespace TJS {
 
         void PreProcess();
 
-        std::vector<tTJSVariant *> Values;
+        std::vector<std::unique_ptr<tTJSVariant>> Values;
+        unsigned TokenCount = 0;
 
         tjs_int PutValue(const tTJSVariant &val);
 

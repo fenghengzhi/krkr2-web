@@ -14,6 +14,8 @@
 #include "tjsInterCodeGen.h"
 #include "tjsConstArrayData.h"
 #include "tjs.h"
+#include "WebHost.h"
+#include <memory>
 
 namespace TJS {
     //---------------------------------------------------------------------------
@@ -195,26 +197,22 @@ namespace TJS {
     }
     //---------------------------------------------------------------------------
 
-    void tTJSScriptBlock::SetText(tTJSVariant *result, const tjs_char *text,
-                                  iTJSDispatch2 *context, bool isexpression) {
-
-        // compiles text and executes its global level scripts.
-        // the script will be compiled as an expression if isexpressn
-        // is true.
-        if(!text)
-            return;
-        if(!text[0])
-            return;
-
-        TJS_D((TJS_W("Counting lines ...\n")))
-
-        Script = new tjs_char[TJS_strlen(text) + 1];
-        TJS_strcpy(Script, text);
+    void tTJSScriptBlock::PrepareText(const tjs_char *text) {
+        KrkrCompilerScope work(1);
+        std::size_t length = 0;
+        while(text[length]) { krkr_compiler_work(length); ++length; }
+        auto ownedScript = std::make_unique<tjs_char[]>(length + 1);
+        for(std::size_t offset = 0; offset <= length; ++offset) {
+            krkr_compiler_work(offset);
+            ownedScript[offset] = text[offset];
+        }
+        Script = ownedScript.release();
 
         // calculation of line-count
         tjs_char *ls = Script;
         tjs_char *p = Script;
         while(*p) {
+            krkr_compiler_scan(p);
             if(*p == TJS_W('\r') || *p == TJS_W('\n')) {
                 LineVector.push_back(int(ls - Script));
                 LineLengthVector.push_back(int(p - ls));
@@ -231,6 +229,22 @@ namespace TJS {
             LineVector.push_back(int(ls - Script));
             LineLengthVector.push_back(int(p - ls));
         }
+    }
+
+    void tTJSScriptBlock::SetText(tTJSVariant *result, const tjs_char *text,
+                                  iTJSDispatch2 *context, bool isexpression) {
+
+        // compiles text and executes its global level scripts.
+        // the script will be compiled as an expression if isexpressn
+        // is true.
+        if(!text)
+            return;
+        if(!text[0])
+            return;
+
+        TJS_D((TJS_W("Counting lines ...\n")))
+
+        PrepareText(text);
 
         try {
 
@@ -425,6 +439,7 @@ namespace TJS {
         if(!script)
             return;
 
+        KrkrCompilerScope work(2);
         CompileErrorCount = 0;
 
         LexicalAnalyzer =
@@ -512,6 +527,7 @@ namespace TJS {
         tjs_int index = 0;
         for(auto i = InterCodeContextList.begin();
             i != InterCodeContextList.end(); ++i, index++) {
+            krkr_compiler_work(index);
             if((*i) == ctx) {
                 return index;
             }
@@ -537,22 +553,24 @@ namespace TJS {
     //---------------------------------------------------------------------------
     void tTJSScriptBlock::ExportByteCode(bool outputdebug,
                                          tTJSBinaryStream *output) {
+        KrkrCompilerScope work(3);
         const int count = (int)InterCodeContextList.size();
-        std::vector<std::vector<tjs_uint8> *> objarray;
+        std::vector<std::unique_ptr<std::vector<tjs_uint8>>> objarray;
         objarray.reserve(count * 2);
-        auto *constarray = new tjsConstArrayData();
+        auto constarray = std::make_unique<tjsConstArrayData>();
         int objsize = 0;
         for(auto obj : InterCodeContextList) {
+            krkr_compiler_checkpoint();
             std::vector<tjs_uint8> *buf =
                 obj->ExportByteCode(outputdebug, this, *constarray);
-            objarray.push_back(buf);
+            objarray.emplace_back(buf);
             objsize += (int)buf->size() + BYTECODE_TAG_SIZE +
                 BYTECODE_CHUNK_SIZE_LEN; // tag + size
         }
 
         objsize += BYTECODE_TAG_SIZE + BYTECODE_CHUNK_SIZE_LEN + 4 +
             4; // OBJS tag + size + toplevel + count
-        std::vector<tjs_uint8> *dataarea = constarray->ExportBuffer();
+        std::unique_ptr<std::vector<tjs_uint8>> dataarea(constarray->ExportBuffer());
         int datasize = (int)dataarea->size() + BYTECODE_TAG_SIZE +
             BYTECODE_CHUNK_SIZE_LEN; // DATA tag + size
         int filesize = objsize + datasize + BYTECODE_FILE_TAG_SIZE +
@@ -561,14 +579,25 @@ namespace TJS {
         if(TopLevelContext != nullptr) {
             toplevel = GetCodeIndex(TopLevelContext);
         }
+        // Keep copies bounded and allow a partially written stream to close
+        // normally when compilation is cancelled after output has opened.
+        const auto writeBuffer = [output](const std::vector<tjs_uint8>& buffer) {
+            constexpr std::size_t chunk = 64 * 1024;
+            for(std::size_t offset = 0; offset < buffer.size(); offset += chunk) {
+                krkr_compiler_checkpoint();
+                output->Write(buffer.data() + offset,
+                    (tjs_uint)std::min(chunk, buffer.size() - offset));
+            }
+        };
         tjs_uint8 tmp[4];
+        krkr_compiler_checkpoint();
         output->Write(BYTECODE_FILE_TAG, 8);
         Write4Byte(tmp, filesize);
         output->Write(tmp, 4);
         output->Write(BYTECODE_DATA_TAG, 4);
         Write4Byte(tmp, datasize);
         output->Write(tmp, 4);
-        output->Write(&((*dataarea)[0]), (tjs_uint)dataarea->size());
+        writeBuffer(*dataarea);
         output->Write(BYTECODE_OBJ_TAG, 4);
         Write4Byte(tmp, objsize);
         output->Write(tmp, 4);
@@ -577,18 +606,16 @@ namespace TJS {
         Write4Byte(tmp, count);
         output->Write(tmp, 4);
         for(int i = 0; i < count; i++) {
-            std::vector<tjs_uint8> *buf = objarray[i];
+            auto* buf = objarray[i].get();
             int size = (int)buf->size();
             output->Write(BYTECODE_CODE_TAG, 4);
             Write4Byte(tmp, size);
             output->Write(tmp, 4);
-            output->Write(&((*buf)[0]), size);
-            delete buf;
-            objarray[i] = nullptr;
+            writeBuffer(*buf);
+            objarray[i].reset();
         }
         objarray.clear();
-        delete constarray;
-        delete dataarea;
+
     }
 
     //---------------------------------------------------------------------------
@@ -602,28 +629,7 @@ namespace TJS {
 
         BytecodeCompile = true;
         try {
-            Script = new tjs_char[TJS_strlen(text) + 1];
-            TJS_strcpy(Script, text);
-
-            // calculation of line-count
-            tjs_char *ls = Script;
-            tjs_char *p = Script;
-            while(*p) {
-                if(*p == TJS_W('\r') || *p == TJS_W('\n')) {
-                    LineVector.push_back(int(ls - Script));
-                    LineLengthVector.push_back(int(p - ls));
-                    if(*p == TJS_W('\r') && p[1] == TJS_W('\n'))
-                        p++;
-                    p++;
-                    ls = p;
-                } else {
-                    p++;
-                }
-            }
-            if(p != ls) {
-                LineVector.push_back(int(ls - Script));
-                LineLengthVector.push_back(int(p - ls));
-            }
+            PrepareText(text);
 
             Parse(text, isexpression, isresultneeded);
 
@@ -883,7 +889,9 @@ namespace TJS {
     void tTJSScriptBlock::TranslateCodeAddress(tjs_int32 *code,
                                                const tjs_int32 codeSize) {
         tjs_int i = 0;
+        unsigned instructions = 0;
         while(i < codeSize) {
+            krkr_compiler_work(instructions++);
             int opcode = code[i];
             auto it = opTable.find(opcode);
             if(it == opTable.end()) {

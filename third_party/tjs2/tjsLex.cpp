@@ -9,6 +9,8 @@
 // TJS2 lexical analyzer
 //---------------------------------------------------------------------------
 #include "tjsCommHead.h"
+#include "WebHost.h"
+#include <memory>
 
 #include "tjsInterCodeGen.h"
 #include "tjs.tab.hpp"
@@ -62,11 +64,13 @@ namespace TJS {
     //---------------------------------------------------------------------------
     static void _TJSNext(const tjs_char **ptr) {
         do {
+            krkr_compiler_scan(*ptr);
             (*ptr)++;
         } while(*(*ptr) && *(*ptr) == TJS_SKIP_CODE);
     }
 
     bool TJSNext(const tjs_char **ptr) {
+        krkr_compiler_scan(*ptr);
         (*ptr)++;
         if(*(*ptr) == TJS_SKIP_CODE)
             _TJSNext(ptr);
@@ -78,8 +82,10 @@ namespace TJS {
     // TJSSkipSpace
     //---------------------------------------------------------------------------
     bool TJSSkipSpace(const tjs_char **ptr) {
-        while(*(*ptr) && (*(*ptr) == TJS_SKIP_CODE || TJS_iswspace(*(*ptr))))
+        while(*(*ptr) && (*(*ptr) == TJS_SKIP_CODE || TJS_iswspace(*(*ptr)))) {
+            krkr_compiler_scan(*ptr);
             (*ptr)++;
+        }
         return *(*ptr) != 0;
     }
     //---------------------------------------------------------------------------
@@ -739,8 +745,7 @@ namespace TJS {
         TJSNext(ptr);
         TJSNext(ptr); // skip <%
 
-        tjs_uint8 *buf = nullptr;
-        tjs_uint buflen = 0;
+        std::vector<tjs_uint8> buf;
 
         bool leading = true;
         tjs_uint8 cur = 0;
@@ -762,16 +767,10 @@ namespace TJS {
                 // literal ended
 
                 if(!leading) {
-                    buf = (tjs_uint8 *)TJS_realloc(buf, buflen + 1);
-                    if(!buf)
-                        throw eTJSError(ttstr(TJSInsufficientMem));
-                    buf[buflen] = cur;
-                    buflen++;
+                    buf.push_back(cur);
                 }
 
-                val = tTJSVariant(buf, buflen); // create octet variant
-                if(buf)
-                    TJS_free(buf);
+                val = tTJSVariant(buf.data(), (tjs_uint)buf.size());
                 return true;
             }
 
@@ -786,22 +785,14 @@ namespace TJS {
                     cur += n;
 
                     // store cur
-                    buf = (tjs_uint8 *)TJS_realloc(buf, buflen + 1);
-                    if(!buf)
-                        throw eTJSError(ttstr(TJSInsufficientMem));
-                    buf[buflen] = cur;
-                    buflen++;
+                    buf.push_back(cur);
 
                     leading = true;
                 }
             }
 
             if(!leading && ch == TJS_W(',')) {
-                buf = (tjs_uint8 *)TJS_realloc(buf, buflen + 1);
-                if(!buf)
-                    TJS_eTJSError(TJSInsufficientMem);
-                buf[buflen] = cur;
-                buflen++;
+                buf.push_back(cur);
 
                 leading = true;
             }
@@ -993,6 +984,7 @@ namespace TJS {
                                              const tjs_char *script,
                                              bool exprmode, bool resneeded) {
         // resneeded is valid only if exprmode is true
+        KrkrCompilerScope work(1);
 
         TJSInitReservedWordsHashTable();
 
@@ -1000,9 +992,14 @@ namespace TJS {
         ExprMode = exprmode;
         ResultNeeded = resneeded;
         PrevToken = -1;
-        auto len = (tjs_int)TJS_strlen(script);
-        Script = new tjs_char[len + 2];
-        TJS_strcpy(Script, script);
+        tjs_int len = 0;
+        while(script[len]) { krkr_compiler_work(len); ++len; }
+        auto ownedScript = std::make_unique<tjs_char[]>(len + 2);
+        Script = ownedScript.get();
+        for(tjs_int i = 0; i <= len; ++i) {
+            krkr_compiler_work(i);
+            Script[i] = script[i];
+        }
         if(ExprMode) {
             // append ';' on expression analyze mode
             Script[len] = TJS_W(';');
@@ -1033,6 +1030,7 @@ namespace TJS {
         RegularExpression = false;
         BareWord = false;
         PutValue(tTJSVariant());
+        ownedScript.release();
     }
 
     //---------------------------------------------------------------------------
@@ -1503,8 +1501,10 @@ namespace TJS {
         const tjs_char *ptr = Current;
         tjs_int nch = 0;
         while(TJS_iswdigit(*ptr) || TJS_iswalpha(*ptr) || *ptr == TJS_W('_') ||
-              *ptr > 0x0100 || *ptr == TJS_SKIP_CODE)
+              *ptr > 0x0100 || *ptr == TJS_SKIP_CODE) {
+            krkr_compiler_scan(ptr);
             ptr++, nch++;
+        }
 
         if(nch == 0) {
             ttstr str(TJSInvalidChar);
@@ -1518,6 +1518,7 @@ namespace TJS {
         tjs_char *s, *d;
         s = d = str.Independ();
         while(*s) {
+            krkr_compiler_scan(s);
             // eliminate TJS_SKIP_CODE
             if(*s == TJS_SKIP_CODE) {
                 s++;
@@ -1579,7 +1580,8 @@ namespace TJS {
                                                      tjs_int n) {
         // parses a conditional compile experssion starting with
         // "start", character count "n".
-        auto *buf = new tjs_char[n + 1];
+        auto ownedBuffer = std::make_unique<tjs_char[]>(n + 1);
+        auto* buf = ownedBuffer.get();
         tjs_char *p;
         const tjs_char *lim = start + n;
         p = buf;
@@ -1592,6 +1594,7 @@ namespace TJS {
         *p = 0;
 
         auto *parser = new TJSPP::tTJSPPExprParser(Block->GetTJS(), buf);
+        ownedBuffer.release();
 
         tjs_int32 result;
         try {
@@ -1609,6 +1612,7 @@ namespace TJS {
     //---------------------------------------------------------------------------
     void tTJSLexicalAnalyzer::PreProcess() {
         TJS_F_TRACE("tTJSLexicalAnalyzer::PreProcess");
+        KrkrCompilerScope work(1);
 
         // pre-process
 
@@ -1621,6 +1625,7 @@ namespace TJS {
         tjs_char *p;
         p = Script;
         while(*p) {
+            krkr_compiler_scan(p);
             if(*p == TJS_W('\r') && *(p + 1) == TJS_W('\n'))
                 *p = TJS_SKIP_CODE;
             else if(*p == TJS_W('\r'))
@@ -1631,18 +1636,13 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     tjs_int tTJSLexicalAnalyzer::PutValue(const tTJSVariant &val) {
-        auto *v = new tTJSVariant(val);
-        Values.push_back(v);
+        Values.push_back(std::make_unique<tTJSVariant>(val));
         return (tjs_int)(Values.size() - 1);
     }
 
     //---------------------------------------------------------------------------
     void tTJSLexicalAnalyzer::Free() {
         delete[] Script;
-        std::vector<tTJSVariant *>::iterator i;
-        for(i = Values.begin(); i != Values.end(); i++) {
-            delete *i;
-        }
         Values.clear();
     }
     /*
@@ -1659,6 +1659,7 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     tjs_int tTJSLexicalAnalyzer::GetNext(tjs_int &value) {
+        krkr_compiler_work(TokenCount++);
 
         if(First) {
             TJS_D((TJS_W("pre-processing ...\n")))

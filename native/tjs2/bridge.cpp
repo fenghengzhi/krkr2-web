@@ -66,14 +66,15 @@ struct Vm {
 EM_ASYNC_JS(Reply*, dispatch_host, (Vm* vm, const tjs_char* name, unsigned length, int count, tTJSVariant** args), {
     return await Module['hostCall'](vm, name, length, count, args);
 });
-EM_ASYNC_JS(int, yield_host, (), {
+EM_ASYNC_JS(int, yield_host, (int phase), {
     await new Promise(resolve => setTimeout(resolve, 0));
-    await Module['onYield']();
+    await Module['onYield'](phase);
     return Module['shouldCancel']() ? 1 : 0;
 });
 
 unsigned instructionCount = 0;
 double deadline = 0;
+int compilerPhase = 0;
 
 class MemoryStream : public tTJSBinaryStream {
 public:
@@ -113,7 +114,7 @@ public:
         text.append(message, length);
         text.append(u"\r\n");
         if(emscripten_get_now() >= deadline) {
-            if(yield_host()) TJS_eTJSError(u"Execution cancelled");
+            if(yield_host(4)) TJS_eTJSError(u"Execution cancelled");
             deadline = emscripten_get_now() + 8;
         }
     }
@@ -359,7 +360,19 @@ extern "C" void krkr_vm_checkpoint() {
     if((++instructionCount & 2047) != 0) return;
     if(shuttingDown) return;
     if(emscripten_get_now() < deadline) return;
-    if(yield_host()) TJS_eTJSError(u"Execution cancelled");
+    if(yield_host(0)) TJS_eTJSError(u"Execution cancelled");
+    deadline = emscripten_get_now() + 8;
+}
+
+extern "C" int krkr_compiler_enter(int phase) {
+    const int previous = compilerPhase;
+    compilerPhase = phase;
+    return previous;
+}
+extern "C" void krkr_compiler_leave(int previous) { compilerPhase = previous; }
+extern "C" void krkr_compiler_checkpoint() {
+    if(!compilerPhase || shuttingDown || emscripten_get_now() < deadline) return;
+    if(yield_host(compilerPhase)) TJS_eTJSError(u"Execution cancelled");
     deadline = emscripten_get_now() + 8;
 }
 

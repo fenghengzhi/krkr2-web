@@ -9,6 +9,8 @@
 // Intermediate Code Context
 //---------------------------------------------------------------------------
 #include "tjsCommHead.h"
+#include "WebHost.h"
+#include <memory>
 
 #include <algorithm>
 #include <spdlog/spdlog.h>
@@ -588,6 +590,9 @@ namespace TJS // following is in the namespace
         tTJSTimeProfiler prof(time_PutCode);
 #endif
 
+        // A class constructor emits its first eight words before ownership
+        // reaches ContextStack. Do not suspend that partially built context.
+        if(CodeAreaSize != 0) krkr_compiler_work(CodeAreaSize);
         if(CodeAreaSize >= CodeAreaCapa) {
             // must inflate the code area
             CodeArea = (tjs_int32 *)TJS_realloc(
@@ -698,6 +703,8 @@ namespace TJS // following is in the namespace
 
     //---------------------------------------------------------------------------
     void tTJSInterCodeContext::FixCode() {
+        unsigned work = 0;
+        krkr_compiler_checkpoint();
         // code re-positioning and patch processing
         // TODO: tTJSInterCodeContext::FixCode fasten the algorithm
 
@@ -727,18 +734,21 @@ namespace TJS // following is in the namespace
             tjs_int codesize = 2;
             for(func = NonLocalFunctionDeclVector.begin();
                 func != NonLocalFunctionDeclVector.end(); func++) {
+                krkr_compiler_work(work++);
                 if(func->ChangeThis)
                     codesize += 10;
                 else
                     codesize += 7;
             }
 
-            tjs_int32 *code = new tjs_int32[codesize];
+            auto ownedCode = std::make_unique<tjs_int32[]>(codesize);
+            tjs_int32 *code = ownedCode.get();
 
             // generate code
             tjs_int32 *codep = code;
             for(func = NonLocalFunctionDeclVector.begin();
                 func != NonLocalFunctionDeclVector.end(); func++) {
+                krkr_compiler_work(work++);
                 // const %1, #funcdata
                 *(codep++) = VM_CONST;
                 *(codep++) = TJS_TO_VM_REG_ADDR(1);
@@ -765,6 +775,7 @@ namespace TJS // following is in the namespace
             // make a patch information
             FixList.emplace_back(FunctionRegisterCodePoint, 0, codesize, code,
                                  true);
+            ownedCode.release();
 
             NonLocalFunctionDeclVector.clear();
         }
@@ -776,8 +787,10 @@ namespace TJS // following is in the namespace
         std::list<tFixData>::iterator fix;
 
         for(fix = FixList.begin(); fix != FixList.end(); fix++) {
+            krkr_compiler_work(work++);
             std::list<tjs_int>::iterator jmp;
             for(jmp = JumpList.begin(); jmp != JumpList.end(); jmp++) {
+                krkr_compiler_work(work++);
                 tjs_int jmptarget = CodeArea[*jmp + 1] + *jmp;
                 if(*jmp >= fix->StartIP && *jmp < fix->Size + fix->StartIP) {
                     // jmp is in the re-positioning target -> delete
@@ -818,6 +831,7 @@ namespace TJS // following is in the namespace
 
                 // move sourcepos
                 for(tjs_int i = 0; i < SourcePosArraySize; i++) {
+                    krkr_compiler_work(i);
                     if(SourcePosArray[i].CodePos >= fix->StartIP + fix->Size)
                         SourcePosArray[i].CodePos += fix->NewSize - fix->Size;
                 }
@@ -835,11 +849,13 @@ namespace TJS // following is in the namespace
         // eliminate redundant jump codes
         for(std::list<tjs_int>::iterator jmp = JumpList.begin();
             jmp != JumpList.end(); jmp++) {
+            krkr_compiler_work(work++);
             tjs_int32 jumptarget = CodeArea[*jmp + 1] + *jmp;
             tjs_int32 jumpcode = CodeArea[*jmp];
             tjs_int addr = *jmp;
             addr += CodeArea[addr + 1];
             for(;;) {
+                krkr_compiler_work(work++);
                 if(CodeArea[addr] == VM_JMP ||
                    (CodeArea[addr] == jumpcode &&
                     (jumpcode == VM_JF || jumpcode == VM_JNF))) {
@@ -868,6 +884,7 @@ namespace TJS // following is in the namespace
         // convert jump addresses to VM address
         for(std::list<tjs_int>::iterator jmp = JumpList.begin();
             jmp != JumpList.end(); jmp++) {
+            krkr_compiler_work(work++);
             CodeArea[*jmp + 1] = TJS_TO_VM_CODE_ADDR(CodeArea[*jmp + 1]);
         }
 
@@ -972,6 +989,7 @@ namespace TJS // following is in the namespace
             DataAreaSize = _DataAreaSize;
 
             for(tjs_int i = 0; i < _DataAreaSize; i++) {
+                krkr_compiler_work(i);
                 DataArea[i].CopyRef(*_DataArea[i]);
             }
 
@@ -4034,7 +4052,8 @@ namespace TJS // following is in the namespace
         int propsize = (int)(Properties.size() * 8 + 4);
         int size = 12 * 4 + srcpossize + codesize + datasize + scgpsize +
             propsize + 4 * 4;
-        std::vector<tjs_uint8> *result = new std::vector<tjs_uint8>();
+        auto ownedResult = std::make_unique<std::vector<tjs_uint8>>();
+        auto* result = ownedResult.get();
         result->reserve(size);
 
         Add4ByteToVector(result, parent);
@@ -4053,9 +4072,11 @@ namespace TJS // following is in the namespace
         Add4ByteToVector(result, count);
         if(outputdebug) {
             for(int i = 0; i < count; i++) {
+                krkr_compiler_work(i);
                 Add4ByteToVector(result, SourcePosArray[i].CodePos);
             }
             for(int i = 0; i < count; i++) {
+                krkr_compiler_work(i);
                 Add4ByteToVector(result, SourcePosArray[i].SourcePos);
             }
         }
@@ -4065,6 +4086,7 @@ namespace TJS // following is in the namespace
 
         block->TranslateCodeAddress(CodeArea, CodeAreaSize);
         for(int i = 0; i < CodeAreaSize; i++) {
+            krkr_compiler_work(i);
             Add2ByteToVector(result, CodeArea[i]);
         }
         if((count % 2) == 1) { // alignment
@@ -4074,6 +4096,7 @@ namespace TJS // following is in the namespace
         count = DataAreaSize;
         Add4ByteToVector(result, count);
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             tjs_int16 type = constarray.GetType(DataArea[i], block);
             tjs_int16 v = (tjs_int16)constarray.PutVariant(DataArea[i], block);
             Add2ByteToVector(result, type);
@@ -4082,6 +4105,7 @@ namespace TJS // following is in the namespace
         count = (int)SuperClassGetterPointer.size();
         Add4ByteToVector(result, count);
         for(int i = 0; i < count; i++) {
+            krkr_compiler_work(i);
             int v = SuperClassGetterPointer.at(i);
             Add4ByteToVector(result, v);
         }
@@ -4092,7 +4116,7 @@ namespace TJS // following is in the namespace
             Add4ByteToVector(result, propname);
             Add4ByteToVector(result, propobj);
         }
-        return result;
+        return ownedResult.release();
     }
     //---------------------------------------------------------------------------
 

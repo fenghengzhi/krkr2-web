@@ -10,6 +10,7 @@
 //---------------------------------------------------------------------------
 #include <spdlog/spdlog.h>
 #include "tjsCommHead.h"
+#include "WebHost.h"
 #include "tjsCompileControl.h"
 #include "tjsLex.h"
 #include "tjsVariant.h"
@@ -94,8 +95,11 @@ namespace TJSPP {
     tjs_int tTJSPPExprParser::GetNext(tjs_int32 &value) {
         // get next token
 
-        while(TJS_iswspace(*Current) && *Current)
+        krkr_compiler_scan(Current);
+        while(TJS_iswspace(*Current) && *Current) {
+            krkr_compiler_scan(Current);
             Current++;
+        }
         if(!*Current)
             return 0;
 
@@ -214,8 +218,10 @@ namespace TJSPP {
         const tjs_char *st = Current;
         while((TJS_iswalpha(*Current) || TJS_iswdigit(*Current) ||
                *Current == TJS_W('_')) &&
-              *Current)
+              *Current) {
+            krkr_compiler_scan(Current);
             Current++;
+        }
 
         ttstr str(st, (int)(Current - st));
 

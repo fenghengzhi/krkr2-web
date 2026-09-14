@@ -23,7 +23,8 @@ export interface ModuleOptions {
     args: number,
   ) => Promise<number>
   shouldCancel: () => boolean
-  onYield: () => Promise<void>
+  /** VM, source preparation, parse/codegen, export, or diagnostic dump. */
+  onYield: (phase?: 0 | 1 | 2 | 3 | 4) => Promise<void>
   queueWrite: (
     name: number,
     nameLength: number,
@@ -40,6 +41,7 @@ export type WasmVariant = 'asyncify' | 'jspi'
 
 export interface WasmManifest {
   abi: number
+  capabilities?: { cooperativeCompilation?: number }
   toolchain: string
   variants: Partial<
     Record<

@@ -115,6 +115,7 @@ namespace TJS {
         void ExportByteCode(bool outputdebug, class tTJSBinaryStream *output);
 
     private:
+        void PrepareText(const tjs_char *text);
         static void ConsoleOutput(const tjs_char *msg, void *data);
 
         // for Bytecode

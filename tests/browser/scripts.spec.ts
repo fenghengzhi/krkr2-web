@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { scriptsFixture, reentrantScriptsFixture } from '../helpers/scripts-fixture.ts'
+import { compilerSource } from '../helpers/compiler-runtime.ts'
 
 for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: native Scripts execution, compilation and reflection reach browser saves`, async ({
@@ -92,5 +93,43 @@ for (const backend of ['asyncify', 'jspi'])
     await page.locator('#stop').click()
     await expect(page.locator('#status')).toHaveText('待机')
     await expect(page.locator('#logs')).not.toContainText('RPC client has been disposed')
+    expect(errors).toEqual([])
+  })
+
+for (const backend of ['asyncify', 'jspi'])
+  test(`${backend}: long native compilation responds to page pause and stops cooperatively`, async ({
+    page,
+  }) => {
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await page.goto('/?backend=' + backend)
+    await page.locator('#files').setInputFiles([
+      {
+        name: 'startup.tjs',
+        mimeType: 'text/plain',
+        buffer: Buffer.from(
+          'Debug.message("cpu-compile-started");for(var i=0;i<100;i++)Scripts.compileStorage("long.tjs","savedata/long.cjs");Debug.message("cpu-compile-finished");',
+        ),
+      },
+      { name: 'long.tjs', mimeType: 'text/plain', buffer: Buffer.from(compilerSource()) },
+    ])
+    await expect(page.getByText('cpu-compile-started', { exact: true })).toBeVisible()
+    await page.locator('#pause').click()
+    await expect(page.locator('#status')).toHaveText('已暂停')
+    await page.waitForTimeout(100)
+    await expect(page.getByText('cpu-compile-finished', { exact: true })).toHaveCount(0)
+    await page.locator('#stop').click()
+    await expect(page.locator('#status')).toHaveText('待机')
+    await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
+    await expect(page.locator('#logs')).not.toContainText('RPC client has been disposed')
+    // Starting a fresh VM after cancellation also checks teardown of its Worker.
+    await page.locator('#files').setInputFiles({
+      name: 'startup.tjs',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('Debug.message("cpu-compile-recovered:"+Scripts.eval("6*7"));'),
+    })
+    await expect(page.getByText('cpu-compile-recovered:42', { exact: true })).toBeVisible()
+    await page.locator('#stop').click()
+    await expect(page.locator('#status')).toHaveText('待机')
     expect(errors).toEqual([])
   })
