@@ -94,49 +94,101 @@ export class WebAudioHost {
   } {
     const context = this.context
     if (!context || this.closed) throw new Error('Audio context is unavailable')
-    const source = context.createMediaElementSource(element),
-      stereo = context.createGain(),
-      split = context.createChannelSplitter(2),
-      left = context.createGain(),
-      right = context.createGain(),
-      merge = context.createChannelMerger(2),
-      analyser = context.createAnalyser()
-    stereo.channelCount = 2
-    stereo.channelCountMode = 'explicit'
-    analyser.fftSize = 256
-    source.connect(stereo).connect(split)
-    split.connect(left, 0)
-    split.connect(right, 1)
-    left.connect(merge, 0, 0)
-    right.connect(merge, 0, 1)
-    merge.connect(analyser).connect(this.output())
-    const samples = new Float32Array(256)
-    const entry = {
-      peak: 0,
-      close: () => {
-        clearInterval(timer)
-        for (const node of [source, stereo, split, left, right, merge, analyser]) node.disconnect()
-        this.media.delete(entry)
-        this.notify()
-      },
+    const nodes: AudioNode[] = []
+    let timer: ReturnType<typeof setInterval> | undefined,
+      entry: { peak: number; close(): void } | undefined,
+      closed = false
+    const own = <T extends AudioNode>(node: T): T => {
+      nodes.push(node)
+      return node
     }
-    const timer = setInterval(() => {
-      analyser.getFloatTimeDomainData(samples)
-      entry.peak =
-        context.state === 'running'
-          ? samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0)
-          : 0
-      this.notify()
-    }, 250)
-    this.media.add(entry)
-    return {
-      set: (volume, balance) => {
-        const gain = volume / 100000,
-          pan = balance / 100000
-        left.gain.value = gain * (pan > 0 ? 1 - pan : 1)
-        right.gain.value = gain * (pan < 0 ? 1 + pan : 1)
-      },
-      close: entry.close,
+    const disconnect = () => {
+      let primary: unknown,
+        failed = false
+      while (nodes.length) {
+        try {
+          nodes.pop()!.disconnect()
+        } catch (error) {
+          if (!failed) {
+            primary = error
+            failed = true
+          }
+        }
+      }
+      if (failed) throw primary
+    }
+    try {
+      const source = own(context.createMediaElementSource(element)),
+        stereo = own(context.createGain()),
+        split = own(context.createChannelSplitter(2)),
+        left = own(context.createGain()),
+        right = own(context.createGain()),
+        merge = own(context.createChannelMerger(2)),
+        analyser = own(context.createAnalyser())
+      stereo.channelCount = 2
+      stereo.channelCountMode = 'explicit'
+      analyser.fftSize = 256
+      source.connect(stereo).connect(split)
+      split.connect(left, 0)
+      split.connect(right, 1)
+      left.connect(merge, 0, 0)
+      right.connect(merge, 0, 1)
+      merge.connect(analyser).connect(this.output())
+      const samples = new Float32Array(256)
+      const current: { peak: number; close(): void } = {
+        peak: 0,
+        close: () => {
+          if (closed) return
+          closed = true
+          if (timer !== undefined) clearInterval(timer)
+          this.media.delete(current)
+          let primary: unknown,
+            failed = false
+          try {
+            disconnect()
+          } catch (error) {
+            primary = error
+            failed = true
+          }
+          try {
+            this.notify()
+          } catch (error) {
+            if (!failed) {
+              primary = error
+              failed = true
+            }
+          }
+          if (failed) throw primary
+        },
+      }
+      entry = current
+      timer = setInterval(() => {
+        analyser.getFloatTimeDomainData(samples)
+        current.peak =
+          context.state === 'running'
+            ? samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0)
+            : 0
+        this.notify()
+      }, 250)
+      this.media.add(current)
+      return {
+        set: (volume, balance) => {
+          if (closed) throw new Error('Media audio connection is closed')
+          const gain = volume / 100000,
+            pan = balance / 100000
+          left.gain.value = gain * (pan > 0 ? 1 - pan : 1)
+          right.gain.value = gain * (pan < 0 ? 1 + pan : 1)
+        },
+        close: current.close,
+      }
+    } catch (error) {
+      closed = true
+      if (timer !== undefined) clearInterval(timer)
+      if (entry) this.media.delete(entry)
+      try {
+        disconnect()
+      } catch {}
+      throw error
     }
   }
   private async updateFocus(): Promise<AudioResult> {
@@ -377,30 +429,43 @@ export class WebAudioHost {
       this.operations.finish(command.id, ticket)
     }
   }
-  async close(): Promise<void> {
+  close(): Promise<void> {
     if (this.closing) return this.closing
     this.closed = true
     this.operations.clear()
-    for (const source of this.media) source.close()
-    this.workletPeak = 0
-    this.node?.disconnect()
-    this.node?.port.close()
-    this.gain?.disconnect()
-    window.removeEventListener('focus', this.focusChanged)
-    window.removeEventListener('blur', this.focusChanged)
-    document.removeEventListener('visibilitychange', this.focusChanged)
-    for (const job of this.pending.values()) job.reject(new Error('Audio host is closed'))
-    this.pending.clear()
-    this.closing = (async () => {
-      try {
-        if (this.context && this.context.state !== 'closed') await this.context.close()
-      } finally {
-        this.state.state = 'closed'
-        this.state.error = undefined
-        this.state.peak = 0
-        this.notify()
+    this.closing = Promise.resolve().then(async () => {
+      let primary: unknown,
+        failed = false
+      const attempt = async (action: () => unknown) => {
+        try {
+          await action()
+        } catch (error) {
+          if (!failed) {
+            primary = error
+            failed = true
+          }
+        }
       }
-    })()
+      for (const source of this.media) await attempt(() => source.close())
+      this.media.clear()
+      this.workletPeak = 0
+      await attempt(() => this.node?.disconnect())
+      await attempt(() => this.node?.port.close())
+      await attempt(() => this.gain?.disconnect())
+      window.removeEventListener('focus', this.focusChanged)
+      window.removeEventListener('blur', this.focusChanged)
+      document.removeEventListener('visibilitychange', this.focusChanged)
+      for (const job of this.pending.values()) job.reject(new Error('Audio host is closed'))
+      this.pending.clear()
+      await attempt(() =>
+        this.context && this.context.state !== 'closed' ? this.context.close() : undefined,
+      )
+      this.state.state = 'closed'
+      this.state.error = undefined
+      this.state.peak = 0
+      await attempt(() => this.notify())
+      if (failed) throw primary
+    })
     return this.closing
   }
 }

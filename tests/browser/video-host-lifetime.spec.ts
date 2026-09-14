@@ -62,6 +62,12 @@ for (const name of [
       const bytes = new Uint8Array(await (await fetch('/video-host-lifetime.mp4')).arrayBuffer())
       return module.exerciseWebVideoLifetime(name, bytes)
     }, name)
+    await test
+      .info()
+      .attach('video-host-ownership', {
+        body: Buffer.from(JSON.stringify(result)),
+        contentType: 'application/json',
+      })
     expect(errors).toEqual([])
     expect(result.audioCloses).toBe(result.connected)
     expect(result.revokedUrls).toBe(result.createdUrls)
