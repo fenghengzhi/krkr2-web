@@ -25,7 +25,11 @@ TJS 源码准备、词法/语法分析、代码生成与字节码导出已接入
 - 页面用例在连续长编译期间点击暂停、停止，再启动新 VM；保留现有 Worker 2 秒停止期限，并检查没有触发强制停止错误。
 - 原有完整测试、KAG 和跨 ABI 离线升级仍须对同一生产构建通过，最终报告绑定构建、源码和逐项证据。
 
-首轮 [34827073341](https://github.com/fenghengzhi/krkr2-web/actions/runs/34827073341) 的 Chromium 页面测试记录了两个 stop：用户停止让 startup 拒绝，启动的 catch 又调用一次 Player.stop，第一个响应销毁了第二个 RPC。页面现在在停止期间保留停止流程对清理、忙碌状态与错误呈现的控制；Player 本身也共用停止 Promise，使输入、媒体和消息端口只执行一次收尾。测试增加只有一个 stop RPC 和取消不显示为启动错误的断言，保留原失败截图、trace 和日志。
+首轮 [34827073341](https://github.com/fenghengzhi/krkr2-web/actions/runs/34827073341) 的 Chromium、Firefox 各有两项新页面测试失败，日志均记录了重复 stop：用户停止让 startup 拒绝，启动的 catch 又调用一次 Player.stop，第一个响应销毁了第二个 RPC。页面现在在停止期间保留停止流程对清理、忙碌状态与错误呈现的控制；Player 本身也共用停止 Promise，使输入、媒体和消息端口只执行一次收尾。测试增加只有一个 stop RPC 和取消不显示为启动错误的断言，保留原失败截图、trace 和日志。该轮 WebKit 常规套件被后续提交中断，整体为 cancelled，不计为通过。中间构建的 [34827454268](https://github.com/fenghengzhi/krkr2-web/actions/runs/34827454268) 已通过 78 项兼容性，但页面修复后的生产构建仍独立执行新专项。
+
+第二轮 [34827988522](https://github.com/fenghengzhi/krkr2-web/actions/runs/34827988522) 的编译与停止用例均通过，完整结果为 371 项 Node、620/621 项浏览器和 6 项直接运行时。唯一失败为 Chromium Asyncify 视频混合截图：定位到第 6 帧后仍取得初始红色，原绿色通道断言失败；截图与 trace 均保留。对应 [34828130875](https://github.com/fenghengzhi/krkr2-web/actions/runs/34828130875) 的 78 项兼容性通过，不替代失败回归。
+
+固定 [40 次原视频场景诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34828858754)未复现失败，记录了 currentTime 设置、原生 seek 事件、解码像素和呈现时间戳。`seeked` 与呈现回调是分开的事件，前者不是截图同步点；[requestVideoFrameCallback 文档](https://developer.mozilla.org/en-US/docs/Web/API/HTMLVideoElement/requestVideoFrameCallback)定义后者为帧提交给合成器时的回调。因此像素用例现增加目标帧 `mediaTime=0.5` 的呈现条件，再进行原来的单次截图和颜色断言，附带呈现次数、位置及像素记录。未更改生产视频实现、颜色范围或超时。诊断观察可能影响时序，浏览器内部的偶发原因仍未确认，不把 40 次诊断通过视作原失败消失的证明。
 
 ## 限制
 
