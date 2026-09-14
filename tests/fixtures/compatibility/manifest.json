@@ -61,12 +61,28 @@
         "bytes": 5560559,
         "sha256": "5edb058bf8e602c79a77ab5740389ad5f3806aa5740fdbcde91b8dab078efb5b"
       }
+    },
+    {
+      "id": "tjs-abi4",
+      "archive": "tjs-abi4.tar.gz",
+      "archiveBytes": 1762702,
+      "archiveSha256": "f885387e5182b3dfc29588ca36abf0b33bac5d9ce26cbbed48309afeb022e496",
+      "historicalDirectory": "GitHub Actions 34815634377 / test-build / dist",
+      "build": "8589ed1bdff38cd018b0f1d98f3b5149e248625205013d0cfb199946db458d9c",
+      "tjsAbi": 4,
+      "fontAbi": 2,
+      "tree": {
+        "files": 32,
+        "bytes": 5568263,
+        "sha256": "3be12a1a953888ad73a9f034d44e6c201f0884b0c04c68adb42a917d00fe81fb"
+      }
     }
   ],
   "historicalMatrices": {
     "system-events": "f90391915bf96bdf4f731139d245887fd4d82ba0c9ab0f677a654e28c127662b",
     "text-layout": "d47954c9fff4019b8d2301bb9f3fb6410bc0376ec5572c88f2e4a686baf73a85",
     "debug-panels": "61a8177fe17b7bdac8c6be5c19a0eea110cac026a3927f6dfe3e6575d12a31fb",
-    "vm-console": "81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d"
+    "vm-console": "81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d",
+    "stack-traces": "9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df"
   }
 }

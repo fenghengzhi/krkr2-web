@@ -85,6 +85,9 @@ jobs:
       - name: TJS ABI 3 to current release with native stack traces
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/system-abi-pwa.ts out/verification/compatibility out/verification/compatibility-baselines/tjs-abi3 trace 2>&1 | tee out/ci/tjs-abi3.log
+      - name: TJS ABI 4 to current release with native Scripts compilation
+        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/system-abi-pwa.ts out/verification/compatibility out/verification/compatibility-baselines/tjs-abi4 scripts 2>&1 | tee out/ci/tjs-abi4.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

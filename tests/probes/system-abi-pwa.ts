@@ -18,16 +18,19 @@ const fontAbi = process.argv[4] === 'font',
   protocol = process.argv[4] === 'protocol',
   runtimeAbi = process.argv[4] === 'runtime',
   traceAbi = process.argv[4] === 'trace',
+  scriptsAbi = process.argv[4] === 'scripts',
   manifestKind = fontAbi ? 'fonts' : 'wasm',
-  reportName = traceAbi
-    ? 'trace-abi-pwa'
-    : runtimeAbi
-      ? 'runtime-abi-pwa'
-      : protocol
-        ? 'protocol-pwa'
-        : fontAbi
-          ? 'font-abi-pwa'
-          : 'abi-pwa',
+  reportName = scriptsAbi
+    ? 'scripts-abi-pwa'
+    : traceAbi
+      ? 'trace-abi-pwa'
+      : runtimeAbi
+        ? 'runtime-abi-pwa'
+        : protocol
+          ? 'protocol-pwa'
+          : fontAbi
+            ? 'font-abi-pwa'
+            : 'abi-pwa',
   directory = process.argv[2] ?? 'out/verification/system-events',
   roots = [
     resolve(process.argv[3] ?? 'out/verification/system-events/abi1-root'),
@@ -46,13 +49,13 @@ const fontAbi = process.argv[4] === 'font',
   )
 const oldAbi = manifests[0].abi,
   newAbi = manifests[1].abi
-if (fontAbi || protocol || runtimeAbi || traceAbi) {
-  assert.equal(oldAbi, fontAbi ? 1 : traceAbi ? 3 : 2)
+if (fontAbi || protocol || runtimeAbi || traceAbi || scriptsAbi) {
+  assert.equal(oldAbi, fontAbi ? 1 : scriptsAbi ? 4 : traceAbi ? 3 : 2)
   if (fontAbi || protocol) assert.equal(newAbi, 2)
-  else assert([3, 4].includes(newAbi) && newAbi > oldAbi)
+  else assert([3, 4, 5].includes(newAbi) && newAbi > oldAbi)
 } else {
   assert.equal(oldAbi, 1)
-  assert([2, 3, 4].includes(newAbi))
+  assert([2, 3, 4, 5].includes(newAbi))
 }
 if (protocol) {
   assert.deepEqual(manifests[0], manifests[1])
@@ -129,7 +132,7 @@ for (const name of probeBrowsers()) {
     const load = async (page: import('@playwright/test').Page, missing: boolean) => {
       const marker = 'abi-game-ready-' + ++loadSequence
       const started = performance.now()
-      if (traceAbi && !missing) await page.locator('#script-debug').check()
+      if ((traceAbi && !missing) || scriptsAbi) await page.locator('#script-debug').check()
       await page.locator('#files').setInputFiles([
         {
           name: 'startup.tjs',
@@ -142,6 +145,9 @@ for (const name of probeBrowsers()) {
               : 'var value=64;Debug.message("' + marker + '");',
           ),
         },
+        ...(scriptsAbi
+          ? [{ name: 'expression.tjs', mimeType: 'text/plain', buffer: Buffer.from('6*7') }]
+          : []),
         ...(fontAbi
           ? [
               {
@@ -182,13 +188,13 @@ for (const name of probeBrowsers()) {
         }
         await evaluate(page, 'value', '64')
       } else {
-        if (!runtimeAbi && !traceAbi)
+        if (!runtimeAbi && !traceAbi && !scriptsAbi)
           await evaluate(page, 'System.addContinuousHandler===void', missing ? '1' : '0')
         if (newAbi >= 3) {
           await evaluate(
             page,
             'typeof Debug.console=="Object" && Debug.console instanceof "Class"',
-            missing && !traceAbi ? '0' : '1',
+            missing && !traceAbi && !scriptsAbi ? '0' : '1',
           )
           if (!missing)
             await evaluate(
@@ -201,6 +207,21 @@ for (const name of probeBrowsers()) {
           await evaluate(page, 'typeof Scripts.getTraceString', missing ? 'undefined' : 'Object')
           if (!missing)
             await evaluate(page, 'Scripts.getTraceString().indexOf("top level script")>=0', '1')
+        }
+        if (scriptsAbi) {
+          await evaluate(page, 'Scripts instanceof "Class"', missing ? '0' : '1')
+          await evaluate(page, 'typeof Scripts.compileStorage', missing ? 'undefined' : 'Object')
+          await evaluate(
+            page,
+            'Scripts.eval("Scripts.getTraceString()","upgrade.tjs").indexOf("krkr2-web/bootstrap.tjs")<0',
+            missing ? '0' : '1',
+          )
+          if (!missing)
+            await evaluate(
+              page,
+              '(function(){Scripts.compileStorage("expression.tjs","savedata/upgrade.cjs",true,true,true);return Scripts.evalStorage("savedata/upgrade.cjs");})()',
+              '42',
+            )
         }
         await evaluate(page, 'value', '64')
       }
@@ -240,6 +261,7 @@ for (const name of probeBrowsers()) {
         newAbi,
         ...(!fontAbi && !protocol && newAbi >= 3 ? { nativeClassesAndDumpVerified: true } : {}),
         ...(traceAbi ? { nativeTraceVerified: true } : {}),
+        ...(scriptsAbi ? { nativeScriptsClassAndCompilerVerified: true } : {}),
         ...(protocol ? { oldProtocol: 8, newProtocol: 9, panelsVerified: true } : {}),
         oldWorkerRestartedOffline: true,
         newWorkerStartedOffline: true,
