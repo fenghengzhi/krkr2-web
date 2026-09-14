@@ -19,6 +19,11 @@ export function executionStats(native: ReturnType<typeof observeNative>) {
     tries: stat(9),
     delegations: stat(10),
     minimumStackFree: stat(11),
+    functionLimit: stat(12),
+    delegationLimit: stat(13),
+    peakFunctions: stat(14),
+    peakTries: stat(15),
+    peakDelegations: stat(16),
   }
 }
 function idle(native: ReturnType<typeof observeNative>) {
@@ -32,13 +37,17 @@ function idle(native: ReturnType<typeof observeNative>) {
     `Unreleased execution budget: ${JSON.stringify(state)}`,
   )
   check(
-    state.peakDepth <= state.depthLimit && state.peakBytes <= state.byteLimit,
+    state.peakDepth <= state.depthLimit &&
+      state.peakBytes <= state.byteLimit &&
+      state.peakFunctions <= state.functionLimit &&
+      state.peakDelegations <= state.delegationLimit,
     'Execution exceeded its reservation',
   )
   return state
 }
 const definition = 'function budgetRecurse(n){if(n<=0)return 42;return budgetRecurse(n-1);}'
-const depthError = /VM execution depth exceeds 256 frames|VM native stack reserve exhausted/
+const depthError =
+  /VM (?:execution depth exceeds 256|function depth exceeds 128|delegation depth exceeds 128) frames|VM native stack reserve exhausted/
 const memoryError = /VM temporary registers and arguments exceed 16 MiB budget/
 
 export async function exerciseExecutionBudget(
@@ -72,7 +81,7 @@ export async function exerciseExecutionBudget(
   try {
     for (const binary of [false, true]) {
       await vm.execute(binary ? await vm.compile(definition, 'budget-function.tjs') : definition)
-      check((await vm.execute('budgetRecurse(32)', '', true)) === 42n, 'Ordinary recursion changed')
+      check((await vm.execute('budgetRecurse(96)', '', true)) === 42n, 'Ordinary recursion changed')
       const message = await caught('budgetRecurse(4096);', depthError)
       results.push({
         scenario: `function/${binary ? 'bytecode' : 'source'}`,
@@ -82,8 +91,8 @@ export async function exerciseExecutionBudget(
       await vm.execute('delete budgetRecurse;delete budgetMessage;')
     }
     const tries = (count: number) =>
-      'try{'.repeat(count) + 'var budgetTryValue=42;' + '}catch(e){throw e;}'.repeat(count)
-    await vm.execute(tries(32), 'ordinary-try.tjs')
+      'try{'.repeat(count) + 'budgetTryValue=42;' + '}catch(e){throw e;}'.repeat(count)
+    await vm.execute('var budgetTryValue=0;' + tries(32), 'ordinary-try.tjs')
     check((await vm.execute('budgetTryValue', '', true)) === 42n, 'Ordinary nested try changed')
     for (const binary of [false, true]) {
       const source = `var budgetMessage="";try{${tries(320)}}catch(e){budgetMessage=e.message;}`
@@ -98,6 +107,22 @@ export async function exerciseExecutionBudget(
         message: String(message),
         state: idle(native),
       })
+    }
+    for (const binary of [false, true]) {
+      const mixed =
+        'function budgetRecurse(n){try{if(n<=0)return 42;return budgetRecurse(n-1);}catch(e){throw e;}}'
+      await vm.execute(binary ? await vm.compile(mixed, 'mixed-budget.tjs') : mixed)
+      check(
+        (await vm.execute('budgetRecurse(64)', '', true)) === 42n,
+        'Ordinary mixed recursion changed',
+      )
+      const message = await caught('budgetRecurse(4096);', depthError)
+      results.push({
+        scenario: `mixed/${binary ? 'bytecode' : 'source'}`,
+        message,
+        state: idle(native),
+      })
+      await vm.execute('delete budgetRecurse;')
     }
     await vm.execute(
       'class BudgetCycleA extends BudgetCycleB {} class BudgetCycleB extends BudgetCycleA {}',
@@ -163,12 +188,31 @@ export async function exerciseExecutionBudget(
     await vm.execute(
       'delete budgetCall;delete budgetValues;delete budgetCalled;delete budgetMessage;delete budgetTryValue;',
     )
+    const automaticInstances = []
+    for (const binary of [false, true]) {
+      await vm.execute('var automaticFinalized=0;')
+      const source =
+        'class AutomaticBudgetBox {function value(){return 42;}function finalize(){automaticFinalized++;}}'
+      await vm.execute(binary ? await vm.compile(source, 'automatic-instance.tjs') : source)
+      check(
+        (await vm.execute('(new AutomaticBudgetBox()).value()', '', true)) === 42n,
+        'Temporary instance method changed',
+      )
+      const finalized = await vm.execute('automaticFinalized', '', true)
+      check(finalized === 1n, 'Exited expression registers retained a temporary instance')
+      await vm.execute('delete AutomaticBudgetBox;delete automaticFinalized;')
+      check(
+        native.stats().contexts === 0 && native.stats().blocks === 0,
+        'Temporary instance kept method contexts alive',
+      )
+      automaticInstances.push({ binary, finalized: Number(finalized), state: idle(native) })
+    }
     check(
       native.stats().contexts === 0 && native.stats().blocks === 0,
       `Error registers retained contexts: ${JSON.stringify(native.stats())}`,
     )
     check(vm.inspect().handles === 0, 'Budget checks leaked host handles')
-    return { debugMode, results, final: idle(native), native: native.stats() }
+    return { debugMode, results, automaticInstances, final: idle(native), native: native.stats() }
   } finally {
     vm.dispose()
   }

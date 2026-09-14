@@ -14,6 +14,7 @@
 #include "tjsError.h"
 #include "tjsGlobalStringMap.h"
 #include "tjsDebug.h"
+#include "NativeOwnership.h"
 
 namespace TJS {
     //---------------------------------------------------------------------------
@@ -242,13 +243,30 @@ namespace TJS {
     }
 
     //---------------------------------------------------------------------------
-    tTJSNativeClass::~tTJSNativeClass() {}
+    tTJSNativeClass::~tTJSNativeClass() {
+        // A derived native-class constructor may throw after registering some
+        // C++ methods. Normal Finalize already cleared these; constructor
+        // rollback must release them without allocating another reference list.
+        for(tjs_int i = 0; i < HashSize; ++i) {
+            auto* child = Symbols[i].Next;
+            Symbols[i].Next = nullptr;
+            if(Symbols[i].SymFlags & TJS_SYMBOL_USING) Symbols[i].PostClear();
+            while(child) {
+                auto* next = child->Next;
+                if(child->SymFlags & TJS_SYMBOL_USING) child->Destory();
+                delete child;
+                child = next;
+            }
+        }
+        Count = 0;
+    }
 
     //---------------------------------------------------------------------------
     void tTJSNativeClass::RegisterNCM(const tjs_char *name, iTJSDispatch2 *dsp,
                                       const tjs_char *classname,
                                       tTJSNativeInstanceType type,
                                       tjs_uint32 flags) {
+        krkr::NativeOwner<iTJSDispatch2> owner(dsp);
         // map name via Global String Map
         ttstr tname = TJSMapGlobalStringMap(ttstr(name));
 
@@ -279,14 +297,11 @@ namespace TJS {
         // add to this
         tTJSVariant val;
         val = dsp;
-        if(PropSetByVS((TJS_MEMBERENSURE | TJS_IGNOREPROP) | flags,
-                       tname.AsVariantStringNoAddRef(), &val,
-                       this) == TJS_E_NOTIMPL)
-            PropSet((TJS_MEMBERENSURE | TJS_IGNOREPROP) | flags, tname.c_str(),
-                    nullptr, &val, this);
-
-        // release dsp
-        dsp->Release();
+        auto status = PropSetByVS((TJS_MEMBERENSURE | TJS_IGNOREPROP) | flags,
+            tname.AsVariantStringNoAddRef(), &val, this);
+        if(status == TJS_E_NOTIMPL)
+            status = PropSet((TJS_MEMBERENSURE | TJS_IGNOREPROP) | flags, tname.c_str(), nullptr, &val, this);
+        if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, tname.c_str());
     }
 
     //---------------------------------------------------------------------------

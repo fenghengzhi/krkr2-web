@@ -10,6 +10,7 @@
 //---------------------------------------------------------------------------
 #include "tjsCommHead.h"
 #include "WebHost.h"
+#include "NativeOwnership.h"
 
 #include "tjsObject.h"
 #include "tjsUtils.h"
@@ -93,6 +94,9 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     tTJSDispatch::~tTJSDispatch() {
+        // Also handles a native method/property constructor that failed after
+        // debug registration, before its derived destructor could run.
+        if(TJSObjectHashMapEnabled()) TJSRemoveObjectHashRecord(this);
         if(!BeforeDestructionCalled) {
             BeforeDestructionCalled = true;
             BeforeDestruction();
@@ -327,15 +331,14 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     tTJSCustomObject::tTJSCustomObject(tjs_int hashbits) {
-        if(TJSObjectHashMapEnabled())
-            TJSAddObjectHashRecord(this);
         Count = 0;
         RebuildHashMagic = TJSGlobalRebuildHashMagic;
         if(hashbits > TJSObjectHashBitsLimit)
             hashbits = TJSObjectHashBitsLimit;
         HashSize = (1 << hashbits);
         HashMask = HashSize - 1;
-        Symbols = new tTJSSymbolData[HashSize];
+        auto ownedSymbols = std::make_unique<tTJSSymbolData[]>(HashSize);
+        Symbols = ownedSymbols.get();
         memset(Symbols, 0, sizeof(tTJSSymbolData) * HashSize);
         IsInvalidated = false;
         IsInvalidating = false;
@@ -354,6 +357,8 @@ namespace TJS {
         missing_name = MissingName;
         for(int &ClassID : ClassIDs)
             ClassID = (tjs_int32)-1;
+        if(TJSObjectHashMapEnabled()) TJSAddObjectHashRecord(this);
+        ownedSymbols.release();
     }
 
     //---------------------------------------------------------------------------
