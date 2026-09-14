@@ -2,6 +2,8 @@
 
 最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)通过 **362 项 Node、615 项浏览器测试及 6 项直接运行时专项**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)另通过 **78 项**原 KAG 和跨 ABI 离线升级。当前已接入原生 Scripts 类、compileStorage、反射/missing 和 textEncoding，修复字节码导出、编译重入/语法拒绝/元数据加载、字体预览布局与停止中导入游戏的竞态。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。全部验证在 GitHub 托管 runner 执行；完整非插件目标仍未完成，设计和限制见 [原生 Scripts](decisions/032-native-scripts.md)。
 
+[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34825096969)已通过，矩阵为 `out/verification/native-scripts-matrix.json`，绑定 495 份证据，SHA-256 为 `1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d`。原生可信冻结为 21,055.2 ms，未把先前阶段的额外冻结/输入复测计入当前结果。
+
 上一轮完成的 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
 
 原生 `Scripts.getTraceString(limit=0)` 与“脚本调试”启动开关已接入，该已验证阶段 TJS ABI **4**、字体 ABI **2**、会话协议 **9**。调用栈在异步挂起、嵌套回调、字节码和取消时保留已验证的位置与顺序；其他 TVP 桥帧、原生错误界面和隐式回收路径仍需继续对齐。设计和失败分析见 [脚本调用栈](decisions/031-script-stack-traces.md)。[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34816691294)保存为 `out/verification/stack-traces-matrix.json`，绑定 503 份证据，SHA-256 为 `9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df`。
@@ -50,7 +52,7 @@ Debug 阶段完整日志为 `out/verification/debug/check.log`，最终证据由
 | TLG 等非插件图像格式与专用算法 | TLG5/TLG6、SDS、PNG/GIF、索引 BMP、伴随平面、颜色键、PNG/TLG 写出和加载缓存/预加载已接入；有读取/运算对照和 192 个独立解码写出验证；其他变体与统一内存预留仍待实现 | 进行中 |
 | 产品：游戏库、导入/恢复、设置、错误诊断、浏览器能力适配 | 已补本地/远程资源持久保存、库中启动与入口/后端设置、容量提示、取消/失败恢复和跨标签页删除保护；身份迁移、包导出与其他设置仍待实现 | 进行中 |
 | GPU 丢失恢复、Worker/媒体清理、后台/前台策略、PWA/静态发布 | 已补 GPU 恢复、用户/图形/页面暂停协调、后台设置与输入/媒体门控；PWA 外壳及更新已验证；移动系统/BFCache、后台长请求、实体 GPU/驱动压力和性能等仍待验证 | 进行中 |
-| 验证：参考 KAG 对话/选择/转场/声音/脚本存读档、三浏览器、差分与性能 | 当前云端 351 项 Node、609 项浏览器与 6 项直接运行时通过；另有原 KAG 36 项、菜单 6 项、异常恢复 6 项、四类跨 ABI 离线升级 24 项及 30 次输入时序复测通过；原生日志、字体、像素、18 项排版等参考按历史阶段保留，完整原生差分和性能仍待验证 | 未完成 |
+| 验证：参考 KAG 对话/选择/转场/声音/脚本存读档、三浏览器、差分与性能 | 当前云端 362 项 Node、615 项浏览器与 6 项直接运行时通过；另有原 KAG 36 项、菜单 6 项、异常恢复 6 项、五类跨 ABI 离线升级 30 项通过；原生日志、字体、像素、18 项排版等参考按历史阶段保留，完整原生差分和性能仍待验证 | 未完成 |
 
 WebGPU 是架构中的可选后端；应在正确性与性能证据支持时实施，不以它替代 WebGL2 的完整实现。PSB 若仅服务被排除的插件，跟随插件阶段；非插件资源格式需求仍属于当前目标。
 

@@ -2,6 +2,8 @@
 
 最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)通过 **362 项 Node、615 项浏览器测试及 6 项直接运行时专项**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)另通过 **78 项**原 KAG 和跨 ABI 离线升级。当前已接入原生 Scripts 类、compileStorage、反射/missing 和 textEncoding，修复字节码导出、编译重入/语法拒绝/元数据加载、字体预览布局与停止中导入游戏的竞态。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。全部验证在 GitHub 托管 runner 执行；完整非插件目标仍未完成，设计和限制见 [原生 Scripts](../decisions/032-native-scripts.md)。
 
+[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34825096969)已通过，矩阵为 `out/verification/native-scripts-matrix.json`，绑定 495 份证据，SHA-256 为 `1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d`。原生可信冻结为 21,055.2 ms，未把先前阶段的额外冻结/输入复测计入当前结果。
+
 上一轮完成的 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
 
 原生 `Scripts.getTraceString(limit=0)` 与“脚本调试”启动开关已接入，该已验证阶段 TJS ABI **4**、字体 ABI **2**、会话协议 **9**。调用栈在异步挂起、嵌套回调、字节码和取消时保留已验证的位置与顺序；其他 TVP 桥帧、原生错误界面和隐式回收路径仍需继续对齐。设计和失败分析见 [脚本调用栈](../decisions/031-script-stack-traces.md)。[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34816691294)保存为 `out/verification/stack-traces-matrix.json`，绑定 503 份证据，SHA-256 为 `9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df`。
@@ -60,6 +62,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 - `Debug.message/notice(...)`、`getLastLog`、`startLogToFile/logAsError`、`logLocation/logToFileOnError/clearLogFileOnError`、`addLoggingHandler/removeLoggingHandler`；另有 `System.inform(message)` 与 `System.getTickCount()`。
 - `System.createAppLock(key)`、`System.exit(code)`、`System.terminate(code)`；浏览器不能终止宿主页，退出表现为停止游戏会话。
 - `Scripts.dump()`：将原生上下文转储写入 `savedata/krkr2-web.dump.txt`，支持暂停/取消、导出和刷新恢复。`Scripts.getTraceString(limit=0)` 已接入原生调用栈，启动前启用“脚本调试”后返回文件、行号和上下文；默认返回空串。详见 [脚本调用栈](../decisions/031-script-stack-traces.md)。
+- `Scripts.compileStorage(input, output, result=false, debug=false, expression=false)`、`getClassNames(object)`、`setCallMissing(object)`、`textEncoding`；原生类、编译输出和编码边界见 [原生 Scripts](../decisions/032-native-scripts.md)。
 - `Scripts.execStorage/evalStorage(name, mode, context)` 和 `Scripts.exec/eval(source, name, lineOffset, context)`，支持嵌套执行、上下文和来源行偏移。
 - `Storages.isExistentStorage(name)`、`Storages.addAutoPath/removeAutoPath(directory)`、`getPlacedPath`、路径提取函数。
 - ZIP 支持 stored/deflate、ZIP64、UTF-8/CP437/Unicode Path、按需读取与 CRC 校验，提供普通名称和 `archive>entry` 地址。无效写入目标在 TJS 创建文本/二进制流时预检；原始归档保持只读。详见 [ZIP 资源决策](../decisions/015-zip-storage.md)。

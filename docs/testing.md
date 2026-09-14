@@ -6,7 +6,9 @@
 
 ## 已完成的云端回归
 
-原生 Scripts 阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)通过 **362 项 Node、615 项浏览器**（492 常规、57 游戏库、59 PWA、7 原生生命周期）与 **6 项直接运行时**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)通过 **78 项**。所选案例无失败、跳过、flaky 或重试。两者的应用源码和发布文件由 Verification report 进一步绑定，历史失败与修复见 [原生 Scripts](decisions/032-native-scripts.md)。
+原生 Scripts 阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34823979389)通过 **362 项 Node、615 项浏览器**（492 常规、57 游戏库、59 PWA、7 原生生命周期）与 **6 项直接运行时**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34824129905)通过 **78 项**。所选案例无失败、跳过、flaky 或重试。两者的应用源码和发布文件已由 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34825096969)绑定，历史失败与修复见 [原生 Scripts](decisions/032-native-scripts.md)。
+
+当前矩阵为 `out/verification/native-scripts-matrix.json`，SHA-256 为 `1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d`，绑定 495 份证据、116 份持久 context 预算和 6 份媒体时钟记录。可信冻结为 21,055.2 ms。报告与产物在 `out/verification/github-actions/34825096969/`，所有失败和被取代的运行仍按各自 run ID 保留。
 
 此前 ABI 4 阶段 [提交 `0eee21e` 的完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)全部通过：**351 项 Node、609 项浏览器测试**（486 常规、57 游戏库、59 PWA、7 原生生命周期）及 6 项直接运行时专项。原生调用栈在三浏览器双后端中检查，该阶段 TJS ABI 为 4。另有 [72 项兼容性](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)及 [30 次输入时序复测](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815498178)通过。所选测试无失败、跳过或 flaky，未使用测试重试；WebKit 原有网络模拟排除继续保留。
 
