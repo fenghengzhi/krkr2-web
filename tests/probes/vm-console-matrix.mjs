@@ -669,7 +669,7 @@ const matrix = {
           {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34847758637',
             reason:
-              'All 392 Node cases passed. The direct runtime failed in Chromium JSPI because copying one 8 MiB string finished within a time slice and never paused in phase 6. The fixed fixture now interns 32,700 independent strings while preserving pause/cancel/cleanup assertions; all six direct combinations are recorded without retry.',
+              'All 392 Node cases passed; browser results were 638/639, with a WebKit JSPI cold offline native Debug restart reporting Page crashed. Its native cause remains unconfirmed and separate twenty-case macOS diagnosis preserves process/crash reports. The direct runtime failed in Chromium JSPI because copying one 8 MiB string finished within a time slice and never paused in phase 6. The fixed fixture now interns 32,700 independent strings while preserving pause/cancel/cleanup assertions; all six direct combinations are recorded without retry.',
           },
           {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34847308669',
@@ -888,6 +888,11 @@ const matrix = {
                 'Compiler checkpoints do not preempt allocations, native library algorithms, UTF-16 bridge copies or destruction; exact worst-case latency and native allocation leak accounting remain unverified',
               ]
             : ['Cooperative long compilation remains incomplete']),
+        ]
+      : []),
+    ...(lifetimePhase
+      ? [
+          'Historical WebKit JSPI cold offline native Debug restart page-process crash has no confirmed root cause',
         ]
       : []),
     'Native error UI policy, remaining exception and finalizer paths, TJS bridge frames in other TVP methods',

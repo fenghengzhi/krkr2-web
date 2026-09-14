@@ -1,0 +1,68 @@
+name: PWA native crash diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-run:
+        description: Successful production build with matching application sources
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: 'true'
+
+jobs:
+  restart:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          build-run: ${{ inputs.build-run }}
+      - run: npm run typecheck
+      - run: npx playwright install --with-deps webkit
+      - name: Repeat twenty original JSPI cold offline restarts and record browser processes
+        env:
+          DEBUG: pw:browser
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/results.json
+        run: |
+          touch out/ci/started
+          npx playwright test -c playwright.pwa.config.ts vm-console.spec.ts \
+            --project=webkit --grep='jspi:' --workers=1 --repeat-each=20 \
+            --reporter=list,json 2>&1 | tee out/ci/restarts.log
+      - name: Retain macOS WebKit crash reports from this run
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          target = Path('out/ci/native-crashes')
+          target.mkdir(parents=True, exist_ok=True)
+          started = Path('out/ci/started').stat().st_mtime
+          for root in [Path.home() / 'Library/Logs/DiagnosticReports', Path('/Library/Logs/DiagnosticReports')]:
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if path.is_file() and path.stat().st_mtime >= started and any(name in path.name.lower() for name in ['webkit', 'webprocess', 'minibrowser', 'playwright']):
+                      shutil.copy2(path, target / path.name)
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: pwa-native-crash-results
+          path: |
+            out/ci/
+            test-results/pwa/
+          retention-days: 30

@@ -22,5 +22,6 @@
 
 完整运行 `34847758637` 的 392 项 Node 已通过，直接运行时在 Chromium JSPI 的阶段 6 用例失败：单个 8 MiB 字符串的复制在时间片内完成，没有触发暂停检查。用例改为固定 32,700 个独立的 256 单元字符串，覆盖实际分配和字符串驻留工作，再在已分配临时资源的检查点暂停；没有放宽暂停、取消或回收断言。运行时探测现在收齐六个组合的失败/成功结果，任何失败仍使工作流失败，不使用重试。
 
-
 [更新夹具后的运行时专项 34848864432](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848864432) 已通过全部六个三浏览器/双后端组合；[同版夹具分配诊断 34848868196](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848868196) 也已通过。正式应用源码与 [78 项兼容专项 34848253401](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401) 完全一致；KAG 不引用该字节码生命周期夹具，报告将其版本分别绑定到完整回归和分配诊断。
+
+运行 `34847758637` 的完整浏览器结果为 638/639：WebKit JSPI 的原有 `native Debug classes and dump files survive a cold offline browser restart` 在冷启动后报告 `Page crashed`（约 5.35 秒），不是等待断言超时。原 JSON、截图、DOM/网络 trace 和持久上下文记录已归档；新增固定 20 次该原场景的 macOS 专项，收集 Playwright 浏览器进程日志与操作系统崩溃报告。该页面崩溃原因尚未确认，不能视为已由字节码所有权修复解释。
