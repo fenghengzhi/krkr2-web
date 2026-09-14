@@ -214,6 +214,9 @@ jobs:
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/browser-capabilities.ts "${{ matrix.browser }}" 2>&1 | tee out/ci/capabilities.log
       - name: Run browser suite
         env:
+          # Preserve native browser process diagnostics for intermittent WebKit
+          # protocol-session loss; test deadlines and retry settings stay fixed.
+          DEBUG: ${{ matrix.browser == 'webkit' && 'pw:browser' || '' }}
           PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/results.json
           KRKR_TEST_BROWSER: ${{ matrix.browser }}
           KRKR_TEST_SUITE: ${{ matrix.suite }}

@@ -31,6 +31,10 @@ on:
         description: Optional three-repeat native lifecycle diagnostic for the same application
         required: false
         type: string
+      font-restart-run:
+        description: Optional twenty-case WebKit font-dialog cancellation and restart diagnostic
+        required: false
+        type: string
       input-run:
         description: Input activity diagnostic for the stack trace phase
         required: false
@@ -68,6 +72,7 @@ jobs:
           KRKR_HANDLES_RUN: ${{ inputs.handles-run }}
           KRKR_PWA_RUN: ${{ inputs.pwa-run }}
           KRKR_FREEZE_RUN: ${{ inputs.freeze-run }}
+          KRKR_FONT_RESTART_RUN: ${{ inputs.font-restart-run }}
           KRKR_INPUT_RUN: ${{ inputs.input-run }}
         run: node tests/probes/vm-console-matrix.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

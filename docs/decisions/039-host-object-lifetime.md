@@ -25,9 +25,11 @@ DeleteAllMembers -> Finalize -> BeforeDestruction -> tTJSDispatch::Release
 
 源码检查发现固定版本 [Emscripten 6.0.9 的 Asyncify](https://github.com/emscripten-core/emscripten/blob/6.0.9/src/lib/libasync.js) 在异步操作开始、状态进入 Unwinding 后才分配挂起缓冲区，并直接使用返回地址。新增保护在 C++ 进入两个异步 import 之前检查并预留挂起空间，失败时沿现有脚本异常边界退出，避免先启动宿主操作；JSPI 不需要该缓冲区。受版本约束的 allocateData 适配只消费已预留的空间，原有 rewind 流程负责释放，未使用的预留由 C++ 作用域释放。头部大小、栈大小、执行状态和独占持有条件均检查。这个检查修复有明确源码依据，但没有据此反推此前缺少分配栈的偶发失败已被证明来自此处。
 
-[完整回归 34875029792](https://github.com/fenghengzhi/krkr2-web/actions/runs/34875029792) 绑定 `e2adc68128b6925010695a57950f5a5c85da75f6`，594 项 Node 和 6 项直接运行时通过，浏览器为 638/639：WebKit/Asyncify 的启动字体对话框停止后重启场景未在 12 秒断言期限内显示新会话日志。该运行整体失败，原始 trace 和错误上下文保留并继续排查，不能作为最终通过记录。
+[完整回归 34875029792](https://github.com/fenghengzhi/krkr2-web/actions/runs/34875029792) 绑定 `e2adc68128b6925010695a57950f5a5c85da75f6`，594 项 Node 和 6 项直接运行时通过，浏览器为 638/639：WebKit/Asyncify 的启动字体对话框停止后重启场景未显示新会话日志。trace 显示整个用例约 2 秒，最后断言只执行约 184 ms，尚未到配置的 12 秒期限；停止与关闭对话框成功，新 Worker 的 manifest、模块和 WASM 请求已完成。空的断言调用日志与固定 Playwright 1.63 的 WebKit protocol session 关闭/崩溃处理路径吻合，但没有记录能确定浏览器退出原因的 crash 事件，不能据此断言应用停止/重启代码或原生内存不足是根因。OPFS 错误在第一个字体对话框之前已出现，第一场游戏仍能运行，也不能单独解释重启失败。原始 trace、错误上下文与完整失败记录保留；不延长用例期限或将这轮算为通过。
 
 修复前的 [宿主句柄诊断 34869766340](https://github.com/fenghengzhi/krkr2-web/actions/runs/34869766340) 绑定 `4bc02b9f95a6ba4c398c1aa38dc90bca99e8012e`，已终结为失败。每个后端分别执行 20 个独立子进程用例，只有 `nested-release` 的四个源码/字节码、调试开关组合通过。批量释放在首个终结器错误后遗留对象；终结期间仍可保留正在退出的旧句柄；宿主主异常处理失败；重复释放触发 WASM 内存越界或子进程超时。完整材料保存在 `out/verification/github-actions/34869766340/complete/`，元数据为同目录上级的 `run.json`。这些失败和超时作为历史证据保留，不由新工作流或后续成功覆盖。
+
+[回归 34876763323](https://github.com/fenghengzhi/krkr2-web/actions/runs/34876763323) 为 590/594 Node、638/639 浏览器和 6/6 直接运行时。四个增强的事件用例已观察到完整终结日志以及零事件源、零弱观察、零待释放句柄；原生对象数量比原基线多 25。新增的 Debug.message 日志首次构造 variadic Array，初始化 `TJSCreateArrayObject` 的静态 Array 类；夹具现在在记录基线前执行同样的日志调用，仍要求回调完成后、任何再次 evaluate 之前回到完整基线，不减弱对象数量断言。WebKit 游戏库的文件 flush 故障用例则在首次 load 阶段提前中断，尚未执行被测的保存/flush：trace 中断言约 613 ms，带相同的空 protocol 错误日志，不能解释为 12 秒超时或存储回滚错误。该轮完整材料与 Node 原始部分下载均保留。
 
 目标仍是 TJS2 引用计数。原引擎不自动收集任意引用环，本阶段也不引入环收集器；宿主额外制造的永久强引用需要单独修正，不能以原生不收集环为理由保留。有关失效、删除及显式断环的边界沿用 [038](038-object-finalization.md)。
 

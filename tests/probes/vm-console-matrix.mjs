@@ -1231,6 +1231,59 @@ if (pwaDiagnostic) {
     assert.equal(row.project, 'webkit')
   }
 }
+const fontRestart = process.env.KRKR_FONT_RESTART_RUN
+  ? await run('KRKR_FONT_RESTART_RUN', 'WebKit startup diagnostic', 1, [
+      '--name',
+      'webkit-diagnostic-results',
+    ])
+  : undefined
+let fontRestarts = []
+let fontRestartWorkers
+if (fontRestart) {
+  unchanged(fontRestart.info.headSha, [
+    'tests/browser/font-selection.spec.ts',
+    'tests/helpers/browser-expression.ts',
+    'tests/helpers/browser-launch.ts',
+    'playwright.config.ts',
+    '.github/workflows/webkit-diagnostic.yml',
+    '.github/actions/prepare-tests/action.yml',
+  ])
+  const steps = fontRestart.info.jobs[0].steps
+  assert.equal(
+    steps.find((step) => step.name === 'Repeat font dialog cancellation and fresh session startup')
+      ?.conclusion,
+    'success',
+  )
+  assert.equal(
+    steps.find((step) => step.name === 'Record Worker startup spans and native stacks')?.conclusion,
+    'skipped',
+  )
+  const root = fontRestart.root + '/artifacts/out/ci'
+  const restoredBuild = await json(root + '/build-info.json')
+  unchanged(restoredBuild.commit, applicationPaths)
+  const report = await json(root + '/font-restart.json')
+  fontRestarts = playwright(report, 20)
+  fontRestartWorkers = report.config.workers
+  assert([1, 2].includes(fontRestartWorkers))
+  const project = report.config.projects.find((item) => item.name === 'webkit')
+  assert(project)
+  assert.equal(project.repeatEach, 10)
+  assert.equal(project.retries, 0)
+  assert.equal(project.timeout, 30_000)
+  combinations(
+    fontRestarts,
+    backends.flatMap((backend) =>
+      Array(10).fill(
+        `${backend}: a font dialog during startup can stop the game and a fresh session can start`,
+      ),
+    ),
+    (row) => row.title,
+  )
+  for (const row of fontRestarts) assert.equal(row.project, 'webkit')
+  const protocol = await readFile(root + '/font-restart.log', 'utf8')
+  assert(protocol.includes('pw:browser'), 'Browser process diagnostics are missing')
+  assert(protocol.includes('pw:protocol'), 'Browser protocol diagnostics are missing')
+}
 const evidence = {}
 for (const path of await files(directory))
   evidence[relative(resolve(directory), path)] = await hash(path)
@@ -1246,6 +1299,7 @@ const matrix = {
     ...(objects ? [objects.info] : []),
     ...(handles ? [handles.info] : []),
     ...(pwaDiagnostic ? [pwaDiagnostic.info] : []),
+    ...(fontRestart ? [fontRestart.info] : []),
     ...(freeze ? [freeze.info] : []),
     ...(inputRun ? [inputRun.info] : []),
   ],
@@ -1342,6 +1396,7 @@ const matrix = {
         }
       : {}),
     ...(pwaDiagnostic ? { coldOfflineRestartDiagnostics: offlineRestarts.length } : {}),
+    ...(fontRestart ? { fontRestartDiagnostics: fontRestarts.length } : {}),
     ...(lifetimePhase
       ? {
           bytecodeControls: 36,
@@ -1383,6 +1438,7 @@ const matrix = {
   hostHandleReports,
   objectReports,
   offlineRestarts,
+  ...(fontRestart ? { fontRestarts, fontRestartWorkers } : {}),
   external,
   fixtureManifest,
   fixture,
@@ -1459,7 +1515,13 @@ const matrix = {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34875029792',
             commit: 'e2adc68128b6925010695a57950f5a5c85da75f6',
             reason:
-              'Node passed 594/594 and all six direct runtime combinations passed. Browser checks passed 638/639: the WebKit Asyncify font-dialog startup cancellation/restart scenario did not display the new-session log within its 12-second assertion deadline. The complete run remains failed; its trace, error context and original reports are preserved for investigation.',
+              'Node passed 594/594 and all six direct runtime combinations passed; browser checks passed 638/639. The WebKit Asyncify font-dialog stop assertions succeeded and fresh Worker assets downloaded, but the new-session assertion failed after about 184 ms despite its configured 12-second timeout; the entire test lasted 1,984 ms. The empty protocol-error log matches the closed/crashed-session path in Playwright 1.63, without identifying its cause. The loading snapshot does not prove a 12-second application hang. Original trace, context and reports remain archived as a failure; a repeated diagnostic cannot establish that its root cause is fixed.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34876763323',
+            commit: 'c579a67b1d1a8442f7d97fb355319a5056ef6325',
+            reason:
+              'Node passed 590/594: four strengthened event cases recorded complete finalizer logs and zero sources, observers and pending handles, but first-use variadic Debug logging initialized 25 shared Array-class objects after the fixture baseline. The fixture now warms logging before taking its baseline and retains exact pre-evaluate cleanup assertions. Browsers passed 638/639; the WebKit library file-flush failure scenario stopped during initial game loading, before the injected save/flush operation, with an empty protocol-error log after about 613 ms. All six direct runtime combinations passed. The complete failed run, trace and original Node report remain archived; no failure is counted as a pass.',
           },
         ]
       : []),
@@ -1802,6 +1864,9 @@ await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(
   process.env.GITHUB_STEP_SUMMARY,
   `Verified **${nodeCount} Node + ${browserCount} browser + 6 direct runtime + ${compatibilityCount} compatibility** cases.\n\n` +
+    (fontRestart
+      ? `Also verified **${fontRestarts.length} WebKit font-dialog restart diagnostics** with ${fontRestartWorkers} worker(s).\n\n`
+      : '') +
     `Sources, builds and individual results are bound in \`${reportName}\`. SHA-256: \`${await hash(output)}\`.\n`,
 )
 console.log('WROTE ' + output)

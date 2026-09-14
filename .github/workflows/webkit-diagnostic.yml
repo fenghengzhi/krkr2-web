@@ -7,6 +7,11 @@ on:
         description: Completed build run ID whose application sources match this commit
         required: true
         type: string
+      scenario:
+        description: Original startup spans or repeated font-dialog cancellation and restart
+        type: choice
+        default: startup
+        options: [startup, font-restart]
       workers:
         description: Concurrent browser workers for comparing hosted resource contention
         type: choice
@@ -40,14 +45,23 @@ jobs:
       - run: npm run typecheck
       - run: npx playwright install --with-deps webkit
       - name: Record Worker startup spans and native stacks
+        if: inputs.scenario == 'startup'
         env:
           KRKR_DIAGNOSTIC_WORKERS: ${{ inputs.workers }}
         run: npx playwright test -c tests/probes/playwright.startup.config.ts --repeat-each=3 --workers="$KRKR_DIAGNOSTIC_WORKERS" 2>&1 | tee out/ci/webkit-diagnostic.log
+      - name: Repeat font dialog cancellation and fresh session startup
+        if: inputs.scenario == 'font-restart'
+        env:
+          KRKR_DIAGNOSTIC_WORKERS: ${{ inputs.workers }}
+          DEBUG: pw:browser,pw:protocol
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/font-restart.json
+        run: npx playwright test tests/browser/font-selection.spec.ts --project=webkit --grep 'a font dialog during startup' --repeat-each=10 --workers="$KRKR_DIAGNOSTIC_WORKERS" --reporter=line,json 2>&1 | tee out/ci/font-restart.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: webkit-diagnostic-results
           path: |
             out/ci/
+            test-results/
             test-results-webkit-diagnostic/
           retention-days: 14

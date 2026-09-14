@@ -230,6 +230,9 @@ function createOwner(){new EventOwner();}
         binary,
         `
 var actionFinalized=0;
+// Debug's variadic arguments initialize the shared native Array class.
+// Warm logging before fixture() records the object baseline.
+Debug.message("warm-action-log");
 class ActionOwner {
   function action(){calls++;Debug.message("action-fired");delete global.owner;}
   function finalize(){actionFinalized++;Debug.message("action-finalized");}
@@ -242,6 +245,8 @@ function createOwner(){var action=new ActionOwner();global.owner=new EventOwner(
 `,
       )
       try {
+        assert.deepEqual(logs, ['warm-action-log'])
+        logs.length = 0
         await execute('createOwner();')
         assert.equal(await session.evaluate('actionFinalized'), '0')
         if (kind === 'Timer') clock.advance(10)
