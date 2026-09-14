@@ -8,13 +8,13 @@
 
 构建作业固定 Node.js 24.19.0 和 Emscripten 6.0.9，使用锁文件安装依赖，编译 Asyncify、JSPI 和 FreeType 内核，执行类型检查、生产构建和离线发布文件校验，再生成两个 PWA 更新样本。生成目录、应用和 PWA 样本打包为 `test-build`，同次运行的所有测试作业共享这一份构建。
 
-| 作业 | 范围 |
-| --- | --- |
-| Node | `tests/conformance`、`tests/integration`，含真实 WASM |
-| Browser × 3 | Chromium、Firefox、WebKit 各自顺序执行常规浏览器、持久游戏库和 PWA 测试 |
-| Chromium trusted lifecycle | 独立浏览器进程的真实隐藏、恢复、冻结与取消 |
-| Direct runtime | 三浏览器 × Asyncify/JSPI，直接验证 compile、转储、异常和取消 |
-| All tests | 要求所有上述作业成功；失败、取消或跳过均不能通过汇总门槛 |
+| 作业                       | 范围                                                                    |
+| -------------------------- | ----------------------------------------------------------------------- |
+| Node                       | `tests/conformance`、`tests/integration`，含真实 WASM                   |
+| Browser × 3                | Chromium、Firefox、WebKit 各自顺序执行常规浏览器、持久游戏库和 PWA 测试 |
+| Chromium trusted lifecycle | 独立浏览器进程的真实隐藏、恢复、冻结与取消                              |
+| Direct runtime             | 三浏览器 × Asyncify/JSPI，直接验证 compile、转储、异常和取消            |
+| All tests                  | 要求所有上述作业成功；失败、取消或跳过均不能通过汇总门槛                |
 
 浏览器矩阵不在某一种浏览器失败后取消其他浏览器；已成功安装浏览器的作业也会继续执行后面的游戏库与 PWA 套件。保留现有用例断言、并发和超时，不增加自动重试。原有 WebKit 网络模拟排除仍由 PWA 配置明确控制。
 

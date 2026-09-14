@@ -24,6 +24,11 @@ export const test = base.extend<{ native: NativeActivity }>({
         chromium.executablePath(),
         [
           '--headless=new',
+          // Match Playwright's Chromium sandbox setting on disposable Linux CI
+          // runners, where unprivileged user namespaces can be unavailable.
+          ...(process.env.GITHUB_ACTIONS === 'true' && process.platform === 'linux'
+            ? ['--no-sandbox']
+            : []),
           '--remote-debugging-port=0',
           `--user-data-dir=${profile}`,
           '--no-first-run',
@@ -52,7 +57,12 @@ export const test = base.extend<{ native: NativeActivity }>({
             if (match) finish(undefined, match[1]!)
           }
           const onError = (error: Error) => finish(error)
-          const onExit = () => finish(new Error(`Native Chromium exited: ${output.slice(-2000)}`))
+          const onExit = () =>
+            finish(
+              new Error(
+                `Native Chromium exited: ${output.length > 8000 ? output.slice(0, 4000) + '\n...\n' + output.slice(-4000) : output}`,
+              ),
+            )
           function finish(error?: Error, endpoint?: string) {
             clearTimeout(timer)
             child.stderr.off('data', onData)
