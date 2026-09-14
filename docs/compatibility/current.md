@@ -2,6 +2,8 @@
 
 当前实现包含独立 TJS2 VM、文件流、持久存档、部分 TVP 宿主、游戏库与离线应用。它可以运行内置示例、已验证的 KAG 流程和使用已实现 API 的脚本；尚未达到完整 KAG 或商业游戏兼容。
 
+平台限制：当前渲染要求 Worker OffscreenCanvas WebGL2。Playwright 1.63 的 Linux GTK WebKit 在云端无法创建该上下文，暂不能运行播放器；WebKit 的完整场景使用 GitHub 托管 macOS 验证。Linux Chromium/Firefox 与不依赖渲染的 Linux WebKit WASM 探测分别保留，见 [测试说明](../testing.md)。
+
 VM 控制台阶段已将 Console/Controller 对齐为原生类对象，接入编译警告、异步 compile、异常代码输出及独立 `Scripts.dump()` 文件。38 项 Node 专项、36 项浏览器面板/VM 检查、6 项独立运行时探测和 6 项冷离线检查通过；本地完整回归已按用户要求中止，后续验证改由 GitHub Actions 执行；新的完整回归与跨 ABI 验证仍待完成。当前 TJS ABI 3、字体 ABI 2、会话协议 9，范围见 [VM 控制台](../decisions/029-vm-console.md)。
 
 调试面板已接入 `Debug.console/controller` 的只读对象与 `visible` 属性，脚本和页面按钮共用状态，暂停与失败时也可重新打开。原 KAG 菜单/快捷键 6 项已通过；完整回归通过 **331 项行为/集成与 579 项浏览器测试**，最终构建另通过 36 项 KAG 综合场景，以及 TJS ABI、字体 ABI、协议 8→9 各 6 项离线升级检查；完整证据见 `out/verification/debug-panels-matrix.json`。原生类身份/构造/静态成员语义已在后续 VM 控制台阶段对齐，范围见 [调试面板](../decisions/028-debug-panels.md)。TJS/字体 ABI 均保持 2。

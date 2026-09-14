@@ -125,17 +125,26 @@ jobs:
           retention-days: 14
 
   browser:
-    name: Browser / ${{ matrix.browser }}
+    name: Browser / ${{ matrix.browser }} (${{ matrix.os }})
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
-      KRKR_TEST_HEADED: ${{ matrix.browser == 'chromium' && '0' || '1' }}
+      KRKR_TEST_HEADED: ${{ matrix.headed }}
       LIBGL_ALWAYS_SOFTWARE: '1'
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox, webkit]
+        include:
+          - browser: chromium
+            os: ubuntu-24.04
+            headed: '0'
+          - browser: firefox
+            os: ubuntu-24.04
+            headed: '1'
+          - browser: webkit
+            os: macos-15
+            headed: '0'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -143,28 +152,29 @@ jobs:
       - uses: ./.github/actions/prepare-tests
       - name: Install browser and system dependencies
         id: browser-install
+        run: npx playwright install --with-deps "${{ matrix.browser }}"
+      - name: Install virtual display and software graphics
+        if: runner.os == 'Linux'
         run: |
-          npx playwright install --with-deps "${{ matrix.browser }}"
           sudo apt-get install -y xvfb libgl1-mesa-dri mesa-utils
+          xvfb-run -a glxinfo -B
       - name: Verify Worker graphics before running game scenarios
         id: graphics
-        run: |
-          xvfb-run -a glxinfo -B
-          xvfb-run -a -s '-screen 0 1920x1600x24' node --import tsx tests/probes/browser-capabilities.ts "${{ matrix.browser }}" 2>&1 | tee out/ci/capabilities.log
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/browser-capabilities.ts "${{ matrix.browser }}" 2>&1 | tee out/ci/capabilities.log
       - name: Regular browser tests
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/browser.json
-        run: xvfb-run -a -s '-screen 0 1920x1600x24' npx playwright test --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/browser.log
+        run: bash scripts/ci-browser.sh npx playwright test --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/browser.log
       - name: Persistent game library tests
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/library.json
-        run: xvfb-run -a -s '-screen 0 1920x1600x24' npx playwright test -c playwright.library.config.ts --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/library.log
+        run: bash scripts/ci-browser.sh npx playwright test -c playwright.library.config.ts --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/library.log
       - name: Offline app and update tests
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/pwa.json
-        run: xvfb-run -a -s '-screen 0 1920x1600x24' npx playwright test -c playwright.pwa.config.ts --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/pwa.log
+        run: bash scripts/ci-browser.sh npx playwright test -c playwright.pwa.config.ts --project="${{ matrix.browser }}" --reporter=list,json 2>&1 | tee out/ci/pwa.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
