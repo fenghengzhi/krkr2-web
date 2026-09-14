@@ -6,6 +6,10 @@
 
 ## 已完成的云端回归
 
+字节码生命周期阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871) 通过 **392 项 Node、639 项浏览器**（516 常规、57 游戏库、59 PWA、7 原生生命周期）和 **6 项直接运行时**；[兼容专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401) 通过 **78 项**。另有 [188 次双后端分配失败](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848868196) 和 [20 次 WebKit JSPI 原生 Debug 冷离线重启](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849908821) 通过，所选测试没有失败、跳过、flaky 或重试。直接运行时包含 36 条字节码暂停/取消路径及六组重复加载/失败回滚检查；范围和原失败见 [字节码生命周期](decisions/036-bytecode-lifetime.md)。
+
+[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242)已绑定 554 份证据；矩阵 `out/verification/bytecode-lifetime-matrix.json` 的 SHA-256 为 `c3c5c665b1de52cc989edc0a3abad39001c0db1fc560baa49b1dfe63f798089b`。本轮可信冻结为 21,059.7 ms，没有计入历史额外冻结；此前各阶段矩阵和失败记录继续保留。
+
 二进制脚本阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34841387392)通过 **384 项 Node、639 项浏览器**（516 常规、57 游戏库、59 PWA、7 原生生命周期）与 **6 项直接运行时**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34840621607)通过 **78 项**。所选测试无失败、跳过、flaky 或重试。[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34842156097)已核对源码、发布树和逐项结果，矩阵 `out/verification/binary-scripts-matrix.json` 的 SHA-256 为 `b941be09c8d5803d19a8c1014fad9b8dfa1a78351a17734808133117cd1c3041`。
 
 本轮绑定 496 份证据、116 份持久 context 预算、6 份媒体时钟与 6 份遮盖像素记录，包含 12 条二进制、36 条编译和 24 条页面控制检查；可信冻结为 21,052.3 ms，没有计入历史额外三次冻结。40 次视频遮盖、2 次隐藏图层和 40 次原 KAG 诊断单独归档，不替代完整回归。一次未复现的 WebKit JSPI 异常成员名称仍待查。失败历史见 [二进制脚本](decisions/034-binary-scripts.md)和 [视频首帧](decisions/035-video-readiness.md)。

@@ -27,3 +27,11 @@
 运行 `34847758637` 的完整浏览器结果为 638/639：WebKit JSPI 的原有 `native Debug classes and dump files survive a cold offline browser restart` 在冷启动后报告 `Page crashed`（约 5.35 秒），不是等待断言超时。原 JSON、截图、DOM/网络 trace 和持久上下文记录已归档；新增固定 20 次该原场景的 macOS 专项，收集 Playwright 浏览器进程日志与操作系统崩溃报告。该页面崩溃原因尚未确认，不能视为已由字节码所有权修复解释。
 
 最终 [Tests 34849454871](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871) 的全部 14 个作业已通过；此版包含 392 项 Node、639 项浏览器及 6 项直接运行时。[WebKit 离线崩溃专项 34849908821](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849908821) 的 20 个原场景均通过，没有重试、跳过或新 macOS 崩溃报告，仍未确认原页面崩溃的根因。完整报告将绑定该回归、78 项兼容性、188 次分配失败及这 20 次独立重启。
+
+## 最终绑定
+
+[报告 34850540242](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242) 已通过，包含 554 份证据，矩阵 `out/verification/bytecode-lifetime-matrix.json` 的 SHA-256 为 `c3c5c665b1de52cc989edc0a3abad39001c0db1fc560baa49b1dfe63f798089b`。报告绑定 Tests `34849454871`、兼容专项 `34848253401`、分配诊断 `34848868196` 与冷重启专项 `34849908821`，所选案例无失败、跳过、flaky 或重试。原失败及额外的运行时专项 `34848864432` 单独保留。
+
+正式 build token 为 `7bfdc47d6e13a4967ed450c7f8d47643b2c61493a0995dd305f99ab8cc4edea7`；TJS 源身份为 `7e1e54bfd0a8dc8fe5cee470c385a133dacc692dc442ca0f0510aa774d28b6df`，`diagnosticAllocator: false`。`src` 为 160 文件、900,619 字节，树摘要 `d7a200d32b6b56d57e255035f4cfd2c693b48a65f509d6460a1e1d10b708a542`；正式发布为 32 文件、5,706,478 字节，树摘要 `a892918a0af501e6d2e4b4ad9a893b44bb264064eb3064e70ad0e175fd1dae51`。可信冻结 21,059.7 ms；字体 ABI 2、协议 9 保持不变。
+
+本地 `.generated` 和 `dist` 仅从该 Tests 的精确 `test-build` artifact 恢复，没有执行本地测试或探测；原本地二进制脚本产物保存于 `out/verification/bytecode-lifetime/prior-local-artifacts/`。最终文档更新发生在报告生成后，不改变应用和测试实现。完整非插件目标继续保持进行中。

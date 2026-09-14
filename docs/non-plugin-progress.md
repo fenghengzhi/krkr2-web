@@ -1,16 +1,22 @@
 # 插件以外的实现进度
 
-最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34841387392)通过 **384 项 Node、639 项浏览器测试及 6 项直接运行时专项**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34840621607)另通过 **78 项**原 KAG 和跨 ABI 离线升级。新增 KBAD 资源、二进制文件偏移、字节码结构检查和反序列化暂停/取消；菜单更新保留节点，视频等待首帧并通过媒体时钟补充区间事件。TJS ABI **5**，能力标记为 `cooperativeCompilation: 1`、`binaryScripts: 1`；字体 ABI **2**、会话协议 **9**。范围与失败历史见 [二进制脚本](decisions/034-binary-scripts.md)及 [视频首帧](decisions/035-video-readiness.md)。
+最新 [字节码生命周期完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871) 通过 **392 项 Node、639 项浏览器及 6 项直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401) 另通过 **78 项**。常量池、上下文构造和链接支持暂停/取消、失败回滚和构造预算；六组生命周期检查及 36 条控制路径验证了显式实例清理后的资源释放。两种后端共 **188 次分配失败**和 **20 次 WebKit 冷离线重启**通过。TJS ABI 5 新增能力标记 `bytecodeLifecycle: 1`，详见 [决策 036](decisions/036-bytecode-lifetime.md)。
 
-本轮 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34842156097)已通过，矩阵为 `out/verification/binary-scripts-matrix.json`，SHA-256 为 `b941be09c8d5803d19a8c1014fad9b8dfa1a78351a17734808133117cd1c3041`。报告绑定 496 份证据、12 条二进制控制路径、36 条编译控制路径、24 条页面控制检查和 6 份视频呈现/像素附件；可信冻结为 21,052.3 ms。此前矩阵和本轮所有失败继续保留。
+[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242)已绑定 554 份证据；矩阵 `out/verification/bytecode-lifetime-matrix.json` 的 SHA-256 为 `c3c5c665b1de52cc989edc0a3abad39001c0db1fc560baa49b1dfe63f798089b`。本轮可信冻结为 21,059.7 ms，没有计入历史额外冻结；此前各阶段矩阵和失败记录继续保留。
 
-一次 WebKit JSPI 原 KAG 启动出现异常成员名称，随后关闭/开启脚本调用栈各 20 次独立诊断均未复现；原失败仍保留，未宣称根因已解决。合法字节码构造失败的所有权、深层调用/try 栈预算、原生分配统计和其他非插件条目仍未完成。所有本轮执行都在 GitHub 托管 runner 上进行。
+自动循环回收、深层调用/try 栈预算、其他原生分配/宿主对象路径和下表非插件条目仍未完成。历史 WebKit JSPI 页面崩溃在 20 次独立重启中未复现，原 KAG 异常成员名称也仍无确定根因；原始失败持续保留，目标保持进行中。
+
+此前二进制脚本阶段的 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34841387392)通过 **384 项 Node、639 项浏览器测试及 6 项直接运行时专项**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34840621607)另通过 **78 项**原 KAG 和跨 ABI 离线升级。新增 KBAD 资源、二进制文件偏移、字节码结构检查和反序列化暂停/取消；菜单更新保留节点，视频等待首帧并通过媒体时钟补充区间事件。TJS ABI **5**，能力标记为 `cooperativeCompilation: 1`、`binaryScripts: 1`；字体 ABI **2**、会话协议 **9**。范围与失败历史见 [二进制脚本](decisions/034-binary-scripts.md)及 [视频首帧](decisions/035-video-readiness.md)。
+
+该阶段的 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34842156097)已通过，矩阵为 `out/verification/binary-scripts-matrix.json`，SHA-256 为 `b941be09c8d5803d19a8c1014fad9b8dfa1a78351a17734808133117cd1c3041`。报告绑定 496 份证据、12 条二进制控制路径、36 条编译控制路径、24 条页面控制检查和 6 份视频呈现/像素附件；可信冻结为 21,052.3 ms。此前矩阵和本轮所有失败继续保留。
+
+一次 WebKit JSPI 原 KAG 启动出现异常成员名称，随后关闭/开启脚本调用栈各 20 次独立诊断均未复现；原失败仍保留，未宣称根因已解决。该二进制脚本阶段尚未覆盖构造失败所有权和原生分配统计；后续字节码生命周期阶段接续这些工作。深层调用/try 栈预算和其他非插件条目仍未完成。所有执行都在 GitHub 托管 runner 上进行。
 
 此前长脚本编译阶段的 [完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34829312486)通过 **371 项 Node、621 项浏览器测试及 6 项直接运行时专项**；[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34829383281)另通过 **78 项**。源码准备、解析/代码生成和导出共有三浏览器双后端 36 条暂停/取消控制路径，详情见 [长脚本编译](decisions/033-cooperative-compilation.md)。
 
 此前的 [原生 Scripts 报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34825096969)继续保留在 `out/verification/native-scripts-matrix.json`，绑定 495 份证据，SHA-256 为 `1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d`。编译控制和二进制脚本各用独立矩阵，不覆盖历史记录。
 
-编译阶段的 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34830361115)保留为 `out/verification/compiler-matrix.json`，SHA-256 为 `bd314e7bf7383553468685c6cea0db2d53998f265dd09b882d09733cdc7c55b9`。其中包含 495 份证据、36 条编译控制路径和 6 份视频呈现/像素附件；可信冻结为 21,053.2 ms。二进制资源与结构检查由新阶段接续，原生分配统计和完整 VM 审计仍未完成。
+编译阶段的 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34830361115)保留为 `out/verification/compiler-matrix.json`，SHA-256 为 `bd314e7bf7383553468685c6cea0db2d53998f265dd09b882d09733cdc7c55b9`。其中包含 495 份证据、36 条编译控制路径和 6 份视频呈现/像素附件；可信冻结为 21,053.2 ms。二进制资源与结构检查由新阶段接续，完整 VM 审计仍未完成，原生分配统计由后续字节码生命周期阶段接续。
 
 上一轮完成的 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
 
@@ -46,7 +52,7 @@ Debug 阶段完整日志为 `out/verification/debug/check.log`，最终证据由
 
 | 要求 | 当前证据/下一步 | 状态 |
 | --- | --- | --- |
-| TJS2 源码/字节码、值桥、回调、异步、调度、生命周期 | 已有真实 WASM、长编译控制、KBAD 资源、偏移和字节码结构校验；继续补构造失败清理、调用栈/原生分配预算、宿主对象回收，并追踪未复现的原 KAG 成员名称错误 | 进行中 |
+| TJS2 源码/字节码、值桥、回调、异步、调度、生命周期 | 已有真实 WASM、长编译控制、KBAD/偏移、字节码结构校验、构造/链接回滚及原生分配计数；继续调用/try 栈预算、自动循环与宿主对象回收，并追踪历史 WebKit 页面崩溃和原 KAG 成员名称错误 | 进行中 |
 | 文件集合、XP3/ZIP、文本编码、资源查找、补丁/auto-path | 已修正 adlr/保护位解释，补限定归档路径、auto-path、文本编码与文件流；ZIP stored/deflate、ZIP64、Unicode、CRC 与 HTTP Range 已接入；嵌套包、其他归档变体及完整路径规则仍未完成 | 进行中 |
 | KAGParser：标签、宏、条件、调用栈、保存恢复、宿主回调 | 已实现 TS parser + TJS 回调桥，通过原有 Conductor 的宏/等待/异步/call/return；继续扩大边界差分与完整 KAG 流程验证 | 进行中 |
 | Timer/AsyncTrigger/事件、Window、完整输入与系统 API | 已补窗口、焦点/模态、鼠标/触摸捕获、脚本命中、键盘/提交文字和异步输入；已接入 System 事件/连续回调、异常处理与菜单门控；手势/完整 IME、多窗口、原生全屏和全部原生事件重入仍需补齐 | 未完成 |
@@ -60,7 +66,7 @@ Debug 阶段完整日志为 `out/verification/debug/check.log`，最终证据由
 | TLG 等非插件图像格式与专用算法 | TLG5/TLG6、SDS、PNG/GIF、索引 BMP、伴随平面、颜色键、PNG/TLG 写出和加载缓存/预加载已接入；有读取/运算对照和 192 个独立解码写出验证；其他变体与统一内存预留仍待实现 | 进行中 |
 | 产品：游戏库、导入/恢复、设置、错误诊断、浏览器能力适配 | 已补本地/远程资源持久保存、库中启动与入口/后端设置、容量提示、取消/失败恢复和跨标签页删除保护；身份迁移、包导出与其他设置仍待实现 | 进行中 |
 | GPU 丢失恢复、Worker/媒体清理、后台/前台策略、PWA/静态发布 | 已补 GPU 恢复、用户/图形/页面暂停协调、后台设置与输入/媒体门控；PWA 外壳及更新已验证；移动系统/BFCache、后台长请求、实体 GPU/驱动压力和性能等仍待验证 | 进行中 |
-| 验证：参考 KAG 对话/选择/转场/声音/脚本存读档、三浏览器、差分与性能 | 当前云端 384 项 Node、639 项浏览器与 6 项直接运行时通过；另有原 KAG 36 项、菜单 6 项、异常恢复 6 项、五类跨 ABI 离线升级 30 项通过；原生日志、字体、像素、18 项排版等参考按历史阶段保留，完整原生差分和性能仍待验证 | 未完成 |
+| 验证：参考 KAG 对话/选择/转场/声音/脚本存读档、三浏览器、差分与性能 | 当前云端 392 项 Node、639 项浏览器与 6 项直接运行时通过，188 次分配故障及 20 次冷离线重启诊断另行记录；原 KAG 36 项、菜单 6 项、异常恢复 6 项、五类跨 ABI 离线升级 30 项通过；原生日志、字体、像素、18 项排版等参考按历史阶段保留，完整原生差分和性能仍待验证 | 未完成 |
 
 WebGPU 是架构中的可选后端；应在正确性与性能证据支持时实施，不以它替代 WebGL2 的完整实现。PSB 若仅服务被排除的插件，跟随插件阶段；非插件资源格式需求仍属于当前目标。
 

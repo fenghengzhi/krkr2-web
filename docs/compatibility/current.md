@@ -1,6 +1,10 @@
 # 当前实现范围
 
-最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34841387392)通过 **384 项 Node、639 项浏览器测试及 6 项直接运行时专项**，另有 [78 项兼容性检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34840621607)通过。[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34842156097)已绑定源码、发布文件和逐项证据，所选测试无失败、跳过或重试。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。
+最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871)通过 **392 项 Node、639 项浏览器测试及 6 项直接运行时专项**，另有 [78 项兼容性检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401)通过。字节码专项覆盖 **36 条暂停/取消路径、188 次分配失败**；原 WebKit JSPI 离线重启场景另通过 20 次诊断，历史页面崩溃的根因仍未确认。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。
+
+[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242)已绑定当前源码、正式发布和逐项证据，旧二进制脚本报告继续保留。
+
+本阶段加入 [字节码构造与链接回滚](../decisions/036-bytecode-lifetime.md)、128 MiB 结构展开预算和原生分配/上下文计数，修正超类查询代码尾部的哨兵处理。实例用例显式 invalidate 后再删除绑定；自动循环回收、深层调用/try 栈预算和其他原生资源路径仍未完成。
 
 新增 [KBAD 与字节码结构校验](../decisions/034-binary-scripts.md)、文件偏移和二进制读取暂停/取消；菜单快照保留现有节点，视频打开等待首帧，媒体时钟补充周期/区间事件，详见 [视频就绪](../decisions/035-video-readiness.md)。一次 WebKit JSPI 原 KAG 异常成员名称未在 40 次诊断中复现，原因仍待查；完整字节码资源审计和整体非插件兼容仍未完成。所有本轮测试在 GitHub 托管 runner 上执行。
 
