@@ -14,7 +14,11 @@
 
 后续 [34901201286](https://github.com/fenghengzhi/krkr2-web/actions/runs/34901201286) 中，这两个场景和新增 collect 场景在 Node 通过；但 JSPI 的 collect 尚未加入 `JSPI_EXPORTS`，`ccall` 收到普通返回值后报 `ret.then is not a function`。原生媒体启动失败的 trace 也保存了这一运行错误，不是单纯加载较慢。构建列表已补上此入口，[34902819922](https://github.com/fenghengzhi/krkr2-web/actions/runs/34902819922) 随后完整通过 772 项 Node、675 项浏览器和 6 组直接运行时，绑定 `6a483869a86f0b0e8096d58ded3b6e608679c694`。
 
-更新的 `d064226dcdc61b0df0ce9bd83bb84c81cdf0946f` 增加 4 项临时返回对象用例，并把 10 种真实视频 Session 场景接入三浏览器、双后端、源码/字节码的直接运行时检查；[34904119374](https://github.com/fenghengzhi/krkr2-web/actions/runs/34904119374) 正在验证这一版。该运行与独立 KAG、对象、句柄、分配诊断尚未全部结束，不能将新增结果提前计入通过。
+更新的 `d064226dcdc61b0df0ce9bd83bb84c81cdf0946f` 增加 4 项临时返回对象用例，Node 776 项通过；同版 KAG/离线升级、独立对象、句柄和分配诊断也通过。但新增直接运行时检查在 [34904119374](https://github.com/fenghengzhi/krkr2-web/actions/runs/34904119374) 失败：测试打开视频后才设置逐帧模式，原生 SetMode 在打开后忽略此设置。六组运行都停在源码场景的 frame-last-reference，此前四个场景已通过。fixture 现改为打开前设定模式，并在发送事件前核对实际模式；回收和事件断言未放宽。
+
+修正后的 [34904603674](https://github.com/fenghengzhi/krkr2-web/actions/runs/34904603674) 完成了每组的 10 个源码视频场景，但最后的日志断言把主动触发并捕获的 disconnected open 错误所产生的原生 VM dump 判为失败。fixture 现单独核对这一错误及其一次原生诊断，并保存原始输出，其他操作仍要求无错误日志。该失败运行未进入后续字节码 Session，不能计为完整通过。
+
+随后复查发现 cancel 命令在首个视频关闭报错时会停止遍历其他视频；已改为继续清理所有视频后再报告首个错误。新增三浏览器场景在调用最终 shutdown **之前** 检查全部媒体已释放，避免最终关闭掩盖取消错误。[34905170428](https://github.com/fenghengzhi/krkr2-web/actions/runs/34905170428) 将验证这些最新修改，预期 776 项 Node、678 项浏览器及 6 组直接运行时，尚未全部完成。CI 对同分支后续运行采用排队，保留正在执行的完整回归。
 
 同次运行的声音测试子进程收到 SIGSEGV：原 TAP 记录 751 个通过用例及一个文件级失败，82 个声音用例只记录到 61 个通过，剩余未执行部分不能计入通过。独立 [进程诊断 34902191020](https://github.com/fenghengzhi/krkr2-web/actions/runs/34902191020) 在同一应用源码/产物上连续运行该文件三次均通过，没有复现崩溃；原始 SIGSEGV 根因尚未确定。诊断保留逐次 TAP、退出状态，并在托管 runner 发生崩溃时记录原生回溯；不因重复通过删除历史失败。
 
