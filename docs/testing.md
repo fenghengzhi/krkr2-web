@@ -89,6 +89,8 @@ VM 控制台阶段的本地完整回归已按用户要求中止（退出码 143�
 
 ## 独立诊断
 
+`Bytecode runtime diagnostic` 可以复用源码完全匹配的云端构建，收齐三浏览器双后端的直接运行时结果；每个组合只运行一次，存在任何失败时整体失败。它用于定位专项问题，不能代替完整 Tests。
+
 `Bytecode allocation diagnostic` 在两个独立 GitHub-hosted Ubuntu 作业构建 Asyncify/JSPI 诊断内核，固定 Node 24.19.0 并显式启用 JSPI。每个内核逐点模拟池、上下文和链接的分配失败，另在新 VM 中模拟字符串堆块/索引扩容失败；记录原生字节、字符串单元、脚本块和上下文。诊断构建有独立身份和 `diagnosticAllocator: true` 标记，生产发布校验拒绝该标记。字节码生命周期报告必须提供同源码的 `allocations-run`，不会以正式构建的测试代替故障验证。
 
 ```sh

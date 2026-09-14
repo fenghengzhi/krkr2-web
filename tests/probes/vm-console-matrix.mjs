@@ -86,6 +86,9 @@ unchanged(compatibility.info.headSha, [
   // Only the full/native lifecycle suites import this helper. Their exact
   // version is checked with regularTestPaths (and the optional freeze run).
   ':(exclude)tests/helpers/native-activity-browser.ts',
+  // Only regular/direct runtime and allocator diagnostics import this fixture.
+  // Both exact versions are checked separately in this report.
+  ':(exclude)tests/helpers/bytecode-lifetime.ts',
   'tests/probes/system-abi-pwa.ts',
   'tests/probes/system-kag-matrix.mjs',
   'tests/probes/kag-browser.ts',
