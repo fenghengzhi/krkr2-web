@@ -13,6 +13,13 @@ export interface ScriptWeakObject {
   readonly runtime: number
 }
 
+/** A revocable native ownership edge, scoped to one VM. */
+export interface ScriptDependent {
+  readonly type: 'dependent'
+  readonly id: number
+  readonly runtime: number
+}
+
 export interface HostObjectLifetime {
   /** Invalidation must only detach host resources, without executing script. */
   observe(owner: ScriptObject, invalidated: () => void): ScriptWeakObject
@@ -105,7 +112,10 @@ export type ConsoleHandler = (text: string) => HostReply | Promise<HostReply>
 
 export interface ScriptRuntime extends HostContext, HostObjectLifetime {
   /** Invalidate this owned dependent at a safe boundary after its owner expires. */
-  bindDependent(owner: ScriptObject, dependent: ScriptObject): void
+  bindDependent(owner: ScriptObject, dependent: ScriptObject): ScriptDependent
+  /** Revoke before invalidation begins; release its lease at the next VM boundary.
+   * Repeated calls and tokens whose operation already started are harmless. */
+  unbindDependent(binding: ScriptDependent): void
   /** Exact function/object plus bound context identity, stable while retained. */
   objectIdentity(object: ScriptObject): string
   execute(source: string | Uint8Array, name?: string, expression?: boolean): Promise<ScriptValue>

@@ -25,6 +25,10 @@ import { exerciseVideoLifetime } from '../helpers/video-lifetime-runtime.ts'
 import { exerciseWeakReturn, weakReturnCases } from '../helpers/weak-return.ts'
 import { dependentLifetimeCases, exerciseDependentLifetime } from '../helpers/dependent-lifetime.ts'
 import {
+  dependentRevocationCases,
+  exerciseDependentRevocation,
+} from '../helpers/dependent-revocation.ts'
+import {
   exerciseBytecodeLifetime,
   makeBytecodeWork,
   bytecodePhases,
@@ -189,6 +193,7 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
   const objectCases = [],
     finalizerControls = []
   const dependentLifetimes = [],
+    dependentRevocations = [],
     soundOwnership = [],
     videoOwnership = [],
     weakReturns = []
@@ -201,6 +206,12 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
       for (const name of weakReturnCases)
         weakReturns.push(
           await exerciseWeakReturn(factory, wasmBinary, backend, name, debug, binary),
+        )
+  for (const debug of [false, true])
+    for (const binary of [false, true])
+      for (const name of dependentRevocationCases)
+        dependentRevocations.push(
+          await exerciseDependentRevocation(factory, wasmBinary, backend, name, debug, binary),
         )
   for (const debug of [false, true])
     for (const binary of [false, true])
@@ -226,6 +237,7 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     ownerObservations: ownerCases,
     eventOwnership,
     dependentLifetimes,
+    dependentRevocations,
     soundOwnership,
     videoOwnership,
     weakReturns,

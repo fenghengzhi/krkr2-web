@@ -932,7 +932,7 @@ API void krkr_value_set_owner(Vm* vm, tTJSVariant* value, unsigned token) {
 API int krkr_owner_upgrade_failed(Vm* vm) { return vm->ownerUpgradeFailed; }
 API void krkr_owner_unobserve(Vm* vm, unsigned token) { vm->owners.erase(token); }
 API unsigned krkr_owner_count(Vm* vm) { return vm->owners.size(); }
-API int krkr_owner_bind_dependent(Vm* vm, unsigned ownerHandle, unsigned dependentHandle) {
+API unsigned krkr_owner_bind_dependent(Vm* vm, unsigned ownerHandle, unsigned dependentHandle) {
     if(shuttingDown || !vm->nextDependent || vm->dependents.size() >= 4096) return 0;
     const auto instance = [&](unsigned handle) -> tTJSCustomObject* {
         if(vm->released.count(handle)) return nullptr;
@@ -952,9 +952,23 @@ API int krkr_owner_bind_dependent(Vm* vm, unsigned ownerHandle, unsigned depende
     try {
         auto record = std::make_unique<DependentOwner>(dependent);
         if(!record->ownerObserver.Attach(owner) || !record->dependentObserver.Attach(dependent)) return 0;
-        vm->dependents.emplace(vm->nextDependent++, std::move(record));
-        return 1;
+        const auto token = vm->nextDependent++;
+        vm->dependents.emplace(token, std::move(record));
+        return token;
     } catch(...) { return 0; }
+}
+API void krkr_owner_unbind_dependent(Vm* vm, unsigned token) {
+    auto found = vm->dependents.find(token);
+    // A drain extracts the binding before invoking script. Revocation cannot
+    // undo an invalidation that has already started or affect a replacement.
+    if(found == vm->dependents.end()) return;
+    auto& record = *found->second;
+    record.ownerObserver.Detach();
+    record.dependentObserver.Detach();
+    record.invalidate = false;
+    record.queued = true;
+    // Never erase the node here: its last dependent reference can execute a
+    // suspendable finalizer. The ordinary VM drain owns that release.
 }
 API unsigned krkr_dependent_count(Vm* vm) { return vm->dependents.size(); }
 API unsigned krkr_pending_invalidation_count(Vm* vm) {
