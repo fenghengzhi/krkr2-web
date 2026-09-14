@@ -41,6 +41,7 @@ export async function decodeTextStream(
   input: Uint8Array,
   codecs: TextCodecs,
   mode = '',
+  defaultEncoding?: string,
 ): Promise<string> {
   const offset = modeOffset(mode)
   if (offset > input.length) throw new Error('Text stream offset exceeds file length')
@@ -86,7 +87,9 @@ export async function decodeTextStream(
   }
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return decodeUtf16(bytes.subarray(2))
   if (bytes[0] === 0xfe && bytes[1] === 0xff) return decodeUtf16(bytes.subarray(2), false)
-  return codecs.narrow(bytes, /utf-?8/i.test(mode) ? 'utf-8' : undefined)
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf)
+    return codecs.narrow(bytes.subarray(3), 'utf-8')
+  return codecs.narrow(bytes, /utf-?8/i.test(mode) ? 'utf-8' : defaultEncoding)
 }
 
 export async function encodeTextStream(

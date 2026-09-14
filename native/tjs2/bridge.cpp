@@ -13,6 +13,7 @@
 #include "tjsArray.h"
 #include "tjsNative.h"
 #include "tjsDebug.h"
+#include "scripts.h"
 
 using namespace TJS;
 #define API extern "C" EMSCRIPTEN_KEEPALIVE
@@ -385,7 +386,7 @@ API Vm* krkr_create(int debugMode) {
 extern "C" bool krkr_vm_is_shutting_down() { return shuttingDown; }
 API void krkr_destroy(Vm* vm) { delete vm; }
 API void krkr_set_console(Vm* vm, int enabled) { vm->engine->SetConsoleOutput(enabled ? vm->console.get() : nullptr); }
-API int krkr_abi_version() { return 4; }
+API int krkr_abi_version() { return 5; }
 API Reply* krkr_execute(Vm* vm, const void* source, unsigned length, const tjs_char* name, int mode) {
     deadline = emscripten_get_now() + 8;
     return capture([&](tTJSVariant& value) {
@@ -443,16 +444,24 @@ API void krkr_value_set_real(tTJSVariant* v, double n) { *v = n; }
 API void krkr_value_set_text(tTJSVariant* v, const tjs_char* text, unsigned length) { *v = ttstr(text, length); }
 API void krkr_value_set_bytes(tTJSVariant* v, const tjs_uint8* bytes, unsigned length) { *v = tTJSVariant(bytes, length); }
 API void krkr_value_set_null(tTJSVariant* v) { *v = tTJSVariant(static_cast<iTJSDispatch2*>(nullptr)); }
-static tjs_error getTraceString(tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2*) {
-    tjs_int limit = 0;
-    if(count >= 1 && args[0]->Type() != tvtVoid) limit = *args[0];
-    if(result) *result = TJSGetStackTraceString(limit);
-    return TJS_S_OK;
-}
 API void krkr_value_set_trace_function(tTJSVariant* value) {
-    auto method = TJSCreateNativeClassMethod(getTraceString);
+    auto method = TJSCreateNativeClassMethod(krkr::getScriptTrace);
     *value = tTJSVariant(method);
     method->Release();
+}
+API void krkr_value_set_scripts_class(Vm* vm, tTJSVariant* value) {
+    auto object = krkr::createScriptsClass(vm->engine,
+        [vm](const tjs_char* operation, std::vector<tTJSVariant> values, tTJSVariant* result) {
+            if(shuttingDown) TJS_eTJSError(u"Runtime is shutting down");
+            std::vector<tTJSVariant*> args;
+            for(auto& arg : values) args.push_back(&arg);
+            std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), args.size(), args.data()));
+            if(!reply) TJS_eTJSError(u"Scripts host returned no response");
+            vm->flushReleased();
+            resolveReply(vm, *reply, result);
+        });
+    *value = tTJSVariant(object);
+    object->Release();
 }
 API void krkr_value_set_proxy(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* className) {
     auto proxy=new HostProxy(vm,prefix,id,className);

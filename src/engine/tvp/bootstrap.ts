@@ -1,14 +1,7 @@
 // This is executed by TJS2 itself. The host stores platform-independent layer
 // state; TJS retains its own class, property and closure semantics.
 export const bootstrap = String.raw`
-var Scripts = %[
-  getTraceString: __host("Scripts.traceFunction"),
-  dump: function() { var data=__host("Scripts.dump");__host("Scripts.writeDump",data); },
-  execStorage: function(name, mode="", context=void) { return __host("Scripts.execStorage", name, mode, context, 0); },
-  evalStorage: function(name, mode="", context=void) { return __host("Scripts.execStorage", name, mode, context, 1); },
-  exec: function(source, name="eval.tjs", lineOffset=0, context=void) { return __host("Scripts.exec", source, name, lineOffset, context); },
-  eval: function(source, name="eval.tjs", lineOffset=0, context=void) { return __host("Scripts.eval", source, name, lineOffset, context); }
-];
+var Scripts = __host("Scripts.class");
 var Storages = %[
   isExistentStorage: function(name) { return __host("Storages.exists", name); },
   addAutoPath: function(path) { __host("Storages.addAutoPath", path); }

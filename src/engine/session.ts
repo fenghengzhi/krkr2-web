@@ -1,4 +1,5 @@
 import { bootstrap } from './tvp/bootstrap.ts'
+import { ScriptTextEncoding } from './script/text-encoding.ts'
 import { debugBridge } from './tvp/debug.ts'
 import { DebugLog } from './diagnostics/log.ts'
 import { DebugPanels, type DebugPanel, type DebugVisibility } from './diagnostics/panels.ts'
@@ -123,8 +124,9 @@ export interface SessionDependencies {
   decodeScript: (
     bytes: Uint8Array,
     mode?: string,
+    encoding?: string,
   ) => string | Uint8Array | Promise<string | Uint8Array>
-  readText: (bytes: Uint8Array, mode?: string) => Promise<string>
+  readText: (bytes: Uint8Array, mode?: string, encoding?: string) => Promise<string>
   writeText: (text: string, mode?: string) => Promise<Uint8Array>
   saveStore?: SaveStore
   appLocks?: AppLocks
@@ -139,6 +141,7 @@ export interface SessionDependencies {
 }
 
 export class EngineSession {
+  private readonly textEncoding = new ScriptTextEncoding()
   private readonly fontCatalog: FontCatalog
   private readonly fontSelection: FontSelection
   private fontPreviewBusy = false
@@ -241,7 +244,8 @@ export class EngineSession {
     )
     this.appLocks = deps.appLocks ?? new MemoryAppLocks()
     this.kag = new KagService(
-      async (name) => this.deps.readText(await this.readResource(name)),
+      async (name) =>
+        this.deps.readText(await this.readResource(name), '', this.textEncoding.codec),
       (text) => this.log(text),
     )
     this.control.onCancel(() => this.menus.dismiss())
@@ -414,7 +418,7 @@ export class EngineSession {
     return this.execute(async () => {
       const resource = this.resolveResource(entry)
       return this.runtime!.execute(
-        await this.deps.decodeScript(await resource.read()),
+        await this.deps.decodeScript(await resource.read(), '', this.textEncoding.codec),
         resource.name,
       )
     }).then(() => undefined)
@@ -1191,22 +1195,37 @@ export class EngineSession {
           this.deps.event({ type: 'log', level: 'error', text: String(error) })
         })
         break
+      case 'Scripts.class':
+        return { kind: 'value', value: { type: 'native-class', name: 'Scripts' } }
+      case 'Scripts.textEncoding.get':
+        value = this.textEncoding.label
+        break
+      case 'Scripts.textEncoding.set':
+        this.textEncoding.set(text(0))
+        break
+      case 'Scripts.readCompile':
+        value = await this.deps.readText(
+          await this.readResource(text(0)),
+          '',
+          this.textEncoding.codec,
+        )
+        break
       case 'Scripts.execStorage': {
+        const resource = this.resolveResource(text(0))
         return {
           kind: 'script',
           source: await this.deps.decodeScript(
-            await this.readResource(text(0)),
+            await resource.read(),
             typeof args[1] === 'string' ? args[1] : '',
+            this.textEncoding.codec,
           ),
-          name: text(0),
+          name: resource.name.replace(/^.*[\\/>]/, ''),
           context: isScriptObject(args[2]) ? args[2] : undefined,
           expression: args[3] === 1n,
         }
       }
       case 'Scripts.dump':
         return { kind: 'dump' }
-      case 'Scripts.traceFunction':
-        return { kind: 'value', value: { type: 'native-method', name: 'getTraceString' } }
       case 'Scripts.writeDump': {
         const bytes = args[0],
           requested = 'savedata/krkr2-web.dump.txt'
@@ -1229,18 +1248,12 @@ export class EngineSession {
         await this.flushFiles(false, true)
         return this.debug!.dispatch(this.diagnostics.begin('Dumped to ' + requested))
       }
-      case 'Scripts.exec':
-      case 'Scripts.eval':
-        return {
-          kind: 'script',
-          source: text(0),
-          name: typeof args[1] === 'string' ? args[1] : 'eval.tjs',
-          lineOffset: args[2] === undefined ? 0 : number(2),
-          context: isScriptObject(args[3]) ? args[3] : undefined,
-          expression: operation === 'Scripts.eval',
-        }
       case 'Storage.readText':
-        value = await this.deps.readText(await this.readResource(text(0)), text(1))
+        value = await this.deps.readText(
+          await this.readResource(text(0)),
+          text(1),
+          this.textEncoding.codec,
+        )
         break
       case 'Storage.readBinary':
         value = await this.readResource(text(0))

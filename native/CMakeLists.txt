@@ -35,7 +35,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/parser/tjsDateWordMap.inc
   WORKING_DIRECTORY "${TJS_ROOT}/script"
   DEPENDS "${TJS_ROOT}/script/create_world_map.py" VERBATIM)
 file(GLOB TJS_SOURCES CONFIGURE_DEPENDS "${TJS_ROOT}/*.cpp")
-add_executable(tjs ${TJS_SOURCES} ${PARSERS} "${CMAKE_CURRENT_BINARY_DIR}/parser/tjsDateWordMap.inc" tjs2/bridge.cpp)
+add_executable(tjs ${TJS_SOURCES} ${PARSERS} "${CMAKE_CURRENT_BINARY_DIR}/parser/tjsDateWordMap.inc" tjs2/bridge.cpp tjs2/scripts.cpp)
 target_include_directories(tjs PRIVATE "${TJS_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/parser" tjs2/include ../third_party/boost/include)
 target_compile_definitions(tjs PRIVATE BOOST_ALL_NO_LIB TJS_TEXT_OUT_CRLF)
 target_link_libraries(tjs PRIVATE fmt::fmt onig)

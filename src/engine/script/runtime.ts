@@ -32,6 +32,7 @@ export interface ScriptClass {
 }
 export type ScriptValue =
   | { readonly type: 'native-method'; readonly name: 'getTraceString' }
+  | { readonly type: 'native-class'; readonly name: 'Scripts' }
   | undefined
   | null
   | string

@@ -16,20 +16,28 @@ for (const backend of ['asyncify', 'jspi'])
     try {
       await page.goto(server.url + '?backend=' + backend)
       await page.locator('#script-debug').check()
-      await page.locator('#files').setInputFiles({
-        name: 'startup.tjs',
-        mimeType: 'text/plain',
-        buffer: Buffer.from(`
+      await page.locator('#files').setInputFiles([
+        {
+          name: 'startup.tjs',
+          mimeType: 'text/plain',
+          buffer: Buffer.from(`
       var recovered=false;
       if(Storages.isExistentStorage("savedata/krkr2-web.dump.txt")){
         var oldDump=[].load("savedata/krkr2-web.dump.txt").join("\\n");
         recovered=oldDump.indexOf("TJS Context Dump")>=0;
       }
+      var compiledRecovered=Storages.isExistentStorage("savedata/offline.cjs");
+      if(!compiledRecovered)Scripts.compileStorage("expression.tjs","savedata/offline.cjs",true,true,true);
+      var compiledResult=Scripts.evalStorage("savedata/offline.cjs");
       Scripts.dump();var callTrace=Scripts.getTraceString();Debug.message("offline-native-dump-ready");
     `),
-      })
+        },
+        { name: 'expression.tjs', mimeType: 'text/plain', buffer: Buffer.from('6*7') },
+      ])
       await expect(page.getByText('offline-native-dump-ready', { exact: true })).toBeVisible()
       await evaluate(page, 'recovered', '0')
+      await evaluate(page, 'compiledRecovered', '0')
+      await evaluate(page, 'compiledResult', '42')
       await page.locator('#library-title').fill('Native Debug')
       await page.locator('#save-library').click()
       await expect(page.locator('#library-games h3')).toHaveText('Native Debug')
@@ -50,6 +58,9 @@ for (const backend of ['asyncify', 'jspi'])
           .click()
         await expect(next.getByText('offline-native-dump-ready', { exact: true })).toBeVisible()
         await evaluate(next, 'recovered', '1')
+        await evaluate(next, 'compiledRecovered', '1')
+        await evaluate(next, 'compiledResult', '42')
+        await evaluate(next, 'Scripts instanceof "Class"', '1')
         await evaluate(
           next,
           'callTrace.indexOf("startup.tjs(")===0 && callTrace.indexOf("top level script")>0',

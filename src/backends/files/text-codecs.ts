@@ -18,9 +18,14 @@ const codecs: TextCodecs = {
     return new Uint8Array(await new Response(stream).arrayBuffer())
   },
 }
-export const readText = (bytes: Uint8Array, mode = '') => decodeTextStream(bytes, codecs, mode)
+export const readText = (bytes: Uint8Array, mode = '', encoding?: string) =>
+  decodeTextStream(bytes, codecs, mode, encoding)
 export const writeText = (text: string, mode = '') => encodeTextStream(text, codecs, mode)
-export async function readScript(bytes: Uint8Array, mode = ''): Promise<string | Uint8Array> {
+export async function readScript(
+  bytes: Uint8Array,
+  mode = '',
+  encoding?: string,
+): Promise<string | Uint8Array> {
   if (bytes[0] === 0x54 && bytes[1] === 0x4a && bytes[2] === 0x53 && bytes[3] === 0x32) return bytes
-  return readText(bytes, mode)
+  return readText(bytes, mode, encoding)
 }
