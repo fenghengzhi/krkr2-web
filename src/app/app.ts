@@ -51,6 +51,7 @@ export function mountApp(root: HTMLDivElement): void {
   }
   let generation = 0
   let busy = false
+  let stopping: Promise<void> | undefined
   let library: ReturnType<typeof createGameLibrary> | undefined
   let offline: ReturnType<typeof createOfflinePanel> | undefined
   const log = (text: string, error = false) => {
@@ -195,28 +196,35 @@ export function mountApp(root: HTMLDivElement): void {
   el('hide-console').addEventListener('click', () => {
     void setDebugVisibility('console', false).catch(report)
   })
-  const stop = async () => {
+  const stop = (): Promise<void> => {
+    if (stopping) return stopping
     const previous = player
     busy = true
-    try {
-      await previous?.stop()
-      generation++
-      player = undefined
-      snapshot = undefined
-      gameMenus.update({})
-      gameMenus.modal(false)
-      gameFonts.close()
-    } catch (error) {
-      if (previous?.session.isDisposed) {
+    update()
+    stopping = (async () => {
+      try {
+        await previous?.stop()
         generation++
         player = undefined
         snapshot = undefined
-      } else if (previous) acceptSnapshot(await previous.session.inspect())
-      throw error
-    } finally {
-      busy = false
-      update()
-    }
+        gameMenus.update({})
+        gameMenus.modal(false)
+        gameFonts.close()
+      } catch (error) {
+        if (previous?.session.isDisposed) {
+          generation++
+          player = undefined
+          snapshot = undefined
+        } else if (previous) acceptSnapshot(await previous.session.inspect())
+        throw error
+      } finally {
+        busy = false
+        update()
+      }
+    })().finally(() => {
+      stopping = undefined
+    })
+    return stopping
   }
   const launch = async (files: GameInput) => {
     await stop()
