@@ -19,7 +19,7 @@ class LifetimeMovie extends VideoOverlay {
   function LifetimeMovie(){super.VideoOverlay(win);}
   function finalize(){finalized++;if(failVideo)throw new Exception("retry-video");}
 }
-function makeMovie(){global.movie=new LifetimeMovie();movie.open("movie.mp4");movie.play();}
+function makeMovie(mode=0){global.movie=new LifetimeMovie();movie.mode=mode;movie.open("movie.mp4");movie.play();}
 function returnedMovie(){var result=new LifetimeMovie();result.open("movie.mp4");result.play();return result;}
 function replacement(status){receiver=this.marker+":"+status;calls++;}
 function lastEvent(value){calls++;delete global.movie;}
@@ -193,9 +193,13 @@ export async function exerciseVideoLifetime(
     for (const event of ['frame', 'period'] as const) {
       active = event + '-last-reference'
       await execute(
-        `calls=0;finalized=0;makeMovie();movie.mode=2;movie.${event === 'frame' ? 'onFrameUpdate' : 'onPeriod'}=lastEvent incontextof movie;`,
+        `calls=0;finalized=0;makeMovie(2);movie.${event === 'frame' ? 'onFrameUpdate' : 'onPeriod'}=lastEvent incontextof movie;`,
       )
       const receiving = owned()
+      check(
+        video.movies.get(video.onlyId())?.mode === 2,
+        'Video frame mode must be selected before opening',
+      )
       await video.emit(video.onlyId(), event)
       const completed = await restored()
       check(

@@ -101,6 +101,9 @@ unchanged(compatibility.info.headSha, [
   ':(exclude)tests/helpers/host-handles.ts',
   ':(exclude)tests/helpers/owner-observation.ts',
   ':(exclude)tests/helpers/event-lifetime-runtime.ts',
+  // This Session ownership fixture is imported only by the direct runtime
+  // entry checked in regularTestPaths, not by any KAG/release probe.
+  ':(exclude)tests/helpers/video-lifetime-runtime.ts',
   'tests/probes/system-abi-pwa.ts',
   'tests/probes/system-kag-matrix.mjs',
   'tests/probes/kag-browser.ts',
@@ -1874,6 +1877,11 @@ const matrix = {
   historicalFailures: [
     ...(videoPhase
       ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34904119374',
+            reason:
+              'The new portable video fixture attempted to set frame mode after opening, when native VideoOverlay deliberately ignores mode changes. All six direct runtimes stopped at the source frame-last-reference case after their first four video cases passed; no frame callback had been requested in the active mode. The fixture now selects mode before open, as the existing passing Node test does, and explicitly verifies the acquired mode before emitting. Exact resource baseline and callback assertions remain. The original failed run is archived and not counted as passing verification.',
+          },
           {
             run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34899772270',
             reason:
