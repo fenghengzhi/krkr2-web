@@ -142,7 +142,7 @@ var tick=0,completed=0;five.onTransitionCompleted=function(dest,src){completed++
     await page.route('**/assets/session.worker-*.js*', async (route) => {
       const response = await route.fetch()
       const gate = `(() => {
-        const state = self.__tlgStop = { allocated: false, held: false };
+        const state = self.__tlgStop = { allocated: false, selected: false, held: false };
         const Bytes = self.Uint8Array, schedule = self.setTimeout.bind(self);
         let release;
         self.Uint8Array = new Proxy(Bytes, {
@@ -153,7 +153,8 @@ var tick=0,completed=0;five.onTransitionCompleted=function(dest,src){completed++
           }
         });
         self.setTimeout = (callback, delay, ...args) => {
-          if (state.allocated && !state.held && delay === 0 && typeof callback === 'function') {
+          if (state.allocated && !state.selected && delay === 0 && typeof callback === 'function') {
+            state.selected = true;
             return schedule(() => {
               state.held = true;
               release = () => callback(...args);
