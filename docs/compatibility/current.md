@@ -1,10 +1,10 @@
 # 当前实现范围
 
-最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871)通过 **392 项 Node、639 项浏览器测试及 6 项直接运行时专项**，另有 [78 项兼容性检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401)通过。字节码专项覆盖 **36 条暂停/取消路径、188 次分配失败**；原 WebKit JSPI 离线重启场景另通过 20 次诊断，历史页面崩溃的根因仍未确认。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。
+最新 [GitHub Actions 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086)通过 **398 项 Node、639 项浏览器测试及 6 项直接运行时专项**，另有 [78 项兼容性检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783)通过。执行专项覆盖 **132 个预算边界、24 个自动终结场景、24 条暂停/取消路径**；[双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858195933)通过 **1,063 次执行分配失败和 188 次字节码分配失败**。历史 WebKit JSPI 页面崩溃与 KAG 成员名称异常仍无确定根因。TJS ABI **5**、字体 ABI **2**、会话协议 **9**。
 
-[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242)已绑定当前源码、正式发布和逐项证据，旧二进制脚本报告继续保留。
+[此前字节码生命周期报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242)按其历史源码和正式发布保留；执行资源阶段使用独立矩阵，不覆盖旧报告。
 
-本阶段加入 [字节码构造与链接回滚](../decisions/036-bytecode-lifetime.md)、128 MiB 结构展开预算和原生分配/上下文计数，修正超类查询代码尾部的哨兵处理。实例用例显式 invalidate 后再删除绑定；自动循环回收、深层调用/try 栈预算和其他原生资源路径仍未完成。
+字节码阶段加入 [构造与链接回滚](../decisions/036-bytecode-lifetime.md)、128 MiB 结构展开预算和原生分配/上下文计数，修正超类查询代码尾部的哨兵处理。后续 [执行资源预算](../decisions/037-execution-budgets.md) 已覆盖深层函数/try/超类/宿主调用、16 MiB 临时载荷和参数复制暂停/取消，退出帧清空寄存器并验证临时实例自动终结。任意对象环、隐式终结器异常和其他原生资源路径仍未完成。
 
 新增 [KBAD 与字节码结构校验](../decisions/034-binary-scripts.md)、文件偏移和二进制读取暂停/取消；菜单快照保留现有节点，视频打开等待首帧，媒体时钟补充周期/区间事件，详见 [视频就绪](../decisions/035-video-readiness.md)。一次 WebKit JSPI 原 KAG 异常成员名称未在 40 次诊断中复现，原因仍待查；完整字节码资源审计和整体非插件兼容仍未完成。所有本轮测试在 GitHub 托管 runner 上执行。
 
@@ -34,35 +34,35 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 
 前一字体几何阶段完整回归为 **290 项行为/集成与 495 项浏览器测试**，矩阵按其历史源码保留。文件字体使用独立 FreeType 2.14.3 WASM，系统字体和普通缺字回退使用 Canvas；337 对矩形、25,200 组坐标和 512 组字形度量/覆盖值已有对照。Windows 字体替换/字符集、集合多 face、旧编码字体、ruby/纵排的完整兼容及全部最终文字混合仍未完成。详见 [字体几何与后端](../decisions/024-font-geometry.md)。
 
-| 模块 | 当前实现 |
-| --- | --- |
-| TJS2 | 源码、表达式、编译/执行字节码、KBAD 资源、文件偏移、结构校验、类/属性/闭包、数组/字典、正则；长编译与二进制读取支持暂停/取消，资源与生命周期审计仍未完成 |
-| 值桥 | void、null、int64、real、UTF-16 字符串、octet、带上下文的对象句柄；显式 Array/Dictionary 构造与有预算的纯数据复制 |
-| 异步桥 | 读取资源后恢复脚本；在 WASM 内继续嵌套脚本与回调；错误带脚本位置；长循环预算让出与取消 |
-| 会话 | 显式 Worker；来源准备、初始化、挂载、启动、暂停、恢复、停止、重新创建；过期消息与旧快照隔离 |
-| 页面生命周期 | 默认后台暂停、可选择隐藏时继续；freeze/pagehide 暂停，与用户/GPU 状态独立；清理临时输入、控制媒体并尽力提交已写存档 |
-| 文件 | File/Blob 与 HTTP Range；版本固定、块缓存、有预算的完整下载与取消；64 MiB 单次读取/解码预算 |
-| XP3 | 独立 XP3 的 raw/zlib 索引、分段、连续索引链、adlr 元数据、可选 Adler-32 校验、按文件懒加载及 archive>entry 限定路径 |
-| 资源查找 | 相对路径、明确的挂载顺序、精确匹配后大小写回退、目录/归档 auto-path（后注册优先）、basename 回退；冲突时报错 |
-| 图像 | TS PNG/GIF/TLG5/TLG6 解码、PNG/TLG 标签和调色板索引；未压缩 BMP 1/4/8/24/32 位读取、8/24/32 位写入及 PNG/TLG 的 RGB/RGBA 写出；PNG zlib 使用 Web 压缩/解压；尺寸上限 4096 × 4096 |
-| 图层 | 显示/图像尺寸与偏移、默认 32×32 图像、父子/相对与绝对顺序、重挂/销毁、ARGB 填色、clip、复制、26 种混合、mask/province 像素和命中 |
-| 渲染 | Worker 中的 OffscreenCanvas + WebGL2；CPU 位图为像素权威，隔离合成需要整体透明度的子树与转场图像；按 revision 上传纹理 |
-| 图形恢复 | 上下文丢失时保留 VM/CPU 像素并暂停；重建程序、uniform 和纹理后提交首帧；保留用户暂停意图，失败可重试显示/备份/停止 |
-| 转场/截图 | 三种内置转场、脚本时钟/暂停、图层树交换与完成回调；onPaint、piledCopy、stretchCopy、BMP 图像存档 |
-| 计时与触发 | Timer 的间隔/容量/启停、AsyncTrigger 的缓存/取消与优先级队列；暂停时冻结计时 |
-| KAGParser | TypeScript 词法与状态机；标签、宏/参数转发、条件、emb、内嵌脚本、跳转/调用栈、store/restore/assign、回调与中断 |
-| 菜单 | MenuItem 树、Window.menu、顺序、可见/禁用、单选组、onClick、页面菜单/快捷键、弹出选择/取消；按 ID 更新保留未移除项的展开、焦点与点击 |
-| 系统 | createAppLock 使用按游戏分区的 Web Locks，停止释放；exit/terminate 取消执行并提交待写存档 |
-| 窗口 | 单窗口的逻辑尺寸、缩放、显示偏移、外观、可见性、resize 通知、管理对象 add/remove、closeQuery/close；可退出的页面内全屏 |
-| 输入 | 鼠标/触摸、捕获、键盘/提交文字、物理按键状态、focus chain、模态栈、onHitTest、异步 postInputEvent、光标与 hint |
-| 字体 | 独立 FreeType 文件字体、Canvas 系统字体/缺字回退、预渲染版本 0/1 与共享映射、getGlyphDrawRect/Rect、样式与阴影；getList/doUserSelect；逻辑纵排家族、vert/vrt2、Unicode 朝向/呈现形式、按索引变换与竖向装饰线；普通文件路径保留原 FreeType 角度语义 |
-| 声音 | Wave/MIDI 宿主、AudioWorklet 混音、WAV/Vorbis/MP3、SLI 循环/标志/标签、定位、音量/声像、淡入淡出、完成事件及静音 |
-| 视频 | VideoOverlay 的 MP4 播放、首帧就绪、显示时间帧索引、遮盖/双图层输出、seek/prepare、区间/周期事件、透明度、媒体声音及释放；媒体时钟补充延迟/遗漏的呈现通知 |
-| 文本与文件流 | TJS Array.load/save、Array/Dictionary 的结构化读写流；UTF-8、UTF-16、UTF-32 读取、c0/c1 简单编码、zlib 压缩文本 |
-| 存档文件 | 写覆盖层、IndexedDB 事务、失败保留脏数据、备份导出/导入；已验证 KAG 变量/场景恢复、BMP 缩略图和刷新读档 |
-| 页面 | 示例、本地文件/目录导入、后端选择、TJS 表达式、日志、暂停/停止/重新开始 |
-| 游戏库 | OPFS 完整资源副本、校验块、IndexedDB 目录、启动设置、导入取消/恢复与跨标签页删除保护 |
-| 离线应用 | 完整发布文件校验与缓存、显式更新、旧标签页依赖保留、缓存修复和子路径部署；生产环境启用 |
+| 模块         | 当前实现                                                                                                                                                                                                                                           |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TJS2         | 源码、表达式、编译/执行字节码、KBAD 资源、文件偏移、结构校验、类/属性/闭包、数组/字典、正则；长编译与二进制读取支持暂停/取消，资源与生命周期审计仍未完成                                                                                           |
+| 值桥         | void、null、int64、real、UTF-16 字符串、octet、带上下文的对象句柄；显式 Array/Dictionary 构造与有预算的纯数据复制                                                                                                                                  |
+| 异步桥       | 读取资源后恢复脚本；在 WASM 内继续嵌套脚本与回调；错误带脚本位置；长循环预算让出与取消                                                                                                                                                             |
+| 会话         | 显式 Worker；来源准备、初始化、挂载、启动、暂停、恢复、停止、重新创建；过期消息与旧快照隔离                                                                                                                                                        |
+| 页面生命周期 | 默认后台暂停、可选择隐藏时继续；freeze/pagehide 暂停，与用户/GPU 状态独立；清理临时输入、控制媒体并尽力提交已写存档                                                                                                                                |
+| 文件         | File/Blob 与 HTTP Range；版本固定、块缓存、有预算的完整下载与取消；64 MiB 单次读取/解码预算                                                                                                                                                        |
+| XP3          | 独立 XP3 的 raw/zlib 索引、分段、连续索引链、adlr 元数据、可选 Adler-32 校验、按文件懒加载及 archive>entry 限定路径                                                                                                                                |
+| 资源查找     | 相对路径、明确的挂载顺序、精确匹配后大小写回退、目录/归档 auto-path（后注册优先）、basename 回退；冲突时报错                                                                                                                                       |
+| 图像         | TS PNG/GIF/TLG5/TLG6 解码、PNG/TLG 标签和调色板索引；未压缩 BMP 1/4/8/24/32 位读取、8/24/32 位写入及 PNG/TLG 的 RGB/RGBA 写出；PNG zlib 使用 Web 压缩/解压；尺寸上限 4096 × 4096                                                                   |
+| 图层         | 显示/图像尺寸与偏移、默认 32×32 图像、父子/相对与绝对顺序、重挂/销毁、ARGB 填色、clip、复制、26 种混合、mask/province 像素和命中                                                                                                                   |
+| 渲染         | Worker 中的 OffscreenCanvas + WebGL2；CPU 位图为像素权威，隔离合成需要整体透明度的子树与转场图像；按 revision 上传纹理                                                                                                                             |
+| 图形恢复     | 上下文丢失时保留 VM/CPU 像素并暂停；重建程序、uniform 和纹理后提交首帧；保留用户暂停意图，失败可重试显示/备份/停止                                                                                                                                 |
+| 转场/截图    | 三种内置转场、脚本时钟/暂停、图层树交换与完成回调；onPaint、piledCopy、stretchCopy、BMP 图像存档                                                                                                                                                   |
+| 计时与触发   | Timer 的间隔/容量/启停、AsyncTrigger 的缓存/取消与优先级队列；暂停时冻结计时                                                                                                                                                                       |
+| KAGParser    | TypeScript 词法与状态机；标签、宏/参数转发、条件、emb、内嵌脚本、跳转/调用栈、store/restore/assign、回调与中断                                                                                                                                     |
+| 菜单         | MenuItem 树、Window.menu、顺序、可见/禁用、单选组、onClick、页面菜单/快捷键、弹出选择/取消；按 ID 更新保留未移除项的展开、焦点与点击                                                                                                               |
+| 系统         | createAppLock 使用按游戏分区的 Web Locks，停止释放；exit/terminate 取消执行并提交待写存档                                                                                                                                                          |
+| 窗口         | 单窗口的逻辑尺寸、缩放、显示偏移、外观、可见性、resize 通知、管理对象 add/remove、closeQuery/close；可退出的页面内全屏                                                                                                                             |
+| 输入         | 鼠标/触摸、捕获、键盘/提交文字、物理按键状态、focus chain、模态栈、onHitTest、异步 postInputEvent、光标与 hint                                                                                                                                     |
+| 字体         | 独立 FreeType 文件字体、Canvas 系统字体/缺字回退、预渲染版本 0/1 与共享映射、getGlyphDrawRect/Rect、样式与阴影；getList/doUserSelect；逻辑纵排家族、vert/vrt2、Unicode 朝向/呈现形式、按索引变换与竖向装饰线；普通文件路径保留原 FreeType 角度语义 |
+| 声音         | Wave/MIDI 宿主、AudioWorklet 混音、WAV/Vorbis/MP3、SLI 循环/标志/标签、定位、音量/声像、淡入淡出、完成事件及静音                                                                                                                                   |
+| 视频         | VideoOverlay 的 MP4 播放、首帧就绪、显示时间帧索引、遮盖/双图层输出、seek/prepare、区间/周期事件、透明度、媒体声音及释放；媒体时钟补充延迟/遗漏的呈现通知                                                                                          |
+| 文本与文件流 | TJS Array.load/save、Array/Dictionary 的结构化读写流；UTF-8、UTF-16、UTF-32 读取、c0/c1 简单编码、zlib 压缩文本                                                                                                                                    |
+| 存档文件     | 写覆盖层、IndexedDB 事务、失败保留脏数据、备份导出/导入；已验证 KAG 变量/场景恢复、BMP 缩略图和刷新读档                                                                                                                                            |
+| 页面         | 示例、本地文件/目录导入、后端选择、TJS 表达式、日志、暂停/停止/重新开始                                                                                                                                                                            |
+| 游戏库       | OPFS 完整资源副本、校验块、IndexedDB 目录、启动设置、导入取消/恢复与跨标签页删除保护                                                                                                                                                               |
+| 离线应用     | 完整发布文件校验与缓存、显式更新、旧标签页依赖保留、缓存修复和子路径部署；生产环境启用                                                                                                                                                             |
 
 **已经提供的脚本 API**
 
@@ -192,9 +192,7 @@ HTTP 阶段的完整检查通过 193 项行为/集成和 243 项浏览器测试�
 
 三浏览器均验证真实服务器关闭后的刷新和完整浏览器重启，以及 OPFS/存档、两套 TJS 后端、Vorbis/AudioWorklet/MP4 和 A/B 更新。额外的网络模拟用例只在 Chromium/Firefox 运行；WebKit 的模拟限制有最小 Service Worker 对照，显式记录在测试配置中。原生操作系统安装未验证。详细协议、部署和证据范围见 [离线应用决策](../decisions/018-offline-app.md)。
 
-
 PWA 阶段完整回归通过 209 项行为/集成和 338 项浏览器测试，选中案例无失败或跳过；上述 WebKit 网络模拟排除项单独列出。最终汇总为 `out/verification/pwa-matrix.json`，完整日志为 `out/verification/pwa/check.log`。中间曾发生的 WebKit 双标签页测试超时、trace 连续截图对照和最终配置均保留在报告中，原有测试断言与超时未放宽。
-
 
 **图形恢复的已验证边界**
 
@@ -202,9 +200,7 @@ WebGL 上下文失效时保留 VM、CPU 图像和存档，并暂停脚本、计�
 
 GPU 丢失/恢复使用浏览器的 WEBGL_lose_context 扩展触发真实资源失效；没有执行物理显卡重置或穷举驱动行为。自动暂停保留 Timer 剩余期限和转场时间，System.getTickCount 继续保留宿主单调时钟语义。Wave/VideoOverlay 的播放位置与音频静音输出有独立验证；AudioWorklet 统计已修复为暂停期间继续报告零电平。实现、暂停协调、该阶段协议版本 4（后续升到 5）和平台限制见 [图形恢复决策](../decisions/019-graphics-recovery.md)。
 
-
 图形恢复阶段完整验证为 216 项行为/集成与 386 项浏览器测试；新增的 48 项 GPU/媒体案例覆盖三浏览器和两种 WASM 后端。当前日志见 `out/verification/graphics/check.log`，源码、测试、配置、发布文件、WASM 和截图的哈希见 `out/verification/graphics-matrix.json`。PWA 的既有模拟排除项保持单独记录，原有外部 KAG 36 场景没有在本阶段重跑。
-
 
 **页面生命周期的已验证边界**
 
@@ -213,6 +209,5 @@ GPU 丢失/恢复使用浏览器的 WEBGL_lose_context 扩展触发真实资源�
 后台尝试提交已经进入覆盖层的存档字节，不重入暂停 VM 关闭原生流；失败保留可导出的数据。该行为不能保证操作系统终止前提交完成，也不保存整个 VM 堆。三浏览器的应用信号测试与 Chromium 的真实隐藏/冻结测试分开记录；移动强杀、BFCache、全部加载/seek 中断排列和 Firefox/WebKit 原生冻结未验证。协议 5、输入法处理及测试方式见 [页面生命周期](../decisions/020-page-lifecycle.md)。
 
 页面策略阶段完整 `npm run check` 已通过 **230 项行为/集成与 438 项浏览器测试**；选中案例无失败或跳过，既有 WebKit PWA 网络模拟排除项保持单独记录。新增 14 项 Node 与 52 项浏览器案例，覆盖暂停的异步结果/错误、Timer 与输入、媒体、存档、设置，以及原生隐藏/冻结和按钮按住期间的更新。日志为 `out/verification/activity/check.log`，最终源码/测试/配置/构建/WASM、原生可信事件与中间失败证据见 `out/verification/activity-matrix.json`。外部 KAG 36 场景矩阵未在本阶段重跑。
-
 
 System 事件使用独立 TypeScript 队列，`eventDisabled` 不暂停 VM 或媒体时钟。支持 add/removeContinuousHandler、精确绑定闭包去重、活列表增删、`-contfreq`、事件异常处理和重新启用时的同步派发。菜单/快捷键检查页面可见性及 epoch，禁用时 popup 仍可返回但不通知 onClick。System 阶段使用 TJS WASM ABI 3、会话协议 9；当前版本与待验证状态见文首。

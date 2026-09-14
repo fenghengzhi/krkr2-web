@@ -36,6 +36,8 @@ Debug 已支持历史与重要消息、同步日志回调、UTF-16LE 文件输�
 
 字节码加载采用分阶段所有权和失败回滚，支持常量池、上下文构造及链接期间的暂停/取消，并限制重复名字等原生结构的展开预算。实现及故障注入验证范围见 [字节码生命周期](docs/decisions/036-bytecode-lifetime.md)。
 
+执行阶段增加函数/try/超类与宿主嵌套调用的深度限制，以及寄存器和参数的临时内存预算。超限返回可捕获的脚本错误；退出帧清空寄存器，停止请求穿过脚本 catch 完成清理。参数复制支持暂停/取消，构造失败回收由独立故障注入验证。范围见 [执行资源预算](docs/decisions/037-execution-budgets.md)。
+
 菜单更新保留仍存在的项目节点，避免更新打断展开或点击。视频打开等待真实首帧，周期和区间事件使用媒体时钟补充呈现回调；错误历史和精度边界见 [视频首帧与时钟](docs/decisions/035-video-readiness.md)。
 
 页面现在也支持“远程文件链接”。支持 Range 和强 ETag 的 XP3/ZIP 服务器可按需读取；小文件可在预算内完整下载。跨域配置、版本与存档身份见 [HTTP 来源](docs/decisions/016-http-sources.md)。
@@ -112,7 +114,7 @@ docs/             架构、已验证决策与兼容范围
 
 ## 验证
 
-测试统一由 [GitHub Actions](.github/workflows/test.yml) 执行，不在本机运行测试。[最近完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871)通过 392 项 Node、639 项浏览器测试及 6 项直接运行时专项；另有 [78 项 KAG/旧 ABI 兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401)通过。字节码专项另通过 [188 次分配失败](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848868196)；历史 WebKit 页面崩溃仍保留为未定位问题。推送代码、更新 PR 或手动触发 Tests 工作流后，云端构建两种 TJS WASM 和字体内核，并运行 Node、三浏览器、游戏库、PWA、原生生命周期及直接运行时探测。
+测试统一由 [GitHub Actions](.github/workflows/test.yml) 执行，不在本机运行测试。[最近完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086)通过 398 项 Node、639 项浏览器测试及 6 项直接运行时专项；另有 [78 项 KAG/旧 ABI 兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783)通过。[双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858195933)通过 1,063 次执行分配失败和 188 次字节码分配失败；历史 WebKit 页面崩溃仍保留为未定位问题。推送代码、更新 PR 或手动触发 Tests 工作流后，云端构建两种 TJS WASM 和字体内核，并运行 Node、三浏览器、游戏库、PWA、原生生命周期及直接运行时探测。
 
 所有测试使用同次工作流生成的产物；日志、JSON 报告、失败截图与 trace 可从 Actions 下载。操作方式、原 KAG/旧 ABI 专项与历史记录见 [测试说明](docs/testing.md)。
 

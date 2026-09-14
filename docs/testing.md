@@ -6,6 +6,8 @@
 
 ## 已完成的云端回归
 
+执行资源阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858757086) 通过 **398 项 Node、639 项浏览器**（516 常规、57 游戏库、59 PWA、7 原生生命周期）和 **6 项直接运行时**；[兼容专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34859159783) 通过 **78 项**。[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34858195933) 通过新增 **1,063 次执行分配失败**与原有 **188 次字节码分配失败**。直接运行时覆盖 132 个预算边界、24 个自动终结场景、12 条深层调用控制和 12 条参数复制控制；原字节码/编译/二进制与页面控制仍保留。范围、失败历史及构建下载修复见 [执行资源预算](decisions/037-execution-budgets.md)。所有所选案例无失败、跳过、flaky 或重试；历史额外冷重启诊断未计入本阶段。
+
 字节码生命周期阶段的 [完整运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849454871) 通过 **392 项 Node、639 项浏览器**（516 常规、57 游戏库、59 PWA、7 原生生命周期）和 **6 项直接运行时**；[兼容专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848253401) 通过 **78 项**。另有 [188 次双后端分配失败](https://github.com/fenghengzhi/krkr2-web/actions/runs/34848868196) 和 [20 次 WebKit JSPI 原生 Debug 冷离线重启](https://github.com/fenghengzhi/krkr2-web/actions/runs/34849908821) 通过，所选测试没有失败、跳过、flaky 或重试。直接运行时包含 36 条字节码暂停/取消路径及六组重复加载/失败回滚检查；范围和原失败见 [字节码生命周期](decisions/036-bytecode-lifetime.md)。
 
 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34850540242)已绑定 554 份证据；矩阵 `out/verification/bytecode-lifetime-matrix.json` 的 SHA-256 为 `c3c5c665b1de52cc989edc0a3abad39001c0db1fc560baa49b1dfe63f798089b`。本轮可信冻结为 21,059.7 ms，没有计入历史额外冻结；此前各阶段矩阵和失败记录继续保留。
@@ -75,7 +77,7 @@ gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 gh workflow run compatibility.yml --ref main -f build-run=BUILD_RUN_ID
 ```
 
-复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。ABI 5 根据能力标记生成 `bytecode-lifetime-matrix.json`、`binary-scripts-matrix.json` 或 `compiler-matrix.json`，更早的原生 Scripts 阶段保留 `native-scripts-matrix.json`；此前 ABI 4 阶段要求输入时序专项，生成 `stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。这些文件位于 `out/verification/`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
+复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。ABI 5 根据能力标记生成 `execution-budgets-matrix.json`、`bytecode-lifetime-matrix.json`、`binary-scripts-matrix.json` 或 `compiler-matrix.json`，更早的原生 Scripts 阶段保留 `native-scripts-matrix.json`；此前 ABI 4 阶段要求输入时序专项，生成 `stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。这些文件位于 `out/verification/`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
 
 [VM 控制台阶段汇总](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)已通过，绑定 487 份证据文件、116 份持久 context 预算记录及 6 份媒体时钟记录。生成时提交为 `d97a3c9`，报告 SHA-256 为 `81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d`。矩阵和引用的完整产物已下载到 `out/verification/github-actions/34812958010/`，矩阵另复制到上述标准路径；报告生成后的本次文档更新不改变应用或测试代码。
 
