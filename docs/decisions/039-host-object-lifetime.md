@@ -17,7 +17,15 @@ DeleteAllMembers -> Finalize -> BeforeDestruction -> tTJSDispatch::Release
 
 这将 440 字节的失败定位到保留字表成员清理。保留字表的 Release 已消费引用、删除对象后继续抛出异常；异常离开 `tTJS` 析构函数导致 abort，全局字符串池、正则状态和调试注册的后续清理未完成。该轮失败堆栈、账本与对照结果保存在 `out/verification/github-actions/34874097344/complete/`，元数据为上级 `run.json`；新增诊断没有把旧失败改成成功。
 
-修复提交 `e2adc68128b6925010695a57950f5a5c85da75f6` 修改 `tjsLex.cpp` 的 `TJSReservedWordsHashRelease()`：先分离 `TJSReservedWordHash`、清空全局指针并重置初始化标记，再使用 `krkr::ReleaseNative` 释放。这个 noexcept 释放器捕获错误并交给外层已经 suppress 的 `CleanupErrors`，避免终止析构，让后续字符串池、正则和调试资源清理继续执行。修复仍等待新的 GitHub-hosted 分配故障枚举和完整测试证明；当前不宣称 039 阶段完成。
+修复提交 `e2adc68128b6925010695a57950f5a5c85da75f6` 修改 `tjsLex.cpp` 的 `TJSReservedWordsHashRelease()`：先分离 `TJSReservedWordHash`、清空全局指针并重置初始化标记，再使用 `krkr::ReleaseNative` 释放。这个 noexcept 释放器捕获错误并交给外层已经 suppress 的 `CleanupErrors`，避免终止析构，让后续字符串池、正则和调试资源清理继续执行。
+
+[分配诊断 34875061460](https://github.com/fenghengzhi/krkr2-web/actions/runs/34875061460) 的两个后端均通过全部 324 条 owner 注册、升级和销毁记录，包括原来失败的销毁位置；实际每后端注入 300 次分配失败。但是 Asyncify 的既有集合清理探测在 debug/dictionary/implicit 的 `after=1` 记录一次“命中分配失败但执行没有抛错”，整轮仍为失败。旧探测在断言之前没有保存失败分配大小和原生栈，无法从这次记录确定分配来源。现已调整为先保存原始返回、异常、命中、字节数和分配栈，再作断言，保留原有判定要求。
+
+新增诊断记录后的 [34875659518](https://github.com/fenghengzhi/krkr2-web/actions/runs/34875659518) 在两个后端全部通过，源码为 `7bcf9ca79a2cd23cdd418d25b40b7eedb8352502`；这不能抹除上轮偶发错误或证明其根因已修复。正在专项检查 Asyncify 挂起缓冲区的分配失败行为；完整 039 报告尚未完成。两轮完整材料均按 run ID 保存在 `out/verification/github-actions/`。
+
+源码检查发现固定版本 [Emscripten 6.0.9 的 Asyncify](https://github.com/emscripten-core/emscripten/blob/6.0.9/src/lib/libasync.js) 在异步操作开始、状态进入 Unwinding 后才分配挂起缓冲区，并直接使用返回地址。新增保护在 C++ 进入两个异步 import 之前检查并预留挂起空间，失败时沿现有脚本异常边界退出，避免先启动宿主操作；JSPI 不需要该缓冲区。受版本约束的 allocateData 适配只消费已预留的空间，原有 rewind 流程负责释放，未使用的预留由 C++ 作用域释放。头部大小、栈大小、执行状态和独占持有条件均检查。这个检查修复有明确源码依据，但没有据此反推此前缺少分配栈的偶发失败已被证明来自此处。
+
+[完整回归 34875029792](https://github.com/fenghengzhi/krkr2-web/actions/runs/34875029792) 绑定 `e2adc68128b6925010695a57950f5a5c85da75f6`，594 项 Node 和 6 项直接运行时通过，浏览器为 638/639：WebKit/Asyncify 的启动字体对话框停止后重启场景未在 12 秒断言期限内显示新会话日志。该运行整体失败，原始 trace 和错误上下文保留并继续排查，不能作为最终通过记录。
 
 修复前的 [宿主句柄诊断 34869766340](https://github.com/fenghengzhi/krkr2-web/actions/runs/34869766340) 绑定 `4bc02b9f95a6ba4c398c1aa38dc90bca99e8012e`，已终结为失败。每个后端分别执行 20 个独立子进程用例，只有 `nested-release` 的四个源码/字节码、调试开关组合通过。批量释放在首个终结器错误后遗留对象；终结期间仍可保留正在退出的旧句柄；宿主主异常处理失败；重复释放触发 WASM 内存越界或子进程超时。完整材料保存在 `out/verification/github-actions/34869766340/complete/`，元数据为同目录上级的 `run.json`。这些失败和超时作为历史证据保留，不由新工作流或后续成功覆盖。
 

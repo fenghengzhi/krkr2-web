@@ -1,10 +1,16 @@
 #include <emscripten.h>
+#if KRKR_ASYNCIFY
+#include <emscripten/fiber.h>
+#endif
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <malloc.h>
 #include <map>
 #include <set>
 #include <memory>
+#include <new>
+#include <stdexcept>
 #include <vector>
 #include <string>
 #include "tjs.h"
@@ -134,6 +140,76 @@ void WeakOwner::Expired(void* context) noexcept {
     owner_invalidated(vm, id);
 }
 
+#if KRKR_ASYNCIFY
+// Emscripten 6.0.9 allocateData calls malloc after starting the host operation
+// and entering Unwinding, without checking for zero. Reserve in C++ first so
+// allocation failure is catchable before any asynchronous callback starts.
+// The pinned wasm32 Asyncify data header is shared with emscripten/fiber.h.
+static_assert(sizeof(asyncify_data_t) == 12 && sizeof(void*) == 4);
+EM_JS_DEPS(krkr_asyncify_reservation, "$Asyncify");
+EM_JS(int, prepare_asyncify_reservation, (unsigned headerSize, unsigned stackSize), {
+    if (headerSize !== 12 || Asyncify.StackSize !== stackSize ||
+        Asyncify.state !== Asyncify.State.Normal || Asyncify.currData ||
+        Asyncify['krkrReservedData']) return 0;
+    if (!Asyncify['krkrReservationHook']) {
+        // Create the slot before C++ owns an allocation. Publication after a
+        // successful malloc only updates this existing numeric property.
+        Asyncify['krkrReservedData'] = 0;
+        Asyncify['krkrReservationHook'] = () => {
+            const pointer = Asyncify['krkrReservedData'];
+            // A missing reservation means an unguarded import or changed
+            // toolchain contract. Never fall back to unchecked malloc.
+            if (!pointer || Asyncify.state !== Asyncify.State.Unwinding || Asyncify.currData)
+                abort('Asyncify suspension has no exclusive reserved stack');
+            Asyncify.setDataHeader(pointer, pointer + headerSize, stackSize);
+            Asyncify.setDataRewindFunc(pointer);
+            // Transfer ownership only after the complete header is ready.
+            // handleSleep frees this allocation when it stops rewinding.
+            Asyncify['krkrReservedData'] = 0;
+            return pointer;
+        };
+        Asyncify.allocateData = Asyncify['krkrReservationHook'];
+    }
+    return Asyncify.allocateData === Asyncify['krkrReservationHook'] ? 1 : 0;
+});
+EM_JS(void, publish_asyncify_reservation, (void* pointer), {
+    Asyncify['krkrReservedData'] = pointer;
+});
+EM_JS(int, discard_asyncify_reservation, (void* pointer), {
+    const reserved = Asyncify['krkrReservedData'];
+    if (!reserved) return 0; // consumed; Emscripten owns/free'd the allocation
+    if (reserved !== pointer) abort('Asyncify suspension reservation ownership changed');
+    Asyncify['krkrReservedData'] = 0;
+    return 1;
+});
+#endif
+
+class AsyncifyReservation {
+#if KRKR_ASYNCIFY
+    void* data = nullptr;
+#endif
+public:
+    AsyncifyReservation() {
+#if KRKR_ASYNCIFY
+        if(!prepare_asyncify_reservation(sizeof(asyncify_data_t), KRKR_ASYNCIFY_STACK_SIZE))
+            throw std::logic_error("Asyncify suspension is unavailable in the current state");
+        data = std::malloc(sizeof(asyncify_data_t) + KRKR_ASYNCIFY_STACK_SIZE);
+        if(!data) throw std::bad_alloc();
+        publish_asyncify_reservation(data);
+#endif
+    }
+    ~AsyncifyReservation() noexcept {
+#if KRKR_ASYNCIFY
+        // Asyncify skips this scope's exit while unwinding, restores its locals
+        // on rewind, then resumes after the raw import. Never free the restored
+        // pointer if allocateData already consumed it; the normal glue did so.
+        if(data && discard_asyncify_reservation(data)) std::free(data);
+#endif
+    }
+    AsyncifyReservation(const AsyncifyReservation&) = delete;
+    AsyncifyReservation& operator=(const AsyncifyReservation&) = delete;
+};
+
 // All VM execution is serialized by the owning Worker. Nested TJS callbacks
 // are invoked here, after the JS import returns, so no JS frame needs suspending.
 EM_JS(int, cancellation_requested, (), {
@@ -150,7 +226,10 @@ Reply* dispatch_host(Vm* vm, const tjs_char* name, unsigned length, int count, t
     krkr::CleanupErrors cleanup;
     std::unique_ptr<Reply> reply;
     try {
-        reply.reset(dispatch_host_raw(vm, name, length, count, args));
+        {
+            AsyncifyReservation reservation;
+            reply.reset(dispatch_host_raw(vm, name, length, count, args));
+        }
         krkr_vm_check_cancellation();
         if(reply && reply->kind == 1) TJS_eTJSError(ttstr(reply->value));
     } catch(...) {
@@ -163,12 +242,16 @@ Reply* dispatch_host(Vm* vm, const tjs_char* name, unsigned length, int count, t
     cleanup.rethrow();
     return reply.release();
 }
-EM_ASYNC_JS(int, yield_host, (int phase), {
+EM_ASYNC_JS(int, yield_host_raw, (int phase), {
     await new Promise(resolve => setTimeout(resolve, 0));
     try { await Module['onYield'](phase); }
     catch(error) { if(!Module['shouldCancel']()) throw error; }
     return Module['shouldCancel']() ? 1 : 0;
 });
+int yield_host(int phase) {
+    AsyncifyReservation reservation;
+    return yield_host_raw(phase);
+}
 
 unsigned instructionCount = 0;
 double deadline = 0;

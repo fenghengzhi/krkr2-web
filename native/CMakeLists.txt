@@ -53,9 +53,12 @@ target_link_options(tjs PRIVATE
   "-sINCOMING_MODULE_JS_API=['locateFile','wasmBinary']"
   "-sEXPORTED_RUNTIME_METHODS=['ccall','HEAPU8','HEAPU16','HEAPU32']")
 if(TJS_VARIANT STREQUAL "jspi")
+  target_compile_definitions(tjs PRIVATE KRKR_ASYNCIFY=0)
   target_link_options(tjs PRIVATE -fwasm-exceptions "-sJSPI=1" "-sJSPI_EXPORTS=['krkr_execute','krkr_invoke','krkr_compile']")
 elseif(TJS_VARIANT STREQUAL "asyncify")
-  target_link_options(tjs PRIVATE -fexceptions "-sDISABLE_EXCEPTION_CATCHING=0" "-sASYNCIFY=1" "-sASYNCIFY_STACK_SIZE=1048576")
+  set(TJS_ASYNCIFY_STACK_SIZE 1048576)
+  target_compile_definitions(tjs PRIVATE KRKR_ASYNCIFY=1 KRKR_ASYNCIFY_STACK_SIZE=${TJS_ASYNCIFY_STACK_SIZE})
+  target_link_options(tjs PRIVATE -fexceptions "-sDISABLE_EXCEPTION_CATCHING=0" "-sASYNCIFY=1" "-sASYNCIFY_STACK_SIZE=${TJS_ASYNCIFY_STACK_SIZE}")
 else()
   message(FATAL_ERROR "Unknown TJS_VARIANT: ${TJS_VARIANT}")
 endif()

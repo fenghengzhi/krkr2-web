@@ -1449,6 +1449,18 @@ const matrix = {
             reason:
               'Both allocator variants again failed all four debug/bytecode disposal rows at allocation index 71. The Asyncify allocation trace identified DeleteAllMembers called through TJSReservedWordsHashRelease and tTJS::Cleanup during engine destruction; the thrown allocation error escaped the destructor and terminated cleanup. The reserved-word hash release now clears its global pointer and initialization state before using the non-throwing native release helper, allowing later string-pool, regex and debug cleanup to continue. The diagnostic run, traces and retained-allocation evidence remain archived as failures.',
           },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34875061460',
+            commit: 'e2adc68128b6925010695a57950f5a5c85da75f6',
+            reason:
+              'All 324 owner registration, upgrade and disposal rows passed on each backend, including 300 injected failures per backend. The separate Asyncify collection-cleanup probe failed its debug Dictionary implicit-release row at allocation index 1 because the allocator reported a hit but execution reported no error. Disposal still matched its control. That probe asserted before recording allocation size and trace, so the exact historical allocation cannot be identified from this run. A later repeated diagnostic passed without reproducing it; the failed run and missing diagnostic fields remain recorded, not retroactively counted as success.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34875029792',
+            commit: 'e2adc68128b6925010695a57950f5a5c85da75f6',
+            reason:
+              'Node passed 594/594 and all six direct runtime combinations passed. Browser checks passed 638/639: the WebKit Asyncify font-dialog startup cancellation/restart scenario did not display the new-session log within its 12-second assertion deadline. The complete run remains failed; its trace, error context and original reports are preserved for investigation.',
+          },
         ]
       : []),
     ...(objectPhase
