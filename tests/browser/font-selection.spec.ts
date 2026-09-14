@@ -37,10 +37,13 @@ for (const backend of ['asyncify', 'jspi']) {
       const original = Worker.prototype.postMessage
       const pending: (() => void)[] = []
       let held = true
-      Worker.prototype.postMessage = function (...args: Parameters<Worker['postMessage']>) {
-        const message = args[0] as { type?: string; argumentList?: { value?: unknown }[] }
-        const send = () => original.apply(this, args)
-        if (held && message.type === 'APPLY' && message.argumentList?.[0]?.value === 'previewFont')
+      Worker.prototype.postMessage = function (
+        message: unknown,
+        transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+      ) {
+        const request = message as { type?: string; argumentList?: { value?: unknown }[] }
+        const send = () => Reflect.apply(original, this, [message, transferOrOptions])
+        if (held && request.type === 'APPLY' && request.argumentList?.[0]?.value === 'previewFont')
           pending.push(send)
         else send()
       }
