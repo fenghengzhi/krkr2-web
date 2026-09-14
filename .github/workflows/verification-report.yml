@@ -71,6 +71,7 @@ jobs:
             out/verification/compiler-matrix.json
             out/verification/binary-scripts-matrix.json
             out/verification/bytecode-lifetime-matrix.json
+            out/verification/execution-budgets-matrix.json
             out/verification/hosted-evidence/
             out/ci/
           if-no-files-found: error

@@ -89,6 +89,7 @@ unchanged(compatibility.info.headSha, [
   // Only regular/direct runtime and allocator diagnostics import this fixture.
   // Both exact versions are checked separately in this report.
   ':(exclude)tests/helpers/bytecode-lifetime.ts',
+  ':(exclude)tests/helpers/execution-budget.ts',
   'tests/probes/system-abi-pwa.ts',
   'tests/probes/system-kag-matrix.mjs',
   'tests/probes/kag-browser.ts',
@@ -117,6 +118,8 @@ const wasm = await json('dist/wasm/manifest.json')
 const font = await json('dist/fonts/manifest.json')
 assert([3, 4, 5].includes(wasm.abi))
 const lifetimePhase = wasm.capabilities?.bytecodeLifecycle === 1
+const executionPhase = wasm.capabilities?.executionBudgets === 1
+if (executionPhase) assert(lifetimePhase)
 if (lifetimePhase) assert.equal(wasm.diagnosticAllocator, false)
 const binaryPhase = wasm.capabilities?.binaryScripts === 1
 const compilerPhase = wasm.capabilities?.cooperativeCompilation === 1
@@ -124,17 +127,19 @@ if (binaryPhase) assert(compilerPhase)
 const scriptsPhase = wasm.abi === 5
 if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
-const nodeCount = lifetimePhase
-  ? 392
-  : binaryPhase
-    ? 384
-    : compilerPhase
-      ? 371
-      : scriptsPhase
-        ? 362
-        : tracePhase
-          ? 351
-          : 346
+const nodeCount = executionPhase
+  ? 398
+  : lifetimePhase
+    ? 392
+    : binaryPhase
+      ? 384
+      : compilerPhase
+        ? 371
+        : scriptsPhase
+          ? 362
+          : tracePhase
+            ? 351
+            : 346
 const browserCount = binaryPhase
   ? 639
   : compilerPhase
@@ -355,6 +360,19 @@ if (inputRun) {
 const runtime = await json(
   base.root + '/artifacts/runtime-results/verification/vm-console/runtime-browser.json',
 )
+function releasedExecution(state) {
+  for (const field of ['depth', 'bytes', 'functions', 'tries', 'delegations'])
+    assert.equal(state[field], 0, field)
+  assert.equal(state.depthLimit, 256)
+  assert.equal(state.functionLimit, 128)
+  assert.equal(state.delegationLimit, 128)
+  assert.equal(state.byteLimit, 16 * 1024 * 1024)
+  assert.equal(state.stackReserve, 64 * 1024)
+  assert(state.peakDepth <= state.depthLimit)
+  assert(state.peakFunctions <= state.functionLimit)
+  assert(state.peakDelegations <= state.delegationLimit)
+  assert(state.peakBytes <= state.byteLimit)
+}
 assert.deepEqual(runtime.manifest, wasm)
 if (lifetimePhase) assert.deepEqual(runtime.failures, [])
 combinations(
@@ -369,6 +387,59 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (executionPhase) {
+    const execution = row.executionBudgets
+    combinations(execution.checks, ['false', 'true'], (item) => String(item.debugMode))
+    for (const check of execution.checks) {
+      combinations(
+        check.results,
+        [
+          'function/source',
+          'function/bytecode',
+          'try/source',
+          'try/bytecode',
+          'mixed/source',
+          'mixed/bytecode',
+          'superclass-cycle',
+          'host-continuations',
+          'wide-registers',
+          'argument-memory',
+          'argument-count',
+        ],
+        (item) => item.scenario,
+      )
+      for (const result of check.results) {
+        assert(result.message.includes('VM '))
+        releasedExecution(result.state)
+      }
+      combinations(check.automaticInstances, ['false', 'true'], (item) => String(item.binary))
+      for (const instance of check.automaticInstances) {
+        assert.equal(instance.finalized, 1)
+        releasedExecution(instance.state)
+      }
+      releasedExecution(check.final)
+      assert.equal(check.native.contexts, 0)
+      assert.equal(check.native.blocks, 0)
+    }
+    for (const controls of [execution.continuations, execution.arguments]) {
+      combinations(controls, ['false', 'true'], (item) => String(item.cancel))
+      for (const control of controls) {
+        releasedExecution(control.after)
+        assert.equal(control.heldMs, 25)
+        assert.equal(control.error, control.cancel ? 'AbortError' : null)
+      }
+    }
+    for (const control of execution.continuations) {
+      assert(control.held.functions >= 65 && control.held.tries >= 65)
+      assert.equal(control.nativeReplyKind, control.cancel ? 1 : 0)
+    }
+    for (const control of execution.arguments) {
+      assert(control.observed.bytes > 8 * 1024 * 1024)
+      assert.equal(control.resources.blocks, control.before.blocks)
+      assert.equal(control.resources.contexts, control.before.contexts)
+      assert(control.resources.heap <= control.before.heap + 64 * 1024)
+    }
+  }
   if (lifetimePhase) {
     const lifetime = row.bytecode.lifetime
     assert.equal(lifetime.loads, 13)
@@ -540,6 +611,7 @@ assert.equal(
 )
 let allocations
 const allocatorReports = []
+const executionAllocatorReports = []
 if (lifetimePhase) {
   allocations = await run('KRKR_ALLOCATIONS_RUN', 'Bytecode allocation diagnostic', 2, [
     '--pattern',
@@ -549,6 +621,9 @@ if (lifetimePhase) {
     'tests/helpers/bytecode-lifetime.ts',
     'tests/helpers/binary-scripts.ts',
     'tests/probes/bytecode-allocation-faults.ts',
+    ...(executionPhase
+      ? ['tests/helpers/execution-budget.ts', 'tests/probes/execution-allocation-faults.ts']
+      : []),
     '.github/workflows/bytecode-allocations.yml',
   ])
   for (const backend of backends) {
@@ -578,6 +653,35 @@ if (lifetimePhase) {
     for (const asset of [manifest.variants[backend].mjs, manifest.variants[backend].wasm])
       assert.equal(await hash(`${root}/.generated/wasm/${asset.file}`), asset.sha256)
     allocatorReports.push(report)
+    if (executionPhase) {
+      const execution = await json(`${root}/out/ci/execution-allocations-${backend}.json`)
+      assert.deepEqual(execution.manifest, manifest)
+      assert.equal(execution.variant, backend)
+      assert.equal(execution.manifest.capabilities.executionBudgets, 1)
+      assert.deepEqual(execution.failures, [])
+      for (const debugMode of [false, true])
+        for (const [name, phase] of [
+          ['pooled-frames', 9],
+          ['collapsed-arguments', 9],
+          ['expanded-arguments', 10],
+        ]) {
+          const rows = execution.results.filter(
+            (item) => item.name === name && item.debugMode === debugMode,
+          )
+          assert(rows.length > 2)
+          rows.forEach((item, index) => {
+            assert.equal(item.phase, phase)
+            assert.equal(item.after, index - 1)
+            assert.equal(item.hits, index === 0 || index === rows.length - 1 ? 0 : 1)
+            assert.deepEqual(item.disposed, rows[0].disposed)
+            assert.deepEqual(item.baseline, rows[0].disposed)
+            assert.equal(item.current.contexts, item.before.contexts)
+            assert.equal(item.current.blocks, item.before.blocks)
+            releasedExecution(item.state)
+          })
+        }
+      executionAllocatorReports.push(execution)
+    }
   }
 }
 const pwaDiagnostic = process.env.KRKR_PWA_RUN
@@ -631,6 +735,18 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(executionPhase
+      ? {
+          executionBudgets: 132,
+          automaticInstances: 24,
+          deepContinuationControls: 12,
+          argumentControls: 12,
+          executionAllocatorFailures: executionAllocatorReports.reduce(
+            (sum, report) => sum + report.results.filter((item) => item.hits === 1).length,
+            0,
+          ),
+        }
+      : {}),
     ...(pwaDiagnostic ? { coldOfflineRestartDiagnostics: offlineRestarts.length } : {}),
     ...(lifetimePhase
       ? {
@@ -667,6 +783,7 @@ const matrix = {
   browserControls,
   runtime,
   allocatorReports,
+  executionAllocatorReports,
   offlineRestarts,
   external,
   fixtureManifest,
@@ -680,6 +797,9 @@ const matrix = {
   evidence,
   previousMatrices: {
     ...fixtureManifest.historicalMatrices,
+    ...(executionPhase
+      ? { 'bytecode-lifetime': 'c3c5c665b1de52cc989edc0a3abad39001c0db1fc560baa49b1dfe63f798089b' }
+      : {}),
     ...(lifetimePhase
       ? { 'binary-scripts': 'b941be09c8d5803d19a8c1014fad9b8dfa1a78351a17734808133117cd1c3041' }
       : {}),
@@ -691,6 +811,30 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(executionPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34853858703',
+            reason:
+              'Initial execution-budget run passed 394/396 Node cases, but the new cases reached an Asyncify host RangeError before catchable recovery; other direct combinations exposed a try fixture block-scope mistake. Independent function/delegation limits and bounded resource-error formatting were added; the fixture now declares its result outside the try block. All six direct results failed and remain archived.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34854635620',
+            reason:
+              'All 188 existing bytecode allocation failures passed. New pooled-frame and expanded-argument allocation cases passed, but lazy Array native class construction leaked members/debug registrations when allocation failed. The failed enumeration and actual post-disposal heap differences remain archived.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34856407118',
+            reason:
+              'Both allocator jobs failed installing Emscripten with HTTP 504. No build or test ran and no test artifact was produced; workflow logs and metadata preserve this infrastructure failure.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34856337571',
+            reason:
+              'The corrected depth cases progressed, but Node passed 394/396 and all six direct combinations failed the argument-memory fixture: one million expanded arguments fit in the 16 MiB budget because native variants are smaller than the fixture assumed. The fixture now includes a collapsed-argument callee so the combined live copies actually exceed the budget. All 639 browser cases passed; this remains an overall failed run.',
+          },
+        ]
+      : []),
     ...(lifetimePhase
       ? [
           {
@@ -903,9 +1047,11 @@ const matrix = {
           'Automatic legacy text detection and decoder latching, full bytecode validation and complete storage paths remain incomplete',
           ...(binaryPhase
             ? [
-                lifetimePhase
-                  ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
-                  : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
+                executionPhase
+                  ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
+                  : lifetimePhase
+                    ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
+                    : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
               ]
             : [
                 'Serialized Array/Dictionary resource execution and prefixed bytecode remain incomplete',
@@ -939,17 +1085,19 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = lifetimePhase
-  ? 'bytecode-lifetime-matrix.json'
-  : binaryPhase
-    ? 'binary-scripts-matrix.json'
-    : compilerPhase
-      ? 'compiler-matrix.json'
-      : scriptsPhase
-        ? 'native-scripts-matrix.json'
-        : tracePhase
-          ? 'stack-traces-matrix.json'
-          : 'vm-console-matrix.json'
+const reportName = executionPhase
+  ? 'execution-budgets-matrix.json'
+  : lifetimePhase
+    ? 'bytecode-lifetime-matrix.json'
+    : binaryPhase
+      ? 'binary-scripts-matrix.json'
+      : compilerPhase
+        ? 'compiler-matrix.json'
+        : scriptsPhase
+          ? 'native-scripts-matrix.json'
+          : tracePhase
+            ? 'stack-traces-matrix.json'
+            : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(
