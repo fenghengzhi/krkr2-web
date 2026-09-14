@@ -77,7 +77,9 @@ export const test = base.extend<{ native: NativeActivity }>({
         })
         browser = await chromium.connectOverCDP(endpoint, { noDefaults: true })
         const context = browser.contexts()[0]!,
-          page = context.pages()[0]!
+          // CDP can become ready before Chromium publishes its initial target.
+          // Keep waiting inside the existing 30 s fixture budget.
+          page = context.pages()[0] ?? (await context.waitForEvent('page', { timeout: 10_000 }))
         const cdp = await context.newCDPSession(page)
         await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' })
         const { windowId } = await cdp.send('Browser.getWindowForTarget')
