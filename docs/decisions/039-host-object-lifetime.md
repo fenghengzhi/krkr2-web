@@ -1,8 +1,23 @@
 # 039 — 宿主对象观察、句柄释放与事件所有权
 
-本阶段实现宿主句柄异常清理和 Timer / AsyncTrigger 的实际资源生命周期，未完成全部非插件对象。首轮完整 [Tests 34871902361](https://github.com/fenghengzhi/krkr2-web/actions/runs/34871902361) 的 Node 为 592/594，639 项浏览器与 6 项直接运行时通过；源码为 `7c08baa9951b114a1ae22eacb8a7e7a455dec93f`。两个字节码暂停/停止夹具使用无条件 TextDecoder，误把编译输出作为文本解析，已改用保留 TJS2/KBAD 二进制的 readScript，仅拦截等待标记。该失败整体仍是失败，新增实现与修订还须完成后续验证。全部构建、测试与可执行探测仅在 GitHub-hosted Actions 运行，未本地执行。
+本阶段实现宿主句柄异常清理和 Timer / AsyncTrigger 的实际资源生命周期，未完成全部非插件对象。首轮完整 [Tests 34871902361](https://github.com/fenghengzhi/krkr2-web/actions/runs/34871902361) 的 Node 为 592/594，639 项浏览器与 6 项直接运行时通过；源码为 `7c08baa9951b114a1ae22eacb8a7e7a455dec93f`。两个字节码暂停/停止夹具使用无条件 TextDecoder，误把编译输出作为文本解析，已改用保留 TJS2/KBAD 二进制的 readScript，仅拦截等待标记。该失败整体仍是失败，不能由后续运行覆盖。全部构建、测试与可执行探测仅在 GitHub-hosted Actions 运行，未本地执行。
 
-[分配诊断 34872335592](https://github.com/fenghengzhi/krkr2-web/actions/runs/34872335592) 在 VM 销毁的第 71 个分配点失败（阶段 11，440 字节）。原生对象计数虽已归零，销毁仍触发 WASM abort，分配账本与全局字符串/调试资源未回到成功对照，不能据对象数宣称回收完成。源码还发现 Shutdown 在 Release 成功后才清空 Global；Release 消费引用后抛错会留下悬空指针，已调整为先分离。诊断构建保留 WASM 函数名以进一步定位余下异常边界，正式构建不加入该调试选项；是否解决须由新故障枚举确认。
+修订后的 [Tests 34873398038](https://github.com/fenghengzhi/krkr2-web/actions/runs/34873398038) 已全部成功，绑定源码 `cf6248c0c9bb9fe6f60d1c5d5fd50586a2c1d50a`；14 个作业均成功，Node 为 594/594，包含上述字节码暂停/停止场景，浏览器、直接运行时和生产构建作业也成功。材料归档至 `out/verification/github-actions/34873398038/complete/`，元数据位于上级 `run.json`。该运行早于后述保留字表销毁修复，不能作为修复后源码或完整 039 阶段的通过证明。
+
+[分配诊断 34872335592](https://github.com/fenghengzhi/krkr2-web/actions/runs/34872335592) 在 VM 销毁的 `after=71` 分配点失败（阶段 11，440 字节）。原生对象计数虽已归零，销毁仍触发 WASM abort，分配账本与全局字符串/调试资源未回到成功对照，不能据对象数宣称回收完成。源码还发现 Shutdown 在 Release 成功后才清空 Global；Release 消费引用后抛错会留下悬空指针，已调整为先分离。诊断构建保留 WASM 函数名，正式构建不加入该调试选项。
+
+随后的 [分配诊断 34873432311](https://github.com/fenghengzhi/krkr2-web/actions/runs/34873432311) 绑定 `cf6248c0c9bb9fe6f60d1c5d5fd50586a2c1d50a`，两个后端仍失败；Global 指针分离没有解决 `after=71`、440 字节的销毁异常。该轮的字节码、执行临时内存和集合清理分配步骤通过，但弱观察/VM 销毁分配步骤失败，因此整轮仍记为失败。完整材料和元数据分别保存在 `out/verification/github-actions/34873432311/complete/` 与 `run.json`。
+
+[分配诊断 34874097344](https://github.com/fenghengzhi/krkr2-web/actions/runs/34874097344) 绑定 `90a5c7eefeb5aabd532fac28c8add935e9e27177`，在异常展开前记录分配失败堆栈；两个后端仍在同一位置失败。其 `allocationTrace` 从失败位置向调用者回溯，除去 Emscripten 包装帧后为：
+
+```text
+DeleteAllMembers -> Finalize -> BeforeDestruction -> tTJSDispatch::Release
+-> TJSReservedWordsHashRelease -> tTJS::Cleanup -> ~tTJS -> tTJS::Release -> Vm::~Vm
+```
+
+这将 440 字节的失败定位到保留字表成员清理。保留字表的 Release 已消费引用、删除对象后继续抛出异常；异常离开 `tTJS` 析构函数导致 abort，全局字符串池、正则状态和调试注册的后续清理未完成。该轮失败堆栈、账本与对照结果保存在 `out/verification/github-actions/34874097344/complete/`，元数据为上级 `run.json`；新增诊断没有把旧失败改成成功。
+
+修复提交 `e2adc68128b6925010695a57950f5a5c85da75f6` 修改 `tjsLex.cpp` 的 `TJSReservedWordsHashRelease()`：先分离 `TJSReservedWordHash`、清空全局指针并重置初始化标记，再使用 `krkr::ReleaseNative` 释放。这个 noexcept 释放器捕获错误并交给外层已经 suppress 的 `CleanupErrors`，避免终止析构，让后续字符串池、正则和调试资源清理继续执行。修复仍等待新的 GitHub-hosted 分配故障枚举和完整测试证明；当前不宣称 039 阶段完成。
 
 修复前的 [宿主句柄诊断 34869766340](https://github.com/fenghengzhi/krkr2-web/actions/runs/34869766340) 绑定 `4bc02b9f95a6ba4c398c1aa38dc90bca99e8012e`，已终结为失败。每个后端分别执行 20 个独立子进程用例，只有 `nested-release` 的四个源码/字节码、调试开关组合通过。批量释放在首个终结器错误后遗留对象；终结期间仍可保留正在退出的旧句柄；宿主主异常处理失败；重复释放触发 WASM 内存越界或子进程超时。完整材料保存在 `out/verification/github-actions/34869766340/complete/`，元数据为同目录上级的 `run.json`。这些失败和超时作为历史证据保留，不由新工作流或后续成功覆盖。
 

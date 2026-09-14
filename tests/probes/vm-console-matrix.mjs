@@ -1062,9 +1062,9 @@ if (lifetimePhase) {
       combinations([...new Set(owners.results.map(groupKey))], groups, (key) => key)
       for (const group of groups) {
         const rows = owners.results.filter((item) => groupKey(item) === group)
-        // Each group needs its successful control and a terminal no-hit sample.
+        // Each group needs a control, a real fault and a terminal no-hit sample.
         // The number of intervening allocation sites comes from the actual run.
-        assert(rows.length >= 2)
+        assert(rows.length >= 3)
         rows.forEach((item, index) => {
           assert.equal(item.after, index - 1)
           assert.equal(item.hits, index === 0 || index === rows.length - 1 ? 0 : 1)
@@ -1424,6 +1424,30 @@ const matrix = {
             commit: '4bc02b9f95a6ba4c398c1aa38dc90bca99e8012e',
             reason:
               'Initial isolated host handle diagnostics passed only the four nested-release debug/bytecode combinations out of 20 cases per backend. Batch release stranded later objects after a finalizer error, retiring handles remained accessible, and host primary errors were mishandled. Duplicate release caused WASM memory access out of bounds or a subprocess timeout. Full failed artifacts and metadata remain archived; timeouts are failures, not passing evidence.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34871902361',
+            commit: '7c08baa9951b114a1ae22eacb8a7e7a455dec93f',
+            reason:
+              'Node passed 592/594; the bytecode suspended-trigger resume and stop fixtures failed with ScriptError syntax errors because their custom decoder converted compiled storage to text. The fixture now uses readScript to preserve bytecode while replacing only the asynchronous marker text. All 639 browser checks and six direct runtime combinations passed, including 240 owner observation rows, but the complete run remains failed. Its original Node, browser and runtime artifacts and metadata remain archived.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34872335592',
+            commit: 'b3e895c079c9f03e5c5296ed37f54e7b2a4b7249',
+            reason:
+              'Owner allocation diagnostics failed four of 324 rows per backend: all debug/bytecode disposal combinations aborted at allocation index 71, a 440-byte phase-11 request. Each had already notified all eight observers and reached zero native dispatch objects, yet retained 33,278 bytes without debug or 90,688 bytes with debug compared with its successful disposal control. Registration and upgrade cases completed; these failed disposal rows prove that zero object and observer counts alone do not establish complete native cleanup. Both failed artifacts and metadata remain archived.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34873432311',
+            commit: 'cf6248c0c9bb9fe6f60d1c5d5fd50586a2c1d50a',
+            reason:
+              'The repeated allocator run still failed the same four disposal rows per backend at allocation index 71, with a 440-byte failed request and the same 33,278/90,688-byte retained-allocation differences. All owner registration and upgrade rows completed, but disposal still aborted after observer revocation and native object release. The full failed enumeration and metadata remain archived; this repeated failure is not a passing verification.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34874097344',
+            commit: '90a5c7eefeb5aabd532fac28c8add935e9e27177',
+            reason:
+              'Both allocator variants again failed all four debug/bytecode disposal rows at allocation index 71. The Asyncify allocation trace identified DeleteAllMembers called through TJSReservedWordsHashRelease and tTJS::Cleanup during engine destruction; the thrown allocation error escaped the destructor and terminated cleanup. The reserved-word hash release now clears its global pointer and initialization state before using the non-throwing native release helper, allowing later string-pool, regex and debug cleanup to continue. The diagnostic run, traces and retained-allocation evidence remain archived as failures.',
           },
         ]
       : []),

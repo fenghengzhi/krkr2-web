@@ -3,7 +3,11 @@ import assert from 'node:assert/strict'
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { ModuleFactory, WasmVariant } from '../../src/backends/script/tjs-wasm/module.ts'
+import type {
+  ModuleFactory,
+  NativeModule,
+  WasmVariant,
+} from '../../src/backends/script/tjs-wasm/module.ts'
 import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import { observeNative } from '../helpers/bytecode-lifetime.ts'
 import { executionStats } from '../helpers/execution-budget.ts'
@@ -19,6 +23,14 @@ const { default: factory } = (await import(pathToFileURL(resolve(root, assets.mj
   default: ModuleFactory
 }
 const wasmBinary = new Uint8Array(readFileSync(resolve(root, assets.wasm.file)))
+function observeAllocator() {
+  let module!: NativeModule & { krkrAllocationTrace?: string }
+  const native = observeNative(async (options) => {
+    module = await factory(options)
+    return module
+  })
+  return { ...native, allocationTrace: () => module.krkrAllocationTrace ?? null }
+}
 const results: unknown[] = [],
   failures: unknown[] = []
 mkdirSync('out/ci', { recursive: true })
@@ -42,7 +54,7 @@ for (const debugMode of [false, true])
       let baseline: ReturnType<typeof allocated> | undefined,
         completed = false
       for (let after = -1; after < 512; after++) {
-        const native = observeNative(factory)
+        const native = observeAllocator()
         const vm = await TjsWasmRuntime.create(
           native.factory,
           () => {
@@ -52,6 +64,13 @@ for (const debugMode of [false, true])
         )
         let outcome: Record<string, unknown> = { debugMode, collection, implicit, after },
           failure: unknown
+        const index = results.length
+        results.push({ ...outcome, status: 'preparing' })
+        const journal = (fields: Record<string, unknown>) => {
+          outcome = { ...outcome, ...fields }
+          results[index] = outcome
+          save()
+        }
         try {
           await vm.execute('try{missingCleanupWarm();}catch(e){}')
           const create = `var bucket=${collection === 'array' ? '[]' : '%[]'};for(var i=0;i<128;i++)bucket[i]=new CleanupLeaf();`
@@ -66,30 +85,60 @@ for (const debugMode of [false, true])
             : collection === 'array'
               ? 'bucket.clear()'
               : '(Dictionary.clear incontextof bucket)()'
+          journal({ status: 'executing', before, beforeObjects, call })
           if (after >= 0) native.call('krkr_test_fail_allocation', 11, after, 0)
-          let error: unknown
+          let error: unknown, value: unknown
           try {
-            await vm.execute(call, 'cleanup-fault.tjs', true)
+            value = await vm.execute(call, 'cleanup-fault.tjs', true)
           } catch (caught) {
             error = caught
           }
           const hits = native.call('krkr_test_allocation_hits'),
             failedBytes = native.call('krkr_test_failed_bytes')
           native.call('krkr_test_fail_allocation', 0, -1, 0)
+          // Persist raw execution evidence before an assertion or another native
+          // read can replace it with the diagnostic failure itself.
+          journal({
+            status: 'executed',
+            hits,
+            failedBytes,
+            allocationTrace: native.allocationTrace(),
+            value: typeof value === 'bigint' ? String(value) : value,
+            error: error instanceof Error ? error.message : null,
+            executionError:
+              error === undefined
+                ? null
+                : error instanceof Error
+                  ? { name: error.name, message: error.message }
+                  : String(error),
+          })
+          journal({
+            boundary: {
+              ...native.stats(),
+              ...vm.inspect(),
+              budget: executionStats(native),
+              objects: native.call('krkr_native_lifetime_stat', 4),
+              pendingDestructions: native.call('krkr_native_lifetime_stat', 0),
+              destructionDepth: native.call('krkr_native_lifetime_stat', 1),
+            },
+          })
           if (hits) assert(error instanceof Error && error.name === 'ScriptError', String(error))
           else {
             assert.equal(error, undefined)
             completed = after >= 0
           }
           const finalized = await vm.execute('cleanupFinalized', '', true)
+          journal({ finalized: Number(finalized) })
           assert.equal(finalized, implicit || !hits ? 128n : 0n)
           const objects = native.call('krkr_native_lifetime_stat', 4)
+          journal({ objects })
           assert.equal(objects, beforeObjects - (implicit || hits ? 0 : 128))
           for (let i = 0; i < 2; i++) await vm.execute(call, 'cleanup-fault.tjs', true)
           assert.equal(await vm.execute('cleanupFinalized', '', true), implicit ? 384n : 128n)
           assert.equal(await vm.execute('6*7', '', true), 42n)
           const current = native.stats(),
             budget = executionStats(native)
+          journal({ current, budget })
           assert.equal(current.blocks, before.blocks)
           assert.equal(current.contexts, before.contexts)
           assert.equal(budget.depth, 0)
@@ -107,6 +156,7 @@ for (const debugMode of [false, true])
             objects,
             budget,
             error: error instanceof Error ? error.message : null,
+            status: 'complete',
           }
         } catch (error) {
           failure = {
@@ -128,7 +178,7 @@ for (const debugMode of [false, true])
             disposed,
             prior: failure,
           }
-        results.push({ ...outcome, baseline, disposed })
+        results[index] = { ...outcome, baseline, disposed }
         if (failure) {
           failures.push(failure)
           console.error(failure)

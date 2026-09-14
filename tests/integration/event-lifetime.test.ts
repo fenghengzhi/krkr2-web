@@ -226,17 +226,17 @@ function createOwner(){new EventOwner();}
     })
 
     test(`${mode}: ${kind} retains the user action object until the event owner is released`, async () => {
-      const { session, clock, execute, restored } = await fixture(
+      const { session, logs, clock, execute, restored, baseline, handles } = await fixture(
         binary,
         `
 var actionFinalized=0;
 class ActionOwner {
-  function action(){calls++;}
-  function finalize(){actionFinalized++;}
+  function action(){calls++;Debug.message("action-fired");delete global.owner;}
+  function finalize(){actionFinalized++;Debug.message("action-finalized");}
 }
 class EventOwner extends ${kind} {
   function EventOwner(action){super.${kind}(action);${kind === 'Timer' ? 'interval=10;enabled=true;' : ''}}
-  function finalize(){finalized++;}
+  function finalize(){finalized++;Debug.message("event-finalized");}
 }
 function createOwner(){var action=new ActionOwner();global.owner=new EventOwner(action);}
 `,
@@ -247,9 +247,19 @@ function createOwner(){var action=new ActionOwner();global.owner=new EventOwner(
         if (kind === 'Timer') clock.advance(10)
         else await execute('owner.trigger();')
         await session.idle()
-        assert.equal(await session.evaluate('calls+","+actionFinalized'), '1,0')
-        await execute('delete global.owner;')
-        assert.equal(await session.evaluate('finalized+","+actionFinalized'), '1,1')
+        // No console evaluation here: another native entry could hide a lease
+        // stranded after the event pump returns, allowing a timer to rearm it.
+        assert.deepEqual(logs, ['action-fired', 'event-finalized', 'action-finalized'])
+        assert.equal(session.inspectOwnership().pendingHandles, 0)
+        assert.deepEqual(session.inspectOwnership(), baseline)
+        assert.equal(session.snapshot().handles, handles)
+        assert.equal(clock.tasks.size, 0)
+        clock.advance(100)
+        await session.idle()
+        assert.deepEqual(logs, ['action-fired', 'event-finalized', 'action-finalized'])
+        assert.deepEqual(session.inspectOwnership(), baseline)
+        assert.equal(clock.tasks.size, 0)
+        assert.equal(await session.evaluate('calls+","+finalized+","+actionFinalized'), '1,1,1')
         await restored()
       } finally {
         await session.stop()
