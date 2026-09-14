@@ -31,6 +31,14 @@ TJS 源码准备、词法/语法分析、代码生成与字节码导出已接入
 
 固定 [40 次原视频场景诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34828858754)未复现失败，记录了 currentTime 设置、原生 seek 事件、解码像素和呈现时间戳。`seeked` 与呈现回调是分开的事件，前者不是截图同步点；[requestVideoFrameCallback 文档](https://developer.mozilla.org/en-US/docs/Web/API/HTMLVideoElement/requestVideoFrameCallback)定义后者为帧提交给合成器时的回调。因此像素用例现增加目标帧 `mediaTime=0.5` 的呈现条件，再进行原来的单次截图和颜色断言，附带呈现次数、位置及像素记录。未更改生产视频实现、颜色范围或超时。诊断观察可能影响时序，浏览器内部的偶发原因仍未确认，不把 40 次诊断通过视作原失败消失的证明。
 
+## 云端构建与证据
+
+[最终汇总报告 34830361115](https://github.com/fenghengzhi/krkr2-web/actions/runs/34830361115)已通过，生成 `out/verification/compiler-matrix.json`，绑定 495 份证据、36 条直接编译控制路径和 6 份视频呈现/像素附件。报告 SHA-256 为 `bd314e7bf7383553468685c6cea0db2d53998f265dd09b882d09733cdc7c55b9`。
+
+当前生产 build 为 `2ee17c89ffae95f3c5e05f6f27245ffd5d31654531b3e11245e6c5f58be8f08b`；发布树为 32 个文件、5,639,839 字节，摘要 `3b404a984088ece14ed7c59ae6638e4fc827ecb9ca9c71f1c811f5e9083336c7`。可信冻结间隔为 21,053.2 ms，本阶段没有额外三次冻结或输入复测。
+
+所有运行及产物按 ID 保存在 `out/verification/github-actions/`。工作区 `.generated` 和 `dist` 从通过的 34829312486 云端构建恢复；上一阶段的工作区产物保留在 `out/verification/compiler/prior-local-artifacts/`。本阶段没有在本地运行测试、构建或浏览器验证。
+
 ## 限制
 
 8 ms 是检查期限，不是最坏响应延迟保证。内存分配、标准库字符串/映射/排序、部分原生复制、JavaScript 与 UTF-16 桥复制、字节码加载及对象销毁仍可能同步执行。宿主句柄为零不能证明 C++ 分配无泄漏；完整原生分配统计、恶意字节码校验、深递归和极端输入预算仍待完成。此项不代表完整非插件目标完成。

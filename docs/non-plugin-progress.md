@@ -4,6 +4,8 @@
 
 上一阶段的 [原生 Scripts 报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34825096969)继续保留在 `out/verification/native-scripts-matrix.json`，绑定 495 份证据，SHA-256 为 `1fab816e278b9746589c729509606aa1c0ad29156309136ce719f80dc22d0b7d`。本轮编译控制使用独立矩阵，不覆盖历史记录。
 
+本轮 [最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34830361115)已通过，矩阵为 `out/verification/compiler-matrix.json`，SHA-256 为 `bd314e7bf7383553468685c6cea0db2d53998f265dd09b882d09733cdc7c55b9`。其中包含 495 份证据、36 条编译控制路径和 6 份视频呈现/像素附件；可信冻结为 21,053.2 ms。编译的极端延迟与原生分配统计、二进制资源、完整字节码校验及其他未完成条目继续保留。
+
 上一轮完成的 [GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34815634377)通过 **351 项 Node、609 项浏览器测试及 6 项直接运行时专项**，所选用例无失败、跳过或 flaky，未使用测试重试。[兼容性专项](https://github.com/fenghengzhi/krkr2-web/actions/runs/34814325349)另通过 72 项原 KAG 与跨 ABI 离线升级，输入时序另有 30 次三浏览器双后端复测通过。完整非插件目标仍未完成。
 
 原生 `Scripts.getTraceString(limit=0)` 与“脚本调试”启动开关已接入，该已验证阶段 TJS ABI **4**、字体 ABI **2**、会话协议 **9**。调用栈在异步挂起、嵌套回调、字节码和取消时保留已验证的位置与顺序；其他 TVP 桥帧、原生错误界面和隐式回收路径仍需继续对齐。设计和失败分析见 [脚本调用栈](decisions/031-script-stack-traces.md)。[最终云端报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34816691294)保存为 `out/verification/stack-traces-matrix.json`，绑定 503 份证据，SHA-256 为 `9babc637693f500efb1a04399f246f037ee5f32ba16090d78d2ab6113ec0a9df`。
