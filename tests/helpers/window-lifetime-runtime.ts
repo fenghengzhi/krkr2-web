@@ -179,11 +179,12 @@ export async function exerciseWindowLifetime(
       '(isvalid first)+","+(isvalid second)+","+managedFinalized',
     )
     check(failedManaged === '1,0,2', 'Managed failure prevented later Window registrations')
+    const managedLogs = logs.splice(0)
     check(
-      logs.length === 1 && logs[0]!.includes('managed-finalizer'),
+      managedLogs.length === 1 && managedLogs[0]!.includes('managed-finalizer'),
       'Window did not record the managed finalizer error',
     )
-    const managedDiagnostic = logs.splice(0).join('\n')
+    const managedDiagnostic = managedLogs.join('\n')
     await execute(
       'failManaged=false;invalidate first;delete global.first;delete global.second;delete global.win;',
     )
