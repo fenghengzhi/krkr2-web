@@ -133,3 +133,13 @@ CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原
 ## Window业务首轮构建失败
 
 [34955651956](https://github.com/fenghengzhi/krkr2-web/actions/runs/34955651956)，提交 `1795766`，在测试类型检查失败：新增BrowserInputCoordinator用例的空数组deepEqual断言将后续packet元素收窄为never，报TS2339。修订为等价的length=0断言，保留随后另一窗口实际activate包的精确内容检查；未放宽类型检查或产品行为。本轮Node、浏览器、直接运行时案例均未执行，不能报告新模态功能通过。完整build logs与工作流记录独立保留。
+
+## Window业务第二轮与定向诊断
+
+[34955789389](https://github.com/fenghengzhi/krkr2-web/actions/runs/34955789389)，提交 `2c3ba46`：Node **1,530／1,532**，浏览器 **1,093／1,095**，直接运行时 **6／6**。新增24项纯scope、8项输入协调器、30／32项Window集成，以及全部36项新浏览器模态／host交互实际通过；失败和未完成断言不计为通过。整轮11作业成功，Node、WebKit常规及汇总失败。
+
+两项Node失败在显式失效后看见一个未执行的激活票据。[Node诊断34988293427](https://github.com/fenghengzhi/krkr2-web/actions/runs/34988293427)，提交 `ac085d3`，记录了实际状态：TJS回调失效自身后继续通过该失效对象上下文查找mark函数，抛出“The object is already invalidated”，正常异常处理因此禁用事件；scope已释放、父调用已返回，剩余票据尚未进入事件体。修订在失效前将日志函数绑定到global，保留失效、父窗口可用和eventDisabled=false断言，没有改变TJS失效语义或绕过事件错误处理。
+
+诊断共 **1,529通过、3失败／1,532**；除上述两项外，源码视频隐藏夹具在首个renderer拒绝后只等待一个host turn，就要求checkpoint已完成，实际仍有一个合法检查点。修订在隐藏操作之前等待对应事件队列返回，renderer仍拒绝且视频completion仍须保持pending；隐藏后的ACK、引用计数及像素断言不增加idle，不放宽检查。诊断的浏览器与直接运行时未执行，独立失败证据保留。
+
+第二轮WebKit两项失败均属既有模板：图像保存首次启动前记录真实WebGL context loss，最终graphics=lost并等待恢复，未到编码像素断言；视频时钟的period／EOF已到达，但原故障夹具未实际收到可丢弃的播放帧回调，dropped=0。前者根因仍未知，三个macOS诊断manifest没有匹配原生报告，不能据此排除崩溃。后者将故障注入改为播放开始时撤销真实已登记回调、播放中登记后立即撤销，保存registered／withheld／primed证据；继续要求真实首帧、明确被阻止的回调、period／EOF及Stop清理，避免把原生回调恰好未到达当成故障注入已执行。

@@ -191,7 +191,10 @@ for (const binary of [false, true]) {
           throw new Error('A visible Window acknowledged its video before presenting the frame')
         }),
       ])
-      await hostTurn()
+      // A renderer attempt can occur before its native checkpoint commits.
+      // Wait for that event round while presentation remains rejected; the
+      // separate video completion must still be pending after queue idle.
+      await f.session.idle()
       assert.equal(delivery.settled, false)
       assert.deepEqual(f.logs, ['video-callback:2'])
       assert.deepEqual(f.session.inspectOwnership(), {

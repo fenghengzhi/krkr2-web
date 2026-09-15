@@ -4,23 +4,50 @@ import { readFileSync } from 'node:fs'
 for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: media clock delivers period and EOF segment loops when presentation callbacks are withheld`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     const errors: string[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     await page.addInitScript(() => {
-      const gate = { playing: false, dropped: 0 }
+      const gate = { playing: false, registered: 0, withheld: 0, primed: 0 }
       Reflect.set(window, 'playbackFrameGate', gate)
       const play = HTMLMediaElement.prototype.play
       const request = HTMLVideoElement.prototype.requestVideoFrameCallback
+      const cancel = HTMLVideoElement.prototype.cancelVideoFrameCallback
+      const pending = new WeakMap<HTMLVideoElement, Set<number>>()
       HTMLMediaElement.prototype.play = function () {
-        if (this instanceof HTMLVideoElement) gate.playing = true
+        if (this instanceof HTMLVideoElement) {
+          gate.playing = true
+          // Revoke real registrations at the start of playback. Waiting for a
+          // native callback to arrive before dropping it makes the fault setup
+          // depend on the presentation timing which this case excludes.
+          for (const id of pending.get(this) ?? []) {
+            cancel.call(this, id)
+            gate.withheld++
+          }
+          pending.get(this)?.clear()
+        }
         return play.call(this)
       }
       HTMLVideoElement.prototype.requestVideoFrameCallback = function (callback) {
-        return request.call(this, (now, metadata) => {
-          if (gate.playing) gate.dropped++
-          else callback(now, metadata)
+        const entries = pending.get(this) ?? new Set<number>()
+        pending.set(this, entries)
+        const id = request.call(this, (now, metadata) => {
+          entries.delete(id)
+          if (!gate.playing) {
+            gate.primed++
+            callback(now, metadata)
+          }
         })
+        gate.registered++
+        if (gate.playing) {
+          cancel.call(this, id)
+          gate.withheld++
+        } else entries.add(id)
+        return id
+      }
+      HTMLVideoElement.prototype.cancelVideoFrameCallback = function (id) {
+        pending.get(this)?.delete(id)
+        cancel.call(this, id)
       }
     })
     await page.goto('/?backend=' + backend)
@@ -55,9 +82,14 @@ movie.setPeriodEvent(8);movie.play();Debug.message("clock-play-ready");
       })
     }).toPass({ timeout: 12000 })
     await expect(page.getByText('clock-period=1', { exact: true })).toBeVisible()
-    expect(
-      await page.evaluate(() => Reflect.get(window, 'playbackFrameGate').dropped),
-    ).toBeGreaterThan(0)
+    const gate = await page.evaluate(() => Reflect.get(window, 'playbackFrameGate'))
+    await testInfo.attach('playback-frame-gate', {
+      body: JSON.stringify(gate),
+      contentType: 'application/json',
+    })
+    expect(gate.primed).toBeGreaterThan(0)
+    expect(gate.withheld).toBeGreaterThan(0)
+    expect(gate.registered).toBeGreaterThan(gate.withheld)
     await page.locator('#stop').click()
     await expect(page.locator('#status')).toHaveText('待机')
     await expect(page.locator('video')).toHaveCount(0)

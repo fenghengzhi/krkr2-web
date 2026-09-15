@@ -226,19 +226,7 @@ async function fixture(
         await bounded(session.idle(), 'settle completed modal frame')
         assert.equal(session.inspectOwnership().modalScopes, 0)
         assert.equal(session.inspectOwnership().modalWaits, 0)
-        assert.equal(
-          session.inspectOwnership().eventReceipts,
-          0,
-          JSON.stringify({
-            snapshot: session.snapshot(),
-            logs,
-            receipts: [
-              ...(
-                session as unknown as { eventReceipts: Map<number, unknown> }
-              ).eventReceipts.values(),
-            ],
-          }),
-        )
+        assert.equal(session.inspectOwnership().eventReceipts, 0)
         assert.equal(session.inspectOwnership().eventCheckpoints, 0)
         assert.equal(
           logs.filter((text) => text.startsWith('run:after:')).at(-1),
@@ -753,7 +741,15 @@ modal.keyHandler=function(key){
     const f = await fixture(
       binary,
       String.raw`
-modal.keyHandler=function(key){if(key==65){invalidate modal;mark("modal:invalidated");}};
+modal.keyHandler=function(key){
+  if(key==65){
+    // Resolving a name through this after invalidation correctly throws in TJS.
+    // Bind logging to the valid global object before retiring this Window.
+    var emit=global.mark incontextof global;
+    invalidate modal;
+    emit("modal:invalidated");
+  }
+};
 `,
     )
     try {
@@ -763,6 +759,7 @@ modal.keyHandler=function(key){if(key==65){invalidate modal;mark("modal:invalida
       await succeeded(f.key('modal', 65))
       await f.finished(opening)
       assert.ok(f.logs.includes('modal:invalidated'))
+      assert.equal(f.session.snapshot().eventDisabled, false)
       assert.ok(!f.session.snapshot().windows?.some((window) => window.id === modalId))
       assert.equal(await f.session.evaluate('(isvalid modal)+","+(isvalid parent)'), '0,1')
       await succeeded(f.key('parent', 66))
