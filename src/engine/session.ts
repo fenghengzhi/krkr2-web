@@ -2124,6 +2124,10 @@ export class EngineSession {
           left = number(1),
           top = number(2),
           rect = { x: number(4), y: number(5), width: number(6), height: number(7) }
+        // Native PiledCopy rejects either missing main image before Complete
+        // can run onPaint. A callback cannot repair an invalid copy request.
+        this.layers.bitmap(id)
+        this.layers.bitmap(source)
         const session = this
         return this.inputs!.start(
           (function* () {

@@ -12,8 +12,10 @@
 
 无主图的 `ltOpaque` 保留自身的填色矩形。它与子图层使用已有整数混合路径合成，再按 opaque 规则呈现；中性颜色中存储的 alpha 不使 opaque 图层透明，图层自身 opacity 仍控制整个子树。合成缓存把填色值纳入键，修改颜色后显式 update 或其他真实更新会得到新画面，尺寸及主图恢复也按新状态重新生成。这个临时合成结果不创建主图，`hasImage` 继续为 false。原生 [DrawSelf](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp#L5462-L5490)同样通过临时矩形完成正常窗口显示。
 
-从有图像的祖先做 `piledCopy` 时，图像为空的 opaque 子图层也参与合成，并保留相应原始像素与 alpha。直接把没有主图的 Layer 当作 piledCopy 来源仍报错，保持[原生 PiledCopy 入口](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp#L3858-L3870)的限制。透明图层与 binder 的无主图背景不改用用户颜色。复杂区域缓存、原生嵌套 completion 与全部组合的逐像素差分仍不在本阶段完成声明内。
+从有图像的祖先做 `piledCopy` 时，图像为空的 opaque 子图层也参与合成，并保留相应原始像素与 alpha。没有主图的来源或目标在任何 onPaint 回调之前报错，回调不能通过重新分配主图使无效请求变成有效请求，保持[原生 PiledCopy 入口](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp#L3858-L3870)的限制。透明图层与 binder 的无主图背景不改用用户颜色。复杂区域缓存、原生嵌套 completion 与全部组合的逐像素差分仍不在本阶段完成声明内。
 
 新增 `tests/integration/layer-neutral-color.test.ts` 的源码／字节码测试，检查初始 primary、64 位整数低位、实例隔离、旧像素和 clip、两种扩容、province、重建、type 变更、assignImages 和仿射清除。透明组用例防止把内部透明背景误改成用户颜色。`layer-opaque-fill.test.ts` 检查无主图 opaque 的窗口帧、祖先快照、子树透明度、动态缓存、primary 和负对照。`tests/browser/layer-neutral-color.spec.ts` 检查双后端源码／字节码的实际画布像素，保存截图附件，并对比屏幕与祖先快照显示。
 
-本阶段尚未验证。所有构建、类型检查、Node 测试、浏览器检查和可执行探针只能由 GitHub-hosted Actions 执行；本地仅阅读、编辑与格式化。此前各阶段及失败记录继续保留，不能用于宣称此提交通过。
+首轮 [Node 诊断 34928484922](https://github.com/fenghengzhi/krkr2-web/actions/runs/34928484922)在 `2f41269` 构建与类型检查通过，1,039 项中 1,037 项通过、2 项失败，无取消或跳过。失败均来自新透明组负对照的 raw mask 预期：原生部分透明度的 alpha-on-opaque 运算只写 RGB，结果 mask 为 0；测试误把最终显示时的 alpha 255 当成了原始快照值。修正后对两个像素精确断言 RGB 和 mask，产品混合算法没有因此改变。该失败的完整日志、产物和 run.json 按原 run ID 保存。
+
+源码复核另补上 piledCopy 的主图前置校验，并用 `tests/integration/piled-copy-preconditions.test.ts` 覆盖回调试图修复来源或目标的源码／字节码场景。这些后续修改尚待云端验证；首次 Node 诊断不代表完整回归通过。所有构建、类型检查、Node 测试、浏览器检查和可执行探针只能由 GitHub-hosted Actions 执行；本地仅阅读、编辑、格式化和检查已有云端产物。此前各阶段及失败记录继续保留。

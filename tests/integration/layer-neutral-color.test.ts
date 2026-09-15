@@ -194,11 +194,16 @@ root.setSize(2,1);root.fillRect(0,0,2,1,0xff102030);
 layer.setSize(2,1);layer.hasImage=false;layer.visible=true;layer.opacity=128;layer.neutralColor=0xff00ff00;
 var child=new Layer(win,layer);child.setImageSize(2,1);child.type=ltPsNormal;child.visible=true;child.fillRect(0,0,2,1,0x00000000);
 var snapshot=new Layer(win,root);snapshot.setImageSize(2,1);snapshot.piledCopy(0,0,root,0,0,2,1);
-var transparent=snapshot.getMainPixel(0,0)==0x102030 && snapshot.getMaskPixel(0,0)==255 && snapshot.getMainPixel(1,0)==0x102030;
 `,
     )
     try {
-      assert.equal(await session.evaluate('transparent'), '1')
+      const pixels = await session.evaluate(
+        '[snapshot.getMainPixel(0,0),snapshot.getMaskPixel(0,0),snapshot.getMainPixel(1,0),snapshot.getMaskPixel(1,0)].join(",")',
+      )
+      // Native alpha-on-opaque with partial opacity writes RGB only, even when
+      // source alpha is zero. The opaque display conversion to alpha 255 is
+      // separate from the raw image planes returned by piledCopy.
+      assert.equal(pixels, '1056816,0,1056816,0', `raw snapshot RGB/mask: ${pixels}`)
     } finally {
       await stop()
     }
