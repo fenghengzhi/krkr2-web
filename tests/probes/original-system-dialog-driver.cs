@@ -39,6 +39,7 @@ public sealed class OriginalSystemDialogReport
     public long ObservedDialogMsBeforeClick { get; set; }
     public bool ButtonMessageDelivered { get; set; }
     public string ButtonRole { get; set; }
+    public string ButtonIdentification { get; set; }
     public long ButtonHwnd { get; set; }
     public string DesiredText { get; set; }
     public string InitialControlText { get; set; }
@@ -181,7 +182,7 @@ public static class OriginalSystemDialogDriver
     {
         long remaining = 3000 - clock.ElapsedMilliseconds;
         if (remaining <= 0) throw new InvalidOperationException("Dialog exceeded its 3000 ms case budget.");
-        return (uint)Math.Min(100, remaining);
+        return (uint)Math.Min(300, remaining);
     }
     private static string ControlText(IntPtr child, Stopwatch clock)
     {
@@ -206,7 +207,8 @@ public static class OriginalSystemDialogDriver
         }, IntPtr.Zero);
         return found;
     }
-    private static List<OriginalDialogControl> FindControls(Process engine, IntPtr dialog, uint thread, Stopwatch clock)
+    private static void FindControls(Process engine, IntPtr dialog, uint thread, Stopwatch clock,
+        List<OriginalDialogControl> controls)
     {
         var handles = new List<IntPtr>();
         EnumChildWindows(dialog, delegate(IntPtr hwnd, IntPtr unused)
@@ -218,19 +220,20 @@ public static class OriginalSystemDialogDriver
             return true;
         }, IntPtr.Zero);
         if (handles.Count > 32) throw new InvalidOperationException("Unexpectedly large dialog control tree.");
-        var controls = new List<OriginalDialogControl>();
         foreach (IntPtr hwnd in handles)
         {
             Owns(engine, hwnd);
-            controls.Add(new OriginalDialogControl
+            var control = new OriginalDialogControl
             {
                 Hwnd = hwnd.ToInt64(), Parent = GetParent(hwnd).ToInt64(),
-                ClassName = ClassName(hwnd), Text = ControlText(hwnd, clock),
+                ClassName = ClassName(hwnd), Text = null,
                 Id = GetDlgCtrlID(hwnd), Style = unchecked((uint)GetWindowLongW(hwnd, -16)),
                 Unicode = IsWindowUnicode(hwnd), Visible = IsWindowVisible(hwnd), Enabled = IsWindowEnabled(hwnd)
-            });
+            };
+            // Preserve identity/style even if a bounded text read then fails.
+            controls.Add(control);
+            control.Text = ControlText(hwnd, clock);
         }
-        return controls;
     }
     private static bool PushButton(OriginalDialogControl control)
     {
@@ -252,6 +255,27 @@ public static class OriginalSystemDialogDriver
             if ((role == "ok" && string.Equals(name, "OK", StringComparison.OrdinalIgnoreCase)) ||
                 (role == "cancel" && (string.Equals(name, "Cancel", StringComparison.OrdinalIgnoreCase) || name == "キャンセル")))
                 matches.Add(control);
+        }
+        if (matches.Count == 0 && role == "cancel")
+        {
+            // The first hosted run recorded exactly these two ANSI TButtons:
+            // default "OK" and non-default "?????" (lost localized caption).
+            // Treat the latter only as a candidate. Its real BM_CLICK handler
+            // must return native void before the observation can be completed.
+            var buttons = new List<OriginalDialogControl>();
+            foreach (var control in controls) if (PushButton(control)) buttons.Add(control);
+            if (buttons.Count == 2)
+            {
+                OriginalDialogControl ok = null, candidate = null;
+                foreach (var control in buttons)
+                {
+                    if (control.ClassName == "TButton" && ButtonName(control) == "OK" && (control.Style & 15) == 1)
+                        ok = control;
+                    if (control.ClassName == "TButton" && ButtonName(control) == "?????" && (control.Style & 15) == 0)
+                        candidate = control;
+                }
+                if (ok != null && candidate != null) matches.Add(candidate);
+            }
         }
         if (matches.Count != 1) throw new InvalidOperationException("Exactly one real " + role + " push button was not identified.");
         return matches[0];
@@ -315,30 +339,11 @@ public static class OriginalSystemDialogDriver
                                 if (ownerPid != (uint)engine.Id) throw new InvalidOperationException("Dialog has an unrelated owner.");
                             }
                             report.DialogOwnerPid = ownerPid;
-                            report.Controls = FindControls(engine, dialog, report.DialogThreadId, caseClock);
-                            foreach (var control in report.Controls)
-                                if (control.Text == "Prompt " + token) report.PromptControlObserved = true;
-                            if (scenario == "inform" && !report.PromptControlObserved)
-                                throw new InvalidOperationException("MessageBox prompt text was not identified.");
-                            button = UniqueButton(report.Controls, scenario == "input-cancel" ? "cancel" : "ok");
-                            if (scenario != "inform")
-                            {
-                                var edits = new List<OriginalDialogControl>();
-                                foreach (var control in report.Controls)
-                                    if ((control.ClassName == "Edit" || control.ClassName == "TEdit") && control.Visible && control.Enabled)
-                                        edits.Add(control);
-                                if (edits.Count != 1) throw new InvalidOperationException("Exactly one real owned Edit was not identified.");
-                                edit = edits[0];
-                                // Both roles must exist before input is authorized.
-                                UniqueButton(report.Controls, "ok");
-                                UniqueButton(report.Controls, "cancel");
-                                report.InitialControlText = edit.Text;
-                            }
                             report.TimerCountAtDiscovery = TimerCount(ReadEvents(path));
                             observedDialogClock = Stopwatch.StartNew();
                             Log(report, processClock, "owned-dialog-identified", "hwnd", report.DialogHwnd,
                                 "class", report.DialogClass, "thread", report.DialogThreadId,
-                                "promptControlObserved", report.PromptControlObserved,
+                                "promptControlState", "not-read-yet",
                                 "timerCount", report.TimerCountAtDiscovery);
                         }
                     }
@@ -346,6 +351,32 @@ public static class OriginalSystemDialogDriver
                     {
                         DialogIdentity(engine, dialog, caption);
                         uint thread = report.DialogThreadId;
+                        // A visible VCL Form can still be constructing its
+                        // children. Observe first, then read the stable controls.
+                        FindControls(engine, dialog, thread, caseClock, report.Controls);
+                        foreach (var control in report.Controls)
+                            if (control.Text == "Prompt " + token) report.PromptControlObserved = true;
+                        if (scenario == "inform" && !report.PromptControlObserved)
+                            throw new InvalidOperationException("MessageBox prompt text was not identified.");
+                        button = UniqueButton(report.Controls, scenario == "input-cancel" ? "cancel" : "ok");
+                        report.ButtonIdentification = ButtonName(button) == "?????"
+                            ? "Recorded two-button ANSI InputQuery candidate; native void return required"
+                            : "Exact visible button caption; native handler return required";
+                        if (scenario != "inform")
+                        {
+                            var edits = new List<OriginalDialogControl>();
+                            foreach (var control in report.Controls)
+                                if ((control.ClassName == "Edit" || control.ClassName == "TEdit") && control.Visible && control.Enabled)
+                                    edits.Add(control);
+                            if (edits.Count != 1) throw new InvalidOperationException("Exactly one real owned Edit was not identified.");
+                            edit = edits[0];
+                            UniqueButton(report.Controls, "ok");
+                            UniqueButton(report.Controls, "cancel");
+                            report.InitialControlText = edit.Text;
+                        }
+                        Log(report, processClock, "owned-controls-identified", "count", report.Controls.Count,
+                            "promptControlObserved", report.PromptControlObserved,
+                            "button", button.Hwnd, "buttonIdentification", report.ButtonIdentification);
                         if (scenario == "input-unicode" || scenario == "input-empty")
                         {
                             IntPtr editHwnd = new IntPtr(edit.Hwnd);

@@ -58,3 +58,27 @@ an inactive dialog to force a click. Edit input uses
 [WM_SETTEXT](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-settext),
 with directed messages bounded by
 [SendMessageTimeoutW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendmessagetimeoutw).
+
+## Preserved first attempt and correction
+
+[35001453121](https://github.com/fenghengzhi/krkr2-web/actions/runs/35001453121)
+at `4b2f88c0b9459194b866a11ab45e5922d11dd7ad` remains failed: two inform
+observations completed, and six input observations were not executable. Four
+early `WM_GETTEXT` reads timed out; two other attempts found an ANSI VCL `TForm`
+with a default `TButton` captioned `OK`, a non-default `TButton` captioned
+`?????`, and one `TEdit`. No input was sent in any failed input scenario. All
+56 original artifact files and terminal evidence are preserved.
+
+The completed inform cases prove TJS Timer execution while the real MessageBox
+was present: Windows 2022 recorded 4 ticks at discovery and 12 before clicking
+(+8 over 812 ms); Windows 2025 recorded 6 and 13 (+7 over 818 ms). Both returned
+void after the actual OK button was clicked.
+
+The corrected driver performs its 800 ms observation before reading controls,
+and individual directed messages use at most 300 ms of the unchanged 3-second
+case budget. It retains control identities even when a subsequent text read
+fails. Only for the exact recorded two-`TButton` InputQuery shape, the
+non-default `?????` button opposite the explicit default `OK` may be selected
+as a cancellation candidate. That name is not assumed to mean Cancel: the
+original handler must return void after its real `BM_CLICK` before the scenario
+is recorded as observed. The correction has not yet been executed.
