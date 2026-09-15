@@ -110,3 +110,25 @@ target command; cancellation must not produce selection evidence. Other return
 and callback values remain observations. This protocol proves bounded posted
 keyboard behavior; it does not cover physical keyboard input, mouse input,
 recursive menus or command-ID allocation beyond these actual leaves.
+
+The first menu run,
+[34995723956](https://github.com/fenghengzhi/krkr2-web/actions/runs/34995723956)
+at `770ecfa0e67e361ad161aafc0b67c58a8e6bb2b7`, remains failed: 9 observations
+completed and 7 input paths were marked not executable. Three Windows 2022
+selection attempts posted two Down presses before any highlight was observed;
+they never sent Enter or fallback Escape. Four other cases recorded menu exit
+and complete native logs, but a later unnecessary HWND ownership read raced the
+engine's own window destruction. Their failed driver statuses are preserved.
+All 112 files from the 16 original artifacts are archived with terminal metadata,
+workflow log and hashes.
+
+The corrected driver waits for an actual highlight transition before advancing
+its bounded navigation and stops all UI reads after observed menu exit. It keeps
+the same two-Down, one-terminal-key and 3-second budgets. This correction is not
+verified until a subsequent hosted run completes.
+
+One already completed case in that failed run is Windows 2025's NoNotify-only
+selection: the actual target was highlighted, Enter was posted to the owned
+popup, the raw return was `1`, and one target onClick was recorded after return.
+This confirms that concrete original-SDK posted-keyboard counterexample without
+turning the seven incomplete observations or the whole run into a pass.

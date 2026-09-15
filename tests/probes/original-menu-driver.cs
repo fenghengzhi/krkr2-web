@@ -179,6 +179,7 @@ public static class OriginalMenuDriver
         long nextKeyAt = 0;
         bool identityEstablished = false;
         uint lastGuiFlags = Invalid;
+        int highlightedBeforeDown = -1;
         try
         {
             while (processClock.ElapsedMilliseconds < 30000)
@@ -223,7 +224,10 @@ public static class OriginalMenuDriver
                         "threadId", report.OwnerThreadId, "targetCommand", report.TargetCommandId,
                         "otherCommand", report.OtherCommandId);
                 }
-                if (identityEstablished && !engine.HasExited)
+                // After recording menu exit, the script may destroy its HWND
+                // while the process is still shutting down. No further input
+                // is permitted or needed; consume only its preserved event log.
+                if (identityEstablished && !report.MenuExitSeen && !engine.HasExited)
                 {
                     OwnedThread(engine, owner, token);
                     GuiThreadInfo info = ThreadInfo(report.OwnerThreadId);
@@ -242,29 +246,39 @@ public static class OriginalMenuDriver
                         // Two DOWN presses are the complete navigation budget for
                         // two leaves. No Home, repeated blind Enter or cleanup Esc.
                         uint targetState = GetMenuState(menu, 0, ByPosition);
-                        if (targetState == Invalid || (targetState & 3) != 0)
-                            throw new InvalidOperationException("Target menu leaf is unreadable or disabled.");
+                        uint otherState = GetMenuState(menu, 1, ByPosition);
+                        if (targetState == Invalid || otherState == Invalid || (targetState & 3) != 0)
+                            throw new InvalidOperationException("Menu leaves are unreadable or the target is disabled.");
                         bool highlighted = (targetState & Highlighted) != 0;
+                        int highlightedIndex = highlighted ? 0 : (otherState & Highlighted) != 0 ? 1 : -1;
+                        bool navigationObserved = highlightedIndex >= 0 && highlightedIndex != highlightedBeforeDown;
                         Log(report, processClock, "real-target-state", "state", targetState,
-                            "highlighted", highlighted, "downPresses", report.DownPresses);
+                            "otherState", otherState, "highlighted", highlighted,
+                            "highlightedBeforeDown", highlightedBeforeDown,
+                            "navigationObserved", navigationObserved, "downPresses", report.DownPresses);
                         if (action == "cancel")
                         {
                             PostKey(engine, owner, token, Escape, report, processClock);
                             report.TerminalKeyPosted = true;
                         }
-                        else if (report.DownPresses > 0 && highlighted)
+                        else if (report.DownPresses > 0 && navigationObserved && highlighted)
                         {
                             report.TargetHighlightSeen = true;
                             PostKey(engine, owner, token, Enter, report, processClock);
                             report.TerminalKeyPosted = true;
                         }
-                        else if (report.DownPresses < 2)
+                        else if (report.DownPresses == 0 || (report.DownPresses < 2 && navigationObserved))
                         {
+                            highlightedBeforeDown = highlightedIndex;
                             PostKey(engine, owner, token, Down, report, processClock);
                             report.DownPresses++;
                             nextKeyAt = processClock.ElapsedMilliseconds + 120;
                         }
-                        else throw new InvalidOperationException("Target never highlighted after two DOWN presses; selection is not executable.");
+                        else if (report.DownPresses >= 2 && navigationObserved)
+                            throw new InvalidOperationException("Two observed DOWN transitions did not highlight the target; selection is not executable.");
+                        // An unchanged state is not acknowledgement of the
+                        // preceding DOWN. Keep observing within the same 3 s
+                        // budget instead of queueing another blind key.
                     }
                 }
 
