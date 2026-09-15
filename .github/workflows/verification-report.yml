@@ -91,6 +91,7 @@ jobs:
             out/verification/host-object-lifetime-matrix.json
             out/verification/sound-object-lifetime-matrix.json
             out/verification/video-object-lifetime-matrix.json
+            out/verification/window-object-lifetime-matrix.json
             out/verification/hosted-evidence/
             out/ci/
           if-no-files-found: error
