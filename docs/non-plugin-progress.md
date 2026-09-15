@@ -1,5 +1,13 @@
 # 插件以外的实现进度
 
+MenuItem 已接入原生生命周期：私有状态持有 action owner、子项和缓存，parent／Window 使用弱观察；点击在实际派发期间持有目标，用户修改 children 数组不再影响事件路由。脚本终结器与资源失效分开，支持清理失败后的重试和会话终止时的原生引用释放。实现、当前验证及保留的失败记录见[决策 043](decisions/043-menu-object-lifetime.md)。
+
+当前版本的[完整 GitHub Actions 回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34921937558)通过 **918 项 Node、678 项浏览器检查和 6 组直接运行时**；[原 KAG／离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34922607852)另通过 **78 项**。其中包括 12 组源码／字节码菜单报告、24 组原生状态检查，以及菜单缓存、重试、排队失效和挂起回调的实际集成测试。
+
+下一步继续 Layer 的生命周期、字体对象和输入持有关系；完整多窗口、其余图形／系统 API、流式媒体等仍未完成。菜单 popup 的嵌套事件和部分平台行为也仍有明确限制，整体非插件目标继续进行。
+
+以下保留此前阶段的实现与验证记录。
+
 Window 生命周期的[完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34914435535)已通过 **900 项 Node、678 项浏览器检查和 6 组直接运行时**；[原 KAG／离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913200791)另通过 **78 项**。[最终证据报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34916018555)绑定 543 份证据，矩阵 SHA-256 为 `e5a2da13b7838024e29c01b51c03c8629377d4a7d8aa6cb21e6eb59c7a435f5e`。
 
 Window 现使用实际对象的弱登记和原生失效入口；清理前保留成员可见性，等待视频关闭，再处理托管对象。输入、resize 和菜单事件只在投递时临时持有窗口；窗口属性按实例路由，旧窗口清理与替代窗口隔离。primaryLayer 为只读查询，惰性菜单、登记去重／移除、析构异常和重试已有验证。三浏览器双后端包括 156 个真实 Window 场景、264 个原生失效入口场景和 216 个撤销登记场景；独立句柄、对象和分配诊断也通过。详见[决策 042](decisions/042-window-object-lifetime.md)。完整多窗口、Layer、MenuItem、其他图形／系统 API 和流式媒体等仍未完成，全部非插件目标继续进行。

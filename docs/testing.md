@@ -18,6 +18,10 @@ gh workflow run test.yml --ref BRANCH -f runtime-only=true
 
 ## 已完成的云端回归
 
+[MenuItem 生命周期完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34921937558)通过全部 **918 Node、678 浏览器、6 组直接运行时**，基于 `a9403d0`，全部 14 个 job 成功。浏览器统计为 555 常规、57 游戏库、59 PWA、7 原生生命周期，零失败、跳过、flaky 和重试。直接运行时包含 12 组菜单报告和 24 组原生状态报告，后者停止后的原生 slot 数全部为零。原始失败、一次未确认原因的 V8 断言及 KAG 刷新全屏测试的时序修正见[决策 043](decisions/043-menu-object-lifetime.md)。
+
+同一应用产物的[原 KAG／离线升级检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34922607852)通过 **78 项**。测试代码 `fc72347` 只修正刷新后等待启动完成再退出全屏的时序；没有改动已完成完整回归的应用源代码。本阶段以按 run ID 保存的 Actions 原始产物为证据，不复用此前 Window 阶段的 900 项报告。
+
 [Window 生命周期完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34914435535)通过 **900 Node、678 浏览器、6 直接运行时**；[KAG／离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913200791)通过 **78 项**。[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34916018555)生成 `window-object-lifetime-matrix.json`，绑定 543 份证据，SHA-256 为 `e5a2da13b7838024e29c01b51c03c8629377d4a7d8aa6cb21e6eb59c7a435f5e`。所选案例零失败、跳过、flaky 和重试；可信冻结为 21,059.9 ms。Node-only/runtime-only 的独立结果未替代完整回归。
 
 另有 [64 项句柄](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913202815)、[120 项对象](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913204662)和[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913216710)通过：600 个 owner、24 个 dependent、20 个集合终结、1,062 个执行及 188 个字节码分配失败检查。原始失败与中间诊断继续归档，范围及未完成项见[决策 042](decisions/042-window-object-lifetime.md)。以下保留历史阶段证据。
