@@ -59,3 +59,11 @@ Window 输入阻塞按模态栈从顶向下决定：System 对话框阻塞游戏
 `35002247123@d01caed` 最终在排队时被 GitHub 替换，状态 cancelled，零作业、零已执行测试；前后快照均保留。合并旧检查点夹具与诊断修订的 `35003369151@4c664bc` 也曾排队，后续若因上述 Firefox 夹具修订被替换，必须同样单独保存，不视为通过。
 
 `35003369151@4c664bc` 最终也在排队时被替换，cancelled、零作业与零测试。随后 [35004112279](https://github.com/fenghengzhi/krkr2-web/actions/runs/35004112279)在 `2b16fe5` 未通过类型检查：旧 `modal-loop.test.ts:55` 的测试适配器仍用无参方式转发 changed 回调，没有传新加入的打开／退出 phase。运行未进入 Node 或浏览器用例，不计任何测试通过。后续修订只让该适配器原样传递 phase；产品逻辑不变，失败构建日志独立保留。
+
+## 完整回归与原 KAG 消息确认
+
+[35005248684](https://github.com/fenghengzhi/krkr2-web/actions/runs/35005248684) 在精确提交 `1066a82bce8ca055937b828e538191473393f6fa` 完整通过：实际 **1,806／1,806 Node、1,236／1,236 浏览器、6／6 直接运行时**，14 个作业全部成功。所有普通用例均报告，零文件占位、取消、跳过或重试；14 份 artifacts、382 份原始文件及同一构建来源已经归档。该结果不改变首轮 SIGABRT、未报告案例及原生回溯的不确定性。
+
+同源构建的首轮 [兼容检查 35005963934](https://github.com/fenghengzhi/krkr2-web/actions/runs/35005963934) 则失败。三个浏览器都在原 KAG 异常恢复探针的 Asyncify 案例停在事件已停止，后续 JSPI 案例未运行。原始 trace 中已有唯一的 Information 消息框，正文为对应 debug-failure.ks 的 KAG-diagnostic-primary。固定 KAG Initialize.tjs 的 handler 确实先保存并禁用事件、调用 System.inform(e.message)，待其返回才恢复原事件状态；旧探针漏掉了现在已实际实现的消息确认。
+
+后续只修订该兼容探针：精确验证消息文本、事件停止、游戏 Window 阻塞及确认按钮可用，保存消息截图后点击真实“确定”，再执行原有事件恢复、日志观察者、下一场景及 UTF-16 存档断言。不会自动接受未知对话框，不直接改 eventDisabled，也不增加超时。探针与此记录的提交使用 [skip ci]；产品仍为已完整验证的同一源码，另用相同构建重新运行兼容工作流，不将首轮失败追记为通过。
