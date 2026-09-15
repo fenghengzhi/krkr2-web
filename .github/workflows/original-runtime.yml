@@ -6,7 +6,7 @@ on:
       suite:
         description: Original SDK observation suite
         type: choice
-        options: [modal, menu]
+        options: [modal, menu, system-dialog]
         default: modal
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
-        scenario: ${{ inputs.suite == 'menu' && fromJSON('["menu-0-select","menu-0-cancel","menu-128-select","menu-128-cancel","menu-256-select","menu-256-cancel","menu-384-select","menu-384-cancel"]') || fromJSON('["modal-close","modal-accepted-reclose","modal-hidden-timer","modal-parent-child"]') }}
+        scenario: ${{ inputs.suite == 'menu' && fromJSON('["menu-0-select","menu-0-cancel","menu-128-select","menu-128-cancel","menu-256-select","menu-256-cancel","menu-384-select","menu-384-cancel"]') || inputs.suite == 'system-dialog' && fromJSON('["system-inform","system-input-unicode","system-input-empty","system-input-cancel"]') || fromJSON('["modal-close","modal-accepted-reclose","modal-hidden-timer","modal-parent-child"]') }}
     defaults:
       run:
         shell: pwsh
@@ -74,6 +74,8 @@ jobs:
               bytes = (Get-Item $engine).Length; sha256 = (Get-FileHash $engine -Algorithm SHA256).Hash.ToLowerInvariant()
               fileVersion = (Get-Item $engine).VersionInfo.FileVersion; productVersion = (Get-Item $engine).VersionInfo.ProductVersion
             }
+            $isSystemDialog = $env:NATIVE_SCENARIO -match '^system-(inform|input-unicode|input-empty|input-cancel)$'
+            if ($isSystemDialog) { $dialogScenario = $Matches[1] }
             $isMenu = $env:NATIVE_SCENARIO -match '^menu-(0|128|256|384)-(select|cancel)$'
             if ($isMenu) {
               $menuFlags = [int] $Matches[1]
@@ -84,12 +86,21 @@ jobs:
               Copy-Item $driver (Join-Path $output 'original-menu-driver.cs')
               $status.driverSha256 = (Get-FileHash $driver -Algorithm SHA256).Hash.ToLowerInvariant()
               Add-Type -Path $driver
+            } elseif ($isSystemDialog) {
+              $dialogToken = [Guid]::NewGuid().ToString('N')
+              $fixture = 'tests/fixtures/native-reference/system-dialog.tjs'
+              $driver = 'tests/probes/original-system-dialog-driver.cs'
+              Copy-Item $driver (Join-Path $output 'original-system-dialog-driver.cs')
+              $status.driverSha256 = (Get-FileHash $driver -Algorithm SHA256).Hash.ToLowerInvariant()
+              Add-Type -Path $driver
             } else {
               $fixture = Join-Path 'tests/fixtures/native-reference' ($env:NATIVE_SCENARIO + '.tjs')
             }
             $script = Get-Content $fixture -Raw -Encoding utf8
             if ($isMenu) {
               $script = $script.Replace('__NATIVE_FLAGS__', [string]$menuFlags).Replace('__NATIVE_ACTION__', $menuAction).Replace('__NATIVE_TOKEN__', $menuToken)
+            } elseif ($isSystemDialog) {
+              $script = $script.Replace('__NATIVE_SCENARIO__', $dialogScenario).Replace('__NATIVE_TOKEN__', $dialogToken)
             }
             $startup = Join-Path $work 'startup.tjs'
             [IO.File]::WriteAllText($startup, $script, [Text.UnicodeEncoding]::new($false, $true))
@@ -112,6 +123,12 @@ jobs:
               if ($status.input.State -cne 'observed') {
                 $status.stage = 'menu-input'
                 throw ('Owned menu input was not established: ' + $status.input.Reason)
+              }
+            } elseif ($isSystemDialog) {
+              $status.input = [OriginalSystemDialogDriver]::Observe($process, $work, $dialogToken, $dialogScenario, $processClock)
+              if ($status.input.State -cne 'observed') {
+                $status.stage = 'system-dialog-input'
+                throw ('Owned System dialog input was not established: ' + $status.input.Reason)
               }
             }
             $remainingMs = [Math]::Max(0, 30000 - [int]$processClock.ElapsedMilliseconds)

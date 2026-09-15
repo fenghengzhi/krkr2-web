@@ -27,7 +27,10 @@ interval, not a general impossibility result.
 ## Input evidence
 
 The driver first filters HWNDs by the held engine PID, then requires the exact
-random caption and random prompt text. It records the actual dialog/control
+random caption. For the MessageBox it also requires the real Static prompt text;
+the VCL InputQuery prompt may be a windowless label, so its availability is
+recorded rather than guessed. InputQuery additionally requires exactly one Edit
+and identifiable OK/Cancel push buttons. It records the actual dialog/control
 classes, IDs, text, parent/root relation and thread identity. Each targeted
 control must still belong to that same dialog and PID immediately before use.
 Only a real enabled/visible Edit may receive `WM_SETTEXT`; only a real enabled
@@ -46,3 +49,12 @@ All logs, partial results, generated fixture bytes, driver bytes, hashes and
 terminal statuses are retained. A failed attempt may justify a bounded fixture
 correction, while preserving that failed attempt. Nested dialogs are excluded
 from this minimum matrix; no result for them is implied.
+
+Microsoft documents [BM_CLICK](https://learn.microsoft.com/en-us/windows/win32/controls/bm-click)
+as invoking the button's normal click notifications and gives it no return value.
+The driver therefore uses the native TJS result to confirm the chosen handler;
+it does not treat a zero button-message result as failure. It does not activate
+an inactive dialog to force a click. Edit input uses
+[WM_SETTEXT](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-settext),
+with directed messages bounded by
+[SendMessageTimeoutW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendmessagetimeoutw).
