@@ -236,6 +236,7 @@ export function mountApp(root: HTMLDivElement): void {
     const current = ++generation
     busy = true
     lastFiles = files
+    let failedLaunch = false
     const canvas = document.createElement('canvas')
     canvas.width = 800
     canvas.height = 600
@@ -279,7 +280,7 @@ export function mountApp(root: HTMLDivElement): void {
           update()
           // A native main-window close finishes the engine independently of
           // the transport button. Retire its page hosts and Worker as well.
-          if (event.snapshot.state === 'stopped') void stop().catch(report)
+          if (event.snapshot.state === 'stopped' && !failedLaunch) void stop().catch(report)
         }
       },
       (audio) => {
@@ -353,6 +354,9 @@ export function mountApp(root: HTMLDivElement): void {
       }
     } catch (error) {
       if (current === generation && !stopping) {
+        // Failed startup also closes its engine, while keeping diagnostics and
+        // the failed state available for the user to inspect and reopen.
+        failedLaunch = true
         report(error)
         try {
           await instance.stop()
