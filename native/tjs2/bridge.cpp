@@ -410,6 +410,7 @@ public:
     HostLifetime(Vm* vm, tTJSCustomObject* owner, const ttstr& operation, unsigned identifier)
         : vm(vm), owner(owner), operation(operation), identifier(identifier) { ++nativeLifetimeCount; }
     ~HostLifetime() override { --nativeLifetimeCount; }
+    double Identifier(Vm* context) const { return vm == context ? static_cast<double>(identifier) : -1; }
     void Invalidate() override {
         if(completed || running || shuttingDown) return;
         running = true;
@@ -976,13 +977,30 @@ API int krkr_owner_register_native(Vm* vm, unsigned handle, const tjs_char* oper
     try {
         auto record = std::make_unique<HostLifetime>(vm, owner, ttstr(operation, length), identifier);
         iTJSNativeInstance* pointer = record.get();
-        const auto classId = TJSRegisterNativeClass(u"krkr2-web.HostLifetime");
+        const auto className = ttstr(u"krkr2-web.HostLifetime.") + ttstr(operation, length);
+        const auto classId = TJSRegisterNativeClass(className.c_str());
         if(TJS_FAILED(owner->NativeInstanceSupport(TJS_NIS_REGISTER, classId, &pointer))) return 0;
         record.release();
         return 1;
     } catch(...) { return 0; }
 }
 API unsigned krkr_native_hook_count() { return nativeLifetimeCount; }
+API double krkr_owner_native_identifier(Vm* vm, unsigned handle, const tjs_char* operation, unsigned length) {
+    if(shuttingDown || !vm || !operation || !length || length > 128 || vm->released.count(handle)) return -1;
+    auto found = vm->handles.find(handle);
+    if(found == vm->handles.end() || found->second.Type() != tvtObject) return -1;
+    auto* owner = found->second.AsObjectNoAddRef();
+    if(!owner) return -1;
+    try {
+        const auto className = ttstr(u"krkr2-web.HostLifetime.") + ttstr(operation, length);
+        const auto classId = TJSFindNativeClassID(className.c_str());
+        if(classId < 0) return -1;
+        iTJSNativeInstance* pointer = nullptr;
+        if(TJS_FAILED(owner->NativeInstanceSupport(TJS_NIS_GETINSTANCE, classId, &pointer))) return -1;
+        const auto* record = dynamic_cast<HostLifetime*>(pointer);
+        return record ? record->Identifier(vm) : -1;
+    } catch(...) { return -1; }
+}
 API unsigned krkr_owner_bind_dependent(Vm* vm, unsigned ownerHandle, unsigned dependentHandle) {
     if(shuttingDown || !vm->nextDependent || vm->dependents.size() >= 4096) return 0;
     auto* owner = lifetimeInstance(vm, ownerHandle);

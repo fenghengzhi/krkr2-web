@@ -310,6 +310,24 @@ export class TjsWasmRuntime implements ScriptRuntime {
       this.call('free', name)
     }
   }
+  nativeLifetimeIdentifier(owner: ScriptObject, operation: string): number | undefined {
+    this.assertObject(owner)
+    if (!/^[A-Za-z][A-Za-z0-9_.]{0,127}$/.test(operation))
+      throw new Error('Invalid native lifetime operation')
+    const name = this.textPointer(operation)
+    try {
+      const id = this.call(
+        'krkr_owner_native_identifier',
+        this.vm,
+        owner.id,
+        name,
+        operation.length,
+      )
+      return id < 0 ? undefined : id
+    } finally {
+      this.call('free', name)
+    }
+  }
   bindDependent(owner: ScriptObject, dependent: ScriptObject): ScriptDependent {
     this.assertObject(owner)
     this.assertObject(dependent)
