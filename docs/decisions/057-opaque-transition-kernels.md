@@ -43,3 +43,11 @@ Opaque 内核读取原始 RGB，不先依据源 mask 预乘。混合阶段原版
 失败夹具使用 `session.evaluate('tick=1000;fore.update()')`。这个 API 在 TJS 表达式模式执行，词法器注入 return 后只执行赋值，第二句 update 没有运行；原测试因此没有推进到终点。修订以 IIFE 执行完整两步，并把原来的 done、visible、RGB、mask 复合布尔断言改成相同预期的逐字段值，便于失败时保留实测状态。LayerTree.exchange 本来就保留各自 bitmap，原白色源和 mask=1 预期不变；没有修改产品代码或放宽像素／完成要求。
 
 首轮完整 TAP 和 build-info 已独立下载至 `out/verification/github-actions/34997020864/early-node/`。记录本节时浏览器与兼容性仍在运行，后续实际结果必须另行保留；此修订也尚待新 Actions，不能将首轮失败改计为成功。
+
+## 第二轮回归的 Firefox 控制台夹具
+
+第二轮 [34998001623](https://github.com/fenghengzhi/krkr2-web/actions/runs/34998001623)在 `076ecfc7e1e9a3144f7386d5ca88fd081a4ac004` 的 Node 作业已成功，终点修订实际通过。Firefox 常规浏览器实际 340／341 通过；唯一失败是 `activity.spec.ts:110` 的 Asyncify 隐藏启动／停止／重启用例，等待 `test-result-7:17` 超时。本轮此时仍有 WebKit 作业，不能视为完整通过。
+
+原始 trace 显示 fill API 请求了完整表达式，但随后点击执行之前的 DOM 快照里 `expression` 输入框仍为空；重启的第二个 `activity-ready`、新 Window 显示与该 fill 同时发生。它证明测试没有提交预期表达式，不能据此认定 VM 的 `value` 求值超时。trace 没有直接记录 activeElement，不能把焦点竞争的具体原因写成已证明。超时终止日志发生在测试失败后的 teardown。
+
+修订让通用控制台助手先等待执行按钮可用，再填写并断言完整表达式，最后按原要求执行并等待原结果。没有增加等待超时、额外 sleep、放宽结果或改动产品代码。运行状态会早于启动收尾发布，控制台按钮的可用状态才是这一交互的准备条件。第二轮原始失败及 trace 保存在独立运行目录；后续通过不会覆盖它。
