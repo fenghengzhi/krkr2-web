@@ -3,9 +3,11 @@
 //
 // All messages, timers and WH_MSGFILTER belong to this process's UI thread.
 // No SendInput, global hook, foreground manipulation or unrelated window access.
-// Bare PostThreadMessage can be lost in modal loops. A tokenized message to our
-// HWND becomes key input only when USER32 invokes the hook with MSGF_MENU:
+// Compare two owned-HWND paths: tokenized messages rewritten by the system
+// MSGF_MENU hook, and directly posted key messages which that hook only observes.
+// Bare PostThreadMessage can be lost in modal loops; neither path uses it.
 // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postthreadmessagew
+// https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew
 // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-callmsgfilterw
 // https://learn.microsoft.com/en-us/windows/win32/winmsg/messageproc
 #include <windows.h>
@@ -59,9 +61,21 @@ struct Command {
     bool duringTrack;
 };
 struct Assertion { std::string name; bool passed; };
+enum class InputMode { HookRewrite, DirectPost };
+const char* modeName(InputMode mode) {
+    return mode == InputMode::HookRewrite ? "hook-rewrite" : "direct-post";
+}
+struct PostedKey {
+    UINT message = 0, wireMessage = 0;
+    WPARAM wp = 0, wireWp = 0;
+    LPARAM lp = 0, wireLp = 0;
+    bool posted = false, hookSeen = false, passedHooks = false, reachedWindow = false;
+    std::uint64_t postSequence = 0;
+};
 struct Case {
     int id = 0;
     UINT flags = 0;
+    InputMode mode = InputMode::HookRewrite;
     bool select = false;
     HWND owner = nullptr;
     HMENU menu = nullptr;
@@ -70,8 +84,9 @@ struct Case {
     bool inTrack = false, hookSeen = false, terminalKey = false;
     bool timedOut = false, postFailed = false, barrierSeen = false, quitSeen = false;
     bool targetHighlighted = false, keySuppressed = false;
-    bool inputFinished = false, selectionAborted = false;
+    bool inputFinished = false, selectionAborted = false, keyPayloadChanged = false;
     int keyStage = 0, filteredKeys = 0, unconsumedKeys = 0;
+    int rewrittenKeys = 0, directObservedKeys = 0;
     ULONGLONG started = 0, nextKeyAt = 0;
     std::uint64_t returnSequence = 0;
     BOOL returnValue = 0;
@@ -79,6 +94,7 @@ struct Case {
     std::string status = "not-run", reason;
     std::vector<Command> commands;
     std::vector<Assertion> assertions;
+    std::vector<PostedKey> keys;
 };
 Case* activeCase = nullptr;
 
@@ -87,7 +103,9 @@ std::uint64_t event(const Case* item, const char* name, const std::string& field
     std::ostringstream line;
     line << "{\"sequence\":" << serial << ",\"tickMs\":" << GetTickCount64()
          << ",\"threadId\":" << GetCurrentThreadId()
-         << ",\"caseId\":" << (item ? item->id : 0) << ",\"event\":" << quote(name);
+         << ",\"caseId\":" << (item ? item->id : 0)
+         << ",\"mode\":" << (item ? quote(modeName(item->mode)) : "null")
+         << ",\"event\":" << quote(name);
     if (!fields.empty()) line << ',' << fields;
     line << '}';
     trace << line.str() << std::endl;
@@ -98,6 +116,13 @@ std::string messageFields(UINT message, WPARAM wp, LPARAM lp) {
     return "\"message\":" + std::to_string(message) +
         ",\"wParam\":" + std::to_string(static_cast<std::uint64_t>(wp)) +
         ",\"lParam\":" + std::to_string(static_cast<std::int64_t>(lp));
+}
+LPARAM keyParameter(UINT key, bool up) {
+    const DWORD scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC);
+    // DOWN is an extended navigation key, not the numeric-keypad key.
+    // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
+    const DWORD extended = key == VK_DOWN ? 0x01000000u : 0;
+    return static_cast<LPARAM>(1u | (scan << 16) | extended | (up ? 0xc0000000u : 0));
 }
 bool relevant(UINT message) {
     switch (message) {
@@ -124,6 +149,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
     }
     if (item && relevant(message)) {
         const auto serial = event(item, "window-message", messageFields(message, wp, lp) +
+            ",\"hwnd\":" + std::to_string(reinterpret_cast<std::uintptr_t>(window)) +
             ",\"duringTrack\":" + (item->inTrack ? "true" : "false"));
         if (message == WM_COMMAND)
             item->commands.push_back({serial, LOWORD(wp), HIWORD(wp), item->inTrack});
@@ -132,6 +158,19 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         item->unconsumedKeys++;
         event(item, "key-not-consumed-by-menu", messageFields(message, wp, lp));
         return 0;
+    }
+    if (item && item->mode == InputMode::DirectPost &&
+        (message == WM_KEYDOWN || message == WM_KEYUP)) {
+        for (auto& key : item->keys) {
+            if (key.posted && !key.reachedWindow && message == key.message &&
+                wp == key.wp && lp == key.lp) {
+                key.reachedWindow = true;
+                item->unconsumedKeys++;
+                event(item, "direct-key-reached-owner", messageFields(message, wp, lp) +
+                    ",\"postSequence\":" + std::to_string(key.postSequence));
+                break;
+            }
+        }
     }
     if (item && message == barrierMessage && wp == static_cast<WPARAM>(item->id)) {
         item->barrierSeen = true;
@@ -145,36 +184,58 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
 // Never called manually: the code must come from the actual USER32 menu loop.
 LRESULT CALLBACK menuFilter(int code, WPARAM wp, LPARAM lp) {
     auto* item = activeCase;
-    bool injected = false, terminal = false;
+    bool matched = false, terminal = false;
+    std::size_t keyIndex = 0;
+    MSG* observedMessage = nullptr;
     if (code == MSGF_MENU && item && item->inTrack) {
         auto* message = reinterpret_cast<MSG*>(lp);
         item->hookSeen = true;
         event(item, "system-menu-filter",
-            messageFields(message->message, message->wParam, message->lParam));
-        if (message->hwnd == item->owner && message->message == keyMessage &&
-            message->wParam == static_cast<WPARAM>(item->id)) {
-            const UINT packed = static_cast<UINT>(message->lParam), key = packed & 0xffff;
-            const bool up = (packed & 0x10000) != 0;
-            message->message = up ? WM_KEYUP : WM_KEYDOWN;
-            message->wParam = key;
-            const DWORD scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC);
-            // DOWN is an extended navigation key, not the numeric-keypad key.
-            // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
-            const DWORD extended = key == VK_DOWN ? 0x01000000u : 0;
-            message->lParam = static_cast<LPARAM>(1u | (scan << 16) | extended |
-                (up ? 0xc0000000u : 0));
-            item->filteredKeys++;
-            injected = true;
-            terminal = !up && key == static_cast<UINT>(item->select ? VK_RETURN : VK_ESCAPE);
-            event(item, "owned-key-injected-into-menu",
-                messageFields(message->message, message->wParam, message->lParam));
+            messageFields(message->message, message->wParam, message->lParam) +
+            ",\"hwnd\":" + std::to_string(reinterpret_cast<std::uintptr_t>(message->hwnd)));
+        if (message->hwnd == item->owner) {
+            for (std::size_t index = 0; index < item->keys.size(); ++index) {
+                auto& key = item->keys[index];
+                if (!key.posted || key.hookSeen || message->message != key.wireMessage ||
+                    message->wParam != key.wireWp || message->lParam != key.wireLp) continue;
+                matched = true;
+                keyIndex = index;
+                observedMessage = message;
+                key.hookSeen = true;
+                if (item->mode == InputMode::HookRewrite) {
+                    message->message = key.message;
+                    message->wParam = key.wp;
+                    message->lParam = key.lp;
+                    item->rewrittenKeys++;
+                } else {
+                    // Observe the already-posted WM_KEYDOWN/UP without writing to MSG.
+                    item->directObservedKeys++;
+                }
+                item->filteredKeys++;
+                terminal = key.message == WM_KEYDOWN &&
+                    key.wp == static_cast<WPARAM>(item->select ? VK_RETURN : VK_ESCAPE);
+                event(item, item->mode == InputMode::HookRewrite ?
+                    "owned-key-injected-into-menu" : "direct-key-observed-by-menu",
+                    messageFields(message->message, message->wParam, message->lParam) +
+                    ",\"postSequence\":" + std::to_string(key.postSequence));
+                break;
+            }
         }
     }
     const LRESULT next = CallNextHookEx(nullptr, code, wp, lp);
-    if (injected) {
+    if (matched) {
+        auto& key = item->keys[keyIndex];
+        const bool unchanged = observedMessage->hwnd == item->owner &&
+            observedMessage->message == key.message && observedMessage->wParam == key.wp &&
+            observedMessage->lParam == key.lp;
         if (next != 0) item->keySuppressed = true;
-        if (terminal && next == 0) item->terminalKey = true;
-        event(item, "remaining-hook-chain-return", "\"value\":" + std::to_string(next));
+        if (!unchanged) item->keyPayloadChanged = true;
+        key.passedHooks = next == 0 && unchanged;
+        if (terminal && key.passedHooks) item->terminalKey = true;
+        event(item, "remaining-hook-chain-return", "\"value\":" + std::to_string(next) +
+            ",\"postSequence\":" + std::to_string(key.postSequence) +
+            ",\"payloadUnchanged\":" + (unchanged ? "true" : "false") + "," +
+            messageFields(observedMessage->message, observedMessage->wParam, observedMessage->lParam));
     }
     return next;
 }
@@ -222,13 +283,25 @@ void CALLBACK driveCase(HWND window, UINT, UINT_PTR, DWORD) {
         }
     }
     if (key == VK_RETURN || key == VK_ESCAPE) item->inputFinished = true;
+    PostedKey queued;
+    queued.message = up ? WM_KEYUP : WM_KEYDOWN;
+    queued.wp = key;
+    queued.lp = keyParameter(key, up);
+    queued.wireMessage = item->mode == InputMode::DirectPost ? queued.message : keyMessage;
+    queued.wireWp = item->mode == InputMode::DirectPost ? queued.wp : static_cast<WPARAM>(item->id);
+    queued.wireLp = item->mode == InputMode::DirectPost ? queued.lp :
+        static_cast<LPARAM>(key | (up ? 0x10000u : 0));
+    item->keys.push_back(queued);
+    auto& postedKey = item->keys.back();
     SetLastError(ERROR_SUCCESS);
-    const BOOL posted = PostMessageW(window, keyMessage, static_cast<WPARAM>(item->id),
-        key | (up ? 0x10000u : 0));
+    const BOOL posted = PostMessageW(window, postedKey.wireMessage, postedKey.wireWp, postedKey.wireLp);
     const DWORD error = GetLastError();
-    event(item, "owned-key-posted", "\"key\":" + std::to_string(key) +
+    postedKey.posted = posted != FALSE;
+    postedKey.postSequence = event(item, "owned-key-posted", "\"key\":" + std::to_string(key) +
         ",\"up\":" + (up ? "true" : "false") + ",\"posted\":" + std::to_string(posted) +
-        ",\"lastError\":" + std::to_string(error));
+        ",\"lastError\":" + std::to_string(error) +
+        ",\"hwnd\":" + std::to_string(reinterpret_cast<std::uintptr_t>(window)) + "," +
+        messageFields(postedKey.wireMessage, postedKey.wireWp, postedKey.wireLp));
     if (!posted) item->postFailed = true;
     item->keyStage++;
     item->nextKeyAt = now + 100;
@@ -326,6 +399,9 @@ void runCase(Case& item, HINSTANCE instance) {
     // Include any synchronous owner notifications during destruction in the
     // observed command list before deciding the case's assertion status.
     releaseCase(item);
+    bool allKeysPassed = !item.keys.empty();
+    for (const auto& key : item.keys)
+        if (!key.posted || !key.hookSeen || !key.passedHooks) allKeysPassed = false;
     if (item.timedOut) item.reason = "Per-case deadline required EndMenu";
     else if (item.postFailed) item.reason = "An owned message could not be posted";
     else if (item.selectionAborted)
@@ -333,7 +409,11 @@ void runCase(Case& item, HINSTANCE instance) {
     else if (!item.hookSeen || !item.terminalKey)
         item.reason = "Owned terminal key was not passed through the system menu hook chain";
     else if (item.keySuppressed)
-        item.reason = "Another thread-local hook suppressed an injected key";
+        item.reason = "Another thread-local hook suppressed an owned key";
+    else if (item.keyPayloadChanged)
+        item.reason = "Another hook changed the owned key payload";
+    else if (!allKeysPassed)
+        item.reason = "Not every posted key was observed unchanged through the system menu hook chain";
     else if (item.select && !item.targetHighlighted)
         item.reason = "Selection injection did not establish the known highlighted leaf";
     else if (!item.barrierSeen || item.quitSeen)
@@ -370,16 +450,18 @@ void summary(const std::filesystem::path& directory, const std::vector<Case>& ca
     }
     file << "{\"schemaVersion\":1,\"scope\":\"Win32 TrackPopupMenuEx only; no KRKR2 or VCL\","
          << "\"status\":" << quote(status) << ",\"reason\":" << quote(reason)
-         << ",\"expectedCases\":16,\"observedCases\":" << observed << ",\"passedCases\":" << passed
+         << ",\"expectedCases\":32,\"observedCases\":" << observed << ",\"passedCases\":" << passed
          << ",\"nestedMenuCoverage\":\"not-run; RECURSE bit tested only without an existing menu\","
-         << "\"inputMethod\":\"owned HWND message transformed by thread-local system MSGF_MENU hook\","
+         << "\"inputModes\":[\"hook-rewrite\",\"direct-post\"],\"expectedCasesPerMode\":16,"
+         << "\"inputMethod\":\"owned HWND keys: hook rewrite versus direct PostMessage with observation-only hook\","
          << "\"globalInputUsed\":false,\"caseLimitMs\":" << caseLimitMs
          << ",\"postReturnObservationMs\":" << observeMs << ",\"cases\":[";
     bool comma = false;
     for (const auto& item : cases) {
         if (comma) file << ',';
         comma = true;
-        file << "{\"id\":" << item.id << ",\"flags\":" << item.flags
+        file << "{\"id\":" << item.id << ",\"mode\":" << quote(modeName(item.mode))
+             << ",\"flags\":" << item.flags
              << ",\"action\":" << quote(item.select ? "select" : "cancel")
              << ",\"status\":" << quote(item.status) << ",\"reason\":" << quote(item.reason)
              << ",\"returnValue\":";
@@ -387,10 +469,13 @@ void summary(const std::filesystem::path& directory, const std::vector<Case>& ca
         file << ",\"returnSequence\":" << item.returnSequence << ",\"lastError\":" << item.lastError
              << ",\"menuFilterSeen\":" << (item.hookSeen ? "true" : "false")
              << ",\"filteredKeys\":" << item.filteredKeys << ",\"unconsumedKeys\":" << item.unconsumedKeys
+             << ",\"postedKeyCount\":" << item.keys.size() << ",\"rewrittenKeys\":" << item.rewrittenKeys
+             << ",\"directObservedKeys\":" << item.directObservedKeys
              << ",\"terminalKeyPassedThroughHooks\":" << (item.terminalKey ? "true" : "false")
              << ",\"targetHighlighted\":" << (item.targetHighlighted ? "true" : "false")
              << ",\"selectionAborted\":" << (item.selectionAborted ? "true" : "false")
              << ",\"keySuppressed\":" << (item.keySuppressed ? "true" : "false")
+             << ",\"keyPayloadChanged\":" << (item.keyPayloadChanged ? "true" : "false")
              << ",\"barrierSeen\":" << (item.barrierSeen ? "true" : "false") << ",\"commands\":[";
         bool childComma = false;
         for (const auto& command : item.commands) {
@@ -419,14 +504,17 @@ int wmain(int argc, wchar_t** argv) {
     if (argc != 2) { std::cerr << "Expected one output directory; hosted Actions only.\n"; return 2; }
     const std::filesystem::path directory(argv[1]);
     std::vector<Case> cases;
-    for (UINT bits = 0; bits < 8; ++bits) {
-        const UINT flags = ((bits & 1) ? TPM_NONOTIFY : 0) |
-            ((bits & 2) ? TPM_RETURNCMD : 0) | ((bits & 4) ? TPM_RECURSE : 0);
-        for (bool select : {false, true}) {
-            Case item;
-            item.id = static_cast<int>(cases.size()) + 1;
-            item.flags = flags; item.select = select;
-            cases.push_back(item);
+    for (InputMode mode : {InputMode::HookRewrite, InputMode::DirectPost}) {
+        for (UINT bits = 0; bits < 8; ++bits) {
+            const UINT flags = ((bits & 1) ? TPM_NONOTIFY : 0) |
+                ((bits & 2) ? TPM_RETURNCMD : 0) | ((bits & 4) ? TPM_RECURSE : 0);
+            for (bool select : {false, true}) {
+                Case item;
+                item.id = static_cast<int>(cases.size()) + 1;
+                item.mode = mode;
+                item.flags = flags; item.select = select;
+                cases.push_back(item);
+            }
         }
     }
     try {

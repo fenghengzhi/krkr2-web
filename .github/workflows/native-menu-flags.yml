@@ -321,6 +321,9 @@ jobs:
               scope = $summary.scope
               nestedMenuCoverage = $summary.nestedMenuCoverage
               globalInputUsed = $summary.globalInputUsed
+              inputMethod = $summary.inputMethod
+              inputModes = $summary.inputModes
+              expectedCasesPerMode = $summary.expectedCasesPerMode
               expectedCases = $summary.expectedCases
               observedCases = $summary.observedCases
               passedCases = $summary.passedCases
@@ -330,8 +333,18 @@ jobs:
             if (-not (Test-JsonInteger $summary.schemaVersion) -or $summary.schemaVersion -ne 1 -or $summary.status -cne 'completed') {
               throw 'The probe summary must use schema 1 and record final completed status.'
             }
-            if (-not (Test-JsonInteger $summary.expectedCases) -or $summary.expectedCases -ne 16 -or -not (Test-JsonInteger $summary.observedCases) -or $summary.observedCases -ne 16 -or -not (Test-JsonInteger $summary.passedCases) -or $summary.passedCases -ne 16 -or $summary.cases -isnot [array] -or $summary.cases.Count -ne 16) {
-              throw 'The probe must report exactly 16 expected, observed, and passed cases with 16 case records.'
+            if (-not (Test-JsonInteger $summary.expectedCases) -or $summary.expectedCases -ne 32 -or -not (Test-JsonInteger $summary.observedCases) -or $summary.observedCases -ne 32 -or -not (Test-JsonInteger $summary.passedCases) -or $summary.passedCases -ne 32 -or $summary.cases -isnot [array] -or $summary.cases.Count -ne 32) {
+              throw 'The probe must report exactly 32 expected, observed, and passed cases with 32 case records.'
+            }
+            if (-not (Test-JsonInteger $summary.expectedCasesPerMode) -or $summary.expectedCasesPerMode -ne 16 -or $summary.inputModes -isnot [array] -or $summary.inputModes.Count -ne 2) {
+              throw 'The probe must declare exactly two input modes with 16 expected cases per mode.'
+            }
+            $allowedModes = @('hook-rewrite', 'direct-post')
+            $inputModes = [Collections.Generic.HashSet[string]]::new()
+            foreach ($mode in $summary.inputModes) {
+              if ($mode -isnot [string] -or $mode -cnotin $allowedModes -or -not $inputModes.Add($mode)) {
+                throw 'The probe input modes must uniquely cover hook-rewrite and direct-post.'
+              }
             }
             if ($summary.scope -cne 'Win32 TrackPopupMenuEx only; no KRKR2 or VCL' -or $summary.nestedMenuCoverage -cne 'not-run; RECURSE bit tested only without an existing menu') {
               throw 'The probe summary must preserve its Win32-only scope and explicitly untested nested-menu coverage.'
@@ -340,22 +353,40 @@ jobs:
               throw 'The probe summary must confirm that no global input was used.'
             }
             $caseIds = [Collections.Generic.HashSet[int]]::new()
-            $casePairs = [Collections.Generic.HashSet[string]]::new()
+            $caseTriples = [Collections.Generic.HashSet[string]]::new()
+            $caseCountsPerMode = [ordered]@{ 'hook-rewrite' = 0; 'direct-post' = 0 }
             # Independent coverage contract: all NONOTIFY, RETURNCMD, RECURSE bit combinations,
-            # each selected and cancelled. This does not impose a case ordering or result oracle.
+            # each selected and cancelled in both input modes. This does not impose a case
+            # ordering or alter the probe's existing notification and return-value assertions.
             $allowedFlags = @(0, 1, 128, 129, 256, 257, 384, 385)
             foreach ($case in $summary.cases) {
-              if (-not (Test-JsonInteger $case.id) -or $case.id -lt 1 -or $case.id -gt 16 -or -not $caseIds.Add([int] $case.id)) {
-                throw 'Probe case IDs must uniquely cover 1 through 16.'
+              if (-not (Test-JsonInteger $case.id) -or $case.id -lt 1 -or $case.id -gt 32 -or -not $caseIds.Add([int] $case.id)) {
+                throw 'Probe case IDs must uniquely cover 1 through 32.'
               }
-              if (-not (Test-JsonInteger $case.flags) -or $case.flags -notin $allowedFlags -or $case.action -cnotin @('select', 'cancel') -or -not $casePairs.Add("$($case.flags):$($case.action)")) {
-                throw "Case $($case.id) has an invalid or duplicate flags/action coverage pair."
+              if ($case.mode -isnot [string] -or $case.mode -cnotin $allowedModes) {
+                throw "Case $($case.id) does not belong to a declared input mode."
               }
+              if (-not (Test-JsonInteger $case.flags) -or $case.flags -notin $allowedFlags -or $case.action -cnotin @('select', 'cancel') -or -not $caseTriples.Add("$($case.mode):$($case.flags):$($case.action)")) {
+                throw "Case $($case.id) has an invalid or duplicate mode/flags/action coverage triple."
+              }
+              $caseCountsPerMode[$case.mode]++
               if ($case.status -cne 'observed' -or $case.terminalKeyPassedThroughHooks -isnot [bool] -or -not $case.terminalKeyPassedThroughHooks -or $case.barrierSeen -isnot [bool] -or -not $case.barrierSeen -or -not (Test-JsonInteger $case.returnSequence) -or $case.returnSequence -le 0) {
                 throw "Case $($case.id) lacks a completed observation, terminal key passed through menu hooks, barrier, or return sequence."
               }
-              if ($case.menuFilterSeen -isnot [bool] -or -not $case.menuFilterSeen -or $case.keySuppressed -isnot [bool] -or $case.keySuppressed -or ($case.action -ceq 'select' -and ($case.targetHighlighted -isnot [bool] -or -not $case.targetHighlighted))) {
-                throw "Case $($case.id) lacks system-menu injection evidence or the expected highlighted selection target."
+              if ($case.menuFilterSeen -isnot [bool] -or -not $case.menuFilterSeen -or $case.keySuppressed -isnot [bool] -or $case.keySuppressed -or $case.selectionAborted -isnot [bool] -or $case.selectionAborted -or ($case.action -ceq 'select' -and ($case.targetHighlighted -isnot [bool] -or -not $case.targetHighlighted))) {
+                throw "Case $($case.id) lacks system-menu input evidence, aborted its selection, or lacks the expected highlighted selection target."
+              }
+              if ($case.keyPayloadChanged -isnot [bool] -or $case.keyPayloadChanged) {
+                throw "Case $($case.id) lacks confirmation that subsequent menu hooks preserved its key payload."
+              }
+              if (-not (Test-JsonInteger $case.postedKeyCount) -or ($case.action -ceq 'cancel' -and $case.postedKeyCount -ne 1) -or ($case.action -ceq 'select' -and $case.postedKeyCount -notin @(3, 5))) {
+                throw "Case $($case.id) did not post the expected bounded input sequence for its action."
+              }
+              if (-not (Test-JsonInteger $case.filteredKeys) -or $case.filteredKeys -ne $case.postedKeyCount -or -not (Test-JsonInteger $case.rewrittenKeys) -or -not (Test-JsonInteger $case.directObservedKeys)) {
+                throw "Case $($case.id) must account for every posted key in its system-menu hook observations."
+              }
+              if (($case.mode -ceq 'direct-post' -and ($case.rewrittenKeys -ne 0 -or $case.directObservedKeys -ne $case.postedKeyCount)) -or ($case.mode -ceq 'hook-rewrite' -and ($case.directObservedKeys -ne 0 -or $case.rewrittenKeys -ne $case.postedKeyCount))) {
+                throw "Case $($case.id) input counters do not prove its declared mode without mixing direct observations and rewrites."
               }
               if ($case.assertions -isnot [array] -or $case.assertions.Count -eq 0) {
                 throw "Case $($case.id) does not contain any known assertions."
@@ -366,8 +397,14 @@ jobs:
                 }
               }
             }
+            foreach ($mode in $allowedModes) {
+              if ($caseCountsPerMode[$mode] -ne 16) {
+                throw "Input mode $mode must complete all 16 flags/action combinations."
+              }
+            }
             $status.probeSummary.validatedCases = $caseIds.Count
-            $status.probeSummary.validatedFlagsActionPairs = $casePairs.Count
+            $status.probeSummary.validatedModeFlagsActionTriples = $caseTriples.Count
+            $status.probeSummary.validatedCasesPerMode = $caseCountsPerMode
             $status.state = 'complete'
             $status.stage = 'complete'
           } catch {
