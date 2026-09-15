@@ -57,3 +57,5 @@ Window 输入阻塞按模态栈从顶向下决定：System 对话框阻塞游戏
 首轮 Firefox 常规实际 **363／371**：四项 inform 均在恢复游戏焦点处失败；另四项 inputString 在第一次 Enter 后已经返回完整 Unicode 字符串并打开下一输入框，因而不满足“还在组合中”的夹具预期。trace 没有单独记录 DOM compositionend，但固定 [Playwright 1.63 ffInput.ts](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/firefox/ffInput.ts#L106) 与 [Firefox PageAgent.js](https://github.com/microsoft/playwright/blob/v1.63.0/browser_patches/firefox/juggler/content/PageAgent.js#L541) 显示 keyboard.insertText 通过 commitCompositionWith 插入文字，结束其组合生命周期。因此后续夹具先执行并检查真实 Unicode 插入，再独立发出组合开始信号，检查真实 Enter 不提交，最后组合结束后再次 Enter 提交。没有放宽结果、增加超时或改动产品防护；专门的 OS 输入法驱动仍不在此测试的证明范围。
 
 `35002247123@d01caed` 最终在排队时被 GitHub 替换，状态 cancelled，零作业、零已执行测试；前后快照均保留。合并旧检查点夹具与诊断修订的 `35003369151@4c664bc` 也曾排队，后续若因上述 Firefox 夹具修订被替换，必须同样单独保存，不视为通过。
+
+`35003369151@4c664bc` 最终也在排队时被替换，cancelled、零作业与零测试。随后 [35004112279](https://github.com/fenghengzhi/krkr2-web/actions/runs/35004112279)在 `2b16fe5` 未通过类型检查：旧 `modal-loop.test.ts:55` 的测试适配器仍用无参方式转发 changed 回调，没有传新加入的打开／退出 phase。运行未进入 Node 或浏览器用例，不计任何测试通过。后续修订只让该适配器原样传递 phase；产品逻辑不变，失败构建日志独立保留。

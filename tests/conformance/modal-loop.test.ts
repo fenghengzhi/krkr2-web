@@ -50,9 +50,9 @@ function fixture(hooks: Partial<ModalLoopDependencies> = {}) {
       dispatches++
       return hooks.dispatch?.() ?? continuation
     },
-    changed() {
+    changed(phase) {
       changes++
-      hooks.changed?.()
+      hooks.changed?.(phase)
     },
   })
   return {
