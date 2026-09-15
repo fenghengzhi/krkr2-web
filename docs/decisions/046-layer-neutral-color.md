@@ -18,4 +18,8 @@
 
 首轮 [Node 诊断 34928484922](https://github.com/fenghengzhi/krkr2-web/actions/runs/34928484922)在 `2f41269` 构建与类型检查通过，1,039 项中 1,037 项通过、2 项失败，无取消或跳过。失败均来自新透明组负对照的 raw mask 预期：原生部分透明度的 alpha-on-opaque 运算只写 RGB，结果 mask 为 0；测试误把最终显示时的 alpha 255 当成了原始快照值。修正后对两个像素精确断言 RGB 和 mask，产品混合算法没有因此改变。该失败的完整日志、产物和 run.json 按原 run ID 保存。
 
-源码复核另补上 piledCopy 的主图前置校验，并用 `tests/integration/piled-copy-preconditions.test.ts` 覆盖回调试图修复来源或目标的源码／字节码场景。这些后续修改尚待云端验证；首次 Node 诊断不代表完整回归通过。所有构建、类型检查、Node 测试、浏览器检查和可执行探针只能由 GitHub-hosted Actions 执行；本地仅阅读、编辑、格式化和检查已有云端产物。此前各阶段及失败记录继续保留。
+源码复核另补上 piledCopy 的主图前置校验，并用 `tests/integration/piled-copy-preconditions.test.ts` 覆盖回调试图修复来源或目标的源码／字节码场景。[Node 诊断 34929115093](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929115093) 在 `259c892` 通过全部 1,043 项，无失败、取消或跳过。
+
+首轮[完整回归 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074) 的 Chromium／Firefox 图形用例发现旧夹具对 primary 默认颜色的依赖。字体测试先扩容再切 ltAlpha，扩展区域已被 opaque white 填充；切换类型不重填已有像素。修订为先切 ltAlpha 再扩容。仿射保存测试需要透明白清除，现显式设置 neutralColor 为 `0x00ffffff`。原像素、字体度量和画布断言保留，失败日志也保留。修订等待完整回归；该首轮不能记为通过。相同构建的[原 KAG／离线升级 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970)已通过。
+
+所有构建、类型检查、Node 测试、浏览器检查和可执行探针只能由 GitHub-hosted Actions 执行；本地仅阅读、编辑、格式化和检查已有云端产物。此前各阶段及失败记录继续保留。
