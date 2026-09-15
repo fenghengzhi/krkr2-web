@@ -18,4 +18,8 @@ Session 分开记录待重绘 Layer 编号与已经提交的像素。即使 Syst
 
 新增 `tests/integration/layer-redraw.test.ts` 的源码／字节码用例覆盖 action 路由、参数、区域、快照、延期、自身失效、所有权、暂停、事件禁用以及异步异常；手动宿主时钟验证帧之间存在延时且没有任务累积。独立 `layer-redraw-fairness.test.ts` 检查多个 Layer 的调度公平性与截止时间。`tests/browser/layer-redraw.spec.ts` 覆盖双后端源码／字节码的真实像素和自主重绘，保存截图附件。
 
-初版提交 `3754227` 的 [Node 检查 34926599954](https://github.com/fenghengzhi/krkr2-web/actions/runs/34926599954)已通过，完整产物及运行元数据按原 run ID 保留。该结果属于修正前的历史证据；本文件记录的按 Layer 截止时间修正及新增测试尚未验证，不能从初版运行推断通过。本地仅阅读、编辑和格式化；所有构建、类型检查、Node、浏览器与可执行探测必须由 GitHub-hosted Actions 执行。阶段 044 及更早的结果不能当作本阶段通过证据。
+初版提交 `3754227` 的 [Node 检查 34926599954](https://github.com/fenghengzhi/krkr2-web/actions/runs/34926599954)通过 1,011 项，完整产物及运行元数据按原 run ID 保留。该结果属于公平性修正前的历史证据；后续源码审查发现其他 Layer 可不断推迟截止时间，以及已经遍历的祖先请求可能丢失，增加 8 项回归后进行了修正。
+
+修正提交 `ebae14e` 的 [Node 诊断 34927092177](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927092177)通过 1,019 项。[完整回归 34927280464](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927280464)随后通过 **1,019 项 Node、750 项浏览器和 6 组直接运行时**，全部 14 个 job 成功；浏览器包含常规 627、游戏库 57、PWA 59、可信生命周期 7，零失败、取消、跳过、flaky 或重试。使用同一构建的[原 KAG／旧 ABI 升级 34927347461](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927347461)另通过 **78 项**。后续合并阶段 044 的记录只改变文档，不改变这些已测应用源文件。
+
+本阶段新增 32 项 Node 与三浏览器双后端的 24 项浏览器检查。原始报告、像素附件、完整构建和 run.json 均按原 run ID 保存在 `out/verification/github-actions/`。本地仅阅读、编辑、格式化和检查已有云端产物；所有构建、类型检查、Node、浏览器与可执行探测均由 GitHub-hosted Actions 执行。阶段 044 及更早的结果作为各自历史证据保留，不替代本阶段回归。

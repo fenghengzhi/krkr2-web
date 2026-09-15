@@ -1,5 +1,11 @@
 # 当前实现范围
 
+Layer.update／onPaint 的参数、action 派发、异步后续重绘及多图层调度已接入，见[决策 045](../decisions/045-layer-redraw.md)。最新完整验证为 **1,019 项 Node、750 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**。其他图形／系统和媒体能力仍未完成，范围以[实现进度](../non-plugin-progress.md)为准。以下保留此前阶段记录。
+
+Layer／Font 生命周期、children 快照、输入角色持有及转场清理已通过本阶段回归，见[决策 044](../decisions/044-layer-object-lifetime.md)。当前验证为 **987 项 Node、726 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**；最新结论以[非插件实现进度](../non-plugin-progress.md)为准。Layer 的其余图形 API、完整多窗口和媒体能力仍在实现。
+
+以下保留此前阶段记录与当时的未完成范围。
+
 当前进度以[非插件实现进度](../non-plugin-progress.md)为准。MenuItem 的强 action owner／子项登记、弱 parent／Window、稳定可变 children 缓存、原生失效和事件临时持有已接通，详见[决策 043](../decisions/043-menu-object-lifetime.md)。声音、视频和 Window 生命周期的后续实现分别见[040](../decisions/040-sound-object-lifetime.md)、[041](../decisions/041-video-object-lifetime.md)和[042](../decisions/042-window-object-lifetime.md)。
 
 Layer、完整多窗口、其他图形／系统接口、流式媒体与菜单 popup 的嵌套事件仍未完成。以下保留各阶段生成时的验证记录及当时的限制，不表示整体非插件兼容已经完成。
