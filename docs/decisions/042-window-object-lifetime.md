@@ -12,7 +12,11 @@ Window 原生登记强持有对象，remove 必须释放这项登记而不失效
 
 [34908290232](https://github.com/fenghengzhi/krkr2-web/actions/runs/34908290232) 已完整通过 **856 项 Node、678 项浏览器检查和 6 组直接运行时**，直接报告逐项记录 264 个原生实例场景及 216 个撤销登记场景，无失败。它仍使用原模糊取消 fixture，不能以这次通过抹去首次竞态失败；包含边界观察修正的 [34908959155](https://github.com/fenghengzhi/krkr2-web/actions/runs/34908959155) 已开始，尚不能计入通过。当前应用实现对应 `8a2ceb474038ef1c63c2a687cf899c80ddaadeab`，后续提交只更新测试或说明。上述结果仅覆盖生命周期接口，Window 服务的实际接入和完整窗口/图层/菜单生命周期仍未完成。
 
-后续继续实现 Window 原生失效顺序、弱注册与实际事件持有、可移除的托管对象登记，以及惰性菜单。基础 Window.finalize 应为空，子类 finalize 失败时仍能保持原生对象有效并重试；直接调用 finalize 不应代替原生失效。托管对象失效失败的记录/继续处理策略，需区别于 Sound labels 的错误传播。Window.add 接受的 closure 及 bound context 也不能无条件缩减为当前从属实例 API 支持的类型。
+当前 Window 接入已实现，尚待行为验证：独立 WindowService 用弱观察登记实际对象，保留与实例无关的清理函数；native instance 回调在成员仍可访问时先等待视频断开，再失效登记对象和惰性菜单。基础 Window.finalize 为空，子类 finalize 失败时保留原生状态供重试，直接调用 finalize 不代替失效。Window.add/remove 用 TJS Array 持有普通 closure，并按 Object 和 ObjThis 的联合身份去重、移除；不把可接受的对象缩减为从属实例 API 的类型。
+
+Window 的 resize、输入和菜单队列现在捕获各自 WindowRecord，实际投递时临时取得对象引用，失效时取消该来源的待投递项。窗口属性按实例 id 路由；旧窗口清理过程中创建的新窗口具有独立状态。primaryLayer 改为只读查询，Layer 记录所属窗口，绘制和输入筛选当前窗口，旧窗口清理不再显式失效独立的 primary Layer。当前仍只允许一个活动窗口；完整多窗口以及 Layer/Menu 自身的所有权改造仍未完成。
+
+新增 40 项源码/字节码 Node 用例和 132 个预期直接运行时场景，检查隐式回收、临时返回值、成员读取顺序、finalizer 重试、绑定闭包身份、移除登记、惰性菜单、队列弱引用、回调释放最后引用、替代窗口、独立 primary Layer、视频异步关闭及会话停止。第一轮 [34911089743](https://github.com/fenghengzhi/krkr2-web/actions/runs/34911089743) 因新指针测试缺少 clicks 字段而在类型检查失败；补齐后的 [34911509538](https://github.com/fenghengzhi/krkr2-web/actions/runs/34911509538) 构建通过，但 Window 引导脚本误用了 TJS 不支持的 finally，导致 Session 初始化语法错误。提交 4f4e4a4 已改为 catch 路径与正常路径分别执行清理；[34912034494](https://github.com/fenghengzhi/krkr2-web/actions/runs/34912034494) 等待执行。失败、排队和未运行均不计为通过。
 
 Window/Layer/Menu 的关系分别处理：Window 不应额外强持有 primaryLayer；Layer 原生 parent 为弱指针，children Array 有独立的惰性强引用；Menu 具有强子节点登记和弱 parent，并使用稳定的惰性 children Array。聚焦、捕获、悬停、模态和转场角色本身的强引用需保留。原引擎不回收任意脚本引用环。
 

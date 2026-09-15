@@ -262,6 +262,11 @@ for (const binary of [false, true]) {
       await f.session.input({ type: 'down', x: 1, y: 1, button: 0, shift: 0, clicks: 1 })
       assert.equal(await f.session.evaluate('trace'), 'new')
       await f.execute(
+        'oldLayer.onHitTest=function(){throw new Exception("Retired Window received hit test");};newLayer.releaseCapture();newLayer.visible=false;trace="";',
+      )
+      await f.session.input({ type: 'down', x: 1, y: 1, button: 0, shift: 0, clicks: 1 })
+      assert.equal(await f.session.evaluate('trace'), '')
+      await f.execute(
         'invalidate oldLayer;delete global.oldLayer;invalidate newLayer;delete global.newLayer;delete global.win;',
       )
       await f.restored()

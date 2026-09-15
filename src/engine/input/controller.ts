@@ -249,6 +249,10 @@ export class InputController {
     try {
       for (const candidate of this.layers.hitCandidates(x, y, root, excludeSelf)) {
         const { id } = candidate
+        // A native pointer packet searches only the displayed window. An
+        // explicit Layer.getLayerAt still searches the requested subtree.
+        if (root === undefined && this.windowId && this.layers.get(id).windowId !== this.windowId())
+          continue
         this.hitChoice.set(id, true)
         yield {
           target: id,
