@@ -2,6 +2,9 @@
 export const windowLifetimeScript = (extra = '') => `
 var finalized=0,managedFinalized=0,calls=0,trace="",caught="",failWindow=false,failConstruct=false;
 try{throw new Exception("warm window exception");}catch(e){}
+// Variadic calls lazily create the shared native Array class. Account for it
+// before measuring per-Window ownership, without writing a diagnostic message.
+Debug.getLastLog();
 class LifetimeWindow extends Window {
   var marker=42;
   function LifetimeWindow(){super.Window();caption="original";if(failConstruct)throw new Exception("window-constructor");}

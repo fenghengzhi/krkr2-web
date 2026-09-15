@@ -282,6 +282,10 @@ export async function exerciseWindowLifetime(
       'Old Window layers reached the replacement frame',
     )
     await execute(
+      'oldLayer.onHitTest=function(){throw new Exception("Retired Window received hit test");};newLayer.hitType=htProvince;',
+    )
+    await session.input({ type: 'down', x: 1, y: 1, button: 0, shift: 0, clicks: 1 })
+    await execute(
       'invalidate oldLayer;delete global.oldLayer;invalidate newLayer;delete global.newLayer;delete global.win;',
     )
     await record(primary, 'separate-layer')
