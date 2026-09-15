@@ -170,6 +170,13 @@ jobs:
       - uses: ./.github/actions/prepare-tests
       - name: Preserve native process crash diagnostics
         run: |
+          # Installing gdb after a crash can upgrade libc and make the core's
+          # build IDs disagree with the libraries used to read its backtrace.
+          sudo apt-get update
+          sudo apt-get install -y gdb
+          gdb --version > out/ci/gdb-version.txt
+          dpkg-query -W libc6 gdb > out/ci/node-debug-packages.txt
+          ldd "$(command -v node)" > out/ci/node-linked-libraries.txt
           mkdir -p out/native-cores
           sudo sysctl -w "kernel.core_pattern=$GITHUB_WORKSPACE/out/native-cores/core.%e.%p" > out/ci/core-pattern.log
       - name: Run Node tests
@@ -183,8 +190,6 @@ jobs:
         if: always()
         run: |
           if compgen -G 'out/native-cores/core.*' > /dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y gdb
             mkdir -p out/ci/node-crashes
             for core in out/native-cores/core.*; do
               sha256sum "$core" >> out/ci/node-crashes/core-sha256.txt

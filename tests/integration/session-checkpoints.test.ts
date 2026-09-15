@@ -258,13 +258,14 @@ for (const binary of [false, true]) {
       internal = f.session as unknown as { host: HostHandler; modalLoop: ModalLoop },
       originalHost = internal.host,
       forward = originalHost.bind(f.session),
-      entered = gate()
+      entered = gate(),
+      parked = gate()
     let token = 0,
       dispatches = 0,
       evaluating: Promise<string> | undefined
-    // Window.showModal is not wired yet. This test-only host operation opens
-    // the real Session ModalLoop and returns its native continuation; it never
-    // invokes the runtime or creates a second VM entry from JavaScript.
+    // Isolate the checkpoint contract from Window.showModal's visibility and
+    // close-query policy. This host operation enters the real Session ModalLoop
+    // through its native continuation, without creating a second VM entry.
     internal.host = (operation, args, context) => {
       if (operation === 'CheckpointTest.modal') {
         const windowId = Number(args[0])
@@ -274,7 +275,18 @@ for (const binary of [false, true]) {
         return continuation
       }
       if (operation === 'Modal.dispatch') dispatches++
-      return forward(operation, args, context)
+      const reply = forward(operation, args, context)
+      // ModalScopes.wait installs its pending wake before its first await.
+      // Observe that real parked state; receipt commit can finish before TJS
+      // returns through the event pump and reaches the next Modal.wait.
+      if (
+        operation === 'Modal.wait' &&
+        Number(args[0]) === token &&
+        internal.modalLoop.pendingWaits === 1 &&
+        !f.session.hasModalWork()
+      )
+        parked.enter()
+      return reply
     }
     try {
       evaluating = f.session.evaluate('runHiddenCheckpointModal()')
@@ -288,7 +300,7 @@ for (const binary of [false, true]) {
       f.gates.block.release()
       await within(entered.entered, 'the real modal continuation')
       await within(admission.completion, 'the outside receipt and its hidden skipped tail')
-      await new Promise<void>((resolve) => setImmediate(resolve))
+      await within(parked.entered, 'the modal wait after the completed hidden receipt')
       // No subsequent evaluate/idle can repair this receipt: its parent TJS
       // operation is still inside Modal.wait with the Window scope open.
       assert.equal(modalState(), 'pending')

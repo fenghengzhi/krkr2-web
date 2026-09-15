@@ -33,3 +33,23 @@ Window 输入阻塞按模态栈从顶向下决定：System 对话框阻塞游戏
 初次提交 `62514dd04026458781cb66fa2a48bfe29b1cfe3a` 已进入 [Actions 35001901909](https://github.com/fenghengzhi/krkr2-web/actions/runs/35001901909)，尚未完成。静态复审发现另一处独立边界：若先给 Window 应用 inert，再打开原生 dialog，浏览器可能已把原焦点移走，组件无法保存真实来源。后续修订明确区分 ModalLoop 的打开和退出发布：打开时先呈现 System 对话框，再发布 Window 阻塞；退出时先恢复 Window 可交互性，再让对话框按身份及焦点版本有条件地恢复。真实 Worker 的 inform 用例在手动 focus 或控制台操作之前检查焦点是否已回到游戏窗口。
 
 这项修订尚待后续完整 Actions，不能把首轮未完成或任何后续通过追记为初次提交已通过。预期新增 28 项纯状态机、22 项真实 TJS、42 项浏览器组件与 48 项真实 Worker 检查；实际数量和结果以完整产物为准。
+
+## 原版托管观测
+
+[35002019683](https://github.com/fenghengzhi/krkr2-web/actions/runs/35002019683) 使用参考提交 `c579227940d1f17638747f333ec152a2c9c932f6`，在 GitHub-hosted Windows 2022／2025 的 8 个案例全部得到真实观测。消息、输入确认、空确认、取消各两例；对话框已出现且尚未点击的约 800 ms 内，每例均记录到 8 或 9 次 TJS Timer 回调。`inform` 返回 `void`，空确认返回长度为零的 String，取消返回 `void`。驱动只操作独立 SDK 进程中已核对的对话框及真实按钮／编辑控件。
+
+参考驱动 SHA-256 为 `37b3eac8ee2f65cbbc17475093784f780e3de59f232f7dd4dbb9bb94c770e03c`。56 份原始产物及每例脚本、驱动哈希和事件记录均已保存。Unicode 目标 `Hello 雪 Ω 😀` 经原版 ACP 1252 编辑控件后，控件读回与 TJS 结果均为 `Hello ? O ??`；这属于原版 ANSI 平台损失，Web 保留完整 Unicode。该运行只使用显式随机 ASCII 标题，默认、void 和空标题仍依据固定源码，未混称二进制验证。
+
+首轮 [35001453121](https://github.com/fenghengzhi/krkr2-web/actions/runs/35001453121) 为 2 项消息观测成功、6 项输入未能执行：构造中的控件读取超时及 ANSI 损失后的按钮标题使驱动无法确认输入条件。56 份原始证据继续保留；修订等待控件稳定并以真正的返回结果确认按钮语义，没有改写首轮状态，也没有扩展为未经观测的递归对话框或全部焦点行为。
+
+## 首轮已报告结果与后续修订
+
+首轮 `35001901909@62514dd` 的 Node 作业失败：**1,797 项普通用例通过、1 项普通断言失败、另有 1 个文件级 SIGABRT 占位，8 项普通用例未报告**。新增 50 项对话框 Node 用例全部实际通过。未报告的是 `layer-neutral-color.test.ts` 最后一项源码及七项字节码用例；文件占位不能当成一个真实案例或代替这八项。原始 TAP、日志、core 哈希和回溯分别保存。
+
+唯一命名断言失败是旧的 bytecode 隐藏模态检查点用例：receipt 完成后再等一次 setImmediate，观察到 modalScopes=1、操作仍 pending，但 modalWaits=0。receipt 在检查点提交时完成，TJS 尚须返回事件泵才能进入下一次 Modal.wait。后续夹具改为观测真实 Modal.wait 已同步安装等待、且没有模态工作时发出停泊信号；不使用 evaluate、idle 或额外 sleep，保留原来的完成、所有权和无忙转要求。
+
+异常终止前的可靠原日志是 `corrupted size vs. prev_size` 与 SIGABRT。首次回溯有五个库 build-id 不匹配、线程库不匹配和 corrupt stack：工作流在崩溃后安装 gdb，把 libc6 从 `2.39-0ubuntu8.8` 升级到 `8.9`，随后才读取 core。这些符号链不能据以确定根因。后续把 gdb 安装移到测试之前，并保存 gdb、libc 版本及 Node 链接库；这仅修正采集顺序，不是已证明修复异常，也没有新增或重建历史安全拒绝的分配复现。
+
+首轮 Chromium 常规浏览器实际 **369／371**；两个失败均为 Asyncify 源码／字节码 inform 返回后的真实焦点恢复断言，已到对话框关闭之后，后续控制台断言未执行。其余 Chromium 新用例与 JSPI inform 实际通过。`d01caed` 的发布顺序修订对应此边界。记录本节时 Firefox／WebKit 尚未结束，不能据局部结果声明首轮完整通过。
+
+只含焦点修订的 `d01caed` 曾排队为 `35002247123`；后续合并上述夹具与诊断修订时，任何被 GitHub 替换而未执行的排队运行都应单独记录，不计作通过。
