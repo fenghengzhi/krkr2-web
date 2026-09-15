@@ -191,3 +191,11 @@ MenuModals 将 popup 接入同一 TJS 栈上的 ModalLoop。MenuTree 保留每�
 这也校正了前文已经测试过、但源于推断的“丢弃关闭查询自动重试”：固定 WindowFormUnit 的 Closing 在排队时置位，隐藏投递失败及 ClearAllWindowInputEvents 都不清该位，SetVisible 也不清；再次 close 因 Closing 直接返回。因此新实现让被丢弃的已入队查询保持 pending，只有显式 base true/false 答复解除；仅在适配器同步入队前失败时回滚。新增隐藏关闭源码/字节码对照，并改正既有父查询被子模态取消的预期，保留取消确实发生、子窗口继续运行和显式答复后才能继续的断言。历史 `2683b304` 的绿色结果仍对应旧行为，不追认这些新改动已验证。
 
 本片新增 18 项 MenuTree、12 项 MenuModals、24 项真实 TJS 菜单、2 项原版隐藏关闭回归及 1 项关闭入队回滚测试，预期共新增 57 项 Node（合计 1,703）；页面新增 5 个宿主模板及 10 个真实 Worker 模板，预期新增 45 项浏览器（合计 1,140）。所有新增和修订均未在本地运行，需以推送后的 GitHub Actions 实际报告为准。
+
+## 菜单首轮 Node 结果与等待条件修订
+
+[34994052828](https://github.com/fenghengzhi/krkr2-web/actions/runs/34994052828)，提交 `352124784ad4d18870dd9d3bf1d03ab9ddf795c0`，类型及生产构建通过；Node 实际 **1,701 通过、2 失败／1,703**，没有取消、跳过或未报告。新增 57 项均实际通过。记录本节时浏览器和直接运行时尚在执行，不能据 Node 局部结果声明整轮通过。
+
+两个失败均为既有测试。旧 popup 等待只检查 events 最后一条是否 menus；新的 ModalLoop.changed 在 presentMenus 后还会发布 state，所以菜单已打开却被夹具错报未打开。失败后的未观察 evaluate Promise 另产生 AbortError unhandledRejection，原 TAP 一并保留。修订单独保存最新菜单快照，按事件通知和 request ID 等待，立即观察所有操作的 rejection，并在 finally 停止后等待结算；没有只增加 sleep 或改变业务结果。
+
+视频的无关窗口拒绝呈现用例，在所属窗口 present 成功后等待一个 host turn 就断言 receipt 已完成。实际 publish 后还需要自己的 native commit continuation；一次 setImmediate 不能保证它已返回。修订直接等待有截止时间的真实 receipt，期间无关窗口持续拒绝呈现；在 receipt 完成后立即比较所有权与 handles，保留所属窗口实际视频像素和无关窗口拒绝的记录。没有添加 idle、解除无关窗口的拒绝或改写生产逻辑。首次失败和修订后的未验证状态均独立保留。

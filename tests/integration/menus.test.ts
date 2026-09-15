@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { headless } from '../helpers/headless.ts'
+import type { MenuPopup, MenuSnapshot } from '../../src/engine/scene/menus.ts'
 
 const setup = String.raw`
 var window=new Window(), group=new MenuItem(window,"Game(&G)"), clicks=0;
@@ -53,38 +54,83 @@ test('MenuItem parent/order/radio semantics and native callbacks stay synchroniz
 })
 
 test('popup selection resumes its suspended caller; cancellation and stop release the wait', async () => {
-  const { session, events } = await headless({ 'startup.tjs': setup })
-  const waitPopup = async () => {
-    for (let i = 0; i < 100; i++) {
-      if (
-        events.at(-1)?.type === 'menus' &&
-        (events.at(-1) as { menus: { popup?: unknown } }).menus.popup
-      )
-        return
-      await new Promise((resolve) => setTimeout(resolve, 1))
-    }
-    throw new Error('Popup did not open')
+  let menus: MenuSnapshot = {},
+    changed: (() => void) | undefined
+  const operations: Promise<unknown>[] = []
+  const { session } = await headless(
+    { 'startup.tjs': setup },
+    {
+      event(event) {
+        if (event.type !== 'menus') return
+        // Modal opening publishes a state event after this menus event. Keep
+        // the latest menu snapshot independently of unrelated event ordering.
+        menus = event.menus
+        changed?.()
+      },
+    },
+  )
+  const observe = <T>(operation: Promise<T>): Promise<T> => {
+    // A failed readiness assertion still stops the suspended caller in finally.
+    // Preserve its original result while observing cancellation immediately.
+    void operation.catch(() => {})
+    operations.push(operation)
+    return operation
   }
+  const waitPopup = (operation: Promise<unknown>, previous?: number) =>
+    new Promise<MenuPopup>((resolve, reject) => {
+      let finished = false
+      const cleanup = () => {
+        finished = true
+        clearTimeout(timer)
+        if (changed === check) changed = undefined
+      }
+      const fail = (error: unknown) => {
+        if (finished) return
+        cleanup()
+        reject(error)
+      }
+      const check = () => {
+        if (finished || !menus.popup || menus.popup.requestId === previous) return
+        const popup = menus.popup
+        cleanup()
+        resolve(popup)
+      }
+      const timer = setTimeout(
+        () => fail(new Error(`Popup did not open: ${JSON.stringify(menus)}`)),
+        10000,
+      )
+      changed = check
+      void operation.then(
+        () => fail(new Error('Popup caller returned before publishing its pending request')),
+        fail,
+      )
+      // Subscribe before rechecking: an already published menu is ready too.
+      check()
+    })
   try {
     await session.start()
     const firstId = Number(await session.evaluate('first.__menuId'))
-    const selected = session.evaluate('group.popup(0,20,30)')
-    await waitPopup()
+    const selected = observe(session.evaluate('group.popup(0,20,30)'))
+    const firstPopup = await waitPopup(selected)
     await session.menuClick(firstId)
     assert.equal(await selected, '1')
     assert.equal(await session.evaluate('clicks'), '1')
-    const cancelled = session.evaluate('group.popup(tpmReturnCmd,20,30)')
-    await waitPopup()
+    const cancelled = observe(session.evaluate('group.popup(tpmReturnCmd,20,30)'))
+    const secondPopup = await waitPopup(cancelled, firstPopup.requestId)
     session.menuDismiss()
     assert.equal(await cancelled, '0')
-    const pending = session.evaluate('group.popup(0,20,30)')
-    const rejected = assert.rejects(pending, /cancelled/)
-    await waitPopup()
+    const pending = observe(session.evaluate('group.popup(0,20,30)'))
+    const rejected = observe(assert.rejects(pending, /cancelled/))
+    await waitPopup(pending, secondPopup.requestId)
     await session.stop()
     await rejected
     assert.equal(session.snapshot().handles, 0)
   } finally {
-    await session.stop()
+    try {
+      await session.stop()
+    } finally {
+      await Promise.allSettled(operations)
+    }
   }
 })
 
