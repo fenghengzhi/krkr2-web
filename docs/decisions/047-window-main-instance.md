@@ -27,3 +27,9 @@ WindowService 的 `main` 从已有活动窗口记录返回 ScriptWeakObject；�
 首轮 [Node diagnostic 34929268155](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929268155) 的构建和类型检查通过，1,065 项测试中 1,063 项通过、2 项失败，没有取消或跳过。失败来自新增测试：TJS 全局槽位读取会自动调用存储的属性 getter，`*mainAccessor` 因而对已经返回的 null 再解引用。测试改用 `*(&global.mainAccessor)`，并增加局部寄存器访问器及隐式／显式只读写入对照；弱引用、替代窗口和回收断言保留。失败记录及完整产物已归档，修订等待云端重跑。
 
 本地仅阅读、编辑与格式化；所有构建、类型检查、测试和可执行探针由 GitHub-hosted Actions 执行。先前已通过的阶段及历史失败继续保留，不作为此提交通过的证据。
+
+后续 [Node diagnostic 34930018485](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930018485) 的 1,065 项测试通过。[完整回归 34930203580](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930203580) 使用提交 `60737a26e78830456f2b07c77a05b7eba57e8aa1`，Node 1,065 项和 6 项 direct runtime 通过，浏览器为 821/822（含 7 项原生活动检查）；新增 Window 查询测试全部通过，完整回归仍是失败结果。
+
+唯一失败是 WebKit JSPI 的既有 `player.spec.ts` 示例场景。该作业使用一个 worker、Playwright 1.63.0、WebKit 26.6/build 2359 和 GitHub-hosted macOS 15 ARM64。测试在 2026-09-15 04:55:03.062 UTC 开始，能力检查返回 JSPI 与 WebGL2 可用；点击“运行示例”后约 164ms，页面在首次“会话就绪”之前报告 `Page crashed`，尚未进入输入、暂停、停止或重启步骤。网络 trace 保存了成功返回的 Worker、manifest、JSPI 模块和 WASM；这些信息不能确定崩溃的原生执行位置。浏览器启动进程随后在失败后的清理中正常退出，也不能据此判断页面崩溃原因。
+
+本次完整产物及失败日志已独立保留。它们没有 macOS `.ips`／`.crash` 报告，因为原工作流没有收集 `DiagnosticReports`；目前没有原生堆栈可以归因。此事件不与历史 WebKit 崩溃合并判断。`webkit-diagnostic.yml` 新增 `player-restart` 场景，复用匹配的原构建，在 hosted Mac 上对原测试的两个后端各重复 10 次，保留 JSON、浏览器／协议日志及运行标记之后新生成的原生崩溃报告。诊断尚未运行，不构成通过证据，也不替代失败的完整回归。
