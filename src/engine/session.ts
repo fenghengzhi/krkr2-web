@@ -32,6 +32,8 @@ import { modeOffset } from '../formats/text/stream.ts'
 import { ScriptEvents } from './scheduler/events.ts'
 import { SystemEvents, type EventOptions, type EventOutcome } from './scheduler/system-events.ts'
 import { systemEventsBridge } from './tvp/system.ts'
+import { systemClassValue, systemReadonlyProperties } from './tvp/system-class.ts'
+import { SystemEnvironment } from './system/environment.ts'
 import { checkpointBridge } from './tvp/checkpoints.ts'
 import { ModalLoop } from './scheduler/modal-loop.ts'
 import { WindowModals } from './scene/window-modal.ts'
@@ -177,6 +179,7 @@ export interface SessionDependencies {
   video?: VideoBackend
   clipboard?: ClipboardPort
   arguments?: ReadonlyMap<string, string>
+  fillRandomBytes?: (bytes: Uint8Array) => void
   now: () => number
   wallNow?: () => number
   yieldToHost: () => Promise<void>
@@ -185,6 +188,7 @@ export interface SessionDependencies {
 }
 
 export class EngineSession {
+  private readonly systemEnvironment: SystemEnvironment
   private readonly clipboard: ClipboardPort
   private clipboardClosed = false
   private readonly textEncoding = new ScriptTextEncoding()
@@ -312,6 +316,8 @@ export class EngineSession {
   private readonly cancellationErrors: unknown[] = []
   private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
+    this.systemArguments = new Map(deps.arguments)
+    this.systemEnvironment = new SystemEnvironment(this.systemArguments, deps.fillRandomBytes)
     this.clipboard = deps.clipboard ?? unavailableClipboard()
     this.fonts = new FontService(
       (name) => this.resolveResource(name),
@@ -331,7 +337,6 @@ export class EngineSession {
     this.fontSelection = new FontSelection(this.fontCatalog, (request) =>
       this.deps.event({ type: 'font-selection', request }),
     )
-    this.systemArguments = new Map(deps.arguments)
     if (deps.activity) {
       validateActivity(deps.activity)
       this.activity = { ...deps.activity }
@@ -425,7 +430,7 @@ export class EngineSession {
           ),
         ),
       )
-      this.diagnostics.setLocation(this.diagnostics.location, this.systemArguments)
+      this.diagnostics.setLocation(this.systemEnvironment.dataPath, this.systemArguments)
       this.eventYieldAt = this.deps.now() + 8
       this.systemEvents = new SystemEvents(
         this.runtime,
@@ -2605,6 +2610,34 @@ export class EngineSession {
     args: ScriptValue[],
     context: HostContext,
   ): Promise<HostReply> {
+    if (operation === 'System.class') return { kind: 'value', value: systemClassValue(args) }
+    if (operation === 'System.createUUID')
+      return { kind: 'value', value: this.systemEnvironment.createUUID() }
+    if (operation === 'System.get') {
+      const property = args[1]
+      if (
+        args[0] !== 0n ||
+        typeof property !== 'string' ||
+        !systemReadonlyProperties.includes(property as (typeof systemReadonlyProperties)[number])
+      )
+        throw new Error('Invalid System property')
+      return {
+        kind: 'value',
+        value:
+          property === 'versionInformation'
+            ? this.systemEnvironment.versionInformation(this.runtime?.languageVersion)
+            : this.systemEnvironment[
+                property as Exclude<(typeof systemReadonlyProperties)[number], 'versionInformation'>
+              ],
+      }
+    }
+    if (operation === 'System.title') {
+      if (args.length) {
+        if (typeof args[0] !== 'string') throw new Error('System title requires text')
+        this.systemEnvironment.title = args[0]
+      }
+      return { kind: 'value', value: this.systemEnvironment.title }
+    }
     if (operation === 'Clipboard.class')
       return {
         kind: 'value',

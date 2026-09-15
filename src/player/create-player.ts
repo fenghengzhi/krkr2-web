@@ -12,6 +12,7 @@ import { activityPaused, initialActivity } from '../engine/ports/activity.ts'
 import type { InputView } from '../engine/ports/input.ts'
 import type { WindowPresentation, WindowView } from '../engine/scene/window.ts'
 import type { WindowSurfaceIdentity } from '../protocol/surfaces.ts'
+import { normalizeSystemDataPath } from '../engine/system/environment.ts'
 
 /** Player-facing DOM ownership; compatible with the app's GameWindows host. */
 export interface PlayerWindowSurface {
@@ -34,6 +35,8 @@ export interface PlayerWindowHost {
 
 export interface PlayerOptions {
   windows: PlayerWindowHost
+  /** Optional game-relative startup directory; never a host filesystem path. */
+  dataPath?: string
   onClipboardRequest?(request: ClipboardRequest | null): void
   ownsClipboardFocus?(target: EventTarget | null): boolean
   /** Input and video are attached, and the canvas has not yet been transferred. */
@@ -50,6 +53,8 @@ export function createPlayer(
   pauseWhenHidden = true,
   options: PlayerOptions,
 ) {
+  const dataPath = options.dataPath
+  normalizeSystemDataPath(dataPath)
   const audioChannel = new MessageChannel()
   const audio = new WebAudioHost(audioChannel.port1, onAudio)
   const videoChannel = new MessageChannel()
@@ -260,6 +265,7 @@ export function createPlayer(
         videoChannel.port2,
         debugMode,
         clipboardChannel.port2,
+        dataPath,
       )
       await session.mount()
       // Only ordered Session events update the host. A start RPC snapshot can

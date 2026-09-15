@@ -62,6 +62,7 @@ export class SessionClient {
     video: MessagePort,
     debugMode = false,
     clipboard?: MessagePort,
+    dataPath?: string,
   ) {
     const request = {
       version: PROTOCOL_VERSION,
@@ -75,6 +76,7 @@ export class SessionClient {
       audio,
       video,
       clipboard,
+      dataPath,
       activity: this.activity,
       systemFonts: this.systemFonts,
     }
