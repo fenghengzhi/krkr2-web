@@ -1,0 +1,27 @@
+# 047 — Window.mainWindow 的实例查询
+
+`Window.mainWindow` 返回实际主窗口对象或 null，替代固定的 true。它是与接收者无关的类级查询：创建窗口之前为 null，派生类实例创建成功后返回该实例，隐藏窗口不会改变身份。类、派生类和实例都可以读取；属性没有 setter，普通赋值会被 TJS 拒绝。
+
+原生 [mainWindow getter](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/WindowIntf.cpp#L1604-L1623)从 TVPMainWindow 取得 owner，返回以该 owner 为接收者的对象闭包。源码注释将其称为 static，但通过普通属性注册宏安装，因此本阶段保留类与实例的访问形式。现有 TJS 类属性机制已经支持这两种访问，无需引入额外原生类或修改 WASM ABI。
+
+WindowService 的 `main` 从已有活动窗口记录返回 ScriptWeakObject；登记本身不持有窗口。宿主桥将观察令牌还原为正常 TJS 对象值，不创建额外的长期宿主句柄。脚本保存查询结果时产生普通强引用；临时结果在求值显示、丢弃和 collect 后释放。保存从 Window 类取得的属性引用只保存查询方法，不保存当时返回的 Window。
+
+生命周期采用已有阶段 042 的登记边界：
+
+| 时点                                  | mainWindow                               |
+| ------------------------------------- | ---------------------------------------- |
+| 成功构造并登记                        | 实际 Window／派生实例                    |
+| 隐藏窗口或直接调用 finalize 方法      | 保持登记                                 |
+| 脚本 finalizer 抛错，尚未进入原生清理 | 保持原窗口，允许重试                     |
+| 原生 invalidate 开始                  | 立即撤销登记，先于媒体等待和托管对象清理 |
+| 托管对象清理期间创建替代窗口          | 指向替代窗口；旧窗口 finish 不撤销它     |
+| 原生清理失败后的重试                  | 不恢复已经撤销的旧登记                   |
+| 构造回滚、最后引用释放、会话终止      | 撤销相应登记                             |
+
+这些顺序依据 [窗口列表登记／撤销](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/WindowIntf.cpp#L33-L70)和 [Invalidate 首先注销窗口](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/WindowIntf.cpp#L181-L205)。清理中的旧对象仍可能因脚本引用而存活，但不能重新成为主窗口。
+
+当前仍只允许一个活动 Window。第二个活动实例的构造保持原有错误；已进入清理的旧记录和新的活动实例可以短暂并存。该查询修正没有实现多窗口显示、焦点分发或原生操作系统窗口策略，完整非插件目标仍在进行。
+
+新增 `tests/integration/window-main-window.test.ts` 的源码／字节码用例，验证身份、只读、查询引用的释放、失败重试、构造回滚和替代窗口。`tests/browser/window-main-window.spec.ts` 在双后端源码／字节码组合中覆盖实际会话的身份、弱引用与清理时序。
+
+本阶段尚未验证。本地仅阅读、编辑与格式化；所有构建、类型检查、测试和可执行探针由 GitHub-hosted Actions 执行。先前已通过的阶段及历史失败继续保留，不作为此提交通过的证据。

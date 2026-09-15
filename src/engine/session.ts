@@ -1771,6 +1771,9 @@ export class EngineSession {
         value = BigInt(this.windows!.create(args[0], args[1], context).id)
         break
       }
+      case 'Window.main':
+        value = this.windows!.main
+        break
       case 'Window.invalidate':
         if (!isScriptObject(args[1])) throw new Error('Expected native Window owner')
         return this.windows!.invalidate(number(0), args[1])

@@ -97,7 +97,9 @@ class Window {
     .join('\n')}
   property focusedLayer {getter(){return __host("Input.get",0,"focusedLayer");}setter(layer){__host("Input.focus",layer===null?0:layer.__id,1);}}
   property currentModalLayer {getter(){return __host("Input.get",0,"currentModalLayer");}}
-  property mainWindow { getter() { return true; } }
+  // TJS class properties are callable on the class and inherited by instances.
+  // This query deliberately does not depend on an instance or __windowId.
+  property mainWindow { getter() { return __host("Window.main"); } }
   ${[
     'caption',
     'visible',

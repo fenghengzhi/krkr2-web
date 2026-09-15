@@ -33,6 +33,12 @@ export class WindowService {
   get active(): WindowRecord | undefined {
     return this.current
   }
+  /** Class-level query: registration is weak and independent of visibility.
+   * Native invalidation unregisters before any asynchronous resource cleanup. */
+  get main(): ScriptWeakObject | null {
+    const window = this.current
+    return window && !window.closing && !window.finished ? window.owner : null
+  }
   get count(): number {
     return this.records.size
   }
