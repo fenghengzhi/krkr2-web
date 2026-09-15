@@ -23,7 +23,7 @@ function menuActionChecks(){
   invalidate bound;
 
   global.menuThrowVisits=0;
-  var failing=new MenuItem(%[action:function(event){global.menuThrowVisits++;throw new Exception("menu-action-thrown");}],"failure"),caught="";
+  var failing=new MenuItem(%[action:function(event){global.menuThrowVisits++;throw new global.Exception("menu-action-thrown");}],"failure"),caught="";
   try{failing.onClick();}catch(error){caught=error.message;}
   demand(caught.indexOf("menu-action-thrown")>=0,"action exception mismatch: caught="+caught+", visits="+menuThrowVisits);
   delete global.menuThrowVisits;
