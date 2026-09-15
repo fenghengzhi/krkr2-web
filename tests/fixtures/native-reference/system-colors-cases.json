@@ -1,0 +1,823 @@
+{
+  "schema": 1,
+  "suite": "system-colors",
+  "executionMode": "source",
+  "sourceReference": {
+    "repository": "https://github.com/krkrz/krkr2",
+    "commit": "dec49af97e174d31059c3ccd7efc700ba3c6b788",
+    "branchPath": "kirikiri2/branches/2.32stable/kirikiri2/src/",
+    "relationshipToSdk": "Static source reference only; sdk.json pins a distribution binary whose exact source commit/VCL build is not assumed."
+  },
+  "scope": "Bounded original SDK values/errors and 2x2 Layer pixels; no Web runtime pass and no predeclared VCL output oracle.",
+  "recordProtocol": "case|id|outcome|inputType|inputText|resultType|resultText|effectCount|errorMessageEscaped",
+  "recordProtocolNotes": [
+    "Error messages use native TJS String.escape() and are retained as escaped text, not guessed JSON or decoded text.",
+    "Integer inputs/results are decimal strings, so JSON number precision never alters native int64 observations.",
+    "Layer resultText is mainRgbDecimal,maskDecimal,provinceDecimal at (0,0).",
+    "effectCount records nativeBadColor getter evaluations within an entry case.",
+    "sourceExpectation values are static expectations only; the converter must not copy or assert them as actual outputs."
+  ],
+  "cases": [
+    {
+      "id": "constant-clScrollBar",
+      "kind": "constant",
+      "inputExpression": "clScrollBar",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000000",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clBackground",
+      "kind": "constant",
+      "inputExpression": "clBackground",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000001",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clActiveCaption",
+      "kind": "constant",
+      "inputExpression": "clActiveCaption",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000002",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clInactiveCaption",
+      "kind": "constant",
+      "inputExpression": "clInactiveCaption",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000003",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clMenu",
+      "kind": "constant",
+      "inputExpression": "clMenu",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000004",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clWindow",
+      "kind": "constant",
+      "inputExpression": "clWindow",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000005",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clWindowFrame",
+      "kind": "constant",
+      "inputExpression": "clWindowFrame",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000006",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clMenuText",
+      "kind": "constant",
+      "inputExpression": "clMenuText",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000007",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clWindowText",
+      "kind": "constant",
+      "inputExpression": "clWindowText",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000008",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clCaptionText",
+      "kind": "constant",
+      "inputExpression": "clCaptionText",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000009",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clActiveBorder",
+      "kind": "constant",
+      "inputExpression": "clActiveBorder",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x8000000a",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clInactiveBorder",
+      "kind": "constant",
+      "inputExpression": "clInactiveBorder",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x8000000b",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clAppWorkSpace",
+      "kind": "constant",
+      "inputExpression": "clAppWorkSpace",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x8000000c",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clHighlight",
+      "kind": "constant",
+      "inputExpression": "clHighlight",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x8000000d",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clHighlightText",
+      "kind": "constant",
+      "inputExpression": "clHighlightText",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x8000000e",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clBtnFace",
+      "kind": "constant",
+      "inputExpression": "clBtnFace",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x8000000f",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clBtnShadow",
+      "kind": "constant",
+      "inputExpression": "clBtnShadow",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000010",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clGrayText",
+      "kind": "constant",
+      "inputExpression": "clGrayText",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000011",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clBtnText",
+      "kind": "constant",
+      "inputExpression": "clBtnText",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000012",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clInactiveCaptionText",
+      "kind": "constant",
+      "inputExpression": "clInactiveCaptionText",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000013",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clBtnHighlight",
+      "kind": "constant",
+      "inputExpression": "clBtnHighlight",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000014",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-cl3DDkShadow",
+      "kind": "constant",
+      "inputExpression": "cl3DDkShadow",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000015",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-cl3DLight",
+      "kind": "constant",
+      "inputExpression": "cl3DLight",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000016",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clInfoText",
+      "kind": "constant",
+      "inputExpression": "clInfoText",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000017",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "constant-clInfoBk",
+      "kind": "constant",
+      "inputExpression": "clInfoBk",
+      "sourceExpectation": {
+        "constantUint32Hex": "0x80000018",
+        "conversion": "VCL-dependent actual RGB; compare separately with the runner palette, not a predeclared RGB."
+      }
+    },
+    {
+      "id": "rgb-zero",
+      "kind": "rgb",
+      "inputExpression": "0",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "rgb-one",
+      "kind": "rgb",
+      "inputExpression": "1",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "rgb-123456",
+      "kind": "rgb",
+      "inputExpression": "0x123456",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "rgb-abcdef",
+      "kind": "rgb",
+      "inputExpression": "0xabcdef",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "rgb-white",
+      "kind": "rgb",
+      "inputExpression": "0xffffff",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "rgb-red",
+      "kind": "rgb",
+      "inputExpression": "0xff0000",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "rgb-green",
+      "kind": "rgb",
+      "inputExpression": "0x00ff00",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "rgb-blue",
+      "kind": "rgb",
+      "inputExpression": "0x0000ff",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-01010203",
+      "kind": "high-byte",
+      "inputExpression": "0x01010203",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-02010203",
+      "kind": "high-byte",
+      "inputExpression": "0x02010203",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-03010203",
+      "kind": "high-byte",
+      "inputExpression": "0x03010203",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-04010203",
+      "kind": "high-byte",
+      "inputExpression": "0x04010203",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-7f010203",
+      "kind": "high-byte",
+      "inputExpression": "0x7f010203",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-81000005",
+      "kind": "high-byte",
+      "inputExpression": "0x81000005",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-ff000005",
+      "kind": "high-byte",
+      "inputExpression": "0xff000005",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-ffffffff",
+      "kind": "high-byte",
+      "inputExpression": "0xffffffff",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-80000105",
+      "kind": "high-byte",
+      "inputExpression": "0x80000105",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-80010005",
+      "kind": "high-byte",
+      "inputExpression": "0x80010005",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-80800005",
+      "kind": "high-byte",
+      "inputExpression": "0x80800005",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-c0000005",
+      "kind": "high-byte",
+      "inputExpression": "0xc0000005",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-80000019",
+      "kind": "high-byte",
+      "inputExpression": "0x80000019",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-8000001a",
+      "kind": "high-byte",
+      "inputExpression": "0x8000001a",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-8000001e",
+      "kind": "high-byte",
+      "inputExpression": "0x8000001e",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-8000001f",
+      "kind": "high-byte",
+      "inputExpression": "0x8000001f",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-800000ff",
+      "kind": "high-byte",
+      "inputExpression": "0x800000ff",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-80000100",
+      "kind": "high-byte",
+      "inputExpression": "0x80000100",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "high-byte-8000ffff",
+      "kind": "high-byte",
+      "inputExpression": "0x8000ffff",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "image-marker-none",
+      "kind": "image-marker",
+      "inputExpression": "clNone",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "image-marker-adapt",
+      "kind": "image-marker",
+      "inputExpression": "clAdapt",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "image-marker-palette-18",
+      "kind": "image-marker",
+      "inputExpression": "clPalIdx+0x12",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "image-marker-alpha-mat-123456",
+      "kind": "image-marker",
+      "inputExpression": "clAlphaMat+0x123456",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-signed-window",
+      "kind": "integer-width",
+      "inputExpression": "-2147483643",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-signed-min32",
+      "kind": "integer-width",
+      "inputExpression": "-2147483648",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-minus-one",
+      "kind": "integer-width",
+      "inputExpression": "-1",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-exact32",
+      "kind": "integer-width",
+      "inputExpression": "0x100000000",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-above32-rgb",
+      "kind": "integer-width",
+      "inputExpression": "0x100123456",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-above32-window",
+      "kind": "integer-width",
+      "inputExpression": "0x180000005",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-negative32-rgb",
+      "kind": "integer-width",
+      "inputExpression": "(-0x100000000+0x123456)",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-above-safe-odd",
+      "kind": "integer-width",
+      "inputExpression": "9007199254740993",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-above-safe-window",
+      "kind": "integer-width",
+      "inputExpression": "9007201402224645",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-negative-safe-odd",
+      "kind": "integer-width",
+      "inputExpression": "-9007199254740993",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-wide-rgb",
+      "kind": "integer-width",
+      "inputExpression": "0x1000000000123456",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-wide-window",
+      "kind": "integer-width",
+      "inputExpression": "0x1000000080000005",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-max-int64",
+      "kind": "integer-width",
+      "inputExpression": "0x7fffffffffffffff",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "integer-width-min-int64",
+      "kind": "integer-width",
+      "inputExpression": "(-9223372036854775807-1)",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "coercion-void",
+      "kind": "coercion",
+      "inputExpression": "void",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "coercion-numeric-string",
+      "kind": "coercion",
+      "inputExpression": "\"1193046\"",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "coercion-fraction",
+      "kind": "coercion",
+      "inputExpression": "1193046.75",
+      "sourceExpectation": {
+        "conversion": "Ordinary 24-bit RGB is unchanged; all other results remain observations until compared with the fixed source and VCL boundary."
+      }
+    },
+    {
+      "id": "entry-missing-used",
+      "kind": "entry",
+      "inputExpression": "System.toActualColor() with a requested result",
+      "sourceExpectation": {
+        "entry": "Quantity error before any color conversion."
+      }
+    },
+    {
+      "id": "entry-missing-discarded",
+      "kind": "entry",
+      "inputExpression": "System.toActualColor() as a statement",
+      "sourceExpectation": {
+        "entry": "Quantity error even when result is unused."
+      }
+    },
+    {
+      "id": "entry-octet-used",
+      "kind": "entry",
+      "inputExpression": "System.toActualColor(nativeBadColor) with a requested result",
+      "sourceExpectation": {
+        "entry": "Getter is evaluated once; record conversion error or result."
+      }
+    },
+    {
+      "id": "entry-octet-discarded",
+      "kind": "entry",
+      "inputExpression": "System.toActualColor(nativeBadColor) as a statement",
+      "sourceExpectation": {
+        "entry": "Getter is evaluated once; native body skips conversion for unused result."
+      }
+    },
+    {
+      "id": "entry-object-used",
+      "kind": "entry",
+      "inputExpression": "System.toActualColor(%[]) with a requested result",
+      "sourceExpectation": {
+        "entry": "Record actual object conversion behavior."
+      }
+    },
+    {
+      "id": "entry-object-discarded",
+      "kind": "entry",
+      "inputExpression": "System.toActualColor(%[]) as a statement",
+      "sourceExpectation": {
+        "entry": "No native argument conversion when the result is unused."
+      }
+    },
+    {
+      "id": "entry-extra-argument",
+      "kind": "entry",
+      "inputExpression": "System.toActualColor(0x123456,nativeBadColor)",
+      "sourceExpectation": {
+        "entry": "Extra expression is evaluated once but extra value is not converted by the native body."
+      }
+    },
+    {
+      "id": "entry-borrowed-receiver",
+      "kind": "entry",
+      "inputExpression": "System.toActualColor borrowed with a non-null Dictionary receiver",
+      "sourceExpectation": {
+        "entry": "Static method has no native System-instance lookup."
+      }
+    },
+    {
+      "id": "entry-null-receiver",
+      "kind": "entry",
+      "inputExpression": "System.toActualColor bound to a null receiver",
+      "sourceExpectation": {
+        "entry": "Record actual call-binding/native receiver behavior; do not infer a result."
+      }
+    },
+    {
+      "id": "layer-fill-opaque-hold",
+      "kind": "layer",
+      "inputExpression": "fillRect clWindow / dfOpaque / holdAlpha=true",
+      "sourceExpectation": {
+        "pixels": "Actual window RGB and original alpha 87."
+      }
+    },
+    {
+      "id": "layer-fill-opaque-replace",
+      "kind": "layer",
+      "inputExpression": "fillRect clWindow / dfOpaque / holdAlpha=false",
+      "sourceExpectation": {
+        "pixels": "Raw RGB 0x000005 and alpha 128."
+      }
+    },
+    {
+      "id": "layer-fill-alpha",
+      "kind": "layer",
+      "inputExpression": "fillRect clWindow / dfAlpha",
+      "sourceExpectation": {
+        "pixels": "Raw RGB 0x000005 and alpha 128."
+      }
+    },
+    {
+      "id": "layer-fill-addalpha",
+      "kind": "layer",
+      "inputExpression": "fillRect clWindow / dfAddAlpha",
+      "sourceExpectation": {
+        "pixels": "Raw RGB 0x000005 and alpha 128."
+      }
+    },
+    {
+      "id": "layer-set-main-window",
+      "kind": "layer",
+      "inputExpression": "setMainPixel clWindow",
+      "sourceExpectation": {
+        "pixels": "Actual window RGB; destination alpha remains 87."
+      }
+    },
+    {
+      "id": "layer-set-main-high01",
+      "kind": "layer",
+      "inputExpression": "setMainPixel 0x01010203",
+      "sourceExpectation": {
+        "pixels": "VCL conversion result; destination alpha remains 87."
+      }
+    },
+    {
+      "id": "layer-color-alpha",
+      "kind": "layer",
+      "inputExpression": "colorRect clWindow / dfAlpha / opacity=255",
+      "sourceExpectation": {
+        "pixels": "Actual window RGB with alpha 255."
+      }
+    },
+    {
+      "id": "layer-color-alpha-zero",
+      "kind": "layer",
+      "inputExpression": "colorRect clWindow / dfAlpha / opacity=0",
+      "sourceExpectation": {
+        "pixels": "No pixel change; no color conversion in fixed source."
+      }
+    },
+    {
+      "id": "layer-color-alpha-negative",
+      "kind": "layer",
+      "inputExpression": "colorRect clWindow / dfAlpha / opacity=-255",
+      "sourceExpectation": {
+        "pixels": "RGB retained; alpha removed without color conversion."
+      }
+    },
+    {
+      "id": "layer-color-opaque",
+      "kind": "layer",
+      "inputExpression": "colorRect clWindow / dfOpaque / opacity=255",
+      "sourceExpectation": {
+        "pixels": "Actual window RGB; destination alpha remains 87."
+      }
+    },
+    {
+      "id": "layer-color-addalpha-zero",
+      "kind": "layer",
+      "inputExpression": "colorRect clWindow / dfAddAlpha / opacity=0",
+      "sourceExpectation": {
+        "pixels": "Fixed source calls conversion; pixels alone cannot prove that call."
+      }
+    },
+    {
+      "id": "layer-fill-mask",
+      "kind": "layer",
+      "inputExpression": "fillRect clWindow / dfMask",
+      "sourceExpectation": {
+        "pixels": "RGB retained; mask uses low byte 5, without system-color conversion."
+      }
+    },
+    {
+      "id": "layer-color-mask",
+      "kind": "layer",
+      "inputExpression": "colorRect clWindow / dfMask",
+      "sourceExpectation": {
+        "pixels": "Record legacy mask behavior separately; fixed source has a Boolean expression."
+      }
+    },
+    {
+      "id": "layer-fill-province",
+      "kind": "layer",
+      "inputExpression": "fillRect clWindow / dfProvince",
+      "sourceExpectation": {
+        "pixels": "Province 5; RGB and mask unchanged."
+      }
+    },
+    {
+      "id": "layer-set-province",
+      "kind": "layer",
+      "inputExpression": "setProvincePixel clWindow",
+      "sourceExpectation": {
+        "pixels": "Province low byte 5; RGB and mask unchanged."
+      }
+    }
+  ]
+}

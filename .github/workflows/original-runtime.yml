@@ -6,7 +6,7 @@ on:
       suite:
         description: Original SDK observation suite
         type: choice
-        options: [modal, menu, system-dialog]
+        options: [modal, menu, system-dialog, system-colors]
         default: modal
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
-        scenario: ${{ inputs.suite == 'menu' && fromJSON('["menu-0-select","menu-0-cancel","menu-128-select","menu-128-cancel","menu-256-select","menu-256-cancel","menu-384-select","menu-384-cancel"]') || inputs.suite == 'system-dialog' && fromJSON('["system-inform","system-input-unicode","system-input-empty","system-input-cancel"]') || fromJSON('["modal-close","modal-accepted-reclose","modal-hidden-timer","modal-parent-child"]') }}
+        scenario: ${{ inputs.suite == 'menu' && fromJSON('["menu-0-select","menu-0-cancel","menu-128-select","menu-128-cancel","menu-256-select","menu-256-cancel","menu-384-select","menu-384-cancel"]') || inputs.suite == 'system-dialog' && fromJSON('["system-inform","system-input-unicode","system-input-empty","system-input-cancel"]') || inputs.suite == 'system-colors' && fromJSON('["system-colors"]') || fromJSON('["modal-close","modal-accepted-reclose","modal-hidden-timer","modal-parent-child"]') }}
     defaults:
       run:
         shell: pwsh
@@ -46,8 +46,17 @@ jobs:
             state = 'not-run'; stage = 'download'; scope = 'Original SDK observations, not a Web runtime test'
             globalInputUsed = $false; pluginsLoadedByFixture = $false
             processDeadlineMs = 30000; timedOut = $false; exitCode = $null; error = $null
+            environment = [ordered]@{
+              OSDescription = [Runtime.InteropServices.RuntimeInformation]::OSDescription
+              OSVersion = [Environment]::OSVersion.VersionString
+              ImageOS = $env:ImageOS; ImageVersion = $env:ImageVersion
+              processArchitecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+              processArchitectureScope = 'PowerShell observation host; not an SDK binary architecture assertion'
+            }
           }
           $process = $null
+          $isSystemColors = $env:NATIVE_SCENARIO -ceq 'system-colors'
+          $systemColorsDriverLoaded = $false
           $work = Join-Path $env:RUNNER_TEMP ('krkr2-original-' + [Guid]::NewGuid().ToString('N'))
           New-Item -ItemType Directory $work | Out-Null
           try {
@@ -93,6 +102,60 @@ jobs:
               Copy-Item $driver (Join-Path $output 'original-system-dialog-driver.cs')
               $status.driverSha256 = (Get-FileHash $driver -Algorithm SHA256).Hash.ToLowerInvariant()
               Add-Type -Path $driver
+            } elseif ($isSystemColors) {
+              $status.stage = 'system-colors-inputs'
+              $fixture = 'tests/fixtures/native-reference/system-colors.tjs'
+              $sourceInputs = [ordered]@{
+                fixture = $fixture
+                plan = 'tests/fixtures/native-reference/system-colors-plan.md'
+                cases = 'tests/fixtures/native-reference/system-colors-cases.json'
+                schema = 'tests/fixtures/native-reference/system-colors.schema.json'
+                sourceManifest = 'tests/fixtures/native-reference/system-colors-source.json'
+                driver = 'tests/probes/original-system-colors.ps1'
+              }
+              $status.systemColorsInputs = [ordered]@{}
+              foreach ($inputName in $sourceInputs.Keys) {
+                $sourcePath = $sourceInputs[$inputName]
+                $archivedPath = Join-Path $output (Split-Path $sourcePath -Leaf)
+                Copy-Item $sourcePath $archivedPath
+                $status.systemColorsInputs[$inputName] = [ordered]@{
+                  file = Split-Path $archivedPath -Leaf
+                  sha256 = (Get-FileHash $archivedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+              }
+              $systemColorsCases = Join-Path $output 'system-colors-cases.json'
+              $status.sourceReference = (Get-Content $systemColorsCases -Raw -Encoding utf8 | ConvertFrom-Json).sourceReference
+              $status.driverSha256 = $status.systemColorsInputs.driver.sha256
+              $status.stage = 'source-reference'
+              $sourceManifest = Get-Content (Join-Path $output 'system-colors-source.json') -Raw -Encoding utf8 | ConvertFrom-Json
+              if ($sourceManifest.repository -cne $status.sourceReference.repository -or
+                  $sourceManifest.commit -cne $status.sourceReference.commit -or
+                  $sourceManifest.branchPath -cne $status.sourceReference.branchPath) {
+                throw 'Source manifest differs from the declared static source reference.'
+              }
+              $sourceDirectory = Join-Path $output 'source-reference'
+              New-Item -ItemType Directory -Force $sourceDirectory | Out-Null
+              $status.sourceReferenceFiles = @()
+              foreach ($sourcePin in $sourceManifest.files) {
+                $sourceFile = Join-Path $sourceDirectory $sourcePin.file
+                New-Item -ItemType Directory -Force (Split-Path $sourceFile -Parent) | Out-Null
+                Invoke-WebRequest -Uri $sourcePin.url -OutFile $sourceFile
+                $sourceObservation = [ordered]@{
+                  file = $sourcePin.file; url = $sourcePin.url
+                  expectedBytes = $sourcePin.bytes; bytes = (Get-Item $sourceFile).Length
+                  expectedSha256 = $sourcePin.sha256
+                  sha256 = (Get-FileHash $sourceFile -Algorithm SHA256).Hash.ToLowerInvariant()
+                  verified = $false
+                }
+                $status.sourceReferenceFiles += $sourceObservation
+                if ($sourceObservation.bytes -ne $sourcePin.bytes -or $sourceObservation.sha256 -cne $sourcePin.sha256) {
+                  throw ('Static source reference differs from the preserved bytes: ' + $sourcePin.file)
+                }
+                $sourceObservation.verified = $true
+              }
+              $status.stage = 'system-colors-driver'
+              . (Join-Path $output 'original-system-colors.ps1')
+              $systemColorsDriverLoaded = $true
             } else {
               $fixture = Join-Path 'tests/fixtures/native-reference' ($env:NATIVE_SCENARIO + '.tjs')
             }
@@ -106,6 +169,10 @@ jobs:
             [IO.File]::WriteAllText($startup, $script, [Text.UnicodeEncoding]::new($false, $true))
             Copy-Item $startup (Join-Path $output 'startup.tjs')
             $status.scriptSha256 = (Get-FileHash $startup -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($isSystemColors) {
+              $status.stage = 'system-palette'
+              Read-OriginalSystemPalette -OutputDirectory $output | Out-Null
+            }
             $status.stage = 'execution'
             # The SDK's Startup.html requires an explicit project folder (or
             # data/content-data). The executable's working directory alone is
@@ -149,6 +216,11 @@ jobs:
             if ($process.ExitCode -ne 0 -or $events -cnotcontains 'observations-complete' -or ($events | Where-Object { $_.StartsWith('error:') })) {
               throw 'Original script did not complete every requested observation.'
             }
+            if ($isSystemColors) {
+              $status.stage = 'structured-evidence'
+              Convert-OriginalSystemColorObservations -EventsPath (Join-Path $output 'native-events.txt') `
+                -OutputDirectory $output -CasesPath $systemColorsCases -Status $status | Out-Null
+            }
             # Do not predeclare the VCL ordering being investigated as the oracle.
             # Completion means these events were observed; their values are compared separately.
             $status.state = 'observed'
@@ -164,6 +236,16 @@ jobs:
             }
             foreach ($file in Get-ChildItem -LiteralPath $work -File -ErrorAction SilentlyContinue) {
               if ($file.Extension -in @('.log', '.txt')) { Copy-Item $file.FullName (Join-Path $output $file.Name) -Force }
+            }
+            if ($isSystemColors -and $systemColorsDriverLoaded -and $status.state -cne 'observed') {
+              try {
+                Convert-OriginalSystemColorObservations -EventsPath (Join-Path $output 'native-events.txt') `
+                  -OutputDirectory $output -CasesPath $systemColorsCases -Status $status -AllowIncomplete | Out-Null
+              } catch {
+                # Partial conversion is secondary evidence and must not replace
+                # the original execution/completion/conversion failure.
+                $status.partialConversionError = $_.Exception.ToString()
+              }
             }
             $status.completedAt = [DateTime]::UtcNow.ToString('o')
             $status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $output 'status.json') -Encoding utf8

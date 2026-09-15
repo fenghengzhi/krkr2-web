@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/krkrz/krkr2",
+  "commit": "dec49af97e174d31059c3ccd7efc700ba3c6b788",
+  "branchPath": "kirikiri2/branches/2.32stable/kirikiri2/src/",
+  "relationshipToSdk": "Static source reference only; sdk.json pins a distribution binary whose exact source commit/VCL build is not assumed.",
+  "files": [
+    {
+      "file": "SystemIntf.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/base/SystemIntf.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/base/SystemIntf.cpp",
+      "bytes": 13086,
+      "sha256": "486ff5e23247a26367e92e76812dee708f672a83868db78efc5a512d77a987e1"
+    },
+    {
+      "file": "LayerIntf.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp",
+      "bytes": 293327,
+      "sha256": "05a8279842f1e4a057c7b9005437fbc85579524307864509e47429228f59240b"
+    },
+    {
+      "file": "LayerIntf.h",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.h",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.h",
+      "bytes": 36333,
+      "sha256": "dd4e07bf42e58052d0cfccad8ac579dd56190834902b3d7d89e94e066a6efd0e"
+    },
+    {
+      "file": "LayerImpl.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/LayerImpl.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/LayerImpl.cpp",
+      "bytes": 5309,
+      "sha256": "9fde72edda33ce178fd9c0cc4ce6d33e257e01c27eca00dc95b2237cd6fb5672"
+    },
+    {
+      "file": "ScriptMgnIntf.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/base/ScriptMgnIntf.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/base/ScriptMgnIntf.cpp",
+      "bytes": 32790,
+      "sha256": "ebee41ae7bbd37dd2d362e39cb305517b92377b086c853d2fb390c62f5ced28f"
+    }
+  ]
+}
