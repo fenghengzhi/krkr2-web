@@ -3,6 +3,7 @@ import { intersect } from '../graphics/bitmap.ts'
 import { autoFace, blendPixel, neutralColor, usesAlpha } from '../graphics/blend.ts'
 import { transitionPixels, type TransitionFrame } from '../graphics/transition.ts'
 import type { LayerTree, LayerState } from './layers.ts'
+import { completeBinder } from './completion.ts'
 interface Composed {
   pixels: Pixels
   revision: number
@@ -18,10 +19,15 @@ const blank = (width: number, height: number): Pixels => ({
 })
 const ordinary = (type: number) =>
   type === 1 || type === 2 || type === 12 || type === 0 || type === 6 || type === 7
+// Effect and Filter also use native DisplayType=ltBinder. An assigned main
+// image remains readable, but these types pass their children's drawing on.
+const binder = (layer: LayerState): boolean =>
+  layer.type === 0 || layer.type === 6 || layer.type === 7
+const displayBitmap = (layer: LayerState) => (binder(layer) ? undefined : layer.bitmap)
 // Opaque Layers still draw their own neutral-color rectangle without a main
 // image. Other image-less Layers retain the existing transparent group backing.
 const compositionType = (layer: LayerState): number =>
-  layer.bitmap || layer.type === 1 ? layer.type : 2
+  displayBitmap(layer) || layer.type === 1 ? layer.type : 2
 function convert(image: Pixels, type: number, toPremultiplied: boolean): Pixels {
   const result = { ...image, data: image.data.slice() }
   if (type === 12) return result
@@ -37,11 +43,15 @@ function convert(image: Pixels, type: number, toPremultiplied: boolean): Pixels 
   }
   return result
 }
-function over(target: Pixels, source: Pixels, left: number, top: number, opacity: number): void {
-  const area = intersect(
-    { x: 0, y: 0, width: target.width, height: target.height },
-    { x: left, y: top, width: source.width, height: source.height },
-  )
+function over(
+  target: Pixels,
+  source: Pixels,
+  left: number,
+  top: number,
+  opacity: number,
+  clip: Rect = { x: 0, y: 0, width: target.width, height: target.height },
+): void {
+  const area = intersect(clip, { x: left, y: top, width: source.width, height: source.height })
   for (let y = area.y; y < area.y + area.height; y++)
     for (let x = area.x; x < area.x + area.width; x++) {
       const at = (y * target.width + x) * 4,
@@ -110,8 +120,9 @@ export class SceneComposer {
       )
     }
     const trail = new Set(ancestors).add(id)
-    let main: Composed | undefined = layer.bitmap
-      ? { pixels: layer.bitmap.pixels, revision: layer.bitmap.revision }
+    const bitmap = displayBitmap(layer)
+    let main: Composed | undefined = bitmap
+      ? { pixels: bitmap.pixels, revision: bitmap.revision }
       : undefined
     if (frame && main) {
       const before = this.raw(id, true),
@@ -122,8 +133,8 @@ export class SceneComposer {
         () => convert(transitionPixels(before.pixels, after.pixels, frame), layer.type, false),
       )
     }
-    // A binder has no pixel operation of its own. At full opacity, preserve
-    // the children's access to the backdrop and only inherit its clip/offset.
+    // Binder opacity gates visibility but does not scale children. Preserve
+    // their access to the backdrop and only inherit the binder's clip/offset.
     const children: Array<{
       layer: LayerState
       image: Composed
@@ -139,7 +150,10 @@ export class SceneComposer {
           y = top + child.top,
           area = intersect(clip, { x, y, width: child.width, height: child.height })
         if (!area.width || !area.height) continue
-        if (!child.bitmap && child.type !== 1 && child.opacity === 255 && !this.transition(childId))
+        if (
+          binder(child) ||
+          (!child.bitmap && child.type !== 1 && child.opacity === 255 && !this.transition(childId))
+        )
           gather(child, x, y, area)
         else
           children.push({
@@ -300,21 +314,47 @@ export class SceneComposer {
         () => transitionPixels(before.pixels, after.pixels, frame),
       )
     }
-    const main = layer.bitmap ? this.raw(id, skipTransition || suppressed.has(id)) : undefined
-    const children = layer.children
-      .map((child) => this.layers.get(child))
-      .filter((child) => child.visible && child.opacity > 0)
-      .map((child) => ({ layer: child, image: this.compose(child.id, false, trail, suppressed) }))
+    const main = displayBitmap(layer)
+      ? this.raw(id, skipTransition || suppressed.has(id))
+      : undefined
+    const children: Array<{
+      layer: LayerState
+      image: Composed
+      left: number
+      top: number
+      clip: Rect
+    }> = []
+    const gather = (parent: LayerState, left: number, top: number, clip: Rect) => {
+      for (const childId of parent.children) {
+        const child = this.layers.get(childId)
+        if (!child.visible || !child.opacity) continue
+        const x = left + child.left,
+          y = top + child.top,
+          area = intersect(clip, { x, y, width: child.width, height: child.height })
+        if (!area.width || !area.height) continue
+        if (binder(child)) gather(child, x, y, area)
+        else
+          children.push({
+            layer: child,
+            image: this.compose(childId, false, trail, suppressed),
+            left: x,
+            top: y,
+            clip: area,
+          })
+      }
+    }
+    gather(layer, 0, 0, { x: 0, y: 0, width: layer.width, height: layer.height })
     const signature = JSON.stringify([
       layer.width,
       layer.height,
       layer.imageLeft,
       layer.imageTop,
       main?.revision,
-      children.map(({ layer, image }) => [
+      children.map(({ layer, image, left, top, clip }) => [
         layer.id,
-        layer.left,
-        layer.top,
+        left,
+        top,
+        clip,
         layer.opacity,
         image.revision,
       ]),
@@ -326,15 +366,53 @@ export class SceneComposer {
         over(
           pixels,
           child.image.pixels,
-          child.layer.left,
-          child.layer.top,
+          child.left,
+          child.top,
           child.layer.opacity / 255,
+          child.clip,
         )
       return pixels
     })
   }
-  /** Snapshot is in source display coordinates and ignores the source's own
-   * visibility and opacity. Descendant visibility/opacity still apply. */
+  /** Complete on a binder ends at a raw CopyRect target, rather than the
+   * parent's blend target. Its own pixels and child completion messages are
+   * copied without applying their display type or nonzero opacity. */
+  private copyTree(id: number): Composed {
+    const transitioned = new Map<number, Pixels>()
+    const signature = (id: number, ancestors = new Set<number>()): unknown[] => {
+      if (ancestors.has(id)) throw new Error('Cyclic scene composition')
+      const layer = this.layers.get(id),
+        trail = new Set(ancestors).add(id),
+        frame = !binder(layer) && this.transition(id) ? this.blendTree(id) : undefined
+      if (frame) transitioned.set(id, frame.pixels)
+      return [
+        id,
+        layer.bitmap?.revision,
+        layer.type,
+        layer.neutralColor,
+        layer.cached,
+        layer.width,
+        layer.height,
+        layer.imageLeft,
+        layer.imageTop,
+        layer.left,
+        layer.top,
+        layer.opacity,
+        frame?.revision,
+        layer.children
+          .filter((id) => {
+            const child = this.layers.get(id)
+            return child.visible && child.opacity > 0
+          })
+          .map((id) => signature(id, trail)),
+      ]
+    }
+    return this.cached(`copy-tree:${id}`, JSON.stringify(signature(id)), () =>
+      completeBinder(this.layers, id, transitioned),
+    )
+  }
+  /** Snapshot ignores the source's own visibility and opacity. An ordinary
+   * root blends descendants; a binder root receives raw completion copies. */
   snapshot(id: number): Pixels {
     const layer = this.layers.get(id),
       bitmap = this.layers.bitmap(id)
@@ -350,6 +428,10 @@ export class SceneComposer {
       layer.height === bitmap.height
     )
       return { ...bitmap.pixels, data: bitmap.pixels.data.slice() }
+    if (binder(layer)) {
+      const source = this.copyTree(id).pixels
+      return { ...source, data: source.data.slice() }
+    }
     if (this.needsBlend(id)) {
       const source = this.blendTree(id).pixels
       return { ...source, data: source.data.slice() }
@@ -384,6 +466,10 @@ export class SceneComposer {
         },
         area = intersect(clip, rect)
       if (!area.width || !area.height) return
+      if (binder(layer)) {
+        for (const child of layer.children) visit(this.layers.get(child), rect.x, rect.y, area)
+        return
+      }
       const transition = this.transition(layer.id),
         group =
           this.needsBlend(layer.id) ||
@@ -403,10 +489,11 @@ export class SceneComposer {
         })
         return
       }
-      if (layer.bitmap) {
+      const bitmap = displayBitmap(layer)
+      if (bitmap) {
         const image = transition
           ? this.raw(layer.id)
-          : { pixels: layer.bitmap.pixels, revision: layer.bitmap.revision }
+          : { pixels: bitmap.pixels, revision: bitmap.revision }
         result.push({
           ...rect,
           id: transition ? -layer.id : layer.id,

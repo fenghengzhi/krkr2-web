@@ -6,7 +6,7 @@ test('saveLayerImage writes whole-image PNG/TLG variants and type tags through t
   const { session } = await headless({
     'startup.tjs': String.raw`
 var window=new Window(),root=new Layer(window,null),layer=new Layer(window,root),loaded=new Layer(window,root);
-layer.setImageSize(2,1);layer.fillRect(0,0,1,1,0x00123456);layer.fillRect(1,0,1,1,0x80abcdef);layer.setProvincePixel(1,0,91);layer.setClip(1,0,1,1);layer.type=ltAddAlpha;
+layer.setImageSize(2,1);layer.fillRect(0,0,1,1,0x00123456);layer.fillRect(1,0,1,1,0x80abcdef);layer.setProvincePixel(1,0,91);layer.type=ltAddAlpha;layer.setClip(1,0,1,1);
 var formats=["png","png24","tlg5","tlg524","tlg6","tlg624"],ok=true;
 for(var i=0;i<formats.count;i++){
  var format=formats[i],path="savedata/round-"+format+".data";layer.saveLayerImage(path,format);var tags=loaded.loadImages(path);

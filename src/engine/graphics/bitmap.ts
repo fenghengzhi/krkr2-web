@@ -74,8 +74,9 @@ export class Bitmap {
     this.clip = { x: 0, y: 0, width: this.width, height: this.height }
   }
   setClip(rect: Rect): void {
-    if (!Object.values(rect).every(Number.isSafeInteger) || rect.width < 0 || rect.height < 0)
-      throw new Error('Invalid drawing clip')
+    if (!Object.values(rect).every(Number.isSafeInteger)) throw new Error('Invalid drawing clip')
+    // Native SetClip clamps each far edge to its near edge. Negative extents
+    // therefore produce an empty drawing area rather than an invalid size.
     this.clip = intersect(rect, { x: 0, y: 0, width: this.width, height: this.height })
   }
   private offset(x: number, y: number): number {
@@ -108,8 +109,8 @@ export class Bitmap {
         ? data[index * 4 + 3]!
         : data[index * 4]! * 65536 + data[index * 4 + 1]! * 256 + data[index * 4 + 2]!
   }
-  setPixel(x: number, y: number, value: number, plane: 'main' | 'mask' | 'province'): void {
-    if (!this.writable(x, y)) return
+  setPixel(x: number, y: number, value: number, plane: 'main' | 'mask' | 'province'): boolean {
+    if (!this.writable(x, y)) return false
     const index = this.offset(x, y),
       data = this.pixels.data
     if (plane === 'province') {
@@ -122,6 +123,7 @@ export class Bitmap {
       data[index * 4 + 2] = value & 255
     }
     this.touch()
+    return true
   }
   adjustGamma(channels: GammaChannel[], additive = false): void {
     if (channels.length !== 3) throw new Error('Gamma adjustment requires three channels')
@@ -152,9 +154,10 @@ export class Bitmap {
       }
     this.touch()
   }
-  fill(rect: Rect, color: number, face: number, holdAlpha: boolean): void {
+  fill(rect: Rect, color: number, face: number, holdAlpha: boolean): boolean {
     const area = intersect(this.clip, rect),
       data = this.pixels.data
+    if (!area.width || !area.height) return false
     if (face === 3 && color & 255) this.province ??= new Uint8Array(this.width * this.height)
     for (let y = area.y; y < area.y + area.height; y++)
       for (let x = area.x; x < area.x + area.width; x++) {
@@ -180,8 +183,16 @@ export class Bitmap {
     )
       this.province = undefined
     this.touch()
+    return true
   }
-  copy(source: Bitmap, left: number, top: number, rect: Rect, face: number): void {
+  copy(
+    source: Bitmap,
+    left: number,
+    top: number,
+    rect: Rect,
+    face: number,
+    holdAlpha = false,
+  ): boolean {
     let target = intersect(this.clip, { x: left, y: top, width: rect.width, height: rect.height })
     target = intersect(target, {
       x: left - rect.x,
@@ -189,6 +200,9 @@ export class Bitmap {
       width: source.width,
       height: source.height,
     })
+    // Province allocation and absent-source clearing have separate native
+    // modified rules. Keep that existing path independent of main/mask copies.
+    if ((!target.width || !target.height) && face !== 3) return false
     const pixels = source === this ? source.pixels.data.slice() : source.pixels.data
     const province = source === this ? source.province?.slice() : source.province
     if (face === 3) this.province ??= new Uint8Array(this.width * this.height)
@@ -199,10 +213,11 @@ export class Bitmap {
         if (face === 3) this.province![dst] = province?.[src] ?? 0
         else if (face === 2) this.pixels.data[dst * 4 + 3] = pixels[src * 4 + 3]!
         else
-          for (let c = 0; c < (face === 1 ? 3 : 4); c++)
+          for (let c = 0; c < (face === 1 && holdAlpha ? 3 : 4); c++)
             this.pixels.data[dst * 4 + c] = pixels[src * 4 + c]!
       }
     this.touch()
+    return true
   }
   copyPixels(
     source: Pixels,
