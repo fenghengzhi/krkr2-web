@@ -67,3 +67,13 @@ Window 输入阻塞按模态栈从顶向下决定：System 对话框阻塞游戏
 同源构建的首轮 [兼容检查 35005963934](https://github.com/fenghengzhi/krkr2-web/actions/runs/35005963934) 则失败。三个浏览器都在原 KAG 异常恢复探针的 Asyncify 案例停在事件已停止，后续 JSPI 案例未运行。原始 trace 中已有唯一的 Information 消息框，正文为对应 debug-failure.ks 的 KAG-diagnostic-primary。固定 KAG Initialize.tjs 的 handler 确实先保存并禁用事件、调用 System.inform(e.message)，待其返回才恢复原事件状态；旧探针漏掉了现在已实际实现的消息确认。
 
 后续只修订该兼容探针：精确验证消息文本、事件停止、游戏 Window 阻塞及确认按钮可用，保存消息截图后点击真实“确定”，再执行原有事件恢复、日志观察者、下一场景及 UTF-16 存档断言。不会自动接受未知对话框，不直接改 eventDisabled，也不增加超时。探针与此记录的提交使用 [skip ci]；产品仍为已完整验证的同一源码，另用相同构建重新运行兼容工作流，不将首轮失败追记为通过。
+
+## 第二轮兼容失败与只读 Worker 观测
+
+[35007635747](https://github.com/fenghengzhi/krkr2-web/actions/runs/35007635747) 使用提交 `6bd83ae619c29644a87fcdf167b4d6420ce8c312` 及相同的 `35005248684` 应用构建。原 KAG 消息确认与异常恢复在三个浏览器的 Asyncify／JSPI 均实际通过；Chromium、Firefox 的兼容作业全部通过。WebKit 的最后一组旧 TJS ABI 4 升级中，Asyncify 实际通过，JSPI 则在关闭 HTTP 服务后重新启动**旧页面的旧 Worker**时失败：12 秒内没有出现第二次启动标记 `abi-game-ready-2`。新版本 JSPI Worker 尚未进入该探针的启动步骤。
+
+原 trace 显示 Stop 已完成，旧页面恢复待机；第二次文件 change 又进入载入状态，旧 Worker 文件与内容正确的两个输入 Blob 都返回成功，随后没有记录到第二轮 WASM manifest 请求。固定旧包的 change handler 同步清空文件 input，正常 Stop 等待全部宿主清理，初始化中的保存数据读取与 manifest 获取也早于应用级后台暂停门，因此目前不能归因为同名文件事件、Stop 按钮提前禁用或引擎的隐藏页面暂停。尚未区分 prepare 尾部哈希与 RPC 回应、initialize 的 IndexedDB 读取、或浏览器自身调度停顿；原始日志、trace 和截图继续保留，未修订产品、断言、启动时间预算或页面前台行为。
+
+后续仅给兼容探针加入 `tests/helpers/worker-observation.js`。在旧／新页面脚本运行前注入原样 JavaScript 文本，绕过 Node 的 tsx 函数名辅助代码；不重写任何固定构建或缓存文件。Worker 构造通过 `Reflect.construct` 保留 `newTarget`，postMessage 与 terminate 通过 `Reflect.apply` 原样调用一次；独立 message 监听器不消费或转发消息。只记录已识别的 Comlink 操作、关联 ID、generation、枚举状态、相对时间与页面可见性／生命周期，不记录游戏文件、脚本内容、返回字符串、剪贴板或 MessagePort 数据。
+
+每页记录最多 2,048 个事件、每 Worker 最多 2,048 个未完成 ID，并标明截断或观察失败。探针 finally 在关闭浏览器前保存每个后端的 `*-worker-observation.json`，含旧／新页面尚未收到回应的操作，可区分 prepare 未回应与 initialize 已发出但未回应。诊断读取单独限时 3 秒并将失败标为 unavailable；原启动验证仍为 12 秒。观察文件不取代完整 trace，也不包含网络失败正文。该改动只增加证据；即使后续运行通过，也不能据此认定历史 WebKit 停顿已经修复。
