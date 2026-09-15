@@ -37,7 +37,8 @@ export async function exerciseMenuActions(
   variant: WasmVariant,
   binary: boolean,
 ) {
-  const logs: string[] = []
+  const logs: string[] = [],
+    timers = new Set<ReturnType<typeof setTimeout>>()
   let rendererCloses = 0
   const session = new EngineSession({
     createRuntime: (handler, control, options) =>
@@ -63,6 +64,17 @@ export async function exerciseMenuActions(
     writeText,
     now: () => performance.now(),
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
+    schedule: (callback, delay) => {
+      const timer = setTimeout(() => {
+        timers.delete(timer)
+        callback()
+      }, delay)
+      timers.add(timer)
+      return () => {
+        timers.delete(timer)
+        clearTimeout(timer)
+      }
+    },
     event: (event) => {
       if (event.type === 'log') logs.push(event.text)
     },
@@ -86,7 +98,11 @@ export async function exerciseMenuActions(
     if (result !== 'result,event,missing,null,bound,exception') throw new Error(result)
     if (logs.length) throw new Error('Unexpected menu diagnostics: ' + logs.join('\n'))
     await session.stop()
-    const stopped = { ...session.inspectOwnership(), handles: session.snapshot().handles }
+    const stopped = {
+      ...session.inspectOwnership(),
+      handles: session.snapshot().handles,
+      timers: timers.size,
+    }
     if (Object.values(stopped).some((value) => value !== 0) || rendererCloses !== 1)
       throw new Error('Menu action teardown retained resources: ' + JSON.stringify(stopped))
     return { variant, binary, result, stopped, rendererCloses }
