@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import type { FrameLayer, Renderer, RendererStatus } from '../../src/engine/ports/graphics.ts'
+import type {
+  FrameLayer,
+  Renderer,
+  RendererReadiness,
+  RendererStatus,
+} from '../../src/engine/ports/graphics.ts'
 import { WindowRendererRegistry } from '../../src/backends/render/window-renderers.ts'
 
 class FakeRenderer implements Renderer {
@@ -84,6 +89,203 @@ function fixture() {
   registry.subscribe((status) => statuses.push(status))
   return { registry, renderers, statuses }
 }
+
+test('readiness follows only its Window and waits through recoverable failures and retries', async () => {
+  const { registry, renderers, statuses } = fixture()
+  try {
+    registry.openWindow(1)
+    registry.openWindow(2)
+    const a = renderers.get(1)!,
+      b = renderers.get(2)!
+    a.emit({ state: 'restoring', generation: 0, pending: true })
+    b.emit({ state: 'lost', generation: 1 })
+    const wait = registry.waitWindowReady(1),
+      completed: string[] = []
+    void wait.promise.then(
+      () => completed.push('A'),
+      () => completed.push('rejected'),
+    )
+    a.emit({ state: 'lost', generation: 1 })
+    a.emit({ state: 'failed', generation: 1, message: 'retryable allocation' })
+    b.emit({ state: 'ready', generation: 2 })
+    await Promise.resolve()
+    assert.deepEqual(completed, [])
+    await registry.waitWindowReady(2).promise
+    assert.equal(statuses.at(-1)?.state, 'failed')
+    b.emit({ state: 'failed', generation: 2, message: 'independent B failure' })
+    a.onRetry = () => a.emit({ state: 'restoring', generation: 1 })
+    registry.retry(1)
+    await Promise.resolve()
+    assert.deepEqual(completed, [])
+    a.emit({ state: 'ready', generation: 2 })
+    await wait.promise
+    assert.deepEqual(completed, ['A'])
+    assert.equal(statuses.at(-1)?.state, 'failed')
+    wait.cancel()
+    await registry.waitWindowReady(1).promise
+  } finally {
+    registry.dispose()
+  }
+})
+
+test('readiness requested inside the factory waits until renderer subscription finishes', async () => {
+  const renderer = new FakeRenderer()
+  let wait: RendererReadiness | undefined
+  const registry = new WindowRendererRegistry((id) => {
+    wait = registry.waitWindowReady(id)
+    return renderer
+  })
+  try {
+    registry.openWindow(1)
+    assert.ok(wait)
+    await wait.promise
+    assert.equal(renderer.listeners.size, 1)
+    wait.cancel()
+  } finally {
+    registry.dispose()
+  }
+})
+
+for (const action of ['throw', 'retire'] as const)
+  test(`readiness cannot succeed when an opening renderer's subscription ${action}s`, async () => {
+    const renderer = new FakeRenderer()
+    let wait: RendererReadiness | undefined
+    const registry = new WindowRendererRegistry((id) => {
+      wait = registry.waitWindowReady(id)
+      return renderer
+    })
+    renderer.onSubscribe = () => {
+      if (action === 'throw') throw new Error('subscribe failed')
+      registry.closeWindow(1)
+    }
+    try {
+      if (action === 'throw') assert.throws(() => registry.openWindow(1), /subscribe failed/)
+      else registry.openWindow(1)
+      assert.ok(wait)
+      await assert.rejects(wait.promise, action === 'throw' ? /subscribe failed/ : /retired/)
+      assert.equal(renderer.disposals, 1)
+      wait.cancel()
+    } finally {
+      registry.dispose()
+    }
+  })
+
+for (const action of ['close', 'dispose'] as const)
+  test(`${action} rejects pending readiness even when GPU cleanup fails`, async () => {
+    const { registry, renderers } = fixture()
+    registry.openWindow(1)
+    const renderer = renderers.get(1)!
+    renderer.emit({ state: 'failed', generation: 1 })
+    renderer.onDispose = () => {
+      throw new Error('GPU cleanup failed')
+    }
+    const wait = registry.waitWindowReady(1),
+      rejected = assert.rejects(wait.promise, action === 'close' ? /retired/ : /disposed/)
+    try {
+      assert.throws(
+        () => (action === 'close' ? registry.closeWindow(1) : registry.dispose()),
+        /GPU cleanup failed/,
+      )
+      await rejected
+      assert.equal(renderer.listeners.size, 0)
+      assert.equal(renderer.disposals, 1)
+      wait.cancel()
+    } finally {
+      registry.dispose()
+    }
+  })
+
+test('cancelling one readiness wait rejects only that waiter and permits later independent waiters', async () => {
+  const { registry, renderers } = fixture()
+  try {
+    registry.openWindow(1)
+    const renderer = renderers.get(1)!
+    renderer.emit({ state: 'restoring', generation: 0, pending: true })
+    const cancelled = registry.waitWindowReady(1),
+      live = registry.waitWindowReady(1),
+      rejected = assert.rejects(cancelled.promise, /readiness wait was cancelled/)
+    cancelled.cancel()
+    cancelled.cancel()
+    await rejected
+    assert.equal(registry.getStatus(1)?.pending, true)
+    assert.equal(renderer.listeners.size, 1)
+    renderer.emit({ state: 'ready', generation: 1 })
+    await live.promise
+    live.cancel()
+    const alreadyReady = registry.waitWindowReady(1)
+    alreadyReady.cancel()
+    await alreadyReady.promise
+    registry.closeWindow(1)
+    await live.promise
+    assert.equal(renderer.listeners.size, 0)
+  } finally {
+    registry.dispose()
+  }
+})
+
+test('readiness rejects unknown and disposed identities without allocating another renderer', async () => {
+  const { registry, renderers } = fixture()
+  await assert.rejects(registry.waitWindowReady(1).promise, /not registered/)
+  registry.openWindow(1)
+  registry.closeWindow(1)
+  await assert.rejects(registry.waitWindowReady(1).promise, /not registered/)
+  registry.dispose()
+  await assert.rejects(registry.waitWindowReady(2).promise, /disposed/)
+  assert.equal(renderers.size, 1)
+})
+
+test('a ready-status observer can retire the Window before pending readiness is resolved', async () => {
+  const { registry, renderers } = fixture()
+  try {
+    registry.openWindow(1)
+    const renderer = renderers.get(1)!
+    renderer.emit({ state: 'lost', generation: 1 })
+    const wait = registry.waitWindowReady(1),
+      rejected = assert.rejects(wait.promise, /retired/)
+    registry.subscribe(() => {
+      if (registry.getStatus(1)?.state === 'ready') registry.closeWindow(1)
+    })
+    renderer.emit({ state: 'ready', generation: 2 })
+    await rejected
+    assert.equal(renderer.disposals, 1)
+    wait.cancel()
+  } finally {
+    registry.dispose()
+  }
+})
+
+test('readiness remains pending when a ready notification immediately discovers another loss', async () => {
+  const { registry, renderers } = fixture()
+  try {
+    registry.openWindow(1)
+    const renderer = renderers.get(1)!
+    renderer.emit({ state: 'lost', generation: 1 })
+    let resolved = false,
+      loseAgain = true
+    const waiting = registry.waitWindowReady(1)
+    void waiting.promise.then(
+      () => {
+        resolved = true
+      },
+      () => {},
+    )
+    registry.subscribe(() => {
+      if (loseAgain && registry.getStatus(1)?.state === 'ready') {
+        loseAgain = false
+        renderer.emit({ state: 'lost', generation: 2 })
+      }
+    })
+    renderer.emit({ state: 'ready', generation: 2 })
+    await Promise.resolve()
+    assert.equal(resolved, false)
+    renderer.emit({ state: 'ready', generation: 3 })
+    await waiting.promise
+    assert.equal(resolved, true)
+    waiting.cancel()
+  } finally {
+    registry.dispose()
+  }
+})
 
 test('no-window and stale frames never allocate or select an implicit window renderer', () => {
   const { registry, renderers, statuses } = fixture()
