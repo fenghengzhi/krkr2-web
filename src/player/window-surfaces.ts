@@ -26,6 +26,7 @@ interface BrowserSurface {
 export class BrowserWindowSurfaces {
   private readonly surfaces = new Map<number, BrowserSurface>()
   private readonly epochs = new Map<number, { epoch: number }>()
+  private readonly retired = new Set<number>()
   private readonly transferred = new WeakSet<HTMLCanvasElement>()
   private disposed = false
 
@@ -46,6 +47,7 @@ export class BrowserWindowSurfaces {
       return
     const message = data as WindowSurfaceRequest
     if (message.type !== 'request' && message.type !== 'detach') return
+    if (this.retired.has(message.windowId)) return
     const latest = this.epochs.get(message.windowId)?.epoch ?? 0
     if (message.type === 'request' ? message.surfaceEpoch <= latest : message.surfaceEpoch < latest)
       return
@@ -101,7 +103,24 @@ export class BrowserWindowSurfaces {
   }
 
   private current(entry: BrowserSurface): boolean {
-    return !this.disposed && this.surfaces.get(entry.identity.windowId) === entry
+    return (
+      !this.disposed &&
+      !this.retired.has(entry.identity.windowId) &&
+      this.surfaces.get(entry.identity.windowId) === entry
+    )
+  }
+
+  /**
+   * Native Window retirement is final across every surface epoch. It may arrive
+   * on the event channel before this port receives the Window's first request.
+   */
+  retireWindow(windowId: number): void {
+    if (this.disposed || !Number.isSafeInteger(windowId) || windowId < 1) return
+    this.retired.add(windowId)
+    // Invalidate any attachment operation suspended in a host cleanup callback.
+    this.epochs.delete(windowId)
+    const entry = this.surfaces.get(windowId)
+    if (entry) this.release(entry)
   }
 
   private release(entry: BrowserSurface): void {
@@ -141,6 +160,7 @@ export class BrowserWindowSurfaces {
         errors.push(error)
       }
     this.epochs.clear()
+    this.retired.clear()
     this.port.close()
     if (errors.length === 1) throw errors[0]
     if (errors.length) throw new AggregateError(errors, 'Window surfaces cleanup failed')

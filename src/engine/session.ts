@@ -122,6 +122,7 @@ export type EngineEvent =
   | { type: 'window-menus'; windows: WindowMenus[] }
   | { type: 'window'; window: WindowView }
   | { type: 'windows'; windows: WindowPresentation[] }
+  | { type: 'window-closed'; windowId: number }
   | { type: 'window-input'; windowId: number; input: InputView }
   | { type: 'input'; input: InputView }
   | { type: 'font-selection'; request: FontSelectionRequest | null }
@@ -235,7 +236,6 @@ export class EngineSession {
   }
   private windowRevision = -1
   private postedInputPending = 0
-  private pointer = { x: 0, y: 0 }
   private readonly windowPointers = new Map<number, { x: number; y: number }>()
   private physicalKeys = new Set<number>()
   private readonly fonts: FontService
@@ -482,6 +482,9 @@ export class EngineSession {
           this.systemEvents!.cancelSource(window)
           window.resizePending = false
           window.inputActive = false
+          // This notification also covers a Window created and invalidated in
+          // one script entry, before it ever appears in a rendered roster.
+          this.deps.event({ type: 'window-closed', windowId: window.id })
           this.syncActiveWindow()
           if (this.windows?.active)
             void this.activateWindow(this.windows.active.id).catch((error) => {
@@ -923,6 +926,7 @@ export class EngineSession {
       this.events?.pause(true)
     if (previous.state === 'visible' && activity.state !== 'visible') {
       this.physicalKeys.clear()
+      for (const window of this.windows?.registered() ?? []) window.inputActive = false
       this.inputControllers.resetTransient()
       this.menus.dismiss()
       // Commit only materialized overlay writes. Never reenter a suspended VM
@@ -958,6 +962,7 @@ export class EngineSession {
     if (paused === (this.state === 'paused')) return
     if (paused) {
       this.physicalKeys.clear()
+      for (const window of this.windows?.registered() ?? []) window.inputActive = false
       this.inputControllers.resetTransient()
       this.menus.dismiss()
       this.presentMenus()
@@ -1007,7 +1012,6 @@ export class EngineSession {
     this.windowId = active?.id ?? 0
     if (active) {
       this.window = active.state
-      this.pointer = this.windowPointers.get(active.id) ?? { x: 0, y: 0 }
     }
   }
   private windowPresentations(): WindowPresentation[] {
@@ -1027,7 +1031,6 @@ export class EngineSession {
     const window = this.registeredWindow(windowId)
     if (!window) return
     this.windowPointers.set(windowId, { x, y })
-    if (windowId === this.windowId) this.pointer = { x, y }
     if (window.state.mouseCursorState === 1) window.state.set('mouseCursorState', 0)
   }
   keyState(keys: number[]): void {
@@ -1140,6 +1143,7 @@ export class EngineSession {
     this.present()
   }
   activateWindow(windowId: number): Promise<void> {
+    if (this.state !== 'running' || this.activity.state !== 'visible') return Promise.resolve()
     const window = this.registeredWindow(windowId)
     if (!window || !window.state.visible || !window.state.focusable) return Promise.resolve()
     const previous = this.windows?.active
@@ -1173,7 +1177,7 @@ export class EngineSession {
   }
   closeWindow(windowId: number): Promise<void> {
     const window = this.registeredWindow(windowId)
-    if (!window || this.state !== 'running') return Promise.resolve()
+    if (!window || !['running', 'paused'].includes(this.state)) return Promise.resolve()
     let lease: ScriptObject | undefined
     return this.systemEvents!.post(
       () => {

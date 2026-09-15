@@ -18,7 +18,7 @@ function __krkrWindowInvalidate(window,id) {
   __host("Window.finish",id);
 }
 class Window {
-  var __windowId, __windowMenu=null, __windowObjects, __windowKeys, __windowClosing=false, __windowCanClose=false;
+  var __windowId, __windowMenu=null, __windowObjects, __windowKeys, __windowClosing=false, __windowCanClose=false, __windowUserClosing=false;
   function Window() {
     __windowObjects=[];__windowKeys=[];
     __windowId=__host("Window.create",this,__krkrWindowInvalidate);
@@ -44,21 +44,26 @@ class Window {
   property primaryLayer { getter() { return __host("Window.primary",__windowId); } }
   function __windowDispatch(name,args) { return this[name](args*); }
   function close() {
+    if(__windowUserClosing)return;
     var window=this;
-    __windowCanClose=false;
+    __windowCanClose=true;
     onCloseQuery(true);
     if((isvalid window) && window.__windowCanClose) invalidate window;
   }
   function __windowUserClose() {
-    var window=this;
-    __windowCanClose=false;
+    if(__windowUserClosing)return;
+    __windowUserClosing=true;
     onCloseQuery(true);
-    if(!(isvalid window) || !window.__windowCanClose)return;
+  }
+  function bringToFront() { __host("Window.activate",__windowId); }
+  function onCloseQuery(canClose) {
+    if(!__windowUserClosing){__windowCanClose=!!canClose;return;}
+    __windowUserClosing=false;
+    if(!canClose)return;
+    var window=this;
     if(__host("Window.isMain",__windowId)) invalidate window;
     else window.visible=false;
   }
-  function bringToFront() { __host("Window.activate",__windowId); }
-  function onCloseQuery(canClose) { __windowCanClose=!!canClose; }
   function setInnerSize(width,height) { __host("Window.resize",__windowId,int(width),int(height)); }
   function setSize(width,height) { setInnerSize(width,height); }
   function setPos(left,top) { this.left=left;this.top=top; }

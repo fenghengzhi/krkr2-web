@@ -311,9 +311,11 @@ export function mountApp(root: HTMLDivElement): void {
             surface.menu,
             () => windows.get(surface.windowId, surface.surfaceEpoch)?.canvas ?? null,
             (id, popup) => {
+              if (current !== generation || instance.session.isDisposed) return
               void instance.session.menuClick(id, popup).catch(report)
             },
             (popup) => {
+              if (current !== generation || instance.session.isDisposed) return
               void instance.session.menuDismiss(popup).catch(report)
             },
             { active: () => !!windowViews.get(surface.windowId)?.active },

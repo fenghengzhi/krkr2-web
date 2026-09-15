@@ -17,8 +17,10 @@ class MultiWindow extends Window {
     queries++;trace.add(name+":query");
     if(queryMode=="invalidate"){invalidate this;return;}
     if(queryMode=="nested"){queryMode="";this.close();return;}
+    if(queryMode=="defer")return;
     super.onCloseQuery(allow);
   }
+  function answerClose(canClose){super.onCloseQuery(canClose);}
   function finalize(){
     if(failFinalizer)throw new Exception("multiwindow-finalizer");
     if(name=="A")aDeaths++;if(name=="B")bDeaths++;
@@ -236,7 +238,7 @@ for (const binary of [false, true]) {
 
   for (const close of ['script', 'user'] as const) {
     for (const queryMode of ['invalidate', 'nested'] as const) {
-      test(`${mode}: ${close} close tolerates ${queryMode} close-query reentry without repeating native cleanup`, async () => {
+      test(`${mode}: ${close} close ${close === 'user' && queryMode === 'nested' ? 'blocks program reentry until its close query is answered' : `tolerates ${queryMode} close-query reentry without repeating native cleanup`}`, async () => {
         const f = await fixture(binary)
         try {
           await f.execute(
@@ -245,6 +247,25 @@ for (const binary of [false, true]) {
           if (close === 'user') {
             await f.session.closeWindow(f.b)
             await f.session.closeWindow(f.a)
+            if (queryMode === 'nested') {
+              // The nested script close returns immediately while user close
+              // awaits a base onCloseQuery answer; it does not issue a second
+              // query or use the program-close default permission.
+              assert.equal(
+                await f.session.evaluate(
+                  '(isvalid a)+","+(isvalid b)+","+a.queries+","+b.queries+","+aDeaths+","+bDeaths+","+managedDeaths+","+(Window.mainWindow===a)',
+                ),
+                '1,1,1,1,0,0,0,1',
+              )
+              await f.session.closeWindow(f.b)
+              await f.session.closeWindow(f.a)
+              await f.session.evaluate('closeSecondary()')
+              await f.session.evaluate('closeMain()')
+              assert.equal(await f.session.evaluate('trace.join("|")'), 'B:query|A:query')
+              await f.execute('a.answerClose(false);b.answerClose(false);')
+              await f.session.evaluate('closeSecondary()')
+              await f.session.evaluate('closeMain()')
+            }
           } else {
             await f.session.evaluate('closeSecondary()')
             await f.session.evaluate('closeMain()')
@@ -257,7 +278,11 @@ for (const binary of [false, true]) {
           )
           assert.equal(
             await f.session.evaluate('trace.join("|")'),
-            queryMode === 'invalidate' ? 'B:query|A:query' : 'B:query|B:query|A:query|A:query',
+            queryMode === 'invalidate'
+              ? 'B:query|A:query'
+              : close === 'user'
+                ? 'B:query|A:query|B:query|A:query'
+                : 'B:query|B:query|A:query|A:query',
           )
           assert.equal(f.session.snapshot().state, 'running')
           assert.equal(f.session.inspectOwnership().windowSources, 0)
@@ -276,6 +301,89 @@ for (const binary of [false, true]) {
       })
     }
   }
+
+  test(`${mode}: program close defaults to permission when an override omits the base close-query answer`, async () => {
+    const f = await fixture(binary)
+    try {
+      await f.execute('a.allow=false;b.allow=false;a.queryMode=b.queryMode="defer";')
+      await f.session.evaluate('closeSecondary()')
+      assert.equal(await f.session.evaluate('(isvalid b)+","+bDeaths'), '0,1')
+      assert.equal(f.session.snapshot().state, 'running')
+      await f.session.evaluate('closeMain()')
+      assert.ok(['stopping', 'stopped'].includes(f.session.snapshot().state))
+      assert.ok(f.logs.includes('after-main-close:0'))
+      await f.session.stop()
+      assert.equal(f.logs.filter((message) => message === 'finalized:A').length, 1)
+      assert.equal(f.logs.filter((message) => message === 'finalized:B').length, 1)
+    } finally {
+      await f.session.stop()
+    }
+  })
+
+  test(`${mode}: a deferred secondary user-close answer rejects or hides exactly once without invalidating managed objects`, async () => {
+    const f = await fixture(binary)
+    try {
+      await f.execute('b.queryMode="defer";var managed=new MultiManaged();b.add(managed);')
+      await f.session.closeWindow(f.b)
+      await f.session.closeWindow(f.b)
+      await f.session.evaluate('closeSecondary()')
+      assert.equal(
+        await f.session.evaluate('b.queries+","+b.visible+","+(isvalid b)+","+(isvalid managed)'),
+        '1,1,1,1',
+      )
+      await f.execute('b.answerClose(false);')
+      assert.equal(await f.session.evaluate('b.visible+","+b.queries'), '1,1')
+      await f.session.closeWindow(f.b)
+      await f.session.evaluate('closeSecondary()')
+      assert.equal(await f.session.evaluate('b.visible+","+b.queries'), '1,2')
+      await f.execute('b.answerClose(true);')
+      assert.equal(
+        await f.session.evaluate(
+          'b.visible+","+(isvalid b)+","+(isvalid managed)+","+bDeaths+","+managedDeaths',
+        ),
+        '0,1,1,0,0',
+      )
+      // The pending flag was cleared by the answer. A later answer alone is
+      // program permission state; it cannot hide an independently reopened UI.
+      await f.execute('b.visible=true;b.answerClose(true);')
+      assert.equal(await f.session.evaluate('b.visible+","+b.queries'), '1,2')
+      await f.execute('b.queryMode="";')
+      await f.session.evaluate('closeSecondary()')
+      assert.equal(await f.session.evaluate('bDeaths+","+managedDeaths'), '1,1')
+      assert.equal(await f.session.evaluate('trace.join("|")'), 'B:query|B:query|B:query')
+      assert.equal(f.session.snapshot().state, 'running')
+    } finally {
+      await f.session.stop()
+    }
+  })
+
+  test(`${mode}: a deferred main user-close answer keeps running after rejection and terminates only after permission`, async () => {
+    const f = await fixture(binary)
+    try {
+      await f.execute('a.queryMode="defer";a.add(new MultiManaged());')
+      await f.session.closeWindow(f.a)
+      await f.session.closeWindow(f.a)
+      await f.session.evaluate('closeMain()')
+      assert.equal(
+        await f.session.evaluate('a.queries+","+(Window.mainWindow===a)+","+a.visible'),
+        '1,1,1',
+      )
+      assert.equal(f.session.snapshot().state, 'running')
+      await f.execute('a.answerClose(false);')
+      assert.equal(f.session.snapshot().state, 'running')
+      await f.session.closeWindow(f.a)
+      assert.equal(await f.session.evaluate('a.queries'), '2')
+      await f.execute('a.answerClose(true);Debug.message("after-main-answer:"+int(isvalid b));')
+      assert.ok(['stopping', 'stopped'].includes(f.session.snapshot().state))
+      assert.ok(f.logs.includes('after-main-answer:1'))
+      assert.ok(f.logs.includes('managed-closed'))
+      await f.session.stop()
+      assert.equal(f.logs.filter((message) => message === 'finalized:A').length, 1)
+      assert.equal(f.session.snapshot().handles, 0)
+    } finally {
+      await f.session.stop()
+    }
+  })
 
   test(`${mode}: a failed main script finalizer does not request automatic exit before native invalidation`, async () => {
     const f = await fixture(binary)

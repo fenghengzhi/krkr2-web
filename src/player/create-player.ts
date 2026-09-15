@@ -54,6 +54,7 @@ export function createPlayer(
   const windows = new Map<number, WindowPresentation>()
   const inputViews = new Map<number, InputView>()
   const attachedWindows = new Set<number>()
+  const retiredWindows = new Set<number>()
   let identity = ''
   let stopping: Promise<void> | undefined
   let input: BrowserInputCoordinator | undefined
@@ -90,14 +91,27 @@ export function createPlayer(
     if (errors.length === 1) onError(errors[0])
     else if (errors.length) onError(new AggregateError(errors, 'Window presentation update failed'))
   }
+  const retireWindow = (windowId: number) => {
+    retiredWindows.add(windowId)
+    windows.delete(windowId)
+    inputViews.delete(windowId)
+    attachedWindows.delete(windowId)
+    if (activeWindow === windowId) activeWindow = 0
+    if (focusRequest?.windowId === windowId) focusRequest = undefined
+    // Retirement is independent of whether a presentation or canvas ever
+    // arrived. Tombstone before cleanup so late messages cannot recreate it.
+    updateParts([() => surfaces?.retireWindow(windowId), () => video.removeWindow(windowId)])
+  }
   const updateWindows = (presentations: WindowPresentation[]) => {
-    const nextActive = presentations.find((window) => window.active)?.id ?? 0
+    const nextActive =
+      presentations.find((window) => window.active && !retiredWindows.has(window.id))?.id ?? 0
     if (nextActive !== activeWindow) {
       activeWindow = nextActive
       focusRequest = nextActive ? { windowId: nextActive } : undefined
     }
     const removed = new Set(windows.keys())
     for (const window of presentations) {
+      if (retiredWindows.has(window.id)) continue
       removed.delete(window.id)
       windows.set(window.id, window)
       const epoch = surfaces?.get(window.id)?.identity.surfaceEpoch
@@ -112,27 +126,15 @@ export function createPlayer(
         () => video.setWindow(window.view, window.id),
       ])
     }
-    for (const id of removed) {
-      windows.delete(id)
-      inputViews.delete(id)
-      attachedWindows.delete(id)
-      const surface = surfaces?.get(id)
-      // Roster removal retires a native Window. Graphics retries only detach its
-      // surface, preserving the movie's decoder, clock, and audio connection.
-      updateParts([
-        () => {
-          if (surface) input?.detach(id, surface.identity.surfaceEpoch)
-        },
-        () => video.removeWindow(id),
-      ])
-    }
+    for (const id of removed) retireWindow(id)
   }
   const session = new SessionClient((event) => {
     if (event.type === 'font-selection') {
       fontSelecting = !!event.request
     }
+    if (event.type === 'window-closed') retireWindow(event.windowId)
     if (event.type === 'windows') updateWindows(event.windows)
-    if (event.type === 'window-input') {
+    if (event.type === 'window-input' && !retiredWindows.has(event.windowId)) {
       inputViews.set(event.windowId, event.input)
       if (surfaces?.get(event.windowId)) input?.setInput(event.windowId, event.input)
     }
@@ -156,6 +158,7 @@ export function createPlayer(
     onAttach: (canvas, identity) => {
       const { windowId, surfaceEpoch } = identity,
         surface = options.windows.get(windowId, surfaceEpoch)
+      if (retiredWindows.has(windowId)) throw new Error('Window has been retired')
       if (!surface || surface.canvas !== canvas)
         throw new Error('Window host returned an inconsistent surface')
       const window = windows.get(windowId),
@@ -219,6 +222,7 @@ export function createPlayer(
   }, pauseWhenHidden)
   return {
     focusWindow(windowId: number, epoch?: number): boolean {
+      if (retiredWindows.has(windowId)) return false
       const focused = input!.focus(windowId, epoch)
       if (focused) focusRequest = undefined
       return focused
@@ -290,6 +294,7 @@ export function createPlayer(
           windows.clear()
           inputViews.clear()
           attachedWindows.clear()
+          retiredWindows.clear()
           focusRequest = undefined
         }
         if (errors.length === 1) throw errors[0]

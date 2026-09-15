@@ -10,6 +10,12 @@
 
 脚本 close 销毁指定窗口。用户关闭主窗口会销毁，用户关闭普通窗口则隐藏；onCloseQuery 可拒绝。System.exitOnWindowClose 默认为 true，主窗口开始原生失效后，在当前 VM 操作结束时请求退出。设置 false 可继续运行其他窗口；关闭主窗口不会把现有普通窗口提升为 mainWindow，所有已登记窗口关闭后新建的窗口才成为新的主窗口。原生依据见 [048](048-multiwindow-plan.md)。
 
+程序关闭的查询默认允许。用户关闭具有独立的待答复状态，等待期间重复关闭请求和脚本 close 不再次查询；调用基类 onCloseQuery 才提交允许或拒绝，可以延后答复。该规则同时见于[官方 Kirikiroid2 Cocos 路径](https://github.com/zeas2/Kirikiroid2/blob/d1c2b1259423542c893e0b65eaeb46c848848f2b/src/core/environ/cocos2d/MainScene.cpp#L1280-L1367)和[原 krkr2 2.32stable](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/WindowFormUnit.cpp#L400-L506)。
+
+## Actions 记录
+
+[首轮 Node 诊断 34935450884](https://github.com/fenghengzhi/krkr2-web/actions/runs/34935450884)，提交 `4ac589f`：原生内核构建完成，应用类型检查因遗留的未使用单窗 pointer 字段失败（TS6133）。Node、浏览器和直接运行时测试均未运行，不能计为通过。完整日志和 run.json 已保存在 `out/verification/github-actions/34935450884/`。修订删除该旧字段，保留每个窗口独立的 physical pointer。
+
 ## 验证范围和边界
 
 新增单元、源码／字节码集成及浏览器场景覆盖窗口身份、动态画布、渲染隔离、输入队列与物理按键、菜单选择身份、视频路由及关闭清理。旧寿命测试仅在有意关闭主窗口后继续检查清理结果的路径明确设置 exitOnWindowClose=false，默认退出行为另有独立用例。

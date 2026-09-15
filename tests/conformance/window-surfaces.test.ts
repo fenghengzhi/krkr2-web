@@ -261,6 +261,198 @@ test('disposal from the page attachment callback removes the DOM before any canv
   assert.equal(surfaces.get(1), undefined)
 })
 
+test('native Window retirement before its first surface request prevents all later attachment epochs', () => {
+  const port = new FakePort(),
+    attached: number[] = [],
+    detached: number[] = []
+  const surfaces = new BrowserWindowSurfaces(port.port, 7, {
+    attach(id) {
+      attached.push(id)
+      return canvas().element
+    },
+    detach: (id) => detached.push(id),
+  })
+  try {
+    surfaces.retireWindow(1)
+    surfaces.retireWindow(1)
+    port.receive(request())
+    port.receive({ type: 'detach', ...identity() })
+    port.receive(request(1, 2))
+    port.receive(request(1, Number.MAX_SAFE_INTEGER))
+    assert.deepEqual(attached, [])
+    assert.deepEqual(detached, [])
+    assert.equal(port.posted.length, 0)
+    assert.equal(surfaces.get(1), undefined)
+    port.receive(request(2))
+    assert.deepEqual(attached, [2])
+    assert.equal(surfaces.get(2)?.identity.windowId, 2)
+  } finally {
+    surfaces.dispose()
+  }
+})
+
+test('native retirement releases an attached Window immediately with input cleanup before DOM removal', () => {
+  const port = new FakePort(),
+    cleanup: string[] = []
+  const surfaces = new BrowserWindowSurfaces(
+    port.port,
+    7,
+    {
+      attach: () => canvas().element,
+      detach: (id) => cleanup.push(`dom:${id}`),
+    },
+    { onDetach: (_canvas, id) => cleanup.push(`input:${id.windowId}`) },
+  )
+  try {
+    port.receive(request())
+    port.receive(request(2))
+    surfaces.retireWindow(1)
+    assert.deepEqual(cleanup, ['input:1', 'dom:1'])
+    assert.equal(surfaces.get(1), undefined)
+    assert.equal(surfaces.get(2)?.identity.windowId, 2)
+    surfaces.retireWindow(1)
+    port.receive({ type: 'detach', ...identity() })
+    port.receive(request(1, 2))
+    assert.deepEqual(cleanup, ['input:1', 'dom:1'])
+    assert.equal(port.posted.length, 2)
+  } finally {
+    surfaces.dispose()
+  }
+  assert.deepEqual(cleanup, ['input:1', 'dom:1', 'input:2', 'dom:2'])
+})
+
+test('native retirement from onAttach cancels transfer and permanently rejects retry requests', () => {
+  const port = new FakePort(),
+    surface = canvas(),
+    cleanup: string[] = []
+  let attachments = 0
+  const surfaces = new BrowserWindowSurfaces(
+    port.port,
+    7,
+    {
+      attach() {
+        attachments++
+        return surface.element
+      },
+      detach: () => cleanup.push('dom'),
+    },
+    {
+      onAttach: (_canvas, id) => surfaces.retireWindow(id.windowId),
+      onDetach: () => cleanup.push('input'),
+    },
+  )
+  try {
+    port.receive(request())
+    assert.deepEqual(cleanup, ['input', 'dom'])
+    assert.equal(surface.state.transfers, 0)
+    assert.equal(surfaces.get(1), undefined)
+    port.receive({ type: 'detach', ...identity() })
+    port.receive(request(1, 2))
+    assert.equal(attachments, 1)
+    assert.equal(port.posted.length, 0)
+  } finally {
+    surfaces.dispose()
+  }
+})
+
+test('a failed surface cannot retry into a natively retired Window', () => {
+  const port = new FakePort()
+  let attachments = 0,
+    removals = 0
+  const surfaces = new BrowserWindowSurfaces(port.port, 7, {
+    attach() {
+      attachments++
+      if (attachments === 1) throw new Error('Temporary DOM failure')
+      return canvas().element
+    },
+    detach: () => {
+      removals++
+    },
+  })
+  try {
+    port.receive(request())
+    assert.equal(port.posted[0]?.message.type, 'failed')
+    surfaces.retireWindow(1)
+    port.receive({ type: 'detach', ...identity() })
+    port.receive(request(1, 2))
+    assert.equal(attachments, 1)
+    assert.equal(removals, 1)
+    assert.equal(port.posted.length, 1)
+    assert.equal(surfaces.get(1), undefined)
+  } finally {
+    surfaces.dispose()
+  }
+})
+
+test('native retirement during old-surface cleanup cancels the already-started replacement request', () => {
+  const port = new FakePort(),
+    attached: number[] = []
+  const surfaces = new BrowserWindowSurfaces(
+    port.port,
+    7,
+    {
+      attach(_id, epoch) {
+        attached.push(epoch)
+        return canvas().element
+      },
+      detach() {},
+    },
+    { onDetach: (_canvas, id) => surfaces.retireWindow(id.windowId) },
+  )
+  try {
+    port.receive(request())
+    port.receive(request(1, 2))
+    assert.deepEqual(attached, [1])
+    assert.equal(surfaces.get(1), undefined)
+    port.receive(request(1, 3))
+    assert.deepEqual(attached, [1])
+  } finally {
+    surfaces.dispose()
+  }
+})
+
+for (const failure of ['input', 'dom'] as const)
+  test(`native retirement stays final after ${failure} cleanup throws`, () => {
+    const port = new FakePort(),
+      attached: number[] = [],
+      cleanup: string[] = []
+    const surfaces = new BrowserWindowSurfaces(
+      port.port,
+      7,
+      {
+        attach(id) {
+          attached.push(id)
+          return canvas().element
+        },
+        detach(id) {
+          cleanup.push(`dom:${id}`)
+          if (failure === 'dom' && id === 1) throw new Error('cleanup failed')
+        },
+      },
+      {
+        onDetach(_canvas, id) {
+          cleanup.push(`input:${id.windowId}`)
+          if (failure === 'input' && id.windowId === 1) throw new Error('cleanup failed')
+        },
+      },
+    )
+    try {
+      port.receive(request())
+      assert.throws(() => surfaces.retireWindow(1), /cleanup failed/)
+      surfaces.retireWindow(1)
+      port.receive(request(1, 2))
+      port.receive({ type: 'detach', ...identity(1, 2) })
+      assert.deepEqual(cleanup, ['input:1', 'dom:1'])
+      assert.deepEqual(attached, [1])
+      assert.equal(surfaces.get(1), undefined)
+      port.receive(request(2))
+      assert.deepEqual(attached, [1, 2])
+      assert.equal(surfaces.get(2)?.identity.windowId, 2)
+    } finally {
+      surfaces.dispose()
+    }
+  })
+
 for (const nested of ['request', 'same-epoch-detach', 'newer-detach'] as const)
   test(`a nested ${nested} during page cleanup supersedes the outer attachment operation`, () => {
     const port = new FakePort(),
