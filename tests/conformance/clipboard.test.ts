@@ -465,7 +465,6 @@ function run(){Debug.message("entered-script");var value=${expression};Debug.mes
         await bounded(session.stop(), `stop pending clipboard ${operation}`)
         const stopped = await bounded(outcome, `cancelled clipboard ${operation} result`)
         assert.equal(stopped.ok, false, 'Stopped clipboard evaluation must reject')
-        if (stopped.ok) assert.fail(`Clipboard continued after Stop: ${stopped.value}`)
         assert.ok(stopped.error instanceof Error)
         assert.match(stopped.error.message, /Execution cancelled/)
         assert.equal(p.closed(), 1)
