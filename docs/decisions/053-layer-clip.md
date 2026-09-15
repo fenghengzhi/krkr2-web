@@ -1,6 +1,6 @@
 # 053：Layer 绘图裁剪的参数与分配重置
 
-本阶段仅实现 `Layer.setClip` 和图像分配路径的裁剪语义。代码基于 051 的 `2593a71`；尚未通过本阶段 GitHub Actions 验证，不能计入已验证范围。所有执行验证由 GitHub-hosted runner 完成，本地只读源码、编辑和格式化。
+本阶段仅实现 `Layer.setClip` 和图像分配路径的裁剪语义。当前提交 `40cedd4` 包含 051 的 `3ef7f09`；Node 和兼容检查通过，但完整回归有一项 WebKit 启动失败，尚未合入已验证主分支。所有执行验证由 GitHub-hosted runner 完成，本地只读源码、编辑和格式化。
 
 ## 原版依据
 
@@ -39,6 +39,14 @@ layer.type=ltAddAlpha;        // 真正类型改变时重置为4×3
 
 既有 `tests/integration/image-writing.test.ts` 的准备顺序调整为先改变type再设置clip；其保存后clip不变的断言保持。旧准备顺序依赖“改变type保留clip”的错误行为，无法继续表达保存函数自身的合同。
 
-尚未执行本阶段测试、类型检查或构建；没有通过计数或绿色结论。原版C++有符号坐标加法溢出不作为定义良好的裁剪合同，本阶段不据此增加溢出行为断言。
+原版C++有符号坐标加法溢出不作为定义良好的裁剪合同，本阶段不据此增加溢出行为断言。
 
 copyRect的mask／空操作、assignImages、独立province、文字混合、转场时序和其他剩余API都不在本阶段；输入、模态、窗口surface与VM重入没有改动。
+
+## Actions 记录
+
+[Node 诊断 34945488350](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945488350)在 `40cedd4` 完成类型检查和构建，实际 **1,337／1,337** 通过，包含本阶段 20 项。无失败、取消、跳过或未报告的 Node 案例；浏览器、直接运行时及可信生命周期未运行，不能计完整回归通过。
+
+[首次完整回归 34946407444](https://github.com/fenghengzhi/krkr2-web/actions/runs/34946407444)使用同一提交：Node **1,337／1,337**、直接运行时 **6／6** 通过；浏览器 **1,040／1,041** 通过，零跳过或 flaky。14 个作业中 12 成功，WebKit 常规套件及汇总作业失败。唯一失败为原有 `layer-neutral-color.spec.ts` 的 JSPI／源码场景，在 launch 等待 evaluate 按钮可用时失败，未进入 neutralColor 像素断言。该 expect 配置 12 秒却约 219ms 后提前结束，整个案例约 1,246ms；不能描述为等满超时。完整错误、trace 和作业日志没有直接记录原始协议异常类型；结合该版本 Playwright 源码，仅能推断与内部协议会话关闭分支一致，不能认定原生崩溃、OOM 或历史故障同因。
+
+[兼容检查 34947049788](https://github.com/fenghengzhi/krkr2-web/actions/runs/34947049788)使用 `40cedd4` 和精确构建 `34946407444`，实际原矩阵 **78／78** 通过，三浏览器各 26 项。KAG 流程／存档／转场 36、调试面板 6、异常恢复 6、ABI 迁移 30 项均执行。三轮完整产物、run.json 和逐项 evidence-summary 分别归档；首次完整回归另保存 failure-details 与版本匹配的只读源码分析，失败状态继续保留。
