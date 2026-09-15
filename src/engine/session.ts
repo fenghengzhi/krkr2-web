@@ -1512,13 +1512,15 @@ export class EngineSession {
         value = this.menuItems!.state(args[0])
         break
       case 'Menu.view':
-        value = this.menuItems!.get(args[0]).view
+        value = BigInt(this.menuItems!.get(args[0]).view)
         break
       case 'Menu.relation':
         value = this.menuItems!.relation(args[0], text(1))
         break
       case 'Menu.index':
-        value = this.menuItems!.index(args[0], args[1] === undefined ? undefined : number(1))
+        value = BigInt(
+          this.menuItems!.index(args[0], args[1] === undefined ? undefined : number(1)),
+        )
         break
       case 'Menu.target': {
         const item = this.menuItems!.byView(number(0))

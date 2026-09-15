@@ -22,6 +22,7 @@ function menuLifetimeChecks(){
   var cache=parent.children;
   demand(cache===parent.children && cache[0]===first,"stable cache identity");
   second.index=0;
+  demand(typeof second.index=="Integer" && typeof first.__menuId=="Integer","native menu integer values");
   demand(cache===parent.children && cache[0]===first && second.index==0,"registration order versus visual order");
   cache.clear();
   demand(parent.children.count==0,"user cache mutation must persist");
