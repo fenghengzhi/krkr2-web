@@ -2,7 +2,11 @@
 
 首次组合回归 [35009948147](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009948147) 在 `a88f3fdccd773aafa5d96a9ae8eb565458102f43` 实际为 Node **2,010/2,010**、浏览器 **1,385/1,401**、直接运行时 **6/6**，整轮失败。新增省图浏览器案例 **24/24** 通过；16 个失败均在同组合的 Clipboard 测试，涉及 Chromium 的空文本／权限预期和 WebKit 自动化的读取授权，详见 [060](060-web-clipboard.md)。同源构建的 [78 项兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/35010819208) 全部通过，但不替代失败的完整回归。
 
-过时的第二轮 [35012318277](https://github.com/fenghengzhi/krkr2-web/actions/runs/35012318277) 被取消：取消请求检查时仍在排队，实际 runner 已开始并在 setup-node 阶段中止，存在六个作业，普通测试执行数为 **0**。修订 Clipboard 测试后，新的完整回归 [35014242871](https://github.com/fenghengzhi/krkr2-web/actions/runs/35014242871) 单独执行。首轮失败、取消时序和所有原件均保留。
+过时的第二轮 [35012318277](https://github.com/fenghengzhi/krkr2-web/actions/runs/35012318277) 被取消：取消请求检查时仍在排队，实际 runner 已开始并在 setup-node 阶段中止，存在六个作业，普通测试执行数为 **0**。首轮失败、取消时序和所有原件均保留。
+
+第三轮 [35014242871](https://github.com/fenghengzhi/krkr2-web/actions/runs/35014242871) 在 `70476b9e24e05d486cb5a15c505276bba3657f6c` 实际为 Node **2,010/2,010**、浏览器 **1,400/1,401**、直接运行时 **6/6**；Clipboard 三浏览器 **51/51** 通过，整轮仍失败。唯一失败是 WebKit JSPI 的 TLG6 写出 Stop 场景，等待 `encode-start` 12 秒超时。原 trace 在导入后约 221 ms 记录 `WebGL: context lost.`；末次快照已有 VM 和 Window，页面为“等待画面恢复”，但尚无编码标记，Stop 观察事件为空。因此本次未进入该例的 Stop 触发阶段，不能据此认定编码取消失效，也没有证据确定图形上下文丢失的根因。三个 WebKit 原生诊断清单均为空；不把清单为空视作没有引擎故障的证明。所有实际用例无跳过、重试或未报告。
+
+后续与 062／063 的整合回归独立验收；其结果不会覆盖本轮失败。上述 78 项兼容检查使用首轮构建，与第三轮应用源码相同，但不是第三轮的同一构建产物。
 
 Layer 可以在 `hasImage=false` 时保存和访问 Province。此前 Province 数组附着在 RGBA Bitmap 上，读写、命中和复制都会错误地要求 MainImage；图像尺寸也无法表示“无主图后改变 Layer 大小，旧省图尺寸保持不变”的状态。
 
