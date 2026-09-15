@@ -170,17 +170,17 @@ test('return-command popup preserves its selected Word command when the view is 
   assert.deepEqual(f.notifications, [])
 })
 
-test('N and N|R suppress queued callbacks while retaining their respective BOOL and command returns', async (t) => {
+test('N alone retains the observed original command notification while N|R returns a command without notification', async (t) => {
   const f = await fixture()
   t.after(() => f.stop())
-  // This is the selected Web contract. Historical N-only Win32 observations
-  // remain recorded separately; this unit does not claim to reproduce them.
+  // The pinned original SDK delivered N-only keyboard selections after popup
+  // returned in 34995723956. Its incomplete cases remain preserved separately.
   for (const flags of [0x80, 0x180]) {
     const current = f.show(`no-notify-${flags}`, flags)
     await f.choose()
     await f.result(current, flags & 0x100 ? BigInt(f.tree.command(f.leaf)) : 1n)
     await f.host('Modal.end', current)
-    assert.deepEqual(f.notifications, [])
+    assert.deepEqual(f.notifications, [f.leaf])
   }
 })
 

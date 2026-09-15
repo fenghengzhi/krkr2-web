@@ -3,13 +3,13 @@ import { evaluate } from '../helpers/browser-expression.ts'
 
 const source = String.raw`
 System.exitOnWindowClose=false;
-var flow="select", trace=[], result=-1, secondResult=-1, selectedCount=0, timerCount=0;
+var flow="select", firstFlags=0, trace=[], result=-1, secondResult=-1, selectedCount=0, timerCount=0;
 function mark(value){trace.add(value);Debug.message("popup-proof:"+value);}
 class PopupParent extends Window {
   function PopupParent(){super.Window();caption="Popup parent";setInnerSize(180,100);setPos(0,0);visible=true;}
   function onMouseDown(){
     global.mark("before");global.clock.enabled=true;
-    global.result=global.tools.popup(0,20,20);
+    global.result=global.tools.popup(global.firstFlags,20,20);
     global.mark("return:"+global.result);
     if(global.flow=="select"){
       global.secondResult=global.more.popup(tpmReturnCmd,20,20);
@@ -42,7 +42,7 @@ var clock=new Timer(global,"tick");clock.interval=100;
 mark("ready");
 `
 
-async function launch(page: Page, backend: string, binary: boolean, flow = 'select') {
+async function launch(page: Page, backend: string, binary: boolean, flow = 'select', flags = 0) {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto(`/?backend=${backend}`)
@@ -63,7 +63,7 @@ async function launch(page: Page, backend: string, binary: boolean, flow = 'sele
     {
       name: 'popup-proof.tjs',
       mimeType: 'text/plain',
-      buffer: Buffer.from(source + `\nflow="${flow}";`),
+      buffer: Buffer.from(source + `\nflow="${flow}";firstFlags=${flags};`),
     },
   ])
   await expect(page.getByText('popup-proof:ready', { exact: true })).toBeVisible()
@@ -152,6 +152,33 @@ for (const backend of ['asyncify', 'jspi']) {
       }
     })
   }
+  test(`${backend}: NoNotify keyboard selection follows the original post-return command notification`, async ({
+    page,
+  }) => {
+    const game = await launch(page, backend, false, 'select', 0x80)
+    try {
+      await game.open()
+      await expect(game.popup).toHaveAttribute('aria-label', 'First popup')
+      const selected = game.popup.getByRole('button', { name: 'Select first', exact: true })
+      await selected.focus()
+      await expect(selected).toBeFocused()
+      await page.keyboard.press('Enter')
+      await expect(page.getByText('popup-proof:return:1', { exact: true })).toBeVisible()
+      await expect(game.popup).toHaveAttribute('aria-label', 'Second popup')
+      await expect(page.getByText('popup-proof:click:1:-1', { exact: true })).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(game.popup).toHaveCount(0)
+      await expect(page.getByText('popup-proof:second-return:0:1', { exact: true })).toBeVisible()
+      await evaluate(
+        page,
+        'trace.join("|")+":"+selectedCount',
+        'ready|before|timer:-1|return:1|click:1:-1|second-return:0:1:1',
+      )
+    } finally {
+      await game.stop()
+    }
+  })
+
   test(`${backend}: Stop releases a popup entered by a suspended input callback`, async ({
     page,
   }) => {

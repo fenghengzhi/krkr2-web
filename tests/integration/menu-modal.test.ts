@@ -331,10 +331,11 @@ run=function(){
       assert.notEqual(results[1], item)
       assert.equal(results[3], results[1])
       assert.equal(results[4], results[1])
-      // N-only follows the documented Web policy; hosted Win32 synthetic-key
-      // observations disagree, so this is not an original-VCL compatibility claim.
-      assert.equal(f.logs.filter((entry) => entry === 'item:click').length, 1)
+      // Both ordinary and N-only selections notify after their own returns,
+      // matching the observed original SDK keyboard path. R suppresses both.
+      assert.equal(f.logs.filter((entry) => entry === 'item:click').length, 2)
       before(f.logs, 'flags:return:0', 'item:click')
+      assert.ok(f.logs.lastIndexOf('item:click') > f.logs.indexOf('flags:return:2'))
     } finally {
       await f.stop()
     }

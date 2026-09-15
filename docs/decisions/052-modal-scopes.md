@@ -199,3 +199,15 @@ MenuModals 将 popup 接入同一 TJS 栈上的 ModalLoop。MenuTree 保留每�
 两个失败均为既有测试。旧 popup 等待只检查 events 最后一条是否 menus；新的 ModalLoop.changed 在 presentMenus 后还会发布 state，所以菜单已打开却被夹具错报未打开。失败后的未观察 evaluate Promise 另产生 AbortError unhandledRejection，原 TAP 一并保留。修订单独保存最新菜单快照，按事件通知和 request ID 等待，立即观察所有操作的 rejection，并在 finally 停止后等待结算；没有只增加 sleep 或改变业务结果。
 
 视频的无关窗口拒绝呈现用例，在所属窗口 present 成功后等待一个 host turn 就断言 receipt 已完成。实际 publish 后还需要自己的 native commit continuation；一次 setImmediate 不能保证它已返回。修订直接等待有截止时间的真实 receipt，期间无关窗口持续拒绝呈现；在 receipt 完成后立即比较所有权与 handles，保留所属窗口实际视频像素和无关窗口拒绝的记录。没有添加 idle、解除无关窗口的拒绝或改写生产逻辑。首次失败和修订后的未验证状态均独立保留。
+
+首轮最终浏览器 **1,140／1,140**、直接运行时 **6／6**；14 作业中 12 成功，Node 与汇总失败。完整 379 文件及 14 artifacts 已归档，原 early-node 和附加未观察取消诊断仍独立保留，整轮不改计成功。
+
+## 原版 NoNotify 观察与行为校准
+
+[原版菜单 34996110492](https://github.com/fenghengzhi/krkr2-web/actions/runs/34996110492)，提交 `2ec771728368f470ce8eedb3794127b7190d925b`，在固定 SDK 引擎上完成 Windows 2022／2025 × 四 flags × 选择／Esc 共 16 份观察。选择经过真实菜单高亮后，向自有 HWND 投递一次 Enter；取消只投递一次 Esc。没有全局输入、hook、前台切换或合成 WM_COMMAND。
+
+两平台的普通及 N-only 选择均返回 1，并在 `popup-after` 之后才出现一次真实 TJS onClick；R 及 N|R 选择返回实际目标命令 31，均无 onClick。Esc 在无 R 时返回 1，有 R 时返回 0，均无通知。首轮 [34995723956](https://github.com/fenghengzhi/krkr2-web/actions/runs/34995723956) 的 9 份完成观察和 7 份不可执行保持原状态；没有将未建立高亮或错误访问已退出 HWND 的案例当成通过。原版完整记录、逐例脚本／驱动哈希及固定包装没有 N/R 二次过滤的来源见参考夹具 README。
+
+这项直接原版证据修正了前文暂沿文档的 N-only 抑制策略：Web 选中命令只在 R 置位时抑制通知，N-only 保留返回后通知。既有纯模型和 source／bytecode flags 用例改为检查普通及 N-only 各通知一次；新增两个浏览器模板通过实际键盘 Enter 检查两种后端的 N-only 路径，共三浏览器 6 项。这个校准仍不证明鼠标／硬件输入、真正原版递归或 VCL 命令编号分配完全相同；Web 不刻意复制本次原版命令值 31。
+
+校准发生在 056 组合分支，预期保持 1,729 项 Node、浏览器增至 1,146 项。先前 `3521247`、`b7bb957` 和 `0a1a948` 的结果继续对应校准前代码，不追认它们已验证新的 NoNotify 行为。新代码仍待后续 GitHub-hosted Actions。

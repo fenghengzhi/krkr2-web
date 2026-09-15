@@ -63,7 +63,7 @@ export class MenuModals {
         !record.aborted &&
         !this.loop.stopped &&
         record.selected &&
-        !(flags & 0x180)
+        !(flags & 0x100)
       )
         this.notifySelection(record.selected)
     }
