@@ -259,7 +259,7 @@ for (const binary of [false, true]) {
       )
       assert.equal(await f.session.evaluate('win.primaryLayer===newLayer'), '1')
       await f.execute('oldLayer.onMouseDown=oldPointer;newLayer.onMouseDown=newPointer;')
-      await f.session.input({ type: 'down', x: 1, y: 1, button: 0, shift: 0 })
+      await f.session.input({ type: 'down', x: 1, y: 1, button: 0, shift: 0, clicks: 1 })
       assert.equal(await f.session.evaluate('trace'), 'new')
       await f.execute(
         'invalidate oldLayer;delete global.oldLayer;invalidate newLayer;delete global.newLayer;delete global.win;',
