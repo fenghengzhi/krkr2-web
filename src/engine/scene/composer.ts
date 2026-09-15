@@ -18,6 +18,10 @@ const blank = (width: number, height: number): Pixels => ({
 })
 const ordinary = (type: number) =>
   type === 1 || type === 2 || type === 12 || type === 0 || type === 6 || type === 7
+// Opaque Layers still draw their own neutral-color rectangle without a main
+// image. Other image-less Layers retain the existing transparent group backing.
+const compositionType = (layer: LayerState): number =>
+  layer.bitmap || layer.type === 1 ? layer.type : 2
 function convert(image: Pixels, type: number, toPremultiplied: boolean): Pixels {
   const result = { ...image, data: image.data.slice() }
   if (type === 12) return result
@@ -66,6 +70,7 @@ export class SceneComposer {
     const layer = this.layers.get(id),
       frame = this.transition(id)
     return (
+      (!layer.bitmap && layer.type === 1) ||
       !ordinary(layer.type) ||
       (!!frame && this.needsBlend(frame.source, visited)) ||
       layer.children.some((child) => {
@@ -134,7 +139,7 @@ export class SceneComposer {
           y = top + child.top,
           area = intersect(clip, { x, y, width: child.width, height: child.height })
         if (!area.width || !area.height) continue
-        if (!child.bitmap && child.opacity === 255 && !this.transition(childId))
+        if (!child.bitmap && child.type !== 1 && child.opacity === 255 && !this.transition(childId))
           gather(child, x, y, area)
         else
           children.push({
@@ -147,11 +152,13 @@ export class SceneComposer {
       }
     }
     gather(layer, 0, 0, { x: 0, y: 0, width: layer.width, height: layer.height })
-    const type = layer.bitmap ? layer.type : 2
+    const type = compositionType(layer),
+      fill = !layer.bitmap && layer.type === 1 ? layer.neutralColor : neutralColor(type)
     return this.cached(
       `blend-tree:${id}:${skipTransition}`,
       JSON.stringify([
         type,
+        fill,
         layer.width,
         layer.height,
         layer.imageLeft,
@@ -168,12 +175,12 @@ export class SceneComposer {
         ]),
       ]),
       () => {
-        const pixels = blank(layer.width, layer.height),
-          neutral = neutralColor(type)
+        const pixels = blank(layer.width, layer.height)
         for (let at = 0; at < pixels.data.length; at += 4) {
-          pixels.data[at] = (neutral >>> 16) & 255
-          pixels.data[at + 1] = (neutral >>> 8) & 255
-          pixels.data[at + 2] = neutral & 255
+          pixels.data[at] = (fill >>> 16) & 255
+          pixels.data[at + 1] = (fill >>> 8) & 255
+          pixels.data[at + 2] = fill & 255
+          pixels.data[at + 3] = (fill >>> 24) & 255
         }
         if (main) {
           const area = intersect(
@@ -194,7 +201,7 @@ export class SceneComposer {
           }
         }
         for (const child of children) {
-          const mode = child.layer.bitmap ? child.layer.type : 2,
+          const mode = compositionType(child.layer),
             face = autoFace(type),
             hold = usesAlpha(type) && mode !== 1 && mode !== 2 && mode !== 12
           for (let y = child.clip.y; y < child.clip.y + child.clip.height; y++)
@@ -276,7 +283,7 @@ export class SceneComposer {
       const source = this.blendTree(id, skipTransition, ancestors, suppressed),
         layer = this.layers.get(id)
       return this.cached(`blend-display:${id}`, `${source.revision}:${layer.type}`, () =>
-        convert(source.pixels, layer.bitmap ? layer.type : 2, true),
+        convert(source.pixels, compositionType(layer), true),
       )
     }
     if (ancestors.has(id)) throw new Error('Cyclic scene composition')

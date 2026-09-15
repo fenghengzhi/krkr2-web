@@ -21,6 +21,7 @@ export interface LayerState {
   bitmap?: Bitmap
   revision: number
   type: number
+  neutralColor: number
   face: number
   holdAlpha: boolean
   imageModified: boolean
@@ -164,6 +165,9 @@ export class LayerTree {
         bitmap: new Bitmap(32, 32),
         revision: 0,
         type: parent ? 2 : 1,
+        // Construct promotes a primary's neutral color after allocating the
+        // shared transparent-white default image. It does not refill it.
+        neutralColor: parent ? neutralColor(2) : 0xffffffff,
         face: 128,
         holdAlpha: false,
         imageModified: true,
@@ -219,7 +223,7 @@ export class LayerTree {
       throw new Error('Layer bitmaps exceed 64 MiB budget')
   }
   private neutral(layer: LayerState): number {
-    return neutralColor(layer.type)
+    return layer.neutralColor
   }
   /** Script updates mark onPaint even if their display region is empty. The
    * region requests presentation; it does not replace the bitmap drawing clip. */
@@ -331,7 +335,8 @@ export class LayerTree {
     }
     if (typeof value !== 'number' || !Number.isSafeInteger(value))
       throw new Error(`Invalid Layer.${name}`)
-    if (name === 'width' || name === 'height')
+    if (name === 'neutralColor') layer.neutralColor = value >>> 0
+    else if (name === 'width' || name === 'height')
       this.resize(
         id,
         name === 'width' ? value : layer.width,
@@ -363,6 +368,7 @@ export class LayerTree {
       if (!imageTypes.has(value) && !noImageTypes.has(value))
         throw new Error(`Layer blend type ${value} is not implemented`)
       layer.type = value
+      layer.neutralColor = neutralColor(value)
       this.set(id, 'hasImage', Number(imageTypes.has(value)))
     } else if (name === 'hasImage') {
       if (value && !imageTypes.has(layer.type))
