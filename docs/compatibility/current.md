@@ -1,5 +1,15 @@
 # 当前实现范围
 
+当前已验证组合包含协作式 `MenuItem.popup`、Window 隐藏关闭查询校准、Layer.drawText／Font 参数与空操作语义，以及 crossfade／universal 的 opaque 定点像素核。菜单保留 TJS 调用栈并允许 Timer 和子模态工作，选中通知在返回后投递；原版 SDK 已确认单独 N 标志仍通知，仅 R 抑制。会话协议 **11**、TJS ABI **5**、字体 ABI **2**，内核提供 `nativeReleaseState: 1`。 实现与边界见 [052](../decisions/052-modal-scopes.md)、[056](../decisions/056-layer-text-semantics.md)、[057](../decisions/057-opaque-transition-kernels.md)。
+
+[完整回归 35001345784](https://github.com/fenghengzhi/krkr2-web/actions/runs/35001345784)在精确提交 `34367abda6a4519d54fa1ff8daae3b7776b20cb8` 通过 **1,756 项 Node、1,146 项浏览器和 6 组直接运行时**，14 个作业全部成功，零失败、取消、跳过或重试。浏览器包含 1,023 项常规、57 项游戏库、59 项 PWA 和 7 项可信生命周期。
+
+[兼容检查 34997605307](https://github.com/fenghengzhi/krkr2-web/actions/runs/34997605307)在 `6678d6e` 使用构建 `34997020864` 通过 **78 项原 KAG／旧 ABI 检查**。从该提交到 `34367ab` 只修改测试与文档，应用及内核源码相同；这是同源码的另一构建证据，不冒充最终回归的同次构建。
+
+已测应用以 `85414d3` 合入 main；合入与文档提交使用 `[skip ci]`，不新增一次验证。System 消息／输入对话框、视频混合图层和 Clipboard 在后续分支实现，尚未合入这里的已验证版本。其他系统／图形 API、流式媒体、旧视频编码及完整非插件目标仍未完成。历次失败、取消、未报告及原生诊断全部保留；当前绿色结果不证明历史 V8、glibc 或 WebKit 故障根因已修复。所有可执行验证只在 GitHub-hosted Actions 进行。
+
+以下保留此前阶段当时的状态与证据，当前结论以上文为准。
+
 当前已验证版本包含 [052 Window.showModal 与协作式事件检查点](../decisions/052-modal-scopes.md)，以及此前 053／054／055 图层组合。showModal 保留调用者栈，继续处理子窗口输入、计时器和关闭查询；接收 ACK、事件完成、原生释放与窗口更新分别结算。会话协议为 **11**，TJS ABI **5**、字体 ABI **2**；新内核明确提供 `nativeReleaseState: 1`。
 
 [完整回归 34989855109](https://github.com/fenghengzhi/krkr2-web/actions/runs/34989855109)在精确提交 `2683b304fa32e409941c84b723d80d53b5d6ac8d` 通过 **1,646 项 Node、1,095 项浏览器和 6 组直接运行时**，14 个作业全部成功。浏览器为 972 项常规、57 项游戏库、59 项 PWA、7 项可信生命周期；零失败、取消、跳过或 flaky。[兼容检查 34991339560](https://github.com/fenghengzhi/krkr2-web/actions/runs/34991339560)使用同一提交、同次构建通过 **78 项**，三浏览器各 26 项。
