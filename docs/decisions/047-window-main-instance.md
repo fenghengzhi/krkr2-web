@@ -24,4 +24,6 @@ WindowService 的 `main` 从已有活动窗口记录返回 ScriptWeakObject；�
 
 新增 `tests/integration/window-main-window.test.ts` 的源码／字节码用例，验证身份、只读、查询引用的释放、失败重试、构造回滚和替代窗口。`tests/browser/window-main-window.spec.ts` 在双后端源码／字节码组合中覆盖实际会话的身份、弱引用与清理时序。
 
-本阶段尚未验证。本地仅阅读、编辑与格式化；所有构建、类型检查、测试和可执行探针由 GitHub-hosted Actions 执行。先前已通过的阶段及历史失败继续保留，不作为此提交通过的证据。
+首轮 [Node diagnostic 34929268155](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929268155) 的构建和类型检查通过，1,065 项测试中 1,063 项通过、2 项失败，没有取消或跳过。失败来自新增测试：TJS 全局槽位读取会自动调用存储的属性 getter，`*mainAccessor` 因而对已经返回的 null 再解引用。测试改用 `*(&global.mainAccessor)`，并增加局部寄存器访问器及隐式／显式只读写入对照；弱引用、替代窗口和回收断言保留。失败记录及完整产物已归档，修订等待云端重跑。
+
+本地仅阅读、编辑与格式化；所有构建、类型检查、测试和可执行探针由 GitHub-hosted Actions 执行。先前已通过的阶段及历史失败继续保留，不作为此提交通过的证据。

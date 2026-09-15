@@ -216,21 +216,54 @@ class FollowingMainCleanup {
   })
 
   test(`${mode}: a saved mainWindow property accessor follows the current registration without retaining old Windows`, async () => {
-    const f = await windowFixture(binary, 'var mainAccessor=&global.Window.mainWindow;')
+    const f = await windowFixture(
+      binary,
+      `
+var mainAccessor=&global.Window.mainWindow;
+function readMainAccessor(){var accessor=&global.mainAccessor;return *accessor;}
+function rejectMainAccessorWrites(){
+  var rejected=0;
+  try{global.mainAccessor=null;}catch(error){rejected++;}
+  try{*(&global.mainAccessor)=null;}catch(error){rejected++;}
+  return rejected;
+}
+`,
+    )
     try {
-      assert.equal(await f.session.evaluate('(*mainAccessor)===null'), '1')
+      // Global slots dispatch stored property objects on an ordinary read.
+      // Fetch the property itself with & before using explicit *, as a local
+      // register holding the accessor does in readMainAccessor().
+      assert.equal(
+        await f.session.evaluate(
+          '(mainAccessor===null)+","+((*(&global.mainAccessor))===null)+","+(readMainAccessor()===null)',
+        ),
+        '1,1,1',
+      )
       await f.execute('makeWindow();')
-      assert.equal(await f.session.evaluate('(*mainAccessor)===win'), '1')
+      assert.equal(
+        await f.session.evaluate(
+          '((*(&global.mainAccessor))===win)+","+(readMainAccessor()===win)+","+rejectMainAccessorWrites()',
+        ),
+        '1,1,2',
+      )
       await f.execute('delete global.win;')
-      assert.equal(await f.session.evaluate('((*mainAccessor)===null)+","+finalized'), '1,1')
+      assert.equal(
+        await f.session.evaluate('((*(&global.mainAccessor))===null)+","+finalized'),
+        '1,1',
+      )
       await f.restored()
       await f.execute('makeWindow();win.caption="next-main";')
       assert.equal(
-        await f.session.evaluate('((*mainAccessor)===win)+","+(*mainAccessor).caption'),
-        '1,next-main',
+        await f.session.evaluate(
+          '((*(&global.mainAccessor))===win)+","+readMainAccessor().caption+","+rejectMainAccessorWrites()',
+        ),
+        '1,next-main,2',
       )
       await f.execute('delete global.win;')
-      assert.equal(await f.session.evaluate('((*mainAccessor)===null)+","+finalized'), '1,2')
+      assert.equal(
+        await f.session.evaluate('((*(&global.mainAccessor))===null)+","+finalized'),
+        '1,2',
+      )
       await f.restored()
     } finally {
       await f.session.stop()
