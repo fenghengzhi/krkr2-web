@@ -5,7 +5,7 @@ import type { ActivityState } from '../engine/ports/activity.ts'
 import type { FontDescriptor, FontPreview } from '../engine/ports/fonts.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
-export const PROTOCOL_VERSION = 10
+export const PROTOCOL_VERSION = 11
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -32,6 +32,11 @@ export interface InitializeRequest {
   activity: ActivityState
 }
 export type SessionEvent = EngineEvent & { generation: number; sequence: number }
+/** Admission acknowledges validation/queueing, not completion of TJS callbacks.
+ * Callback failures are reported by the owning Session's failure/state events. */
+export interface InputAdmissionAck {
+  status: 'accepted' | 'ignored'
+}
 export interface SessionApi {
   prepare(files: GameInput): Promise<string>
   initialize(request: InitializeRequest): Promise<SessionSnapshot>
@@ -42,17 +47,19 @@ export interface SessionApi {
   resume(): Promise<SessionSnapshot>
   retryGraphics(): Promise<SessionSnapshot>
   setActivity(activity: ActivityState): Promise<SessionSnapshot>
+  /** Legacy programmatic helpers retain callback-completion semantics. */
   click(x: number, y: number): Promise<void>
   pointerMove(x: number, y: number): Promise<void>
   pointerState(x: number, y: number, windowId?: number): Promise<void>
-  input(packet: InputPacket): Promise<void>
+  /** Resolve immediately after admission so browser input can continue queueing. */
+  input(packet: InputPacket): Promise<InputAdmissionAck>
   keyState(keys: number[]): Promise<void>
   exitFullScreen(windowId?: number): Promise<void>
-  activateWindow(windowId: number): Promise<void>
-  closeWindow(windowId: number): Promise<void>
+  activateWindow(windowId: number): Promise<InputAdmissionAck>
+  closeWindow(windowId: number): Promise<InputAdmissionAck>
   moveWindow(windowId: number, left: number, top: number): Promise<void>
   resizeWindow(windowId: number, width: number, height: number): Promise<void>
-  menuClick(id: number, popup?: MenuPopupIdentity): Promise<void>
+  menuClick(id: number, popup?: MenuPopupIdentity): Promise<InputAdmissionAck>
   menuDismiss(popup?: MenuPopupIdentity): Promise<void>
   setSystemFonts(fonts: FontDescriptor[]): Promise<void>
   setDebugVisibility(panel: DebugPanel, visible: boolean): Promise<SessionSnapshot>

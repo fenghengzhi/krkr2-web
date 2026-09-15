@@ -9,6 +9,7 @@ import {
   type VideoResult,
 } from '../ports/video.ts'
 import type { Pixels } from '../ports/graphics.ts'
+import { ExecutionCancelled } from '../scheduler/control.ts'
 import {
   isScriptObject,
   scriptList,
@@ -62,6 +63,9 @@ export class VideoService {
       before: () => void,
       immediate: boolean,
       source: object,
+      /** A Session receipt invokes this at body settlement and owns the
+       * following native/frame boundary. Standalone dispatchers may ignore it. */
+      release: () => void,
     ) => Promise<void>,
     private readonly error: (error: unknown) => void,
     private readonly cancelQueued: (source: object) => void = () => {},
@@ -176,6 +180,12 @@ export class VideoService {
   }
   private async receive(event: VideoEvent): Promise<void> {
     let lease: ScriptObject | undefined
+    let receiptReleased = false
+    const release = () => {
+      const owned = lease
+      lease = undefined
+      if (owned) this.objects.release(owned)
+    }
     try {
       if (this.disposed) return
       if (event.type === 'error') throw new Error(event.message)
@@ -206,14 +216,22 @@ export class VideoService {
         () => this.pixels(video, event),
         event.type !== 'ended',
         video,
+        () => {
+          receiptReleased = true
+          release()
+        },
       )
     } catch (error) {
       this.error(error)
+      // Session completion now includes the boundary that used to be awaited
+      // in finally. Preserve its cleanup rejection; terminal cancellation is
+      // still a dropped transport message, not a successful presented frame.
+      if (receiptReleased && !(error instanceof ExecutionCancelled)) throw error
     } finally {
       if (lease) {
         // Release at event completion, while the VM can still drain the native
         // handle. Only then wait for presentation before acknowledging a frame.
-        this.objects.release(lease)
+        release()
         await this.deliveryBoundary()
       }
     }

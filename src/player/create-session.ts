@@ -61,6 +61,8 @@ export function createSession(request: InitializeRequest): EngineSession {
         if (!response.ok) throw new Error('WASM assets are missing. Run npm run build:wasm.')
         const manifest = (await response.json()) as WasmManifest
         if (manifest.abi !== 5) throw new Error('WASM manifest ABI mismatch')
+        if (manifest.capabilities?.nativeReleaseState !== 1)
+          throw new Error('WASM manifest is missing native release-state support')
         const supportsJspi = 'Suspending' in WebAssembly && 'promising' in WebAssembly
         const variant: WasmVariant =
           request.backend === 'auto'

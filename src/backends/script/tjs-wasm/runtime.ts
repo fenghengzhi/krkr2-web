@@ -73,6 +73,8 @@ export class TjsWasmRuntime implements ScriptRuntime {
       },
     })
     if (runtime.call('krkr_abi_version') !== 5) throw new Error('TJS WASM ABI mismatch')
+    if (typeof runtime.module._krkr_release_draining !== 'function')
+      throw new Error('TJS WASM is missing native release-state support')
     runtime.vm = runtime.call('krkr_create', Number(options.debugMode === true))
     if (!runtime.vm) throw new Error('TJS VM initialization failed')
     return runtime
@@ -644,6 +646,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       weakOwners: this.call('krkr_owner_count', this.vm),
       scriptObjects: this.call('krkr_native_lifetime_stat', 4),
       pendingHandles: this.call('krkr_pending_handle_count', this.vm),
+      drainingReleased: this.call('krkr_release_draining', this.vm) !== 0,
       dependents: this.call('krkr_dependent_count', this.vm),
       pendingInvalidations: this.call('krkr_pending_invalidation_count', this.vm),
     }

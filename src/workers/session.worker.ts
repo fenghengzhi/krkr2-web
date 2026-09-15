@@ -4,8 +4,8 @@ import { importSources } from '../backends/files/import-resources.ts'
 import { resolveFiles, type SourceFile } from '../backends/files/source-files.ts'
 import { HttpRangePool } from '../backends/files/http-range.ts'
 import { gameIdentity } from '../player/game-identity.ts'
-import { PROTOCOL_VERSION, type SessionApi } from '../protocol/session.ts'
-import type { EngineSession } from '../engine/session.ts'
+import { PROTOCOL_VERSION, type InputAdmissionAck, type SessionApi } from '../protocol/session.ts'
+import type { EngineSession, SessionAdmission } from '../engine/session.ts'
 import { LibraryService, type LibraryLease } from '../player/library/service.ts'
 
 let session: EngineSession | undefined
@@ -44,6 +44,50 @@ let pendingClicks = 0
 function active(): EngineSession {
   if (!session) throw new Error('Session has not been initialized')
   return session
+}
+function reserveInput(): void {
+  if (pendingClicks >= 64) throw new Error('Input queue is full; wait for the current script')
+  pendingClicks++
+}
+function admitInput(accept: (target: EngineSession) => SessionAdmission): InputAdmissionAck {
+  const target = active()
+  reserveInput()
+  let admission: SessionAdmission
+  try {
+    admission = accept(target)
+  } catch (error) {
+    pendingClicks--
+    throw error
+  }
+  // The page owns only the admission ACK. Keep the slot and the captured
+  // Session until this particular callback operation settles, including when
+  // a newer UI action or shutdown has overtaken its acknowledgment.
+  void admission.completion.then(
+    () => {
+      pendingClicks--
+    },
+    (error: unknown) => {
+      pendingClicks--
+      if (target.control.cancelled) return
+      try {
+        target.fail(error)
+      } catch (failure) {
+        // Failure reporting may itself lose a disposed event port. The
+        // detached completion must never become an unhandled rejection.
+        console.error('Unable to report an admitted input failure', failure)
+      }
+    },
+  )
+  return { status: admission.status }
+}
+async function completeInput(operation: (target: EngineSession) => Promise<void>): Promise<void> {
+  const target = active()
+  reserveInput()
+  try {
+    await operation(target)
+  } finally {
+    pendingClicks--
+  }
 }
 const api: SessionApi = {
   async prepare(files) {
@@ -145,31 +189,19 @@ const api: SessionApi = {
     return active().snapshot()
   },
   async click(x, y) {
-    if (pendingClicks >= 64) throw new Error('Input queue is full; wait for the current script')
-    pendingClicks++
-    try {
-      await active().click(x, y)
-    } finally {
-      pendingClicks--
-    }
+    await completeInput((target) => target.click(x, y))
   },
   async inspect() {
     return active().snapshot()
   },
   async pointerMove(x, y) {
-    await active().pointerMove(x, y)
+    await completeInput((target) => target.pointerMove(x, y))
   },
   async pointerState(x, y, windowId) {
     active().pointerState(x, y, windowId)
   },
   async input(packet) {
-    if (pendingClicks >= 64) throw new Error('Input queue is full')
-    pendingClicks++
-    try {
-      await active().input(packet, false)
-    } finally {
-      pendingClicks--
-    }
+    return admitInput((target) => target.acceptInput(packet, false))
   },
   async keyState(keys) {
     active().keyState(keys)
@@ -178,10 +210,10 @@ const api: SessionApi = {
     active().exitFullScreen(windowId)
   },
   async activateWindow(windowId) {
-    await active().activateWindow(windowId)
+    return admitInput((target) => target.acceptActivateWindow(windowId))
   },
   async closeWindow(windowId) {
-    await active().closeWindow(windowId)
+    return admitInput((target) => target.acceptCloseWindow(windowId))
   },
   async moveWindow(windowId, left, top) {
     active().moveWindow(windowId, left, top)
@@ -190,7 +222,7 @@ const api: SessionApi = {
     active().resizeWindow(windowId, width, height)
   },
   async menuClick(id, popup) {
-    await active().menuClick(id, popup)
+    return admitInput((target) => target.acceptMenuClick(id, popup))
   },
   async menuDismiss(popup) {
     active().menuDismiss(popup)

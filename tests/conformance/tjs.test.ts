@@ -31,6 +31,94 @@ async function runtime(
   return TjsWasmRuntime.create(factory, handler, { wasmBinary, control })
 }
 
+test('an ABI 5 module without release-drain state is rejected before creating a VM', async () => {
+  let created = false
+  const legacy: ModuleFactory = async () => ({
+    HEAPU8: new Uint8Array(),
+    HEAPU16: new Uint16Array(),
+    HEAPU32: new Uint32Array(),
+    _krkr_abi_version: () => 5,
+    _krkr_create: () => {
+      created = true
+      return 1
+    },
+    ccall: async () => 0,
+  })
+  await assert.rejects(
+    TjsWasmRuntime.create(legacy, () => ({ kind: 'value', value: undefined })),
+    /missing native release-state support/,
+  )
+  assert.equal(created, false)
+})
+
+for (const binary of [false, true])
+  for (const outcome of ['success', 'throw', 'cancel'] as const)
+    test(
+      `${binary ? 'bytecode' : 'source'}: native drain stays active with an empty release queue during suspended ${outcome} finalization`,
+      { timeout: 30000 },
+      async () => {
+        const control = new ExecutionControl()
+        let enter!: () => void, release!: () => void
+        const entered = new Promise<void>((resolve) => {
+            enter = resolve
+          }),
+          gate = new Promise<void>((resolve) => {
+            release = resolve
+          })
+        let observed: ReturnType<TjsWasmRuntime['inspect']> | undefined,
+          collecting: Promise<void> | undefined
+        const vm = await runtime(async (operation) => {
+          assert.equal(operation, 'DuringDrain')
+          observed = vm.inspect()
+          enter()
+          await gate
+          return { kind: 'value', value: undefined }
+        }, control)
+        try {
+          assert.equal(manifest.capabilities?.nativeReleaseState, 1)
+          assert.equal(vm.inspect().drainingReleased, false)
+          const source = `class DrainMarker {
+          function finalize(){__host("DuringDrain");${outcome === 'throw' ? 'throw new Exception("drain-finalizer-failure");' : ''}}
+        }`
+          const program = binary ? await vm.compile(source, 'drain-state.tjs') : source
+          await vm.execute(program, binary ? 'drain-state.cjs' : 'drain-state.tjs')
+          const owned = await vm.execute('new DrainMarker()', 'drain-owner.tjs', true)
+          assert(isScriptObject(owned))
+          vm.release(owned)
+          assert.equal(vm.inspect().pendingHandles, 1)
+          assert.equal(vm.inspect().drainingReleased, false)
+          collecting = vm.collect()
+          await Promise.race([
+            entered,
+            collecting.then(() => {
+              throw new Error('Collector returned without observing finalization')
+            }),
+          ])
+          assert.equal(observed?.pendingHandles, 0, 'The retiring handle already left the queue')
+          assert.equal(
+            observed?.drainingReleased,
+            true,
+            'The native finalizer still owns the drain',
+          )
+          assert.equal(vm.inspect().drainingReleased, true)
+          if (outcome === 'cancel') control.cancel()
+          release()
+          if (outcome === 'success') await collecting
+          else
+            await assert.rejects(
+              collecting,
+              outcome === 'throw' ? /drain-finalizer-failure/ : /Execution cancelled/,
+            )
+          assert.equal(vm.inspect().drainingReleased, false)
+          assert.equal(vm.inspect().pendingHandles, 0)
+        } finally {
+          release()
+          await collecting?.catch(() => {})
+          vm.dispose()
+        }
+      },
+    )
+
 test('native console warnings can suspend and run nested script on the existing compiler stack', async () => {
   const vm = await runtime(),
     messages: string[] = []

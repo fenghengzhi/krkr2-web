@@ -923,6 +923,9 @@ API int krkr_value_set_handle(Vm* vm, tTJSVariant* v, unsigned id) {
 }
 API unsigned krkr_handle_count(Vm* vm) { return vm->handles.size() - vm->released.size(); }
 API unsigned krkr_pending_handle_count(Vm* vm) { return vm->released.size(); }
+// A retiring value has already left released/handles while its finalizer runs.
+// Nested host continuations must not mistake an empty queue for a finished drain.
+API int krkr_release_draining(Vm* vm) { return vm->drainingReleased ? 1 : 0; }
 
 // Observe an actual instance, not an arbitrary function/context closure. Tokens
 // are never reused within this VM; they cannot accidentally name a new object

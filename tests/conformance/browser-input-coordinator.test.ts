@@ -634,3 +634,230 @@ test('focus revision observes external controls during pending input and suspens
     f.close()
   }
 })
+
+test('modal blocking is host presentation state and does not become a script Window property', () => {
+  const state = new WindowState(),
+    view = { ...state.view(), blocked: true }
+  assert.equal(view.blocked, true)
+  assert.equal(state.view().visible, false)
+  assert.equal(state.view().focusable, true)
+  assert.equal('blocked' in state.view(), false)
+  assert.throws(() => state.set('blocked', 1), /Unsupported Window property: blocked/)
+})
+
+test('blocked surfaces reject focus, pointer, touch, keyboard and text while retaining script visibility', async () => {
+  const f = fixture(),
+    view = { ...new WindowState().view(), visible: true, blocked: true }
+  try {
+    f.coordinator.setWindow(101, view)
+    assert.equal(view.visible, true)
+    assert.equal(view.focusable, true)
+    assert.equal(f.coordinator.focus(101), false)
+    f.a.focus()
+    f.dispatch(f.a, 'pointerdown', { pointerType: 'mouse', pointerId: 7 })
+    f.dispatch(f.a, 'pointerdown', {
+      pointerType: 'touch',
+      pointerId: 8,
+      clientX: 10,
+      clientY: 10,
+      width: 1,
+      height: 1,
+    })
+    f.mouse(f.a, 'mousedown', 1, 10)
+    f.mouse(f.a, 'mousemove', 1, 20)
+    f.key(f.a, 'a')
+    f.textareas[0]!.value = 'blocked text'
+    f.dispatch(f.textareas[0]!, 'input')
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.equal(f.a.captures.size, 0)
+    assert.equal(f.textareas[0]!.value, '')
+    assert.deepEqual(f.keys, [])
+    assert.deepEqual(f.pointers, [])
+    await settle()
+    assert.equal(f.packets.length, 0)
+    assert.equal(f.coordinator.focus(202), true)
+    await settle()
+    assert.deepEqual(
+      f.packets.map((packet) => [packet.windowId, packet.type]),
+      [[202, 'activate']],
+    )
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('blocking cancels captured input and composition and removes queued packets behind an admitted callback', async () => {
+  const waiting = deferred(),
+    f = fixture(async (packet) => {
+      if (packet.windowId === 101 && packet.type === 'activate') await waiting.promise
+    }),
+    view = { ...new WindowState().view(), visible: true, blocked: true }
+  try {
+    f.dispatch(f.a, 'pointerdown', { pointerType: 'mouse', pointerId: 7 })
+    f.mouse(f.a, 'mousedown', 1, 10)
+    f.key(f.textareas[0]!, 'a')
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    assert.equal(f.a.captures.has(7), true)
+    assert.deepEqual(f.keys.at(-1), [1, 65])
+    f.coordinator.setWindow(101, view)
+    assert.equal(f.a.captures.size, 0)
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.deepEqual(f.keys.at(-1), [])
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'discarded' })
+    f.coordinator.focus(202)
+    waiting.resolve()
+    await settle()
+    assert.deepEqual(
+      f.packets.map((packet) => [packet.windowId, packet.type]),
+      [
+        [101, 'activate'],
+        [202, 'activate'],
+      ],
+    )
+    f.coordinator.setWindow(101, { ...view, blocked: false })
+    f.coordinator.focus(101)
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'stale composition' })
+    await settle()
+    assert.equal(
+      f.packets.some((packet) => packet.type === 'text'),
+      false,
+    )
+    assert.deepEqual(f.errors, [])
+  } finally {
+    waiting.resolve()
+    f.close()
+  }
+})
+
+test('blocking releases physical keys after DOM blur without clearing another Window keys', async () => {
+  const f = fixture()
+  try {
+    f.coordinator.focus(101)
+    f.key(f.textareas[0]!, 'a')
+    f.coordinator.focus(202)
+    f.key(f.textareas[1]!, 'b')
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.equal(f.coordinator.isActive(202), true)
+    assert.deepEqual(f.keys.at(-1), [65, 66])
+    f.coordinator.setWindow(101, {
+      ...new WindowState().view(),
+      visible: true,
+      blocked: true,
+    })
+    assert.deepEqual(f.keys.at(-1), [66])
+    assert.equal(f.coordinator.isActive(202), true)
+    f.key(f.page, 'b', false)
+    assert.deepEqual(f.keys.at(-1), [])
+    await settle()
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('modal transitions invalidate pending focus even before canvas attachment and after view reuse', async () => {
+  const f = fixture(),
+    view = { ...new WindowState().view(), visible: true, blocked: true },
+    canvas = f.canvas()
+  try {
+    const before = f.coordinator.focusRevision
+    f.coordinator.setWindow(303, view)
+    assert.ok(f.coordinator.focusRevision > before)
+    const blocked = f.coordinator.focusRevision
+    f.coordinator.setWindow(303, view)
+    assert.equal(f.coordinator.focusRevision, blocked)
+    f.coordinator.attach(303, 1, canvas as unknown as HTMLCanvasElement)
+    assert.equal(f.coordinator.focus(303), false)
+    view.blocked = false
+    f.coordinator.setWindow(303, view)
+    assert.ok(f.coordinator.focusRevision > blocked)
+    assert.equal(f.coordinator.isActive(303), false)
+    assert.equal(f.coordinator.focus(303), true)
+    await settle()
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('unblocking does not reactivate a stale focused textarea or an older activation completion', async () => {
+  const waiting = deferred(),
+    f = fixture(async (packet) => {
+      if (packet.windowId === 101 && packet.type === 'activate') await waiting.promise
+    }),
+    view = { ...new WindowState().view(), visible: true, blocked: true }
+  try {
+    f.coordinator.focus(101)
+    const requestedRevision = f.coordinator.focusRevision
+    f.coordinator.setWindow(101, view)
+    f.coordinator.setWindow(101, { ...view, blocked: false })
+    assert.ok(f.coordinator.focusRevision > requestedRevision)
+    // This event-only fixture deliberately retains activeElement through inert;
+    // the coordinator must not rely on the browser delivering an extra blur.
+    assert.equal(f.document.activeElement, f.textareas[0])
+    assert.equal(f.coordinator.isActive(101), false)
+    waiting.resolve()
+    await settle()
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.equal(f.packets.filter((packet) => packet.type === 'activate').length, 1)
+    assert.equal(f.coordinator.focus(101), true)
+    await settle()
+    assert.equal(f.packets.filter((packet) => packet.type === 'activate').length, 2)
+    assert.deepEqual(f.errors, [])
+  } finally {
+    waiting.resolve()
+    f.close()
+  }
+})
+
+test('a rejected input from before blocking cannot discard input queued after unblocking', async () => {
+  const waiting = deferred(),
+    f = fixture(async (packet) => {
+      if (packet.windowId === 101 && packet.type === 'keyDown' && packet.key === 65)
+        await waiting.promise
+    }),
+    view = { ...new WindowState().view(), visible: true, blocked: true }
+  try {
+    f.coordinator.focus(101)
+    await settle()
+    f.key(f.textareas[0]!, 'a')
+    f.coordinator.setWindow(101, view)
+    f.coordinator.setWindow(101, { ...view, blocked: false })
+    f.coordinator.focus(101)
+    f.key(f.textareas[0]!, 'b')
+    waiting.reject(new Error('stale admitted input failure'))
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) => (packet.type === 'keyDown' ? [packet.key] : [])),
+      [65, 66],
+    )
+    assert.equal(f.packets.filter((packet) => packet.type === 'activate').length, 2)
+    assert.deepEqual(f.errors, [])
+  } finally {
+    waiting.resolve()
+    f.close()
+  }
+})
+
+test('page resume leaves blocked canvases suspended until an explicit unblocked focus', async () => {
+  const f = fixture(),
+    view = { ...new WindowState().view(), visible: true, blocked: true }
+  try {
+    f.coordinator.focus(101)
+    f.coordinator.setWindow(101, view)
+    f.coordinator.setSuspended(true)
+    f.coordinator.setSuspended(false)
+    assert.equal(f.coordinator.focus(101), false)
+    f.mouse(f.a, 'mousedown', 1, 10)
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.deepEqual(f.pointers, [])
+    f.coordinator.setWindow(101, { ...view, blocked: false })
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.equal(f.coordinator.focus(101), true)
+    await settle()
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})

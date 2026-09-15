@@ -123,9 +123,10 @@ export class SessionClient {
     if (!this.initialized) return Promise.resolve()
     return this.call('pointerState', x, y, windowId)
   }
-  input(packet: InputPacket) {
-    if (!this.initialized) return Promise.resolve()
-    return this.call('input', packet)
+  /** Browser send queues await admission only; callback completion stays in the Worker. */
+  async input(packet: InputPacket): Promise<void> {
+    if (!this.initialized) return
+    await this.call('input', packet)
   }
   keyState(keys: number[]) {
     if (!this.initialized) return Promise.resolve()
@@ -134,11 +135,11 @@ export class SessionClient {
   exitFullScreen(windowId?: number) {
     return this.call('exitFullScreen', windowId)
   }
-  activateWindow(windowId: number) {
-    return this.call('activateWindow', windowId)
+  async activateWindow(windowId: number): Promise<void> {
+    await this.call('activateWindow', windowId)
   }
-  closeWindow(windowId: number) {
-    return this.call('closeWindow', windowId)
+  async closeWindow(windowId: number): Promise<void> {
+    await this.call('closeWindow', windowId)
   }
   moveWindow(windowId: number, left: number, top: number) {
     return this.call('moveWindow', windowId, left, top)
@@ -146,8 +147,8 @@ export class SessionClient {
   resizeWindow(windowId: number, width: number, height: number) {
     return this.call('resizeWindow', windowId, width, height)
   }
-  menuClick(id: number, popup?: MenuPopupIdentity) {
-    return this.call('menuClick', id, popup)
+  async menuClick(id: number, popup?: MenuPopupIdentity): Promise<void> {
+    await this.call('menuClick', id, popup)
   }
   menuDismiss(popup?: MenuPopupIdentity) {
     return this.call('menuDismiss', popup)
