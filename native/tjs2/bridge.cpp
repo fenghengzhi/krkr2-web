@@ -97,7 +97,7 @@ struct Vm {
     bool ownerUpgradeFailed = false;
     unsigned nextDependent = 1;
     std::map<unsigned, std::unique_ptr<DependentOwner>> dependents;
-    std::set<tTJSVariant*> nativeStates; // non-owning; native instances own the variants
+    std::set<tTJSVariant*> nativeStates; // non-owning; native instances/delegates own the variants
     ~Vm() {
         krkr::CleanupErrors cleanup;
         cleanup.suppress();
@@ -581,11 +581,122 @@ public:
 // Host member operations cross into the TypeScript engine.
 class HostClass final : public tTJSNativeClass {
     static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+    Vm* systemVm;
+    unsigned systemBindings = 0;
 public:
-    explicit HostClass(const tjs_char* name) : tTJSNativeClass(name) {
+    explicit HostClass(const tjs_char* name, Vm* systemVm = nullptr)
+        : tTJSNativeClass(name), systemVm(systemVm) {
         SetClassID(TJSRegisterNativeClass(name));
         RegisterNCM(name, TJSCreateNativeClassConstructor(noOp), name, nitMethod);
         RegisterNCM(u"finalize", TJSCreateNativeClassMethod(noOp), name, nitMethod);
+        if(systemVm) {
+            tTJSVariant empty(static_cast<iTJSDispatch2*>(nullptr), static_cast<iTJSDispatch2*>(nullptr));
+            const tjs_char* callbacks[] = {u"exceptionHandler", u"onActivate", u"onDeactivate"};
+            for(const auto* member : callbacks) {
+                const auto status = PropSet(TJS_MEMBERENSURE, member, nullptr, &empty, this);
+                if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, member);
+            }
+        }
+    }
+    iTJSNativeInstance* CreateNativeInstance() override {
+        // The System.System constructor itself is a no-op. The original class
+        // rejects creation here, before that constructor can be called.
+        if(systemVm) TJS_eTJSError(u"Cannot create an instance of System");
+        return tTJSNativeClass::CreateNativeInstance();
+    }
+    bool CanBindSystem(Vm* vm, unsigned bit) const noexcept {
+        return systemVm == vm && vm && GetValidity() && !(systemBindings & bit);
+    }
+    void BoundSystem(unsigned bit) noexcept { systemBindings |= bit; }
+};
+
+// These delegates retain the existing TJS bodies, including dialog request
+// cleanup and their captured script context. This wrapper supplies native
+// member identity and the small, explicit entry policy below; it does not claim
+// that all conversions inside the script bodies match the original C++.
+struct SystemMethodPolicy { const tjs_char* name; int policy; };
+constexpr SystemMethodPolicy systemMethodPolicies[] = {
+    {u"getArgument", 1 | 0x100}, {u"setArgument", 2},
+    {u"addContinuousHandler", 1}, {u"removeContinuousHandler", 1},
+    {u"getKeyState", 1}, {u"getTickCount", 0x100},
+    {u"clearGraphicCache", 0}, {u"touchImages", 1},
+    {u"createAppLock", 1 | 0x100}, {u"exit", 0}, {u"terminate", 0},
+    {u"inform", 1}, {u"inputString", 3}
+};
+constexpr const tjs_char* systemPropertyNames[] = {
+    u"eventDisabled", u"graphicCacheLimit", u"exitOnWindowClose", u"title"
+};
+class SystemDelegate {
+    Vm* vm;
+protected:
+    tTJSVariant body;
+    SystemDelegate(Vm* vm, const tTJSVariant& body) : vm(vm), body(body) {
+        // A bound script closure can retain global, which contains System.
+        // The existing terminal native-state drain severs this cycle on Stop.
+        vm->nativeStates.insert(&this->body);
+    }
+    ~SystemDelegate() { vm->nativeStates.erase(&body); }
+    SystemDelegate(const SystemDelegate&) = delete;
+    SystemDelegate& operator=(const SystemDelegate&) = delete;
+};
+class SystemMethod final : public tTJSNativeClassMethod, private SystemDelegate {
+    int policy;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    SystemMethod(Vm* vm, const tTJSVariant& body, int policy)
+        : tTJSNativeClassMethod(noOp), SystemDelegate(vm, body), policy(policy) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        if(count < (policy & 0xff)) return TJS_E_BADPARAMCOUNT;
+        if(!result && (policy & 0x100)) return TJS_S_OK;
+        krkr::ExecutionFrame delegation(2);
+        return body.AsObjectClosureNoAddRef().FuncCall(0, nullptr, nullptr, result, count, args, context);
+    }
+};
+class SystemProperty final : public tTJSNativeClassProperty, private SystemDelegate {
+public:
+    SystemProperty(Vm* vm, const tTJSVariant& body)
+        : tTJSNativeClassProperty(nullptr, nullptr), SystemDelegate(vm, body) {}
+    tjs_error PropGet(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassProperty::PropGet(flag, member, hint, result, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(!result) return TJS_E_FAIL;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        krkr::ExecutionFrame delegation(2);
+        return body.AsObjectClosureNoAddRef().PropGet(0, nullptr, nullptr, result, context);
+    }
+    tjs_error PropSet(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        const tTJSVariant* input, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassProperty::PropSet(flag, member, hint, input, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(!input) return TJS_E_FAIL;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        krkr::ExecutionFrame delegation(2);
+        return body.AsObjectClosureNoAddRef().PropSet(0, nullptr, nullptr, input, context);
+    }
+};
+class SystemUuid final : public tTJSNativeClassMethod {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit SystemUuid(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        // Original createUUID generates random bytes even for an unused result.
+        constexpr auto operation = u"System.createUUID";
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 0, nullptr));
+        if(!reply) TJS_eTJSError(u"System.createUUID returned no response");
+        resolveReply(vm, *reply, result);
+        return TJS_S_OK;
     }
 };
 
@@ -886,13 +997,70 @@ API int krkr_proxy_bind_owner(Vm* vm, tTJSVariant* value, unsigned handle) {
     return proxy->BindOwner(owner);
 }
 API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* className) {
-    krkr::NativeOwner<HostClass> object(new HostClass(className));
+    const bool system = id == 0 && ttstr(prefix) == u"System" && ttstr(className) == u"System";
+    krkr::NativeOwner<HostClass> object(new HostClass(className, system ? vm : nullptr));
     if(id == 0 && ttstr(prefix) == u"Clipboard" && ttstr(className) == u"Clipboard") {
         object->RegisterNCM(u"hasFormat", new ClipboardHasFormat(vm), u"Clipboard", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"asText", new ClipboardText(vm), u"Clipboard", nitProperty, TJS_STATICMEMBER);
     }
+    if(system) object->RegisterNCM(u"createUUID", new SystemUuid(vm), u"System", nitMethod, TJS_STATICMEMBER);
     *value = tTJSVariant(object.get(), object.get());
 }
+// Private assembly exports: only the fixed System delegates may be installed,
+// once each, and only from live script function/property handles. Validation
+// reads the concrete TJS context type; it must not execute script during reply
+// construction while the original host call is suspended.
+static HostClass* systemBindingTarget(Vm* vm, tTJSVariant* value, unsigned bit) {
+    if(shuttingDown || !vm || !value || value->Type() != tvtObject) return nullptr;
+    auto* object = dynamic_cast<HostClass*>(value->AsObjectNoAddRef());
+    return object && object->CanBindSystem(vm, bit) ? object : nullptr;
+}
+static const tTJSVariant* systemBindingBody(Vm* vm, unsigned handle, bool property) {
+    if(vm->released.count(handle)) return nullptr;
+    const auto found = vm->handles.find(handle);
+    if(found == vm->handles.end() || found->second.Type() != tvtObject) return nullptr;
+    auto* body = dynamic_cast<tTJSInterCodeContext*>(found->second.AsObjectNoAddRef());
+    if(!body || !body->IsLifetimeValid()) return nullptr;
+    const auto type = body->GetContextType();
+    if(property ? type != ctProperty : type != ctFunction && type != ctExprFunction) return nullptr;
+    return &found->second;
+}
+API int krkr_class_system_method(Vm* vm, tTJSVariant* value, const tjs_char* member, unsigned handle, int policy) {
+    if(!member) return 0;
+    for(unsigned index = 0; index < sizeof(systemMethodPolicies) / sizeof(systemMethodPolicies[0]); ++index) {
+        const auto& expected = systemMethodPolicies[index];
+        if(TJS_strcmp(member, expected.name) || policy != expected.policy) continue;
+        const unsigned bit = 1u << index;
+        auto* object = systemBindingTarget(vm, value, bit);
+        if(!object) return 0;
+        const auto* body = systemBindingBody(vm, handle, false);
+        if(!body) return 0;
+        try {
+            object->RegisterNCM(member, new SystemMethod(vm, *body, policy), u"System", nitMethod, TJS_STATICMEMBER);
+            object->BoundSystem(bit);
+            return 1;
+        } catch(...) { return 0; }
+    }
+    return 0;
+}
+API int krkr_class_system_property(Vm* vm, tTJSVariant* value, const tjs_char* member, unsigned handle) {
+    if(!member) return 0;
+    for(unsigned index = 0; index < sizeof(systemPropertyNames) / sizeof(systemPropertyNames[0]); ++index) {
+        if(TJS_strcmp(member, systemPropertyNames[index])) continue;
+        const unsigned bit = 1u << (16 + index);
+        auto* object = systemBindingTarget(vm, value, bit);
+        if(!object) return 0;
+        const auto* body = systemBindingBody(vm, handle, true);
+        if(!body) return 0;
+        try {
+            object->RegisterNCM(member, new SystemProperty(vm, *body), u"System", nitProperty, TJS_STATICMEMBER);
+            object->BoundSystem(bit);
+            return 1;
+        } catch(...) { return 0; }
+    }
+    return 0;
+}
+API unsigned krkr_tjs_version() { return TJSVersionHex; }
 // Called only while assembling a fresh native-class reply, before publishing it.
 API void krkr_class_property(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* member, int options) {
     auto object = static_cast<HostClass*>(value->AsObjectNoAddRef());

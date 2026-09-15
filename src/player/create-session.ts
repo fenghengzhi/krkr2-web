@@ -11,6 +11,8 @@ import { readScript, readText, writeText } from '../backends/files/text-codecs.t
 import { inflateImage, deflateImage } from '../backends/files/blob-source.ts'
 import { IndexedDbSaveStore } from '../backends/files/indexeddb-saves.ts'
 import { WebAppLocks } from '../backends/files/web-app-locks.ts'
+import { fillWebRandomBytes } from '../backends/system/web-crypto.ts'
+import { normalizeSystemDataPath } from '../engine/system/environment.ts'
 import { PortAudioBackend } from '../backends/audio/port-backend.ts'
 import { PortVideoBackend } from '../backends/video/port-backend.ts'
 import { PortClipboardBackend } from '../backends/clipboard/port-backend.ts'
@@ -19,11 +21,17 @@ import { fontManifestFile } from './build-info.ts'
 import { loadFontKernel } from '../backends/text/freetype/module.ts'
 
 export function createSession(request: InitializeRequest): EngineSession {
+  // Reject invalid configuration before any port backend or surface owns the
+  // transferred channels. The player's API performs the same early validation.
+  const dataPath = request.dataPath
+  normalizeSystemDataPath(dataPath)
+  const arguments_ = new Map<string, string>(request.debugMode ? [['-debug', 'yes']] : [])
+  if (dataPath !== undefined) arguments_.set('-datapath', dataPath)
   let sequence = 0
   const session: EngineSession = new EngineSession({
     systemFonts: request.systemFonts,
     activity: request.activity,
-    arguments: new Map(request.debugMode ? [['-debug', 'yes']] : []),
+    arguments: arguments_,
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
     renderer: new WorkerWindowSurfaces(request.surfaces, request.generation),
     graphics: new BrowserGraphics(() =>
@@ -41,6 +49,7 @@ export function createSession(request: InitializeRequest): EngineSession {
     writeText,
     saveStore: new IndexedDbSaveStore(request.gameId),
     appLocks: new WebAppLocks(request.gameId),
+    fillRandomBytes: fillWebRandomBytes,
     audio: new PortAudioBackend(request.audio),
     video: new PortVideoBackend(request.video),
     clipboard: request.clipboard
@@ -69,6 +78,8 @@ export function createSession(request: InitializeRequest): EngineSession {
           throw new Error('WASM manifest is missing native release-state support')
         if (manifest.capabilities?.nativeClipboard !== 1)
           throw new Error('WASM manifest is missing native Clipboard support')
+        if (manifest.capabilities?.nativeSystem !== 1)
+          throw new Error('WASM manifest is missing native System support')
         const supportsJspi = 'Suspending' in WebAssembly && 'promising' in WebAssembly
         const variant: WasmVariant =
           request.backend === 'auto'

@@ -51,4 +51,4 @@ DOM 的 `altKey`、VK_MENU 和 F10 被标记为 systemKey，其它按普通键�
 
 当前新增定义数为 Node 86（attention 32、trapKey 42、浏览器协调器 12），浏览器规格 28（trapKey 16、attention 12；三浏览器展开为 84）。现有 multiwindow-ime 仅修正显式 useAttention 夹具，原用例数不变。这些是静态定义数，首次 Actions 的实际执行数、失败或未执行项须另行记录。
 
-协议暂更新到 15，native kernel ABI 不变。合并并行切片时以最终协议号为准。此阶段不包含窗口形状、全屏、键盘模拟鼠标、系统指针移动、完整 OS IME 或插件支持。
+与 062 System 配置整合后的会话协议统一为 **16**，native kernel ABI 保持 5；System 的新 native 能力另由 manifest 标记校验。此阶段不包含窗口形状、全屏、键盘模拟鼠标、系统指针移动、完整 OS IME 或插件支持。

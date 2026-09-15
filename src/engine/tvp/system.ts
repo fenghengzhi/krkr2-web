@@ -24,7 +24,7 @@ function __krkrSystemEventPump(token){
         var handled=false,message=describe(error);
         try{
           // Read the closure first, as the native exception dispatcher does.
-          // Calling the dictionary member directly supplies System as objthis.
+          // Calling the member directly supplies System as objthis.
           var handler=System.exceptionHandler;
           if(typeof handler=="Object" && handler!==null)handled=!!handler(error);
         }
@@ -50,10 +50,4 @@ function __krkrSystemEventPump(token){
 }
 __host("System.bindEvents",__krkrSystemEventPump);
 delete global.__krkrSystemEventPump;
-property __systemEventDisabled {
-  getter(){return __host("System.eventDisabled");}
-  setter(value){__host("System.eventDisabled",int(!!value));}
-}
-System.eventDisabled=&__systemEventDisabled;
-delete global.__systemEventDisabled;
 `

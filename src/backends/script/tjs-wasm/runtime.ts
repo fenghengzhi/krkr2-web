@@ -83,6 +83,12 @@ export class TjsWasmRuntime implements ScriptRuntime {
   private call(name: string, ...args: (number | bigint)[]): number {
     return Number(this.module[`_${name}`]!(...args))
   }
+  get languageVersion(): string | undefined {
+    this.assertAlive()
+    if (typeof this.module._krkr_tjs_version !== 'function') return undefined
+    const version = this.call('krkr_tjs_version') >>> 0
+    return `${version >>> 24}.${(version >>> 16) & 0xff}.${version & 0xffff}`
+  }
   private assertAlive(allowDisposing = false): void {
     if (this.disposed || (this.disposing && !allowDisposing))
       throw new Error('TJS runtime is disposed')
@@ -179,6 +185,22 @@ export class TjsWasmRuntime implements ScriptRuntime {
           value.properties.some((p) => !p.name || p.name.includes('\0')))
       )
         throw new Error('Invalid native class properties')
+      if (value.type === 'class' && (value.systemMethods || value.systemProperties)) {
+        if (
+          value.namespace !== 'System' ||
+          value.id !== 0 ||
+          value.className !== 'System' ||
+          (value.systemMethods?.length ?? 0) > 13 ||
+          (value.systemProperties?.length ?? 0) > 4
+        )
+          throw new Error('Invalid System class delegates')
+        if (
+          typeof this.module._krkr_class_system_method !== 'function' ||
+          typeof this.module._krkr_class_system_property !== 'function' ||
+          typeof this.module._krkr_tjs_version !== 'function'
+        )
+          throw new Error('TJS WASM is missing native System support')
+      }
       const namespace = this.textPointer(value.namespace),
         name = this.textPointer(value.className)
       try {
@@ -214,6 +236,49 @@ export class TjsWasmRuntime implements ScriptRuntime {
               this.call('free', key)
             }
           }
+        if (value.type === 'class') {
+          for (const method of value.systemMethods ?? []) {
+            if (!method.name || method.name.includes('\0') || !Number.isInteger(method.policy))
+              throw new Error('Invalid System method delegate')
+            this.assertObject(method.callback)
+            const key = this.textPointer(method.name)
+            try {
+              if (
+                !this.call(
+                  'krkr_class_system_method',
+                  this.vm,
+                  pointer,
+                  key,
+                  method.callback.id,
+                  method.policy,
+                )
+              )
+                throw new Error(`Cannot bind System.${method.name}`)
+            } finally {
+              this.call('free', key)
+            }
+          }
+          for (const property of value.systemProperties ?? []) {
+            if (!property.name || property.name.includes('\0'))
+              throw new Error('Invalid System property delegate')
+            this.assertObject(property.callback)
+            const key = this.textPointer(property.name)
+            try {
+              if (
+                !this.call(
+                  'krkr_class_system_property',
+                  this.vm,
+                  pointer,
+                  key,
+                  property.callback.id,
+                )
+              )
+                throw new Error(`Cannot bind System.${property.name}`)
+            } finally {
+              this.call('free', key)
+            }
+          }
+        }
       } finally {
         this.call('free', namespace)
         this.call('free', name)

@@ -5,7 +5,7 @@ import type { ActivityState } from '../engine/ports/activity.ts'
 import type { FontDescriptor, FontPreview } from '../engine/ports/fonts.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
-export const PROTOCOL_VERSION = 15
+export const PROTOCOL_VERSION = 16
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -26,6 +26,8 @@ export interface InitializeRequest {
   manifestUrl: string
   backend: BackendPreference
   debugMode?: boolean
+  /** Raw relative -datapath configuration, normalized once by the engine. */
+  dataPath?: string
   gameId: string
   audio: MessagePort
   video: MessagePort

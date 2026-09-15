@@ -55,6 +55,14 @@ export interface ScriptClass {
     static: boolean
     boolean: boolean
   }[]
+  /** Private delegates copied into native references before the class reply is
+   * published. These fields are accepted only by the System class factory. */
+  readonly systemMethods?: readonly {
+    name: string
+    callback: ScriptObject
+    policy: number
+  }[]
+  readonly systemProperties?: readonly { name: string; callback: ScriptObject }[]
 }
 export type ScriptValue =
   | { readonly type: 'native-method'; readonly name: 'getTraceString' }
@@ -114,6 +122,8 @@ export type HostHandler = (
 export type ConsoleHandler = (text: string) => HostReply | Promise<HostReply>
 
 export interface ScriptRuntime extends HostContext, HostObjectLifetime {
+  /** Version read from the loaded native TJS kernel, not an emulated SDK version. */
+  readonly languageVersion?: string
   /** Attach a native instance without retaining its owner. Its host operation
    * receives [identifier, owner] during native invalidation, before member deletion.
    * Optional private state is strongly owned until successful native invalidation
