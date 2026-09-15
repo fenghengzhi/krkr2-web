@@ -5,7 +5,7 @@ import type { ActivityState } from '../engine/ports/activity.ts'
 import type { FontDescriptor, FontPreview } from '../engine/ports/fonts.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
-export const PROTOCOL_VERSION = 12
+export const PROTOCOL_VERSION = 13
 export interface LocalGameFile {
   path: string
   blob: Blob

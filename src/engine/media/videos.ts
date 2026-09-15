@@ -7,6 +7,7 @@ import {
   type VideoSettings,
   type VideoSnapshot,
   type VideoResult,
+  type VideoMixingBitmap,
 } from '../ports/video.ts'
 import type { Pixels } from '../ports/graphics.ts'
 import { ExecutionCancelled } from '../scheduler/control.ts'
@@ -70,6 +71,12 @@ export class VideoService {
     private readonly error: (error: unknown) => void,
     private readonly cancelQueued: (source: object) => void = () => {},
     private readonly deliveryBoundary: () => Promise<void> = () => Promise.resolve(),
+    private readonly mixingLayer?: (
+      source: ScriptValue,
+      settings: VideoSettings,
+      windowId: number,
+      opened: boolean,
+    ) => VideoMixingBitmap | null,
   ) {
     this.unsubscribe = backend?.listen((event) => this.receive(event))
   }
@@ -273,6 +280,23 @@ export class VideoService {
     const video = this.get(Number(args[0]))
     if (operation === 'Video.destroy') {
       this.retire(video.id)
+      return
+    }
+    if (operation === 'Video.mixingLayer') {
+      if (!this.mixingLayer) throw new Error('This environment has no video mixing source')
+      const bitmap = this.mixingLayer(
+        args[1],
+        videoSettings(video.snapshot),
+        video.windowId,
+        video.ready,
+      )
+      if (video.ready && video.snapshot.mode === 2)
+        await this.videoCommand(video, {
+          op: 'mixing',
+          id: video.id,
+          epoch: video.snapshot.epoch,
+          bitmap,
+        })
       return
     }
     if (operation === 'Video.layer' || operation === 'Video.layerGet') {

@@ -40,6 +40,13 @@ export interface VideoSnapshot extends VideoSettings {
   numberOfVideoStream: number
   enabledVideoStream: number
 }
+/** A call-time RGB snapshot, independent of its source Layer and its mask. */
+export interface VideoMixingBitmap {
+  pixels: Pixels
+  /** Frozen VMR-style normalized output coordinates, including the half-pixel offset. */
+  destination: { left: number; top: number; right: number; bottom: number }
+  opacity: number
+}
 export type VideoCommand =
   | {
       op: 'open'
@@ -58,6 +65,7 @@ export type VideoCommand =
       epoch: number
     }
   | { op: 'set'; id: number; epoch: number; settings: VideoSettings }
+  | { op: 'mixing'; id: number; epoch: number; bitmap: VideoMixingBitmap | null }
   | { op: 'seek'; id: number; epoch: number; position?: number; frame?: number }
   | { op: 'pauseAll'; paused: boolean }
   | { op: 'shutdown' }
