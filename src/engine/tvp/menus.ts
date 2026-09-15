@@ -34,9 +34,9 @@ function __krkrMenuInsert(parent,item,index) {
 }
 class MenuItem {
   function MenuItem(actionOwner, captionOrWindow="") {
-    if(typeof actionOwner!="object")throw new Exception("MenuItem requires an action owner object");
+    if(typeof actionOwner!="Object")throw new Exception("MenuItem requires an action owner object");
     var state=%[actionOwner:actionOwner,owned:[],cache:null,clear:null,cacheValid:false];
-    __host("Menu.create",this,state,typeof captionOrWindow=="object"?captionOrWindow:string(captionOrWindow));
+    __host("Menu.create",this,state,typeof captionOrWindow=="Object"?captionOrWindow:string(captionOrWindow));
   }
   function finalize() {}
   function add(item) { __krkrMenuInsert(this,item,void); }
