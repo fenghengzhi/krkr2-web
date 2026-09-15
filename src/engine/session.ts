@@ -186,6 +186,12 @@ export class EngineSession {
   private transitions?: SceneTransitions
   private readonly composer = new SceneComposer(this.layers, (id) => this.transitions?.frame(id))
   private preparingFrame = false
+  private readonly paintedLayers = new Set<number>()
+  private readonly redrawRequests = new Set<number>()
+  private readonly deferredPaint = new Set<number>()
+  private cancelRedraw?: () => void
+  private redrawQueued = false
+  private redrawGeneration = 0
   private layerObjects?: LayerService
   private runtime?: ScriptRuntime
   private systemEvents?: SystemEvents
@@ -264,6 +270,10 @@ export class EngineSession {
       this.fontCatalog.clear()
     })
     this.control.onCancel(() => {
+      this.cancelRedraw?.()
+      this.cancelRedraw = undefined
+      this.redrawRequests.clear()
+      this.deferredPaint.clear()
       this.detachRenderer?.()
       this.transitions?.dispose()
       this.composer.clear()
@@ -460,10 +470,14 @@ export class EngineSession {
         this.layers,
         this.windows,
         (layer) => {
+          this.redrawRequests.delete(layer.id)
+          this.deferredPaint.delete(layer.id)
           this.systemEvents?.cancelSource(layer)
           this.dirty = true
         },
         (layer) => {
+          this.redrawRequests.delete(layer.id)
+          this.deferredPaint.delete(layer.id)
           this.systemEvents?.cancelSource(layer)
           this.transitions?.drop(layer.id)
           this.dirty = true
@@ -514,6 +528,7 @@ export class EngineSession {
     return this.queue.enqueue(async () => {
       await this.control.wait()
       this.control.check()
+      this.paintedLayers.clear()
       let failed = false,
         recorded = false
       try {
@@ -522,6 +537,11 @@ export class EngineSession {
         try {
           value = await operation()
           await this.inputs?.synchronize()
+          if (
+            this.hasPendingRedraw() &&
+            [...this.redrawRequests].some((id) => !this.deferredPaint.has(id))
+          )
+            this.dirty = true
           if (this.dirty && !this.systemEvents?.disabled) {
             const reply = this.inputs!.start(this.prepareFrame())
             if (reply.kind === 'invoke')
@@ -576,6 +596,7 @@ export class EngineSession {
         }
         this.present()
         this.notify()
+        this.armRedraw()
         return display
       } catch (error) {
         if (this.exitRequested && error instanceof Error && error.message === 'Execution cancelled')
@@ -691,16 +712,84 @@ export class EngineSession {
   private discard(value: ScriptValue): void {
     if (isScriptObject(value)) this.runtime!.release(value)
   }
+  private hasPendingRedraw(): boolean {
+    for (const id of this.redrawRequests)
+      if (
+        !this.layers.has(id) ||
+        !this.layers.get(id).callOnPaint ||
+        !this.inputController.attached(id) ||
+        this.layerObjects?.isClosing(id)
+      ) {
+        this.redrawRequests.delete(id)
+        this.deferredPaint.delete(id)
+      }
+    return this.redrawRequests.size !== 0
+  }
+  private armRedraw(): void {
+    const pending = this.hasPendingRedraw()
+    if (
+      !pending ||
+      this.control.cancelled ||
+      this.control.paused ||
+      this.state !== 'running' ||
+      this.systemEvents?.disabled ||
+      this.activity.state !== 'visible'
+    ) {
+      this.cancelRedraw?.()
+      this.cancelRedraw = undefined
+      return
+    }
+    if (this.cancelRedraw || this.redrawQueued) return
+    const generation = this.redrawGeneration
+    // Only one delayed frame and one serialized execution can be in flight.
+    // An onPaint that calls update() must yield to the host between frames.
+    this.cancelRedraw = this.deps.schedule(() => {
+      this.cancelRedraw = undefined
+      if (!this.hasPendingRedraw() || this.control.cancelled) return
+      this.redrawQueued = true
+      void this.execute(async () => {
+        // Recheck when the VM actually takes this task: it can have waited
+        // behind an asynchronous call, a newer paint, or a page transition.
+        if (
+          generation === this.redrawGeneration &&
+          !this.systemEvents?.disabled &&
+          this.activity.state === 'visible'
+        )
+          this.deferredPaint.clear()
+        return undefined
+      }, 2)
+        .catch(() => {}) // execute records and fails the session itself.
+        .finally(() => {
+          this.redrawQueued = false
+          this.armRedraw()
+        })
+    }, 16)
+  }
   private *prepareFrame(source = this.inputController.root()): InputOperation {
     if (this.preparingFrame) return
     this.preparingFrame = true
-    const layers = this.layers
+    const layers = this.layers,
+      painted = this.paintedLayers,
+      deferred = this.deferredPaint,
+      pending = this.redrawRequests,
+      beginPaint = () => {
+        // A synchronous completion can supersede a previously delayed frame.
+        // Its old wake must not expire during an asynchronous paint callback.
+        this.cancelRedraw?.()
+        this.cancelRedraw = undefined
+        this.redrawGeneration++
+      }
     function* visit(id: number, paint: boolean, seen = new Set<number>()): InputOperation {
       if (!layers.has(id) || seen.has(id)) return
       seen.add(id)
-      if (paint && layers.get(id).callOnPaint) {
-        layers.set(id, 'callOnPaint', 0)
-        yield { target: id, method: 'onPaint', args: [] }
+      if (paint && !painted.has(id) && !deferred.has(id)) {
+        pending.delete(id)
+        if (layers.get(id).callOnPaint) {
+          beginPaint()
+          painted.add(id)
+          layers.set(id, 'callOnPaint', 0)
+          yield { target: id, method: 'onPaint', args: [] }
+        }
       }
       if (!layers.has(id)) return
       for (const child of [...layers.get(id).children]) yield* visit(child, paint, seen)
@@ -721,6 +810,7 @@ export class EngineSession {
       throw new Error('Only an active session can be paused')
     this.userPaused = true
     this.applyPause()
+    this.armRedraw()
     this.notify()
   }
   resume(): void {
@@ -756,6 +846,7 @@ export class EngineSession {
     }
     if (activity.state === 'visible') this.dirty = true
     this.applyPause()
+    this.armRedraw()
     this.notify()
   }
   private pauseMediaRequestTimeouts(): void {
@@ -789,6 +880,7 @@ export class EngineSession {
       if (!this.control.cancelled) this.fail(error)
     })
     this.setState(paused ? 'paused' : 'running')
+    this.armRedraw()
   }
   retryGraphics(): void {
     if (this.control.cancelled) return
@@ -1801,6 +1893,10 @@ export class EngineSession {
       case 'Layer.set':
         return this.inputs!.change(() => {
           this.layers.set(number(0), text(1), typeof args[2] === 'string' ? text(2) : number(2))
+          if (text(1) === 'callOnPaint' && !this.preparingFrame) {
+            this.paintedLayers.delete(number(0))
+            this.deferredPaint.delete(number(0))
+          }
           this.dirty = true
         })
       case 'Layer.resize':
@@ -2191,10 +2287,25 @@ export class EngineSession {
         }
         break
       }
-      case 'Layer.update':
-        this.layers.get(number(0))
-        this.dirty = true
+      case 'Layer.update': {
+        const id = number(0),
+          region =
+            args.length > 1
+              ? { x: number(1), y: number(2), width: number(3), height: number(4) }
+              : undefined
+        // A later explicit update + piledCopy is another synchronous completion.
+        // Only requests made by an in-progress completion defer its own repaint.
+        if (!this.preparingFrame) {
+          this.paintedLayers.delete(id)
+          this.deferredPaint.delete(id)
+        }
+        if (this.layers.update(id, region) && this.inputController.attached(id)) {
+          if (this.preparingFrame && this.paintedLayers.has(id)) this.deferredPaint.add(id)
+          this.redrawRequests.add(id)
+          this.dirty = true
+        }
         break
+      }
       case 'Plugins.link':
         throw new Error(`Plugin is not implemented: ${text(0)}`)
       default:

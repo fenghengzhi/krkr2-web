@@ -221,6 +221,29 @@ export class LayerTree {
   private neutral(layer: LayerState): number {
     return neutralColor(layer.type)
   }
+  /** Script updates mark onPaint even if their display region is empty. The
+   * region requests presentation; it does not replace the bitmap drawing clip. */
+  update(id: number, region?: Rect): boolean {
+    let layer = this.get(id)
+    layer.callOnPaint = true
+    let left = region?.x ?? 0,
+      top = region?.y ?? 0,
+      right = left + (region?.width ?? layer.width),
+      bottom = top + (region?.height ?? layer.height)
+    while (true) {
+      left = Math.max(0, left)
+      top = Math.max(0, top)
+      right = Math.min(layer.width, right)
+      bottom = Math.min(layer.height, bottom)
+      if (left >= right || top >= bottom || !layer.visible) return false
+      if (!layer.parent) return layer.primary
+      left += layer.left
+      top += layer.top
+      right += layer.left
+      bottom += layer.top
+      layer = this.get(layer.parent)
+    }
+  }
   private resizeBitmap(layer: LayerState, width: number, height: number): void {
     const bitmap = layer.bitmap!
     dimension(width)

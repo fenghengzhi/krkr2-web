@@ -35,7 +35,7 @@ class Layer {
   function onClick(x,y) {
     return __inputAction("onClick",%[x:x,y:y]);
   }
-  function onPaint() {}
+  function onPaint() { __inputAction("onPaint",%[]); }
   function onHitTest(x,y,hit){__inputAction("onHitTest",%[x:x,y:y,hit:hit]);__host("Input.hitChoice",__id,int(hit));}
   function focus(direction=true){__host("Input.focus",__id,int(direction));}
   function focusNext(){return __host("Input.moveFocus",1);}
@@ -140,7 +140,13 @@ class Layer {
   function convertType(from){__host("Layer.convertType",__id,int(from));}
   function doGrayScale(){__host("Layer.grayscale",__id);}
   function doBoxBlur(xblur=1,yblur=1){__host("Layer.boxBlur",__id,int(xblur),int(yblur));}
-  function update(type=utNormal){__host("Layer.update",__id);}
+  function update(args*){
+    if(args.count==0)__host("Layer.update",__id);
+    else{
+      if(args.count<4)throw new global.Exception("Layer.update requires zero or at least four arguments");
+      __host("Layer.update",__id,int(args[0]),int(args[1]),int(args[2]),int(args[3]));
+    }
+  }
   function getLayerAt(x,y,excludeSelf=false,getDisabled=false) { return __host("Input.hit",__id,int(x),int(y),int(excludeSelf),int(getDisabled)); }
   ${['Main', 'Mask', 'Province']
     .map(
