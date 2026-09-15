@@ -27,7 +27,7 @@ import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts
 import { SaveOverlay } from './storage/save-overlay.ts'
 import { modeOffset } from '../formats/text/stream.ts'
 import { ScriptEvents } from './scheduler/events.ts'
-import { SystemEvents } from './scheduler/system-events.ts'
+import { SystemEvents, type EventOptions } from './scheduler/system-events.ts'
 import { systemEventsBridge } from './tvp/system.ts'
 import { eventClasses } from './tvp/events.ts'
 import { tvpConstants } from './tvp/constants.ts'
@@ -87,6 +87,15 @@ import {
 
 export type SessionState =
   'initializing' | 'ready' | 'running' | 'paused' | 'stopping' | 'stopped' | 'failed'
+/** Acceptance is synchronous; completion remains owned by the submitted operation. */
+export interface SessionAdmission {
+  readonly status: 'accepted' | 'ignored'
+  readonly completion: Promise<void>
+}
+const ignoredAdmission = (): SessionAdmission => ({
+  status: 'ignored',
+  completion: Promise.resolve(),
+})
 export interface SessionSnapshot {
   windows?: WindowPresentation[]
   activeWindow?: number
@@ -1041,35 +1050,68 @@ export class EngineSession {
     for (const controller of this.inputControllers.values())
       controller.keys = new Set(this.physicalKeys)
   }
-  input(packet: InputPacket, observe = true): Promise<void> {
+  async input(packet: InputPacket, observe = true): Promise<void> {
+    await this.acceptInput(packet, observe).completion
+  }
+  private acceptEvent(prepare: () => HostReply, options: EventOptions): SessionAdmission {
+    let releaseError: unknown,
+      releaseFailed = false
+    const admission = this.systemEvents!.enqueue(prepare, {
+      ...options,
+      onSettled: (outcome, round) => {
+        // The scheduler isolates bookkeeping observers. Keep actual resource
+        // cleanup failures in this operation's public completion contract.
+        try {
+          options.onSettled?.(outcome, round)
+        } catch (error) {
+          releaseError = error
+          releaseFailed = true
+        }
+      },
+    })
+    return {
+      status: admission.status === 'accepted' ? 'accepted' : 'ignored',
+      completion: admission.completion.then(
+        async () => {
+          await this.queue.drain()
+          if (releaseFailed) throw releaseError
+        },
+        (error) => {
+          if (releaseFailed) this.reportFlushFailure(releaseError)
+          throw error
+        },
+      ),
+    }
+  }
+  acceptInput(packet: InputPacket, observe = true): SessionAdmission {
     if (this.fontSelection.active && packet.type !== 'cancel' && packet.type !== 'deactivate')
-      return Promise.resolve()
+      return ignoredAdmission()
     for (const value of Object.values(packet))
       if (
         typeof value === 'number' &&
         (!Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER)
       )
-        return Promise.reject(new Error('Invalid input coordinates or key'))
+        throw new Error('Invalid input coordinates or key')
     if (packet.type === 'text' && packet.text.length > 65536)
-      return Promise.reject(new Error('Input text budget exceeded'))
-    if (this.activity.state !== 'visible') return Promise.resolve()
+      throw new Error('Input text budget exceeded')
+    if (this.activity.state !== 'visible') return ignoredAdmission()
     const windowId = packet.windowId ?? this.windowId,
       window = this.registeredWindow(windowId),
       controller = this.inputControllers.get(windowId)
-    if (!window || !controller) return Promise.resolve()
+    if (!window || !controller) return ignoredAdmission()
     packet = { ...packet, windowId }
     if (
       packet.type === 'activate' &&
       (!window.state.visible || !window.state.focusable || this.state !== 'running')
     )
-      return Promise.resolve()
+      return ignoredAdmission()
     if (
       packet.type === 'activate' &&
       window.state.visible &&
       window.state.focusable &&
       this.state === 'running'
     ) {
-      if (window.inputActive && this.windowId === windowId) return Promise.resolve()
+      if (window.inputActive && this.windowId === windowId) return ignoredAdmission()
       window.inputActive = true
       this.windows!.activate(windowId)
       this.syncActiveWindow()
@@ -1080,7 +1122,7 @@ export class EngineSession {
         this.windows!.activate(0)
         this.syncActiveWindow()
       }
-      if (!wasActive && this.state === 'running') return Promise.resolve()
+      if (!wasActive && this.state === 'running') return ignoredAdmission()
     }
     if (this.state !== 'running' && (packet.type === 'cancel' || packet.type === 'deactivate'))
       controller.resetTransient()
@@ -1104,9 +1146,9 @@ export class EngineSession {
       )
         this.pointerState(packet.x, packet.y, windowId)
     }
-    if (this.state !== 'running') return Promise.resolve()
+    if (this.state !== 'running') return ignoredAdmission()
     const epoch = controller.epoch
-    return this.systemEvents!.post(() => this.inputs!.packet(packet), {
+    return this.acceptEvent(() => this.inputs!.packet(packet), {
       valid: () =>
         this.registeredWindow(windowId) === window &&
         epoch === controller.epoch &&
@@ -1115,7 +1157,7 @@ export class EngineSession {
       priority: 1,
       discardable: packet.type === 'move',
       source: window,
-    }).then(() => this.queue.drain())
+    })
   }
   private postInput(packet: InputPacket, window: WindowRecord): void {
     const controller = this.inputControllers.get(window.id)
@@ -1143,26 +1185,45 @@ export class EngineSession {
     this.registeredWindow(windowId)?.state.set('fullScreen', 0)
     this.present()
   }
-  activateWindow(windowId: number): Promise<void> {
-    if (this.state !== 'running' || this.activity.state !== 'visible') return Promise.resolve()
+  async activateWindow(windowId: number): Promise<void> {
+    await this.acceptActivateWindow(windowId).completion
+  }
+  acceptActivateWindow(windowId: number): SessionAdmission {
+    if (this.state !== 'running' || this.activity.state !== 'visible') return ignoredAdmission()
     const window = this.registeredWindow(windowId)
-    if (!window || !window.state.visible || !window.state.focusable) return Promise.resolve()
+    if (!window || !window.state.visible || !window.state.focusable) return ignoredAdmission()
     const previous = this.windows?.active
     // Enqueue both notifications now, in observed order. Waiting for the old
     // callback before selecting the target lets an older request steal focus
     // back from a newer Window while that callback is suspended.
     const deactivated =
       previous && previous !== window
-        ? this.input({ type: 'deactivate', windowId: previous.id }, false)
-        : Promise.resolve()
+        ? this.acceptInput({ type: 'deactivate', windowId: previous.id }, false)
+        : ignoredAdmission()
     this.windows!.activate(windowId)
     this.syncActiveWindow()
-    const activated = this.input({ type: 'activate', windowId }, false)
+    let activated: SessionAdmission
+    try {
+      activated = this.acceptInput({ type: 'activate', windowId }, false)
+    } catch (error) {
+      // A submitted deactivation keeps its own lifetime even if the second
+      // admission fails; observe it before propagating the synchronous error.
+      void deactivated.completion.catch((failure) => {
+        if (!this.control.cancelled) this.fail(failure)
+      })
+      throw error
+    }
     // A focus command is distinct from the state echoed after browser input.
     // Treating every roster update as a command creates an activation loop.
     this.deps.event({ type: 'window-activate', windowId })
     this.present()
-    return Promise.all([deactivated, activated]).then(() => undefined)
+    return {
+      status:
+        deactivated.status === 'accepted' || activated.status === 'accepted'
+          ? 'accepted'
+          : 'ignored',
+      completion: Promise.all([deactivated.completion, activated.completion]).then(() => undefined),
+    }
   }
   moveWindow(windowId: number, left: number, top: number): void {
     const window = this.registeredWindow(windowId)
@@ -1179,11 +1240,14 @@ export class EngineSession {
     this.dirty = true
     this.present()
   }
-  closeWindow(windowId: number): Promise<void> {
+  async closeWindow(windowId: number): Promise<void> {
+    await this.acceptCloseWindow(windowId).completion
+  }
+  acceptCloseWindow(windowId: number): SessionAdmission {
     const window = this.registeredWindow(windowId)
-    if (!window || !['running', 'paused'].includes(this.state)) return Promise.resolve()
+    if (!window || !['running', 'paused'].includes(this.state)) return ignoredAdmission()
     let lease: ScriptObject | undefined
-    return this.systemEvents!.post(
+    return this.acceptEvent(
       () => {
         lease = this.runtime!.upgrade(window.owner)
         return lease
@@ -1194,12 +1258,13 @@ export class EngineSession {
         source: window,
         priority: 1,
         valid: () => this.registeredWindow(windowId) === window && !this.systemEvents!.disabled,
+        onSettled: () => {
+          const owned = lease
+          lease = undefined
+          if (owned) this.runtime!.release(owned)
+        },
       },
     )
-      .finally(() => {
-        if (lease) this.runtime?.release(lease)
-      })
-      .then(() => this.queue.drain())
   }
   present(): void {
     for (const window of this.windows?.registered() ?? []) {
@@ -1305,23 +1370,26 @@ export class EngineSession {
     // Keep the legacy event last for existing single-window consumers.
     this.deps.event({ type: 'menus', menus: this.menus.snapshot(this.windowId) })
   }
-  menuClick(id: number, popup?: MenuPopupIdentity): Promise<void> {
-    if (this.fontSelection.active) return Promise.resolve()
-    if (this.state !== 'running' || this.activity.state !== 'visible') return Promise.resolve()
+  async menuClick(id: number, popup?: MenuPopupIdentity): Promise<void> {
+    await this.acceptMenuClick(id, popup).completion
+  }
+  acceptMenuClick(id: number, popup?: MenuPopupIdentity): SessionAdmission {
+    if (this.fontSelection.active) return ignoredAdmission()
+    if (this.state !== 'running' || this.activity.state !== 'visible') return ignoredAdmission()
     const item = this.menuItems?.byView(id),
       window = this.menuItems?.windowByView(id),
       controller = window && this.inputControllers.get(window.id)
     if (!item || item.closing || item.finished || !window?.state.visible || !controller)
-      return Promise.resolve()
-    if (popup && popup.windowId !== window.id) return Promise.resolve()
-    if (this.systemEvents!.disabled && !this.menus.hasPopup) return Promise.resolve()
+      return ignoredAdmission()
+    if (popup && popup.windowId !== window.id) return ignoredAdmission()
+    if (this.systemEvents!.disabled && !this.menus.hasPopup) return ignoredAdmission()
     if (!this.menus.choose(id, window.id, popup?.requestId)) {
       this.presentMenus()
-      return Promise.resolve()
+      return ignoredAdmission()
     }
     const epoch = controller.epoch
     let lease: ScriptObject | undefined
-    return this.systemEvents!.post(
+    return this.acceptEvent(
       () => {
         lease = this.runtime!.upgrade(item.owner)
         return lease
@@ -1343,12 +1411,13 @@ export class EngineSession {
         priority: 1,
         discardable: true,
         source: item,
+        onSettled: () => {
+          const owned = lease
+          lease = undefined
+          if (owned) this.runtime!.release(owned)
+        },
       },
     )
-      .finally(() => {
-        if (lease) this.runtime?.release(lease)
-      })
-      .then(() => this.queue.drain())
   }
   menuDismiss(popup?: MenuPopupIdentity): void {
     this.menus.dismiss(popup?.windowId, popup?.requestId)

@@ -61,3 +61,13 @@
 选择失败来自探针没有建立真实高亮：两平台 case 2 的 Home 按下／抬起确实经过系统 MSGF_MENU，后续 hook 返回 0，但发送 Enter 前 `GetMenuState=0`、`MF_HILITE=false`，没有目标项的 WM_MENUSELECT，之后 Enter 使菜单结束且没有 WM_COMMAND。其余选择组合相同。返回 BOOL=1 不能证明选中了命令；原有高亮门槛正确拒绝了这些结果。轨迹只能证明这条 Home 注入路径没有建立选择，不能确定 Windows 内部忽略它的具体原因。
 
 修订改用 [Win32 标准菜单键盘接口](https://learn.microsoft.com/en-us/windows/win32/menurc/about-menus#standard-keyboard-interface)明确列出的 Down，补齐 [WM_KEYDOWN 导航键的 extended 位](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-keydown)，每次配对抬起后再读取真实高亮。两个叶子最多尝试两次 Down；只有目标实际高亮才发送 Enter，否则发送本窗口的 Esc 清理并保留选择用例 `not-executable`，不会改计取消成功。没有人工设置高亮或合成 WM_COMMAND，原始返回／通知顺序断言和 3 秒／180 秒截止时间保留。该修订尚未运行；第二轮完整产物与 run.json 保存于 `out/verification/github-actions/34946408599`，前一轮归档保留原状。
+
+## Session 与浏览器的接收确认
+
+EngineSession 增加同步的 `acceptInput`、`acceptActivateWindow`、`acceptCloseWindow`、`acceptMenuClick`，返回 accepted／ignored 及独立 completion；参数或入队拒绝同步抛错。原同名完成接口（不含 accept 前缀）继续返回 Promise。关闭和菜单回调的临时 lease 在 onSettled 同步释放，真实释放错误保留在该操作的 completion 中。当前 completion 仍等待原 execute 尾部和队列 drain，尚未替换为逐事件 native checkpoint。
+
+会话协议升为 11：上述四类 Worker RPC 在接收后立即回复状态，页面输入协调器因此可以继续发送后续包，不等待第一个脚本回调结束。Worker 的 64 项未完成预算覆盖这些入口及原 click／pointerMove，直到对应 completion 结算才释放；同步拒绝立即回滚，异步拒绝由捕获的 Session 处理。旧 click／pointerMove 仍等待完成。普通 TJS 回调错误继续走 System.exceptionHandler／eventDisabled，不因 ACK 改成会话强制失败。
+
+新增 18 项源码／字节码 Session 检查，覆盖挂起期间接收后续事件、FIFO、执行尾部、忽略／拒绝、回调期间与排队期间的不同引用规则，以及 Stop 清理；新增 6 个浏览器模板，分别检查真实 HTTP 读取未完成时鼠标／键盘包已接收，放行后的顺序，以及回调异常后 VM 保留。全部尚待 Actions；这些用例不证明模态泵、视频 ACK 或帧提交屏障已经接通。
+
+接收修订之前的[完整回归 34946408644](https://github.com/fenghengzhi/krkr2-web/actions/runs/34946408644)在 `9cb5e92` 已完成 Node 作业，实际 **1,378／1,378** 通过，零失败、取消、跳过或未报告；包含新增结算 17 项、scope 34 项及嵌套调度 10 项。记录时浏览器尚未全部完成，因此只计 Node 证据；该提交不含本节的接收接口及 18／6 项新测试。原始产物与逐项摘要在该 run 的 early-node 目录保留。
