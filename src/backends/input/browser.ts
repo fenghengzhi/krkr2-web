@@ -109,6 +109,7 @@ export interface BrowserInputHooks {
 export class BrowserInput {
   private readonly abort = new AbortController()
   private readonly text: HTMLTextAreaElement
+  private resizeObserver?: ResizeObserver
   private queue: InputPacket[] = []
   private sending = false
   private disposed = false
@@ -250,6 +251,25 @@ export class BrowserInput {
       },
       options,
     )
+    window.addEventListener('resize', () => this.appearance(), options)
+    window.addEventListener('scroll', () => this.appearance(), {
+      ...options,
+      capture: true,
+      passive: true,
+    })
+    // Responsive layout and fullscreen fitting change CSS dimensions without
+    // changing the game's logical Window or InputView.
+    if (typeof ResizeObserver !== 'undefined') {
+      try {
+        this.resizeObserver = new ResizeObserver(() => this.appearance())
+        this.resizeObserver.observe(canvas)
+      } catch {
+        try {
+          this.resizeObserver?.disconnect()
+        } catch {}
+        this.resizeObserver = undefined
+      }
+    }
   }
   setWindow(view: WindowView): void {
     this.view = view
@@ -280,6 +300,7 @@ export class BrowserInput {
     } else if (document.activeElement === this.text) this.activate()
   }
   private appearance(): void {
+    if (this.disposed) return
     this.canvas.style.cursor = this.view?.mouseCursorState
       ? 'none'
       : (cursors[this.input?.cursor ?? 0] ?? 'default')
@@ -554,6 +575,10 @@ export class BrowserInput {
     if (this.disposed) return
     this.setSuspended(true)
     this.disposed = true
+    try {
+      this.resizeObserver?.disconnect()
+    } catch {}
+    this.resizeObserver = undefined
     this.abort.abort()
     this.queue = []
     clearTimeout(this.composeTimer)
