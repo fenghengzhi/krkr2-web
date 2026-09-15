@@ -66,6 +66,7 @@ export class SystemEvents {
   private nextContinuous = 0
   private cancelWake?: () => void
   private frequency = 0
+  private readonly pendingListeners = new Set<() => void>()
 
   constructor(
     private readonly objects: ScriptRuntime,
@@ -74,6 +75,46 @@ export class SystemEvents {
     private readonly changed: () => void,
     private readonly error: (message: string, handled: boolean) => void,
   ) {}
+
+  /** Readiness for a fresh nested round, without taking jobs or invoking user predicates. */
+  hasDispatchableWork(): boolean {
+    if (this.disposed || this.disabled || this.paused || !this.pump) return false
+    // Invalid jobs still need a round to settle them. A pending continuous tick
+    // cannot reenter the continuous delivery that owns an outer callback.
+    return this.jobs.length > 0 || (this.continuousPending && !this.continuousProcessing)
+  }
+
+  /** Return a continuation for the existing TJS pump; never enter the VM from JavaScript. */
+  beginNested(): HostReply {
+    return this.hasDispatchableWork() ? this.begin() : empty()
+  }
+
+  /** Synchronous host-only wakeups. Callers recheck readiness after subscribing. */
+  subscribePending(listener: () => void): () => void {
+    if (this.disposed) return () => {}
+    this.pendingListeners.add(listener)
+    return () => {
+      this.pendingListeners.delete(listener)
+    }
+  }
+
+  private notifyPending(): void {
+    for (const listener of [...this.pendingListeners]) {
+      if (!this.pendingListeners.has(listener)) continue
+      try {
+        listener()
+      } catch (error) {
+        // Notification must not orphan a just-posted promise or stop another
+        // modal waiter from waking. A failed observer is detached permanently.
+        this.pendingListeners.delete(listener)
+        try {
+          this.error(String(error), false)
+        } catch {
+          /* Preserve queue ownership. */
+        }
+      }
+    }
+  }
 
   post(prepare: () => HostReply, options: EventOptions = {}): Promise<void> {
     const {
@@ -104,6 +145,7 @@ export class SystemEvents {
       })
     })
     if (priority === 0) this.exclusivePosted = true
+    this.notifyPending()
     this.kick()
     return promise
   }
@@ -114,6 +156,7 @@ export class SystemEvents {
       job.resolve()
       return false
     })
+    this.notifyPending()
   }
   private kick(): void {
     if (
@@ -125,7 +168,7 @@ export class SystemEvents {
       !this.pump
     )
       return
-    if (!this.jobs.length && !this.continuousPending) return
+    if (!this.hasDispatchableWork()) return
     this.queued = true
     void this.execute(() => this.begin())
       .catch((error) => {
@@ -140,6 +183,8 @@ export class SystemEvents {
     if (this.disposed || this.disabled || this.paused || !this.pump) return empty()
     if (this.rounds.size >= 64) throw new Error('System event nesting limit exceeded')
     const token = ++this.token
+    // Native TVP keeps a global cutoff: a nested delivery advances the cutoff
+    // subsequently seen by its suspended parent. Do not restore an older one.
     this.cutoff = this.sequence++
     this.exclusivePosted = false
     this.rounds.set(token, {
@@ -150,6 +195,7 @@ export class SystemEvents {
       continuous: -1,
       tick: 0,
     })
+    this.notifyPending()
     return { kind: 'invoke', callback: this.pump, args: [BigInt(token)] }
   }
   setDisabled(disabled: boolean): HostReply {
@@ -158,6 +204,7 @@ export class SystemEvents {
     // is disabled. Merely assigning false must not invent a reentrant tick.
     this.armContinuous()
     this.changed()
+    this.notifyPending()
     // Setting false drains eligible queued events synchronously in the caller's
     // native stack, including when the previous value was already false.
     return disabled ? empty() : this.begin()
@@ -191,6 +238,8 @@ export class SystemEvents {
     if (round.continuous < 0) {
       if (!this.continuousPending) return
       this.continuousPending = false
+      // Native TVP consumes the notification before its nonreentrant continuous
+      // dispatcher rejects a nested call. Preserve that legacy round behavior.
       if (this.continuousProcessing) return
       this.continuousProcessing = true
       round.ownsContinuous = true
@@ -234,6 +283,7 @@ export class SystemEvents {
       if (!isScriptObject(args[0])) throw new Error('System event pump must be callable')
       if (this.pump) this.objects.release(this.pump)
       this.pump = this.objects.retain(args[0])
+      this.notifyPending()
       this.kick()
       return empty()
     }
@@ -243,6 +293,7 @@ export class SystemEvents {
     if (operation === 'System.eventNext') {
       if (round.current) throw new Error('Previous event has not completed')
       round.current = this.take(round)
+      this.notifyPending()
       return { kind: 'value', value: round.current ? 1n : 0n }
     }
     if (operation === 'System.eventCall') {
@@ -253,6 +304,7 @@ export class SystemEvents {
       round.checkExclusive = round.current?.priority === 1 || !!round.current?.continuous
       round.current?.resolve()
       round.current = undefined
+      this.notifyPending()
       return empty()
     }
     if (operation === 'System.eventFailed') {
@@ -263,6 +315,7 @@ export class SystemEvents {
         this.continuousProcessing = false
       }
       round.current = undefined
+      this.notifyPending()
       return empty()
     }
     if (operation === 'System.eventInvalid') {
@@ -271,6 +324,7 @@ export class SystemEvents {
       round.current?.onError?.()
       round.current?.resolve()
       round.current = undefined
+      this.notifyPending()
       return empty()
     }
     if (operation === 'System.eventEnd') {
@@ -278,6 +332,7 @@ export class SystemEvents {
       this.rounds.delete(token)
       if (round.ownsContinuous) this.continuousProcessing = false
       if (!this.jobs.some((job) => job.priority !== 1)) this.sequence = 0
+      this.notifyPending()
       if (!this.rounds.size) {
         this.armContinuous()
         this.kick()
@@ -307,6 +362,7 @@ export class SystemEvents {
     if (callback !== null) this.registered.set(key, entry)
     this.entries.push(entry)
     this.restartClock()
+    this.notifyPending()
   }
   remove(callback: ScriptObject | null): void {
     if (callback === null) return
@@ -318,6 +374,7 @@ export class SystemEvents {
     this.registered.delete(entry.key)
     this.objects.release(entry.callback)
     entry.callback = undefined
+    this.notifyPending()
   }
   private interval(): number {
     return this.frequency ? Math.floor(65536000 / this.frequency) / 65536 : 0
@@ -356,6 +413,7 @@ export class SystemEvents {
         this.nextContinuous = interval
           ? now + interval - ((((now - this.nextContinuous) % interval) + interval) % interval)
           : now
+        this.notifyPending()
         this.kick()
       },
       Math.max(0, this.nextContinuous - this.clock.now()),
@@ -367,18 +425,21 @@ export class SystemEvents {
     this.pausedAt = this.clock.now()
     this.cancelWake?.()
     this.cancelWake = undefined
+    this.notifyPending()
   }
   resume(): void {
     if (!this.paused) return
     this.paused = false
     this.nextContinuous += this.clock.now() - this.pausedAt
     this.armContinuous()
+    this.notifyPending()
     this.kick()
   }
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
     this.cancelWake?.()
+    this.cancelWake = undefined
     for (const job of this.jobs) job.reject(new ExecutionCancelled())
     this.jobs = []
     for (const round of this.rounds.values()) round.current?.reject(new ExecutionCancelled())
@@ -388,5 +449,9 @@ export class SystemEvents {
     this.registered.clear()
     if (this.pump) this.objects.release(this.pump)
     this.pump = undefined
+    this.continuousPending = false
+    this.continuousProcessing = false
+    this.notifyPending()
+    this.pendingListeners.clear()
   }
 }
