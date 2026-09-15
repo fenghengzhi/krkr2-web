@@ -95,6 +95,7 @@ function retainedCallback(value){calls++;completed++;Debug.message("video-callba
 function lastReferenceCallback(value){
   calls++;delete global.movie;completed++;Debug.message("video-callback:"+value);
 }
+function hideCheckpointWindow(){win.visible=false;}
 `
 
 async function fixture(binary: boolean, extra = '') {
@@ -160,6 +161,70 @@ for (const binary of [false, true]) {
       assert.deepEqual(f.session.inspectOwnership(), ownership)
       assert.equal(f.session.snapshot().handles, handles)
       assert.deepEqual(f.logs, ['video-callback:2'])
+    } finally {
+      await f.session.stop()
+      await delivery?.promise
+    }
+  })
+
+  test(`${mode}: hiding a Window releases its pending video presentation without losing frame pixels`, async () => {
+    const f = await fixture(binary)
+    let delivery: ReturnType<typeof track> | undefined
+    try {
+      await f.execute(
+        'makeCheckpointMovie();movie.onFrameUpdate=retainedCallback incontextof movie;',
+      )
+      const ownership = f.session.inspectOwnership(),
+        handles = f.session.snapshot().handles,
+        id = f.video.onlyId(),
+        start = f.renderer.attempts.length,
+        rejected = f.renderer.videoAttempt(f.windowId, false)
+      f.renderer.blocked.add(f.windowId)
+      delivery = track(f.video.emit(id, 'frame'))
+      await Promise.race([
+        rejected,
+        delivery.promise.then(() => {
+          throw new Error('A visible Window acknowledged its video before presenting the frame')
+        }),
+      ])
+      await hostTurn()
+      assert.equal(delivery.settled, false)
+      assert.deepEqual(f.logs, ['video-callback:2'])
+      assert.deepEqual(f.session.inspectOwnership(), {
+        ...ownership,
+        eventReceipts: ownership.eventReceipts + 1,
+      })
+      assert.equal(f.session.snapshot().handles, handles)
+
+      // This is the requested visibility change, after proving the visible
+      // frame was still pending. The renderer continues to reject every frame,
+      // including empty frames, so no presentation can masquerade as success.
+      await f.execute('hideCheckpointWindow();')
+      await delivery.promise
+      assert.deepEqual(f.session.inspectOwnership(), ownership)
+      assert.equal(f.session.snapshot().handles, handles)
+      assert.equal(f.session.snapshot().state, 'running')
+      assert.equal(
+        f.session.snapshot().windows?.find((window) => window.id === f.windowId)?.view.visible,
+        false,
+      )
+      assert.deepEqual([...f.video.movies.keys()], [id])
+      assert.deepEqual(f.video.closedIds, [])
+      assert.deepEqual(f.logs, ['video-callback:2'])
+      assert.equal(f.renderer.blocked.has(f.windowId), true)
+      assert.equal(
+        f.renderer.attempts.slice(start).some((attempt) => attempt.accepted),
+        false,
+      )
+
+      // Read the bitmap only after the receipt and native ownership assertions;
+      // a query must not supply the checkpoint under test.
+      assert.equal(
+        await f.session.evaluate(
+          '[videoLayer.getMainPixel(0,0),videoLayer.getMaskPixel(0,0)].join(",")',
+        ),
+        '16711680,255',
+      )
     } finally {
       await f.session.stop()
       await delivery?.promise

@@ -528,6 +528,10 @@ function createOwner(){global.owner=new EventOwner();}
           assert.equal(session.snapshot().state, 'stopped')
           assert.equal(session.snapshot().handles, 0)
           assert.deepEqual(session.inspectOwnership(), {
+            eventReceipts: 0,
+            eventCheckpoints: 0,
+            modalScopes: 0,
+            modalWaits: 0,
             eventSources: 0,
             soundSources: 0,
             pendingSoundCloses: 0,
