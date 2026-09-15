@@ -20,6 +20,8 @@
 
 源码复核另补上 piledCopy 的主图前置校验，并用 `tests/integration/piled-copy-preconditions.test.ts` 覆盖回调试图修复来源或目标的源码／字节码场景。[Node 诊断 34929115093](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929115093) 在 `259c892` 通过全部 1,043 项，无失败、取消或跳过。
 
-首轮[完整回归 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074) 的 Chromium／Firefox 图形用例发现旧夹具对 primary 默认颜色的依赖。字体测试先扩容再切 ltAlpha，扩展区域已被 opaque white 填充；切换类型不重填已有像素。修订为先切 ltAlpha 再扩容。仿射保存测试需要透明白清除，现显式设置 neutralColor 为 `0x00ffffff`。原像素、字体度量和画布断言保留，失败日志也保留。修订等待完整回归；该首轮不能记为通过。相同构建的[原 KAG／离线升级 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970)已通过。
+首轮[完整回归 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074) 通过全部 1,043 项 Node 和 6 组直接运行时；浏览器 767 项通过、19 项失败，无取消、跳过或重试。其中 18 项图形用例发现旧夹具对 primary 默认颜色的依赖。字体测试先扩容再切 ltAlpha，扩展区域已被 opaque white 填充；切换类型不重填已有像素。修订为先切 ltAlpha 再扩容。仿射保存测试需要透明白清除，现显式设置 neutralColor 为 `0x00ffffff`。原像素、字体度量和画布断言保留，失败日志也保留。修订等待完整回归；该首轮不能记为通过。相同构建的[原 KAG／离线升级 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970)已通过全部 78 项。
+
+另 1 项是 WebKit Asyncify 的 PNG 编码停止测试。归档 trace 显示编码完成与会话就绪早于实际按钮点击：开始通知断言完成至真实点击相隔约 1.895 秒，点击前至少 85 毫秒的快照已经包含 encode-finished。这证明该次测试没有在编码期间发出停止，不能据此判定运行时遗漏取消，也不能把后来通过当作该时序已修复。完整原始 trace 和失败记录继续保留；及时触发按钮及编码已开始后的受控取消验证另行补齐。
 
 所有构建、类型检查、Node 测试、浏览器检查和可执行探针只能由 GitHub-hosted Actions 执行；本地仅阅读、编辑、格式化和检查已有云端产物。此前各阶段及失败记录继续保留。
