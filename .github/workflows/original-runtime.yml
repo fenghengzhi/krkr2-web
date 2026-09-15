@@ -72,7 +72,12 @@ jobs:
             Copy-Item $startup (Join-Path $output 'startup.tjs')
             $status.scriptSha256 = (Get-FileHash $startup -Algorithm SHA256).Hash.ToLowerInvariant()
             $status.stage = 'execution'
-            $process = Start-Process -FilePath $engine -WorkingDirectory $work -PassThru `
+            # The SDK's Startup.html requires an explicit project folder (or
+            # data/content-data). The executable's working directory alone is
+            # not a project-selection rule. Keep the exact arguments as evidence.
+            $arguments = '"' + $work + '" -forcelog=yes'
+            $status.arguments = $arguments
+            $process = Start-Process -FilePath $engine -WorkingDirectory $work -ArgumentList $arguments -PassThru `
               -RedirectStandardOutput (Join-Path $output 'stdout.log') `
               -RedirectStandardError (Join-Path $output 'stderr.log')
             $status.processId = $process.Id
