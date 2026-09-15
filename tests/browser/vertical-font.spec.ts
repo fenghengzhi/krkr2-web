@@ -8,24 +8,23 @@ for (const backend of ['asyncify', 'jspi'])
     page,
   }) => {
     await page.goto('/?backend=' + backend)
-    await page
-      .locator('#files')
-      .setInputFiles([
-        {
-          name: 'startup.tjs',
-          mimeType: 'text/plain',
-          buffer: Buffer.from(
-            'var w=new Window(),a=new Layer(w,null);w.visible=true;w.setInnerSize(64,128);a.setSize(64,128);a.type=ltAlpha;a.font.getList(0);a.font.face="@Krkr Vertical vert";a.font.height=20;a.font.angle=2700;a.drawText(24,4,"漢A、（ぁ",0xffffff);Debug.message("vertical-worker-ready");',
-          ),
-        },
-        ...(await Promise.all(
-          ['vert', 'novmetrics'].map(async (name) => ({
-            name: name + '.ttf',
-            mimeType: 'font/ttf',
-            buffer: await readFile('tests/fixtures/text-layout/' + name + '.ttf'),
-          })),
-        )),
-      ])
+    await page.locator('#files').setInputFiles([
+      {
+        name: 'startup.tjs',
+        mimeType: 'text/plain',
+        // A primary image grows with opaque white until its type changes.
+        buffer: Buffer.from(
+          'var w=new Window(),a=new Layer(w,null);w.visible=true;w.setInnerSize(64,128);a.type=ltAlpha;a.setSize(64,128);a.font.getList(0);a.font.face="@Krkr Vertical vert";a.font.height=20;a.font.angle=2700;a.drawText(24,4,"漢A、（ぁ",0xffffff);Debug.message("vertical-worker-ready");',
+        ),
+      },
+      ...(await Promise.all(
+        ['vert', 'novmetrics'].map(async (name) => ({
+          name: name + '.ttf',
+          mimeType: 'font/ttf',
+          buffer: await readFile('tests/fixtures/text-layout/' + name + '.ttf'),
+        })),
+      )),
+    ])
     await expect(page.getByText('vertical-worker-ready', { exact: true })).toBeVisible()
     await evaluate(page, 'a.font.getTextWidth("漢A")', '32')
     await evaluate(
