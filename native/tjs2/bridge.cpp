@@ -410,7 +410,9 @@ class HostLifetime final : public tTJSNativeInstance {
 public:
     HostLifetime(Vm* vm, tTJSCustomObject* owner, const ttstr& operation, unsigned identifier, const tTJSVariant& state)
         : vm(vm), owner(owner), operation(operation), identifier(identifier), state(state) { ++nativeLifetimeCount; }
-    ~HostLifetime() override { state.Clear(); --nativeLifetimeCount; }
+    // The variant destructor defers cleanup exceptions. Calling Clear directly
+    // from this noexcept destructor would terminate on a failing finalizer.
+    ~HostLifetime() override { --nativeLifetimeCount; }
     double Identifier(Vm* context) const { return vm == context ? static_cast<double>(identifier) : -1; }
     void Invalidate() override {
         if(completed || running || shuttingDown) return;
