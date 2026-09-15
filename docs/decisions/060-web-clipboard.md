@@ -8,7 +8,9 @@
 
 第四轮 [35009940671](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009940671) 在 `e85e41fae181596b70ef58c72507dd81fa3bc08a` 的 **Chromium regular 作业**实际 413/418 通过、5 项首次失败；这里不提前填写整轮结论。四种 VM 组合都在成功写入空字符串后读取到 `types=[[]]`，TJS 已输出 `empty-format:0` 并等待下一次读操作；失败是测试仍等待 `empty-format:1`。第五项在无 grant 的真实按钮写入时返回 `NotAllowedError: ... Write permission denied.`，且调用时 active/focused/secure 均为 true；后续读取没有执行。061 的 [35009948147](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009948147) Chromium 作业保留了同五项、相同原始 Clipboard 观测。两份失败证据独立保留，不以修订后的测试覆盖。
 
-本次只校准测试和文档：固定 Chromium 153.0.8010.12 headless 分支要求空写入后 API 不暴露文本格式，继续实际点击 getter 并要求 void，再真实写入非空文本并读取恢复。Firefox/WebKit 保留存在空文本时返回空字符串的检查。无 grant 分支对 Chromium 明确要求写入和读取各自抛 NotAllowedError，再显式授予权限并真实写读恢复；**首轮只观察到写入拒绝，新补的读取拒绝和恢复仍待后续 Actions 实测**。所有调用顺序、原始异常、激活/聚焦、授权变更发生的调用序号分别记录；原 12 秒断言期限不变，生产实现没有增加缓存或修改返回合同。
+同轮 **WebKit regular 作业**实际 407/418 通过、11 项首次失败；WebKit 26.6/revision 2359、macOS headless，均无 grant。每项都有实际写入成功，随后 `read()` 在 active/focused/secure 为 true 时拒绝为 NotAllowedError。四个往返用例在首次非空 hasFormat 已被拒绝，尚未触及空文本。四个 Stop 用例的首轮停止日志只有 `startup-before`，旧请求取消和禁止继续的断言已经通过；trace 随后到新会话的 `fresh-written`，首次失败是其 `fresh-read:1`，finally 的待机检查又被新会话“运行失败”状态阻挡。不能把最后的清理报错归为 Stop 本体故障。其余三个失败是 PNG-only 格式查询、无 grant 读取、父输入框 Timer 内读取。同轮 Firefox regular 实际 418/418 通过，空文本 read 保留 text/plain，无 grant 的写和读均成功；三种浏览器证据分别保存。061 第一轮 WebKit 同样有这 11 个 Clipboard 失败，不由省份图读写新增功能引入。
+
+本次只校准测试和文档：固定 Chromium 153.0.8010.12 headless 分支要求空写入后 API 不暴露文本格式，继续实际点击 getter 并要求 void，再真实写入非空文本并读取恢复。成功路径对 Chromium 授予 read/write、对 WebKit **只授予 clipboard-read**，Firefox 不授予该权限；WebKit 授权后的空文本行为尚待实际运行，仍严格检验存在文本时返回空字符串。无 grant 案例固定为 Chromium 写/读均拒绝、WebKit 写成功/读拒绝、Firefox 写/读均成功；拒绝分支检查具体 NotAllowedError 与原始消息，然后显式授予对应浏览器支持的权限并真实写读恢复。**Chromium 首轮只观察到写入拒绝；新补的 Chromium 读取拒绝及两种浏览器授权后的恢复仍待后续 Actions 实测**。所有调用顺序、原始异常、激活/聚焦、授权变更发生的调用序号分别记录；原 12 秒断言期限不变，生产实现没有增加缓存或修改返回合同。
 
 ## 原版合同与本阶段接口
 
@@ -70,6 +72,8 @@ BrowserClipboard 只在安全 Window 上调用 navigator.clipboard。hasFormat �
 浏览器用例使用真实点击与真实 navigator API；仅观察包装转发原函数，记录调用时激活/聚焦/安全上下文、实际返回类型和异常。合成 Unicode、空文本与 PNG-only 内容用来检验文本格式区别；PNG 是测试输入，不是新增游戏接口。额外覆盖用户取消、Stop/旧按钮、新 Session 和已有 SystemDialog 的 Timer 发起请求。
 
 固定 Playwright 1.63.0 的 Chromium 驱动支持 clipboard-read/write grant，WebKit 只支持 clipboard-read，Firefox 不支持两者，不能吞掉 Unsupported grant 后声称已授权。成功矩阵必须明确使用的 grant；Chromium headless-shell 的无 grant 拒绝另作实际错误路径，不预设所有引擎无 grant 都能成功。外部内容触发的原生 Paste 提示没有自动化证据时保持未覆盖，不能用页面 DOM 假装完成浏览器授权。[各引擎官方权限测试](https://github.com/microsoft/playwright/blob/v1.63.0/tests/library/permissions.spec.ts)、[WebKit grant](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/webkit/wkPage.ts)、[Firefox grant](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/firefox/ffBrowser.ts)。
+
+WebKit 的这次拒绝也有自动化专属依据：固定 Playwright WebKit 原生补丁在 `isControlledByAutomation()` 下默认拒绝 DOM paste access，只有 origin 已获 `clipboard-read` grant 才放行。即便写入来自同源、当前有用户激活，也不能把普通 Safari 的同源读取说明直接用作该驱动的成功预期。补充 read-only grant 只调整明确记录的测试环境，不给产品添加权限绕过，也不尝试 WebKit 不支持的 clipboard-write grant。[WebKit 自动化权限分支](https://github.com/microsoft/playwright/blob/v1.63.0/browser_patches/webkit/patches/bootstrap.diff#L14532-L14547)、[驱动支持表](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/webkit/wkPage.ts#L1240-L1256)。
 
 固定配置未指定 channel，Playwright 因 headless 选择 Chromium Headless Shell；其权限管理器对请求返回 ASK，模拟关闭提示，Blink 写入分支只把 GRANTED 视作成功。因此用户激活存在也可能得到本轮精确的 Write permission denied，不能据此归因于按钮丢失激活，也不能外推为所有 Chrome 部署都拒绝写入。[Playwright 选择规则](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/chromium/chromium.ts#L418-L424)、[Shell 权限结果](https://github.com/chromium/chromium/blob/153.0.8010.12/headless/lib/browser/headless_permission_manager.cc#L22-L38)、[Blink 写入判断](https://github.com/chromium/chromium/blob/153.0.8010.12/third_party/blink/renderer/modules/clipboard/clipboard_promise.cc#L589-L604)。
 

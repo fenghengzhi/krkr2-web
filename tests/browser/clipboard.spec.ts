@@ -163,9 +163,15 @@ async function evidence(
   return proof.calls
 }
 
+function supportedGrants(browserName: string): string[] {
+  if (browserName === 'chromium') return ['clipboard-read', 'clipboard-write']
+  if (browserName === 'webkit') return ['clipboard-read']
+  return []
+}
+
 async function prepare(page: Page, backend: string, browserName: string, assisted = true) {
   const errors: string[] = [],
-    grants = assisted && browserName === 'chromium' ? ['clipboard-read', 'clipboard-write'] : []
+    grants = assisted ? supportedGrants(browserName) : []
   page.on('pageerror', (error) => errors.push(error.message))
   await observe(page)
   await page.goto(`/?backend=${backend}`)
@@ -278,7 +284,7 @@ for (const backend of ['asyncify', 'jspi']) {
   for (const binary of [false, true]) {
     const variant = `${backend}/${binary ? 'bytecode' : 'source'}`
 
-    test(`${variant}: real Clipboard Unicode, empty-write representation and recovery (Chromium driver grants; Firefox/WebKit no grants)`, async ({
+    test(`${variant}: real Clipboard Unicode, empty-write representation and recovery (Chromium read/write grants; WebKit read grant; Firefox no grants)`, async ({
       page,
       browserName,
     }, info) => {
@@ -456,7 +462,7 @@ clipboardMark("cancel-done");`),
   }
 }
 
-test('PNG-only real clipboard has no text; a later real write replaces it (Chromium driver grants; Firefox/WebKit no grants)', async ({
+test('PNG-only real clipboard has no text; a later real write replaces it (Chromium read/write grants; WebKit read grant; Firefox no grants)', async ({
   page,
   browserName,
 }, info) => {
@@ -512,16 +518,17 @@ var text=Clipboard.asText;clipboardMark("png-replaced:"+int(text===${JSON.string
   }
 })
 
-test('real ungranted Clipboard buttons follow fixed browser policy and recover after explicit Chromium grants', async ({
+test('real ungranted Clipboard buttons follow fixed browser policy and recover after supported explicit grants', async ({
   page,
   browserName,
 }, info) => {
   const setup = await prepare(page, 'asyncify', browserName, false),
-    denied = browserName === 'chromium',
+    writeDenied = browserName === 'chromium',
+    readDenied = browserName === 'chromium' || browserName === 'webkit',
     recovered = unicode + '\nAfter the permission boundary'
   try {
-    if (denied) {
-      expect(page.context().browser()?.version()).toBe('153.0.8010.12')
+    if (readDenied) {
+      expect(page.context().browser()?.version()).toBe(writeDenied ? '153.0.8010.12' : '26.6')
       expect(process.env.KRKR_TEST_HEADED).not.toBe('1')
     }
     await load(
@@ -543,18 +550,29 @@ clipboardMark("policy-done");`),
       page,
       'write-text',
       'policy-before-write',
-      denied ? 'policy-write-error:1' : 'policy-written',
+      writeDenied ? 'policy-write-error:1' : 'policy-written',
     )
     await perform(
       page,
       'read-text',
       'policy-before-read',
-      denied ? 'policy-read-error:1' : 'policy-read:1',
+      readDenied ? 'policy-read-error:1' : 'policy-read:1',
     )
     const calls = await evidence(page, info, setup.grants, 'clipboard-before-permission-change')
     expect(calls.map((call) => call.method)).toEqual(['writeText', 'read'])
-    if (denied) {
-      for (const call of calls) {
+    if (writeDenied) {
+      expect(calls[0].state).toBe('rejected')
+      expect(calls[0].error?.name).toBe('NotAllowedError')
+      expect(calls[0].error?.message).toBe(
+        "Failed to execute 'writeText' on 'Clipboard': Write permission denied.",
+      )
+      await expect(mark(page, 'policy-written')).toHaveCount(0)
+    } else {
+      successful(calls.slice(0, 1), ['writeText'])
+      await expect(mark(page, 'policy-write-error:1')).toHaveCount(0)
+    }
+    if (readDenied) {
+      for (const call of writeDenied ? calls : calls.slice(1)) {
         expect(call.state).toBe('rejected')
         expect(call.error?.name).toBe('NotAllowedError')
         expect(call.active).toBe(true)
@@ -562,15 +580,16 @@ clipboardMark("policy-done");`),
         expect(call.focused).toBe(true)
         expect(call.secure).toBe(true)
       }
-      expect(calls[0].error?.message).toBe(
-        "Failed to execute 'writeText' on 'Clipboard': Write permission denied.",
-      )
-      // The first failing runs stopped at writeText. This read denial is a
-      // separate assertion awaiting the next hosted run, not earlier evidence.
-      expect(calls[1].error?.message).toContain('Read permission denied')
-      await expect(mark(page, 'policy-written')).toHaveCount(0)
+      // Chromium's first failing runs stopped at writeText. Its read denial is a
+      // new Chromium assertion. WebKit's actual read denial was observed in
+      // 35009940671: automation requires an explicit clipboard-read grant.
+      if (writeDenied) expect(calls[1].error?.message).toContain('Read permission denied')
+      else
+        expect(calls[1].error?.message).toBe(
+          'The request is not allowed by the user agent or the platform in the current context, possibly because the user denied permission.',
+        )
       await expect(mark(page, 'policy-read:1')).toHaveCount(0)
-      const granted = ['clipboard-read', 'clipboard-write']
+      const granted = supportedGrants(browserName)
       await page.context().grantPermissions(granted, { origin: new URL(page.url()).origin })
       recordedGrants.set(page, granted)
       grantHistory.set(page, [
@@ -578,8 +597,7 @@ clipboardMark("policy-done");`),
         { fromCall: calls.length, grants: [...granted] },
       ])
     } else {
-      successful(calls, ['writeText', 'read'])
-      await expect(mark(page, 'policy-write-error:1')).toHaveCount(0)
+      successful(calls.slice(1), ['read'])
       await expect(mark(page, 'policy-read-error:1')).toHaveCount(0)
     }
     await perform(page, 'write-text', 'policy-before-recovery', 'policy-recovery-written')
