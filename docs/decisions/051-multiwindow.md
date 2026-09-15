@@ -16,6 +16,8 @@
 
 [首轮 Node 诊断 34935450884](https://github.com/fenghengzhi/krkr2-web/actions/runs/34935450884)，提交 `4ac589f`：原生内核构建完成，应用类型检查因遗留的未使用单窗 pointer 字段失败（TS6133）。Node、浏览器和直接运行时测试均未运行，不能计为通过。完整日志和 run.json 已保存在 `out/verification/github-actions/34935450884/`。修订删除该旧字段，保留每个窗口独立的 physical pointer。
 
+[第二轮 Node 诊断 34935871336](https://github.com/fenghengzhi/krkr2-web/actions/runs/34935871336)，提交 `ae3abe0`：应用与 Worker 类型检查通过后，测试类型检查发现三处错误：输入包判别联合缺少 key 字段收窄，以及两个测试生成器缺少返回值。Node 和浏览器案例仍未运行；本轮完整日志单独归档。修订只完善测试类型，不放宽行为断言。
+
 ## 验证范围和边界
 
 新增单元、源码／字节码集成及浏览器场景覆盖窗口身份、动态画布、渲染隔离、输入队列与物理按键、菜单选择身份、视频路由及关闭清理。旧寿命测试仅在有意关闭主窗口后继续检查清理结果的路径明确设置 exitOnWindowClose=false，默认退出行为另有独立用例。

@@ -233,6 +233,7 @@ test('epoch invalidation suppresses stale callbacks while preserving cooperative
     } finally {
       yield { kind: 'invoke', callback, args: [], unwind: true }
     }
+    return undefined
   }
   const operation = f.service.start(work(), f.ca, 'packet')
   assert.equal(f.next(operation).method, 'onActivate')
@@ -248,6 +249,7 @@ test('generic rendering generators keep callbacks when input transient state res
   function* paint(): InputOperation {
     yield { target: f.a, method: 'onPaint', args: [] }
     yield { target: f.a, method: 'onPaint', args: [] }
+    return undefined
   }
   const operation = f.service.start(paint(), f.ca)
   assert.equal(f.next(operation).method, 'onPaint')

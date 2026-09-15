@@ -278,9 +278,9 @@ test('mouse capture crosses another canvas without duplicate routing and IME fol
       [[202, 'new']],
     )
     assert.deepEqual(
-      f.packets
-        .filter((packet) => packet.type === 'keyDown')
-        .map((packet) => [packet.windowId, packet.key]),
+      f.packets.flatMap((packet) =>
+        packet.type === 'keyDown' ? [[packet.windowId, packet.key]] : [],
+      ),
       [[202, 89]],
     )
   } finally {
