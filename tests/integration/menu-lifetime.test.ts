@@ -24,8 +24,11 @@ async function fixture(binary: boolean, extra = '', overrides: Partial<SessionDe
       )
       await session.evaluate('Scripts.execStorage("savedata/menu-lifetime.cjs")')
     } else await session.evaluate('Scripts.execStorage("menu-lifetime.tjs")')
+    // Native input argument lists use TJSCreateArrayObject's static Array class,
+    // separately from global.Array used by the script children literal. The
+    // Debug varargs call initializes that class before taking the exact baseline.
     await execute(
-      'var warm=new OwnedMenu();warm.children;invalidate warm;delete global.warm;menuItemDeaths=0;try{throw new Exception("warm");}catch(e){}',
+      'Debug.getLastLog();var warm=new OwnedMenu();warm.children;invalidate warm;delete global.warm;menuItemDeaths=0;try{throw new Exception("warm");}catch(e){}',
     )
     const baseline = session.inspectOwnership(),
       handles = session.snapshot().handles
@@ -47,6 +50,34 @@ async function fixture(binary: boolean, extra = '', overrides: Partial<SessionDe
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
+  test(
+    `${mode}: repeated visible Windows and their menus restore the exact native ownership baseline`,
+    { timeout: 60000 },
+    async () => {
+      const f = await fixture(binary, 'var menuWindowActivations=0;')
+      try {
+        for (let cycle = 0; cycle < 3; cycle++) {
+          await f.execute(
+            'System.exitOnWindowClose=false;var win=new Window();' +
+              'win.action=function(event){if(event.type=="onActivate")global.menuWindowActivations++;};' +
+              'win.visible=true;win.menu.add(new OwnedMenu());',
+          )
+          // Let the real automatic onActivate input callback run, so this is
+          // not merely a constructor/invalidation pair that cancels its event.
+          await f.session.idle()
+          assert.equal(await f.session.evaluate('menuWindowActivations'), String(cycle + 1))
+          assert.equal(f.session.inspectOwnership().windowSources, 1)
+          assert.equal(f.session.inspectOwnership().menuSources, 2)
+          await f.execute('invalidate win;delete global.win;System.exitOnWindowClose=true;')
+          assert.equal(await f.session.evaluate('menuItemDeaths'), String(cycle + 1))
+          assert.equal(await f.session.evaluate('System.exitOnWindowClose'), '1')
+          await f.restored()
+        }
+      } finally {
+        await f.session.stop()
+      }
+    },
+  )
   test(
     `${mode}: an unreferenced MenuItem releases native state and its action owner`,
     { timeout: 60000 },

@@ -18,6 +18,10 @@
 
 [第二轮 Node 诊断 34935871336](https://github.com/fenghengzhi/krkr2-web/actions/runs/34935871336)，提交 `ae3abe0`：应用与 Worker 类型检查通过后，测试类型检查发现三处错误：输入包判别联合缺少 key 字段收窄，以及两个测试生成器缺少返回值。Node 和浏览器案例仍未运行；本轮完整日志单独归档。修订只完善测试类型，不放宽行为断言。
 
+[第三轮 Node 诊断 34936005894](https://github.com/fenghengzhi/krkr2-web/actions/runs/34936005894)，提交 `36316b7`：类型检查及生产构建通过；Node **1,286 项中 1,276 通过、10 失败、零取消／跳过**。失败分为：1 项虚拟鼠标键被测试输入的零 shift 清掉、2 项旧 blur 寿命场景关闭主窗口后继续求值、4 项菜单寿命基线差异（scriptObjects 1007 对 982，其余所有权计数为零）、1 项旧 Renderer 测试假设每次帧都有 Layer、2 项新视频测试调用不存在的 getPixel。完整测试日志、TAP、构建和 run.json 单独保留在该 run 的归档中；浏览器和直接运行时未运行。
+
+菜单基线的 25 个对象来自首次 `TJSCreateArrayObject` 创建的原生 static Array 类：类本身、构造器、21 个方法和 2 个属性（`third_party/tjs2/tjsArray.cpp`）。新的自动激活通过 InputService 的 `scriptList` 触发 `native/tjs2/bridge.cpp` 的容器创建，旧夹具只初始化脚本 global.Array。修订使用既有 Debug.getLastLog 的原生 varargs 路径提前初始化该共享类，保留所有精确计数断言，并新增源码／字节码各三轮可见窗口、真实激活与菜单清理检查。其余修订保留原像素、alpha、焦点和生命周期预期，不把未运行测试或本轮失败改写为通过。
+
 ## 验证范围和边界
 
 新增单元、源码／字节码集成及浏览器场景覆盖窗口身份、动态画布、渲染隔离、输入队列与物理按键、菜单选择身份、视频路由及关闭清理。旧寿命测试仅在有意关闭主窗口后继续检查清理结果的路径明确设置 exitOnWindowClose=false，默认退出行为另有独立用例。

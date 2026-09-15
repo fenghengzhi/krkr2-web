@@ -87,13 +87,17 @@ for (const binary of [false, true]) {
         mb = Number(await f.session.evaluate('mb.__videoId'))
       await f.video.emit(ma, 'frame')
       assert.equal(
-        await f.session.evaluate('la.getPixel(0,0)+","+lb.getPixel(0,0)'),
-        '16711680,65280',
+        await f.session.evaluate(
+          '[la.getMainPixel(0,0),la.getMaskPixel(0,0),lb.getMainPixel(0,0),lb.getMaskPixel(0,0)].join(",")',
+        ),
+        '16711680,255,65280,255',
       )
       await f.video.emit(mb, 'frame')
       assert.equal(
-        await f.session.evaluate('la.getPixel(0,0)+","+lb.getPixel(0,0)'),
-        '16711680,16711680',
+        await f.session.evaluate(
+          '[la.getMainPixel(0,0),la.getMaskPixel(0,0),lb.getMainPixel(0,0),lb.getMaskPixel(0,0)].join(",")',
+        ),
+        '16711680,255,16711680,255',
       )
       assert.match(
         await f.session.evaluate(

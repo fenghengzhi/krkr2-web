@@ -191,7 +191,9 @@ test('Layer input uses its manager Window and explicit Window focus queries igno
 test('keyState treats its first argument as a key code even when it collides with a Layer id', () => {
   const f = fixture()
   f.active(202)
-  f.cb.observe({ type: 'keyDown', key: f.a, shift: 0 })
+  // Virtual key 1 also denotes the left mouse button. Supply the physical
+  // snapshot directly so a zero modifier mask does not release it first.
+  f.cb.keys.add(f.a)
   assert.deepEqual(f.host('Input.get', [BigInt(f.a), 'keyState']), { kind: 'value', value: 1n })
   f.controllers.resetTransient()
   assert.deepEqual(f.host('Input.get', [BigInt(f.a), 'keyState']), { kind: 'value', value: 0n })

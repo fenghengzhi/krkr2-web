@@ -37,7 +37,8 @@ test('real TJS bootstrap drives layer pixels, callback coordinates and session l
     },
     renderer: {
       present: (layers) => {
-        firstPixel = Array.from(layers[0]!.pixels.data.subarray(0, 4))
+        // Window visibility may present before its first Layer is created.
+        firstPixel = layers[0] ? Array.from(layers[0].pixels.data.subarray(0, 4)) : []
       },
       dispose: () => {
         rendererDisposed = true

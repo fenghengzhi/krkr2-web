@@ -127,8 +127,9 @@ for (const binary of [false, true]) {
   test(`${mode}: replacing a Window inside blur does not resume old-manager focus work`, async () => {
     const f = await fixture(binary)
     try {
+      // Keep this VM running after the blur callback invalidates its main Window.
       await f.execute(
-        'var a=new InputReplacingLayer(root,"a",0),b=new InputOwnedLayer(root,"b",50);a.focus();inputTrace.clear();b.focus();',
+        'System.exitOnWindowClose=false;var a=new InputReplacingLayer(root,"a",0),b=new InputOwnedLayer(root,"b",50);a.focus();inputTrace.clear();b.focus();',
       )
       assert.equal(await f.session.evaluate('inputTrace.join("|")'), 'replace|focus:replacement:0')
       assert.equal(await f.session.evaluate('window.focusedLayer.name'), 'replacement')
