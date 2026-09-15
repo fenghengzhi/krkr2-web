@@ -1,0 +1,25 @@
+// Hosted original SDK observation. Its real dialog is driven only after PID,
+// random caption/prompt and child-control ownership are independently checked.
+var nativeRows=[];
+function nativeRecord(text){nativeRows.add(text);nativeRows.save("native-events.txt");}
+System.exceptionHandler=function(error){nativeRecord("error:"+error.message);System.exit();return true;};
+var nativeScenario="__NATIVE_SCENARIO__",nativeToken="__NATIVE_TOKEN__";
+var nativeCaption="KRKR2 Dialog "+nativeToken,nativePrompt="Prompt "+nativeToken;
+var nativeInCall=false,nativeTimerTicks=0;
+nativeRecord("start");nativeRecord("version:"+System.versionString);
+nativeRecord("scenario:"+nativeScenario);
+var nativeWindow=new Window();nativeWindow.caption="KRKR2 Dialog Owner "+nativeToken;nativeWindow.visible=true;
+function nativeObserveTimer(event){
+  if(nativeInCall){nativeTimerTicks++;nativeRecord("timer-in-call:"+nativeTimerTicks);}
+}
+var nativeTimer=new Timer(global,"nativeObserveTimer");nativeTimer.enabled=false;nativeTimer.interval=100;
+nativeRecord("dialog-before");nativeInCall=true;nativeTimer.enabled=true;
+var nativeResult;
+if(nativeScenario=="inform")nativeResult=System.inform(nativePrompt,nativeCaption);
+else nativeResult=System.inputString(nativeCaption,nativePrompt,"Initial value");
+nativeInCall=false;nativeTimer.enabled=false;
+nativeRecord("dialog-after:void="+int(nativeResult===void)+":type="+typeof nativeResult);
+if(nativeResult!==void){nativeRecord("result-length:"+nativeResult.length);nativeRecord("result-text:"+nativeResult);}
+nativeRecord("timer-count:"+nativeTimerTicks);
+nativeRecord("observations-complete");
+System.exit();
