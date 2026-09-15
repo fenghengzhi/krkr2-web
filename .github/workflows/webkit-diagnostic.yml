@@ -1,4 +1,4 @@
-name: WebKit startup diagnostic
+name: WebKit scenario diagnostic
 
 on:
   workflow_dispatch:
@@ -8,10 +8,10 @@ on:
         required: true
         type: string
       scenario:
-        description: Startup spans, font-dialog cancellation, or the original player startup/restart scene
+        description: Focused startup, restart, or Clipboard scenarios; not a full regression
         type: choice
         default: startup
-        options: [startup, font-restart, player-restart]
+        options: [startup, font-restart, player-restart, clipboard]
       workers:
         description: Concurrent browser workers for comparing hosted resource contention
         type: choice
@@ -68,6 +68,13 @@ jobs:
           DEBUG: pw:browser,pw:protocol
           PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/player-restart.json
         run: npx playwright test tests/browser/player.spec.ts --project=webkit --grep 'real TJS scene, input, pause, stop and fresh restart' --repeat-each=10 --workers="$KRKR_DIAGNOSTIC_WORKERS" --reporter=line,json 2>&1 | tee out/ci/player-restart.log
+      - name: Check real Clipboard permissions and recovery
+        if: inputs.scenario == 'clipboard'
+        env:
+          KRKR_DIAGNOSTIC_WORKERS: ${{ inputs.workers }}
+          DEBUG: pw:browser
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/clipboard.json
+        run: npx playwright test tests/browser/clipboard.spec.ts --project=webkit --workers="$KRKR_DIAGNOSTIC_WORKERS" --reporter=list,json 2>&1 | tee out/ci/clipboard.log
       - name: Preserve new macOS native crash reports from this scenario
         if: always()
         run: |
