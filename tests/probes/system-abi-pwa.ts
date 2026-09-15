@@ -5,7 +5,7 @@ import { browserLaunchOptions } from '../helpers/browser-launch.ts'
 // "protocol" instead checks a preserved protocol 8 shell against protocol 9,
 // with unchanged TJS/font binaries and actual offline old/new Worker execution.
 import assert from 'node:assert/strict'
-import { chromium, firefox, webkit, expect } from '@playwright/test'
+import { chromium, firefox, webkit, expect, type Page } from '@playwright/test'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { readFile, mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
@@ -13,6 +13,34 @@ import { resolve, extname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { prepareOffline, reloadOffline, pageBuild } from '../helpers/offline-browser.ts'
 import { evaluate } from '../helpers/browser-expression.ts'
+
+// Use original browser JavaScript text, avoiding tsx's injected __name helpers.
+const workerObservationScript = await readFile(
+  new URL('../helpers/worker-observation.js', import.meta.url),
+  'utf8',
+)
+
+/** No Worker request or TJS call; a broken page cannot stall failure evidence indefinitely. */
+async function readWorkerObservation(page: Page): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const reading = page
+    .evaluate(() => {
+      const read = (window as unknown as { __krkrWorkerObservation?: () => unknown })
+        .__krkrWorkerObservation
+      return read ? read() : { unavailable: 'not-installed' }
+    })
+    .catch(() => ({ unavailable: 'page-unavailable' }))
+  try {
+    return await Promise.race([
+      reading,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ unavailable: 'read-timeout' }), 3000)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 const fontAbi = process.argv[4] === 'font',
   protocol = process.argv[4] === 'protocol',
@@ -228,8 +256,14 @@ for (const name of probeBrowsers()) {
       await expect(page.locator('#runtime-info')).toContainText(backend.toUpperCase())
     }
     const artifact = `${directory}/${reportName}/${name}-${backend}`
+    let verified = false,
+      failed = false,
+      primaryFailure: unknown
     await context.tracing.start({ screenshots: name !== 'webkit', snapshots: true, sources: true })
     try {
+      // Observe both releases before their scripts run. Neither release's
+      // files, request arguments, RPC consumers nor startup budget are changed.
+      await context.addInitScript({ content: workerObservationScript })
       await page.goto(url)
       await prepareOffline(page)
       await load(page, true)
@@ -275,14 +309,51 @@ for (const name of probeBrowsers()) {
       console.log(
         `PASS ${name} ${backend} ${protocol ? 'protocol 8 -> 9' : manifestKind + ' ABI ' + oldAbi + ' -> ' + newAbi} with offline old/new Workers`,
       )
+      verified = true
     } catch (error) {
+      failed = true
+      primaryFailure = error
       await page.screenshot({ path: artifact + '.png' }).catch(() => {})
       await context.tracing.stop({ path: artifact + '.zip' })
       throw error
     } finally {
-      await context.close()
-      await stopServer()
-      await rm(profile, { recursive: true, force: true })
+      try {
+        const pages = await Promise.all(
+          context.pages().map(async (candidate, index) => ({
+            page: candidate === page ? 'original' : `update-${index}`,
+            observation: await readWorkerObservation(candidate),
+          })),
+        )
+        await writeFile(
+          artifact + '-worker-observation.json',
+          JSON.stringify(
+            {
+              version: 1,
+              observerOnly: true,
+              browser: name,
+              backend,
+              verified,
+              oldBuild: shells[0].build,
+              newBuild: shells[1].build,
+              startups,
+              pages,
+            },
+            null,
+            2,
+          ) + '\n',
+        )
+      } catch (error) {
+        if (failed)
+          throw new AggregateError(
+            [primaryFailure, error],
+            'Probe and diagnostic persistence failed',
+          )
+        throw error
+      } finally {
+        await context.close()
+        await stopServer()
+        await rm(profile, { recursive: true, force: true })
+      }
     }
   }
 }
