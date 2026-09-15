@@ -91,8 +91,11 @@ for (const binary of [false, true]) {
     const f = await layerFixture(binary)
     try {
       await f.execute(
-        'var win=new LifetimeLayerWindow(),parent=new LifetimeLayer(win),child=new LifetimeLayer(win,parent),cache=parent.children;delete global.child;',
+        'var win=new LifetimeLayerWindow(),parent=new LifetimeLayer(win),child=new LifetimeLayer(win,parent);',
       )
+      // Creation completes a frame, whose native child traversal dirties the
+      // cache. Acquire the snapshot afterward while child still has an owner.
+      await f.execute('var cache=parent.children;delete global.child;')
       assert.equal(
         await f.session.evaluate('layerDeaths+","+(cache===parent.children)+","+cache.count'),
         '0,1,1',

@@ -9,7 +9,9 @@ function __krkrTransitionState(state,mode,destination=void,source=void){
     var dest=state.destination;state.destination=void;
     var src=state.source;state.source=void;
     try{
-      if(!System.eventDisabled && isvalid dest && isvalid src)
+      // Input invokes this unbound helper from a step Dictionary. Its receiver
+      // is not the global object, so the global class must be named explicitly.
+      if(!global.System.eventDisabled && (isvalid dest) && (isvalid src))
         dest.onTransitionCompleted(dest,src);
     }catch(error){
       src=void;dest=void;

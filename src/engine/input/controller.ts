@@ -47,6 +47,8 @@ export class InputController {
   private releasedTouches = new Set<number>()
   private enabledDepth = 0
   private enabledBefore = new Map<number, boolean>()
+  private rawEnabledBefore = new Map<number, boolean>()
+  private enabledTraversal = false
   // Numeric bookkeeping never owns a script object. The corresponding values
   // live in the Input pump's private Dictionary and change only at VM yields.
   private owners = new Map<string, number>()
@@ -227,27 +229,64 @@ export class InputController {
     if (next) yield* this.focus(next, forward)
     return ref(next)
   }
-  private saveEnabled(): void {
-    if (this.enabledDepth++ === 0)
+  private saveEnabled(traverse = false): void {
+    if (this.enabledDepth++ === 0) {
       this.enabledBefore = new Map(this.layers.ids().map((id) => [id, this.enabled(id)]))
+      this.rawEnabledBefore = new Map(
+        this.layers.ids().map((id) => [id, this.layers.get(id).enabled]),
+      )
+      this.enabledTraversal = false
+    }
+    this.enabledTraversal ||= traverse
+  }
+  private *notifyEnabledTree(
+    id: number,
+    before: ReadonlyMap<number, boolean>,
+    seen = new Set<number>(),
+  ): InputOperation {
+    if (!this.layers.has(id) || seen.has(id)) return undefined
+    seen.add(id)
+    if (before.has(id) && before.get(id) !== this.enabled(id))
+      yield {
+        target: id,
+        method: this.enabled(id) ? 'onNodeEnabled' : 'onNodeDisabled',
+        args: [],
+      }
+    if (!this.layers.has(id)) return undefined
+    // Native FOR_EACH_CHILD snapshots registrations after this node's callback;
+    // removals of later entries are skipped and additions during iteration wait.
+    for (const child of [...this.layers.get(id).children])
+      if (this.layers.has(child) && this.layers.get(child).parent === id)
+        yield* this.notifyEnabledTree(child, before, seen)
+    // FOR_EACH_CHILD_END invalidates even an empty leaf's children snapshot.
+    if (this.layers.has(id)) this.layers.invalidateChildren(id)
+    return undefined
   }
   private *notifyEnabled(): InputOperation {
     if (--this.enabledDepth === 0) {
-      const before = this.enabledBefore
+      const before = this.enabledBefore,
+        raw = this.rawEnabledBefore,
+        traverse = this.enabledTraversal
       this.enabledBefore = new Map()
-      for (const id of this.order())
-        if (before.has(id) && before.get(id) !== this.enabled(id))
-          yield {
-            target: id,
-            method: this.enabled(id) ? 'onNodeEnabled' : 'onNodeDisabled',
-            args: [],
-          }
+      this.rawEnabledBefore = new Map()
+      this.enabledTraversal = false
+      // Input.change also wraps position/image mutations. Only native enabled
+      // or modal work should dirty all caches through this recursive traversal.
+      if (
+        traverse ||
+        this.order().some(
+          (id) =>
+            before.has(id) &&
+            (before.get(id) !== this.enabled(id) || raw.get(id) !== this.layers.get(id).enabled),
+        )
+      )
+        yield* this.notifyEnabledTree(this.root(), before)
     }
     return undefined
   }
   *setMode(id: number): InputOperation {
     if (!this.attached(id)) return
-    this.saveEnabled()
+    this.saveEnabled(true)
     try {
       const current = this.modal.at(-1)
       if (current && this.layers.contains(current, id))
@@ -267,7 +306,7 @@ export class InputController {
   }
   *removeMode(id: number, tree = false): InputOperation {
     if (!this.modal.some((item) => (tree ? this.layers.contains(id, item) : item === id))) return
-    this.saveEnabled()
+    this.saveEnabled(true)
     try {
       for (const item of [...this.modal])
         if (tree ? this.layers.contains(id, item) : item === id) {

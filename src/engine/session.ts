@@ -1754,6 +1754,9 @@ export class EngineSession {
       case 'Layer.state':
         value = this.layerObjects!.get(number(0)).state
         break
+      case 'Layer.identity':
+        value = BigInt(this.layerObjects!.cast(args[0]).id)
+        break
       case 'Layer.relation':
         value = this.layerObjects!.relation(number(0), text(1))
         break

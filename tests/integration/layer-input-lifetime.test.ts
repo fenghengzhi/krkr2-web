@@ -34,10 +34,14 @@ class InputReplacingLayer extends InputOwnedLayer {
   function onBlur(next){
     inputTrace.add("replace");
     invalidate global.window;
-    global.window=new Window();window.setInnerSize(160,80);window.visible=true;
-    global.root=new Layer(window,null);root.setSize(160,80);
-    var replacement=new InputOwnedLayer(root,"replacement",0);replacement.focus();
+    global.window=new Window();global.window.setInnerSize(160,80);global.window.visible=true;
+    global.root=new Layer(global.window,null);global.root.setSize(160,80);
+    var replacement=new InputOwnedLayer(global.root,"replacement",0);replacement.focus();
   }
+}
+class InputCacheLayer extends InputOwnedLayer {
+  function InputCacheLayer(parent,name,x){super.InputOwnedLayer(parent,name,x);}
+  function onNodeDisabled(){inputTrace.add("disabled:"+name);children.add(null);}
 }
 `
 
@@ -163,6 +167,39 @@ for (const binary of [false, true]) {
       await f.execute('window.currentModalLayer.removeMode();')
       assert.equal(await f.session.evaluate('inputDeaths.join(",")'), 'modal')
       assert.equal(await f.session.evaluate('window.currentModalLayer===null'), '1')
+    } finally {
+      await f.session.stop()
+    }
+  })
+
+  test(`${mode}: enabled traversal refreshes leaf caches without dirtying them for position changes`, async () => {
+    const f = await fixture(binary)
+    try {
+      await f.execute(
+        'System.eventDisabled=true;var leaf=new InputOwnedLayer(root,"leaf",0);var cache=leaf.children;cache.add(null);leaf.left=10;var positionCacheCount=leaf.children.count;leaf.enabled=false;var disabledCacheCount=leaf.children.count;cache.add(null);root.enabled=false;var ancestorCacheCount=leaf.children.count;cache.add(null);leaf.enabled=true;var hiddenNodeCacheCount=leaf.children.count;',
+      )
+      assert.equal(
+        await f.session.evaluate(
+          '[positionCacheCount,disabledCacheCount,ancestorCacheCount,hiddenNodeCacheCount,leaf.children===cache].join(",")',
+        ),
+        '1,0,0,0,1',
+      )
+    } finally {
+      await f.session.stop()
+    }
+  })
+
+  test(`${mode}: enabled callbacks run before postorder children-cache invalidation`, async () => {
+    const f = await fixture(binary)
+    try {
+      await f.execute(
+        'var parent=new InputCacheLayer(root,"parent",0),leaf=new InputCacheLayer(parent,"leaf",0);parent.enabled=false;var enabledCacheResult=parent.children.count+","+leaf.children.count;',
+      )
+      assert.equal(
+        await f.session.evaluate('inputTrace.join("|")'),
+        'disabled:parent|disabled:leaf',
+      )
+      assert.equal(await f.session.evaluate('enabledCacheResult'), '1,0')
     } finally {
       await f.session.stop()
     }

@@ -29,7 +29,7 @@ class Layer {
   function __transitionTick(token){var clock=__host("Transition.callback",token);if(clock!==void)__host("Transition.tick",token,clock());}
   function beginTransition(name,withchildren=true,transsrc=null,options=%[]){
     if(transsrc===null)throw new Exception("Transition source is required");
-    __host("Transition.begin",__id,string(name),int(withchildren),transsrc.__id,options.time,options.vague,options.rule,options.from,options.stay,int(options.selfupdate),options.callback,%[destination:this,source:transsrc,callback:options.callback]);
+    __host("Transition.begin",__host("Layer.identity",this),string(name),int(withchildren),__host("Layer.identity",transsrc),options.time,options.vague,options.rule,options.from,options.stay,int(options.selfupdate),options.callback,%[destination:this,source:transsrc,callback:options.callback]);
   }
   function stopTransition(){__host("Transition.stop",__id);}
   function onClick(x,y) {
