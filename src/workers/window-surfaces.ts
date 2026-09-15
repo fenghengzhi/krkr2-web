@@ -1,4 +1,9 @@
-import type { FrameLayer, Renderer, RendererStatus } from '../engine/ports/graphics.ts'
+import type {
+  FrameLayer,
+  Renderer,
+  RendererReadiness,
+  RendererStatus,
+} from '../engine/ports/graphics.ts'
 import { WindowRendererRegistry } from '../backends/render/window-renderers.ts'
 import { WebGLRenderer } from '../backends/render/webgl2/renderer.ts'
 import {
@@ -305,6 +310,10 @@ export class WorkerWindowSurfaces implements Renderer {
 
   closeWindow(windowId: number): void {
     this.renderers.closeWindow(windowId)
+  }
+
+  waitWindowReady(windowId: number): RendererReadiness {
+    return this.renderers.waitWindowReady(windowId)
   }
 
   present(layers: FrameLayer[], width: number, height: number, windowId = 0): void | boolean {

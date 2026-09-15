@@ -1,4 +1,9 @@
-import type { FrameLayer, Renderer, RendererStatus } from '../../engine/ports/graphics.ts'
+import type {
+  FrameLayer,
+  Renderer,
+  RendererReadiness,
+  RendererStatus,
+} from '../../engine/ports/graphics.ts'
 
 export interface WindowRendererRegistryOptions {
   /** Maximum simultaneously registered surfaces, including ones being constructed. */
@@ -12,6 +17,7 @@ interface WindowRenderer {
   unsubscribe?: () => void
   opening: boolean
   status: RendererStatus
+  waiters: Set<{ resolve(): void; reject(error: unknown): void }>
 }
 
 const severity: Record<RendererStatus['state'], number> = {
@@ -69,6 +75,7 @@ export class WindowRendererRegistry implements Renderer {
     const entry: WindowRenderer = {
       opening: true,
       status: { state: 'restoring', generation: 0 },
+      waiters: new Set(),
     }
     // Reserve the identity and budget before calling a potentially reentrant factory.
     this.windows.set(windowId, entry)
@@ -86,7 +93,10 @@ export class WindowRendererRegistry implements Renderer {
         const unsubscribe = entry.renderer.subscribe((status) => {
           if (!this.current(windowId, entry)) return
           entry.status = { ...status }
-          if (!entry.opening) this.publish()
+          if (!entry.opening) {
+            this.publish()
+            if (this.current(windowId, entry)) this.resolveReady(entry)
+          }
         })
         if (!this.current(windowId, entry)) {
           // close/dispose may have run before subscribe returned its cleanup.
@@ -99,6 +109,7 @@ export class WindowRendererRegistry implements Renderer {
     } catch (error) {
       if (this.current(windowId, entry)) this.windows.delete(windowId)
       this.retired.add(windowId)
+      this.rejectReady(entry, error)
       const errors = [error]
       try {
         this.release(entry)
@@ -113,6 +124,7 @@ export class WindowRendererRegistry implements Renderer {
       throwErrors(errors, `Could not create window renderer ${windowId}`)
     }
     this.publish()
+    if (this.current(windowId, entry)) this.resolveReady(entry)
   }
 
   closeWindow(windowId: number): void {
@@ -122,6 +134,7 @@ export class WindowRendererRegistry implements Renderer {
     const entry = this.windows.get(windowId)
     if (!entry) return
     this.windows.delete(windowId)
+    this.rejectReady(entry, new Error(`Window renderer ${windowId} is retired`))
     const errors: unknown[] = []
     try {
       this.release(entry)
@@ -138,6 +151,51 @@ export class WindowRendererRegistry implements Renderer {
 
   private current(windowId: number, entry: WindowRenderer): boolean {
     return !this.disposed && this.windows.get(windowId) === entry
+  }
+
+  /** No aggregate status or VM queue is involved in construction readiness. */
+  waitWindowReady(windowId: number): RendererReadiness {
+    const entry = this.windows.get(windowId)
+    if (this.disposed || !entry)
+      return {
+        promise: Promise.reject(
+          new Error(
+            this.disposed
+              ? 'The window renderer registry is disposed'
+              : `Window renderer ${windowId} is not registered`,
+          ),
+        ),
+        cancel() {},
+      }
+    if (!entry.opening && entry.status.state === 'ready')
+      return { promise: Promise.resolve(), cancel() {} }
+    let resolve!: () => void, reject!: (error: unknown) => void
+    const promise = new Promise<void>((done, fail) => {
+      resolve = done
+      reject = fail
+    })
+    const waiter = { resolve, reject }
+    entry.waiters.add(waiter)
+    return {
+      promise,
+      cancel() {
+        if (!entry.waiters.delete(waiter)) return
+        reject(new Error(`Window renderer ${windowId} readiness wait was cancelled`))
+      },
+    }
+  }
+
+  private resolveReady(entry: WindowRenderer): void {
+    if (entry.opening || entry.status.state !== 'ready') return
+    const waiters = [...entry.waiters]
+    entry.waiters.clear()
+    for (const waiter of waiters) waiter.resolve()
+  }
+
+  private rejectReady(entry: WindowRenderer, error: unknown): void {
+    const waiters = [...entry.waiters]
+    entry.waiters.clear()
+    for (const waiter of waiters) waiter.reject(error)
   }
 
   private release(entry: WindowRenderer): void {
@@ -290,6 +348,7 @@ export class WindowRendererRegistry implements Renderer {
     const errors: unknown[] = []
     for (const entry of entries)
       try {
+        this.rejectReady(entry, new Error('The window renderer registry is disposed'))
         this.release(entry)
       } catch (error) {
         errors.push(error)

@@ -25,11 +25,18 @@ export interface FrameLayer extends Rect {
   source: Rect
   type: number
 }
+export interface RendererReadiness {
+  promise: Promise<void>
+  /** Withdraw this waiter. Pending waits reject; settled waits are unchanged. */
+  cancel(): void
+}
 export interface Renderer {
   /** Registers a Window surface before its first frame, when surfaces are dynamic. */
   openWindow?(windowId: number): void
   /** Retires a Window surface and its resources. */
   closeWindow?(windowId: number): void
+  /** Wait only for this Window's surface. Recoverable faults remain retryable. */
+  waitWindowReady?(windowId: number): RendererReadiness
   /** false means the frame was not presented and must remain dirty. */
   present(layers: FrameLayer[], width: number, height: number, windowId?: number): void | boolean
   /** Delivers the current status immediately, then any changes. */
@@ -44,7 +51,8 @@ export interface RendererStatus {
   /**
    * Initial surface attachment, before its first successful presentation and
    * without a graphics failure. Only meaningful with state='restoring'. This
-   * keeps the Window dirty without pausing script execution or shared media.
+   * keeps the Window dirty without setting the session pause state or pausing
+   * shared media. A constructor may still await its own surface readiness.
    * Recovery after a loss/failure must never use this exemption.
    */
   pending?: boolean
