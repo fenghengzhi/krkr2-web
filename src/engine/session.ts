@@ -33,6 +33,7 @@ import { checkpointBridge } from './tvp/checkpoints.ts'
 import { ModalLoop } from './scheduler/modal-loop.ts'
 import { WindowModals } from './scene/window-modal.ts'
 import { MenuModals } from './scene/menu-modal.ts'
+import { SystemDialogs, type SystemDialogSnapshot } from './scene/system-dialogs.ts'
 import { modalBridge } from './tvp/modal.ts'
 import type {
   CheckpointCallbacks,
@@ -146,6 +147,7 @@ export type EngineEvent =
   | { type: 'window-input'; windowId: number; input: InputView }
   | { type: 'input'; input: InputView }
   | { type: 'font-selection'; request: FontSelectionRequest | null }
+  | ({ type: 'system-dialog' } & SystemDialogSnapshot)
   | { type: 'log'; level: 'info' | 'error'; text: string }
 export interface SessionDependencies {
   systemFonts?: FontDescriptor[]
@@ -234,6 +236,7 @@ export class EngineSession {
   private modalLoop?: ModalLoop
   private windowModals?: WindowModals
   private menuModals?: MenuModals
+  private systemDialogs?: SystemDialogs
   private windowInputGeneration = 0
   private modalWakeup?: () => void
   private detachPendingEvents?: () => void
@@ -444,9 +447,11 @@ export class EngineSession {
         beforeWait: (token) => {
           this.windowModals?.beforeWait(token)
           this.menuModals?.beforeWait(token)
+          this.systemDialogs?.beforeWait(token)
         },
         changed: () => {
           this.present()
+          this.systemDialogs?.present()
           this.notify()
         },
       })
@@ -652,6 +657,17 @@ export class EngineSession {
       this.menuModals = new MenuModals(this.menus, this.modalLoop, (view) =>
         this.queueMenuNotification(view),
       )
+      this.systemDialogs = new SystemDialogs(this.modalLoop, {
+        changed: (snapshot) => this.deps.event({ type: 'system-dialog', ...snapshot }),
+        enter: () => {
+          this.windowInputGeneration++
+          for (const window of this.windows!.registered()) this.systemEvents!.cancelSource(window)
+          this.inputControllers.releaseCaptures()
+          this.physicalKeys.clear()
+          this.menus.dismiss(undefined, undefined, 'unavailable')
+          this.present()
+        },
+      })
       this.layerObjects = new LayerService(
         this.runtime,
         this.layers,
@@ -2216,6 +2232,16 @@ export class EngineSession {
     if (face === null) this.fontSelection.cancel(id)
     else if (this.activity.state === 'visible') this.fontSelection.choose(id, face)
   }
+  selectSystemDialog(id: number, value: string | null): boolean {
+    if (
+      this.control.cancelled ||
+      this.state !== 'running' ||
+      this.activity.state !== 'visible' ||
+      this.fontSelection.active
+    )
+      return false
+    return this.systemDialogs?.respond(id, value) ?? false
+  }
   async previewFont(
     id: number,
     face: string,
@@ -2630,6 +2656,22 @@ export class EngineSession {
     }
     let value: ScriptValue
     switch (operation) {
+      case 'System.dialog': {
+        if (!isScriptObject(args[0])) throw new Error('System dialog request must be an object')
+        const kind = text(1)
+        if (kind !== 'inform' && kind !== 'input-string') throw new Error('Unknown System dialog')
+        return this.systemDialogs!.show(
+          this.runtime!.objectIdentity(args[0]),
+          kind,
+          text(2),
+          text(3),
+          text(4),
+        )
+      }
+      case 'System.dialogAbort':
+        if (isScriptObject(args[0]))
+          this.systemDialogs?.abort(this.runtime!.objectIdentity(args[0]))
+        break
       case 'Debug.panel': {
         const id = number(0)
         if (id !== 0 && id !== 1) throw new Error('Invalid Debug panel')

@@ -163,6 +163,9 @@ export class SessionClient {
   selectFont(id: number, face: string | null) {
     return this.call('selectFont', id, face)
   }
+  selectSystemDialog(id: number, value: string | null) {
+    return this.call('selectSystemDialog', id, value)
+  }
   previewFont(id: number, face: string, kind: 'sample' | 'label' = 'sample') {
     return this.call('previewFont', id, face, kind)
   }

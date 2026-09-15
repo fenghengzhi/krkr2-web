@@ -56,6 +56,9 @@ export class ModalLoop {
   info(token: number): ModalScopeInfo | undefined {
     return this.scopes.info(token)
   }
+  isPending(token: number): boolean {
+    return this.scopes.isPending(token)
+  }
   /** Blocking lasts until the corresponding native/TJS modal frame unwinds. */
   get modalWindowId(): number | undefined {
     for (let token = this.scopes.top; token !== undefined;) {
@@ -64,6 +67,17 @@ export class ModalLoop {
       token = scope.parentToken
     }
     return undefined
+  }
+
+  /** The nearest Window or system dialog determines which Window can receive input. */
+  blockedWindow(windowId: number): boolean {
+    for (let token = this.scopes.top; token !== undefined;) {
+      const scope = this.scopes.info(token)!
+      if (scope.kind === 'system-dialog') return true
+      if (scope.kind === 'window') return (scope.windowId ?? scope.ownerId) !== windowId
+      token = scope.parentToken
+    }
+    return false
   }
 
   open(options: ModalScopeOptions): number {

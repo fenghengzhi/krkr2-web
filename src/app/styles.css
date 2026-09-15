@@ -729,6 +729,55 @@ footer {
   margin-bottom: 0;
 }
 
+.game-system-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  border: 1px solid #354455;
+  border-radius: 12px;
+  padding: 24px;
+  color: #e8edf4;
+  background: #121a24;
+}
+.game-system-dialog::backdrop {
+  background: #070b12b3;
+}
+.game-system-dialog h2 {
+  margin: 0 0 16px;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+.game-system-dialog p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.game-system-dialog label {
+  display: block;
+  margin: 20px 0 8px;
+}
+.game-system-dialog input {
+  width: 100%;
+}
+.system-dialog-status {
+  min-height: 1.5em;
+  margin: 12px 0;
+  font-size: 13px;
+  color: #bac9db;
+}
+.system-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.system-dialog-actions [data-action='stop'] {
+  margin-right: auto;
+}
+.system-dialog-actions [data-action='confirm'] {
+  color: #0c221c;
+  background: #79dfc3;
+}
+
 .game-font-dialog {
   width: min(680px, calc(100vw - 32px));
   max-height: calc(100dvh - 40px);

@@ -48,8 +48,7 @@ export class WindowModals {
     return record?.accepted ? record.completion : undefined
   }
   blocked(windowId: number): boolean {
-    const modal = this.loop.modalWindowId
-    return modal !== undefined && modal !== windowId
+    return this.loop.blockedWindow(windowId)
   }
 
   show(windowId: number, requestIdentity: string): HostReply {

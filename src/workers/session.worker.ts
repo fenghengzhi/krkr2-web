@@ -237,6 +237,9 @@ const api: SessionApi = {
   async selectFont(id, face) {
     active().selectFont(id, face)
   },
+  async selectSystemDialog(id, value) {
+    return active().selectSystemDialog(id, value)
+  },
   async previewFont(id, face, kind) {
     return active().previewFont(id, face, kind)
   },

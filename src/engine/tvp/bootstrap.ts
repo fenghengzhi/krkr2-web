@@ -40,7 +40,25 @@ var System = %[
   createAppLock: function(key) { return __host("System.createAppLock", string(key)); },
   exit: function(code=0) { __host("System.exit", int(code)); },
   terminate: function(code=0) { __host("System.exit", int(code)); },
-  inform: function(message) { __host("Debug.message", string(message)); }
+  inform: function(args*) {
+    if(args.count<1) throw new Exception("System.inform requires a message");
+    var request=%[],host=global.__host incontextof global;
+    var caption=args.count>1 && args[1]!==void ? string(args[1]) : "Information";
+    try { host("System.dialog",request,"inform",caption,string(args[0]),""); }
+    catch(error) {
+      try { host("System.dialogAbort",request); } catch(cleanupError) {}
+      throw error;
+    }
+  },
+  inputString: function(args*) {
+    if(args.count<3) throw new Exception("System.inputString requires caption, prompt and initialString");
+    var request=%[],host=global.__host incontextof global;
+    try { return host("System.dialog",request,"input-string",string(args[0]),string(args[1]),string(args[2])); }
+    catch(error) {
+      try { host("System.dialogAbort",request); } catch(cleanupError) {}
+      throw error;
+    }
+  }
 ];
 property __graphicCacheLimit {
   getter() { return __host("System.cacheLimit"); }

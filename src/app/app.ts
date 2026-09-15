@@ -9,6 +9,7 @@ import { createGameWindows, type GameWindows } from './game-windows.ts'
 import type { WindowPresentation } from '../engine/scene/window.ts'
 import type { MenuSnapshot } from '../engine/scene/menus.ts'
 import { createGameFonts } from './game-fonts.ts'
+import { createGameDialogs } from './game-dialogs.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import { createGameLibrary } from './game-library.ts'
 import { createOfflinePanel } from './offline.ts'
@@ -87,17 +88,20 @@ export function mountApp(root: HTMLDivElement): void {
   const windowViews = new Map<number, WindowPresentation>()
   const gameMenus = new Map<number, ReturnType<typeof createGameMenus>>()
   let fontSelecting = false
+  let systemDialogSelecting = false
+  let gameDialogs: ReturnType<typeof createGameDialogs> | undefined
   const clearMenus = () => {
     for (const menus of gameMenus.values()) menus.dispose()
     gameMenus.clear()
     menuViews.clear()
     windowViews.clear()
     fontSelecting = false
+    systemDialogSelecting = false
   }
   const updateMenus = () => {
     for (const [id, menus] of gameMenus) {
       const view = windowViews.get(id)?.view
-      menus.modal(fontSelecting || !!view?.blocked)
+      menus.modal(fontSelecting || systemDialogSelecting || !!view?.blocked)
       menus.state(
         snapshot?.state === 'running' && snapshot.activity.state === 'visible' && !!view?.visible,
         view?.width,
@@ -119,6 +123,9 @@ export function mountApp(root: HTMLDivElement): void {
     },
   })
   const update = () => {
+    gameDialogs?.state(
+      snapshot?.state === 'running' && snapshot.activity.state === 'visible' && !fontSelecting,
+    )
     if (snapshot) debugVisibility = snapshot.debug
     for (const panel of ['console', 'controller'] as const) {
       const target = el('debug-' + panel),
@@ -217,12 +224,17 @@ export function mountApp(root: HTMLDivElement): void {
         snapshot = undefined
         clearMenus()
         gameFonts.close()
+        gameDialogs?.dispose()
+        gameDialogs = undefined
       } catch (error) {
         if (previous?.session.isDisposed) {
           generation++
           player = undefined
           snapshot = undefined
           clearMenus()
+          gameFonts.close()
+          gameDialogs?.dispose()
+          gameDialogs = undefined
         } else if (previous) acceptSnapshot(await previous.session.inspect())
         throw error
       } finally {
@@ -269,6 +281,15 @@ export function mountApp(root: HTMLDivElement): void {
         else if (event.type === 'font-selection') {
           gameFonts.update(event.request)
           fontSelecting = !!event.request
+          gameDialogs?.state(
+            snapshot?.state === 'running' &&
+              snapshot.activity.state === 'visible' &&
+              !fontSelecting,
+          )
+          updateMenus()
+        } else if (event.type === 'system-dialog') {
+          gameDialogs?.update(event.request, event.pendingIds)
+          systemDialogSelecting = !!event.request
           updateMenus()
         } else if (event.type === 'window-menus') {
           menuViews.clear()
@@ -337,6 +358,15 @@ export function mountApp(root: HTMLDivElement): void {
       },
     )
     player = instance
+    gameDialogs = createGameDialogs({
+      choose: (id, value) => {
+        if (current !== generation || instance.session.isDisposed) return
+        return instance.session.selectSystemDialog(id, value)
+      },
+      stop: async () => {
+        if (current === generation && player === instance) await stop()
+      },
+    })
     void instance.session.setSystemFonts(systemFonts).catch(report)
     canvas.addEventListener('playererror', (event) =>
       report((event as CustomEvent<unknown>).detail),
@@ -366,7 +396,12 @@ export function mountApp(root: HTMLDivElement): void {
         } catch (stopError) {
           report(stopError)
         }
-        if (instance.session.isDisposed) player = undefined
+        if (instance.session.isDisposed) {
+          player = undefined
+          gameDialogs?.dispose()
+          gameDialogs = undefined
+          systemDialogSelecting = false
+        }
         if (snapshot) snapshot = { ...snapshot, state: 'failed' }
       }
     } finally {
