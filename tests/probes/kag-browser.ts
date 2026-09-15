@@ -121,6 +121,15 @@ let report: Record<string, unknown> = {
 }
 const steps: string[] = []
 let evaluation = 0
+async function prepareConsole(): Promise<void> {
+  // Running is announced before the KAG constructor restores saved options.
+  // Wait for startup to finish before inspecting fullscreen; otherwise its
+  // late restoration can cover the console after the visibility check.
+  await expect(page.locator('#evaluate')).toBeEnabled({ timeout: 20000 })
+  const exit = page.locator('.leave-fullscreen')
+  if (await exit.isVisible()) await exit.click()
+  await expect(page.locator('#stage')).not.toHaveClass(/window-fullscreen/)
+}
 async function evaluate(source: string, result: string | RegExp): Promise<string> {
   const prefix = `kag-probe-result-${++evaluation}:`
   await page.locator('#expression').fill(`${JSON.stringify(prefix)}+string(${source})`)
@@ -165,10 +174,8 @@ try {
   let conductor: string | undefined
   // Running state can precede completion of KAG's constructor. Wait for the
   // script queue to become available instead of silently skipping the scenario.
-  await expect(page.locator('#evaluate')).toBeEnabled({ timeout: 20000 })
+  await prepareConsole()
   {
-    const exit = page.locator('.leave-fullscreen')
-    if (await exit.isVisible()) await exit.click()
     conductor = await evaluate(
       '"conductor="+kag.conductor.timerEnabled+","+kag.conductor.inProcessing',
       /^conductor=[01],[01]$/,
@@ -258,9 +265,7 @@ try {
       await page.reload()
       await page.locator('#files').setInputFiles(files)
       await expect(page.locator('#status')).toHaveText('运行中', { timeout: 20000 })
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      const exit = page.locator('.leave-fullscreen')
-      if (await exit.isVisible()) await exit.click()
+      await prepareConsole()
       await evaluate(
         '(function(){kag.saveThumbnail=true;kag.thumbnailDepth=8;return "reload-load="+kag.loadBookMark(8);})()',
         'reload-load=1',
@@ -342,6 +347,7 @@ try {
   await writeFile(resolve(directory, `${reportName}.json`), JSON.stringify(report, null, 2) + '\n')
 }
 console.log(JSON.stringify(report, null, 2))
+if (!report.observedWithoutError) process.exitCode = 1
 if (!report.observedWithoutError) process.exitCode = 1
 if (!report.observedWithoutError) process.exitCode = 1
 if (!report.observedWithoutError) process.exitCode = 1
