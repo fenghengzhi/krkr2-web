@@ -48,10 +48,16 @@
 
 新增 `tests/probes/native-menu-flags.cpp` 和独立 Actions 工作流，仅在 GitHub-hosted Windows 2022／2025 上运行。首版对自建菜单验证 NoNotify／ReturnCmd／Recurse 三个位的八种组合及选择／Esc，共每平台 16 项；通过本进程窗口和线程的真实菜单消息循环注入，记录原始返回值与 WM_COMMAND 顺序。没有全局输入，也没有运行本机探针。每例和进程均有截止时间，失败、不可执行、超时与未运行保留原始产物。
 
-它只比较 Win32 TrackPopupMenuEx，不证明旧 VCL 命令 ID 分配，也尚未测试已有菜单中的真正递归。无 ReturnCmd 的取消 BOOL 原样记录，不预先规定值。新增探针还未执行，不能引用为通过证据。
+它只比较 Win32 TrackPopupMenuEx，不证明旧 VCL 命令 ID 分配，也尚未测试已有菜单中的真正递归。无 ReturnCmd 的取消 BOOL 原样记录，不预先规定值。执行结果与尚未完成的覆盖见下面记录，不能将部分用例成功作为整轮通过证据。
 
 ## 接线前的失败记录与修订
 
 [首次完整回归 34945297088](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945297088)，提交 `6671c42`，在测试类型检查阶段因新夹具的 `retain` 缺少参数而失败（TS2352）。Node、浏览器和直接运行时案例均未执行。修订让夹具接收 `ScriptObject` 参数，与实际接口一致，没有绕过类型检查或放宽断言。
 
 同一提交的[首次 Windows 菜单参考运行 34945297180](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945297180)在 Windows 2022、2025 均停于编译器定位，尚未编译或执行 C++，每个平台的 16 项均未运行。原工作流没有保存足够的 Visual Studio 查询信息，不能据此断定 runner 缺少编译器。修订从 `installationPath` 解析 `vcvars64.bat` 和默认 x64 工具，保存完整安装清单、查询参数、stdout、stderr、退出码及文件存在状态，并区分查询失败、无匹配和布局缺失。两次失败的完整产物及 run.json 保留在各自独立归档，后续结果不会覆盖它们。
+
+[第二次 Windows 菜单参考运行 34946408599](https://github.com/fenghengzhi/krkr2-web/actions/runs/34946408599)，提交 `9cb5e92`，两平台均成功发现并运行编译器：Windows 2022 使用 VS `17.14.37614.0`／默认 MSVC `14.44.35207`，Windows 2025 使用 VS `18.9.12120.119`／默认 MSVC `14.51.36231`；`compilerDiscoveryState=ready`、编译退出码均为 0。两平台探针均以 1 退出，整体失败。每个平台 16 个用例实际进入菜单循环，其中 8 个取消用例完成观察并通过现有断言，8 个选择用例为 `not-executable`，没有超时或普通断言失败。取消时，无 ReturnCmd 的四组均返回 1，有 ReturnCmd 的四组均返回 0，没有 WM_COMMAND；这些仅是本次两平台的 Win32 取消观察，不证明旧 VCL 或真正嵌套行为。
+
+选择失败来自探针没有建立真实高亮：两平台 case 2 的 Home 按下／抬起确实经过系统 MSGF_MENU，后续 hook 返回 0，但发送 Enter 前 `GetMenuState=0`、`MF_HILITE=false`，没有目标项的 WM_MENUSELECT，之后 Enter 使菜单结束且没有 WM_COMMAND。其余选择组合相同。返回 BOOL=1 不能证明选中了命令；原有高亮门槛正确拒绝了这些结果。轨迹只能证明这条 Home 注入路径没有建立选择，不能确定 Windows 内部忽略它的具体原因。
+
+修订改用 [Win32 标准菜单键盘接口](https://learn.microsoft.com/en-us/windows/win32/menurc/about-menus#standard-keyboard-interface)明确列出的 Down，补齐 [WM_KEYDOWN 导航键的 extended 位](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-keydown)，每次配对抬起后再读取真实高亮。两个叶子最多尝试两次 Down；只有目标实际高亮才发送 Enter，否则发送本窗口的 Esc 清理并保留选择用例 `not-executable`，不会改计取消成功。没有人工设置高亮或合成 WM_COMMAND，原始返回／通知顺序断言和 3 秒／180 秒截止时间保留。该修订尚未运行；第二轮完整产物与 run.json 保存于 `out/verification/github-actions/34946408599`，前一轮归档保留原状。

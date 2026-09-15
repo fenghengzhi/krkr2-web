@@ -70,6 +70,7 @@ struct Case {
     bool inTrack = false, hookSeen = false, terminalKey = false;
     bool timedOut = false, postFailed = false, barrierSeen = false, quitSeen = false;
     bool targetHighlighted = false, keySuppressed = false;
+    bool inputFinished = false, selectionAborted = false;
     int keyStage = 0, filteredKeys = 0, unconsumedKeys = 0;
     ULONGLONG started = 0, nextKeyAt = 0;
     std::uint64_t returnSequence = 0;
@@ -157,10 +158,14 @@ LRESULT CALLBACK menuFilter(int code, WPARAM wp, LPARAM lp) {
             message->message = up ? WM_KEYUP : WM_KEYDOWN;
             message->wParam = key;
             const DWORD scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC);
-            message->lParam = static_cast<LPARAM>(1u | (scan << 16) | (up ? 0xc0000000u : 0));
+            // DOWN is an extended navigation key, not the numeric-keypad key.
+            // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
+            const DWORD extended = key == VK_DOWN ? 0x01000000u : 0;
+            message->lParam = static_cast<LPARAM>(1u | (scan << 16) | extended |
+                (up ? 0xc0000000u : 0));
             item->filteredKeys++;
             injected = true;
-            terminal = !up && key == (item->select ? VK_RETURN : VK_ESCAPE);
+            terminal = !up && key == static_cast<UINT>(item->select ? VK_RETURN : VK_ESCAPE);
             event(item, "owned-key-injected-into-menu",
                 messageFields(message->message, message->wParam, message->lParam));
         }
@@ -190,21 +195,33 @@ void CALLBACK driveCase(HWND window, UINT, UINT_PTR, DWORD) {
         }
         return;
     }
-    if (now < item->nextKeyAt || item->keyStage >= (item->select ? 3 : 1)) return;
-    // HOME removes any dependence on initial hover/highlight. No hardware keys
-    // are changed by these posted messages; no global key-up cleanup is needed.
-    const UINT key = item->select && item->keyStage < 2 ? VK_HOME :
-        item->select ? VK_RETURN : VK_ESCAPE;
-    const bool up = item->select && item->keyStage == 1;
-    if (key == VK_RETURN) {
+    if (now < item->nextKeyAt || item->inputFinished) return;
+    // Navigate using the standard menu keyboard interface. With two leaves,
+    // at most two DOWN presses reach the target regardless of initial hover.
+    // https://learn.microsoft.com/en-us/windows/win32/menurc/about-menus#standard-keyboard-interface
+    // Each press is followed by key-up, then a real menu-state observation.
+    // These posted messages do not change any hardware/global keyboard state.
+    UINT key = item->select ? VK_DOWN : VK_ESCAPE;
+    const bool up = item->select && (item->keyStage % 2) == 1;
+    if (item->select && !up && item->keyStage >= 2) {
         SetLastError(ERROR_SUCCESS);
         const UINT state = GetMenuState(item->menu, 0, MF_BYPOSITION);
         const DWORD error = GetLastError();
         item->targetHighlighted = state != static_cast<UINT>(-1) && (state & MF_HILITE) != 0;
-        event(item, "owned-target-before-enter", "\"menuState\":" + std::to_string(state) +
+        event(item, "owned-target-after-navigation", "\"menuState\":" + std::to_string(state) +
+            ",\"navigationPresses\":" + std::to_string(item->keyStage / 2) +
             ",\"highlighted\":" + (item->targetHighlighted ? "true" : "false") +
             ",\"lastError\":" + std::to_string(error));
+        if (item->targetHighlighted) key = VK_RETURN;
+        else if (item->keyStage >= 4) {
+            // Escape is cleanup for a failed SELECT attempt; it never changes
+            // this case into a successful cancellation observation.
+            item->selectionAborted = true;
+            key = VK_ESCAPE;
+            event(item, "selection-aborted-before-enter");
+        }
     }
+    if (key == VK_RETURN || key == VK_ESCAPE) item->inputFinished = true;
     SetLastError(ERROR_SUCCESS);
     const BOOL posted = PostMessageW(window, keyMessage, static_cast<WPARAM>(item->id),
         key | (up ? 0x10000u : 0));
@@ -311,6 +328,8 @@ void runCase(Case& item, HINSTANCE instance) {
     releaseCase(item);
     if (item.timedOut) item.reason = "Per-case deadline required EndMenu";
     else if (item.postFailed) item.reason = "An owned message could not be posted";
+    else if (item.selectionAborted)
+        item.reason = "Two owned DOWN presses did not establish the known highlighted leaf; Escape was cleanup only";
     else if (!item.hookSeen || !item.terminalKey)
         item.reason = "Owned terminal key was not passed through the system menu hook chain";
     else if (item.keySuppressed)
@@ -370,6 +389,7 @@ void summary(const std::filesystem::path& directory, const std::vector<Case>& ca
              << ",\"filteredKeys\":" << item.filteredKeys << ",\"unconsumedKeys\":" << item.unconsumedKeys
              << ",\"terminalKeyPassedThroughHooks\":" << (item.terminalKey ? "true" : "false")
              << ",\"targetHighlighted\":" << (item.targetHighlighted ? "true" : "false")
+             << ",\"selectionAborted\":" << (item.selectionAborted ? "true" : "false")
              << ",\"keySuppressed\":" << (item.keySuppressed ? "true" : "false")
              << ",\"barrierSeen\":" << (item.barrierSeen ? "true" : "false") << ",\"commands\":[";
         bool childComma = false;
