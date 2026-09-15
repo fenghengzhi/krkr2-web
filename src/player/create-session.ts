@@ -13,6 +13,7 @@ import { IndexedDbSaveStore } from '../backends/files/indexeddb-saves.ts'
 import { WebAppLocks } from '../backends/files/web-app-locks.ts'
 import { PortAudioBackend } from '../backends/audio/port-backend.ts'
 import { PortVideoBackend } from '../backends/video/port-backend.ts'
+import { PortClipboardBackend } from '../backends/clipboard/port-backend.ts'
 import type { InitializeRequest, SessionEvent } from '../protocol/session.ts'
 import { fontManifestFile } from './build-info.ts'
 import { loadFontKernel } from '../backends/text/freetype/module.ts'
@@ -42,6 +43,9 @@ export function createSession(request: InitializeRequest): EngineSession {
     appLocks: new WebAppLocks(request.gameId),
     audio: new PortAudioBackend(request.audio),
     video: new PortVideoBackend(request.video),
+    clipboard: request.clipboard
+      ? new PortClipboardBackend(request.clipboard, request.generation)
+      : undefined,
     event: (event) => {
       const message: SessionEvent = {
         ...event,
@@ -63,6 +67,8 @@ export function createSession(request: InitializeRequest): EngineSession {
         if (manifest.abi !== 5) throw new Error('WASM manifest ABI mismatch')
         if (manifest.capabilities?.nativeReleaseState !== 1)
           throw new Error('WASM manifest is missing native release-state support')
+        if (manifest.capabilities?.nativeClipboard !== 1)
+          throw new Error('WASM manifest is missing native Clipboard support')
         const supportsJspi = 'Suspending' in WebAssembly && 'promising' in WebAssembly
         const variant: WasmVariant =
           request.backend === 'auto'

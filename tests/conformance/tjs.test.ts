@@ -51,6 +51,54 @@ test('an ABI 5 module without release-drain state is rejected before creating a 
   assert.equal(created, false)
 })
 
+test('the nativeClipboard manifest capability is backed by the real native class factory and members', async () => {
+  const calls: string[] = [],
+    writes: string[] = []
+  const vm = await runtime((operation, args) => {
+    if (operation === 'Clipboard.class')
+      return {
+        kind: 'value',
+        value: {
+          type: 'class',
+          namespace: 'Clipboard',
+          id: 0,
+          className: 'Clipboard',
+          properties: [],
+        },
+      }
+    calls.push(operation)
+    if (operation === 'Clipboard.hasText') return { kind: 'value', value: 1n }
+    if (operation === 'Clipboard.read') return { kind: 'value', value: 'native-read' }
+    if (operation === 'Clipboard.write') {
+      assert.equal(typeof args[0], 'string')
+      writes.push(args[0] as string)
+      return { kind: 'value', value: undefined }
+    }
+    throw new Error(`Unexpected native Clipboard call: ${operation}`)
+  })
+  try {
+    assert.equal(manifest.capabilities?.nativeClipboard, 1)
+    await vm.execute(
+      `
+var Clipboard=__host("Clipboard.class"),shell=new Clipboard();
+var identity=[Clipboard instanceof "Class",Clipboard instanceof "Clipboard",
+  Clipboard.hasFormat instanceof "Function",(&Clipboard.asText) instanceof "Property",
+  shell instanceof "Clipboard",typeof shell.hasFormat,typeof shell.asText].join("|");
+var found=Clipboard.hasFormat(1);Clipboard.asText=9007199254740993;
+var text=Clipboard.asText;
+`,
+      'native-clipboard-capability.tjs',
+    )
+    assert.equal(await vm.execute('identity', '', true), '1|1|1|1|1|undefined|undefined')
+    assert.equal(await vm.execute('found', '', true), 1n)
+    assert.equal(await vm.execute('text', '', true), 'native-read')
+    assert.deepEqual(calls, ['Clipboard.hasText', 'Clipboard.write', 'Clipboard.read'])
+    assert.deepEqual(writes, ['9007199254740993'])
+  } finally {
+    vm.dispose()
+  }
+})
+
 for (const binary of [false, true])
   for (const outcome of ['success', 'throw', 'cancel'] as const)
     test(

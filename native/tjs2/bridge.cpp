@@ -578,7 +578,7 @@ public:
 };
 
 // Class identity/construction and static-member copying are owned by TJS.
-// Only the property operation crosses into the TypeScript engine.
+// Host member operations cross into the TypeScript engine.
 class HostClass final : public tTJSNativeClass {
     static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
 public:
@@ -588,6 +588,62 @@ public:
         RegisterNCM(u"finalize", TJSCreateNativeClassMethod(noOp), name, nitMethod);
     }
 };
+
+tjs_error clipboardHost(Vm* vm, const tjs_char* operation, tTJSVariant* result,
+                        tTJSVariant* input = nullptr) {
+    if(shuttingDown) return TJS_E_INVALIDOBJECT;
+    std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation),
+        input ? 1 : 0, input ? &input : nullptr));
+    if(!reply) TJS_eTJSError(u"Clipboard returned no response");
+    resolveReply(vm, *reply, result);
+    return TJS_S_OK;
+}
+
+// These two members need the original native conversions before crossing JS:
+// narrowing the int64 format via Number can discard the supported low 32 bits.
+class ClipboardHasFormat final : public tTJSNativeClassMethod {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit ClipboardHasFormat(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        if(count < 1) return TJS_E_BADPARAMCOUNT;
+        const tjs_int format = *args[0];
+        if(format != 1) {
+            if(result) *result = static_cast<tjs_int>(0);
+            return TJS_S_OK;
+        }
+        return clipboardHost(vm, u"Clipboard.hasText", result);
+    }
+};
+
+class ClipboardText final : public tTJSNativeClassProperty {
+    Vm* vm;
+public:
+    explicit ClipboardText(Vm* vm) : tTJSNativeClassProperty(nullptr, nullptr), vm(vm) {}
+    tjs_error PropGet(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassProperty::PropGet(flag, member, hint, result, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(!result) return TJS_E_FAIL;
+        return clipboardHost(vm, u"Clipboard.read", result);
+    }
+    tjs_error PropSet(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        const tTJSVariant* input, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassProperty::PropSet(flag, member, hint, input, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(!input) return TJS_E_FAIL;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        tTJSVariant text{ttstr(*input)};
+        return clipboardHost(vm, u"Clipboard.write", nullptr, &text);
+    }
+};
+
 class HostProperty final : public tTJSDispatch {
     Vm* vm;
     ttstr prefix, member;
@@ -829,10 +885,13 @@ API int krkr_proxy_bind_owner(Vm* vm, tTJSVariant* value, unsigned handle) {
     if(!owner || !proxy || dynamic_cast<tTJSInterCodeContext*>(owner) || dynamic_cast<tTJSNativeClass*>(owner)) return 0;
     return proxy->BindOwner(owner);
 }
-API void krkr_value_set_class(Vm*, tTJSVariant* value, const tjs_char*, int, const tjs_char* className) {
-    auto object = new HostClass(className);
-    *value = tTJSVariant(object, object);
-    object->Release();
+API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* className) {
+    krkr::NativeOwner<HostClass> object(new HostClass(className));
+    if(id == 0 && ttstr(prefix) == u"Clipboard" && ttstr(className) == u"Clipboard") {
+        object->RegisterNCM(u"hasFormat", new ClipboardHasFormat(vm), u"Clipboard", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"asText", new ClipboardText(vm), u"Clipboard", nitProperty, TJS_STATICMEMBER);
+    }
+    *value = tTJSVariant(object.get(), object.get());
 }
 // Called only while assembling a fresh native-class reply, before publishing it.
 API void krkr_class_property(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* member, int options) {

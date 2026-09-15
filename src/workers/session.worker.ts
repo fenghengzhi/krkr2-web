@@ -129,6 +129,8 @@ const api: SessionApi = {
     sources.signal.throwIfAborted()
     if (session) throw new Error('Worker already owns a session')
     if (request.version !== PROTOCOL_VERSION) throw new Error('Worker protocol mismatch')
+    if (request.clipboard !== undefined && !(request.clipboard instanceof MessagePort))
+      throw new Error('Invalid clipboard channel')
     if (!prepared || request.gameId !== gameId)
       throw new Error('Prepare the game sources before initializing')
     session = createSession(request)

@@ -1,4 +1,6 @@
 import { bootstrap } from './tvp/bootstrap.ts'
+import { clipboardClass } from './tvp/clipboard.ts'
+import { assertClipboardText, unavailableClipboard, type ClipboardPort } from './ports/clipboard.ts'
 import { ScriptTextEncoding } from './script/text-encoding.ts'
 import { debugBridge } from './tvp/debug.ts'
 import { DebugLog } from './diagnostics/log.ts'
@@ -172,6 +174,7 @@ export interface SessionDependencies {
   appLocks?: AppLocks
   audio?: AudioBackend
   video?: VideoBackend
+  clipboard?: ClipboardPort
   arguments?: ReadonlyMap<string, string>
   now: () => number
   wallNow?: () => number
@@ -181,6 +184,8 @@ export interface SessionDependencies {
 }
 
 export class EngineSession {
+  private readonly clipboard: ClipboardPort
+  private clipboardClosed = false
   private readonly textEncoding = new ScriptTextEncoding()
   private readonly fontCatalog: FontCatalog
   private readonly fontSelection: FontSelection
@@ -306,6 +311,7 @@ export class EngineSession {
   private readonly cancellationErrors: unknown[] = []
   private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
+    this.clipboard = deps.clipboard ?? unavailableClipboard()
     this.fonts = new FontService(
       (name) => this.resolveResource(name),
       deps.graphics,
@@ -347,6 +353,7 @@ export class EngineSession {
       // can throw. Preserve those failures for the terminal stop result.
       this.cancelEventReceipts(new ExecutionCancelled())
       for (const cleanup of [
+        () => this.closeClipboard(),
         () => this.modalLoop?.dispose(),
         () => this.menus.dismiss(undefined, undefined, 'unavailable'),
         () => this.fontSelection.cancel(),
@@ -692,6 +699,7 @@ export class EngineSession {
       this.discard(await this.runtime.execute(tvpConstants, 'krkr2-web/constants.tjs'))
       this.discard(await this.runtime.execute(debugBridge, 'krkr2-web/debug.tjs'))
       this.discard(await this.runtime.execute(bootstrap, 'krkr2-web/bootstrap.tjs'))
+      this.discard(await this.runtime.execute(clipboardClass, 'krkr2-web/clipboard.tjs'))
       this.discard(await this.runtime.execute(systemEventsBridge, 'krkr2-web/system-events.tjs'))
       this.discard(await this.runtime.execute(eventClasses, 'krkr2-web/events.tjs'))
       this.discard(await this.runtime.execute(kagClass, 'krkr2-web/kag.tjs'))
@@ -2428,6 +2436,7 @@ export class EngineSession {
       // cleanup. Once here, one media failure must not retain the VM or other
       // resources. Cache the outcome so a retry never disposes a device twice.
       await attempt(() => this.appLocks.close())
+      await attempt(() => this.closeClipboard())
       await attempt(async () => {
         while (this.cancellationWork.size) await Promise.all([...this.cancellationWork])
         if (this.cancellationErrors.length) {
@@ -2552,11 +2561,75 @@ export class EngineSession {
       work.return(undefined as T)
     }
   }
+  private closeClipboard(): void {
+    if (this.clipboardClosed) return
+    this.clipboardClosed = true
+    this.clipboard.close()
+  }
+
+  private async clipboardCall<T>(operation: () => Promise<T>): Promise<T> {
+    this.control.check()
+    try {
+      return await cancelable(operation(), this.control)
+    } catch (error) {
+      if (this.control.cancelled) throw new ExecutionCancelled()
+      // The generic TJS host error bridge carries a message. Keep the actual
+      // browser exception name alongside its message instead of losing it.
+      const name = error instanceof Error ? error.name : 'Error',
+        message = error instanceof Error ? error.message : String(error)
+      try {
+        assertClipboardText(name)
+        assertClipboardText(message)
+      } catch (limitError) {
+        const failure = limitError as Error
+        throw new Error(`${failure.name}: ${failure.message}`, { cause: error })
+      }
+      throw new Error(`${name}: ${message}`, { cause: error })
+    }
+  }
+
   private async host(
     operation: string,
     args: ScriptValue[],
     context: HostContext,
   ): Promise<HostReply> {
+    if (operation === 'Clipboard.class')
+      return {
+        kind: 'value',
+        value: {
+          type: 'class',
+          namespace: 'Clipboard',
+          id: 0,
+          className: 'Clipboard',
+          properties: [],
+        },
+      }
+    if (operation === 'Clipboard.hasText') {
+      const result = await this.clipboardCall(() => this.clipboard.hasText())
+      if (typeof result !== 'boolean') throw new Error('DataError: Invalid clipboard format result')
+      return { kind: 'value', value: result ? 1n : 0n }
+    }
+    if (operation === 'Clipboard.read') {
+      const result = await this.clipboardCall(async () => {
+        const content = await this.clipboard.readText()
+        if (content?.hasText === true) assertClipboardText(content.text)
+        return content
+      })
+      if (
+        !result ||
+        (result.hasText !== false && !(result.hasText === true && typeof result.text === 'string'))
+      )
+        throw new Error('DataError: Invalid clipboard text result')
+      return { kind: 'value', value: result.hasText ? result.text : undefined }
+    }
+    if (operation === 'Clipboard.write') {
+      if (typeof args[0] !== 'string') throw new Error('Clipboard text must be a native string')
+      await this.clipboardCall(() => {
+        assertClipboardText(args[0])
+        return this.clipboard.writeText(args[0])
+      })
+      return { kind: 'value', value: undefined }
+    }
     if (operation.startsWith('Checkpoint.')) return this.checkpointHost(operation, args, context)
     if (operation.startsWith('Modal.')) {
       if (!this.modalLoop) throw new Error('Modal dispatcher is unavailable')

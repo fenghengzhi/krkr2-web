@@ -10,6 +10,7 @@ import type { WindowPresentation } from '../engine/scene/window.ts'
 import type { MenuSnapshot } from '../engine/scene/menus.ts'
 import { createGameFonts } from './game-fonts.ts'
 import { createGameDialogs } from './game-dialogs.ts'
+import { createGameClipboard } from './game-clipboard.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import { createGameLibrary } from './game-library.ts'
 import { createOfflinePanel } from './offline.ts'
@@ -55,6 +56,7 @@ export function mountApp(root: HTMLDivElement): void {
   let generation = 0
   let busy = false
   let stopping: Promise<void> | undefined
+  let stopRequested = false
   let library: ReturnType<typeof createGameLibrary> | undefined
   let offline: ReturnType<typeof createOfflinePanel> | undefined
   const log = (text: string, error = false) => {
@@ -90,6 +92,8 @@ export function mountApp(root: HTMLDivElement): void {
   let fontSelecting = false
   let systemDialogSelecting = false
   let gameDialogs: ReturnType<typeof createGameDialogs> | undefined
+  let gameClipboard: ReturnType<typeof createGameClipboard> | undefined
+  let clipboardSelecting = false
   const clearMenus = () => {
     for (const menus of gameMenus.values()) menus.dispose()
     gameMenus.clear()
@@ -112,7 +116,8 @@ export function mountApp(root: HTMLDivElement): void {
   }
   let systemFonts: FontDescriptor[] = []
   const gameFonts = createGameFonts({
-    choose: (id, face) => player?.session.selectFont(id, face),
+    choose: (id, face) =>
+      clipboardSelecting || stopRequested ? undefined : player?.session.selectFont(id, face),
     preview: (id, face, kind) => player?.session.previewFont(id, face, kind),
     system: (fonts) => {
       systemFonts = fonts
@@ -124,8 +129,13 @@ export function mountApp(root: HTMLDivElement): void {
   })
   const update = () => {
     gameDialogs?.state(
-      snapshot?.state === 'running' && snapshot.activity.state === 'visible' && !fontSelecting,
+      snapshot?.state === 'running' &&
+        snapshot.activity.state === 'visible' &&
+        !fontSelecting &&
+        !clipboardSelecting &&
+        !stopRequested,
     )
+    gameFonts.state(!clipboardSelecting && !stopRequested)
     if (snapshot) debugVisibility = snapshot.debug
     for (const panel of ['console', 'controller'] as const) {
       const target = el('debug-' + panel),
@@ -213,12 +223,31 @@ export function mountApp(root: HTMLDivElement): void {
   })
   const stop = (): Promise<void> => {
     if (stopping) return stopping
-    const previous = player
+    const previous = player,
+      previousClipboard = gameClipboard,
+      cleanupErrors: unknown[] = []
+    stopRequested = true
+    gameClipboard = undefined
+    clipboardSelecting = false
+    try {
+      previousClipboard?.dispose()
+    } catch (error) {
+      // A presentation failure must not prevent canceling the Worker which
+      // is still waiting for that presentation's clipboard response.
+      cleanupErrors.push(error)
+    }
     busy = true
     update()
     stopping = (async () => {
       try {
-        await previous?.stop()
+        try {
+          await previous?.stop()
+        } catch (error) {
+          cleanupErrors.push(error)
+        }
+        if (cleanupErrors.length === 1) throw cleanupErrors[0]
+        if (cleanupErrors.length)
+          throw new AggregateError(cleanupErrors, 'Game and clipboard cleanup failed')
         generation++
         player = undefined
         snapshot = undefined
@@ -239,6 +268,7 @@ export function mountApp(root: HTMLDivElement): void {
         throw error
       } finally {
         busy = false
+        stopRequested = false
         update()
       }
     })().finally(() => {
@@ -284,11 +314,16 @@ export function mountApp(root: HTMLDivElement): void {
           gameDialogs?.state(
             snapshot?.state === 'running' &&
               snapshot.activity.state === 'visible' &&
-              !fontSelecting,
+              !fontSelecting &&
+              !clipboardSelecting &&
+              !stopRequested,
           )
+          gameFonts.state(!clipboardSelecting && !stopRequested)
+          gameClipboard?.refreshPlacement()
           updateMenus()
         } else if (event.type === 'system-dialog') {
           gameDialogs?.update(event.request, event.pendingIds)
+          gameClipboard?.refreshPlacement()
           systemDialogSelecting = !!event.request
           updateMenus()
         } else if (event.type === 'window-menus') {
@@ -331,6 +366,13 @@ export function mountApp(root: HTMLDivElement): void {
       el<HTMLInputElement>('pause-background').checked,
       {
         windows,
+        onClipboardRequest(request) {
+          if (current !== generation) return
+          if (request && !gameClipboard) throw new Error('Clipboard presentation is not available')
+          gameClipboard?.show(request)
+        },
+        ownsClipboardFocus: (target) =>
+          current === generation && !!gameClipboard?.ownsFocus(target),
         onSurfaceAttach(surface) {
           if (current !== generation) return
           if (!el('stage').querySelector('#game-menus')) surface.menu.id = 'game-menus'
@@ -360,11 +402,39 @@ export function mountApp(root: HTMLDivElement): void {
     player = instance
     gameDialogs = createGameDialogs({
       choose: (id, value) => {
-        if (current !== generation || instance.session.isDisposed) return
+        if (
+          current !== generation ||
+          instance.session.isDisposed ||
+          clipboardSelecting ||
+          stopRequested
+        )
+          return
         return instance.session.selectSystemDialog(id, value)
       },
       stop: async () => {
         if (current === generation && player === instance) await stop()
+      },
+    })
+    gameClipboard = createGameClipboard({
+      complete: (response) => {
+        if (current !== generation || player !== instance || instance.session.isDisposed)
+          return false
+        return instance.clipboard.respond(response)
+      },
+      pending: (active) => {
+        if (current !== generation || player !== instance) return
+        clipboardSelecting = active
+        gameFonts.state(!active && !stopRequested)
+        gameDialogs?.state(
+          snapshot?.state === 'running' &&
+            snapshot.activity.state === 'visible' &&
+            !fontSelecting &&
+            !active &&
+            !stopRequested,
+        )
+      },
+      stop: () => {
+        if (current === generation && player === instance) return stop()
       },
     })
     void instance.session.setSystemFonts(systemFonts).catch(report)
@@ -398,6 +468,9 @@ export function mountApp(root: HTMLDivElement): void {
         }
         if (instance.session.isDisposed) {
           player = undefined
+          gameClipboard?.dispose()
+          gameClipboard = undefined
+          clipboardSelecting = false
           gameDialogs?.dispose()
           gameDialogs = undefined
           systemDialogSelecting = false

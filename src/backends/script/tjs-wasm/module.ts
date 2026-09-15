@@ -55,6 +55,7 @@ export interface WasmManifest {
     nativeLifetimeHooks?: number
     windowObjectLifetime?: number
     nativeReleaseState?: number
+    nativeClipboard?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string
