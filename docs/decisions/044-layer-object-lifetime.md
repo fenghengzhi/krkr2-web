@@ -2,7 +2,7 @@
 
 Layer 的脚本对象与显示树分别由 `src/engine/scene/layer-objects.ts` 的 LayerService 和 `src/engine/scene/layers.ts` 的 LayerTree 管理。TJS 接口保留 `new Layer(window, parent)`、parent、children、window 和 font；基本父子关系不再通过脚本成员或永久宿主句柄强持有另一侧。输入和过渡本来具有的额外强引用则单独保留。
 
-本阶段实现了以下所有权和清理路径，尚未证明完整非插件兼容性。首次云端检查已发现并记录失败，修正尚待重跑，验证状态见文末。
+本阶段实现了以下所有权和清理路径，尚未证明完整非插件兼容性。当前完整云端回归和原 KAG 兼容检查已通过，历史失败与验证范围见文末。
 
 ## 对象与引用
 
@@ -82,6 +82,10 @@ Layer.finalize 的默认实现为空。直接调用 finalize 不释放原生状�
 
 第二次 [Node 诊断 34925558902](https://github.com/fenghengzhi/krkr2-web/actions/runs/34925558902)针对 `ce44edd`：987 项中 985 项通过、2 项失败，无取消或跳过。转场及旧有图形回归恢复；剩余窗口替换夹具在实例方法中使用未限定类名，命中了继承的构造方法。后续改为显式 global 类并增加分阶段错误信息；本次失败记录完整保留，修正待完整回归。
 
-新增源码 / 原生字节码集成用例分别位于 `tests/integration/layer-lifetime.test.ts`、`layer-font-lifetime.test.ts`、`layer-input-lifetime.test.ts` 和 `layer-transition-lifetime.test.ts`；LayerTree 的缓存和 manager 检查位于 `tests/conformance/layer-tree-lifetime.test.ts`。所有权夹具在基线前预热 Array、Font、Exception，检查释放后的宿主观察、句柄和停止状态；错误用例区分脚本捕获文本、原生诊断与主错误。它们目前是待云端验证的要求，不是已通过的证据。
+首轮 [完整回归 34925826399](https://github.com/fenghengzhi/krkr2-web/actions/runs/34925826399)针对 `efc2c65`：987 项 Node、6 组直接运行时、全部游戏库/PWA/可信生命周期通过；常规浏览器每种 193 项通过、8 项失败，共 24 个失败。失败均在新增夹具删除全局对象之后，以普通变量赋值重建 child/fore/back，触发“成员不存在”；`117af18` 改为显式 global 成员写入。三浏览器无跳过或 flaky，完整失败产物和提前下载的 Chromium trace 分别保存。
+
+[兼容检查 34925944413](https://github.com/fenghengzhi/krkr2-web/actions/runs/34925944413)在 `efc2c65` 使用同次构建 34925826399，通过 78 个场景：原 KAG 流程/存档/转场 36、调试菜单 6、异常恢复 6、五种旧 ABI 离线升级 30。后续 117af18 只改浏览器夹具，应用源码相同。修正后的 [完整回归 34926303139](https://github.com/fenghengzhi/krkr2-web/actions/runs/34926303139)在 `117af18` 全部通过：987 项 Node、726 项浏览器（常规 603、游戏库 57、PWA 59、可信生命周期 7）及 6 组直接运行时。所有用例无失败、取消、跳过或 flaky，未使用重试；完整产物和 run.json 已保存。
+
+新增源码 / 原生字节码集成用例分别位于 `tests/integration/layer-lifetime.test.ts`、`layer-font-lifetime.test.ts`、`layer-input-lifetime.test.ts` 和 `layer-transition-lifetime.test.ts`；LayerTree 的缓存和 manager 检查位于 `tests/conformance/layer-tree-lifetime.test.ts`。所有权夹具在基线前预热 Array、Font、Exception，检查释放后的宿主观察、句柄和停止状态；错误用例区分脚本捕获文本、原生诊断与主错误。这些选定的要求已通过上述完整回归；不表示原引擎全部 API 或商业游戏集合都已覆盖。
 
 后续每次运行按原 run ID 保存日志、完整产物和运行元数据到 `out/verification/github-actions/<id>/`。失败、取消、中断或尚未执行的检查不能被后续绿色结果覆盖；Menu / Window 阶段已有的验证记录也不变更为 Layer 本阶段的通过证明。
