@@ -142,9 +142,11 @@ export class SceneTransitions {
         token: this.next++,
         destination,
         source,
+        destinationType: dest.type === 6 || dest.type === 7 ? 0 : dest.type,
         children,
         kind: kind as Transition['kind'],
         phase: 0,
+        pixelPhase: 0,
         vague,
         rule,
         from,
@@ -250,6 +252,11 @@ export class SceneTransitions {
         const tick = state.hasCallback ? state.tick : this.now()
         state.started ??= tick
         state.phase = Math.max(0, Math.min(1, (tick - state.started) / state.duration))
+        const phaseMax = 255 + (state.kind === 'universal' ? state.vague : 0)
+        state.pixelPhase = Math.max(
+          0,
+          Math.min(phaseMax, Math.floor(((tick - state.started) * phaseMax) / state.duration)),
+        )
         this.changed()
         if (state.phase === 1) yield* this.finish(state.destination)
       }

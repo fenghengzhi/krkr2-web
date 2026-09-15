@@ -1,17 +1,27 @@
 import type { Pixels } from '../ports/graphics.ts'
+import { usesAlpha } from './blend.ts'
+import { blendOpaqueTransitionPixel, opaqueUniversalOpacity } from './transition-opaque.ts'
 export interface TransitionFrame {
   token: number
   destination: number
   source: number
+  /** DisplayType captured when the native transition handler is created. */
+  destinationType: number
   children: boolean
   kind: 'crossfade' | 'universal' | 'scroll'
   phase: number
+  /** Integer phase computed before elapsed time is normalized for layout. */
+  pixelPhase?: number
   vague: number
   rule?: Pixels
   from: number
   stay: number
 }
-/** Both inputs and the result contain premultiplied RGBA. */
+export const opaqueTransition = (frame: TransitionFrame): boolean =>
+  frame.kind !== 'scroll' && !usesAlpha(frame.destinationType)
+
+/** Opaque fade inputs/results are raw image planes. Other transitions retain
+ * the premultiplied representation until their own kernels are calibrated. */
 export function transitionPixels(
   before: Pixels,
   after: Pixels,
@@ -22,7 +32,12 @@ export function transitionPixels(
   const { width, height } = before,
     result = { width, height, data: new Uint8Array(before.data.length) }
   const progress = Math.max(0, Math.min(1, transition.phase))
-  if (!progress) {
+  const opaque = opaqueTransition(transition),
+    phase =
+      opaque && transition.pixelPhase !== undefined
+        ? transition.pixelPhase
+        : Math.floor(progress * (255 + (transition.kind === 'universal' ? transition.vague : 0)))
+  if (!progress || (opaque && !phase)) {
     result.data.set(before.data)
     return result
   }
@@ -62,10 +77,23 @@ export function transitionPixels(
         const at = ((y % rule.height) * rule.width + (x % rule.width)) * 4
         const threshold =
           (rule.data[at]! * 54 + rule.data[at + 1]! * 183 + rule.data[at + 2]! * 19) >> 8
-        const phase = Math.floor(progress * (255 + transition.vague))
+        if (opaque) {
+          blendOpaqueTransitionPixel(
+            result.data,
+            offset,
+            before.data,
+            after.data,
+            opaqueUniversalOpacity(phase, transition.vague, threshold),
+          )
+          continue
+        }
         amount = transition.vague
           ? Math.max(0, Math.min(1, (phase - threshold) / transition.vague))
           : Number(threshold < phase)
+      }
+      if (opaque) {
+        blendOpaqueTransitionPixel(result.data, offset, before.data, after.data, phase)
+        continue
       }
       for (let channel = 0; channel < 4; channel++)
         result.data[offset + channel] = Math.round(
