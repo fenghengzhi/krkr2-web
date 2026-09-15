@@ -226,7 +226,19 @@ async function fixture(
         await bounded(session.idle(), 'settle completed modal frame')
         assert.equal(session.inspectOwnership().modalScopes, 0)
         assert.equal(session.inspectOwnership().modalWaits, 0)
-        assert.equal(session.inspectOwnership().eventReceipts, 0)
+        assert.equal(
+          session.inspectOwnership().eventReceipts,
+          0,
+          JSON.stringify({
+            snapshot: session.snapshot(),
+            logs,
+            receipts: [
+              ...(
+                session as unknown as { eventReceipts: Map<number, unknown> }
+              ).eventReceipts.values(),
+            ],
+          }),
+        )
         assert.equal(session.inspectOwnership().eventCheckpoints, 0)
         assert.equal(
           logs.filter((text) => text.startsWith('run:after:')).at(-1),
