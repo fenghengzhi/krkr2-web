@@ -39,7 +39,25 @@ The baseline success produced no separate native console log.
   query or modal return before their deadlines. They remain failed observations.
   The correction gates the next action on an actual query or child entry and
   explicitly supplies the hidden window's final answer to end that observation.
-  This correction remains unverified until its hosted run completes.
+- [34993108821](https://github.com/fenghengzhi/krkr2-web/actions/runs/34993108821),
+  `6fed67b404a2927845362c96abc6ff6941b82637`: all eight observations completed
+  (four scenarios on each runner). Each scenario's entire event list was
+  identical across the two runners. All 48 artifact files, terminal metadata,
+  workflow log and per-file hashes are archived; earlier failures remain failed.
+
+## Observed ordering
+
+| Scenario         | Recorded result on both runners in `34993108821`                                                                                                                                                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Baseline         | Each `close()` returned before its query. Veto kept waiting; acceptance returned `void`, hid the Window and left it valid.                                                                                                                                              |
+| Accepted reclose | Accepting query 1 and then calling `close()` in the same callback produced query 2. Its veto kept the modal waiting until a later recovery close produced accepting query 3.                                                                                            |
+| Hidden timer     | Hiding kept the modal active; ticks 2 and 3 ran while invisible. The hidden `close()` returned without a query before tick 3. The only query then logged was the fixture's explicitly marked `onCloseQuery(true)` call; after that the modal returned valid and hidden. |
+| Parent and child | The parent accepted closure and continued into child `showModal()`. The child returned before the parent query returned; the parent was still visible at that point. The parent modal then returned. Both windows remained valid and hidden.                            |
+
+The earlier two 30-second hidden timeouts additionally observed no delivered
+query after the hidden close. The successful finite observation does not assert
+that a hidden query can never arrive under every possible host condition. No
+reshow or subsequent hidden-close recovery behavior has been observed here.
 
 ## Scenarios
 
