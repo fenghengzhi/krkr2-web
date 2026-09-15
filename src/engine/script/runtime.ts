@@ -117,7 +117,12 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
   /** Attach a native instance without retaining its owner. Its host operation
    * receives [identifier, owner] during native invalidation, before member deletion.
    * Ordinary VM execution may suspend; terminal VM destruction runs no host script. */
-  registerNativeLifetime(owner: ScriptObject, operation: string, identifier: number): void
+  registerNativeLifetime(
+    owner: ScriptObject,
+    operation: string,
+    identifier: number,
+    state?: ScriptObject,
+  ): void
   /** Read native instance metadata without consulting script fields. Like a
    * native class cast, this still works after explicit script invalidation. */
   nativeLifetimeIdentifier(owner: ScriptObject, operation: string): number | undefined

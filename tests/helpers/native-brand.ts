@@ -37,11 +37,21 @@ export async function exerciseNativeBrand(
     return value as ScriptObject
   }
   try {
-    await execute('class Branded {} function unbranded(){} var other=%[];')
+    await execute(
+      'class Branded {} function unbranded(){} var other=%[]; var stateDeaths=0; class StateVictim { function finalize(){stateDeaths++;} }',
+    )
     const baseline = vm.inspect()
     owner = await acquire('new Branded()')
     vm.registerNativeLifetime(owner, 'Tag.A', 0)
-    vm.registerNativeLifetime(owner, 'Tag.B', 0xffffffff)
+    const state = await acquire('%[payload:new StateVictim()]')
+    vm.registerNativeLifetime(owner, 'Tag.B', 0xffffffff, state)
+    held.splice(held.indexOf(state), 1)
+    vm.release(state)
+    await vm.collect()
+    check(
+      (await execute('stateDeaths', true)) === 0n,
+      'Native instance did not retain its private state',
+    )
     vm.registerNativeLifetime(owner, 'Tag.A', 99)
     const bound = await acquire('__host("Owner") incontextof other'),
       plain = await acquire('unbranded'),
@@ -69,6 +79,10 @@ export async function exerciseNativeBrand(
     )
     check(native.call('krkr_native_hook_count') === 3, 'Native brand lookup changed its slots')
     await execute('invalidate __host("Owner");')
+    check(
+      (await execute('stateDeaths', true)) === 1n,
+      'Native invalidation did not release its private state',
+    )
     check(
       vm.nativeLifetimeIdentifier(owner, 'Tag.A') === 0,
       'Invalidation erased native instance metadata',

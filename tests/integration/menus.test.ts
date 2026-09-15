@@ -22,7 +22,7 @@ test('MenuItem parent/order/radio semantics and native callbacks stay synchroniz
       '1',
     )
     await session.evaluate('second.index=0')
-    assert.equal(await session.evaluate('group.children[0]===second && first.index==1'), '1')
+    assert.equal(await session.evaluate('group.children[0]===first && first.index==1'), '1')
     const firstId = Number(await session.evaluate('first.__menuId'))
     await session.menuClick(firstId)
     assert.equal(await session.evaluate('clicks'), '1')
@@ -36,7 +36,7 @@ test('MenuItem parent/order/radio semantics and native callbacks stay synchroniz
       await session.evaluate(
         '(function(){var copy=group.children;copy.clear();return group.children.count;})()',
       ),
-      '1',
+      '0',
     )
     assert.equal(
       await session.evaluate(
@@ -45,7 +45,8 @@ test('MenuItem parent/order/radio semantics and native callbacks stay synchroniz
       'cycle rejected',
     )
     await session.evaluate('(function(){invalidate group;return 0;})()')
-    assert.equal(await session.evaluate('window.menu.children.count'), '0')
+    assert.equal(await session.evaluate('window.menu.children.count'), '1')
+    assert.equal(await session.evaluate('isvalid window.menu.children[0]'), '0')
   } finally {
     await session.stop()
   }

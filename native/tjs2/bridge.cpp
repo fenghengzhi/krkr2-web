@@ -405,11 +405,12 @@ class HostLifetime final : public tTJSNativeInstance {
     tTJSCustomObject* owner; // owning custom object contains this native instance
     ttstr operation;
     unsigned identifier;
+    tTJSVariant state;
     bool running = false, completed = false;
 public:
-    HostLifetime(Vm* vm, tTJSCustomObject* owner, const ttstr& operation, unsigned identifier)
-        : vm(vm), owner(owner), operation(operation), identifier(identifier) { ++nativeLifetimeCount; }
-    ~HostLifetime() override { --nativeLifetimeCount; }
+    HostLifetime(Vm* vm, tTJSCustomObject* owner, const ttstr& operation, unsigned identifier, const tTJSVariant& state)
+        : vm(vm), owner(owner), operation(operation), identifier(identifier), state(state) { ++nativeLifetimeCount; }
+    ~HostLifetime() override { state.Clear(); --nativeLifetimeCount; }
     double Identifier(Vm* context) const { return vm == context ? static_cast<double>(identifier) : -1; }
     void Invalidate() override {
         if(completed || running || shuttingDown) return;
@@ -420,6 +421,7 @@ public:
         std::unique_ptr<Reply> reply(dispatch_host(vm, operation.c_str(), operation.GetLen(), 2, args));
         if(!reply) TJS_eTJSError(u"Native lifetime returned no response");
         resolveReply(vm, *reply, nullptr);
+        state.Clear();
         completed = true;
     }
 };
@@ -970,12 +972,18 @@ static tTJSCustomObject* lifetimeInstance(Vm* vm, unsigned handle) {
         dynamic_cast<tTJSNativeClass*>(object)) return nullptr;
     return object;
 }
-API int krkr_owner_register_native(Vm* vm, unsigned handle, const tjs_char* operation, unsigned length, unsigned identifier) {
+API int krkr_owner_register_native(Vm* vm, unsigned handle, const tjs_char* operation, unsigned length, unsigned identifier, unsigned stateHandle) {
     if(shuttingDown || !operation || !length || length > 128) return 0;
     auto* owner = lifetimeInstance(vm, handle);
     if(!owner) return 0;
     try {
-        auto record = std::make_unique<HostLifetime>(vm, owner, ttstr(operation, length), identifier);
+        tTJSVariant state;
+        if(stateHandle) {
+            auto found = vm->handles.find(stateHandle);
+            if(vm->released.count(stateHandle) || found == vm->handles.end() || found->second.Type() != tvtObject) return 0;
+            state = found->second;
+        }
+        auto record = std::make_unique<HostLifetime>(vm, owner, ttstr(operation, length), identifier, state);
         iTJSNativeInstance* pointer = record.get();
         const auto className = ttstr(u"krkr2-web.HostLifetime.") + ttstr(operation, length);
         const auto classId = TJSRegisterNativeClass(className.c_str());

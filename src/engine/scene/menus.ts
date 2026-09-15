@@ -125,6 +125,17 @@ export class MenuTree {
     if (this.root === id) this.root = 0
     this.revision++
   }
+  /** Release one platform node. Script-owned descendants have independent
+   * lifetimes and are detached until their own native invalidation runs. */
+  detach(id: number): void {
+    const item = this.get(id)
+    if (item.parent) this.remove(item.parent, id)
+    for (const child of item.children) this.get(child).parent = 0
+    this.dismiss()
+    this.nodes.delete(id)
+    if (this.root === id) this.root = 0
+    this.revision++
+  }
   selectable(id: number): boolean {
     const item = this.nodes.get(id)
     if (!item || item.caption === '-' || item.children.length) return false

@@ -3,6 +3,7 @@ import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import type { ModuleFactory, WasmVariant } from '../../src/backends/script/tjs-wasm/module.ts'
 import { readScript, readText, writeText } from '../../src/backends/files/text-codecs.ts'
 import { inflateImage, deflateImage } from '../../src/backends/files/blob-source.ts'
+import { menuLifetimeScript } from './menu-lifetime-script.ts'
 
 const source = String.raw`
 function demand(value,message){if(!value)throw new Exception(message);}
@@ -84,10 +85,12 @@ export async function exerciseMenuActions(
   try {
     await session.initialize()
     session.mount(
-      Object.entries({ 'startup.tjs': '', 'menu-actions.tjs': source }).map(([name, source]) => {
-        const bytes = new TextEncoder().encode(source)
-        return { name, size: bytes.length, read: async () => bytes }
-      }),
+      Object.entries({ 'startup.tjs': '', 'menu-actions.tjs': source + menuLifetimeScript }).map(
+        ([name, source]) => {
+          const bytes = new TextEncoder().encode(source)
+          return { name, size: bytes.length, read: async () => bytes }
+        },
+      ),
     )
     await session.start()
     if (binary) {
@@ -98,6 +101,12 @@ export async function exerciseMenuActions(
     } else await session.evaluate('Scripts.execStorage("menu-actions.tjs")')
     const result = await session.evaluate('menuActionChecks()')
     if (result !== 'result,event,missing,null,bound,exception') throw new Error(result)
+    const lifetime = await session.evaluate('menuLifetimeChecks()')
+    if (
+      lifetime !==
+      'registration/cache/finalize,action owner,weak parent,script retry,native retry,window roots,native casts'
+    )
+      throw new Error('Unexpected menu lifetime result: ' + lifetime)
     if (logs.length) throw new Error('Unexpected menu diagnostics: ' + logs.join('\n'))
     await session.stop()
     const stopped = {
@@ -107,7 +116,7 @@ export async function exerciseMenuActions(
     }
     if (Object.values(stopped).some((value) => value !== 0) || rendererCloses !== 1)
       throw new Error('Menu action teardown retained resources: ' + JSON.stringify(stopped))
-    return { variant, binary, result, stopped, rendererCloses }
+    return { variant, binary, result, lifetime, stopped, rendererCloses }
   } finally {
     await session.stop()
   }
