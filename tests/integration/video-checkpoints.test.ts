@@ -174,6 +174,10 @@ for (const binary of [false, true]) {
       await f.execute(
         'makeCheckpointMovie();movie.onFrameUpdate=retainedCallback incontextof movie;',
       )
+      // Finish focus notification as setup. Hiding an active Window also posts
+      // an independent deactivation receipt; that receipt is not a video lease
+      // and must not be mistaken for a failed frame acknowledgement below.
+      await f.session.input({ type: 'deactivate', windowId: f.windowId }, false)
       const ownership = f.session.inspectOwnership(),
         handles = f.session.snapshot().handles,
         id = f.video.onlyId(),

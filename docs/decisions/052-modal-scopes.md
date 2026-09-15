@@ -112,6 +112,12 @@ CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原
 
 同一轮Firefox/PWA实际19／20通过，唯一失败为corrupt deployment夹具在浏览器启动时报 `cannot open display: :99`，进程exit 1，尚未创建页面或执行应用；没有足够Xvfb日志确定原因。旧REPAIR用例本轮通过，不能追认此前竞态已修。这里另外纳入054已加强且实际通过的REPAIR前置及缓存内容断言；该修订并不声称解决显示服务器失败。首轮最终浏览器1,058／1,059、直接运行时6／6；常规三浏览器各312项全通过。14作业中11成功，Node、Firefox/PWA与汇总失败。原早期快照保留，另存finalrun.json与完整逐项摘要。
 
+## 检查点第二轮 Node 证据
+
+[34954669374](https://github.com/fenghengzhi/krkr2-web/actions/runs/34954669374)，提交 `3274d3e`，Node作业失败：TAP的1,467条记录包含1,464个命名案例通过、2个命名案例断言失败，以及1个文件级SIGTRAP占位。预期1,468个真实案例中，graphics-lifecycle.test.ts后两项没有报告，不能计为跳过或通过，也不能用占位编号差推定是否开始执行。其前四项已报告通过。V8报 `jit_page.has_value()`，栈含UnregisterWasmAllocation／FreeCode／FreeDeadCode／TierUpWasmToJSWrapper；这是不同于历史erase断言的新证据，glibc build-id不匹配限制系统帧可信度，根因未知。完整日志、core哈希及回溯独立保留，未运行本地复现。
+
+两个命名失败都是新visible→hidden视频用例：视频票据已完成，但隐藏活跃窗口另产生一项deactivate输入票据，严格全局计数把它误作视频残留。修订在发帧前明确完成deactivate作为setup，关键视频completion之后不追加idle、不放宽计数或呈现断言。测试预期仍为1,468。首轮十项非通过案例本轮均实际通过；这些局部结果不能把第二轮改计成功，修订也尚待新Actions。记录时浏览器矩阵仍在运行。
+
 ## Window.showModal 业务接线（尚待验证）
 
 `Window.showModal()`通过既有ModalLoop返回HostReply continuation，在同一TJS调用栈上保留调用者局部变量。独立WindowModals管理窗口请求身份、关闭查询和接受结果，隐藏本身不结束modal；进入前拒绝可见、全屏、已模态或失效窗口。每次TJS调用持有独立request对象，native释放在pump进入前抛错时，catch只撤销匹配identity的尝试，不伤旧scope或同窗口后续调用。
