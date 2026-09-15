@@ -17,6 +17,12 @@ const popupFocusOrigin = (element: Element | null): HTMLElement | null => {
   }
   return element
 }
+const canRestoreFocus = (element: HTMLElement) =>
+  element.isConnected &&
+  !element.closest('[inert], [hidden], [aria-disabled="true"]') &&
+  !element.matches(':disabled') &&
+  element.getClientRects().length > 0 &&
+  getComputedStyle(element).visibility === 'visible'
 
 export function createGameMenus(
   container: HTMLElement,
@@ -44,7 +50,7 @@ export function createGameMenus(
     overlay = undefined
     popupPanel = undefined
     popupRequest = undefined
-    if (restore && previous?.isConnected) previous.focus({ preventScroll: true })
+    if (restore && previous && canRestoreFocus(previous)) previous.focus({ preventScroll: true })
   }
   const select = (id: number) => {
     if (disposed || modal || !running || document.hidden || (eventDisabled && !current.popup))
@@ -63,7 +69,12 @@ export function createGameMenus(
   const text = (element: Element, value: string) => {
     if (element.textContent !== value) element.textContent = value
   }
-  const build = (group: HTMLElement, items: MenuView[], enabled = true, popup = false) => {
+  const build = (
+    group: HTMLElement,
+    items: MenuView[],
+    enabled = true,
+    popup?: MenuPopupIdentity,
+  ) => {
     let nodes = groups.get(group)
     if (!nodes) groups.set(group, (nodes = new Map()))
     const visible = new Set<number>()
@@ -71,7 +82,7 @@ export function createGameMenus(
     for (const item of items) {
       if (!item.visible) continue
       visible.add(item.id)
-      const active = !modal && enabled && item.enabled && running && (popup || !eventDisabled)
+      const active = !modal && enabled && item.enabled && running && (!!popup || !eventDisabled)
       const kind = item.caption === '-' ? 'HR' : item.children.length ? 'DETAILS' : 'BUTTON'
       let node = nodes.get(item.id)
       if (node?.tagName !== kind) {
@@ -89,8 +100,19 @@ export function createGameMenus(
           node.append(document.createElement('span'), document.createElement('kbd'))
           node.addEventListener('click', (event) => {
             // Removed popup panels and retired windows may still have queued
-            // browser events or external element references.
-            if ((event.currentTarget as HTMLElement).isConnected) select(item.id)
+            // browser events or external element references. A retired panel
+            // must not select against a replacement request, even if reattached.
+            const target = event.currentTarget as HTMLElement
+            if (!target.isConnected || nodes?.get(item.id) !== target) return
+            if (
+              popup
+                ? current.popup?.requestId !== popup.requestId ||
+                  current.popup?.windowId !== popup.windowId ||
+                  !popupPanel?.contains(target)
+                : !container.contains(target)
+            )
+              return
+            select(item.id)
           })
         }
       }
@@ -137,7 +159,7 @@ export function createGameMenus(
     build(bar, visible ? current.root!.children : [], current.root?.enabled)
     const popup = current.popup,
       menu = popup && find(current.root, popup.id)
-    if (popup && menu) {
+    if (!modal && popup && menu) {
       const fresh = !overlay || popupRequest !== popup.requestId
       if (fresh) {
         const previous = popupFocusOrigin(document.activeElement)
@@ -147,8 +169,16 @@ export function createGameMenus(
         overlay.className = 'game-menu-overlay'
         overlay.dataset.windowId = String(popup.windowId)
         overlay.dataset.requestId = String(popup.requestId)
+        const element = overlay
         overlay.addEventListener('click', (event) => {
-          if (!disposed && event.target === overlay) dismiss(popup)
+          if (
+            !disposed &&
+            !modal &&
+            overlay === element &&
+            element.isConnected &&
+            event.target === element
+          )
+            dismiss(popup)
         })
         popupRequest = popup.requestId
         popupPanel = groupElement()
@@ -157,7 +187,7 @@ export function createGameMenus(
         document.body.append(overlay)
       }
       const panel = popupPanel!
-      build(panel, menu.children, menu.enabled, true)
+      build(panel, menu.children, menu.enabled, popup)
       panel.setAttribute('aria-label', caption(menu.caption))
       const bounds = canvas()?.getBoundingClientRect() ?? container.getBoundingClientRect()
       panel.style.left = `${Math.min(innerWidth - 20, Math.max(0, bounds.left + (popup.x * bounds.width) / dimensions.width))}px`
@@ -165,7 +195,9 @@ export function createGameMenus(
       panel.style.transform = `translate(${popup.flags & 8 ? '-100%' : popup.flags & 4 ? '-50%' : '0'},${popup.flags & 32 ? '-100%' : popup.flags & 16 ? '-50%' : '0'})`
       if (fresh) panel.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
     } else {
-      removePopup()
+      // A child modal owns focus. Its parent's popup may still be unwinding
+      // in the engine, but must no longer cover or cancel the child in the DOM.
+      removePopup(!modal)
     }
   }
   const keydown = (event: KeyboardEvent) => {

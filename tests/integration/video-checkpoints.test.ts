@@ -247,37 +247,46 @@ var otherLayer=new Layer(other,null);otherLayer.setSize(1,1);
 otherLayer.fillRect(0,0,1,1,0xff00ff00);
 `,
     )
-    let delivery: ReturnType<typeof track> | undefined
+    let delivery: ReturnType<typeof track> | undefined,
+      timeout: ReturnType<typeof setTimeout> | undefined
     try {
       await f.execute(
         'makeCheckpointMovie();movie.onFrameUpdate=retainedCallback incontextof movie;',
       )
       const otherId = f.renderer.opened[1]!,
         start = f.renderer.attempts.length,
-        accepted = f.renderer.videoAttempt(f.windowId, true)
+        ownership = f.session.inspectOwnership(),
+        handles = f.session.snapshot().handles
       f.renderer.blocked.add(otherId)
       delivery = track(f.video.emit(f.video.onlyId(), 'frame'))
+      // Renderer publication precedes the native commit continuation. A host
+      // turn cannot guarantee that commit has run; await the actual receipt
+      // while the unrelated surface keeps rejecting every presentation.
       await Promise.race([
-        accepted,
-        delivery.promise.then(() => {
-          assert.ok(
-            f.renderer.attempts
-              .slice(start)
-              .some(
-                (attempt) =>
-                  attempt.accepted && attempt.windowId === f.windowId && hasVideoPixels(attempt),
-              ),
-            'The video receipt must follow a successful presentation of its pixels',
+        delivery.promise,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('The owner Window did not complete its video receipt')),
+            10000,
           )
         }),
       ])
-      await hostTurn()
       assert.equal(
         delivery.settled,
         true,
         'The successful owner Window is sufficient for its frame',
       )
-      await delivery.promise
+      assert.deepEqual(f.session.inspectOwnership(), ownership)
+      assert.equal(f.session.snapshot().handles, handles)
+      assert.ok(
+        f.renderer.attempts
+          .slice(start)
+          .some(
+            (attempt) =>
+              attempt.accepted && attempt.windowId === f.windowId && hasVideoPixels(attempt),
+          ),
+        'The video receipt must follow a successful presentation of its pixels',
+      )
       assert.deepEqual(f.logs, ['video-callback:2'])
       assert.ok(
         f.renderer.attempts
@@ -287,6 +296,7 @@ otherLayer.fillRect(0,0,1,1,0xff00ff00);
       assert.equal(f.renderer.blocked.has(otherId), true)
       assert.equal(f.session.snapshot().state, 'running')
     } finally {
+      if (timeout !== undefined) clearTimeout(timeout)
       await f.session.stop()
       await delivery?.promise
     }

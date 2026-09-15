@@ -1,7 +1,7 @@
 import type { FrameLayer, Pixels, Rect } from '../ports/graphics.ts'
 import { intersect } from '../graphics/bitmap.ts'
 import { autoFace, blendPixel, neutralColor, usesAlpha } from '../graphics/blend.ts'
-import { transitionPixels, type TransitionFrame } from '../graphics/transition.ts'
+import { opaqueTransition, transitionPixels, type TransitionFrame } from '../graphics/transition.ts'
 import type { LayerTree, LayerState } from './layers.ts'
 import { completeBinder } from './completion.ts'
 interface Composed {
@@ -108,15 +108,17 @@ export class SceneComposer {
         `blend-transition:${id}`,
         `${frame.token}:${frame.phase}:${before.revision}:${after.revision}:${layer.type}`,
         () =>
-          convert(
-            transitionPixels(
-              convert(before.pixels, layer.type, true),
-              convert(after.pixels, this.layers.get(frame.source).type, true),
-              frame,
-            ),
-            layer.type,
-            false,
-          ),
+          opaqueTransition(frame)
+            ? transitionPixels(before.pixels, after.pixels, frame)
+            : convert(
+                transitionPixels(
+                  convert(before.pixels, layer.type, true),
+                  convert(after.pixels, this.layers.get(frame.source).type, true),
+                  frame,
+                ),
+                layer.type,
+                false,
+              ),
       )
     }
     const trail = new Set(ancestors).add(id)
@@ -125,13 +127,16 @@ export class SceneComposer {
       ? { pixels: bitmap.pixels, revision: bitmap.revision }
       : undefined
     if (frame && main) {
-      const before = this.raw(id, true),
-        after = this.raw(frame.source)
-      main = this.cached(
-        `blend-main-transition:${id}`,
-        `${frame.token}:${frame.phase}:${before.revision}:${after.revision}`,
-        () => convert(transitionPixels(before.pixels, after.pixels, frame), layer.type, false),
-      )
+      if (opaqueTransition(frame)) main = this.raw(id, false, true)
+      else {
+        const before = this.raw(id, true),
+          after = this.raw(frame.source)
+        main = this.cached(
+          `blend-main-transition:${id}`,
+          `${frame.token}:${frame.phase}:${before.revision}:${after.revision}`,
+          () => convert(transitionPixels(before.pixels, after.pixels, frame), layer.type, false),
+        )
+      }
     }
     // Binder opacity gates visibility but does not scale children. Preserve
     // their access to the backdrop and only inherit the binder's clip/offset.
@@ -259,20 +264,25 @@ export class SceneComposer {
     this.bytes += size
     return value
   }
-  private raw(id: number, skipTransition = false): Composed {
+  private raw(id: number, skipTransition = false, native = false): Composed {
     const layer = this.layers.get(id),
       bitmap = layer.bitmap
     if (!bitmap) throw new Error('Source layer has no image')
     const frame = !skipTransition ? this.transition(id) : undefined
     if (frame && !frame.children) {
-      const before = this.raw(id, true),
-        after = this.raw(frame.source)
+      const opaque = opaqueTransition(frame),
+        before = this.raw(id, true, opaque),
+        after = this.raw(frame.source, false, opaque)
       return this.cached(
-        `raw-transition:${id}`,
-        `${frame.token}:${frame.phase}:${before.revision}:${after.revision}`,
-        () => transitionPixels(before.pixels, after.pixels, frame),
+        `raw-transition:${id}:${native}`,
+        `${frame.token}:${frame.phase}:${before.revision}:${after.revision}:${layer.type}`,
+        () => {
+          const pixels = transitionPixels(before.pixels, after.pixels, frame)
+          return native === opaque ? pixels : convert(pixels, layer.type, !native)
+        },
       )
     }
+    if (native) return { pixels: bitmap.pixels, revision: bitmap.revision }
     return this.cached(`raw:${id}`, `${bitmap.revision}:${layer.type}`, () => {
       const result = blank(bitmap.width, bitmap.height)
       for (let at = 0; at < result.data.length; at += 4) {
@@ -293,7 +303,8 @@ export class SceneComposer {
     ancestors = new Set<number>(),
     suppressed = new Set<number>(),
   ): Composed {
-    if (this.needsBlend(id)) {
+    const transition = this.transition(id)
+    if (this.needsBlend(id) || (transition && opaqueTransition(transition))) {
       const source = this.blendTree(id, skipTransition, ancestors, suppressed),
         layer = this.layers.get(id)
       return this.cached(`blend-display:${id}`, `${source.revision}:${layer.type}`, () =>
@@ -432,7 +443,8 @@ export class SceneComposer {
       const source = this.copyTree(id).pixels
       return { ...source, data: source.data.slice() }
     }
-    if (this.needsBlend(id)) {
+    const transition = this.transition(id)
+    if (this.needsBlend(id) || (transition && opaqueTransition(transition))) {
       const source = this.blendTree(id).pixels
       return { ...source, data: source.data.slice() }
     }
@@ -473,6 +485,7 @@ export class SceneComposer {
       const transition = this.transition(layer.id),
         group =
           this.needsBlend(layer.id) ||
+          (transition && opaqueTransition(transition)) ||
           transition?.children ||
           (layer.opacity < 255 && layer.children.some((id) => this.layers.get(id).visible))
       if (group) {

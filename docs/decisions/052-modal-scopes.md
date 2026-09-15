@@ -173,3 +173,41 @@ CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原
 已测应用在 `5e54ceb` 合入并推送 main；该合入提交带 `[skip ci]`，不另计一次通过结果。相对 `2683b304`，只另有原版 SDK 参考工作流和两份参考夹具，应用／内核源码保持已测状态。Menu.popup 的新嵌套业务仍留在 052 工作目录，未验证、未合入，现有 main 的旧 popup 队列限制继续成立。
 
 本阶段通过的是 Web 实现的上述合同。旧发行所用 VCL Forms 二进制的确切关闭时序、NoNotify 观察差异和原生菜单递归仍有未知项；增加原版参考工作流不等于已取得这些结论。其余非插件功能继续实现，不能将 Window 模态接通写为整个目标完成。
+
+## Menu.popup 业务接线与原版关闭校准（新改动尚待 Actions）
+
+MenuModals 将 popup 接入同一 TJS 栈上的 ModalLoop。MenuTree 保留每次请求及其结果，选择或撤销只移除该层 UI；即使父菜单的 Window 被子 showModal 阻挡，也先记录不可用结果，等自己的 wait 恢复为栈顶才结束，不取消正在运行的子 Window。打开失败、异常和 Stop 按请求身份清理，服务不额外强持有脚本对象。
+
+选中通知在该 scope 清理后进入普通输入队列，TJS popup 不再内联调用 onClick。取队时才升级原 MenuRecord 的弱引用，并沿当前 Parent 查找 Window、检查平台项和祖先 enabled；其间只改变叶项 visible、caption 或 children 不抹掉已经选中的通知。新的 DOM 点击仍校验原 Window、请求、epoch 和可见叶项，旧请求不能借重挂载或命令编号复用进入另一窗口。通知继续使用既有错误处理、原生引用释放和逐事件完成检查点。
+
+无 ReturnCmd 的普通选择返回 BOOL=1；带 ReturnCmd 返回选中瞬间捕获的独立 Word 命令编号，取消为 0。命令池采用 Web 自己的最小可用正 Word，与 view/request/Window 身份分离；这不宣称复刻未知旧 VCL 的分配序列。flags 和坐标先在 TJS 整数域取低 32 位，再跨入 JavaScript，保留大整数的低位。显式 UI 取消目前采用已观察到的 Win32 Esc BOOL=1；窗口不可用、暂停、后台撤销和调用前拒绝仍返回 0，不能把 Esc 观察推广为所有原生撤销方式。
+
+无 Recurse 的嵌套调用返回 0 且保留父菜单；有 Recurse 时子菜单结束并收尾后恢复父请求。这是当前 Web 行为，完整原版递归仍待对照。ReturnCmd 抑制通知；NoNotify 单独使用暂沿文档抑制，但两轮 Windows synthetic 键盘观察与此不同，不能声称该位已完全兼容。最新对照 [34989280346](https://github.com/fenghengzhi/krkr2-web/actions/runs/34989280346)，`4f01cec`，在每个平台记录 32 项，28 通过、4 断言失败；hook 改写和直接 PostMessage 两种输入均在 N-only 的选择中收到 WM_COMMAND。失败保留，独立输入只排除了本探针改写 MSG 是该反例的必要条件，没有证明旧 VCL 或真实鼠标路径。
+
+宿主菜单组件在 Window blocked 或字体对话框活跃时移除 body 上的菜单浮层，不抢回父窗口焦点，不拦截子窗口指针与 Esc；旧 DOM 即使被重新挂回页面也不能提交给新请求。焦点恢复仅接受仍连接、可见且非 inert/disabled 的目标，并保留从非活动窗口的显式 popup 返回实际原输入窗口的规则。
+
+原版 SDK 的[基础观察 34992096141](https://github.com/fenghengzhi/krkr2-web/actions/runs/34992096141)和[修订后扩展 34993108821](https://github.com/fenghengzhi/krkr2-web/actions/runs/34993108821)在 GitHub-hosted Windows 2022/2025 执行固定哈希的 2.32r2 引擎。后者四场景×两平台共 8 份观察完成：close 先返回再 query；已接受后同回调再次 close 会覆盖未消费结果；已接受父窗口仍等待子 modal 完整返回；隐藏后 Timer 继续，但 close 的 query 被丢弃，直到显式 base 答复才结束。这里统计的是原版观察完成，不是 Web 回归通过。最初无项目参数的超时和扩展状态机尚未建立时的失败均保留在对应原运行，见参考夹具 README。
+
+这也校正了前文已经测试过、但源于推断的“丢弃关闭查询自动重试”：固定 WindowFormUnit 的 Closing 在排队时置位，隐藏投递失败及 ClearAllWindowInputEvents 都不清该位，SetVisible 也不清；再次 close 因 Closing 直接返回。因此新实现让被丢弃的已入队查询保持 pending，只有显式 base true/false 答复解除；仅在适配器同步入队前失败时回滚。新增隐藏关闭源码/字节码对照，并改正既有父查询被子模态取消的预期，保留取消确实发生、子窗口继续运行和显式答复后才能继续的断言。历史 `2683b304` 的绿色结果仍对应旧行为，不追认这些新改动已验证。
+
+本片新增 18 项 MenuTree、12 项 MenuModals、24 项真实 TJS 菜单、2 项原版隐藏关闭回归及 1 项关闭入队回滚测试，预期共新增 57 项 Node（合计 1,703）；页面新增 5 个宿主模板及 10 个真实 Worker 模板，预期新增 45 项浏览器（合计 1,140）。所有新增和修订均未在本地运行，需以推送后的 GitHub Actions 实际报告为准。
+
+## 菜单首轮 Node 结果与等待条件修订
+
+[34994052828](https://github.com/fenghengzhi/krkr2-web/actions/runs/34994052828)，提交 `352124784ad4d18870dd9d3bf1d03ab9ddf795c0`，类型及生产构建通过；Node 实际 **1,701 通过、2 失败／1,703**，没有取消、跳过或未报告。新增 57 项均实际通过。记录本节时浏览器和直接运行时尚在执行，不能据 Node 局部结果声明整轮通过。
+
+两个失败均为既有测试。旧 popup 等待只检查 events 最后一条是否 menus；新的 ModalLoop.changed 在 presentMenus 后还会发布 state，所以菜单已打开却被夹具错报未打开。失败后的未观察 evaluate Promise 另产生 AbortError unhandledRejection，原 TAP 一并保留。修订单独保存最新菜单快照，按事件通知和 request ID 等待，立即观察所有操作的 rejection，并在 finally 停止后等待结算；没有只增加 sleep 或改变业务结果。
+
+视频的无关窗口拒绝呈现用例，在所属窗口 present 成功后等待一个 host turn 就断言 receipt 已完成。实际 publish 后还需要自己的 native commit continuation；一次 setImmediate 不能保证它已返回。修订直接等待有截止时间的真实 receipt，期间无关窗口持续拒绝呈现；在 receipt 完成后立即比较所有权与 handles，保留所属窗口实际视频像素和无关窗口拒绝的记录。没有添加 idle、解除无关窗口的拒绝或改写生产逻辑。首次失败和修订后的未验证状态均独立保留。
+
+首轮最终浏览器 **1,140／1,140**、直接运行时 **6／6**；14 作业中 12 成功，Node 与汇总失败。完整 379 文件及 14 artifacts 已归档，原 early-node 和附加未观察取消诊断仍独立保留，整轮不改计成功。
+
+## 原版 NoNotify 观察与行为校准
+
+[原版菜单 34996110492](https://github.com/fenghengzhi/krkr2-web/actions/runs/34996110492)，提交 `2ec771728368f470ce8eedb3794127b7190d925b`，在固定 SDK 引擎上完成 Windows 2022／2025 × 四 flags × 选择／Esc 共 16 份观察。选择经过真实菜单高亮后，向自有 HWND 投递一次 Enter；取消只投递一次 Esc。没有全局输入、hook、前台切换或合成 WM_COMMAND。
+
+两平台的普通及 N-only 选择均返回 1，并在 `popup-after` 之后才出现一次真实 TJS onClick；R 及 N|R 选择返回实际目标命令 31，均无 onClick。Esc 在无 R 时返回 1，有 R 时返回 0，均无通知。首轮 [34995723956](https://github.com/fenghengzhi/krkr2-web/actions/runs/34995723956) 的 9 份完成观察和 7 份不可执行保持原状态；没有将未建立高亮或错误访问已退出 HWND 的案例当成通过。原版完整记录、逐例脚本／驱动哈希及固定包装没有 N/R 二次过滤的来源见参考夹具 README。
+
+这项直接原版证据修正了前文暂沿文档的 N-only 抑制策略：Web 选中命令只在 R 置位时抑制通知，N-only 保留返回后通知。既有纯模型和 source／bytecode flags 用例改为检查普通及 N-only 各通知一次；新增两个浏览器模板通过实际键盘 Enter 检查两种后端的 N-only 路径，共三浏览器 6 项。这个校准仍不证明鼠标／硬件输入、真正原版递归或 VCL 命令编号分配完全相同；Web 不刻意复制本次原版命令值 31。
+
+校准发生在 056 组合分支，预期保持 1,729 项 Node、浏览器增至 1,146 项。先前 `3521247`、`b7bb957` 和 `0a1a948` 的结果继续对应校准前代码，不追认它们已验证新的 NoNotify 行为。新代码仍待后续 GitHub-hosted Actions。

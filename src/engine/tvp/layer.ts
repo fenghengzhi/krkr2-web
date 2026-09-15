@@ -130,8 +130,11 @@ class Layer {
   function assignImages(source) { __host("Layer.assignImages",__id,source.__id); }
   function loadImages(name,key=clNone) { return __host("Layer.image",__id,string(name),int(key)); }
   function loadProvinceImage(name) { __host("Layer.provinceImage",__id,string(name)); }
-  function drawText(x,y,text,color=0xffffff,opa=255,aa=true,shadowlevel=0,shadowcolor=0,shadowwidth=0,shadowofsx=0,shadowofsy=0) {
-    __host("Layer.text",__id,int(x),int(y),string(text),int(color),__fontData,int(opa),int(aa),int(shadowlevel),int(shadowcolor),int(shadowwidth),int(shadowofsx),int(shadowofsy));
+  function drawText(args*) {
+    if(args.count<4)throw new global.Exception("Layer.drawText requires at least four arguments");
+    __host("Layer.text",__id,int(args[0]),int(args[1]),string(args[2]),int(args[3]),__fontData,
+      int(args[4]===void?255:args[4]),int(!!(args[5]===void?true:args[5])),
+      ${[6, 7, 8, 9, 10].map((index) => `int(args[${index}]===void?0:args[${index}])`).join(',')});
   }
   function adjustGamma(args*) {
     if(args.count==0)return;

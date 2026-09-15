@@ -1,5 +1,4 @@
 // Original SDK observation, run only by the hosted Windows workflow.
-// No external input or plugin is needed: the engine owns this Timer and Window.
 var nativeRows=[];
 function nativeRecord(text) {
   nativeRows.add(text);
@@ -12,32 +11,37 @@ System.exceptionHandler=function(error) {
 };
 nativeRecord("start");
 nativeRecord("version:"+System.versionString);
+// A final explicit query answer ends the observation if hidden close is withheld.
 class NativeModalWindow extends Window {
-  var queries=0;
-  function NativeModalWindow() { super.Window(); caption="KRKR2 original modal reference"; }
+  function NativeModalWindow() { super.Window(); caption="KRKR2 hidden modal reference"; }
   function onCloseQuery(canClose) {
     var emit=global.nativeRecord incontextof global;
-    var number=++queries;
-    emit("query:"+number);
-    super.onCloseQuery(number>1);
-    emit("query-return:"+number);
-    if(number==1)global.nativeReady=true;
+    emit("query");
+    super.onCloseQuery(true);
+    emit("query-return");
   }
 }
 var nativeMain=new Window();
-nativeMain.caption="KRKR2 original reference owner";
 nativeMain.visible=true;
 var nativeModal=new NativeModalWindow();
 var nativeTicks=0;
-var nativeReady=true;
 function nativeTick(event) {
-  if(!nativeReady)return;
-  nativeReady=false;
   nativeTicks++;
-  nativeRecord("close-before:"+nativeTicks+":"+nativeModal.queries);
-  if(nativeTicks>=2)nativeTimer.enabled=false;
-  nativeModal.close();
-  nativeRecord("close-after:"+nativeTicks+":"+((isvalid nativeModal)?string(nativeModal.queries):"invalid"));
+  nativeRecord("tick:"+nativeTicks+":visible="+int(nativeModal.visible));
+  if(nativeTicks==1) {
+    nativeRecord("hide-before");
+    nativeModal.visible=false;
+    nativeRecord("hide-after:"+int(nativeModal.visible));
+  } else if(nativeTicks==2) {
+    nativeRecord("close-before");
+    nativeModal.close();
+    nativeRecord("close-after");
+  } else {
+    nativeTimer.enabled=false;
+    nativeRecord("explicit-answer-before");
+    nativeModal.onCloseQuery(true);
+    nativeRecord("explicit-answer-after");
+  }
 }
 var nativeTimer=new Timer(global,"nativeTick");
 nativeTimer.enabled=false;
@@ -46,7 +50,7 @@ nativeRecord("modal-before");
 nativeTimer.enabled=true;
 var nativeResult=nativeModal.showModal();
 nativeTimer.enabled=false;
-nativeRecord("modal-after:"+int(nativeResult===void)+":"+int(isvalid nativeModal));
+nativeRecord("modal-after:"+int(nativeResult===void)+":"+int(isvalid nativeModal)+":ticks="+nativeTicks);
 if(isvalid nativeModal)nativeRecord("visible-after:"+int(nativeModal.visible));
 nativeRecord("observations-complete");
 System.exit();

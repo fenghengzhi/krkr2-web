@@ -85,9 +85,10 @@ test('a stale popup response cannot select or dismiss a later request for the sa
   const { tree, a } = fixture()
   const first = tree.openPopup(a.group, 0, 1, 2),
     old = tree.snapshot(10).popup!
+  tree.dismiss(10, old.requestId)
+  assert.equal(await first, 0)
   const second = tree.openPopup(a.group, 0, 3, 4),
     current = tree.snapshot(10).popup!
-  assert.equal(await first, 0)
   assert.notEqual(old.requestId, current.requestId)
   tree.dismiss(10, old.requestId)
   tree.dismiss(20, current.requestId)

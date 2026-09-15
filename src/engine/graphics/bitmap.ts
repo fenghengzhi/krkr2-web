@@ -22,6 +22,15 @@ export const dimension = (value: number): number => {
 }
 const byte = (value: number) => Math.max(0, Math.min(255, Math.trunc(value)))
 
+/** Layer.DrawText selects its face before the bitmap clamps opacity. */
+export function textOpacity(face: number, value: number): number {
+  if (face !== 0 && face !== 1 && face !== 4)
+    throw new Error('Text drawing requires dfAlpha, dfOpaque or dfAddAlpha')
+  if (face === 4 && value < 0)
+    throw new Error('Negative text opacity is not supported on dfAddAlpha')
+  return Math.max(face === 0 ? -255 : 0, Math.min(255, Math.trunc(value)))
+}
+
 let nextRevision = 1
 
 export class Bitmap {
@@ -350,8 +359,13 @@ export class Bitmap {
     face: number,
     opacity = 255,
     holdAlpha = false,
-  ): void {
+  ): boolean {
+    opacity = textOpacity(face, opacity)
+    // Native DrawText returns before font/raster work when opacity clamps to
+    // zero. In particular an opaque draw must not clear destination alpha.
+    if (!opacity) return false
     const area = intersect(this.clip, { x: left, y: top, width: image.width, height: image.height })
+    if (!area.width || !area.height) return false
     const data = this.pixels.data
     for (let y = area.y; y < area.y + area.height; y++)
       for (let x = area.x; x < area.x + area.width; x++) {
@@ -362,20 +376,12 @@ export class Bitmap {
         if (face === 1 && !holdAlpha) data[dst + 3] = 0
         if (!sa) continue
         if (opacity < 0) {
-          if (face !== 0) throw new Error('Negative text opacity requires dfAlpha')
           data[dst + 3] = Math.round(data[dst + 3]! * (1 - sa))
           continue
         }
-        if (face === 2) {
-          data[dst + 3] = Math.round(image.data[src]! * sa + data[dst + 3]! * (1 - sa))
-          continue
-        }
-        if (face === 3) {
-          this.province ??= new Uint8Array(this.width * this.height)
-          this.province[dst / 4] = image.data[src]!
-          continue
-        }
-        const alpha = face === 1 || holdAlpha ? da : sa + da * (1 - sa)
+        // holdAlpha selects only the opaque text kernel. Alpha and AddAlpha
+        // always update destination alpha, including negative Alpha opacity.
+        const alpha = face === 1 ? da : sa + da * (1 - sa)
         for (let c = 0; c < 3; c++) {
           const source = image.data[src + c]!,
             destination = data[dst + c]!
@@ -383,7 +389,7 @@ export class Bitmap {
             Math.round(
               face === 4
                 ? source * sa + destination * (1 - sa)
-                : face === 1 || holdAlpha
+                : face === 1
                   ? source * sa + destination * (1 - sa)
                   : alpha
                     ? (source * sa + destination * da * (1 - sa)) / alpha
@@ -391,9 +397,12 @@ export class Bitmap {
             ),
           )
         }
-        if (!holdAlpha && face !== 1) data[dst + 3] = Math.round(alpha * 255)
+        if (face !== 1) data[dst + 3] = Math.round(alpha * 255)
       }
     this.touch()
+    // Native update rectangles follow the clipped glyph box, even when its
+    // coverage is entirely zero; they do not compare before/after pixels.
+    return true
   }
   flip(horizontal: boolean): void {
     const area = { x: 0, y: 0, width: this.width, height: this.height },
