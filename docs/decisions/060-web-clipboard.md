@@ -1,6 +1,6 @@
 # 060：core Clipboard 与真实浏览器剪贴板
 
-状态：实现及验证用例已编写，**尚未由本阶段 GitHub-hosted Actions 执行验证**。本机未运行测试、build/check、浏览器或系统剪贴板探针。不能把下文待验收项目写成通过结果；所有首次失败、中断与原始 artifacts 必须保留。
+状态：实现及验证用例已编写，**尚未通过本阶段 GitHub-hosted Actions 验证**。首轮 [35009240317](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009240317) 在 `12af5df0a1c18702d7f89ac1a04fd0cb5847a48b` 构建失败：`game-clipboard.ts:247` 的条件表达式未能把联合类型收窄至写入请求（TS2339）。已改为明确的 operation 分支，仍在真实点击内直接调用 API。该轮实际测试执行数为 **0**，两个作业失败、四个作业跳过；不能记作剪贴板行为通过。本机未运行测试、build/check、浏览器或系统剪贴板探针，首次失败与原始 artifacts 继续保留。
 
 ## 原版合同与本阶段接口
 
