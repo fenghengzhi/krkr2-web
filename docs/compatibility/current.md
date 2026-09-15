@@ -1,5 +1,13 @@
 # 当前实现范围
 
+当前已验证版本包含 [052 Window.showModal 与协作式事件检查点](../decisions/052-modal-scopes.md)，以及此前 053／054／055 图层组合。showModal 保留调用者栈，继续处理子窗口输入、计时器和关闭查询；接收 ACK、事件完成、原生释放与窗口更新分别结算。会话协议为 **11**，TJS ABI **5**、字体 ABI **2**；新内核明确提供 `nativeReleaseState: 1`。
+
+[完整回归 34989855109](https://github.com/fenghengzhi/krkr2-web/actions/runs/34989855109)在精确提交 `2683b304fa32e409941c84b723d80d53b5d6ac8d` 通过 **1,646 项 Node、1,095 项浏览器和 6 组直接运行时**，14 个作业全部成功。浏览器为 972 项常规、57 项游戏库、59 项 PWA、7 项可信生命周期；零失败、取消、跳过或 flaky。[兼容检查 34991339560](https://github.com/fenghengzhi/krkr2-web/actions/runs/34991339560)使用同一提交、同次构建通过 **78 项**，三浏览器各 26 项。
+
+已测应用在 `5e54ceb` 合入 main。该合入提交使用 `[skip ci]`，只另含原版 SDK 参考工作流及其夹具，不构成新增通过结果。Menu.popup 新嵌套业务仍在 052 工作目录实现，未验证、未合入；其余图形／系统 API、流式媒体、旧视频编码与完整非插件目标仍未完成。旧 VCL 的具体二进制行为仍有未知项；历次失败与未报告案例均保留，绿色回归不证明历史 V8、WebKit 或 Xvfb 故障根因已修复。全部可执行验证只在 GitHub-hosted Actions 进行。
+
+以下保留 055 阶段当时的状态与证据，当前结论以上文为准。
+
 当前已验证组合包含053裁剪、054 copyRect／空写入与055 assignImages：赋值保留目标Font身份及映射，深复制图像，正确处理自赋值；Binder显示透传与直接复制使用各自的完成规则。阶段边界及保留的失败见[053](../decisions/053-layer-clip.md)、[054](../decisions/054-layer-copy-rect.md)和[055](../decisions/055-layer-assign-images.md)。 会话协议10、TJS ABI5、字体ABI2保持。
 
 [完整回归 34955337265](https://github.com/fenghengzhi/krkr2-web/actions/runs/34955337265)在 `cf564282` 通过 **1,431 项 Node、1,041 项浏览器和 6 组直接运行时**，14个作业全部成功；浏览器包含918常规、57游戏库、59 PWA、7可信生命周期，零失败、取消、跳过或flaky。[兼容检查 34954688171](https://github.com/fenghengzhi/krkr2-web/actions/runs/34954688171)在 `c35ac758` 复用构建34952630856通过 **78 项原 KAG／旧 ABI 检查**；到当前提交，应用及内核源码不变，仅文档与runner诊断改变，两个构建的来源分别保留。
@@ -105,7 +113,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 | KAGParser    | TypeScript 词法与状态机；标签、宏/参数转发、条件、emb、内嵌脚本、跳转/调用栈、store/restore/assign、回调与中断                                                                                                                                     |
 | 菜单         | MenuItem 树、Window.menu、顺序、可见/禁用、单选组、onClick、页面菜单/快捷键、弹出选择/取消；按 ID 更新保留未移除项的展开、焦点与点击                                                                                                               |
 | 系统         | createAppLock 使用按游戏分区的 Web Locks，停止释放；exit/terminate 取消执行并提交待写存档                                                                                                                                                          |
-| 窗口         | 同一会话多个页面内窗口，独立画布、输入、菜单与视频；尺寸／位置、缩放、可见性、resize、管理对象与关闭查询；mainWindow 独立于活动窗口，支持页面内全屏                                                                                                |
+| 窗口         | 同一会话多个页面内窗口，独立画布、输入、菜单与视频；尺寸／位置、缩放、可见性、resize、管理对象与关闭查询；mainWindow 独立于活动窗口，支持页面内全屏与 showModal 协作式嵌套循环                                                                     |
 | 输入         | 鼠标/触摸、捕获、键盘/提交文字、物理按键状态、focus chain、模态栈、onHitTest、异步 postInputEvent、光标与 hint                                                                                                                                     |
 | 字体         | 独立 FreeType 文件字体、Canvas 系统字体/缺字回退、预渲染版本 0/1 与共享映射、getGlyphDrawRect/Rect、样式与阴影；getList/doUserSelect；逻辑纵排家族、vert/vrt2、Unicode 朝向/呈现形式、按索引变换与竖向装饰线；普通文件路径保留原 FreeType 角度语义 |
 | 声音         | Wave/MIDI 宿主、AudioWorklet 混音、WAV/Vorbis/MP3、SLI 循环/标志/标签、定位、音量/声像、淡入淡出、完成事件及静音                                                                                                                                   |
@@ -126,7 +134,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 - `Scripts.execStorage/evalStorage(name, mode, context)` 和 `Scripts.exec/eval(source, name, lineOffset, context)`，支持嵌套执行、上下文和来源行偏移。
 - `Storages.isExistentStorage(name)`、`Storages.addAutoPath/removeAutoPath(directory)`、`getPlacedPath`、路径提取函数。
 - ZIP 支持 stored/deflate、ZIP64、UTF-8/CP437/Unicode Path、按需读取与 CRC 校验，提供普通名称和 `archive>entry` 地址。无效写入目标在 TJS 创建文本/二进制流时预检；原始归档保持只读。详见 [ZIP 资源决策](../decisions/015-zip-storage.md)。
-- `Window`：尺寸/位置/显示偏移/缩放、外观属性、`add/remove` 管理对象、`onResize`、`onCloseQuery/close`、`menu`、`primaryLayer`。只读 `mainWindow` 返回实际主窗口实例或 null，类／派生类／实例均可查询；登记不额外持有窗口，失效开始即撤销查询身份，详见 [047](../decisions/047-window-main-instance.md)。新窗口初始不可见，脚本需设置 `visible=true`；多个存活窗口分别登记，主窗口和当前活动窗口分开；默认关闭主窗口退出会话，exitOnWindowClose=false 可保留其他窗口。画布就绪与生命周期见 [051](../decisions/051-multiwindow.md)。
+- `Window`：尺寸/位置/显示偏移/缩放、外观属性、`add/remove` 管理对象、`onResize`、`onCloseQuery/close`、`showModal`、`menu`、`primaryLayer`。只读 `mainWindow` 返回实际主窗口实例或 null，类／派生类／实例均可查询；登记不额外持有窗口，失效开始即撤销查询身份，详见 [047](../decisions/047-window-main-instance.md)。新窗口初始不可见，普通显示需设置 `visible=true`；`showModal()` 要求进入前保持隐藏且非全屏，调用期间继续处理输入和计时事件，接受关闭后隐藏并解除阻塞，详见 [052](../decisions/052-modal-scopes.md)。多个存活窗口分别登记，主窗口和当前活动窗口分开；默认关闭主窗口退出会话，exitOnWindowClose=false 可保留其他窗口。画布就绪与生命周期见 [051](../decisions/051-multiwindow.md)。
 - `Layer`：尺寸/图像尺寸与偏移、`setSizeToImageSize/setClip`、`fillRect/colorRect/copyRect/assignImages`、`loadImages`、`drawText`、像素访问、parent/children、order/absolute、moveBefore/moveBehind、翻转、命中及显式销毁。
 - `Layer.neutralColor`：每实例保存低 32 位 ARGB，设置本身不改现有像素或请求重绘；扩容、主图重新分配及仿射 clear 使用该值，真正改变 type 时恢复类型默认值。无主图 opaque 图层仍填色并参与祖先快照；`piledCopy` 在 onPaint 前拒绝无主图的来源或目标。详见[决策 046](../decisions/046-layer-neutral-color.md)。
 - `Layer.focus/focusNext/focusPrev`、`setMode/removeMode`、`releaseCapture/releaseTouchCapture`、焦点/按键/鼠标/触摸事件、`onHitTest` 和四参数 `getLayerAt`；`Window.focusedLayer/currentModalLayer/postInputEvent`、`System.getKeyState`。输入法模式、手势和系统事件仍有未完成项。
@@ -146,11 +154,11 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 
 上述 TVP API 仍是子集。`setSize` 缩小显示区域时保留图像，扩大显示区域会按需扩大图像；`setImageSize` 缩小到显示区域以下时会收缩显示区域；图像偏移必须使显示区域保持在图像之内。`fillRect` 颜色按 `0xAARRGGBB` 解释，原来示例中的第六个“透明度”参数已改正。子层默认不可见，主层可见且不允许移动/隐藏。`face` 区分 main、mask、province 与两种 alpha 表示；`colorRect` 使用 TVP 的定点规则。
 
-仍未完成其他 Bitmap/像素方法、全部几何/混合/采样分支的精确差分、转场的全部原生重入/系统事件边界、字体兼容、完整 ruby/纵排验证和原生窗口事件全集。游戏文件字体使用独立 FreeType WASM；系统字体名称映射和普通缺字回退依赖浏览器，不能保证与原生系统字体一致。预渲染映射、Rect/边界查询、角度的后端差异及已测范围见 [字体几何与后端](../decisions/024-font-geometry.md)。当前全屏占满页面视口，支持按钮/Escape 退出，未调用原生 Fullscreen API。窗口位置用于页面内浮动宿主，不会移动浏览器窗口；Window.showModal 与独立浏览器弹窗仍未完成。
+仍未完成其他 Bitmap/像素方法、全部几何/混合/采样分支的精确差分、转场的全部原生重入/系统事件边界、字体兼容、完整 ruby/纵排验证和原生窗口事件全集。游戏文件字体使用独立 FreeType WASM；系统字体名称映射和普通缺字回退依赖浏览器，不能保证与原生系统字体一致。预渲染映射、Rect/边界查询、角度的后端差异及已测范围见 [字体几何与后端](../decisions/024-font-geometry.md)。当前全屏占满页面视口，支持按钮/Escape 退出，未调用原生 Fullscreen API。窗口位置用于页面内浮动宿主，不会移动浏览器窗口；Window.showModal 已在页面内实现，独立浏览器弹窗仍未实现。旧 VCL 的具体关闭时序仍有未证实的兼容边界。
 
 **尚未实现**
 
-KAG 完整画面和复杂游戏流程、流式音频/完整 MIDI/CD 映射、旧视频编码/完整混合层与色彩控制、完整系统/立即事件异常策略、复杂场景/媒体状态的完整存读档验证、按块持久 HTTP 缓存/续传、嵌套包与根目录发现、其他 ZIP 压缩/加密及多卷变体、统一内存预留及其他图像编码变体、PSB、Emote/MotionPlayer 和其他插件、嵌入 EXE 的 XP3、XP3 提取过滤器/加密、完整虚拟路径/patch 自动发现规则、Window.showModal／完整菜单嵌套循环、移动系统强杀/BFCache 与后台长请求的完整验证。`Plugins.link` 返回带插件名的明确错误。
+KAG 完整画面和复杂游戏流程、流式音频/完整 MIDI/CD 映射、旧视频编码/完整混合层与色彩控制、完整系统/立即事件异常策略、复杂场景/媒体状态的完整存读档验证、按块持久 HTTP 缓存/续传、嵌套包与根目录发现、其他 ZIP 压缩/加密及多卷变体、统一内存预留及其他图像编码变体、PSB、Emote/MotionPlayer 和其他插件、嵌入 EXE 的 XP3、XP3 提取过滤器/加密、完整虚拟路径/patch 自动发现规则、完整 MenuItem.popup 嵌套循环、移动系统强杀/BFCache 与后台长请求的完整验证。`Plugins.link` 返回带插件名的明确错误。
 
 没有解析游戏专用补丁命名规则。页面的源文件顺序就是挂载顺序；后挂载的同名资源覆盖前者。目录选择保留目录内的相对路径。不同大小写文件可各自存在，但歧义回退会报错。XP3 的保护位是提取保护标志，不等于内容加密；adlr 也不保证是内容校验和。两者作为元数据保留，不再阻止普通读取。游戏专用提取过滤器仍未接入。
 
@@ -176,7 +184,7 @@ KAG 完整画面和复杂游戏流程、流式音频/完整 MIDI/CD 映射、旧
 
 原生流关闭时将数据复制到宿主队列；下一次宿主读之前应用写覆盖层，脚本调用结束后等待 IndexedDB 提交，之后才报告保存完成。失败时保留可导出的覆盖层并允许重试停止。事务完成语义依据 [IndexedDB transaction](https://developer.mozilla.org/en-US/docs/Web/API/IDBTransaction)。
 
-Timer 间隔按 1/65536 ms 取整，默认容量为 6；容量 0 在当前调度器中限制为 65535 个积压事件。初始间隔沿用本地参考实现的固定点初值 1000 / 65536 ms，使用方应显式设置间隔。AsyncTrigger.cached 合并未派发事件，变更 cached/mode 会取消待派发事件。实现参考 [Timer.interval](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_Timer_interval.html)、[Timer.capacity](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_Timer_capacity.html) 与 [AsyncTrigger.cached](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_AsyncTrigger_cached.html)。System.eventDisabled、连续回调、优先级、嵌套 generation 和异常处理已接通，详细范围见 [System 事件](../decisions/021-system-events.md)。完整窗口更新尾部、立即异常和隐式所有权仍未覆盖。
+Timer 间隔按 1/65536 ms 取整，默认容量为 6；容量 0 在当前调度器中限制为 65535 个积压事件。初始间隔沿用本地参考实现的固定点初值 1000 / 65536 ms，使用方应显式设置间隔。AsyncTrigger.cached 合并未派发事件，变更 cached/mode 会取消待派发事件。实现参考 [Timer.interval](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_Timer_interval.html)、[Timer.capacity](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_Timer_capacity.html) 与 [AsyncTrigger.cached](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_AsyncTrigger_cached.html)。System.eventDisabled、连续回调、优先级、嵌套 generation 和异常处理已接通，详细范围见 [System 事件](../decisions/021-system-events.md)。052 已接入逐事件原生释放检查点、合法轮次窗口更新尾部及明确跳过的完成边界，覆盖 Window.showModal 内的实际输入、计时器与停止；完整立即异常策略、全部原生差分及其余所有权组合仍需扩大验证。
 
 浏览器测试针对生产构建运行，避免开发服务器热重载影响执行上下文，覆盖三种浏览器上的两种 WASM 后端。2026-09-13 的 ZIP 阶段 `npm run check` 通过 **230 项行为/集成测试和 438 项浏览器测试**（339 项常规上下文、57 项磁盘游戏库、35 项 PWA、7 项 Chromium 原生生命周期），包含 94,464 组标量混合对照、333 个图像处理对照、310 个 TLG 原生编码器样本、110 个 PNG/GIF/BMP 样本、12,288 个加载运算对照、192 个独立解码写出验证、16 个独立 ZIP 包的 90 次成员读取，以及图形/场景、声音、视频、输入、KAG、菜单、锁、存档、HTTP、OPFS、离线应用更新和停止回归。该结果不证明全部非插件引擎功能完成。
 
@@ -218,7 +226,7 @@ KAG 表达式在原 TJS2 中以 parser 实例为上下文执行；标签字典�
 
 数据复制只接受原生 Array/Dictionary，不执行脚本属性，拒绝循环/任意脚本对象，限制深度 64、成员 100,000；常规 TJS 对象继续使用句柄，不自动序列化。KAG 宏定义/展开限制 8 MiB，宏/调用栈深度限制 4096。
 
-`MenuItem.popup` 挂起调用者直到选择/取消，关闭后恢复 TJS 并按 flags 决定派发 onClick。当前 VM 队列在弹出期间不会执行其他计时回调，尚未覆盖原文档允许的弹出期间异步事件重入；原生窗口句柄、菜单动画和全部 Win32 布局标志未实现。参见 [popup](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_MenuItem_popup.html)。Web Locks 的范围是同一站点存储分区，并按 game ID 加前缀，不能检测另一站点或原生程序的同名锁。参见 [Web Locks](https://w3c.github.io/web-locks/)。
+`MenuItem.popup` 挂起调用者直到选择/取消，关闭后恢复 TJS 并按 flags 决定派发 onClick。当前 VM 队列在弹出期间不会执行其他计时回调，尚未覆盖原文档允许的弹出期间异步事件重入；原生窗口句柄、菜单动画和全部 Win32 布局标志未实现。新嵌套业务仍在 052 工作目录实现，未验证、未合入 main，不能引用 Window.showModal 的绿色结果替代其验收。参见 [popup](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_MenuItem_popup.html)。Web Locks 的范围是同一站点存储分区，并按 game ID 加前缀，不能检测另一站点或原生程序的同名锁。参见 [Web Locks](https://w3c.github.io/web-locks/)。
 
 **远程来源的已验证边界**
 

@@ -1,6 +1,10 @@
-# 052 — 合作式模态循环的 scope 基础
+# 052 — 协作式 Window 模态循环与原生检查点
 
-当前工作分支已接入浏览器接收确认；逐事件 native checkpoint、视频完成票据和 ModalLoop 也已写入，尚待本片 Actions。Window.showModal 业务已接通、尚待首轮Actions；Menu.popup 的模态业务仍未接通。下面保留各步骤当时的状态和失败记录，新接线详见文末，不以基础组件通过代替完整模态功能。
+输入接收确认、逐事件 native checkpoint、视频完成票据、ModalLoop 与 Window.showModal 业务已在精确提交 `2683b304fa32e409941c84b723d80d53b5d6ac8d` 通过完整 Actions：**1,646 项 Node、1,095 项浏览器、6 组直接运行时**；同一提交、同次构建的兼容检查另通过 **78 项**。已测应用在 `5e54ceb` 合入 main，完整来源见文末。会话协议 11、TJS ABI 5、字体 ABI 2；内核要求 `nativeReleaseState: 1`。
+
+Menu.popup 的新嵌套业务仍在 052 工作目录实现，未验证、未合入 main，不能纳入本次通过范围。旧 VCL 二进制关闭时序、菜单 flags 及真正原生递归的未知项仍保留，完整非插件目标未完成。以下按步骤保留当时的实现状态、失败及未报告证据；早期“尚未执行／尚待接线”描述不覆盖文末的最新验证结果。
+
+## 初始 scope 基础（阶段历史）
 
 本阶段先实现独立的 `src/engine/scheduler/modal-scopes.ts`。它管理 host 侧身份、栈和等待生命周期，尚未接入 Session、SystemEvents、ExecutionControl、TJS pump 或 DOM。`Window.showModal` 与 `Menu.popup` 的完整嵌套事件循环仍未实现，不能以此组件的测试代替实际 VM/浏览器验证。总体边界见[多窗口规划](048-multiwindow-plan.md)。
 
@@ -143,3 +147,29 @@ CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原
 诊断共 **1,529通过、3失败／1,532**；除上述两项外，源码视频隐藏夹具在首个renderer拒绝后只等待一个host turn，就要求checkpoint已完成，实际仍有一个合法检查点。修订在隐藏操作之前等待对应事件队列返回，renderer仍拒绝且视频completion仍须保持pending；隐藏后的ACK、引用计数及像素断言不增加idle，不放宽检查。诊断的浏览器与直接运行时未执行，独立失败证据保留。
 
 第二轮WebKit两项失败均属既有模板：图像保存首次启动前记录真实WebGL context loss，最终graphics=lost并等待恢复，未到编码像素断言；视频时钟的period／EOF已到达，但原故障夹具未实际收到可丢弃的播放帧回调，dropped=0。前者根因仍未知，三个macOS诊断manifest没有匹配原生报告，不能据此排除崩溃。后者将故障注入改为播放开始时撤销真实已登记回调、播放中登记后立即撤销，保存registered／withheld／primed证据；继续要求真实首帧、明确被阻止的回调、period／EOF及Stop清理，避免把原生回调恰好未到达当成故障注入已执行。
+
+## Window 与检查点完整验证及合入 main
+
+[完整回归 34989855109](https://github.com/fenghengzhi/krkr2-web/actions/runs/34989855109)在精确提交 `2683b304fa32e409941c84b723d80d53b5d6ac8d` 最终成功，14 个作业全部通过。该提交包含本阶段的输入 ACK、原生检查点和 Window.showModal，以及已合入的 053／054／055 图层组合。
+
+| 验证范围                  | 实际结果                                                            |
+| ------------------------- | ------------------------------------------------------------------- |
+| Node 行为与集成           | 1,646／1,646；TAP 编号连续，失败、取消、跳过、todo 均为 0           |
+| 常规浏览器                | Chromium、Firefox、WebKit 各 324／324，共 972 项                    |
+| 游戏库／PWA／可信生命周期 | 57／57、59／59、7／7；浏览器合计 1,095／1,095                       |
+| 直接运行时                | 三浏览器 × Asyncify／JSPI 共 6／6 组；failures 和各组 errors 均为空 |
+| 同次构建的兼容检查        | 78／78；KAG 36、原菜单／面板 6、诊断 6、旧 ABI 离线迁移 30          |
+
+浏览器案例均首次执行通过，没有 flaky、重试、结果错误或全局报告错误。其中真实 Window 模态的源码／字节码与 Stop 为 6 模板 × 3 浏览器，共 18 项；页面宿主的阻塞、焦点、置顶／全屏堆叠和移动／缩放取消另有 6 模板 × 3 浏览器，共 18 项，均已包含在上述总数内。Node 包含修订后的内部关闭查询重试、宿主关闭完成边界、父子模态、显式失效及原生释放／视频票据用例；不再以早期组件测试代替这些实际接线路径。
+
+[兼容检查 34991339560](https://github.com/fenghengzhi/krkr2-web/actions/runs/34991339560)使用同一精确提交和完整回归 `34989855109` 的构建，三浏览器各 26 项通过。全部 36 份 KAG 详细记录的 `observedWithoutError=true`，错误数组为空；30 项离线迁移的目标 build 均为 `9e74646937621c2b840267f1683a8566b9d9c7054a6ff2b659a732954a698e08`，与生产归档的 Service Worker／HTML 标记一致。
+
+完整回归的 13 份外部 build-info 与归档内 1 份字节相同，SHA-256 为 `af6b0f33bead2b26c21ef64684f88907340eadd20cf4f17843813fdff0f2756a`，均标记上述提交、run `34989855109`、attempt `1`。内核复用了相同原生源码的缓存，本轮没有重新编译内核；ABI 5、`nativeReleaseState: 1`、`diagnosticAllocator: false`，归档资源的大小和哈希匹配清单。共享 build-info 描述的是构建环境，不是各浏览器测试 runner 的环境。
+
+已下载完整回归 14 个 artifact／379 个原始文件，兼容检查 3 个 artifact／261 个原始文件。逐例结果、构建来源和 SHA-256 清单分别保存于 `out/verification/github-actions/34989855109/root-evidence-summary.json` 和 `out/verification/github-actions/34991339560/root-evidence-summary.json`，并有同名 Markdown 摘要；原始产物在各自 `complete/` 目录。全部测试、构建和探针由 GitHub-hosted Actions 执行，本地只解析已完成运行的证据。
+
+本轮三个 WebKit 原生诊断清单均没有候选报告或收集错误；Node 产物保留 TAP、日志和 core-pattern 信息，没有 core／backtrace 或崩溃清单。没有报告不证明未发生崩溃，也不能据本轮通过将历史 V8 断言、WebGL context loss 或显示服务器故障追认为已修复。前述全部失败、取消、文件级占位和未报告案例仍按原运行保留。
+
+已测应用在 `5e54ceb` 合入并推送 main；该合入提交带 `[skip ci]`，不另计一次通过结果。相对 `2683b304`，只另有原版 SDK 参考工作流和两份参考夹具，应用／内核源码保持已测状态。Menu.popup 的新嵌套业务仍留在 052 工作目录，未验证、未合入，现有 main 的旧 popup 队列限制继续成立。
+
+本阶段通过的是 Web 实现的上述合同。旧发行所用 VCL Forms 二进制的确切关闭时序、NoNotify 观察差异和原生菜单递归仍有未知项；增加原版参考工作流不等于已取得这些结论。其余非插件功能继续实现，不能将 Window 模态接通写为整个目标完成。
