@@ -33,10 +33,22 @@ class InputReplacingLayer extends InputOwnedLayer {
   function InputReplacingLayer(parent,name,x){super.InputOwnedLayer(parent,name,x);}
   function onBlur(next){
     inputTrace.add("replace");
-    invalidate global.window;
-    global.window=new Window();global.window.setInnerSize(160,80);global.window.visible=true;
-    global.root=new Layer(global.window,null);global.root.setSize(160,80);
-    var replacement=new InputOwnedLayer(global.root,"replacement",0);replacement.focus();
+    var stage="invalidate old Window";
+    try{
+      invalidate global.window;
+      stage="construct Window";
+      global.window=new global.Window();
+      stage="configure Window";
+      global.window.setInnerSize(160,80);global.window.visible=true;
+      stage="construct primary Layer";
+      global.root=new global.Layer(global.window,null);
+      stage="configure primary Layer";
+      global.root.setSize(160,80);
+      stage="construct replacement Layer";
+      var replacement=new global.InputOwnedLayer(global.root,"replacement",0);
+      stage="focus replacement Layer";
+      replacement.focus();
+    }catch(error){throw new global.Exception("Window replacement ["+stage+"]: "+error.message);}
   }
 }
 class InputCacheLayer extends InputOwnedLayer {

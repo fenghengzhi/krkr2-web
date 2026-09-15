@@ -80,6 +80,8 @@ Layer.finalize 的默认实现为空。直接调用 finalize 不释放原生状�
 
 首个 [Node 诊断运行 34925068344](https://github.com/fenghengzhi/krkr2-web/actions/runs/34925068344)针对 `2c2c295`：构建及类型检查通过，983 项 Node 中 967 项通过、16 项失败，取消及跳过均为零。浏览器和直接运行时未执行。失败涉及转场静态 helper 的 `System` 上下文解析，以及替换 Window、首次 children 快照两个夹具的作用域或帧时机；对应修正和启用状态遍历补充待下一次云端验证。该失败记录及完整产物保存在原 run ID 下，不由后续结果覆盖。
 
+第二次 [Node 诊断 34925558902](https://github.com/fenghengzhi/krkr2-web/actions/runs/34925558902)针对 `ce44edd`：987 项中 985 项通过、2 项失败，无取消或跳过。转场及旧有图形回归恢复；剩余窗口替换夹具在实例方法中使用未限定类名，命中了继承的构造方法。后续改为显式 global 类并增加分阶段错误信息；本次失败记录完整保留，修正待完整回归。
+
 新增源码 / 原生字节码集成用例分别位于 `tests/integration/layer-lifetime.test.ts`、`layer-font-lifetime.test.ts`、`layer-input-lifetime.test.ts` 和 `layer-transition-lifetime.test.ts`；LayerTree 的缓存和 manager 检查位于 `tests/conformance/layer-tree-lifetime.test.ts`。所有权夹具在基线前预热 Array、Font、Exception，检查释放后的宿主观察、句柄和停止状态；错误用例区分脚本捕获文本、原生诊断与主错误。它们目前是待云端验证的要求，不是已通过的证据。
 
 后续每次运行按原 run ID 保存日志、完整产物和运行元数据到 `out/verification/github-actions/<id>/`。失败、取消、中断或尚未执行的检查不能被后续绿色结果覆盖；Menu / Window 阶段已有的验证记录也不变更为 Layer 本阶段的通过证明。
