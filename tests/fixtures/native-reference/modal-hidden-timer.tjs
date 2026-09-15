@@ -1,0 +1,52 @@
+// Original SDK observation, run only by the hosted Windows workflow.
+var nativeRows=[];
+function nativeRecord(text) {
+  nativeRows.add(text);
+  nativeRows.save("native-events.txt");
+}
+System.exceptionHandler=function(error) {
+  nativeRecord("error:"+error.message);
+  System.exit();
+  return true;
+};
+nativeRecord("start");
+nativeRecord("version:"+System.versionString);
+// Observe whether hiding leaves showModal active and permits a later timer close.
+class NativeModalWindow extends Window {
+  function NativeModalWindow() { super.Window(); caption="KRKR2 hidden modal reference"; }
+  function onCloseQuery(canClose) {
+    var emit=global.nativeRecord incontextof global;
+    emit("query");
+    super.onCloseQuery(true);
+    emit("query-return");
+  }
+}
+var nativeMain=new Window();
+nativeMain.visible=true;
+var nativeModal=new NativeModalWindow();
+var nativeTicks=0;
+function nativeTick(event) {
+  nativeTicks++;
+  nativeRecord("tick:"+nativeTicks+":visible="+int(nativeModal.visible));
+  if(nativeTicks==1) {
+    nativeRecord("hide-before");
+    nativeModal.visible=false;
+    nativeRecord("hide-after:"+int(nativeModal.visible));
+  } else {
+    nativeTimer.enabled=false;
+    nativeRecord("close-before");
+    nativeModal.close();
+    nativeRecord("close-after");
+  }
+}
+var nativeTimer=new Timer(global,"nativeTick");
+nativeTimer.enabled=false;
+nativeTimer.interval=150;
+nativeRecord("modal-before");
+nativeTimer.enabled=true;
+var nativeResult=nativeModal.showModal();
+nativeTimer.enabled=false;
+nativeRecord("modal-after:"+int(nativeResult===void)+":"+int(isvalid nativeModal)+":ticks="+nativeTicks);
+if(isvalid nativeModal)nativeRecord("visible-after:"+int(nativeModal.visible));
+nativeRecord("observations-complete");
+System.exit();
