@@ -204,11 +204,24 @@ export class Bitmap {
       }
     this.touch()
   }
-  copyPixels(source: Pixels, left: number, top: number, rect: Rect, holdAlpha = false): void {
+  copyPixels(
+    source: Pixels,
+    left: number,
+    top: number,
+    rect: Rect,
+    holdAlpha = false,
+    clip: Rect = this.clip,
+  ): boolean {
     const target = intersect(
-      intersect(this.clip, { x: left, y: top, width: rect.width, height: rect.height }),
+      intersect(intersect(clip, { x: 0, y: 0, width: this.width, height: this.height }), {
+        x: left,
+        y: top,
+        width: rect.width,
+        height: rect.height,
+      }),
       { x: left - rect.x, y: top - rect.y, width: source.width, height: source.height },
     )
+    if (!target.width || !target.height) return false
     const data = source.data === this.pixels.data ? source.data.slice() : source.data
     for (let y = target.y; y < target.y + target.height; y++)
       for (let x = target.x; x < target.x + target.width; x++) {
@@ -217,6 +230,7 @@ export class Bitmap {
         for (let c = 0; c < (holdAlpha ? 3 : 4); c++) this.pixels.data[to + c] = data[from + c]!
       }
     this.touch()
+    return true
   }
   color(rect: Rect, color: number, opacity: number, face: number): void {
     if (face === 2 || face === 3) {
