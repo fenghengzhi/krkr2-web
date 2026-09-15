@@ -1,5 +1,9 @@
 # 061：独立 Province 平面与图像独占入口
 
+首次组合回归 [35009948147](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009948147) 在 `a88f3fdccd773aafa5d96a9ae8eb565458102f43` 实际为 Node **2,010/2,010**、浏览器 **1,385/1,401**、直接运行时 **6/6**，整轮失败。新增省图浏览器案例 **24/24** 通过；16 个失败均在同组合的 Clipboard 测试，涉及 Chromium 的空文本／权限预期和 WebKit 自动化的读取授权，详见 [060](060-web-clipboard.md)。同源构建的 [78 项兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/35010819208) 全部通过，但不替代失败的完整回归。
+
+过时的第二轮 [35012318277](https://github.com/fenghengzhi/krkr2-web/actions/runs/35012318277) 被取消：取消请求检查时仍在排队，实际 runner 已开始并在 setup-node 阶段中止，存在六个作业，普通测试执行数为 **0**。修订 Clipboard 测试后，新的完整回归 [35014242871](https://github.com/fenghengzhi/krkr2-web/actions/runs/35014242871) 单独执行。首轮失败、取消时序和所有原件均保留。
+
 Layer 可以在 `hasImage=false` 时保存和访问 Province。此前 Province 数组附着在 RGBA Bitmap 上，读写、命中和复制都会错误地要求 MainImage；图像尺寸也无法表示“无主图后改变 Layer 大小，旧省图尺寸保持不变”的状态。
 
 本片把 Province 交给 Layer 单独持有，保留其自身宽高及 8 位像素；`Bitmap` 只负责 Main/Mask。已有主图的绘制、转场与合成继续使用原 Bitmap 对象；省图不会成为可见 RGBA 图像。原生实现会共享图像，本项目目前仍使用独占深复制，见下文边界。
@@ -64,4 +68,4 @@ LayerTree 的 64 MiB 持久位图预算计入所有 Layer 的 RGBA 字节和独�
 
 新增 95 项 Node 用例定义：独立平面 12 项、联合预算 2 项、ImageLoader 部分失败 11 项，以及 70 项 source/bytecode 的省图操作、生命周期和加载用例。真实 Worker 浏览器输入及独占方法有 8 项定义，交由既有三浏览器矩阵发现，实际执行/跳过数量以 Actions 为准。迁移原先直接访问 Bitmap.province 的测试时保留原像素期望，并把加载失败测试改为固定原版的清省图和部分主图行为。
 
-本片尚未运行验证。所有测试和可执行检查只能由根任务统一推送后，在 GitHub-hosted Actions 执行。未启动的、失败的或中断的运行不能记作通过；已有验证证据保持不变。
+本片首次组合验证及后续状态见文首；尚未完成新一轮完整回归的验收。所有测试和可执行检查只在 GitHub-hosted Actions 执行。未启动的、失败的或中断的运行不能记作通过；已有验证证据保持不变。
