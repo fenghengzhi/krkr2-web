@@ -90,7 +90,37 @@ try {
           '1',
         )
         await expect(page.locator('#logs')).toContainText('KAG-diagnostic-primary')
+        // The fixed KAG Initialize.tjs handler disables events before calling
+        // System.inform(e.message), then restores them only after it returns.
+        // Confirm this exact deliberate Conductor error through the real UI;
+        // evaluating more TJS here would wait behind the suspended handler.
+        const errorMessage = [
+            'An error occurred',
+            'File: debug-failure.ks   Line: 5',
+            'Tag:  ( This may indicate the tag before or after the error )',
+            'Error occurred in iscript block starting from line 3 of debug-failure.ks.',
+            '( See console for details )',
+            'KAG-diagnostic-primary',
+          ].join('\n'),
+          dialog = page.getByRole('dialog', { name: 'Information', exact: true }),
+          owner = page.locator('.game-window'),
+          confirm = dialog.getByRole('button', { name: '确定', exact: true })
+        await expect(page.locator('.game-system-dialog')).toHaveCount(1)
+        await expect(dialog).toBeVisible()
+        await expect(dialog).toHaveAttribute('data-kind', 'inform')
+        await expect(dialog.getByText(errorMessage, { exact: true })).toBeVisible()
+        await expect(dialog.getByRole('textbox')).toHaveCount(0)
+        await expect(page.locator('#status')).toHaveText('事件已停止')
+        await expect(owner).toHaveCount(1)
+        await expect(owner).toHaveAttribute('data-blocked', 'true')
+        await expect(owner).toHaveAttribute('aria-disabled', 'true')
+        await expect(page.getByText('KAG-diagnostic-recovered', { exact: true })).toHaveCount(0)
+        await expect(confirm).toBeEnabled()
+        await page.screenshot({ path: prefix + '-dialog.png', fullPage: true })
+        await confirm.click()
+        await expect(page.locator('.game-system-dialog')).toHaveCount(0)
         await expect(page.locator('#status')).toHaveText('运行中')
+        await expect(owner).toHaveAttribute('data-blocked', 'false')
         await evaluate(page, 'System.eventDisabled', '0')
         await evaluate(page, 'diagnosticSeen.join("\\n").indexOf("KAG-diagnostic-primary")>=0', '1')
         await evaluate(
@@ -128,6 +158,14 @@ try {
           indexSha256,
           errors,
           originalHandler: true,
+          originalHandlerDialog: {
+            caption: 'Information',
+            message: errorMessage,
+            eventDisabledWhileOpen: true,
+            windowBlockedWhileOpen: true,
+            confirmed: true,
+            screenshot: prefix + '-dialog.png',
+          },
           primaryLogged: true,
           observersNotified: true,
           recovered: true,
