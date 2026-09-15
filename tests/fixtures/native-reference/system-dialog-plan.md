@@ -81,4 +81,45 @@ fails. Only for the exact recorded two-`TButton` InputQuery shape, the
 non-default `?????` button opposite the explicit default `OK` may be selected
 as a cancellation candidate. That name is not assumed to mean Cancel: the
 original handler must return void after its real `BM_CLICK` before the scenario
-is recorded as observed. The correction has not yet been executed.
+is recorded as observed.
+
+## Completed corrected observations
+
+[35002019683](https://github.com/fenghengzhi/krkr2-web/actions/runs/35002019683)
+at `c579227940d1f17638747f333ec152a2c9c932f6` completed all eight scenarios.
+All 56 original files, terminal run metadata, complete workflow log and hashes
+are archived. All 16 generated fixture/driver hashes match the archived bytes.
+The earlier run remains failed.
+
+| Runner       | Scenario      | Timer discovery → before click | Dialog observation ms | Native return         |
+| ------------ | ------------- | ------------------------------ | --------------------- | --------------------- |
+| Windows 2022 | inform        | 4 → 12                         | 818                   | void                  |
+| Windows 2022 | input-unicode | 0 → 9                          | 825                   | String `Hello ? O ??` |
+| Windows 2022 | input-empty   | 0 → 9                          | 819                   | String `""`, length 0 |
+| Windows 2022 | input-cancel  | 0 → 9                          | 822                   | void                  |
+| Windows 2025 | inform        | 2 → 10                         | 825                   | void                  |
+| Windows 2025 | input-unicode | 0 → 9                          | 832                   | String `Hello ? O ??` |
+| Windows 2025 | input-empty   | 0 → 8                          | 831                   | String `""`, length 0 |
+| Windows 2025 | input-cancel  | 0 → 8                          | 824                   | void                  |
+
+Every case recorded additional TJS Timer callbacks after identifying the real
+owned dialog and before clicking its real button. Thus both APIs directly
+demonstrated Timer execution while their dialogs remained open. Empty
+confirmation and cancellation produced different native types, as shown above.
+The non-default ANSI button's cancellation role was confirmed by the actual
+native void result on both runners.
+
+For Unicode confirmation, the driver sent `Hello 雪 Ω 😀`; both ANSI TEdit
+controls read back `Hello ? O ??`, and the native script returned that same
+12-unit string. The driver reported host ACP 1252. Preserve this native platform
+observation without imposing its character loss on the Web implementation.
+
+Both platforms used driver SHA-256
+`37b3eac8ee2f65cbbc17475093784f780e3de59f232f7dd4dbb9bb94c770e03c`.
+Generated UTF-16 fixture hashes and all native event sequences are preserved in
+each artifact's `status.json` and the archived evidence summary.
+
+All four scenarios use explicit unique ASCII captions. Default, void and empty
+caption behavior, nested dialogs, Window modal nesting, other locales/code
+pages, hardware input and alternative dismissal paths remain outside this
+observed matrix.

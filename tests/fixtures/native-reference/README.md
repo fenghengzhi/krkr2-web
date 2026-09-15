@@ -180,3 +180,18 @@ Window eligibility checks do not apply a second NoNotify/ReturnCmd filter. The
 exact SDK source revision and bundled VCL build remain unidentified. No mouse,
 hardware keyboard, recursive-popup or other cancellation path is established by
 these observations.
+
+## System inform and inputString
+
+The `system-dialog` workflow suite observes real owned System dialogs through
+their real controls. Its [plan and preserved results](system-dialog-plan.md)
+record both attempts, the input evidence and scope limits.
+
+[35002019683](https://github.com/fenghengzhi/krkr2-web/actions/runs/35002019683)
+completed eight observations on Windows 2022 and Windows 2025. Both APIs executed
+TJS Timer callbacks while the real dialog remained open. `inform` returned void;
+empty input confirmation returned a zero-length String; input cancellation
+returned void. Unicode input was separately recorded at the driver, ANSI Edit
+and native return boundaries, preserving the SDK's observed conversion without
+making character loss a Web requirement. These results are original runtime
+observations, not Web test results; the failed first attempt remains preserved.
