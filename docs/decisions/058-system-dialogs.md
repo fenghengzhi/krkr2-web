@@ -53,3 +53,7 @@ Window 输入阻塞按模态栈从顶向下决定：System 对话框阻塞游戏
 首轮 Chromium 常规浏览器实际 **369／371**；两个失败均为 Asyncify 源码／字节码 inform 返回后的真实焦点恢复断言，已到对话框关闭之后，后续控制台断言未执行。其余 Chromium 新用例与 JSPI inform 实际通过。`d01caed` 的发布顺序修订对应此边界。记录本节时 Firefox／WebKit 尚未结束，不能据局部结果声明首轮完整通过。
 
 只含焦点修订的 `d01caed` 曾排队为 `35002247123`；后续合并上述夹具与诊断修订时，任何被 GitHub 替换而未执行的排队运行都应单独记录，不计作通过。
+
+首轮 Firefox 常规实际 **363／371**：四项 inform 均在恢复游戏焦点处失败；另四项 inputString 在第一次 Enter 后已经返回完整 Unicode 字符串并打开下一输入框，因而不满足“还在组合中”的夹具预期。trace 没有单独记录 DOM compositionend，但固定 [Playwright 1.63 ffInput.ts](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/firefox/ffInput.ts#L106) 与 [Firefox PageAgent.js](https://github.com/microsoft/playwright/blob/v1.63.0/browser_patches/firefox/juggler/content/PageAgent.js#L541) 显示 keyboard.insertText 通过 commitCompositionWith 插入文字，结束其组合生命周期。因此后续夹具先执行并检查真实 Unicode 插入，再独立发出组合开始信号，检查真实 Enter 不提交，最后组合结束后再次 Enter 提交。没有放宽结果、增加超时或改动产品防护；专门的 OS 输入法驱动仍不在此测试的证明范围。
+
+`35002247123@d01caed` 最终在排队时被 GitHub 替换，状态 cancelled，零作业、零已执行测试；前后快照均保留。合并旧检查点夹具与诊断修订的 `35003369151@4c664bc` 也曾排队，后续若因上述 Firefox 夹具修订被替换，必须同样单独保存，不视为通过。

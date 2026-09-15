@@ -251,14 +251,16 @@ for (const backend of ['asyncify', 'jspi']) {
         await expect(input).toHaveValue('初期値')
         await expect(input).toBeFocused()
         await input.fill('')
-        // Playwright has no OS IME driver. These composition events exercise
-        // the ownership guard; Unicode insertion and Enter are real input.
-        await input.dispatchEvent('compositionstart', { data: '編' })
         await page.keyboard.insertText(value)
+        await expect(input).toHaveValue(value)
+        // Firefox's Page.insertText commits its own composition. Finish the
+        // real Unicode insertion before independently exercising the synthetic
+        // composition guard; this does not claim to drive an OS IME.
+        await input.dispatchEvent('compositionstart', { data: '' })
         await page.keyboard.press('Enter')
         await expect(unicode).toBeVisible()
         await expect(page.getByText(/^system-dialog-proof:unicode-return:/)).toHaveCount(0)
-        await input.dispatchEvent('compositionend', { data: value })
+        await input.dispatchEvent('compositionend', { data: '' })
         await expect(input).toHaveValue(value)
         await page.keyboard.press('Enter')
         await expect(
