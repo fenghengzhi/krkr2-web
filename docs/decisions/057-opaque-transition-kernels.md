@@ -35,3 +35,11 @@ Opaque 内核读取原始 RGB，不先依据源 mask 预乘。混合阶段原版
 旧 composition / integration / browser 测试中红蓝 crossfade 的目标默认是 ltAlpha，因此其 `[128, 0, 127, 255]` 预期不应随本阶段改动；纯 composition 夹具现在显式标注该目标类型。这里的保留断言仅保证本阶段没有修改 alpha 路径，不证明它已符合原版。
 
 尚未校准 Alpha / AddAlpha 的表与定点像素、转场时间原点与回调顺序、特殊图层完整合成的所有组合、规则图彩色转灰及缩放语义。本阶段不能据此声称全部内置转场或非插件范围完成。
+
+## 首轮 Node 证据与终点夹具修订
+
+[34997020864](https://github.com/fenghengzhi/krkr2-web/actions/runs/34997020864)，提交 `6678d6e46071ccad788bfd632a8ebce2f8471fee`，构建／类型检查通过；Node 实际 **1,752 通过、4 失败／1,756**，没有取消、跳过或未报告。新增 9 项纯测试和 14 项真实 TJS 用例通过；另外 4 项 crossfade 用例完成中间 RGB、mask 和显示像素检查后，在最后的完成／交换复合断言失败，不能计为通过。先前菜单、NoNotify 和 Font 组合的 1,729 项本轮均实际通过。
+
+失败夹具使用 `session.evaluate('tick=1000;fore.update()')`。这个 API 在 TJS 表达式模式执行，词法器注入 return 后只执行赋值，第二句 update 没有运行；原测试因此没有推进到终点。修订以 IIFE 执行完整两步，并把原来的 done、visible、RGB、mask 复合布尔断言改成相同预期的逐字段值，便于失败时保留实测状态。LayerTree.exchange 本来就保留各自 bitmap，原白色源和 mask=1 预期不变；没有修改产品代码或放宽像素／完成要求。
+
+首轮完整 TAP 和 build-info 已独立下载至 `out/verification/github-actions/34997020864/early-node/`。记录本节时浏览器与兼容性仍在运行，后续实际结果必须另行保留；此修订也尚待新 Actions，不能将首轮失败改计为成功。

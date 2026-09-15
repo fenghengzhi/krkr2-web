@@ -114,12 +114,15 @@ for (const binary of [false, true]) {
           await f.session.evaluate('sample(999)'),
           children ? '16645629:0,64768:0' : '16645629:0,16645629:0',
         )
-        await f.session.evaluate('tick=1000;fore.update()')
+        // evaluate uses TJS expression mode, which injects an initial return.
+        // Keep both statements inside a callable expression so update runs.
+        await f.session.evaluate('(function(){tick=1000;fore.update();return 0;})()')
         assert.equal(
           await f.session.evaluate(
-            'done==1 && back.visible && !fore.visible && back.getMainPixel(0,0)==0xffffff && back.getMaskPixel(0,0)==1',
+            '[done,int(back.visible),int(fore.visible),back.getMainPixel(0,0),back.getMaskPixel(0,0)].join(",")',
           ),
-          '1',
+          '1,1,0,16777215,1',
+          'completion count, source visibility, destination visibility, source RGB, source mask',
         )
       } finally {
         await f.stop()
