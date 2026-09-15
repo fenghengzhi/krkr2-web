@@ -10,6 +10,15 @@ import type { EventClock } from './events.ts'
 
 /** Exclusive, input, normal and idle; continuous callbacks follow all four. */
 export type EventPriority = 0 | 1 | 2 | 3
+export type EventOutcome =
+  | { readonly kind: 'delivered' | 'failed' | 'invalid' }
+  | { readonly kind: 'dropped'; readonly reason: 'disabled' | 'source' }
+  | { readonly kind: 'aborted' | 'disposed'; readonly error: unknown }
+export interface EventAdmission {
+  readonly status: 'accepted' | 'discarded'
+  /** Event-body completion only; it does not prove a native/frame checkpoint. */
+  readonly completion: Promise<void>
+}
 export interface EventOptions {
   valid?: () => boolean
   priority?: EventPriority
@@ -17,6 +26,9 @@ export interface EventOptions {
   source?: object
   replace?: boolean
   onTaken?: () => void
+  /** Synchronous host bookkeeping, after detachment and before completion settles.
+   * Undefined roundToken means the event never entered a native event round. */
+  onSettled?: (outcome: EventOutcome, roundToken?: number) => void
 }
 interface EventJob {
   source?: object
@@ -29,6 +41,10 @@ interface EventJob {
   onError?(): void
   continuous?: boolean
   onTaken?(): void
+  onSettled?: EventOptions['onSettled']
+  roundToken?: number
+  taken: boolean
+  settled: boolean
 }
 interface ContinuousEntry {
   key: string
@@ -107,16 +123,58 @@ export class SystemEvents {
         // Notification must not orphan a just-posted promise or stop another
         // modal waiter from waking. A failed observer is detached permanently.
         this.pendingListeners.delete(listener)
-        try {
-          this.error(String(error), false)
-        } catch {
-          /* Preserve queue ownership. */
-        }
+        this.reportInternal(error)
       }
     }
   }
 
+  private reportInternal(error: unknown): void {
+    try {
+      this.error(String(error), false)
+    } catch {
+      /* Reporting must not interrupt owned-job cleanup. */
+    }
+  }
+
+  private markTaken(job: EventJob): void {
+    if (job.taken) return
+    job.taken = true
+    const callback = job.onTaken
+    job.onTaken = undefined
+    callback?.()
+  }
+
+  private settle(job: EventJob, outcome: EventOutcome): void {
+    if (job.settled) return
+    // Callers detach the job from jobs/current first. Hooks can cancel another
+    // source or dispose the scheduler without seeing this job a second time.
+    job.settled = true
+    const callback = job.onSettled
+    job.onSettled = undefined
+    try {
+      this.markTaken(job)
+    } catch (error) {
+      this.reportInternal(error)
+    }
+    try {
+      callback?.(outcome, job.roundToken)
+    } catch (error) {
+      this.reportInternal(error)
+    }
+    if (outcome.kind === 'aborted' || outcome.kind === 'disposed') job.reject(outcome.error)
+    else job.resolve()
+  }
+
   post(prepare: () => HostReply, options: EventOptions = {}): Promise<void> {
+    try {
+      return this.enqueue(prepare, options).completion
+    } catch (error) {
+      return Promise.reject(error)
+    }
+  }
+
+  /** Throw before accepting a new job; accepted/discarded jobs own their settlement hook. */
+  enqueue(prepare: () => HostReply, options: EventOptions = {}): EventAdmission {
     const {
       valid = () => true,
       priority = 2,
@@ -124,38 +182,70 @@ export class SystemEvents {
       source,
       replace,
       onTaken,
+      onSettled,
     } = options
-    if (this.disposed) return Promise.reject(new ExecutionCancelled())
-    if (discardable && this.disabled) {
-      onTaken?.()
-      return Promise.resolve()
+    if (this.disposed) throw new ExecutionCancelled()
+    if (![0, 1, 2, 3].includes(priority)) throw new Error('Invalid event priority')
+    const discarded = discardable && this.disabled
+    if (!discarded) {
+      if (source && replace) this.cancelSource(source)
+      // A replacement's settlement hook may have stopped the scheduler.
+      if (this.disposed) throw new ExecutionCancelled()
+      if (this.jobs.length >= 65536) throw new Error('Event queue budget exceeded')
     }
-    if (source && replace) this.cancelSource(source)
-    if (this.jobs.length >= 65536) return Promise.reject(new Error('Event queue budget exceeded'))
-    const promise = new Promise<void>((resolve, reject) => {
-      this.jobs.push({
-        source,
-        sequence: this.sequence,
-        priority,
-        prepare,
-        valid,
-        resolve,
-        reject,
-        onTaken,
-      })
+    let resolve!: () => void, reject!: (error: unknown) => void
+    const completion = new Promise<void>((yes, no) => {
+      resolve = yes
+      reject = no
     })
+    const job: EventJob = {
+      source,
+      sequence: this.sequence,
+      priority,
+      prepare,
+      valid,
+      resolve,
+      reject,
+      onTaken,
+      onSettled,
+      taken: false,
+      settled: false,
+    }
+    if (discarded) {
+      this.settle(job, { kind: 'dropped', reason: 'disabled' })
+      return { status: 'discarded', completion }
+    }
+    this.jobs.push(job)
     if (priority === 0) this.exclusivePosted = true
     this.notifyPending()
     this.kick()
-    return promise
+    return { status: 'accepted', completion }
   }
   cancelSource(source: object): void {
-    this.jobs = this.jobs.filter((job) => {
-      if (job.source !== source) return true
-      job.onTaken?.()
-      job.resolve()
-      return false
-    })
+    const removed = this.jobs.filter((job) => job.source === source)
+    this.jobs = this.jobs.filter((job) => job.source !== source)
+    for (const job of removed) this.settle(job, { kind: 'dropped', reason: 'source' })
+    this.notifyPending()
+  }
+
+  private abortDispatch(error: unknown): void {
+    if (this.disposed) return
+    this.disabled = true
+    const jobs = this.jobs
+    this.jobs = []
+    for (const round of this.rounds.values()) {
+      if (round.current) jobs.push(round.current)
+      round.current = undefined
+    }
+    this.rounds.clear()
+    this.continuousProcessing = false
+    for (const job of jobs) this.settle(job, { kind: 'aborted', error })
+    try {
+      this.changed()
+    } catch (failure) {
+      this.reportInternal(failure)
+    }
+    this.reportInternal(error)
     this.notifyPending()
   }
   private kick(): void {
@@ -170,9 +260,17 @@ export class SystemEvents {
       return
     if (!this.hasDispatchableWork()) return
     this.queued = true
-    void this.execute(() => this.begin())
+    let execution: Promise<void>
+    try {
+      execution = this.execute(() => this.begin())
+    } catch (error) {
+      this.abortDispatch(error)
+      this.queued = false
+      return
+    }
+    void execution
       .catch((error) => {
-        if (!this.disposed) this.error(String(error), false)
+        this.abortDispatch(error)
       })
       .finally(() => {
         this.queued = false
@@ -209,7 +307,7 @@ export class SystemEvents {
     // native stack, including when the previous value was already false.
     return disabled ? empty() : this.begin()
   }
-  private take(round: Round): EventJob | undefined {
+  private take(round: Round, token: number): EventJob | undefined {
     if (round.checkExclusive) {
       round.checkExclusive = false
       if (this.exclusivePosted) return
@@ -227,9 +325,23 @@ export class SystemEvents {
         continue
       }
       const job = this.jobs.splice(index, 1)[0]!
-      job.onTaken?.()
-      if (!job.valid()) {
-        job.resolve()
+      job.roundToken = token
+      round.current = job
+      let valid: boolean
+      try {
+        this.markTaken(job)
+        if (job.settled || this.rounds.get(token) !== round) return
+        valid = job.valid()
+      } catch (error) {
+        round.current = undefined
+        this.settle(job, { kind: 'aborted', error })
+        throw error
+      }
+      if (job.settled || this.rounds.get(token) !== round) return
+      if (!valid) {
+        round.current = undefined
+        this.settle(job, { kind: 'invalid' })
+        if (this.rounds.get(token) !== round) return
         if (round.group === 1 && this.exclusivePosted) return
         continue
       }
@@ -266,6 +378,9 @@ export class SystemEvents {
         reject() {},
         onError: () => this.removeEntry(entry),
         continuous: true,
+        roundToken: token,
+        taken: true,
+        settled: false,
       }
     }
     // Compact only after walking the live list, so self-removal and appends do
@@ -292,45 +407,73 @@ export class SystemEvents {
     if (!Number.isSafeInteger(token) || !round) throw new Error('System event round has ended')
     if (operation === 'System.eventNext') {
       if (round.current) throw new Error('Previous event has not completed')
-      round.current = this.take(round)
-      this.notifyPending()
-      return { kind: 'value', value: round.current ? 1n : 0n }
+      try {
+        round.current = this.take(round, token)
+        return { kind: 'value', value: round.current ? 1n : 0n }
+      } finally {
+        this.notifyPending()
+      }
     }
     if (operation === 'System.eventCall') {
-      const reply = round.current?.valid() ? round.current.prepare() : empty()
+      const job = round.current
+      if (!job) return empty()
+      if (!job.valid()) {
+        round.checkExclusive = job.priority === 1 || !!job.continuous
+        if (job.continuous) round.emptyContinuous = true
+        round.current = undefined
+        this.settle(job, { kind: 'invalid' })
+        this.notifyPending()
+        return empty()
+      }
+      if (job.settled || this.rounds.get(token) !== round) return empty()
+      const reply = job.prepare()
+      if (job.settled || this.rounds.get(token) !== round) return empty()
       return reply.kind === 'invoke' ? { ...reply, statusOnly: true } : reply
     }
     if (operation === 'System.eventDone') {
-      round.checkExclusive = round.current?.priority === 1 || !!round.current?.continuous
-      round.current?.resolve()
+      const job = round.current
+      if (!job) return empty()
+      round.checkExclusive = job.priority === 1 || !!job.continuous
       round.current = undefined
+      this.settle(job, { kind: 'delivered' })
       this.notifyPending()
       return empty()
     }
     if (operation === 'System.eventFailed') {
-      round.current?.onError?.()
-      round.current?.resolve()
+      const job = round.current
+      round.current = undefined
       if (round.ownsContinuous) {
         round.ownsContinuous = false
         this.continuousProcessing = false
       }
-      round.current = undefined
-      this.notifyPending()
+      try {
+        job?.onError?.()
+      } finally {
+        if (job) this.settle(job, { kind: 'failed' })
+        this.notifyPending()
+      }
       return empty()
     }
     if (operation === 'System.eventInvalid') {
-      round.checkExclusive = round.current?.priority === 1 || !!round.current?.continuous
-      if (round.current?.continuous) round.emptyContinuous = true
-      round.current?.onError?.()
-      round.current?.resolve()
+      const job = round.current
+      if (!job) return empty()
+      round.checkExclusive = job.priority === 1 || !!job.continuous
+      if (job.continuous) round.emptyContinuous = true
       round.current = undefined
-      this.notifyPending()
+      try {
+        job.onError?.()
+      } finally {
+        this.settle(job, { kind: 'invalid' })
+        this.notifyPending()
+      }
       return empty()
     }
     if (operation === 'System.eventEnd') {
-      round.current?.reject(new Error('System event round aborted'))
+      const job = round.current
+      round.current = undefined
       this.rounds.delete(token)
       if (round.ownsContinuous) this.continuousProcessing = false
+      if (job) this.settle(job, { kind: 'aborted', error: new Error('System event round aborted') })
       if (!this.jobs.some((job) => job.priority !== 1)) this.sequence = 0
       this.notifyPending()
       if (!this.rounds.size) {
@@ -370,11 +513,15 @@ export class SystemEvents {
     if (entry) this.removeEntry(entry)
   }
   private removeEntry(entry: ContinuousEntry): void {
-    if (!entry.callback) return
+    const callback = entry.callback
+    if (!callback) return
     this.registered.delete(entry.key)
-    this.objects.release(entry.callback)
     entry.callback = undefined
-    this.notifyPending()
+    try {
+      this.objects.release(callback)
+    } finally {
+      this.notifyPending()
+    }
   }
   private interval(): number {
     return this.frequency ? Math.floor(65536000 / this.frequency) / 65536 : 0
@@ -440,18 +587,47 @@ export class SystemEvents {
     this.disposed = true
     this.cancelWake?.()
     this.cancelWake = undefined
-    for (const job of this.jobs) job.reject(new ExecutionCancelled())
+    const jobs = this.jobs
     this.jobs = []
-    for (const round of this.rounds.values()) round.current?.reject(new ExecutionCancelled())
+    for (const round of this.rounds.values()) {
+      if (round.current) jobs.push(round.current)
+      round.current = undefined
+    }
     this.rounds.clear()
-    for (const entry of this.entries) if (entry.callback) this.objects.release(entry.callback)
+    const entries = this.entries,
+      pump = this.pump
     this.entries = []
     this.registered.clear()
-    if (this.pump) this.objects.release(this.pump)
     this.pump = undefined
     this.continuousPending = false
     this.continuousProcessing = false
+    const outcome: EventOutcome = { kind: 'disposed', error: new ExecutionCancelled() }
+    for (const job of jobs) this.settle(job, outcome)
+    const releaseErrors: unknown[] = []
+    for (const entry of entries) {
+      const callback = entry.callback
+      entry.callback = undefined
+      if (callback) {
+        try {
+          this.objects.release(callback)
+        } catch (error) {
+          releaseErrors.push(error)
+        }
+      }
+    }
+    if (pump) {
+      try {
+        this.objects.release(pump)
+      } catch (error) {
+        releaseErrors.push(error)
+      }
+    }
     this.notifyPending()
     this.pendingListeners.clear()
+    // Observer errors are isolated, but actual resource-release failures remain
+    // visible to the disposer after every lease and waiter has been processed.
+    if (releaseErrors.length === 1) throw releaseErrors[0]
+    if (releaseErrors.length > 1)
+      throw new AggregateError(releaseErrors, 'System event resources failed to release')
   }
 }

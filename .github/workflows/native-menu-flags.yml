@@ -1,0 +1,291 @@
+name: Native Windows menu flags probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - tests/probes/native-menu-flags.cpp
+      - .github/workflows/native-menu-flags.yml
+
+permissions:
+  contents: read
+
+jobs:
+  native-menu-flags:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+        with:
+          persist-credentials: false
+      - name: Compile and run the bounded native probe on the hosted Windows desktop
+        if: always()
+        env:
+          PROBE_RUNNER_LABEL: ${{ matrix.runner }}
+          PROBE_CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outDirectory = Join-Path $env:GITHUB_WORKSPACE 'out/native-menu-flags'
+          New-Item -ItemType Directory -Force -Path $outDirectory | Out-Null
+          $statusPath = Join-Path $outDirectory 'harness-status.json'
+          $status = [ordered]@{
+            schemaVersion = 1
+            state = 'not-executed'
+            stage = 'setup'
+            startedAt = [DateTime]::UtcNow.ToString('o')
+            finishedAt = $null
+            sourceRevision = $env:GITHUB_SHA
+            checkoutOutcome = $env:PROBE_CHECKOUT_OUTCOME
+            runnerLabel = $env:PROBE_RUNNER_LABEL
+            timeoutSeconds = 180
+            compilerExitCode = $null
+            processId = $null
+            exitCode = $null
+            error = $null
+            cleanupError = $null
+            probeSummary = $null
+          }
+          $status | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 $statusPath
+          $probeProcess = $null
+          $failure = $null
+          function Stop-HeldProbe {
+            param([Diagnostics.Process] $Process, [string] $Reason)
+            $termination = [ordered]@{
+              at = [DateTime]::UtcNow.ToString('o')
+              processId = $Process.Id
+              reason = $Reason
+              outcome = 'not-attempted'
+              error = $null
+            }
+            try {
+              if ($Process.HasExited) {
+                $termination.outcome = 'already-exited'
+                return
+              }
+              try {
+                # This held Process object identifies only the probe; never kill a process tree.
+                $Process.Kill()
+                $termination.outcome = 'kill-requested'
+              } catch {
+                if (-not $Process.HasExited) { throw }
+                $termination.outcome = 'exited-before-kill'
+              }
+              if (-not $Process.WaitForExit(10000)) {
+                $termination.outcome = 'termination-timeout'
+                throw 'The held native probe did not terminate within its 10-second cleanup deadline.'
+              }
+              if ($termination.outcome -eq 'kill-requested') {
+                $termination.outcome = 'terminated'
+              }
+            } catch {
+              $termination.error = $_.Exception.Message
+              throw
+            } finally {
+              $termination | ConvertTo-Json -Compress |
+                Add-Content -Encoding utf8 (Join-Path $outDirectory 'termination.log')
+            }
+          }
+          function Test-JsonInteger {
+            param([object] $Value)
+            return $Value -is [int] -or $Value -is [long]
+          }
+          try {
+            $metadata = [ordered]@{
+              sourceRevision = $env:GITHUB_SHA
+              sourceRef = $env:GITHUB_REF
+              repository = $env:GITHUB_REPOSITORY
+              workflowRef = $env:GITHUB_WORKFLOW_REF
+              workflowRevision = $env:GITHUB_WORKFLOW_SHA
+              runId = $env:GITHUB_RUN_ID
+              runAttempt = $env:GITHUB_RUN_ATTEMPT
+              runnerLabel = $env:PROBE_RUNNER_LABEL
+              runnerEnvironment = $env:RUNNER_ENVIRONMENT
+              runnerOS = $env:RUNNER_OS
+              runnerArchitecture = $env:RUNNER_ARCH
+              imageOS = $env:ImageOS
+              imageVersion = $env:ImageVersion
+              operatingSystem = [Environment]::OSVersion.VersionString
+              powershellVersion = $PSVersionTable.PSVersion.ToString()
+              userInteractive = [Environment]::UserInteractive
+              harnessSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+              timeoutSeconds = 180
+              executableArguments = @($outDirectory)
+            }
+            $metadata | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 (Join-Path $outDirectory 'host-metadata.json')
+            if ($env:PROBE_CHECKOUT_OUTCOME -ne 'success') {
+              throw "Source checkout did not succeed: $env:PROBE_CHECKOUT_OUTCOME"
+            }
+            if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
+              throw 'This native probe must execute only on a GitHub-hosted Windows Actions runner.'
+            }
+            $status.stage = 'compiler-setup'
+            $source = Join-Path $env:GITHUB_WORKSPACE 'tests/probes/native-menu-flags.cpp'
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Native probe source is missing: $source"
+            }
+            Copy-Item -LiteralPath $source -Destination (Join-Path $outDirectory 'native-menu-flags.cpp')
+            Get-FileHash -Algorithm SHA256 -LiteralPath $source |
+              Select-Object Algorithm, Hash |
+              ConvertTo-Json |
+              Set-Content -Encoding utf8 (Join-Path $outDirectory 'source-sha256.json')
+            $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+            if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+              throw "Visual Studio discovery tool is missing: $vswhere"
+            }
+            $compilerSetup = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat' |
+              Select-Object -First 1
+            if ($LASTEXITCODE -ne 0 -or -not $compilerSetup -or -not (Test-Path -LiteralPath $compilerSetup -PathType Leaf)) {
+              throw 'A native Visual Studio x64 C++ compiler environment was not found.'
+            }
+            $executable = Join-Path $outDirectory 'native-menu-flags.exe'
+            $objectFile = Join-Path $outDirectory 'native-menu-flags.obj'
+            $compilerScript = Join-Path $outDirectory 'compile.cmd'
+            @(
+              '@echo off'
+              "call `"$compilerSetup`""
+              'if errorlevel 1 exit /b %errorlevel%'
+              "cl /nologo /Bv /std:c++20 /EHsc /W4 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX `"$source`" /Fe`"$executable`" /Fo`"$objectFile`" /link user32.lib"
+              'exit /b %errorlevel%'
+            ) | Set-Content -Encoding ascii $compilerScript
+            $status.stage = 'compile'
+            & cmd.exe /d /c "`"$compilerScript`"" 2>&1 |
+              Tee-Object -FilePath (Join-Path $outDirectory 'compiler.log')
+            $status.compilerExitCode = $LASTEXITCODE
+            if ($status.compilerExitCode -ne 0 -or -not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+              $status.state = 'compile-failed'
+              throw "Native C++ compilation failed with exit code $($status.compilerExitCode)."
+            }
+            Get-FileHash -Algorithm SHA256 -LiteralPath $executable |
+              Select-Object Algorithm, Hash |
+              ConvertTo-Json |
+              Set-Content -Encoding utf8 (Join-Path $outDirectory 'executable-sha256.json')
+            $status.stage = 'probe'
+            $probeProcess = Start-Process -FilePath $executable -ArgumentList "`"$outDirectory`"" -WorkingDirectory $outDirectory -PassThru -RedirectStandardOutput (Join-Path $outDirectory 'stdout.log') -RedirectStandardError (Join-Path $outDirectory 'stderr.log')
+            $status.state = 'running'
+            $status.processId = $probeProcess.Id
+            $status | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 $statusPath
+            if (-not $probeProcess.WaitForExit(180000)) {
+              $status.state = 'timeout'
+              Stop-HeldProbe -Process $probeProcess -Reason 'probe-deadline'
+              throw 'Native probe exceeded its 180-second process deadline; partial output is preserved.'
+            }
+            $status.state = 'exited'
+            $status.exitCode = $probeProcess.ExitCode
+            if ($status.exitCode -ne 0) {
+              $status.state = 'probe-failed'
+              throw "Native probe exited with code $($status.exitCode); inspect its trace, summary, and stderr."
+            }
+            $status.stage = 'output-validation'
+            foreach ($outputName in @('trace.jsonl', 'summary.json')) {
+              $outputPath = Join-Path $outDirectory $outputName
+              if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf) -or (Get-Item -LiteralPath $outputPath).Length -eq 0) {
+                $status.state = 'incomplete-output'
+                throw "The probe exited zero without its required non-empty $outputName."
+              }
+            }
+            try {
+              $summary = Get-Content -Raw -LiteralPath (Join-Path $outDirectory 'summary.json') | ConvertFrom-Json -ErrorAction Stop
+            } catch {
+              $status.state = 'incomplete-output'
+              throw "The probe summary is invalid JSON: $($_.Exception.Message)"
+            }
+            $status.probeSummary = [ordered]@{
+              schemaVersion = $summary.schemaVersion
+              status = $summary.status
+              scope = $summary.scope
+              nestedMenuCoverage = $summary.nestedMenuCoverage
+              globalInputUsed = $summary.globalInputUsed
+              expectedCases = $summary.expectedCases
+              observedCases = $summary.observedCases
+              passedCases = $summary.passedCases
+              caseCount = @($summary.cases).Count
+            }
+            $status.state = 'incomplete-output'
+            if (-not (Test-JsonInteger $summary.schemaVersion) -or $summary.schemaVersion -ne 1 -or $summary.status -cne 'completed') {
+              throw 'The probe summary must use schema 1 and record final completed status.'
+            }
+            if (-not (Test-JsonInteger $summary.expectedCases) -or $summary.expectedCases -ne 16 -or -not (Test-JsonInteger $summary.observedCases) -or $summary.observedCases -ne 16 -or -not (Test-JsonInteger $summary.passedCases) -or $summary.passedCases -ne 16 -or $summary.cases -isnot [array] -or $summary.cases.Count -ne 16) {
+              throw 'The probe must report exactly 16 expected, observed, and passed cases with 16 case records.'
+            }
+            if ($summary.scope -cne 'Win32 TrackPopupMenuEx only; no KRKR2 or VCL' -or $summary.nestedMenuCoverage -cne 'not-run; RECURSE bit tested only without an existing menu') {
+              throw 'The probe summary must preserve its Win32-only scope and explicitly untested nested-menu coverage.'
+            }
+            if ($summary.globalInputUsed -isnot [bool] -or $summary.globalInputUsed) {
+              throw 'The probe summary must confirm that no global input was used.'
+            }
+            $caseIds = [Collections.Generic.HashSet[int]]::new()
+            $casePairs = [Collections.Generic.HashSet[string]]::new()
+            # Independent coverage contract: all NONOTIFY, RETURNCMD, RECURSE bit combinations,
+            # each selected and cancelled. This does not impose a case ordering or result oracle.
+            $allowedFlags = @(0, 1, 128, 129, 256, 257, 384, 385)
+            foreach ($case in $summary.cases) {
+              if (-not (Test-JsonInteger $case.id) -or $case.id -lt 1 -or $case.id -gt 16 -or -not $caseIds.Add([int] $case.id)) {
+                throw 'Probe case IDs must uniquely cover 1 through 16.'
+              }
+              if (-not (Test-JsonInteger $case.flags) -or $case.flags -notin $allowedFlags -or $case.action -cnotin @('select', 'cancel') -or -not $casePairs.Add("$($case.flags):$($case.action)")) {
+                throw "Case $($case.id) has an invalid or duplicate flags/action coverage pair."
+              }
+              if ($case.status -cne 'observed' -or $case.terminalKeyPassedThroughHooks -isnot [bool] -or -not $case.terminalKeyPassedThroughHooks -or $case.barrierSeen -isnot [bool] -or -not $case.barrierSeen -or -not (Test-JsonInteger $case.returnSequence) -or $case.returnSequence -le 0) {
+                throw "Case $($case.id) lacks a completed observation, terminal key passed through menu hooks, barrier, or return sequence."
+              }
+              if ($case.menuFilterSeen -isnot [bool] -or -not $case.menuFilterSeen -or $case.keySuppressed -isnot [bool] -or $case.keySuppressed -or ($case.action -ceq 'select' -and ($case.targetHighlighted -isnot [bool] -or -not $case.targetHighlighted))) {
+                throw "Case $($case.id) lacks system-menu injection evidence or the expected highlighted selection target."
+              }
+              if ($case.assertions -isnot [array] -or $case.assertions.Count -eq 0) {
+                throw "Case $($case.id) does not contain any known assertions."
+              }
+              foreach ($assertion in $case.assertions) {
+                if ($assertion.passed -isnot [bool] -or -not $assertion.passed) {
+                  throw "Case $($case.id) contains an unsuccessful or malformed assertion: $($assertion.name)"
+                }
+              }
+            }
+            $status.probeSummary.validatedCases = $caseIds.Count
+            $status.probeSummary.validatedFlagsActionPairs = $casePairs.Count
+            $status.state = 'complete'
+            $status.stage = 'complete'
+          } catch {
+            $failure = $_.Exception.Message
+            $status.error = $failure
+            if ($status.state -in @('running', 'exited')) {
+              $status.state = 'harness-error'
+            } elseif ($status.state -eq 'not-executed' -and $status.stage -eq 'compile') {
+              $status.state = 'compile-failed'
+            } elseif ($status.state -eq 'not-executed' -and $status.stage -ne 'setup') {
+              $status.state = 'setup-failed'
+            }
+          } finally {
+            try {
+              if ($null -ne $probeProcess) {
+                Stop-HeldProbe -Process $probeProcess -Reason 'harness-finally'
+              }
+            } catch {
+              $status.cleanupError = $_.Exception.Message
+              if ($null -eq $failure) {
+                $failure = "Failed to terminate the native probe: $($_.Exception.Message)"
+                $status.error = $failure
+                $status.state = 'harness-error'
+              }
+            } finally {
+              $status.finishedAt = [DateTime]::UtcNow.ToString('o')
+              $status | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 $statusPath
+            }
+          }
+          if ($null -ne $failure) {
+            throw $failure
+          }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: native-menu-flags-${{ matrix.runner }}-${{ github.run_attempt }}
+          path: out/native-menu-flags/
+          if-no-files-found: error
+          retention-days: 90

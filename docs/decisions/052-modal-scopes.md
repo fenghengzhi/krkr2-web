@@ -31,3 +31,21 @@
 只有不可重入的连续事件通知时，就绪查询返回 false；真正的嵌套轮次若因其他排队事件进入连续派发阶段，仍按原生顺序先消费合并通知再拒绝重入，不能将其擅自留给父轮。通知、暂停、禁用和释放会唤醒订阅者，抛错的订阅者会被移除，避免遗留尚未完成的排队 Promise。新增 10 项纯调度测试与上述 34 项 scope 测试共同等待 Actions 验证。
 
 这两个组件尚未相互接线。输入接受 ACK、每事件原生安全 checkpoint、视频完成屏障、绘制推进与真实 `Window.showModal`／`Menu.popup` 仍是后续实现，当前不声明模态功能完成。
+
+## 首轮 Actions 记录
+
+[Node 诊断 34941302575](https://github.com/fenghengzhi/krkr2-web/actions/runs/34941302575)在 `ce17a66` 完成类型检查与生产构建，但整体失败。新增 scope 34 项、嵌套调度 10 项全部实际通过；总计 1,300 个案例通过、1 个测试文件因 SIGTRAP 失败，预期 1,340 个案例中另有 40 个未报告。文件失败占位不能计为一个普通案例，未报告也不能计为跳过或通过。浏览器及直接运行时在该诊断中未运行。
+
+中止的是原有 `object-lifetime.test.ts`，其 68 项只报告 28 项通过。Node v24.19.0 的 V8 再次触发 `jit_page_->allocations_.erase(addr) == 1`，本次回溯经过 NativeModule::FreeCode。它与此前记录的断言相同，但不能据此断定根因相同或已修复。完整 run.json、TAP 和回溯保留在该 run 的独立归档；只读逐项核算在 `out/verification/multiwindow/node-v8-34941302575.md`。这次组件通过不代表尚未接线的模态功能完成。
+
+## 接收与事件体结算
+
+`SystemEvents.enqueue()` 现在同步返回 accepted/discarded 及该事件体的 completion Promise。销毁、容量或参数拒绝在接管新任务前同步抛出；旧 `post()` 包装它并保留 Promise 接口。新增 `onSettled(outcome, roundToken?)` 在事件体结束、失效、丢弃或取消时同步调用一次，早于 completion；已取队任务携带所属 round，未取队任务没有 round。调用者必须先登记自己的资源记录，再调用 enqueue，因为丢弃或同步调度失败可以立即结算。
+
+任务先从队列／current 分离再结算，重入取消和销毁不会覆盖后来的任务。取队时 onTaken／valid 抛错也会收敛取出的任务；hook 与诊断回调异常隔离，实际原生引用释放错误在尝试其余清理后继续向调用方传播。新增 17 项测试检查这些边界，尚待 Actions。这里的事件体完成仍不代表 native release、画面提交或完整 Session checkpoint；浏览器接受 ACK、逐事件 checkpoint 和视频屏障还没有接线。
+
+## Windows 菜单参考探针
+
+新增 `tests/probes/native-menu-flags.cpp` 和独立 Actions 工作流，仅在 GitHub-hosted Windows 2022／2025 上运行。首版对自建菜单验证 NoNotify／ReturnCmd／Recurse 三个位的八种组合及选择／Esc，共每平台 16 项；通过本进程窗口和线程的真实菜单消息循环注入，记录原始返回值与 WM_COMMAND 顺序。没有全局输入，也没有运行本机探针。每例和进程均有截止时间，失败、不可执行、超时与未运行保留原始产物。
+
+它只比较 Win32 TrackPopupMenuEx，不证明旧 VCL 命令 ID 分配，也尚未测试已有菜单中的真正递归。无 ReturnCmd 的取消 BOOL 原样记录，不预先规定值。新增探针还未执行，不能引用为通过证据。
