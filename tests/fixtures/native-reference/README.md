@@ -74,9 +74,9 @@ reshow or subsequent hidden-close recovery behavior has been observed here.
 - `modal-parent-child`: the parent query accepts closure and opens a child modal
   before returning. A later timer closes the child and records both returns.
 
-Each scenario runs in its own process so a failure cannot hide the other
+Each modal scenario runs in its own process so a failure cannot hide the other
 scenarios. No hardware input, menu notifications, browser behavior or native
-plugin behavior is covered by these fixtures.
+plugin behavior is covered by the modal fixtures.
 
 ## Owned keyboard menu observations
 
@@ -124,11 +124,59 @@ workflow log and hashes.
 
 The corrected driver waits for an actual highlight transition before advancing
 its bounded navigation and stops all UI reads after observed menu exit. It keeps
-the same two-Down, one-terminal-key and 3-second budgets. This correction is not
-verified until a subsequent hosted run completes.
+the same two-Down, one-terminal-key and 3-second budgets.
 
 One already completed case in that failed run is Windows 2025's NoNotify-only
 selection: the actual target was highlighted, Enter was posted to the owned
 popup, the raw return was `1`, and one target onClick was recorded after return.
 This confirms that concrete original-SDK posted-keyboard counterexample without
 turning the seven incomplete observations or the whole run into a pass.
+
+The corrected run,
+[34996110492](https://github.com/fenghengzhi/krkr2-web/actions/runs/34996110492)
+at `2ec771728368f470ce8eedb3794127b7190d925b`, completed all 16 observations.
+Both runners recorded the following results. `C` was independently read with
+`GetMenuItemID` and was `31` for the target and `32` for the other leaf in every
+fresh process; this does not establish a general command allocator sequence.
+
+| Flags                  | Selected target: raw return | Selected target: onClick count | Escape: raw return | Escape: onClick count |
+| ---------------------- | --------------------------- | ------------------------------ | ------------------ | --------------------- |
+| `0`                    | `1`                         | `1`, after popup return        | `1`                | `0`                   |
+| `tpmNoNotify` (`128`)  | `1`                         | `1`, after popup return        | `1`                | `0`                   |
+| `tpmReturnCmd` (`256`) | `C` (`31`)                  | `0`                            | `0`                | `0`                   |
+| Both (`384`)           | `C` (`31`)                  | `0`                            | `0`                | `0`                   |
+
+Each selection had an observed target highlight before its owned Enter; each
+cancellation sent only its owned Escape. All 112 original artifact files,
+terminal metadata, workflow log, native events and driver traces are archived.
+The archived UTF-16 startup and driver bytes match their recorded hashes in all
+32 comparisons. This is original SDK keyboard evidence, not a Web test result
+or a reinterpretation of the older failing Win32 assertions.
+
+For NoNotify-only selection, both runners recorded this consecutive ordering:
+
+```text
+popup-after:return=1:clicks=0:other=0
+target-onClick:1:returned=1
+```
+
+Windows 2022 additionally recorded `timer-inside-popup` before the return in
+that case. The exact NoNotify-only startup SHA-256 values are:
+
+- Windows 2022: `be7f4e972bd3d2c1fd1a78431b0fb4c4cbe5852d2ca36ae3d705347fe969eeb8`.
+- Windows 2025: `7ba6c54b4589fd56e005f284132a6f69574e5f1b4bfcc8acb785193c1a2465cb`.
+
+Both used driver SHA-256
+`153dd76ac4728ae6b4488481505c48f8e48fe5cae357101346958f5e0399f41c`
+and the pinned engine SHA-256 from `sdk.json`. Fixture hashes differ because each
+process receives its own random owner token.
+
+The fixed original
+[MenuItemImpl.cpp](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/MenuItemImpl.cpp)
+passes flags directly to `TrackPopupMenuEx`; `MenuItemClick` only queues an input
+event. Its enabled checks and
+[MenuItemIntf.cpp](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/MenuItemIntf.cpp)'s
+Window eligibility checks do not apply a second NoNotify/ReturnCmd filter. The
+exact SDK source revision and bundled VCL build remain unidentified. No mouse,
+hardware keyboard, recursive-popup or other cancellation path is established by
+these observations.
