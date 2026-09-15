@@ -1,6 +1,12 @@
 # 当前实现范围
 
-当前已验证阶段为 050，同时包含 [047 的 Window.mainWindow 实例查询](../decisions/047-window-main-instance.md)、[049 的 piledCopy 空目标区域及回调顺序](../decisions/049-piled-copy-empty-region.md)和 [050 的图像保存取消验证](../decisions/050-image-save-cancellation.md)。此前 [046 的 neutralColor](../decisions/046-layer-neutral-color.md)、无主图 opaque 填色与祖先快照继续保留。**仍只允许一个活动 Window**；051 多窗口在独立分支开发，尚未验证，不能计入本页当前能力。其他图形／系统和媒体能力仍未完成，见[实现进度](../non-plugin-progress.md)与[多窗口规划](../decisions/048-multiwindow-plan.md)。
+当前已验证阶段为 [051 多窗口](../decisions/051-multiwindow.md)：同一 Worker／TJS VM 内有独立 Window 身份、画布、输入、菜单和视频平面；支持页面内浮动布局、单窗嵌入布局、关闭及恢复。会话协议为 10，TJS ABI 5 与字体 ABI 2 保持。
+
+[完整回归 34945014092](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945014092)在 `3ef7f09` 通过 **1,317 项 Node、1,041 项浏览器和 6 组直接运行时**；浏览器包含 918 项常规、57 项游戏库、59 项 PWA、7 项可信生命周期。[兼容检查 34945755032](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945755032)使用同一提交、同次构建通过 **78 项原 KAG／旧 ABI 检查**，三浏览器各 26 项。
+
+各轮失败与未报告案例继续保留；本轮通过不证明历史 V8 断言或 WebGL context loss 的根因已修复。Window.showModal、菜单嵌套事件循环、其余图形／系统 API、流式媒体及旧视频编码仍在实现，完整非插件目标尚未完成。 完整范围见[实现进度](../non-plugin-progress.md)。
+
+以下保留 050 及更早阶段的验证历史；当时的单窗限制已由 051 更新。
 
 [完整回归 34931803098](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931803098)在 `f1f6a3d` 通过全部 14 个作业：**1,118 项 Node、846 项浏览器（723 项常规、57 项游戏库、59 项 PWA、7 项原生生命周期）及 6 项直接运行时**；失败、取消、跳过、flaky 和重试均为 0，最大重试次数为 0。总数包含 18 项观察器内调用 Stop 的浏览器场景和 32 项编码器内部取消检查点的 Node 场景，二者分别验证按钮调用顺序和编码已进入后取消的行为，不互相代替。
 
@@ -91,7 +97,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 | KAGParser    | TypeScript 词法与状态机；标签、宏/参数转发、条件、emb、内嵌脚本、跳转/调用栈、store/restore/assign、回调与中断                                                                                                                                     |
 | 菜单         | MenuItem 树、Window.menu、顺序、可见/禁用、单选组、onClick、页面菜单/快捷键、弹出选择/取消；按 ID 更新保留未移除项的展开、焦点与点击                                                                                                               |
 | 系统         | createAppLock 使用按游戏分区的 Web Locks，停止释放；exit/terminate 取消执行并提交待写存档                                                                                                                                                          |
-| 窗口         | 单活动窗口的逻辑尺寸、缩放、显示偏移、外观、可见性、resize 通知、管理对象 add/remove、closeQuery/close；mainWindow 返回实际实例或 null；可退出的页面内全屏                                                                                         |
+| 窗口         | 同一会话多个页面内窗口，独立画布、输入、菜单与视频；尺寸／位置、缩放、可见性、resize、管理对象与关闭查询；mainWindow 独立于活动窗口，支持页面内全屏                                                                                                |
 | 输入         | 鼠标/触摸、捕获、键盘/提交文字、物理按键状态、focus chain、模态栈、onHitTest、异步 postInputEvent、光标与 hint                                                                                                                                     |
 | 字体         | 独立 FreeType 文件字体、Canvas 系统字体/缺字回退、预渲染版本 0/1 与共享映射、getGlyphDrawRect/Rect、样式与阴影；getList/doUserSelect；逻辑纵排家族、vert/vrt2、Unicode 朝向/呈现形式、按索引变换与竖向装饰线；普通文件路径保留原 FreeType 角度语义 |
 | 声音         | Wave/MIDI 宿主、AudioWorklet 混音、WAV/Vorbis/MP3、SLI 循环/标志/标签、定位、音量/声像、淡入淡出、完成事件及静音                                                                                                                                   |
@@ -112,7 +118,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 - `Scripts.execStorage/evalStorage(name, mode, context)` 和 `Scripts.exec/eval(source, name, lineOffset, context)`，支持嵌套执行、上下文和来源行偏移。
 - `Storages.isExistentStorage(name)`、`Storages.addAutoPath/removeAutoPath(directory)`、`getPlacedPath`、路径提取函数。
 - ZIP 支持 stored/deflate、ZIP64、UTF-8/CP437/Unicode Path、按需读取与 CRC 校验，提供普通名称和 `archive>entry` 地址。无效写入目标在 TJS 创建文本/二进制流时预检；原始归档保持只读。详见 [ZIP 资源决策](../decisions/015-zip-storage.md)。
-- `Window`：尺寸/位置/显示偏移/缩放、外观属性、`add/remove` 管理对象、`onResize`、`onCloseQuery/close`、`menu`、`primaryLayer`。只读 `mainWindow` 返回实际主窗口实例或 null，类／派生类／实例均可查询；登记不额外持有窗口，失效开始即撤销查询身份，详见 [047](../decisions/047-window-main-instance.md)。新窗口初始不可见，脚本需设置 `visible=true`；第二个活动 Window 仍报错。
+- `Window`：尺寸/位置/显示偏移/缩放、外观属性、`add/remove` 管理对象、`onResize`、`onCloseQuery/close`、`menu`、`primaryLayer`。只读 `mainWindow` 返回实际主窗口实例或 null，类／派生类／实例均可查询；登记不额外持有窗口，失效开始即撤销查询身份，详见 [047](../decisions/047-window-main-instance.md)。新窗口初始不可见，脚本需设置 `visible=true`；多个存活窗口分别登记，主窗口和当前活动窗口分开；默认关闭主窗口退出会话，exitOnWindowClose=false 可保留其他窗口。画布就绪与生命周期见 [051](../decisions/051-multiwindow.md)。
 - `Layer`：尺寸/图像尺寸与偏移、`setSizeToImageSize/setClip`、`fillRect/colorRect/copyRect/assignImages`、`loadImages`、`drawText`、像素访问、parent/children、order/absolute、moveBefore/moveBehind、翻转、命中及显式销毁。
 - `Layer.neutralColor`：每实例保存低 32 位 ARGB，设置本身不改现有像素或请求重绘；扩容、主图重新分配及仿射 clear 使用该值，真正改变 type 时恢复类型默认值。无主图 opaque 图层仍填色并参与祖先快照；`piledCopy` 在 onPaint 前拒绝无主图的来源或目标。详见[决策 046](../decisions/046-layer-neutral-color.md)。
 - `Layer.focus/focusNext/focusPrev`、`setMode/removeMode`、`releaseCapture/releaseTouchCapture`、焦点/按键/鼠标/触摸事件、`onHitTest` 和四参数 `getLayerAt`；`Window.focusedLayer/currentModalLayer/postInputEvent`、`System.getKeyState`。输入法模式、手势和系统事件仍有未完成项。
@@ -132,11 +138,11 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 
 上述 TVP API 仍是子集。`setSize` 缩小显示区域时保留图像，扩大显示区域会按需扩大图像；`setImageSize` 缩小到显示区域以下时会收缩显示区域；图像偏移必须使显示区域保持在图像之内。`fillRect` 颜色按 `0xAARRGGBB` 解释，原来示例中的第六个“透明度”参数已改正。子层默认不可见，主层可见且不允许移动/隐藏。`face` 区分 main、mask、province 与两种 alpha 表示；`colorRect` 使用 TVP 的定点规则。
 
-仍未完成其他 Bitmap/像素方法、全部几何/混合/采样分支的精确差分、转场的全部原生重入/系统事件边界、字体兼容、完整 ruby/纵排验证和原生窗口事件全集。游戏文件字体使用独立 FreeType WASM；系统字体名称映射和普通缺字回退依赖浏览器，不能保证与原生系统字体一致。预渲染映射、Rect/边界查询、角度的后端差异及已测范围见 [字体几何与后端](../decisions/024-font-geometry.md)。当前全屏占满页面视口，支持按钮/Escape 退出，未调用原生 Fullscreen API。主窗口的外部位置是逻辑值，不会移动浏览器窗口；多窗口尚未支持。
+仍未完成其他 Bitmap/像素方法、全部几何/混合/采样分支的精确差分、转场的全部原生重入/系统事件边界、字体兼容、完整 ruby/纵排验证和原生窗口事件全集。游戏文件字体使用独立 FreeType WASM；系统字体名称映射和普通缺字回退依赖浏览器，不能保证与原生系统字体一致。预渲染映射、Rect/边界查询、角度的后端差异及已测范围见 [字体几何与后端](../decisions/024-font-geometry.md)。当前全屏占满页面视口，支持按钮/Escape 退出，未调用原生 Fullscreen API。窗口位置用于页面内浮动宿主，不会移动浏览器窗口；Window.showModal 与独立浏览器弹窗仍未完成。
 
 **尚未实现**
 
-KAG 完整画面和复杂游戏流程、流式音频/完整 MIDI/CD 映射、旧视频编码/完整混合层与色彩控制、完整系统/立即事件异常策略、复杂场景/媒体状态的完整存读档验证、按块持久 HTTP 缓存/续传、嵌套包与根目录发现、其他 ZIP 压缩/加密及多卷变体、统一内存预留及其他图像编码变体、PSB、Emote/MotionPlayer 和其他插件、嵌入 EXE 的 XP3、XP3 提取过滤器/加密、完整虚拟路径/patch 自动发现规则、多窗口、移动系统强杀/BFCache 与后台长请求的完整验证。`Plugins.link` 返回带插件名的明确错误。
+KAG 完整画面和复杂游戏流程、流式音频/完整 MIDI/CD 映射、旧视频编码/完整混合层与色彩控制、完整系统/立即事件异常策略、复杂场景/媒体状态的完整存读档验证、按块持久 HTTP 缓存/续传、嵌套包与根目录发现、其他 ZIP 压缩/加密及多卷变体、统一内存预留及其他图像编码变体、PSB、Emote/MotionPlayer 和其他插件、嵌入 EXE 的 XP3、XP3 提取过滤器/加密、完整虚拟路径/patch 自动发现规则、Window.showModal／完整菜单嵌套循环、移动系统强杀/BFCache 与后台长请求的完整验证。`Plugins.link` 返回带插件名的明确错误。
 
 没有解析游戏专用补丁命名规则。页面的源文件顺序就是挂载顺序；后挂载的同名资源覆盖前者。目录选择保留目录内的相对路径。不同大小写文件可各自存在，但歧义回退会报错。XP3 的保护位是提取保护标志，不等于内容加密；adlr 也不保证是内容校验和。两者作为元数据保留，不再阻止普通读取。游戏专用提取过滤器仍未接入。
 
