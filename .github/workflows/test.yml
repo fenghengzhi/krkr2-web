@@ -229,6 +229,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Mark this hosted macOS job before starting any browsers
+        if: runner.os == 'macOS' && runner.environment == 'github-hosted'
+        run: |
+          mkdir -p out/ci
+          touch out/ci/native-reports-start.marker
+          date -u '+%Y-%m-%dT%H:%M:%SZ' > out/ci/native-reports-start.txt
       - uses: ./.github/actions/prepare-tests
       - name: Install browser and system dependencies
         id: browser-install
@@ -236,7 +242,7 @@ jobs:
       - name: Install virtual display, graphics and audio output
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y xvfb libgl1-mesa-dri mesa-utils pulseaudio pulseaudio-utils
+          sudo apt-get install -y xvfb x11-utils libgl1-mesa-dri mesa-utils pulseaudio pulseaudio-utils
           xvfb-run -a glxinfo -B
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=krkr_test_output rate=48000 channels=2
@@ -247,9 +253,9 @@ jobs:
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/browser-capabilities.ts "${{ matrix.browser }}" 2>&1 | tee out/ci/capabilities.log
       - name: Run browser suite
         env:
-          # Preserve native browser process diagnostics for intermittent WebKit
-          # protocol-session loss; test deadlines and retry settings stay fixed.
-          DEBUG: ${{ matrix.browser == 'webkit' && 'pw:browser' || '' }}
+          # Correlate Firefox display failures and WebKit page crashes with native
+          # process lifetimes; test deadlines and retry settings stay fixed.
+          DEBUG: ${{ matrix.browser != 'chromium' && 'pw:browser' || '' }}
           PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/results.json
           KRKR_TEST_BROWSER: ${{ matrix.browser }}
           KRKR_TEST_SUITE: ${{ matrix.suite }}
@@ -263,6 +269,91 @@ jobs:
           esac
           bash scripts/ci-browser.sh npx playwright test -c "$krkr_playwright_config" \
             --project="$KRKR_TEST_BROWSER" --workers="$KRKR_TEST_WORKERS" --reporter=list,json,github 2>&1 | tee out/ci/results.log
+      - name: Preserve new hosted macOS browser crash reports
+        if: ${{ always() && runner.os == 'macOS' && runner.environment == 'github-hosted' }}
+        env:
+          KRKR_TEST_BROWSER: ${{ matrix.browser }}
+          KRKR_TEST_SUITE: ${{ matrix.suite }}
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import platform
+          import shutil
+          import time
+
+          # Never inspect a developer's Mac or a self-hosted runner.
+          if (os.environ.get('GITHUB_ACTIONS') != 'true' or
+                  os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted' or
+                  platform.system() != 'Darwin'):
+              raise SystemExit('Native report collection requires a GitHub-hosted Mac')
+          output = pathlib.Path('out/ci/native-crashes')
+          output.mkdir(parents=True, exist_ok=True)
+          marker = pathlib.Path('out/ci/native-reports-start.marker')
+          manifest = {
+              'runId': os.environ.get('GITHUB_RUN_ID'),
+              'attempt': os.environ.get('GITHUB_RUN_ATTEMPT'),
+              'commit': os.environ.get('GITHUB_SHA'),
+              'browser': os.environ.get('KRKR_TEST_BROWSER'),
+              'suite': os.environ.get('KRKR_TEST_SUITE'),
+              'jobStarted': marker.exists(),
+              'scope': 'New browser-related report candidates; correlate crash time and PID with Playwright logs',
+              'roots': [], 'reports': [], 'errors': [], 'unrelatedNewReports': 0,
+          }
+          if marker.exists():
+              started = marker.stat().st_mtime_ns
+              manifest['markerMtimeNs'] = started
+              # Allow ReportCrash a bounded interval to finish writing. An empty
+              # result after this interval does not establish that no crash occurred.
+              time.sleep(3)
+              keywords = (b'webkit', b'webcontent', b'minibrowser', b'playwright',
+                          b'javascriptcore', b'webprocess')
+              manifest['matchKeywords'] = [word.decode() for word in keywords]
+              for label, root in [
+                  ('user', pathlib.Path.home() / 'Library/Logs/DiagnosticReports'),
+                  ('system', pathlib.Path('/Library/Logs/DiagnosticReports')),
+              ]:
+                  manifest['roots'].append({'label': label, 'path': str(root), 'exists': root.exists()})
+                  if not root.exists():
+                      continue
+                  try:
+                      for report in root.rglob('*'):
+                          if report.suffix.lower() not in ('.ips', '.crash') or not report.is_file():
+                              continue
+                          try:
+                              info = report.stat()
+                              birth = int(info.st_birthtime * 1_000_000_000)
+                              if birth < started or info.st_mtime_ns < started:
+                                  continue
+                              payload = report.read_bytes()
+                              candidate = report.name.encode().lower() + b'\n' + payload.lower()
+                              matches = [word.decode() for word in keywords if word in candidate]
+                              if not matches:
+                                  manifest['unrelatedNewReports'] += 1
+                                  continue
+                              target = output / label / report.relative_to(root)
+                              target.parent.mkdir(parents=True, exist_ok=True)
+                              target.write_bytes(payload)
+                              shutil.copystat(report, target)
+                              manifest['reports'].append({
+                                  'source': str(report), 'artifactPath': str(target),
+                                  'size': len(payload), 'mtimeNs': info.st_mtime_ns,
+                                  'birthtimeNs': birth, 'matchedKeywords': matches,
+                                  'sha256': hashlib.sha256(payload).hexdigest(),
+                              })
+                          except OSError as error:
+                              manifest['errors'].append({'path': str(report), 'error': str(error)})
+                  except OSError as error:
+                      manifest['errors'].append({'path': str(root), 'error': str(error)})
+          manifest['collectedAt'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          print(json.dumps(manifest, indent=2))
+          if manifest['errors']:
+              raise SystemExit('Some new native diagnostic reports could not be preserved')
+          PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
