@@ -72,6 +72,18 @@ export class PortVideoBackend implements VideoBackend {
         if (this.openings.get(id) === ticket) this.openings.delete(id)
       }
     }
+    if (command.op === 'mixing' && command.bitmap) {
+      const bitmap = command.bitmap
+      // A caller may still own this snapshot. Transfer a private copy, never a Layer buffer.
+      return this.send({
+        ...command,
+        bitmap: {
+          ...bitmap,
+          destination: { ...bitmap.destination },
+          pixels: { ...bitmap.pixels, data: Uint8Array.from(bitmap.pixels.data) },
+        },
+      })
+    }
     return this.send(command)
   }
   private send(command: VideoCommand): Promise<VideoResult> {
@@ -85,7 +97,11 @@ export class PortVideoBackend implements VideoBackend {
       try {
         this.port.postMessage(
           { serial, command } satisfies VideoRequest,
-          command.op === 'open' ? [command.bytes.buffer as ArrayBuffer] : [],
+          command.op === 'open'
+            ? [command.bytes.buffer as ArrayBuffer]
+            : command.op === 'mixing' && command.bitmap
+              ? [command.bitmap.pixels.data.buffer as ArrayBuffer]
+              : [],
         )
       } catch (error) {
         cancelTimeout()

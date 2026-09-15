@@ -3,16 +3,24 @@ import {
   emptyVideoSnapshot,
   type VideoCommand,
   type VideoEvent,
+  type VideoMixingBitmap,
   type VideoResult,
   type VideoSettings,
   type VideoSnapshot,
   type VideoTimeline,
 } from '../../../engine/ports/video.ts'
 import { videoFrameAt, videoFrameTime } from '../../../engine/media/video-time.ts'
+import { videoOutputRectangle } from '../../../engine/media/video-mixing.ts'
 import type { Pixels } from '../../../engine/ports/graphics.ts'
 import type { WindowView } from '../../../engine/scene/window.ts'
 import type { VideoMessage, VideoRequest } from '../../../protocol/video.ts'
 import type { WebAudioHost } from '../../audio/web/host.ts'
+import {
+  createVideoMixingSurface,
+  releaseVideoMixingSurface,
+  videoMixingBudget,
+  type VideoMixingSurface,
+} from './mixing-bitmap.ts'
 interface Movie {
   id: number
   epoch: number
@@ -33,6 +41,7 @@ interface Movie {
   abort: AbortController
   audio: ReturnType<WebAudioHost['connectMedia']>
   surface?: OffscreenCanvas
+  mixing?: VideoMixingSurface
 }
 interface VideoWindow {
   epoch: number
@@ -52,6 +61,7 @@ export class WebVideoHost {
     this.timeouts.setPaused(paused)
   }
   private movies = new Map<number, Movie>()
+  private mixingBytes = 0
   private closed = false
   private closing?: Promise<void>
   private paused = false
@@ -305,13 +315,25 @@ export class WebVideoHost {
       for (const movie of this.movies.values()) {
         if (movie.windowId !== windowId) continue
         const s = movie.settings,
-          layer = s.mode === 1
+          layer = s.mode === 1,
+          output =
+            s.mode === 2
+              ? videoOutputRectangle(s, {
+                  zoomNumer: view?.zoomNumer ?? 1,
+                  zoomDenom: view?.zoomDenom ?? 1,
+                })
+              : {
+                  left: s.left * zoom,
+                  top: s.top * zoom,
+                  width: s.width * zoom,
+                  height: s.height * zoom,
+                }
         Object.assign(movie.container.style, {
           position: 'absolute',
-          left: `${(s.left * zoom + (view?.layerLeft ?? 0)) * sx}px`,
-          top: `${(s.top * zoom + (view?.layerTop ?? 0)) * sy}px`,
-          width: `${s.width * zoom * sx}px`,
-          height: `${s.height * zoom * sy}px`,
+          left: `${(output.left + (view?.layerLeft ?? 0)) * sx}px`,
+          top: `${(output.top + (view?.layerTop ?? 0)) * sy}px`,
+          width: `${(s.mode === 2 ? Math.max(0, output.width) : output.width) * sx}px`,
+          height: `${(s.mode === 2 ? Math.max(0, output.height) : output.height) * sy}px`,
           visibility: layer || !s.visible || view?.visible === false ? 'hidden' : 'visible',
           overflow: 'hidden',
           backgroundColor: `#${(s.mixingMovieBGColor & 0xffffff).toString(16).padStart(6, '0')}`,
@@ -628,6 +650,38 @@ export class WebVideoHost {
     )
     this.layout()
   }
+  private mixing(movie: Movie, bitmap: VideoMixingBitmap | null): void {
+    if (movie.settings.mode !== 2) return
+    const previous = movie.mixing
+    if (!bitmap) {
+      this.releaseMixing(movie)
+      return
+    }
+    const next = createVideoMixingSurface(
+      bitmap,
+      videoMixingBudget - this.mixingBytes + (previous?.bytes ?? 0),
+    )
+    try {
+      next.canvas.dataset.videoId = String(movie.id)
+      next.canvas.dataset.mixingWindowId = String(movie.windowId)
+      movie.container.append(next.canvas)
+    } catch (error) {
+      try {
+        releaseVideoMixingSurface(next)
+      } catch {}
+      throw error
+    }
+    movie.mixing = next
+    this.mixingBytes += next.bytes - (previous?.bytes ?? 0)
+    if (previous) releaseVideoMixingSurface(previous)
+  }
+  private releaseMixing(movie: Movie): void {
+    const surface = movie.mixing
+    if (!surface) return
+    movie.mixing = undefined
+    this.mixingBytes -= surface.bytes
+    releaseVideoMixingSurface(surface)
+  }
   private async open(command: Extract<VideoCommand, { op: 'open' }>): Promise<VideoResult> {
     const windowId = command.windowId ?? 0
     if (this.retiredWindows.has(windowId)) throw new Error('Video Window is closed')
@@ -831,6 +885,7 @@ export class WebVideoHost {
     if (command.epoch < movie.epoch) throw new Error('Video operation was superseded')
     movie.epoch = command.epoch
     if (command.op === 'set') this.settings(movie, command.settings)
+    else if (command.op === 'mixing') this.mixing(movie, command.bitmap)
     else if (command.op === 'seek' || command.op === 'rewind') {
       const time =
         command.op === 'seek'
@@ -910,6 +965,7 @@ export class WebVideoHost {
       }
     }
     attempt(() => movie.abort.abort())
+    attempt(() => this.releaseMixing(movie))
     attempt(() => this.cancelFrame(movie))
     attempt(() => {
       movie.element.onended = movie.element.ontimeupdate = null

@@ -18,8 +18,11 @@ class VideoOverlay {
   function setPeriodEvent(frame=-1){periodEventFrame=frame;}
   function cancelPeriodEvent(){periodEventFrame=-1;}
   function selectAudioStream(index){__videoRun("audioStream",[int(index)]);}
-  function setMixingLayer(layer){throw new Exception("Video mixing-layer composition is not implemented");}
-  function resetMixingLayer(){}
+  function setMixingLayer(args*){
+    if(args.count<1)throw new global.Exception("VideoOverlay.setMixingLayer requires a Layer argument");
+    __host("Video.mixingLayer",__videoId,args[0]);
+  }
+  function resetMixingLayer(){__host("Video.mixingLayer",__videoId,null);}
   function onStatusChanged(status){if(typeof __videoWindow.action!="undefined")__videoWindow.action(%[type:"onStatusChanged",target:this,status:status]);}
   function onPeriod(reason){if(typeof __videoWindow.action!="undefined")__videoWindow.action(%[type:"onPeriod",target:this,reason:reason]);}
   function onFrameUpdate(frame){if(typeof __videoWindow.action!="undefined")__videoWindow.action(%[type:"onFrameUpdate",target:this,frame:frame]);}

@@ -23,6 +23,7 @@ import { ImageLoader } from './storage/images.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree } from './scene/layers.ts'
 import { LayerService } from './scene/layer-objects.ts'
+import { captureVideoMixingBitmap } from './media/video-mixing.ts'
 import type { DecodedImage, GraphicsDecoder, Renderer, RendererStatus } from './ports/graphics.ts'
 import type { Inflater, Resource } from './ports/storage.ts'
 import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts'
@@ -569,6 +570,17 @@ export class EngineSession {
           if (!this.control.cancelled) this.fail(error)
         },
         (source) => this.systemEvents!.cancelSource(source),
+        undefined,
+        (source, settings, windowId, opened) => {
+          // Native argument validation precedes the unopened-video no-op.
+          const layer = source === null ? null : this.layerObjects!.cast(source)
+          if (!opened || !layer) return null
+          return captureVideoMixingBitmap(
+            this.layers.get(layer.id),
+            settings,
+            this.windows!.get(windowId).state,
+          )
+        },
       )
       this.windows = new WindowService(
         this.runtime,

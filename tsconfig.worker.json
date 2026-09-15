@@ -10,7 +10,7 @@
   "exclude": [
     "src/backends/audio/web/host.ts",
     "src/backends/clipboard/browser.ts",
-    "src/backends/video/browser/host.ts",
+    "src/backends/video/browser",
     "src/backends/input/browser.ts",
     "src/backends/input/coordinator.ts"
   ]
