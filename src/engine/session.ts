@@ -35,6 +35,7 @@ import { KagService } from './kag/service.ts'
 import { kagClass } from './tvp/kag.ts'
 import { menuClass } from './tvp/menus.ts'
 import { MenuTree, type MenuSnapshot } from './scene/menus.ts'
+import { MenuService } from './scene/menu-items.ts'
 import { WindowState, type WindowView } from './scene/window.ts'
 import { WindowService, type WindowRecord } from './scene/windows.ts'
 import { windowClass } from './tvp/window.ts'
@@ -198,6 +199,7 @@ export class EngineSession {
   private detachRenderer?: () => void
   private window = new WindowState()
   private windows?: WindowService
+  private menuItems?: MenuService
   private windowId = 0
   private get width(): number {
     return this.window.width
@@ -436,7 +438,7 @@ export class EngineSession {
         (window) => {
           this.systemEvents?.cancelSource(window)
           this.videos?.disconnectWindow(window.id)
-          if (window.menu && this.menus.has(window.menu)) this.menus.destroy(window.menu)
+          this.menuItems?.disconnectWindow(window)
           if (this.windowId === window.id) {
             this.windowId = 0
             this.inputController.clear()
@@ -444,6 +446,9 @@ export class EngineSession {
           this.dirty = true
         },
       )
+      this.menuItems = new MenuService(this.runtime, this.menus, this.windows, (item) => {
+        this.systemEvents?.cancelSource(item)
+      })
       this.discard(await this.runtime.execute(tvpConstants, 'krkr2-web/constants.tjs'))
       this.discard(await this.runtime.execute(debugBridge, 'krkr2-web/debug.tjs'))
       this.discard(await this.runtime.execute(bootstrap, 'krkr2-web/bootstrap.tjs'))
@@ -928,13 +933,14 @@ export class EngineSession {
       return Promise.resolve()
     }
     const epoch = this.inputController.epoch,
-      window = this.windows?.active
+      window = this.windows?.active,
+      item = this.menuItems?.byView(id)
     let lease: ScriptObject | undefined
     return this.systemEvents!.post(
       () => {
-        lease = window && this.runtime!.upgrade(window.owner)
+        lease = item && this.runtime!.upgrade(item.owner)
         return lease
-          ? { kind: 'invoke', callback: lease, member: '__menuClick', args: [BigInt(id)] }
+          ? { kind: 'invoke', callback: lease, member: 'onClick', args: [] }
           : { kind: 'value', value: undefined }
       },
       {
@@ -945,11 +951,14 @@ export class EngineSession {
           !this.systemEvents!.disabled &&
           this.window.visible &&
           this.menus.selectable(id) &&
+          !!item &&
+          !item.finished &&
+          !item.closing &&
           !!window?.menu &&
           this.windows?.active === window,
         priority: 1,
         discardable: true,
-        source: window,
+        source: item,
       },
     )
       .finally(() => {
@@ -1020,6 +1029,7 @@ export class EngineSession {
     videoSources: number
     pendingVideoCloses: number
     windowSources: number
+    menuSources: number
     closingWindows: number
     dependents: number
     pendingInvalidations: number
@@ -1035,6 +1045,7 @@ export class EngineSession {
       videoSources: this.videos?.count ?? 0,
       pendingVideoCloses: this.videos?.pendingCloses ?? 0,
       windowSources: this.windows?.count ?? 0,
+      menuSources: this.menuItems?.count ?? 0,
       closingWindows: this.windows?.closing ?? 0,
       dependents: runtime?.dependents ?? 0,
       pendingInvalidations: runtime?.pendingInvalidations ?? 0,
@@ -1140,8 +1151,9 @@ export class EngineSession {
       await attempt(() => this.inputs?.dispose())
       this.callbacks.clear()
       await attempt(() => this.kag.clear())
-      await attempt(() => this.menus.clear())
       await attempt(() => this.windows?.dispose())
+      await attempt(() => this.menuItems?.dispose())
+      await attempt(() => this.menus.clear())
       await attempt(() => this.presentMenus())
       const runtime = this.runtime
       this.runtime = undefined
@@ -1475,16 +1487,57 @@ export class EngineSession {
         value = BigInt(this.events!.create(type, callback))
         break
       }
-      case 'Menu.create':
-        value = BigInt(this.menus.create(text(0)))
+      case 'Menu.bind':
+        if (!isScriptObject(args[0])) throw new Error('Expected menu cleanup function')
+        this.menuItems!.bind(args[0])
         break
-      case 'Menu.root': {
-        const window = this.windows!.get(number(1))
-        this.menus.get(number(0))
-        window.menu = number(0)
-        if (this.windowId === window.id) this.menus.setRoot(window.menu)
+      case 'Menu.create':
+        if (!isScriptObject(args[0]) || !isScriptObject(args[1]))
+          throw new Error('Expected MenuItem instance and private state')
+        value = this.menuItems!.create(args[0], args[1], args[2])
+        break
+      case 'Menu.invalidate':
+        if (!isScriptObject(args[1])) throw new Error('Expected native menu owner')
+        return this.menuItems!.invalidate(number(0), args[1])
+      case 'Menu.releaseSlot':
+        this.menuItems!.releaseSlot(number(0), number(1))
+        break
+      case 'Menu.abort':
+        this.menuItems!.abort(number(0))
+        break
+      case 'Menu.finish':
+        this.menuItems!.finish(number(0))
+        break
+      case 'Menu.state':
+        value = this.menuItems!.state(args[0])
+        break
+      case 'Menu.view':
+        value = BigInt(this.menuItems!.get(args[0]).view)
+        break
+      case 'Menu.relation':
+        value = this.menuItems!.relation(args[0], text(1))
+        break
+      case 'Menu.index':
+        value = BigInt(
+          this.menuItems!.index(args[0], args[1] === undefined ? undefined : number(1)),
+        )
+        break
+      case 'Menu.target': {
+        const item = this.menuItems!.byView(number(0))
+        value = item && !item.closing && this.menus.selectable(item.view) ? item.owner : null
         break
       }
+      case 'Menu.action':
+        if (args[0] === null) break
+        if (!isScriptObject(args[0]) || !isScriptObject(args[1]))
+          throw new Error('MenuItem action requires an object owner and target')
+        return {
+          kind: 'invoke',
+          callback: args[0],
+          member: 'action',
+          args: [scriptRecord({ type: 'onClick', target: args[1] })],
+          ignoreStatus: true,
+        }
       case 'Menu.get': {
         const property = text(1)
         if (
@@ -1493,28 +1546,38 @@ export class EngineSession {
           )
         )
           throw new Error('Unsupported menu property')
-        const field = this.menus.get(number(0))[property as 'caption']
+        const field = this.menus.get(this.menuItems!.get(args[0]).view)[property as 'caption']
         value = typeof field === 'string' ? field : BigInt(Number(field))
         break
       }
       case 'Menu.set':
-        this.menus.set(number(0), text(1), typeof args[2] === 'string' ? text(2) : number(2))
+        this.menus.set(
+          this.menuItems!.get(args[0]).view,
+          text(1),
+          typeof args[2] === 'string' ? text(2) : number(2),
+        )
         break
       case 'Menu.insert':
-        this.menus.insert(number(0), number(1), number(2))
+        value = this.menuItems!.insert(
+          args[0],
+          args[1],
+          args[2] === undefined ? undefined : number(2),
+        )
         break
       case 'Menu.remove':
-        this.menus.remove(number(0), number(1))
-        break
-      case 'Menu.destroy':
-        this.menus.destroy(number(0))
+        value = this.menuItems!.remove(args[0], args[1])
         break
       case 'Menu.popup': {
         if (this.activity.state !== 'visible' || !this.window.visible) {
           value = 0n
           break
         }
-        const selected = this.menus.openPopup(number(0), number(1), number(2), number(3))
+        const selected = this.menus.openPopup(
+          this.menuItems!.get(args[0]).view,
+          number(1),
+          number(2),
+          number(3),
+        )
         this.presentMenus()
         value = BigInt(await selected)
         this.presentMenus()

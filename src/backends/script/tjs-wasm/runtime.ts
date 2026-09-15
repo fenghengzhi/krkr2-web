@@ -284,8 +284,14 @@ export class TjsWasmRuntime implements ScriptRuntime {
     this.owners.delete(owner.id)
     this.call('krkr_owner_unobserve', this.vm, owner.id)
   }
-  registerNativeLifetime(owner: ScriptObject, operation: string, identifier: number): void {
+  registerNativeLifetime(
+    owner: ScriptObject,
+    operation: string,
+    identifier: number,
+    state?: ScriptObject,
+  ): void {
     this.assertObject(owner)
+    if (state) this.assertObject(state)
     if (
       !/^[A-Za-z][A-Za-z0-9_.]{0,127}$/.test(operation) ||
       !Number.isSafeInteger(identifier) ||
@@ -303,9 +309,28 @@ export class TjsWasmRuntime implements ScriptRuntime {
           name,
           operation.length,
           identifier,
+          state?.id ?? 0,
         )
       )
         throw new Error('Cannot register a native lifetime on this TJS instance')
+    } finally {
+      this.call('free', name)
+    }
+  }
+  nativeLifetimeIdentifier(owner: ScriptObject, operation: string): number | undefined {
+    this.assertObject(owner)
+    if (!/^[A-Za-z][A-Za-z0-9_.]{0,127}$/.test(operation))
+      throw new Error('Invalid native lifetime operation')
+    const name = this.textPointer(operation)
+    try {
+      const id = this.call(
+        'krkr_owner_native_identifier',
+        this.vm,
+        owner.id,
+        name,
+        operation.length,
+      )
+      return id < 0 ? undefined : id
     } finally {
       this.call('free', name)
     }
@@ -386,6 +411,8 @@ export class TjsWasmRuntime implements ScriptRuntime {
   }
   private buildReply(reply: HostReply): number {
     if (reply.kind === 'dump') return this.call('krkr_reply_new', 8)
+    if (reply.kind === 'invoke' && reply.statusOnly && reply.ignoreStatus)
+      throw new Error('Cannot both return and ignore a native call status')
     if (
       reply.kind === 'script' &&
       typeof reply.source !== 'string' &&
@@ -398,7 +425,9 @@ export class TjsWasmRuntime implements ScriptRuntime {
         : reply.kind === 'invoke'
           ? reply.statusOnly
             ? 7
-            : 2
+            : reply.ignoreStatus
+              ? 9
+              : 2
           : typeof reply.source === 'string'
             ? 3
             : 4

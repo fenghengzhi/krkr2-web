@@ -97,6 +97,7 @@ struct Vm {
     bool ownerUpgradeFailed = false;
     unsigned nextDependent = 1;
     std::map<unsigned, std::unique_ptr<DependentOwner>> dependents;
+    std::set<tTJSVariant*> nativeStates; // non-owning; native instances own the variants
     ~Vm() {
         krkr::CleanupErrors cleanup;
         cleanup.suppress();
@@ -115,6 +116,18 @@ struct Vm {
             const auto id = owners.begin()->first;
             WeakOwner::Expired(owners.begin()->second.get());
             owners.erase(id); // the host may already have removed this token
+        }
+        // Native private state can deliberately retain its own script owner.
+        // Terminal disposal must sever these edges even when no global/handle
+        // still points into the cycle. Script callbacks are already suppressed.
+        while(!nativeStates.empty()) {
+            auto* state = *nativeStates.begin();
+            nativeStates.erase(nativeStates.begin());
+            // Copy before clearing the field: releasing the last reference can
+            // destroy the containing native instance and its variant member.
+            tTJSVariant pending(*state);
+            try { state->Clear(); } catch(...) {}
+            try { pending.Clear(); } catch(...) {}
         }
         // All script execution is suppressed for terminal VM disposal. Detach
         // both notifications before releasing the dependent's extra reference.
@@ -365,7 +378,7 @@ void loadBinary(Vm* vm, const tjs_uint8* bytes, std::size_t length,
 
 void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
     if(reply.kind == 1) TJS_eTJSError(ttstr(reply.value));
-    if(reply.kind == 2 || reply.kind == 7) {
+    if(reply.kind == 2 || reply.kind == 7 || reply.kind == 9) {
         krkr::ExecutionFrame delegation(2);
         if(reply.args.size() > 1000000) throw krkr::ExecutionLimitError(u"VM call exceeds 1000000 arguments");
         krkr::TemporaryMemory memory;
@@ -377,7 +390,7 @@ void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
         auto status = closure.FuncCall(0, reply.name.GetLen() ? reply.name.c_str() : nullptr, nullptr, reply.kind == 7 ? nullptr : result,
             args.size(), args.data(), reply.name.GetLen() ? closure.Object : nullptr);
         if(reply.kind == 7) { if(result) *result = static_cast<tjs_int>(status); }
-        else if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, reply.name.GetLen() ? reply.name.c_str() : nullptr);
+        else if(reply.kind != 9 && TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, reply.name.GetLen() ? reply.name.c_str() : nullptr);
     } else if(reply.kind == 3) {
         krkr::ExecutionFrame delegation(2);
         auto context = reply.context.Type() == tvtObject ? reply.context.AsObjectNoAddRef() : nullptr;
@@ -405,11 +418,18 @@ class HostLifetime final : public tTJSNativeInstance {
     tTJSCustomObject* owner; // owning custom object contains this native instance
     ttstr operation;
     unsigned identifier;
+    tTJSVariant state;
     bool running = false, completed = false;
 public:
-    HostLifetime(Vm* vm, tTJSCustomObject* owner, const ttstr& operation, unsigned identifier)
-        : vm(vm), owner(owner), operation(operation), identifier(identifier) { ++nativeLifetimeCount; }
-    ~HostLifetime() override { --nativeLifetimeCount; }
+    HostLifetime(Vm* vm, tTJSCustomObject* owner, const ttstr& operation, unsigned identifier, const tTJSVariant& state)
+        : vm(vm), owner(owner), operation(operation), identifier(identifier), state(state) {
+        if(state.Type() != tvtVoid) vm->nativeStates.insert(&this->state);
+        ++nativeLifetimeCount;
+    }
+    // The variant destructor defers cleanup exceptions. Calling Clear directly
+    // from this noexcept destructor would terminate on a failing finalizer.
+    ~HostLifetime() override { vm->nativeStates.erase(&state); --nativeLifetimeCount; }
+    double Identifier(Vm* context) const { return vm == context ? static_cast<double>(identifier) : -1; }
     void Invalidate() override {
         if(completed || running || shuttingDown) return;
         running = true;
@@ -419,6 +439,8 @@ public:
         std::unique_ptr<Reply> reply(dispatch_host(vm, operation.c_str(), operation.GetLen(), 2, args));
         if(!reply) TJS_eTJSError(u"Native lifetime returned no response");
         resolveReply(vm, *reply, nullptr);
+        state.Clear();
+        vm->nativeStates.erase(&state);
         completed = true;
     }
 };
@@ -969,20 +991,43 @@ static tTJSCustomObject* lifetimeInstance(Vm* vm, unsigned handle) {
         dynamic_cast<tTJSNativeClass*>(object)) return nullptr;
     return object;
 }
-API int krkr_owner_register_native(Vm* vm, unsigned handle, const tjs_char* operation, unsigned length, unsigned identifier) {
+API int krkr_owner_register_native(Vm* vm, unsigned handle, const tjs_char* operation, unsigned length, unsigned identifier, unsigned stateHandle) {
     if(shuttingDown || !operation || !length || length > 128) return 0;
     auto* owner = lifetimeInstance(vm, handle);
     if(!owner) return 0;
     try {
-        auto record = std::make_unique<HostLifetime>(vm, owner, ttstr(operation, length), identifier);
+        tTJSVariant state;
+        if(stateHandle) {
+            auto found = vm->handles.find(stateHandle);
+            if(vm->released.count(stateHandle) || found == vm->handles.end() || found->second.Type() != tvtObject) return 0;
+            state = found->second;
+        }
+        auto record = std::make_unique<HostLifetime>(vm, owner, ttstr(operation, length), identifier, state);
         iTJSNativeInstance* pointer = record.get();
-        const auto classId = TJSRegisterNativeClass(u"krkr2-web.HostLifetime");
+        const auto className = ttstr(u"krkr2-web.HostLifetime.") + ttstr(operation, length);
+        const auto classId = TJSRegisterNativeClass(className.c_str());
         if(TJS_FAILED(owner->NativeInstanceSupport(TJS_NIS_REGISTER, classId, &pointer))) return 0;
         record.release();
         return 1;
     } catch(...) { return 0; }
 }
 API unsigned krkr_native_hook_count() { return nativeLifetimeCount; }
+API double krkr_owner_native_identifier(Vm* vm, unsigned handle, const tjs_char* operation, unsigned length) {
+    if(shuttingDown || !vm || !operation || !length || length > 128 || vm->released.count(handle)) return -1;
+    auto found = vm->handles.find(handle);
+    if(found == vm->handles.end() || found->second.Type() != tvtObject) return -1;
+    auto* owner = found->second.AsObjectNoAddRef();
+    if(!owner) return -1;
+    try {
+        const auto className = ttstr(u"krkr2-web.HostLifetime.") + ttstr(operation, length);
+        const auto classId = TJSFindNativeClassID(className.c_str());
+        if(classId < 0) return -1;
+        iTJSNativeInstance* pointer = nullptr;
+        if(TJS_FAILED(owner->NativeInstanceSupport(TJS_NIS_GETINSTANCE, classId, &pointer))) return -1;
+        const auto* record = dynamic_cast<HostLifetime*>(pointer);
+        return record ? record->Identifier(vm) : -1;
+    } catch(...) { return -1; }
+}
 API unsigned krkr_owner_bind_dependent(Vm* vm, unsigned ownerHandle, unsigned dependentHandle) {
     if(shuttingDown || !vm->nextDependent || vm->dependents.size() >= 4096) return 0;
     auto* owner = lifetimeInstance(vm, ownerHandle);

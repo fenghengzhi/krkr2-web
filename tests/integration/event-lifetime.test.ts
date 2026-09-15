@@ -534,6 +534,7 @@ function createOwner(){global.owner=new EventOwner();}
             videoSources: 0,
             pendingVideoCloses: 0,
             windowSources: 0,
+            menuSources: 0,
             closingWindows: 0,
             dependents: 0,
             pendingInvalidations: 0,

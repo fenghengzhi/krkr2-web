@@ -85,6 +85,9 @@ export type HostReply =
       args: ScriptValue[]
       member?: string
       statusOnly?: boolean
+      /** Native TVP action dispatch ignores negative FuncCall statuses while
+       * preserving a successful result and propagating thrown exceptions. */
+      ignoreStatus?: boolean
     }
   | {
       kind: 'script'
@@ -113,8 +116,18 @@ export type ConsoleHandler = (text: string) => HostReply | Promise<HostReply>
 export interface ScriptRuntime extends HostContext, HostObjectLifetime {
   /** Attach a native instance without retaining its owner. Its host operation
    * receives [identifier, owner] during native invalidation, before member deletion.
+   * Optional private state is strongly owned until successful native invalidation
+   * or actual destruction; references inside it may deliberately retain the owner.
    * Ordinary VM execution may suspend; terminal VM destruction runs no host script. */
-  registerNativeLifetime(owner: ScriptObject, operation: string, identifier: number): void
+  registerNativeLifetime(
+    owner: ScriptObject,
+    operation: string,
+    identifier: number,
+    state?: ScriptObject,
+  ): void
+  /** Read native instance metadata without consulting script fields. Like a
+   * native class cast, this still works after explicit script invalidation. */
+  nativeLifetimeIdentifier(owner: ScriptObject, operation: string): number | undefined
   /** Invalidate this owned dependent at a safe boundary after its owner expires. */
   bindDependent(owner: ScriptObject, dependent: ScriptObject): ScriptDependent
   /** Revoke before invalidation begins; release its lease at the next VM boundary.

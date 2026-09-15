@@ -1,54 +1,94 @@
 export const menuClass = String.raw`
-class MenuItem {
-  var __menuId, __menuParent=null, __menuChildren, __menuWindow;
-  function MenuItem(window, caption="") {
-    __menuWindow=window; __menuChildren=[];
-    __menuId=__host("Menu.create", string(caption));
-  }
-  function finalize() {
-    if(__menuParent!==null) __menuParent.remove(this);
-    while(__menuChildren.count) invalidate __menuChildren[0];
-    __host("Menu.destroy", __menuId);
-    __menuWindow=null;
-  }
-  function add(item) { insert(item, __menuChildren.count); }
-  function insert(item, index) {
-    if(!(item instanceof "MenuItem") || item.__menuWindow !== __menuWindow) throw new Exception("MenuItem belongs to a different window");
-    __host("Menu.insert", __menuId, item.__menuId, int(index));
-    if(item.__menuParent!==null) item.__menuParent.__menuChildren.remove(item);
-    __menuChildren.insert(int(index),item); item.__menuParent=this;
-  }
-  function remove(item) {
-    __host("Menu.remove", __menuId, item.__menuId);
-    __menuChildren.remove(item); item.__menuParent=null;
-  }
-  function __menuFind(id) {
-    if(__menuId==id) return this;
-    for(var i=0;i<__menuChildren.count;i++) {
-      var found=__menuChildren[i].__menuFind(id);
-      if(found!==null) return found;
+function __krkrMenuInvalidate(owner,id,state,count) {
+  try {
+    for(var i=0;i<count;i++) {
+      var child=state.owned[i];
+      if(child!==void && child!==null) {
+        invalidate child;
+        state.owned[i]=null;
+        child=null;
+      }
+      __host("Menu.releaseSlot",id,i);
     }
-    return null;
+    state.owned.clear();
+    state.cache=null;
+    state.clear=null;
+    state.actionOwner=null;
+  } catch(error) {
+    __host("Menu.abort",id);
+    throw error;
+  }
+  __host("Menu.finish",id);
+}
+__host("Menu.bind",__krkrMenuInvalidate);
+function __krkrMenuInsert(parent,item,index) {
+  var change=__host("Menu.insert",parent,item,index);
+  if(change===null)return;
+  // Establish the new owning edge before releasing the previous registration.
+  change.state.owned[change.slot]=change.child;
+  change.state.cacheValid=false;
+  if(change.oldState!==null) {
+    change.oldState.owned[change.oldSlot]=null;
+    change.oldState.cacheValid=false;
+  }
+}
+class MenuItem {
+  function MenuItem(actionOwner, captionOrWindow="") {
+    if(typeof actionOwner!="Object")throw new Exception("MenuItem requires an action owner object");
+    var state=%[actionOwner:actionOwner,owned:[],cache:null,clear:null,cacheValid:false];
+    __host("Menu.create",this,state,typeof captionOrWindow=="Object"?captionOrWindow:string(captionOrWindow));
+  }
+  function finalize() {}
+  function add(item) { __krkrMenuInsert(this,item,void); }
+  function insert(item,index) { __krkrMenuInsert(this,item,int(index)); }
+  function remove(item) {
+    var change=__host("Menu.remove",this,item);
+    if(change!==null) {
+      change.state.owned[change.slot]=null;
+      change.state.cacheValid=false;
+    }
   }
   function popup(flags,x,y) {
-    var selected=__host("Menu.popup", __menuId, int(flags), int(x), int(y));
-    if(selected && !(flags & (tpmNoNotify|tpmReturnCmd)) && !System.eventDisabled) __menuWindow.__menuClick(selected);
+    var selected=__host("Menu.popup",this,int(flags),int(x),int(y));
+    if(selected && !(flags & (tpmNoNotify|tpmReturnCmd)) && !System.eventDisabled) {
+      var target=__host("Menu.target",selected);
+      if(target!==null)target.onClick();
+    }
     return selected;
   }
-  function onClick() {}
-  property parent { getter() { return __menuParent; } }
-  property children { getter() { var copy=[];copy.assign(__menuChildren);return copy; } }
-  property window { getter() { return __menuWindow; } }
-  property root { getter() { var item=this;while(item.__menuParent!==null)item=item.__menuParent;return item; } }
+  function onClick() { return __host("Menu.action",__host("Menu.state",this).actionOwner,this); }
+  property __menuId { getter() { return __host("Menu.view",this); } }
+  property parent { getter() { return __host("Menu.relation",this,"parent"); } }
+  property window { getter() { return __host("Menu.relation",this,"window"); } }
+  property root { getter() { return __host("Menu.relation",this,"root"); } }
+  property children { getter() {
+    var state=__host("Menu.state",this);
+    if(state.cache===null) {
+      state.cache=[];
+      state.clear=Array.clear incontextof null;
+    }
+    if(!state.cacheValid) {
+      (state.clear incontextof state.cache)();
+      if(isvalid state.cache) {
+        var count=0;
+        for(var i=0;i<state.owned.count;i++) {
+          var child=state.owned[i];
+          if(child!==void && child!==null)state.cache[count++]=child;
+        }
+      }
+      state.cacheValid=true;
+    }
+    return state.cache;
+  } }
   property index {
-    getter() { return __menuParent===null ? -1 : __menuParent.__menuChildren.find(this); }
-    setter(value) { if(__menuParent===null) throw new Exception("MenuItem has no parent"); __menuParent.insert(this,value); }
+    getter() { return __host("Menu.index",this); }
+    setter(value) { __host("Menu.index",this,int(value)); }
   }
   ${['caption', 'checked', 'enabled', 'group', 'radio', 'shortcut', 'visible']
     .map(
       (name) => `property ${name} {
-    getter() { return __host("Menu.get", __menuId, "${name}"); }
-    setter(value) { __host("Menu.set", __menuId, "${name}", ${name === 'caption' || name === 'shortcut' ? 'string' : 'int'}(value)); }
+    getter() { return __host("Menu.get", this, "${name}"); }
+    setter(value) { __host("Menu.set", this, "${name}", ${name === 'caption' || name === 'shortcut' ? 'string' : 'int'}(value)); }
   }`,
     )
     .join('\n')}

@@ -1,0 +1,135 @@
+import { EngineSession } from '../../src/engine/session.ts'
+import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
+import type { ModuleFactory, WasmVariant } from '../../src/backends/script/tjs-wasm/module.ts'
+import { readScript, readText, writeText } from '../../src/backends/files/text-codecs.ts'
+import { inflateImage, deflateImage } from '../../src/backends/files/blob-source.ts'
+import { menuLifetimeScript } from './menu-lifetime-script.ts'
+
+const source = String.raw`
+function demand(value,message){if(!value)throw new Exception(message);}
+function menuActionChecks(){
+  var owner=%[marker:41,action:function(event){demand(event.type=="onClick","event name");demand(event.target===global.actionMenu,"event target");return %[answer:this.marker+1];}];
+  global.actionMenu=new MenuItem(owner,"action");
+  var returned=actionMenu.onClick();
+  demand(returned.answer===42,"native action result");
+  invalidate actionMenu;delete global.actionMenu;
+
+  var absent=new MenuItem(%[],"missing"),empty=new MenuItem(null,"null");
+  demand(absent.onClick()===void && empty.onClick()===void,"absent action must return void");
+  invalidate absent;invalidate empty;
+
+  var context=%[marker:73],boundOwner=%[marker:12,action:function(event){return this.marker;}];
+  var bound=new MenuItem(boundOwner incontextof context,"bound");
+  demand(bound.onClick()===73,"action owner bound context");
+  invalidate bound;
+
+  global.menuThrowVisits=0;
+  var failing=new MenuItem(%[action:function(event){global.menuThrowVisits++;throw new global.Exception("menu-action-thrown");}],"failure"),caught="";
+  try{failing.onClick();}catch(error){caught=error.message;}
+  demand(caught.indexOf("menu-action-thrown")>=0,"action exception mismatch: caught="+caught+", visits="+menuThrowVisits);
+  delete global.menuThrowVisits;
+  invalidate failing;
+  return "result,event,missing,null,bound,exception";
+}
+`
+
+/** Native action statuses and exceptions are distinct in the actual MenuItem bridge. */
+export async function exerciseMenuActions(
+  factory: ModuleFactory,
+  wasmBinary: Uint8Array,
+  variant: WasmVariant,
+  binary: boolean,
+) {
+  const logs: string[] = [],
+    timers = new Set<ReturnType<typeof setTimeout>>()
+  let rendererCloses = 0
+  const session = new EngineSession({
+    createRuntime: (handler, control, options) =>
+      TjsWasmRuntime.create(factory, handler, { wasmBinary, variant, control, ...options }),
+    renderer: {
+      present() {},
+      dispose() {
+        rendererCloses++
+      },
+    },
+    graphics: {
+      decode: async () => {
+        throw new Error('Unexpected menu image')
+      },
+      text: () => {
+        throw new Error('Unexpected menu text')
+      },
+    },
+    inflateImage,
+    deflateImage,
+    decodeScript: readScript,
+    readText,
+    writeText,
+    now: () => performance.now(),
+    yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
+    schedule: (callback, delay) => {
+      const timer = setTimeout(() => {
+        timers.delete(timer)
+        callback()
+      }, delay)
+      timers.add(timer)
+      return () => {
+        timers.delete(timer)
+        clearTimeout(timer)
+      }
+    },
+    event: (event) => {
+      if (event.type === 'log') logs.push(event.text)
+    },
+  })
+  try {
+    await session.initialize()
+    session.mount(
+      Object.entries({ 'startup.tjs': '', 'menu-actions.tjs': source + menuLifetimeScript }).map(
+        ([name, source]) => {
+          const bytes = new TextEncoder().encode(source)
+          return { name, size: bytes.length, read: async () => bytes }
+        },
+      ),
+    )
+    await session.start()
+    if (binary) {
+      await session.evaluate(
+        'Scripts.compileStorage("menu-actions.tjs","savedata/menu-actions.cjs",false,true,false)',
+      )
+      await session.evaluate('Scripts.execStorage("savedata/menu-actions.cjs")')
+    } else await session.evaluate('Scripts.execStorage("menu-actions.tjs")')
+    const result = await session.evaluate('menuActionChecks()')
+    if (result !== 'result,event,missing,null,bound,exception') throw new Error(result)
+    if (logs.length) throw new Error('Unexpected menu action diagnostics: ' + logs.join('\n'))
+    const lifetime = await session.evaluate('menuLifetimeChecks()')
+    if (
+      lifetime !==
+      'registration/cache/finalize,action owner,weak parent,script retry,native retry,window roots,native casts'
+    )
+      throw new Error('Unexpected menu lifetime result: ' + lifetime)
+    // The three rejected host casts emit native VM exception dumps even though
+    // the script catches them. Preserve and check these expected diagnostics.
+    const diagnostics = logs.join('\n'),
+      headers = [...diagnostics.matchAll(/==== An exception occurred at ([^\n]+)/g)]
+    if (
+      headers.length !== 3 ||
+      headers.some(
+        (header) =>
+          !/menus\.tjs\(\d+\)\[\(function\) (MenuItem|__krkrMenuInsert)\]/.test(header[1]!),
+      )
+    )
+      throw new Error('Unexpected menu cast diagnostics: ' + diagnostics)
+    await session.stop()
+    const stopped = {
+      ...session.inspectOwnership(),
+      handles: session.snapshot().handles,
+      timers: timers.size,
+    }
+    if (Object.values(stopped).some((value) => value !== 0) || rendererCloses !== 1)
+      throw new Error('Menu action teardown retained resources: ' + JSON.stringify(stopped))
+    return { variant, binary, result, lifetime, diagnostics, stopped, rendererCloses }
+  } finally {
+    await session.stop()
+  }
+}

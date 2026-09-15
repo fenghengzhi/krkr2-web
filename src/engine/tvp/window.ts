@@ -35,13 +35,11 @@ class Window {
   }
   property menu { getter() {
     if(__windowMenu===null) {
-      __windowMenu=new MenuItem(this);
-      __host("Menu.root",__windowMenu.__menuId,__windowId);
+      __windowMenu=new MenuItem(this,this);
     }
     return __windowMenu;
   } }
   property primaryLayer { getter() { return __host("Window.primary",__windowId); } }
-  function __menuClick(id) { var item=menu.__menuFind(id);if(item!==null)item.onClick(); }
   function __windowDispatch(name,args) { return this[name](args*); }
   function close() {
     __windowCanClose=false;
