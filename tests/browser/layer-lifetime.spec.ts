@@ -61,7 +61,7 @@ function dropChild(){delete global.child;return 0;}
 function cacheChild(){
   var empty=parent.children;empty.add("user entry");
   stable=(parent.children===empty && empty[0]=="user entry");empty.clear();
-  child=new BrowserLifetimeLayer(win,parent);cache=parent.children;
+  global.child=new BrowserLifetimeLayer(win,parent);cache=parent.children;
   font=parent.font;font.height=29;delete global.child;return 0;
 }
 function clearCache(){cache.clear();return 0;}
@@ -196,7 +196,7 @@ function beginOwned(){
 function completeOwned(){tick=100;root.update();return 0;}
 var oldChild,newChild;
 function beginShutdown(){
-  trace="";fore=new BrowserTransitionLayer("fore");back=new BrowserTransitionLayer("back");
+  trace="";global.fore=new BrowserTransitionLayer("fore");global.back=new BrowserTransitionLayer("back");
   fore.visible=true;oldChild=new Layer(win,fore);newChild=new Layer(win,back);
   fore.beginTransition("crossfade",false,back,%[time:100,selfupdate:true]);return 0;
 }
