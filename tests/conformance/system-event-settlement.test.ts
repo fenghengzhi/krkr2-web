@@ -31,7 +31,7 @@ function setup(
   const settlements: { id: number; outcome: EventOutcome; round?: number }[] = []
   let next = 1000
   const objects = {
-    retain() {
+    retain(_value: ScriptObject) {
       const id = next++
       leases.add(id)
       return object(id)

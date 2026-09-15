@@ -49,3 +49,9 @@
 新增 `tests/probes/native-menu-flags.cpp` 和独立 Actions 工作流，仅在 GitHub-hosted Windows 2022／2025 上运行。首版对自建菜单验证 NoNotify／ReturnCmd／Recurse 三个位的八种组合及选择／Esc，共每平台 16 项；通过本进程窗口和线程的真实菜单消息循环注入，记录原始返回值与 WM_COMMAND 顺序。没有全局输入，也没有运行本机探针。每例和进程均有截止时间，失败、不可执行、超时与未运行保留原始产物。
 
 它只比较 Win32 TrackPopupMenuEx，不证明旧 VCL 命令 ID 分配，也尚未测试已有菜单中的真正递归。无 ReturnCmd 的取消 BOOL 原样记录，不预先规定值。新增探针还未执行，不能引用为通过证据。
+
+## 接线前的失败记录与修订
+
+[首次完整回归 34945297088](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945297088)，提交 `6671c42`，在测试类型检查阶段因新夹具的 `retain` 缺少参数而失败（TS2352）。Node、浏览器和直接运行时案例均未执行。修订让夹具接收 `ScriptObject` 参数，与实际接口一致，没有绕过类型检查或放宽断言。
+
+同一提交的[首次 Windows 菜单参考运行 34945297180](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945297180)在 Windows 2022、2025 均停于编译器定位，尚未编译或执行 C++，每个平台的 16 项均未运行。原工作流没有保存足够的 Visual Studio 查询信息，不能据此断定 runner 缺少编译器。修订从 `installationPath` 解析 `vcvars64.bat` 和默认 x64 工具，保存完整安装清单、查询参数、stdout、stderr、退出码及文件存在状态，并区分查询失败、无匹配和布局缺失。两次失败的完整产物及 run.json 保留在各自独立归档，后续结果不会覆盖它们。

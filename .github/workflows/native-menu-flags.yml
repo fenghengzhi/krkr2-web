@@ -46,6 +46,7 @@ jobs:
             checkoutOutcome = $env:PROBE_CHECKOUT_OUTCOME
             runnerLabel = $env:PROBE_RUNNER_LABEL
             timeoutSeconds = 180
+            compilerDiscoveryState = 'not-run'
             compilerExitCode = $null
             processId = $null
             exitCode = $null
@@ -137,13 +138,130 @@ jobs:
               ConvertTo-Json |
               Set-Content -Encoding utf8 (Join-Path $outDirectory 'source-sha256.json')
             $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-            if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
-              throw "Visual Studio discovery tool is missing: $vswhere"
+            $discovery = [ordered]@{
+              toolPath = $vswhere
+              state = 'started'
+              queries = @()
+              selected = $null
+              error = $null
             }
-            $compilerSetup = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat' |
-              Select-Object -First 1
-            if ($LASTEXITCODE -ne 0 -or -not $compilerSetup -or -not (Test-Path -LiteralPath $compilerSetup -PathType Leaf)) {
-              throw 'A native Visual Studio x64 C++ compiler environment was not found.'
+            try {
+              if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+                $discovery.state = 'tool-missing'
+                throw "Visual Studio discovery tool is missing: $vswhere"
+              }
+              # Keep the full instance records, including failed-query output, before parsing.
+              # https://github.com/microsoft/vswhere/wiki/Find-VC
+              $queries = @(
+                @{ name = 'inventory'; arguments = @('-all', '-prerelease', '-products', '*', '-format', 'json', '-utf8') }
+                @{ name = 'cpp-candidate'; arguments = @('-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-format', 'json', '-utf8') }
+              )
+              $candidates = @()
+              foreach ($query in $queries) {
+                $queryResult = [ordered]@{
+                  name = $query.name
+                  arguments = $query.arguments
+                  state = 'started'
+                  exitCode = $null
+                  instanceCount = $null
+                  stdoutFile = "vswhere-$($query.name).stdout.json"
+                  stderrFile = "vswhere-$($query.name).stderr.log"
+                  error = $null
+                }
+                $discovery.queries += $queryResult
+                $queryArguments = $query.arguments
+                $savedNativePreference = $PSNativeCommandUseErrorActionPreference
+                try {
+                  # Nonzero native exit codes are recorded explicitly, not converted to a
+                  # terminating PowerShell error before stdout/stderr can be preserved.
+                  $PSNativeCommandUseErrorActionPreference = $false
+                  & $vswhere @queryArguments 1> (Join-Path $outDirectory $queryResult.stdoutFile) 2> (Join-Path $outDirectory $queryResult.stderrFile)
+                  $queryResult.exitCode = $LASTEXITCODE
+                } catch {
+                  $queryResult.state = 'invocation-failed'
+                  $queryResult.error = $_.Exception.Message
+                  $discovery.state = 'query-invocation-failed'
+                  throw
+                } finally {
+                  $PSNativeCommandUseErrorActionPreference = $savedNativePreference
+                }
+                if ($queryResult.exitCode -ne 0) {
+                  $queryResult.state = 'exit-failed'
+                  $discovery.state = 'query-exit-failed'
+                  throw "vswhere $($query.name) failed with exit code $($queryResult.exitCode); raw stdout/stderr are preserved."
+                }
+                try {
+                  $instances = Get-Content -Raw -LiteralPath (Join-Path $outDirectory $queryResult.stdoutFile) |
+                    ConvertFrom-Json -NoEnumerate -ErrorAction Stop
+                  if ($instances -isnot [array]) { throw 'Expected a JSON array of Visual Studio instances.' }
+                } catch {
+                  $queryResult.state = 'invalid-json'
+                  $queryResult.error = $_.Exception.Message
+                  $discovery.state = 'query-output-invalid'
+                  throw "vswhere $($query.name) exited zero but its output is invalid: $($queryResult.error)"
+                }
+                $queryResult.state = 'completed'
+                $queryResult.instanceCount = $instances.Count
+                if ($query.name -eq 'cpp-candidate') { $candidates = $instances }
+              }
+              if ($candidates.Count -eq 0) {
+                $discovery.state = 'no-matching-instance'
+                throw 'vswhere succeeded but found no complete stable Visual Studio instance with Microsoft.VisualStudio.Component.VC.Tools.x86.x64; inspect the full inventory.'
+              }
+              $instance = $candidates[0]
+              if ([string]::IsNullOrWhiteSpace($instance.installationPath)) {
+                $discovery.state = 'installation-path-missing'
+                throw 'The selected Visual Studio instance does not contain an installationPath.'
+              }
+              # Resolve from the installation root; do not depend on vswhere -find glob rules.
+              $compilerSetup = Join-Path $instance.installationPath 'VC\Auxiliary\Build\vcvars64.bat'
+              $toolsVersionFile = Join-Path $instance.installationPath 'VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt'
+              $toolsRoot = Join-Path $instance.installationPath 'VC\Tools\MSVC'
+              $selected = [ordered]@{
+                instanceId = $instance.instanceId
+                installationPath = $instance.installationPath
+                installationVersion = $instance.installationVersion
+                compilerSetup = $compilerSetup
+                compilerSetupExists = Test-Path -LiteralPath $compilerSetup -PathType Leaf
+                defaultToolsVersionFile = $toolsVersionFile
+                defaultToolsVersionFileExists = Test-Path -LiteralPath $toolsVersionFile -PathType Leaf
+                installedToolsVersions = @()
+                defaultToolsVersion = $null
+                compilerPath = $null
+                compilerExists = $false
+                linkerPath = $null
+                linkerExists = $false
+              }
+              $discovery.selected = $selected
+              if (Test-Path -LiteralPath $toolsRoot -PathType Container) {
+                $selected.installedToolsVersions = @(Get-ChildItem -LiteralPath $toolsRoot -Directory | Select-Object -ExpandProperty Name)
+              }
+              if (-not $selected.compilerSetupExists -or -not $selected.defaultToolsVersionFileExists) {
+                $discovery.state = 'compiler-layout-incomplete'
+                throw 'The selected Visual Studio installation is missing vcvars64.bat or its default MSVC version file; inspect compiler-discovery.json.'
+              }
+              $selected.defaultToolsVersion = (Get-Content -Raw -LiteralPath $toolsVersionFile).Trim()
+              if ($selected.defaultToolsVersion -notmatch '^\d+(\.\d+){2,3}$') {
+                $discovery.state = 'tools-version-invalid'
+                throw "The default MSVC tools version is invalid: $($selected.defaultToolsVersion)"
+              }
+              $nativeTools = Join-Path (Join-Path $toolsRoot $selected.defaultToolsVersion) 'bin\Hostx64\x64'
+              $selected.compilerPath = Join-Path $nativeTools 'cl.exe'
+              $selected.linkerPath = Join-Path $nativeTools 'link.exe'
+              $selected.compilerExists = Test-Path -LiteralPath $selected.compilerPath -PathType Leaf
+              $selected.linkerExists = Test-Path -LiteralPath $selected.linkerPath -PathType Leaf
+              if (-not $selected.compilerExists -or -not $selected.linkerExists) {
+                $discovery.state = 'compiler-tools-missing'
+                throw 'The selected default MSVC version is missing its native x64 cl.exe or link.exe; inspect compiler-discovery.json.'
+              }
+              $discovery.state = 'ready'
+            } catch {
+              $discovery.error = $_.Exception.Message
+              if ($discovery.state -eq 'started') { $discovery.state = 'discovery-failed' }
+              throw
+            } finally {
+              $status.compilerDiscoveryState = $discovery.state
+              $discovery | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $outDirectory 'compiler-discovery.json')
             }
             $executable = Join-Path $outDirectory 'native-menu-flags.exe'
             $objectFile = Join-Path $outDirectory 'native-menu-flags.obj'
