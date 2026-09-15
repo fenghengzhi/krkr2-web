@@ -2,7 +2,13 @@
 
 状态：实现及验证用例已编写，**尚未通过本阶段 GitHub-hosted Actions 验证**。首轮 [35009240317](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009240317) 在 `12af5df0a1c18702d7f89ac1a04fd0cb5847a48b` 构建失败：`game-clipboard.ts:247` 的条件表达式未能把联合类型收窄至写入请求（TS2339）。已改为明确的 operation 分支，仍在真实点击内直接调用 API。该轮实际测试执行数为 **0**，两个作业失败、四个作业跳过；不能记作剪贴板行为通过。本机未运行测试、build/check、浏览器或系统剪贴板探针，首次失败与原始 artifacts 继续保留。
 
-第二轮 [35009742804](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009742804) 在 `53a37dc593a8e081b51d7f499f7f390b1473c6a1` 仍于构建阶段失败，实际测试执行数为 **0**。应用和 Worker 类型检查已通过，工具检查报 `clipboard.test.ts:468` TS2339：`assert.equal(stopped.ok, false)` 已收窄至拒绝结果，紧随的成功分支成为 `never`。删除重复的不可达分支，保留“必须拒绝”、错误类型/消息、日志和句柄清理断言。该失败独立保存，不替代首轮记录。
+第二轮 [35009742804](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009742804) 在 `53a37dc593a8e081b51d7f499f7f390b1473c6a1` 仍于构建阶段失败，实际测试执行数为 **0**。应用和 Worker 类型检查已通过，工具检查报 `clipboard.test.ts:468` TS2339：`assert.equal(stopped.ok, false)` 已收窄至拒绝结果，紧随的成功分支成为 `never`。该失败独立保存，不替代首轮记录。
+
+第三轮 [35009913509](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009913509) 的提交 `fe3a6bede8238d6b7e522b0d869d69d64044eb55` 实际只更新了文档，源码补丁没有落入提交，因此再次因同一行 TS2339 构建失败，实际测试执行数仍为 **0**。真正的一行修正位于 `e85e41fae181596b70ef58c72507dd81fa3bc08a`：删除不可达成功分支，保留“必须拒绝”、错误类型/消息、日志和句柄清理断言。第三轮不是修正后的测试通过记录。
+
+第四轮 [35009940671](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009940671) 在 `e85e41fae181596b70ef58c72507dd81fa3bc08a` 的 **Chromium regular 作业**实际 413/418 通过、5 项首次失败；这里不提前填写整轮结论。四种 VM 组合都在成功写入空字符串后读取到 `types=[[]]`，TJS 已输出 `empty-format:0` 并等待下一次读操作；失败是测试仍等待 `empty-format:1`。第五项在无 grant 的真实按钮写入时返回 `NotAllowedError: ... Write permission denied.`，且调用时 active/focused/secure 均为 true；后续读取没有执行。061 的 [35009948147](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009948147) Chromium 作业保留了同五项、相同原始 Clipboard 观测。两份失败证据独立保留，不以修订后的测试覆盖。
+
+本次只校准测试和文档：固定 Chromium 153.0.8010.12 headless 分支要求空写入后 API 不暴露文本格式，继续实际点击 getter 并要求 void，再真实写入非空文本并读取恢复。Firefox/WebKit 保留存在空文本时返回空字符串的检查。无 grant 分支对 Chromium 明确要求写入和读取各自抛 NotAllowedError，再显式授予权限并真实写读恢复；**首轮只观察到写入拒绝，新补的读取拒绝和恢复仍待后续 Actions 实测**。所有调用顺序、原始异常、激活/聚焦、授权变更发生的调用序号分别记录；原 12 秒断言期限不变，生产实现没有增加缓存或修改返回合同。
 
 ## 原版合同与本阶段接口
 
@@ -40,6 +46,8 @@ Stop 先退休 UI、请求身份和端口等待；BrowserClipboard 继续消费�
 
 BrowserClipboard 只在安全 Window 上调用 navigator.clipboard。hasFormat 使用真实 `read()` 返回的 ClipboardItem.types 查找 text/plain；getter 在同一次 read 的首个 text/plain item 上调用 getType/Blob.text。不存在该类型才返回 void，空 Blob 仍是空字符串；getType 失败独立传播。不能用 readText 的空字符串猜测格式，也不能用 ClipboardItem.supports 判断当前内容。[MDN Clipboard API](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API)、[types](https://developer.mozilla.org/en-US/docs/Web/API/ClipboardItem/types)。
 
+“存在的空文本表示”与“写入空字符串后浏览器未暴露文本表示”不是同一状态。上述固定 Chromium headless 实测属于后者，不能用最近写入的空字符串伪造 text/plain 存在，也不据 `read()` 的类型列表断言桌面 OS 剪贴板必然被清空。固定 Chromium 源码在公共写入分派中跳过空 TextData，而新后端数据仍会提交；读取结果可以包含一个没有类型的 ClipboardItem。这解释了该配置的 `types=[[]]`，不改变当宿主确实提供空 text/plain Blob 时应返回 `""` 的 engine/adapter 合同。[空文本分派](https://github.com/chromium/chromium/blob/153.0.8010.12/ui/base/clipboard/clipboard.cc#L267-L306)、[后端提交](https://github.com/chromium/chromium/blob/153.0.8010.12/ui/base/clipboard/clipboard_non_backed.cc#L878-L899)、[返回 ClipboardItem](https://github.com/chromium/chromium/blob/153.0.8010.12/third_party/blink/renderer/modules/clipboard/clipboard_promise.cc#L310-L343)。
+
 | 情况                                 | 本阶段 Web 结果                                                |
 | ------------------------------------ | -------------------------------------------------------------- |
 | 无安全 Window / 无所需 Clipboard API | 可捕获的 NotSupportedError                                     |
@@ -62,6 +70,8 @@ BrowserClipboard 只在安全 Window 上调用 navigator.clipboard。hasFormat �
 浏览器用例使用真实点击与真实 navigator API；仅观察包装转发原函数，记录调用时激活/聚焦/安全上下文、实际返回类型和异常。合成 Unicode、空文本与 PNG-only 内容用来检验文本格式区别；PNG 是测试输入，不是新增游戏接口。额外覆盖用户取消、Stop/旧按钮、新 Session 和已有 SystemDialog 的 Timer 发起请求。
 
 固定 Playwright 1.63.0 的 Chromium 驱动支持 clipboard-read/write grant，WebKit 只支持 clipboard-read，Firefox 不支持两者，不能吞掉 Unsupported grant 后声称已授权。成功矩阵必须明确使用的 grant；Chromium headless-shell 的无 grant 拒绝另作实际错误路径，不预设所有引擎无 grant 都能成功。外部内容触发的原生 Paste 提示没有自动化证据时保持未覆盖，不能用页面 DOM 假装完成浏览器授权。[各引擎官方权限测试](https://github.com/microsoft/playwright/blob/v1.63.0/tests/library/permissions.spec.ts)、[WebKit grant](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/webkit/wkPage.ts)、[Firefox grant](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/firefox/ffBrowser.ts)。
+
+固定配置未指定 channel，Playwright 因 headless 选择 Chromium Headless Shell；其权限管理器对请求返回 ASK，模拟关闭提示，Blink 写入分支只把 GRANTED 视作成功。因此用户激活存在也可能得到本轮精确的 Write permission denied，不能据此归因于按钮丢失激活，也不能外推为所有 Chrome 部署都拒绝写入。[Playwright 选择规则](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/chromium/chromium.ts#L418-L424)、[Shell 权限结果](https://github.com/chromium/chromium/blob/153.0.8010.12/headless/lib/browser/headless_permission_manager.cc#L22-L38)、[Blink 写入判断](https://github.com/chromium/chromium/blob/153.0.8010.12/third_party/blink/renderer/modules/clipboard/clipboard_promise.cc#L589-L604)。
 
 `page.evaluate()` 在固定驱动里会模拟用户激活，所以不能用它启动请求来证明无激活规则。正向操作来自页面真实 click；无激活用例由全新页面自己的初始脚本记录状态与结果，完成前不通过 evaluate 污染激活。[Chromium](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/chromium/crExecutionContext.ts)、[WebKit](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/webkit/wkExecutionContext.ts)、[Firefox](https://github.com/microsoft/playwright/blob/v1.63.0/browser_patches/firefox/juggler/content/Runtime.js)。
 
