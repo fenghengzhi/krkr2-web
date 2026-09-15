@@ -1,5 +1,11 @@
 # 插件以外的实现进度
 
+Layer.update 与 onPaint 重绘链路已接通：支持整层／矩形请求、默认 action owner、请求合并、回调后续重绘、异步处理和各图层独立截止时间；快速更新一个图层不会让另一个图层长期得不到绘制。实现和区域性能边界见[决策 045](decisions/045-layer-redraw.md)。
+
+最新[完整回归 34927280464](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927280464)通过 **1,019 项 Node、750 项浏览器和 6 组直接运行时**；同次构建的[原 KAG／离线升级检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927347461)通过 **78 项**。本阶段新增 32 项 Node、24 项浏览器检查，所有用例零失败、取消、跳过或重试。
+
+下一步继续可写 neutralColor、无主图像的不透明图层填色以及其他图形／系统接口；完整多窗口、流式媒体、旧视频编码、菜单嵌套事件等仍未完成。整体非插件目标继续进行。以下按阶段保留此前范围与验证历史。
+
 Layer 与 Font 已接入原生生命周期：基本父子关系使用弱观察，children 缓存、输入角色和转场分别持有实际需要的强引用；失效会按顺序停止转场、断开图层、清理字体和图像，并支持失败重试。实现与明确限制见[决策 044](decisions/044-layer-object-lifetime.md)。
 
 [完整回归 34926303139](https://github.com/fenghengzhi/krkr2-web/actions/runs/34926303139)通过 **987 项 Node、726 项浏览器检查和 6 组直接运行时**；相同应用源码的[原 KAG／旧版本离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34925944413)通过 **78 项**。本阶段新增 69 项 Node 和三浏览器双后端的 48 项浏览器检查；三轮历史失败均保留。

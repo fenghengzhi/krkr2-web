@@ -1,5 +1,7 @@
 # 当前实现范围
 
+Layer.update／onPaint 的参数、action 派发、异步后续重绘及多图层调度已接入，见[决策 045](../decisions/045-layer-redraw.md)。最新完整验证为 **1,019 项 Node、750 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**。其他图形／系统和媒体能力仍未完成，范围以[实现进度](../non-plugin-progress.md)为准。以下保留此前阶段记录。
+
 Layer／Font 生命周期、children 快照、输入角色持有及转场清理已通过本阶段回归，见[决策 044](../decisions/044-layer-object-lifetime.md)。当前验证为 **987 项 Node、726 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**；最新结论以[非插件实现进度](../non-plugin-progress.md)为准。Layer 的其余图形 API、完整多窗口和媒体能力仍在实现。
 
 以下保留此前阶段记录与当时的未完成范围。

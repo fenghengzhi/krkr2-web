@@ -18,6 +18,10 @@ gh workflow run test.yml --ref BRANCH -f runtime-only=true
 
 ## 已完成的云端回归
 
+[Layer 重绘完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927280464)在 `ebae14e` 通过 **1,019 Node、750 浏览器、6 组直接运行时**，全部 14 个 job 成功。750 包含常规 627、游戏库 57、PWA 59、可信生命周期 7，零失败、取消、跳过、flaky 或重试。同次构建的[原 KAG／旧 ABI 升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927347461)通过 **78 项**。初版与公平性修正的 Node 诊断分别保留，详见[决策 045](decisions/045-layer-redraw.md)。
+
+[此前 Layer 生命周期回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34926303139)在 `117af18` 通过 **987 Node、726 浏览器、6 组直接运行时**；相同应用源码的[兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34925944413)通过 **78 项**。两次 Node 诊断失败及首次完整回归的 24 个浏览器夹具失败均按原 run ID 保留，见[决策 044](decisions/044-layer-object-lifetime.md)。
+
 [MenuItem 生命周期完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34921937558)通过全部 **918 Node、678 浏览器、6 组直接运行时**，基于 `a9403d0`，全部 14 个 job 成功。浏览器统计为 555 常规、57 游戏库、59 PWA、7 原生生命周期，零失败、跳过、flaky 和重试。直接运行时包含 12 组菜单报告和 24 组原生状态报告，后者停止后的原生 slot 数全部为零。原始失败、一次未确认原因的 V8 断言及 KAG 刷新全屏测试的时序修正见[决策 043](decisions/043-menu-object-lifetime.md)。
 
 同一应用产物的[原 KAG／离线升级检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34922607852)通过 **78 项**。测试代码 `fc72347` 只修正刷新后等待启动完成再退出全屏的时序；没有改动已完成完整回归的应用源代码。本阶段以按 run ID 保存的 Actions 原始产物为证据，不复用此前 Window 阶段的 900 项报告。
