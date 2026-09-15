@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "sourcePage": "https://krkrz.github.io/",
+  "url": "https://krkrz.github.io/download/kr2_232r2.zip",
+  "archiveBytes": 6622114,
+  "archiveSha256": "645a6dc0898e41e20603e134ca6ff6a22994e66a9ed9049c059c83ac91b8fa2d",
+  "engineMember": "kr2_232r2/kirikiri2/krkr.eXe",
+  "engineBytes": 3499008,
+  "engineSha256": "b1e9b84905f29489d2a9caba0c45e125c971b19f71156b0cf3f506835c18e19d",
+  "scope": "Original 2.32r2 distribution; the exact source commit and bundled VCL build are not assumed. No plugins are loaded by this fixture."
+}

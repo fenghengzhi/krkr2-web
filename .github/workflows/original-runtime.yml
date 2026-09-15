@@ -1,0 +1,122 @@
+name: Original KRKR2 runtime observations
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  original:
+    name: Original SDK / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Observe original modal close without external input
+        env:
+          NATIVE_OS: ${{ matrix.os }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
+            throw 'Original executable observations require a GitHub-hosted Windows runner.'
+          }
+          $output = Join-Path $env:GITHUB_WORKSPACE 'out/verification/original-runtime'
+          New-Item -ItemType Directory -Force $output | Out-Null
+          $status = [ordered]@{
+            schema = 1; runId = $env:GITHUB_RUN_ID; attempt = $env:GITHUB_RUN_ATTEMPT
+            commit = $env:GITHUB_SHA; runner = $env:NATIVE_OS
+            state = 'not-run'; stage = 'download'; scope = 'Original SDK observations, not a Web runtime test'
+            globalInputUsed = $false; pluginsLoadedByFixture = $false
+            processDeadlineMs = 30000; timedOut = $false; exitCode = $null; error = $null
+          }
+          $process = $null
+          $work = Join-Path $env:RUNNER_TEMP ('krkr2-original-' + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory $work | Out-Null
+          try {
+            $pin = Get-Content tests/fixtures/native-reference/sdk.json -Raw | ConvertFrom-Json
+            Copy-Item tests/fixtures/native-reference/sdk.json (Join-Path $output 'sdk.json')
+            $archive = Join-Path $work 'sdk.zip'
+            Invoke-WebRequest -Uri $pin.url -OutFile $archive
+            if ((Get-Item $archive).Length -ne $pin.archiveBytes -or (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pin.archiveSha256) {
+              throw 'Original SDK archive differs from the preserved bytes.'
+            }
+            $status.stage = 'extract'
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+            $engine = Join-Path $work 'krkr.eXe'
+            try {
+              $entry = $zip.GetEntry($pin.engineMember)
+              if ($null -eq $entry) { throw 'Pinned engine member is missing.' }
+              [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $engine)
+            } finally { $zip.Dispose() }
+            if ((Get-Item $engine).Length -ne $pin.engineBytes -or (Get-FileHash $engine -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pin.engineSha256) {
+              throw 'Original engine differs from the pinned SDK member.'
+            }
+            $status.engine = [ordered]@{
+              bytes = (Get-Item $engine).Length; sha256 = (Get-FileHash $engine -Algorithm SHA256).Hash.ToLowerInvariant()
+              fileVersion = (Get-Item $engine).VersionInfo.FileVersion; productVersion = (Get-Item $engine).VersionInfo.ProductVersion
+            }
+            $script = Get-Content tests/fixtures/native-reference/modal-close.tjs -Raw -Encoding utf8
+            $startup = Join-Path $work 'startup.tjs'
+            [IO.File]::WriteAllText($startup, $script, [Text.UnicodeEncoding]::new($false, $true))
+            Copy-Item $startup (Join-Path $output 'startup.tjs')
+            $status.scriptSha256 = (Get-FileHash $startup -Algorithm SHA256).Hash.ToLowerInvariant()
+            $status.stage = 'execution'
+            $process = Start-Process -FilePath $engine -WorkingDirectory $work -PassThru `
+              -RedirectStandardOutput (Join-Path $output 'stdout.log') `
+              -RedirectStandardError (Join-Path $output 'stderr.log')
+            $status.processId = $process.Id
+            $null = $process.Handle
+            if (-not $process.WaitForExit(30000)) {
+              $status.timedOut = $true
+              $status.state = 'timed-out'
+              Stop-Process -Id $process.Id -Force
+              $process.WaitForExit()
+              throw 'Original engine exceeded the owned-process deadline.'
+            }
+            $status.exitCode = $process.ExitCode
+            $status.stage = 'evidence'
+            $eventsFile = Join-Path $work 'native-events.txt'
+            if (-not (Test-Path $eventsFile)) { throw 'Original script produced no observation file.' }
+            Copy-Item $eventsFile (Join-Path $output 'native-events.txt')
+            $events = [IO.File]::ReadAllLines($eventsFile)
+            $status.events = $events
+            if ($process.ExitCode -ne 0 -or $events -cnotcontains 'observations-complete' -or ($events | Where-Object { $_.StartsWith('error:') })) {
+              throw 'Original script did not complete every requested observation.'
+            }
+            # Do not predeclare the VCL ordering being investigated as the oracle.
+            # Completion means these events were observed; their values are compared separately.
+            $status.state = 'observed'
+            $status.stage = 'complete'
+          } catch {
+            if (-not $status.timedOut) { $status.state = 'failed' }
+            $status.error = $_.Exception.ToString()
+            throw
+          } finally {
+            if ($null -ne $process -and -not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+              $process.WaitForExit()
+            }
+            foreach ($file in Get-ChildItem -LiteralPath $work -File -ErrorAction SilentlyContinue) {
+              if ($file.Extension -in @('.log', '.txt')) { Copy-Item $file.FullName (Join-Path $output $file.Name) -Force }
+            }
+            $status.completedAt = [DateTime]::UtcNow.ToString('o')
+            $status | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $output 'status.json') -Encoding utf8
+          }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-runtime-${{ matrix.os }}-${{ github.run_attempt }}
+          path: out/verification/original-runtime
+          if-no-files-found: error
+          retention-days: 30
