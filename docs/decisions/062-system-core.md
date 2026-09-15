@@ -59,3 +59,7 @@ ABI 保持 5，manifest 增加 `nativeSystem:1`；生产 loader 必须同时满�
 静态清单新增 58 个 Node 案例，以及 13 个浏览器测试定义（按三浏览器为 39 项）。嵌入 API 的新增场景使用源码脚本；正常应用路径的身份、UUID、持久化场景覆盖源码和字节码。实际执行数量、跳过情况和结果以 Actions 报告为准。
 
 本阶段不注册 49 个空方法来制造完整表象。`toActualColor`、`doCompact`、线程/处理器与启动退出策略、onActivate/onDeactivate 的自动事件派发、title 的应用页面展示副作用等仍待各自合同实现。OS shell/执行/注册表、屏幕指标、`assignMessage` 和故意崩溃不进入本切片。旧 wrapper 的 touchImages Array 限制、部分 int32/boolean 转换、exit/terminate 的 code 转换和退出流程仍有明确差异；没有顺带重写它们。历史被安全审核拒绝的分配失败复现不属于本阶段验收。
+
+## 首次组合构建结果
+
+[35013970344](https://github.com/fenghengzhi/krkr2-web/actions/runs/35013970344) 在 `8cf6ae9bb1b1b26a0d96cf53ba51f65f4fcf6c2f` 成功编译 Asyncify／JSPI／字体内核，随后在 `web-crypto.ts:5` 类型检查失败：宽泛的 `Uint8Array<ArrayBufferLike>` 可能包含 SharedArrayBuffer，不能直接传给当前 Web Crypto 类型所要求的 ArrayBuffer view。普通测试实际执行数为 **0**，原始构建日志与终态单独保留。UUID 本来就新建自有的 16 字节 ArrayBuffer，修订只把 adapter、Session 依赖和 SystemEnvironment 的对应类型统一为 `Uint8Array<ArrayBuffer>`，没有使用类型断言或替换随机源。修订仍须 GitHub-hosted Actions 验证。

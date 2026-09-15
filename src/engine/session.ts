@@ -179,7 +179,7 @@ export interface SessionDependencies {
   video?: VideoBackend
   clipboard?: ClipboardPort
   arguments?: ReadonlyMap<string, string>
-  fillRandomBytes?: (bytes: Uint8Array) => void
+  fillRandomBytes?: (bytes: Uint8Array<ArrayBuffer>) => void
   now: () => number
   wallNow?: () => number
   yieldToHost: () => Promise<void>

@@ -2,7 +2,7 @@
 
 本切片补上 `Layer.setAttentionPos`、使 `useAttention` 的父链选择生效，并让 `Window.trapKey` 真正把游戏按键交给其它页面内 Window。焦点仍留在用户实际操作的窗口；普通宿主输入框、系统／字体对话框和剪贴板控件继续处理自己的编辑操作。
 
-当前仅完成实现与验收定义，尚未获得本切片的 GitHub-hosted Actions 结果。没有运行本地测试、构建、类型检查或浏览器探针。测试定义不是通过证据，历史失败、取消和未执行结果不得被本说明改写。
+当前实现尚未通过完整回归。与 062 整合的首轮 [35013970344](https://github.com/fenghengzhi/krkr2-web/actions/runs/35013970344) 在 `8cf6ae9bb1b1b26a0d96cf53ba51f65f4fcf6c2f` 完成 native 内核构建后，于 Web Crypto 适配器类型检查报 TS2345；Node／浏览器／直接运行时用例实际执行数均为 **0**。后续将 UUID 自有缓冲区的类型明确为 `Uint8Array<ArrayBuffer>`，不改随机源或输入行为。没有运行本地测试、构建、类型检查或浏览器探针，原始失败继续保留。
 
 ## 原版依据
 

@@ -51,7 +51,7 @@ export class SystemEnvironment {
 
   constructor(
     arguments_: ReadonlyMap<string, string> | undefined,
-    private readonly fillRandomBytes?: (bytes: Uint8Array) => void,
+    private readonly fillRandomBytes?: (bytes: Uint8Array<ArrayBuffer>) => void,
   ) {
     this.dataPath = normalizeSystemDataPath(arguments_?.get('-datapath'))
   }
