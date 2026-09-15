@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { headless } from '../helpers/headless.ts'
 import type { SessionDependencies } from '../../src/engine/session.ts'
 import { menuLifetimeScript } from '../helpers/menu-lifetime-script.ts'
+import { readScript } from '../../src/backends/files/text-codecs.ts'
 
 async function fixture(binary: boolean, extra = '', overrides: Partial<SessionDependencies> = {}) {
   const harness = await headless(
@@ -155,13 +156,13 @@ class RemovingMenu extends MenuItem {
         binary,
         'var clicks=0;class ClickMenu extends MenuItem {function ClickMenu(){super.MenuItem(null,"click");}function onClick(){clicks++;}}',
         {
-          decodeScript(bytes) {
+          decodeScript(bytes, mode, encoding) {
             const source = new TextDecoder().decode(bytes)
             if (source === 'menu-lifetime-gate') {
               entered()
               return gate
             }
-            return source
+            return readScript(bytes, mode, encoding)
           },
         },
       )
@@ -181,7 +182,7 @@ class RemovingMenu extends MenuItem {
         await f.execute('invalidate win;delete global.win;')
         await f.restored()
       } finally {
-        finish('0')
+        finish('0;')
         await f.session.stop()
       }
     },
@@ -206,13 +207,13 @@ class SuspendingMenu extends OwnedMenu {
   function onClick(){win.menu.remove(this);delete global.item;Scripts.execStorage("gate.tjs");clicks++;}
 }`,
         {
-          decodeScript(bytes) {
+          decodeScript(bytes, mode, encoding) {
             const source = new TextDecoder().decode(bytes)
             if (source === 'menu-lifetime-gate') {
               entered()
               return gate
             }
-            return source
+            return readScript(bytes, mode, encoding)
           },
         },
       )
@@ -225,14 +226,18 @@ class SuspendingMenu extends OwnedMenu {
         const click = f.session.menuClick(id)
         await ready
         assert.equal(f.session.inspectOwnership().menuSources, before)
-        finish('0')
+        finish('0;')
         await click
-        assert.equal(await f.session.evaluate('clicks+","+menuItemDeaths'), '1,1')
+        assert.equal(
+          await f.session.evaluate('clicks+","+menuItemDeaths'),
+          '1,1',
+          f.logs.join('\n'),
+        )
         assert.equal(f.session.inspectOwnership().menuSources, before - 1)
         await f.execute('invalidate win;delete global.win;')
         await f.restored()
       } finally {
-        finish('0')
+        finish('0;')
         await f.session.stop()
       }
     },

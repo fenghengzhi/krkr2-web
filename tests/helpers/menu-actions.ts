@@ -101,13 +101,25 @@ export async function exerciseMenuActions(
     } else await session.evaluate('Scripts.execStorage("menu-actions.tjs")')
     const result = await session.evaluate('menuActionChecks()')
     if (result !== 'result,event,missing,null,bound,exception') throw new Error(result)
+    if (logs.length) throw new Error('Unexpected menu action diagnostics: ' + logs.join('\n'))
     const lifetime = await session.evaluate('menuLifetimeChecks()')
     if (
       lifetime !==
       'registration/cache/finalize,action owner,weak parent,script retry,native retry,window roots,native casts'
     )
       throw new Error('Unexpected menu lifetime result: ' + lifetime)
-    if (logs.length) throw new Error('Unexpected menu diagnostics: ' + logs.join('\n'))
+    // The three rejected host casts emit native VM exception dumps even though
+    // the script catches them. Preserve and check these expected diagnostics.
+    const diagnostics = logs.join('\n'),
+      headers = [...diagnostics.matchAll(/==== An exception occurred at ([^\n]+)/g)]
+    if (
+      headers.length !== 3 ||
+      headers.some(
+        (header) =>
+          !/menus\.tjs\(\d+\)\[\(function\) (MenuItem|__krkrMenuInsert)\]/.test(header[1]!),
+      )
+    )
+      throw new Error('Unexpected menu cast diagnostics: ' + diagnostics)
     await session.stop()
     const stopped = {
       ...session.inspectOwnership(),
@@ -116,7 +128,7 @@ export async function exerciseMenuActions(
     }
     if (Object.values(stopped).some((value) => value !== 0) || rendererCloses !== 1)
       throw new Error('Menu action teardown retained resources: ' + JSON.stringify(stopped))
-    return { variant, binary, result, lifetime, stopped, rendererCloses }
+    return { variant, binary, result, lifetime, diagnostics, stopped, rendererCloses }
   } finally {
     await session.stop()
   }
