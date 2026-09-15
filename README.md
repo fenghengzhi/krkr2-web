@@ -46,6 +46,8 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 `Layer.update()` 与矩形重绘会触发默认或自定义 onPaint；同次绘制前的请求合并，回调继续请求时安排后续帧。各图层保留独立截止时间，异步调用、暂停和事件禁用不会丢失请求。真实像素、自主连续重绘及原 KAG 已由云端验证，详见[重绘链路](docs/decisions/045-layer-redraw.md)。
 
+`Layer.neutralColor` 已支持每实例的可写 32 位 ARGB，供图像扩容、重新分配和仿射清除使用。无主图的 opaque 图层按该颜色显示并参与祖先快照；`piledCopy` 会在 onPaint 前拒绝缺少主图的来源或目标。本 046 分支已通过完整云端回归，详见[中性颜色](docs/decisions/046-layer-neutral-color.md)。
+
 菜单更新保留仍存在的项目节点，避免更新打断展开或点击。视频打开等待真实首帧，周期和区间事件使用媒体时钟补充呈现回调；错误历史和精度边界见 [视频首帧与时钟](docs/decisions/035-video-readiness.md)。
 
 页面现在也支持“远程文件链接”。支持 Range 和强 ETag 的 XP3/ZIP 服务器可按需读取；小文件可在预算内完整下载。跨域配置、版本与存档身份见 [HTTP 来源](docs/decisions/016-http-sources.md)。
@@ -122,9 +124,13 @@ docs/             架构、已验证决策与兼容范围
 
 ## 验证
 
-测试统一由 [GitHub Actions](.github/workflows/test.yml) 执行，不在本机运行测试。[最近完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927280464)通过 1,019 项 Node、750 项浏览器测试及 6 项直接运行时专项；同次构建另有 [78 项 KAG/旧 ABI 兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927347461)通过。[此前双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895417115)通过 1,061 次执行、188 次字节码、20 次对象清理、600 次观察/升级/销毁及 24 次从属对象分配失败；历史失败与未定位问题继续保留。推送代码、更新 PR 或手动触发 Tests 工作流后，云端构建两种 TJS WASM 和字体内核，并运行 Node、三浏览器、游戏库、PWA、原生生命周期及直接运行时探测。
+测试统一由 GitHub-hosted [GitHub Actions](.github/workflows/test.yml) 执行，不在本机运行测试。阶段 046 的[完整回归 34930172005](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930172005)在 `551b97d` 通过全部 14 个作业：1,043 项 Node、786 项浏览器测试（663 项常规、57 项游戏库、59 项 PWA、7 项原生生命周期）及 6 项直接运行时专项；失败、取消、跳过、flaky 和重试均为 0。[KAG／旧 ABI 兼容检查 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970)另通过 78 项，使用 `259c892` 的构建 34929264074；之后到 `551b97d` 仅调整浏览器测试夹具，应用源码相同。阶段 046 已纳入本版本。
 
-所有测试使用同次工作流生成的产物；日志、JSON 报告、失败截图与 trace 可从 Actions 下载。操作方式、原 KAG/旧 ABI 专项与历史记录见 [测试说明](docs/testing.md)。
+046 [首次完整回归 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074)的 19 项浏览器失败继续保留：18 项源于旧夹具依赖 primary 默认颜色，已修正夹具；另 1 项 PNG 编码停止点击晚于编码完成。后续通过没有证明该取消测试的时序已修复，050 的取消验证仍在独立分支。047 的 `Window.mainWindow` 已实现，但[完整回归 34930203580](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930203580)仅通过 821／822 项浏览器测试，另 1 项 WebKit JSPI 启动用例报 `Page crashed`，尚未计入当前已验证能力；049 的空矩形复制也仍在独立分支。
+
+[045 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927280464)的 1,019 项 Node、750 项浏览器和 6 项直接运行时，以及同次构建的 [78 项兼容检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927347461)作为历史证据保留。[此前双后端分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34895417115)通过 1,061 次执行、188 次字节码、20 次对象清理、600 次观察/升级/销毁及 24 次从属对象分配失败；历史失败与未定位问题继续保留。推送代码、更新 PR 或手动触发 Tests 工作流后，云端构建两种 TJS WASM 和字体内核，并运行 Node、三浏览器、游戏库、PWA、原生生命周期及直接运行时探测。
+
+Tests 工作流各测试作业使用同次构建产物，独立兼容检查使用上文注明的构建。日志、JSON 报告、失败截图与 trace 可从 Actions 下载。操作方式、原 KAG/旧 ABI 专项与历史记录见 [测试说明](docs/testing.md)。
 
 ## 来源
 

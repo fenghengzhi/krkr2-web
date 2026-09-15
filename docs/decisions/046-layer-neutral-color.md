@@ -1,5 +1,9 @@
 # 046 — Layer 的可写 neutralColor
 
+本阶段选定范围已通过[完整回归 34930172005](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930172005)：验证提交 `551b97d`，全部 **14 个 job 成功、1,043 项 Node、786 项浏览器和 6 组直接运行时通过**。浏览器包含常规 663、游戏库 57、PWA 59、可信生命周期 7；所选测试零失败、取消、跳过、flaky 或重试。完整产物和 run.json 按原 run ID 保存在 `out/verification/github-actions/34930172005/`。
+
+[原 KAG／离线升级 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970) 在 `259c892` 使用[构建 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074)的精确产物，通过全部 **78 项**。后续 `551b97d` 只调整浏览器夹具，应用源码相同；该兼容结果对应原构建，不能写成重跑了 `551b97d` 的构建。以下保留所有历史失败与范围限制。
+
 `Layer.neutralColor` 现保存每个原生图层实例自己的 32 位 ARGB 值。TJS setter 先按原生规则转为整数，再在 BigInt 中保留低 32 位，避免较大 64 位整数经过 JavaScript number 后丢失颜色位；getter 返回非负整数。设置颜色本身不修改现有图像、绘图 clip、imageModified 或输入状态，也不单独请求重绘。
 
 依据为 [原生属性入口](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp#L9482-L9499)与 [只赋值的 uint32 setter](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.h#L420-L421)。初始子层为透明白 `0x00ffffff`。初始 primary 在 Construct 中改为 `0xffffffff`，但不重填此前分配的透明白默认 bitmap；两种初始状态分别保留。[原生 Construct](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp#L433-L445)
@@ -20,8 +24,10 @@
 
 源码复核另补上 piledCopy 的主图前置校验，并用 `tests/integration/piled-copy-preconditions.test.ts` 覆盖回调试图修复来源或目标的源码／字节码场景。[Node 诊断 34929115093](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929115093) 在 `259c892` 通过全部 1,043 项，无失败、取消或跳过。
 
-首轮[完整回归 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074) 通过全部 1,043 项 Node 和 6 组直接运行时；浏览器 767 项通过、19 项失败，无取消、跳过或重试。其中 18 项图形用例发现旧夹具对 primary 默认颜色的依赖。字体测试先扩容再切 ltAlpha，扩展区域已被 opaque white 填充；切换类型不重填已有像素。修订为先切 ltAlpha 再扩容。仿射保存测试需要透明白清除，现显式设置 neutralColor 为 `0x00ffffff`。原像素、字体度量和画布断言保留，失败日志也保留。修订等待完整回归；该首轮不能记为通过。相同构建的[原 KAG／离线升级 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970)已通过全部 78 项。
+首轮[完整回归 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074) 通过全部 1,043 项 Node 和 6 组直接运行时；浏览器 767 项通过、19 项失败，无取消、跳过或重试。其中 18 项图形用例发现旧夹具对 primary 默认颜色的依赖。字体测试先扩容再切 ltAlpha，扩展区域已被 opaque white 填充；切换类型不重填已有像素。修订为先切 ltAlpha 再扩容。仿射保存测试需要透明白清除，现显式设置 neutralColor 为 `0x00ffffff`。原像素、字体度量和画布断言保留，失败日志也保留。修订后的完整结果见本文开头；该首轮仍为失败，不能改记为通过。
 
-另 1 项是 WebKit Asyncify 的 PNG 编码停止测试。归档 trace 显示编码完成与会话就绪早于实际按钮点击：开始通知断言完成至真实点击相隔约 1.895 秒，点击前至少 85 毫秒的快照已经包含 encode-finished。这证明该次测试没有在编码期间发出停止，不能据此判定运行时遗漏取消，也不能把后来通过当作该时序已修复。完整原始 trace 和失败记录继续保留；及时触发按钮及编码已开始后的受控取消验证另行补齐。
+另 1 项是 WebKit Asyncify 的 PNG 编码停止测试。归档 trace 显示编码完成与会话就绪早于实际按钮点击：开始通知断言完成至真实点击相隔约 1.895 秒，点击前至少 85 毫秒的快照已经包含 encode-finished。这证明该次测试没有在编码期间发出停止，不能据此判定运行时遗漏取消。34930172005 的绿色重跑也没有证明该时序已修复；阶段 050 的及时触发按钮及编码开始后的受控取消测试仍在独立分支，不属于本阶段结果。完整原始 trace 和失败记录继续保留。
+
+本阶段不包含仍在分支中的阶段 047 Window.mainWindow、阶段 049 空矩形 piledCopy 或阶段 050 取消测试。047 已实现，但其[完整回归 34930203580](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930203580)仅 821/822 项浏览器通过，另 1 项 WebKit JSPI 启动用例报 Page crashed，仍待诊断和完整通过。当前仍限制一个活动 Window；完整多窗口、其余图形／系统 API、流式媒体及全部非插件兼容均未完成。
 
 所有构建、类型检查、Node 测试、浏览器检查和可执行探针只能由 GitHub-hosted Actions 执行；本地仅阅读、编辑、格式化和检查已有云端产物。此前各阶段及失败记录继续保留。
