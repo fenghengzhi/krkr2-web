@@ -142,7 +142,7 @@ for (const binary of [false, true]) {
           popup.requestId,
         )
         await f.session.menuClick(f.bItem, popup)
-        assert.equal(await result, String(f.bItem))
+        assert.equal(await result, '1')
         assert.equal(await f.session.evaluate('aClicks+","+bClicks'), '0,1')
       } finally {
         f.session.menuDismiss()
@@ -175,14 +175,14 @@ for (const binary of [false, true]) {
       try {
         const first = await show()
         f.session.menuDismiss(first.popup)
-        assert.equal(await first.result, '0')
+        assert.equal(await first.result, '1')
         const second = await show()
         assert.notEqual(first.popup.requestId, second.popup.requestId)
         f.session.menuDismiss(first.popup)
         await f.session.menuClick(f.aItem, first.popup)
         assert.equal(state.popup?.requestId, second.popup.requestId)
         await f.session.menuClick(f.aItem, second.popup)
-        assert.equal(await second.result, String(f.aItem))
+        assert.equal(await second.result, '1')
         assert.equal(await f.session.evaluate('aClicks'), '1')
         // The same reply must not become an ordinary menu click after the wait ends.
         await f.session.menuClick(f.aItem, second.popup)

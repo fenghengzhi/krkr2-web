@@ -48,13 +48,18 @@ class MenuItem {
       change.state.cacheValid=false;
     }
   }
-  function popup(flags,x,y) {
-    var selected=__host("Menu.popup",this,int(flags),int(x),int(y));
-    if(selected && !(flags & (tpmNoNotify|tpmReturnCmd)) && !System.eventDisabled) {
-      var target=__host("Menu.target",selected);
-      if(target!==null)target.onClick();
+  function popup(args*) {
+    if(args.count<3)throw new Exception("MenuItem.popup requires flags, x and y");
+    var request=[], host=global.__host incontextof global;
+    // Mask before crossing into JavaScript Number so high TJS integer bits do
+    // not lose the low DWORD flags or the signed coordinate payload.
+    try {
+      return host("Menu.popup",this,int(args[0]) & 0xffffffff,
+        int(args[1]) & 0xffffffff,int(args[2]) & 0xffffffff,request);
+    } catch(error) {
+      try { host("Menu.modalAbort",request); } catch(cleanupError) {}
+      throw error;
     }
-    return selected;
   }
   function onClick() { return __host("Menu.action",__host("Menu.state",this).actionOwner,this); }
   property __menuId { getter() { return __host("Menu.view",this); } }

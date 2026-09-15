@@ -173,3 +173,21 @@ CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原
 已测应用在 `5e54ceb` 合入并推送 main；该合入提交带 `[skip ci]`，不另计一次通过结果。相对 `2683b304`，只另有原版 SDK 参考工作流和两份参考夹具，应用／内核源码保持已测状态。Menu.popup 的新嵌套业务仍留在 052 工作目录，未验证、未合入，现有 main 的旧 popup 队列限制继续成立。
 
 本阶段通过的是 Web 实现的上述合同。旧发行所用 VCL Forms 二进制的确切关闭时序、NoNotify 观察差异和原生菜单递归仍有未知项；增加原版参考工作流不等于已取得这些结论。其余非插件功能继续实现，不能将 Window 模态接通写为整个目标完成。
+
+## Menu.popup 业务接线与原版关闭校准（新改动尚待 Actions）
+
+MenuModals 将 popup 接入同一 TJS 栈上的 ModalLoop。MenuTree 保留每次请求及其结果，选择或撤销只移除该层 UI；即使父菜单的 Window 被子 showModal 阻挡，也先记录不可用结果，等自己的 wait 恢复为栈顶才结束，不取消正在运行的子 Window。打开失败、异常和 Stop 按请求身份清理，服务不额外强持有脚本对象。
+
+选中通知在该 scope 清理后进入普通输入队列，TJS popup 不再内联调用 onClick。取队时才升级原 MenuRecord 的弱引用，并沿当前 Parent 查找 Window、检查平台项和祖先 enabled；其间只改变叶项 visible、caption 或 children 不抹掉已经选中的通知。新的 DOM 点击仍校验原 Window、请求、epoch 和可见叶项，旧请求不能借重挂载或命令编号复用进入另一窗口。通知继续使用既有错误处理、原生引用释放和逐事件完成检查点。
+
+无 ReturnCmd 的普通选择返回 BOOL=1；带 ReturnCmd 返回选中瞬间捕获的独立 Word 命令编号，取消为 0。命令池采用 Web 自己的最小可用正 Word，与 view/request/Window 身份分离；这不宣称复刻未知旧 VCL 的分配序列。flags 和坐标先在 TJS 整数域取低 32 位，再跨入 JavaScript，保留大整数的低位。显式 UI 取消目前采用已观察到的 Win32 Esc BOOL=1；窗口不可用、暂停、后台撤销和调用前拒绝仍返回 0，不能把 Esc 观察推广为所有原生撤销方式。
+
+无 Recurse 的嵌套调用返回 0 且保留父菜单；有 Recurse 时子菜单结束并收尾后恢复父请求。这是当前 Web 行为，完整原版递归仍待对照。ReturnCmd 抑制通知；NoNotify 单独使用暂沿文档抑制，但两轮 Windows synthetic 键盘观察与此不同，不能声称该位已完全兼容。最新对照 [34989280346](https://github.com/fenghengzhi/krkr2-web/actions/runs/34989280346)，`4f01cec`，在每个平台记录 32 项，28 通过、4 断言失败；hook 改写和直接 PostMessage 两种输入均在 N-only 的选择中收到 WM_COMMAND。失败保留，独立输入只排除了本探针改写 MSG 是该反例的必要条件，没有证明旧 VCL 或真实鼠标路径。
+
+宿主菜单组件在 Window blocked 或字体对话框活跃时移除 body 上的菜单浮层，不抢回父窗口焦点，不拦截子窗口指针与 Esc；旧 DOM 即使被重新挂回页面也不能提交给新请求。焦点恢复仅接受仍连接、可见且非 inert/disabled 的目标，并保留从非活动窗口的显式 popup 返回实际原输入窗口的规则。
+
+原版 SDK 的[基础观察 34992096141](https://github.com/fenghengzhi/krkr2-web/actions/runs/34992096141)和[修订后扩展 34993108821](https://github.com/fenghengzhi/krkr2-web/actions/runs/34993108821)在 GitHub-hosted Windows 2022/2025 执行固定哈希的 2.32r2 引擎。后者四场景×两平台共 8 份观察完成：close 先返回再 query；已接受后同回调再次 close 会覆盖未消费结果；已接受父窗口仍等待子 modal 完整返回；隐藏后 Timer 继续，但 close 的 query 被丢弃，直到显式 base 答复才结束。这里统计的是原版观察完成，不是 Web 回归通过。最初无项目参数的超时和扩展状态机尚未建立时的失败均保留在对应原运行，见参考夹具 README。
+
+这也校正了前文已经测试过、但源于推断的“丢弃关闭查询自动重试”：固定 WindowFormUnit 的 Closing 在排队时置位，隐藏投递失败及 ClearAllWindowInputEvents 都不清该位，SetVisible 也不清；再次 close 因 Closing 直接返回。因此新实现让被丢弃的已入队查询保持 pending，只有显式 base true/false 答复解除；仅在适配器同步入队前失败时回滚。新增隐藏关闭源码/字节码对照，并改正既有父查询被子模态取消的预期，保留取消确实发生、子窗口继续运行和显式答复后才能继续的断言。历史 `2683b304` 的绿色结果仍对应旧行为，不追认这些新改动已验证。
+
+本片新增 18 项 MenuTree、12 项 MenuModals、24 项真实 TJS 菜单、2 项原版隐藏关闭回归及 1 项关闭入队回滚测试，预期共新增 57 项 Node（合计 1,703）；页面新增 5 个宿主模板及 10 个真实 Worker 模板，预期新增 45 项浏览器（合计 1,140）。所有新增和修订均未在本地运行，需以推送后的 GitHub Actions 实际报告为准。
