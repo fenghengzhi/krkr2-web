@@ -11,7 +11,7 @@ System.exceptionHandler=function(error) {
 };
 nativeRecord("start");
 nativeRecord("version:"+System.versionString);
-// The third timer tick is a bounded recovery close, not an expected ordering.
+// Recovery is armed by the actual second query, never by an elapsed tick count.
 class NativeModalWindow extends Window {
   var queries=0;
   function NativeModalWindow() { super.Window(); caption="KRKR2 accepted reclose reference"; }
@@ -29,21 +29,23 @@ class NativeModalWindow extends Window {
       emit("reclose-after");
     }
     emit("query-return:"+number);
+    if(number==2)global.nativeReady=true;
   }
 }
 var nativeMain=new Window();
 nativeMain.visible=true;
 var nativeModal=new NativeModalWindow();
 var nativeTicks=0;
+var nativeReady=true;
 function nativeTick(event) {
+  if(!nativeReady)return;
+  nativeReady=false;
   nativeTicks++;
-  nativeRecord("tick:"+nativeTicks);
-  if(nativeTicks==1 || nativeTicks==3) {
-    if(nativeTicks==3)nativeTimer.enabled=false;
-    nativeRecord("close-before:"+nativeTicks);
-    nativeModal.close();
-    nativeRecord("close-after:"+nativeTicks);
-  }
+  nativeRecord("close-step:"+nativeTicks);
+  if(nativeTicks==2)nativeTimer.enabled=false;
+  nativeRecord("close-before:"+nativeTicks);
+  nativeModal.close();
+  nativeRecord("close-after:"+nativeTicks);
 }
 var nativeTimer=new Timer(global,"nativeTick");
 nativeTimer.enabled=false;

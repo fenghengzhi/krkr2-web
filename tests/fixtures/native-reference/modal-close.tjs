@@ -21,6 +21,7 @@ class NativeModalWindow extends Window {
     emit("query:"+number);
     super.onCloseQuery(number>1);
     emit("query-return:"+number);
+    if(number==1)global.nativeReady=true;
   }
 }
 var nativeMain=new Window();
@@ -28,7 +29,10 @@ nativeMain.caption="KRKR2 original reference owner";
 nativeMain.visible=true;
 var nativeModal=new NativeModalWindow();
 var nativeTicks=0;
+var nativeReady=true;
 function nativeTick(event) {
+  if(!nativeReady)return;
+  nativeReady=false;
   nativeTicks++;
   nativeRecord("close-before:"+nativeTicks+":"+nativeModal.queries);
   if(nativeTicks>=2)nativeTimer.enabled=false;

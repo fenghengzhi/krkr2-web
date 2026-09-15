@@ -11,7 +11,7 @@ System.exceptionHandler=function(error) {
 };
 nativeRecord("start");
 nativeRecord("version:"+System.versionString);
-// Observe whether hiding leaves showModal active and permits a later timer close.
+// A final explicit query answer ends the observation if hidden close is withheld.
 class NativeModalWindow extends Window {
   function NativeModalWindow() { super.Window(); caption="KRKR2 hidden modal reference"; }
   function onCloseQuery(canClose) {
@@ -32,11 +32,15 @@ function nativeTick(event) {
     nativeRecord("hide-before");
     nativeModal.visible=false;
     nativeRecord("hide-after:"+int(nativeModal.visible));
-  } else {
-    nativeTimer.enabled=false;
+  } else if(nativeTicks==2) {
     nativeRecord("close-before");
     nativeModal.close();
     nativeRecord("close-after");
+  } else {
+    nativeTimer.enabled=false;
+    nativeRecord("explicit-answer-before");
+    nativeModal.onCloseQuery(true);
+    nativeRecord("explicit-answer-after");
   }
 }
 var nativeTimer=new Timer(global,"nativeTick");
