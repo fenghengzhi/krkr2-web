@@ -397,6 +397,32 @@ void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
     } else if(result) *result = reply.value;
 }
 
+unsigned nativeLifetimeCount = 0;
+// Native instances execute before custom-object member deletion, unlike weak
+// observers. This is the boundary needed by Window/Layer resource invalidation.
+class HostLifetime final : public tTJSNativeInstance {
+    Vm* vm;
+    tTJSCustomObject* owner; // owning custom object contains this native instance
+    ttstr operation;
+    unsigned identifier;
+    bool running = false, completed = false;
+public:
+    HostLifetime(Vm* vm, tTJSCustomObject* owner, const ttstr& operation, unsigned identifier)
+        : vm(vm), owner(owner), operation(operation), identifier(identifier) { ++nativeLifetimeCount; }
+    ~HostLifetime() override { --nativeLifetimeCount; }
+    void Invalidate() override {
+        if(completed || running || shuttingDown) return;
+        running = true;
+        struct RunningScope { bool& value; ~RunningScope() { value = false; } } scope{running};
+        tTJSVariant values[] = { tTJSVariant(static_cast<tjs_int64>(identifier)), tTJSVariant(owner, owner) };
+        tTJSVariant* args[] = { &values[0], &values[1] };
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation.c_str(), operation.GetLen(), 2, args));
+        if(!reply) TJS_eTJSError(u"Native lifetime returned no response");
+        resolveReply(vm, *reply, nullptr);
+        completed = true;
+    }
+};
+
 class HostConsole final : public iTJSConsoleOutput {
     Vm* vm;
 public:
@@ -932,29 +958,57 @@ API void krkr_value_set_owner(Vm* vm, tTJSVariant* value, unsigned token) {
 API int krkr_owner_upgrade_failed(Vm* vm) { return vm->ownerUpgradeFailed; }
 API void krkr_owner_unobserve(Vm* vm, unsigned token) { vm->owners.erase(token); }
 API unsigned krkr_owner_count(Vm* vm) { return vm->owners.size(); }
-API int krkr_owner_bind_dependent(Vm* vm, unsigned ownerHandle, unsigned dependentHandle) {
+static tTJSCustomObject* lifetimeInstance(Vm* vm, unsigned handle) {
+    if(vm->released.count(handle)) return nullptr;
+    auto found = vm->handles.find(handle);
+    if(found == vm->handles.end() || found->second.Type() != tvtObject) return nullptr;
+    const auto closure = found->second.AsObjectClosureNoAddRef();
+    if(closure.ObjThis && closure.ObjThis != closure.Object) return nullptr;
+    auto* object = dynamic_cast<tTJSCustomObject*>(closure.Object);
+    if(!object || !object->IsLifetimeValid() || dynamic_cast<tTJSInterCodeContext*>(object) ||
+        dynamic_cast<tTJSNativeClass*>(object)) return nullptr;
+    return object;
+}
+API int krkr_owner_register_native(Vm* vm, unsigned handle, const tjs_char* operation, unsigned length, unsigned identifier) {
+    if(shuttingDown || !operation || !length || length > 128) return 0;
+    auto* owner = lifetimeInstance(vm, handle);
+    if(!owner) return 0;
+    try {
+        auto record = std::make_unique<HostLifetime>(vm, owner, ttstr(operation, length), identifier);
+        iTJSNativeInstance* pointer = record.get();
+        const auto classId = TJSRegisterNativeClass(u"krkr2-web.HostLifetime");
+        if(TJS_FAILED(owner->NativeInstanceSupport(TJS_NIS_REGISTER, classId, &pointer))) return 0;
+        record.release();
+        return 1;
+    } catch(...) { return 0; }
+}
+API unsigned krkr_native_hook_count() { return nativeLifetimeCount; }
+API unsigned krkr_owner_bind_dependent(Vm* vm, unsigned ownerHandle, unsigned dependentHandle) {
     if(shuttingDown || !vm->nextDependent || vm->dependents.size() >= 4096) return 0;
-    const auto instance = [&](unsigned handle) -> tTJSCustomObject* {
-        if(vm->released.count(handle)) return nullptr;
-        auto found = vm->handles.find(handle);
-        if(found == vm->handles.end() || found->second.Type() != tvtObject) return nullptr;
-        const auto closure = found->second.AsObjectClosureNoAddRef();
-        if(closure.ObjThis && closure.ObjThis != closure.Object) return nullptr;
-        auto* object = dynamic_cast<tTJSCustomObject*>(closure.Object);
-        if(!object || !object->IsLifetimeValid() || dynamic_cast<tTJSInterCodeContext*>(object) ||
-            dynamic_cast<tTJSNativeClass*>(object)) return nullptr;
-        return object;
-    };
-    auto* owner = instance(ownerHandle);
-    auto* dependent = instance(dependentHandle);
+    auto* owner = lifetimeInstance(vm, ownerHandle);
+    auto* dependent = lifetimeInstance(vm, dependentHandle);
     if(!owner || !dependent || owner == dependent) return 0;
     KrkrCompilerScope dependentPhase(14);
     try {
         auto record = std::make_unique<DependentOwner>(dependent);
         if(!record->ownerObserver.Attach(owner) || !record->dependentObserver.Attach(dependent)) return 0;
-        vm->dependents.emplace(vm->nextDependent++, std::move(record));
-        return 1;
+        const auto token = vm->nextDependent++;
+        vm->dependents.emplace(token, std::move(record));
+        return token;
     } catch(...) { return 0; }
+}
+API void krkr_owner_unbind_dependent(Vm* vm, unsigned token) {
+    auto found = vm->dependents.find(token);
+    // A drain extracts the binding before invoking script. Revocation cannot
+    // undo an invalidation that has already started or affect a replacement.
+    if(found == vm->dependents.end()) return;
+    auto& record = *found->second;
+    record.ownerObserver.Detach();
+    record.dependentObserver.Detach();
+    record.invalidate = false;
+    record.queued = true;
+    // Never erase the node here: its last dependent reference can execute a
+    // suspendable finalizer. The ordinary VM drain owns that release.
 }
 API unsigned krkr_dependent_count(Vm* vm) { return vm->dependents.size(); }
 API unsigned krkr_pending_invalidation_count(Vm* vm) {

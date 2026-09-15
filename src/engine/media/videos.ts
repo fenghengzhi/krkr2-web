@@ -23,6 +23,7 @@ interface Video {
   id: number
   owner: ScriptWeakObject
   window?: ScriptWeakObject
+  windowId: number
   snapshot: VideoSnapshot
   ready: boolean
   detached: boolean
@@ -73,6 +74,9 @@ export class VideoService {
   }
   get pendingCloses(): number {
     return this.closes.size
+  }
+  disconnectWindow(id: number): void {
+    for (const video of this.videos.values()) if (video.windowId === id) this.disconnect(video)
   }
   private cancelEvents(video: Video): void {
     video.version++
@@ -221,12 +225,16 @@ export class VideoService {
         throw new Error('VideoOverlay requires its instance and Window')
       if (this.videos.size >= 16) throw new Error('Video overlay limit exceeded')
       const id = this.next++
+      const windowId = Number(args[2])
+      if (!Number.isSafeInteger(windowId) || windowId <= 0)
+        throw new Error('Invalid video Window identity')
       const owner = this.objects.observe(args[0], () => this.retire(id))
       let window: ScriptWeakObject | undefined
       try {
         const video: Video = {
           id,
           owner,
+          windowId,
           snapshot: emptyVideoSnapshot(id, this.epoch++),
           ready: false,
           detached: false,

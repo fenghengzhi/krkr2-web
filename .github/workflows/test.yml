@@ -1,15 +1,25 @@
 name: Tests
+run-name: ${{ inputs.node-only && 'Node diagnostic (browser suites not run)' || inputs.runtime-only && 'Direct runtime diagnostic (application suites not run)' || 'Full test suite' }}
 
 on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      node-only:
+        description: Run build and Node checks only; this is not a full regression result
+        type: boolean
+        default: false
+      runtime-only:
+        description: Run build and direct browser runtime checks only; not a full regression result
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ inputs.node-only && '-node-diagnostic' || inputs.runtime-only && '-runtime-diagnostic' || '' }}
   # Keep the running suite and its evidence when a follow-up fix is queued.
   cancel-in-progress: false
 
@@ -26,6 +36,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
+      - name: Reject conflicting diagnostic selections
+        if: ${{ inputs.node-only && inputs.runtime-only }}
+        run: exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -146,6 +159,7 @@ jobs:
 
   node:
     name: Node conformance and integration
+    if: ${{ !inputs.runtime-only }}
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -186,6 +200,7 @@ jobs:
 
   browser:
     name: Browser / ${{ matrix.browser }} / ${{ matrix.suite }} (${{ matrix.os }})
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
     needs: build
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -260,6 +275,7 @@ jobs:
 
   native-activity:
     name: Chromium trusted lifecycle
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -283,6 +299,7 @@ jobs:
 
   runtime:
     name: Direct runtime / three browsers
+    if: ${{ !inputs.node-only }}
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -305,7 +322,7 @@ jobs:
 
   tests:
     name: All tests
-    if: always()
+    if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
     needs: [build, node, browser, native-activity, runtime]
     runs-on: ubuntu-24.04
     timeout-minutes: 5

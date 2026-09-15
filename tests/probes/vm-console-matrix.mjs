@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import { verifyOfflineBuild } from '../../scripts/verify-offline-build.mjs'
+import { windowLifetimeEvidence } from './window-lifetime-evidence.mjs'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Run verification reports on GitHub Actions')
 const directory = 'out/verification/hosted-evidence'
@@ -137,6 +138,12 @@ const objectPhase = wasm.capabilities?.objectFinalization === 1
 const hostPhase = wasm.capabilities?.hostObjectLifetime === 1
 const soundPhase = wasm.capabilities?.soundObjectLifetime === 1
 const videoPhase = wasm.capabilities?.videoObjectLifetime === 1
+const windowPhase = wasm.capabilities?.windowObjectLifetime === 1
+if (windowPhase) {
+  assert(videoPhase)
+  assert.equal(wasm.capabilities.dependentRevocation, 1)
+  assert.equal(wasm.capabilities.nativeLifetimeHooks, 1)
+}
 if (videoPhase) assert(soundPhase)
 if (soundPhase) assert(hostPhase)
 if (hostPhase) assert(objectPhase)
@@ -161,27 +168,29 @@ if (binaryPhase) assert(compilerPhase)
 const scriptsPhase = wasm.abi === 5
 if (compilerPhase) assert(scriptsPhase)
 const tracePhase = wasm.abi >= 4
-const nodeCount = videoPhase
-  ? 776
-  : soundPhase
-    ? 710
-    : hostPhase
-      ? 594
-      : objectPhase
-        ? 466
-        : executionPhase
-          ? 398
-          : lifetimePhase
-            ? 392
-            : binaryPhase
-              ? 384
-              : compilerPhase
-                ? 371
-                : scriptsPhase
-                  ? 362
-                  : tracePhase
-                    ? 351
-                    : 346
+const nodeCount = windowPhase
+  ? 900
+  : videoPhase
+    ? 776
+    : soundPhase
+      ? 710
+      : hostPhase
+        ? 594
+        : objectPhase
+          ? 466
+          : executionPhase
+            ? 398
+            : lifetimePhase
+              ? 392
+              : binaryPhase
+                ? 384
+                : compilerPhase
+                  ? 371
+                  : scriptsPhase
+                    ? 362
+                    : tracePhase
+                      ? 351
+                      : 346
 const browserCount = videoPhase
   ? 678
   : soundPhase
@@ -964,6 +973,7 @@ for (const row of runtime.results) {
   assert.equal(row.cancelled, 'AbortError: Execution cancelled')
   assert.match(row.primary, /browserPrimaryMissing/)
   assert.deepEqual(row.errors, [])
+  if (windowPhase) windowLifetimeEvidence(row)
   if (videoPhase) {
     weakReturnOwnership(row.weakReturns, row.backend)
     videoOwnership(row.videoOwnership, row.backend)
@@ -1664,6 +1674,27 @@ const matrix = {
     node: nodeCount,
     browser: browserCount,
     directRuntime: 6,
+    ...(windowPhase
+      ? {
+          dependentRevocations: runtime.results.reduce(
+            (sum, row) => sum + row.dependentRevocations.length,
+            0,
+          ),
+          nativeLifetimes: runtime.results.reduce(
+            (sum, row) => sum + row.nativeLifetimes.length,
+            0,
+          ),
+          windowOwnershipSessions: runtime.results.reduce(
+            (sum, row) => sum + row.windowOwnership.length,
+            0,
+          ),
+          windowOwnershipCases: runtime.results.reduce(
+            (sum, row) =>
+              sum + row.windowOwnership.reduce((count, session) => count + session.cases.length, 0),
+            0,
+          ),
+        }
+      : {}),
     ...(videoPhase
       ? {
           weakReturns: runtime.results.reduce((sum, row) => sum + row.weakReturns.length, 0),
@@ -1859,6 +1890,12 @@ const matrix = {
   evidence,
   previousMatrices: {
     ...fixtureManifest.historicalMatrices,
+    ...(windowPhase
+      ? {
+          'video-object-lifetime':
+            '7996d5d822fbdbbc1acde1c019e247a3cb60b994f474cbe766d6fe78e2921a5d',
+        }
+      : {}),
     ...(videoPhase
       ? {
           'sound-object-lifetime':
@@ -1893,6 +1930,35 @@ const matrix = {
       : {}),
   },
   historicalFailures: [
+    ...(windowPhase
+      ? [
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34907178124',
+            reason:
+              'The original WebKit Asyncify box-blur cancellation fixture observed completion before stop arrived. The revised fixture observes and holds an actual cooperative yield after native-sized working buffers are allocated, then releases it on the real stop RPC. The failed run is retained; this proves cooperative cancellation, not worst-case physical latency.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34911089743',
+            reason:
+              'Type checking rejected a new pointer test packet without the required clicks field. No behavior suite ran.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34911509538',
+            reason:
+              'Window bootstrap used unsupported TJS finally syntax and prevented Session initialization. Cleanup now uses supported catch and normal completion paths. Original failures and incomplete jobs are not passing evidence.',
+          },
+          {
+            run: 'https://github.com/fenghengzhi/krkr2-web/actions/runs/34912324061',
+            reason:
+              'Node diagnostic passed 888/896. Six baselines did not account for first variadic-call initialization of the shared native Array class (25 dispatch objects); two pointer fixtures tried to hide a primary Layer. Warmup now precedes exact baseline capture, and an empty province plane exercises hit exclusion with the primary visible.',
+          },
+          ...['34912839836', '34912926109'].map((id) => ({
+            run: `https://github.com/fenghengzhi/krkr2-web/actions/runs/${id}`,
+            reason:
+              'Type checking narrowed the diagnostic log length to 1 despite a later splice and rejected its final comparison with 0. The expected diagnostic is now copied out before assertions. Neither diagnostic reached its behavior suite.',
+          })),
+        ]
+      : []),
     ...(videoPhase
       ? [
           {
@@ -2252,6 +2318,12 @@ const matrix = {
     },
   ],
   incomplete: [
+    ...(windowPhase
+      ? [
+          'Selected Window weak registration, native cleanup order, event delivery leases, managed registrations and replacement-window isolation are covered; complete multiwindow behavior and Layer/Menu ownership remain unfinished',
+          'Native lifetime registration allocation-failure paths have not yet received a dedicated fault-injection matrix; slot exhaustion and invalid registrations are covered',
+        ]
+      : []),
     ...(videoPhase
       ? [
           'Historical Node sound-lifetime.test.ts SIGSEGV has no confirmed cause; three isolated unchanged 82-case runs passed without reproducing it',
@@ -2269,19 +2341,21 @@ const matrix = {
           'Automatic legacy text detection and decoder latching, full bytecode validation and complete storage paths remain incomplete',
           ...(binaryPhase
             ? [
-                videoPhase
-                  ? 'Selected Sound, VideoOverlay, Timer and AsyncTrigger weak ownership, queued event leases, dependent retirement and asynchronous media resource cleanup are covered. Layer, Window, MenuItem and remaining host/VM ownership semantics still require implementation. Registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
-                  : soundPhase
-                    ? 'Selected Sound, Timer and AsyncTrigger weak ownership, dependent retirement, queued event leases and asynchronous audio resource closes are covered; Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
-                    : hostPhase
-                      ? 'Selected host handle drains, native weak observation and Timer/AsyncTrigger event leases are covered; Sound, Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Genuine registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
-                      : objectPhase
-                        ? 'Reference-counted cleanup, explicit cycle breaking and selected finalizer failures are covered; host object ownership and remaining VM semantics still require implementation. Arbitrary cycle collection is not part of the TJS2 reference behavior.'
-                        : executionPhase
-                          ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
-                          : lifetimePhase
-                            ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
-                            : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
+                windowPhase
+                  ? 'Selected Window, Sound, VideoOverlay, Timer and AsyncTrigger lifetimes are covered. Full multiple-window behavior, Layer, MenuItem and remaining host/VM ownership semantics still require implementation. Registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                  : videoPhase
+                    ? 'Selected Sound, VideoOverlay, Timer and AsyncTrigger weak ownership, queued event leases, dependent retirement and asynchronous media resource cleanup are covered. Layer, Window, MenuItem and remaining host/VM ownership semantics still require implementation. Registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                    : soundPhase
+                      ? 'Selected Sound, Timer and AsyncTrigger weak ownership, dependent retirement, queued event leases and asynchronous audio resource closes are covered; Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                      : hostPhase
+                        ? 'Selected host handle drains, native weak observation and Timer/AsyncTrigger event leases are covered; Sound, Layer, Window, VideoOverlay, MenuItem and remaining host/VM ownership semantics still require implementation. Genuine registered callbacks and explicit reference cycles retain their original ownership; arbitrary cycle collection is not part of TJS2.'
+                        : objectPhase
+                          ? 'Reference-counted cleanup, explicit cycle breaking and selected finalizer failures are covered; host object ownership and remaining VM semantics still require implementation. Arbitrary cycle collection is not part of the TJS2 reference behavior.'
+                          : executionPhase
+                            ? 'Execution budgets and selected frame/argument allocation rollback are covered; arbitrary object cycles, implicit finalizer failures and remaining VM semantics still require implementation'
+                            : lifetimePhase
+                              ? 'Selected bytecode ownership, cancellation and allocator failures are covered; automatic cyclic instance reclamation, deep try/call stack budgets and remaining VM semantics still require implementation'
+                              : 'Structural bytecode validation does not prove native allocation cleanup, deep try/call stack budgets or every VM instruction semantic; these still require audit',
               ]
             : [
                 'Serialized Array/Dictionary resource execution and prefixed bytecode remain incomplete',
@@ -2315,27 +2389,29 @@ const matrix = {
     'All remaining requirements in docs/non-plugin-progress.md; full non-plugin compatibility is not complete',
   ],
 }
-const reportName = videoPhase
-  ? 'video-object-lifetime-matrix.json'
-  : soundPhase
-    ? 'sound-object-lifetime-matrix.json'
-    : hostPhase
-      ? 'host-object-lifetime-matrix.json'
-      : objectPhase
-        ? 'object-finalization-matrix.json'
-        : executionPhase
-          ? 'execution-budgets-matrix.json'
-          : lifetimePhase
-            ? 'bytecode-lifetime-matrix.json'
-            : binaryPhase
-              ? 'binary-scripts-matrix.json'
-              : compilerPhase
-                ? 'compiler-matrix.json'
-                : scriptsPhase
-                  ? 'native-scripts-matrix.json'
-                  : tracePhase
-                    ? 'stack-traces-matrix.json'
-                    : 'vm-console-matrix.json'
+const reportName = windowPhase
+  ? 'window-object-lifetime-matrix.json'
+  : videoPhase
+    ? 'video-object-lifetime-matrix.json'
+    : soundPhase
+      ? 'sound-object-lifetime-matrix.json'
+      : hostPhase
+        ? 'host-object-lifetime-matrix.json'
+        : objectPhase
+          ? 'object-finalization-matrix.json'
+          : executionPhase
+            ? 'execution-budgets-matrix.json'
+            : lifetimePhase
+              ? 'bytecode-lifetime-matrix.json'
+              : binaryPhase
+                ? 'binary-scripts-matrix.json'
+                : compilerPhase
+                  ? 'compiler-matrix.json'
+                  : scriptsPhase
+                    ? 'native-scripts-matrix.json'
+                    : tracePhase
+                      ? 'stack-traces-matrix.json'
+                      : 'vm-console-matrix.json'
 const output = 'out/verification/' + reportName
 await writeFile(output, JSON.stringify(matrix, null, 2) + '\n')
 await appendFile(

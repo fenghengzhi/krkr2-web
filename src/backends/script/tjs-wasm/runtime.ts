@@ -7,6 +7,7 @@ import {
   type HostReply,
   type ScriptObject,
   type ScriptWeakObject,
+  type ScriptDependent,
   type ScriptRuntime,
   type ScriptValue,
   scriptRecord,
@@ -283,11 +284,44 @@ export class TjsWasmRuntime implements ScriptRuntime {
     this.owners.delete(owner.id)
     this.call('krkr_owner_unobserve', this.vm, owner.id)
   }
-  bindDependent(owner: ScriptObject, dependent: ScriptObject): void {
+  registerNativeLifetime(owner: ScriptObject, operation: string, identifier: number): void {
+    this.assertObject(owner)
+    if (
+      !/^[A-Za-z][A-Za-z0-9_.]{0,127}$/.test(operation) ||
+      !Number.isSafeInteger(identifier) ||
+      identifier < 0 ||
+      identifier > 0xffffffff
+    )
+      throw new Error('Invalid native lifetime operation or identifier')
+    const name = this.textPointer(operation)
+    try {
+      if (
+        !this.call(
+          'krkr_owner_register_native',
+          this.vm,
+          owner.id,
+          name,
+          operation.length,
+          identifier,
+        )
+      )
+        throw new Error('Cannot register a native lifetime on this TJS instance')
+    } finally {
+      this.call('free', name)
+    }
+  }
+  bindDependent(owner: ScriptObject, dependent: ScriptObject): ScriptDependent {
     this.assertObject(owner)
     this.assertObject(dependent)
-    if (!this.call('krkr_owner_bind_dependent', this.vm, owner.id, dependent.id))
-      throw new Error('Cannot bind a released, invalid or unavailable TJS dependent')
+    const id = this.call('krkr_owner_bind_dependent', this.vm, owner.id, dependent.id) >>> 0
+    if (!id) throw new Error('Cannot bind a released, invalid or unavailable TJS dependent')
+    return { type: 'dependent', id, runtime: this.identity }
+  }
+  unbindDependent(binding: ScriptDependent): void {
+    if (binding.runtime !== this.identity)
+      throw new Error('Dependent belongs to a different TJS runtime')
+    if (this.disposed) return
+    this.call('krkr_owner_unbind_dependent', this.vm, binding.id)
   }
   private assertWeakOwner(owner: ScriptWeakObject): void {
     if (owner.runtime !== this.identity) throw new Error('Owner belongs to a different TJS runtime')

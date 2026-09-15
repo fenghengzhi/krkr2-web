@@ -22,8 +22,14 @@ import { ownerObservationCases, exerciseOwnerObservation } from '../helpers/owne
 import { exerciseEventLifetime } from '../helpers/event-lifetime-runtime.ts'
 import { exerciseSoundLifetime } from '../helpers/sound-lifetime-runtime.ts'
 import { exerciseVideoLifetime } from '../helpers/video-lifetime-runtime.ts'
+import { exerciseWindowLifetime } from '../helpers/window-lifetime-runtime.ts'
 import { exerciseWeakReturn, weakReturnCases } from '../helpers/weak-return.ts'
 import { dependentLifetimeCases, exerciseDependentLifetime } from '../helpers/dependent-lifetime.ts'
+import {
+  dependentRevocationCases,
+  exerciseDependentRevocation,
+} from '../helpers/dependent-revocation.ts'
+import { nativeLifetimeCases, exerciseNativeLifetime } from '../helpers/native-lifetime.ts'
 import {
   exerciseBytecodeLifetime,
   makeBytecodeWork,
@@ -189,18 +195,35 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
   const objectCases = [],
     finalizerControls = []
   const dependentLifetimes = [],
+    dependentRevocations = [],
+    nativeLifetimes = [],
     soundOwnership = [],
     videoOwnership = [],
+    windowOwnership = [],
     weakReturns = []
   for (const binary of [false, true])
     soundOwnership.push(await exerciseSoundLifetime(factory, wasmBinary, backend, binary))
   for (const binary of [false, true])
     videoOwnership.push(await exerciseVideoLifetime(factory, wasmBinary, backend, binary))
+  for (const binary of [false, true])
+    windowOwnership.push(await exerciseWindowLifetime(factory, wasmBinary, backend, binary))
   for (const debug of [false, true])
     for (const binary of [false, true])
       for (const name of weakReturnCases)
         weakReturns.push(
           await exerciseWeakReturn(factory, wasmBinary, backend, name, debug, binary),
+        )
+  for (const debug of [false, true])
+    for (const binary of [false, true])
+      for (const name of dependentRevocationCases)
+        dependentRevocations.push(
+          await exerciseDependentRevocation(factory, wasmBinary, backend, name, debug, binary),
+        )
+  for (const debug of [false, true])
+    for (const binary of [false, true])
+      for (const name of nativeLifetimeCases)
+        nativeLifetimes.push(
+          await exerciseNativeLifetime(factory, wasmBinary, backend, name, debug, binary),
         )
   for (const debug of [false, true])
     for (const binary of [false, true])
@@ -226,8 +249,11 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     ownerObservations: ownerCases,
     eventOwnership,
     dependentLifetimes,
+    dependentRevocations,
+    nativeLifetimes,
     soundOwnership,
     videoOwnership,
+    windowOwnership,
     weakReturns,
     executionBudgets: {
       checks: [

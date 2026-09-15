@@ -96,6 +96,67 @@ Debug.message("processing-ready:"+string(saved.getMainPixel(0,0)==0xff && saved.
   test(`${backend}: a large box blur can stop without the Worker timeout fallback`, async ({
     page,
   }) => {
+    await page.addInitScript(() => {
+      const NativeWorker = window.Worker
+      window.Worker = class extends NativeWorker {
+        constructor(input: string | URL, options?: WorkerOptions) {
+          const url = new URL(input, location.href)
+          if (url.pathname.includes('/assets/session.worker-'))
+            url.searchParams.set('box-stop-test', crypto.randomUUID())
+          super(url, options)
+        }
+      }
+    })
+    await page.route('**/assets/session.worker-*.js*', async (route) => {
+      const response = await route.fetch()
+      // Hold the real cooperative yield only after boxBlur has acquired its
+      // column sums, four-channel accumulator and full-size output bitmap.
+      // A log marker alone can reach Playwright after the operation finished.
+      const gate = `(() => {
+        const state = self.__boxBlurStop = { columns: 0, accumulator: 0, output: 0, selected: false, held: false };
+        const schedule = self.setTimeout.bind(self);
+        let release;
+        self.Uint32Array = new Proxy(self.Uint32Array, {
+          construct(target, args, newTarget) {
+            const value = Reflect.construct(target, args, newTarget);
+            if (args[0] === 4096 * 4) state.columns = value.byteLength;
+            return value;
+          }
+        });
+        self.Float64Array = new Proxy(self.Float64Array, {
+          construct(target, args, newTarget) {
+            const value = Reflect.construct(target, args, newTarget);
+            if (state.columns && args[0] === 4) state.accumulator = value.byteLength;
+            return value;
+          }
+        });
+        self.Uint8Array = new Proxy(self.Uint8Array, {
+          construct(target, args, newTarget) {
+            const value = Reflect.construct(target, args, newTarget);
+            if (state.accumulator && args[0] === 4096 * 4096 * 4) state.output = value.byteLength;
+            return value;
+          }
+        });
+        self.setTimeout = (callback, delay, ...args) => {
+          if (state.output && !state.selected && delay === 0 && typeof callback === 'function') {
+            state.selected = true;
+            return schedule(() => { state.held = true; release = () => callback(...args); }, delay);
+          }
+          return schedule(callback, delay, ...args);
+        };
+        self.addEventListener('message', event => {
+          const request = event.data;
+          if (request?.type === 'APPLY' && request.argumentList?.[0]?.value === 'stop') {
+            schedule(() => { const resume = release; release = undefined; resume?.(); }, 0);
+          }
+        });
+      })();`
+      await route.fulfill({
+        response,
+        headers: { ...response.headers(), 'cache-control': 'no-store' },
+        body: gate + '\n' + (await response.text()),
+      })
+    })
     await page.goto(`/?backend=${backend}`)
     test.skip(
       backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)),
@@ -110,6 +171,30 @@ Debug.message("box-start");root.doBoxBlur(63,63);Debug.message("box-finished");
 `),
     })
     await expect(page.locator('#logs')).toContainText('box-start')
+    await expect
+      .poll(() => page.workers().some((worker) => worker.url().includes('/assets/session.worker-')))
+      .toBe(true)
+    const worker = page
+      .workers()
+      .find((worker) => worker.url().includes('/assets/session.worker-'))!
+    await expect
+      .poll(() => worker.evaluate(() => Reflect.get(globalThis, '__boxBlurStop').held))
+      .toBe(true)
+    const observed = await worker.evaluate(() => Reflect.get(globalThis, '__boxBlurStop'))
+    expect(observed).toEqual({
+      columns: 65536,
+      accumulator: 32,
+      output: 67108864,
+      selected: true,
+      held: true,
+    })
+    await test
+      .info()
+      .attach('box-blur-cancellation', {
+        body: Buffer.from(JSON.stringify(observed)),
+        contentType: 'application/json',
+      })
+    await expect(page.locator('#logs')).not.toContainText('box-finished')
     await page.locator('#stop').click()
     await expect(page.locator('#stop')).toBeDisabled({ timeout: 1800 })
     await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')

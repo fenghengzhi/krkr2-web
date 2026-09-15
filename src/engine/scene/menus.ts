@@ -19,6 +19,9 @@ export interface MenuSnapshot {
 }
 
 export class MenuTree {
+  has(id: number): boolean {
+    return this.nodes.has(id)
+  }
   private nodes = new Map<number, MenuNode>()
   private nextId = 1
   private root = 0
@@ -50,6 +53,11 @@ export class MenuTree {
   setRoot(id: number): void {
     this.get(id)
     this.root = id
+    this.revision++
+  }
+  hideRoot(): void {
+    this.dismiss()
+    this.root = 0
     this.revision++
   }
   set(id: number, property: string, value: string | number): void {

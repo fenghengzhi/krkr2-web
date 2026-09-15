@@ -6,6 +6,7 @@ import {
   type HostContext,
   type HostReply,
   type ScriptObject,
+  type ScriptWeakObject,
   type ScriptValue,
 } from '../script/runtime.ts'
 import type { InputPacket } from '../ports/input.ts'
@@ -17,7 +18,7 @@ export class InputService {
     readonly controller: InputController,
     private readonly objects: HostContext,
     private readonly layer: (id: number) => ScriptObject | undefined,
-    private readonly window: () => ScriptObject | undefined,
+    private readonly window: () => ScriptObject | ScriptWeakObject | undefined,
   ) {}
   private value(value: InputValue): ScriptValue {
     if (typeof value === 'object' && value !== null) return this.layer(value.layer) ?? null

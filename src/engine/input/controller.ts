@@ -35,9 +35,18 @@ export class InputController {
   constructor(
     readonly layers: LayerTree,
     private readonly window: () => WindowView,
+    private readonly windowId?: () => number,
   ) {}
   root(): number {
-    return this.layers.ids().find((id) => this.layers.get(id).primary) ?? 0
+    return (
+      this.layers
+        .ids()
+        .find(
+          (id) =>
+            this.layers.get(id).primary &&
+            (!this.windowId || this.layers.get(id).windowId === this.windowId()),
+        ) ?? 0
+    )
   }
   attached(id: number): boolean {
     return this.layers.has(id) && this.layers.contains(this.root(), id)
@@ -240,6 +249,10 @@ export class InputController {
     try {
       for (const candidate of this.layers.hitCandidates(x, y, root, excludeSelf)) {
         const { id } = candidate
+        // A native pointer packet searches only the displayed window. An
+        // explicit Layer.getLayerAt still searches the requested subtree.
+        if (root === undefined && this.windowId && this.layers.get(id).windowId !== this.windowId())
+          continue
         this.hitChoice.set(id, true)
         yield {
           target: id,
