@@ -55,47 +55,126 @@ test('failed PNG compression preserves the existing saved file', async () => {
   }
 })
 
-test('pause and cancellation discard a pending TLG encoding without overwriting the saved file', async () => {
-  let signal = () => {},
-    release = () => {},
-    held = false,
-    ticks = 0
-  const entered = new Promise<void>((resolve) => {
-    signal = resolve
-  })
-  const { session, logs } = await headless(
-    {
-      'startup.tjs':
-        'var window=new Window(),layer=new Layer(window,null);layer.setImageSize(129,65);layer.fillRect(0,0,129,65,0x80123456);Debug.message("encode-start");layer.saveLayerImage("savedata/keep.tlg","tlg6");Debug.message("encode-finished");',
-    },
-    {
-      now: () => (ticks += 10),
-      schedule: (callback, delay) => {
-        if (delay === 0 && !held) {
-          held = true
-          release = callback
-          signal()
-          return () => {}
-        }
-        const timer = setTimeout(callback, delay)
-        return () => clearTimeout(timer)
-      },
-    },
-  )
-  try {
-    await session.importSaves([{ path: 'savedata/keep.tlg', bytes: new Uint8Array([1, 2, 3]) }])
-    const started = session.start()
-    await entered
-    assert.ok(logs.includes('encode-start'))
-    session.pause()
-    release()
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    assert.equal(logs.includes('encode-finished'), false)
-    const settled = await Promise.allSettled([started, session.stop()])
-    assert.equal(settled[1]!.status, 'fulfilled')
-    assert.deepEqual([...session.exportSaves()[0]!.bytes], [1, 2, 3])
-    assert.equal(logs.includes('encode-finished'), false)
-  } finally {
-    await session.stop()
-  }
-})
+for (const binary of [false, true])
+  for (const format of ['png', 'png24', 'png32', 'tlg', 'tlg5', 'tlg524', 'tlg6', 'tlg624'])
+    for (const overwrite of [false, true])
+      test(
+        `${binary ? 'bytecode' : 'source'}: cancellation at the first ${format} encoder yield ${overwrite ? 'preserves the existing destination' : 'creates no incomplete destination'}`,
+        { timeout: 60000 },
+        async () => {
+          let signal = () => {},
+            release = () => {},
+            armed = false,
+            held = false,
+            ticks = 0
+          const order: string[] = [],
+            logs: string[] = [],
+            entered = new Promise<void>((resolve) => {
+              signal = resolve
+            }),
+            destination = overwrite ? 'savedata/keep.img' : 'savedata/pending.img'
+          const { session } = await headless(
+            {
+              'startup.tjs': '',
+              'encode.tjs': `
+var window=new Window(),layer=new Layer(window,null);
+layer.setImageSize(129,65);layer.fillRect(0,0,129,65,0x80123456);
+Debug.message("encode-start");
+layer.saveLayerImage("${destination}","${format}");
+Debug.message("encode-finished");`,
+            },
+            {
+              now: () => (ticks += 10),
+              event(event) {
+                if (event.type !== 'log') return
+                logs.push(event.text)
+                if (event.text === 'encode-start') {
+                  armed = true
+                  order.push('encode-start')
+                }
+                if (event.text === 'encode-finished') order.push('encode-finished')
+              },
+              schedule(callback, delay) {
+                // This fixture has no frame driver or user timers. Between
+                // encode-start and this first zero-delay schedule, the script
+                // only enters saveLayerImage and advances its real encoder.
+                if (armed && delay === 0 && !held) {
+                  held = true
+                  armed = false
+                  release = () => {
+                    release = () => {}
+                    order.push('encoder-yield-released')
+                    callback()
+                  }
+                  order.push('encoder-yield-held')
+                  signal()
+                  return () => {}
+                }
+                const timer = setTimeout(callback, delay)
+                return () => clearTimeout(timer)
+              },
+            },
+          )
+          const unlisten = session.control.onCancel(() => order.push('cancelled'))
+          try {
+            await session.importSaves([
+              { path: 'savedata/keep.img', bytes: new Uint8Array([1, 2, 3]) },
+            ])
+            await session.start()
+            let storage = 'encode.tjs'
+            if (binary) {
+              storage = 'savedata/encode.cjs'
+              await session.evaluate(
+                'Scripts.compileStorage("encode.tjs","savedata/encode.cjs",false,true,false)',
+              )
+            }
+            const snapshot = () =>
+                session.exportSaves().map((file) => ({ path: file.path, bytes: [...file.bytes] })),
+              before = snapshot(),
+              execution = session.evaluate(`Scripts.execStorage("${storage}")`).then(
+                () => ({ status: 'fulfilled' as const }),
+                (error: unknown) => ({ status: 'rejected' as const, error }),
+              )
+            await Promise.race([
+              entered,
+              execution.then((result) => {
+                throw new Error(
+                  `Encoding settled before its first checkpoint: ${result.status === 'rejected' ? String(result.error) : result.status}`,
+                )
+              }),
+            ])
+            assert.deepEqual(order, ['encode-start', 'encoder-yield-held'])
+            assert.equal(session.control.cancelled, false)
+            assert.deepEqual(snapshot(), before)
+            assert.equal(held, true)
+            order.push('paused')
+            session.pause()
+            release()
+            await new Promise((resolve) => setTimeout(resolve, 20))
+            assert.equal(logs.includes('encode-finished'), false)
+            assert.deepEqual(snapshot(), before)
+            order.push('stop-requested')
+            await session.stop()
+            const result = await execution
+            assert.equal(result.status, 'rejected')
+            if (result.status === 'rejected') assert.match(String(result.error), /cancelled/)
+            assert.deepEqual(order, [
+              'encode-start',
+              'encoder-yield-held',
+              'paused',
+              'encoder-yield-released',
+              'stop-requested',
+              'cancelled',
+            ])
+            assert.deepEqual(snapshot(), before)
+            assert.equal(logs.includes('encode-finished'), false)
+            assert.equal(session.snapshot().state, 'stopped')
+            assert.equal(session.snapshot().handles, 0)
+          } finally {
+            const stopped = session.stop()
+            release()
+            await stopped
+            unlisten()
+          }
+        },
+      )

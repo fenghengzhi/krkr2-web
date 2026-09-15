@@ -120,25 +120,87 @@ Debug.message("saved-ready:"+string(existing)+":"+string(ok));
     expect(errors).toEqual([])
   })
   for (const format of ['png', 'tlg5', 'tlg6'])
-    test(`${backend}: stopping ${format} encoding discards unfinished output`, async ({ page }) => {
+    test(`${backend}: prompt Stop after the ${format} encoding announcement discards unfinished output`, async ({
+      page,
+    }) => {
       await page.goto(`/?backend=${backend}`)
       test.skip(
         backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)),
         'JSPI unavailable',
       )
-      await page
-        .locator('#files')
-        .setInputFiles({
+      // Match image-loading's observer: avoid a Playwright round trip and
+      // actionability wait after a short-lived operation announces itself.
+      // This orders the actual button handler; it is not an encoder-entry gate.
+      await page.evaluate(() => {
+        const logs = document.querySelector('#logs')!,
+          button = document.querySelector('#stop') as HTMLButtonElement,
+          seen = new Set<Element>(),
+          report: { events: { kind: string; time: number }[]; enabledAtClick?: boolean } = {
+            events: [],
+          }
+        Object.assign(window, { __imageWritingStop: report })
+        let scheduled = false
+        const collect = () => {
+          for (const paragraph of logs.querySelectorAll('p')) {
+            if (seen.has(paragraph)) continue
+            seen.add(paragraph)
+            const text = paragraph.querySelector('span')?.textContent
+            if (text !== 'encode-start' && text !== 'encode-finished') continue
+            report.events.push({ kind: text, time: performance.now() })
+            if (text === 'encode-start' && !scheduled) {
+              scheduled = true
+              setTimeout(() => {
+                collect()
+                button.click()
+              }, 0)
+            }
+          }
+        }
+        button.addEventListener(
+          'click',
+          () => {
+            collect()
+            report.enabledAtClick = !button.disabled
+            report.events.push({ kind: 'stop-click', time: performance.now() })
+          },
+          { capture: true, once: true },
+        )
+        const observer = new MutationObserver(collect)
+        observer.observe(logs, { childList: true, subtree: true, characterData: true })
+      })
+      const observation = () =>
+        page.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __imageWritingStop: {
+                  events: { kind: string; time: number }[]
+                  enabledAtClick?: boolean
+                }
+              }
+            ).__imageWritingStop,
+        )
+      try {
+        await page.locator('#files').setInputFiles({
           name: 'startup.tjs',
           mimeType: 'text/plain',
           buffer: Buffer.from(
             `var window=new Window(),layer=new Layer(window,null);layer.setImageSize(4096,4096);layer.fillRect(0,0,4096,4096,0x80123456);Debug.message("encode-start");layer.saveLayerImage("savedata/pending.img","${format}");Debug.message("encode-finished");`,
           ),
         })
-      await expect(page.locator('#logs')).toContainText('encode-start')
-      await page.locator('#stop').click()
-      await expect(page.locator('#stop')).toBeDisabled({ timeout: 1800 })
-      await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
-      await expect(page.locator('#logs')).not.toContainText('encode-finished')
+        await expect(page.locator('#logs')).toContainText('encode-start')
+        await expect(page.locator('#stop')).toBeDisabled({ timeout: 1800 })
+        await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
+        await expect(page.locator('#logs')).not.toContainText('encode-finished')
+        const report = await observation()
+        expect(report.enabledAtClick).toBe(true)
+        expect(report.events.map((event) => event.kind)).toEqual(['encode-start', 'stop-click'])
+        expect(report.events[1]!.time).toBeGreaterThanOrEqual(report.events[0]!.time)
+      } finally {
+        await test.info().attach('image-stop-order', {
+          body: Buffer.from(JSON.stringify(await observation(), null, 2)),
+          contentType: 'application/json',
+        })
+      }
     })
 }
