@@ -1,6 +1,6 @@
 # 051 — 同一会话中的多个窗口
 
-状态：实现接线完成，等待 GitHub-hosted Actions 的类型检查、构建和回归。当前主分支已验证范围仍见阶段 050；本文件不得当作多窗口已经通过的证据。
+状态：提交 `3ef7f09` 已通过 GitHub-hosted Actions 的完整回归与原 78 项兼容矩阵。本阶段验证同一页面内的多窗口能力；完整非插件能力仍受文末边界限制。
 
 ## 结构
 
@@ -42,7 +42,11 @@
 
 [第三次兼容检查 34940921002](https://github.com/fenghengzhi/krkr2-web/actions/runs/34940921002)在 `e7da203` 使用构建 `34940763466`，以及[第四次兼容检查 34943130101](https://github.com/fenghengzhi/krkr2-web/actions/runs/34943130101)在 `2593a71` 使用构建 `34941841853`，均通过原 **78／78** 项。每次完整产物及 run.json 独立保留。
 
-第二、三次完整回归另各有一项 WebKit JSPI TLG5 页面停止测试在 `encode-start` 前发生 WebGL context loss，Stop 观察记录为空，未走到编码取消。第四次该项通过，不能证明历史故障已修复。只读证据确认 050 在 VM 初始化前建立 GPU，051 原异步连接可能与大图 CPU 分配重叠，但没有证明泄漏或 OOM。当前修订让 Window 构造等待自己的初始画布就绪，空白 1×1 帧不依赖 VM 绘制；等待可取消，lost/failed 可跨重试继续，Stop 在 queue drain 前解除等待。新增 11 项渲染等待测试和 10 项真实 Session 源码／字节码检查；构造 GPU 场景直接验证原构造挂起、恢复后只返回一次，删除旧构造后文件门闩。这些新改动仍待 Actions 验证，不预先认定历史上下文丢失根因已修复。
+第二、三次完整回归另各有一项 WebKit JSPI TLG5 页面停止测试在 `encode-start` 前发生 WebGL context loss，Stop 观察记录为空，未走到编码取消。第四次该项通过，不能证明历史故障已修复。只读证据确认 050 在 VM 初始化前建立 GPU，051 原异步连接可能与大图 CPU 分配重叠，但没有证明泄漏或 OOM。当前修订让 Window 构造等待自己的初始画布就绪，空白 1×1 帧不依赖 VM 绘制；等待可取消，lost/failed 可跨重试继续，Stop 在 queue drain 前解除等待。新增 11 项渲染等待测试和 10 项真实 Session 源码／字节码检查；构造 GPU 场景直接验证原构造挂起、恢复后只返回一次，删除旧构造后文件门闩。这些改动已在第五次完整回归通过；该结果不能确定历史上下文丢失或 V8 原生崩溃的根因，也不能据此宣称根因已修复。
+
+[第五次完整回归 34945014092](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945014092)，提交 `3ef7f0972a77a0f0efdfa74373343167e86965e1`：全部 **14 个作业成功**，Node **1,317／1,317**、浏览器 **1,041／1,041**、直接运行时 **6／6** 通过。浏览器包含 Chromium、Firefox、WebKit 常规套件各 306 项，游戏库各 19 项，PWA 分别 20、20、19 项，以及 Chromium 可信生命周期 7 项。Node 无失败、取消、跳过或未报告案例；浏览器无失败、跳过、flaky 或未运行案例。完整 14 份产物、run.json 和逐项 evidence-summary.json/md 已保存在 `out/verification/github-actions/34945014092/`。
+
+[第五次兼容检查 34945755032](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945755032)使用同一提交及精确构建 `34945014092`，原矩阵 **78／78** 通过，零失败或未运行。KAG 流程／存档／转场 36 项、debug panels 6 项、KAG diagnostics 6 项、ABI 迁移 30 项均实际执行；三浏览器各 26 项。完整产物、run.json 和逐项 evidence-summary.json/md 独立保存在 `out/verification/github-actions/34945755032/`，没有覆盖前四次兼容检查的证据。
 
 ## 验证范围和边界
 
