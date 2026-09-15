@@ -1,0 +1,48 @@
+// Original SDK observation, run only by the hosted Windows workflow.
+// No external input or plugin is needed: the engine owns this Timer and Window.
+var nativeRows=[];
+function nativeRecord(text) {
+  nativeRows.add(text);
+  nativeRows.save("native-events.txt");
+}
+System.exceptionHandler=function(error) {
+  nativeRecord("error:"+error.message);
+  System.exit();
+  return true;
+};
+nativeRecord("start");
+nativeRecord("version:"+System.versionString);
+class NativeModalWindow extends Window {
+  var queries=0;
+  function NativeModalWindow() { super.Window(); caption="KRKR2 original modal reference"; }
+  function onCloseQuery(canClose) {
+    var emit=global.nativeRecord incontextof global;
+    var number=++queries;
+    emit("query:"+number);
+    super.onCloseQuery(number>1);
+    emit("query-return:"+number);
+  }
+}
+var nativeMain=new Window();
+nativeMain.caption="KRKR2 original reference owner";
+nativeMain.visible=true;
+var nativeModal=new NativeModalWindow();
+var nativeTicks=0;
+function nativeTick(event) {
+  nativeTicks++;
+  nativeRecord("close-before:"+nativeTicks+":"+nativeModal.queries);
+  if(nativeTicks>=2)nativeTimer.enabled=false;
+  nativeModal.close();
+  nativeRecord("close-after:"+nativeTicks+":"+((isvalid nativeModal)?string(nativeModal.queries):"invalid"));
+}
+var nativeTimer=new Timer(global,"nativeTick");
+nativeTimer.enabled=false;
+nativeTimer.interval=150;
+nativeRecord("modal-before");
+nativeTimer.enabled=true;
+var nativeResult=nativeModal.showModal();
+nativeTimer.enabled=false;
+nativeRecord("modal-after:"+int(nativeResult===void)+":"+int(isvalid nativeModal));
+if(isvalid nativeModal)nativeRecord("visible-after:"+int(nativeModal.visible));
+nativeRecord("observations-complete");
+System.exit();
