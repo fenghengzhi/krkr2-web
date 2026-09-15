@@ -1,6 +1,6 @@
 # 054：copyRect 的 mask 复制和空写入
 
-本阶段基于 053 的 `40cedd4`，修正 `copyRect` 的 opaque mask 复制，以及 `copyRect`／`fillRect`／main、mask 单像素写入的空区域和主图检查顺序。代码和回归用例已编写，尚未通过本阶段 GitHub Actions 验证。没有本地测试、构建、类型检查、浏览器或执行探针；没有运行历史 allocation reproduction。
+本阶段基于 053 的 `40cedd4`，修正 `copyRect` 的 opaque mask 复制，以及 `copyRect`／`fillRect`／main、mask 单像素写入的空区域和主图检查顺序。Node 与原 78 项兼容矩阵已通过 GitHub Actions；两轮完整回归各有一个浏览器失败，尚不能计为完整通过。没有本地测试、构建、类型检查、浏览器或执行探针；没有运行历史 allocation reproduction。
 
 ## 固定原版依据
 
@@ -55,4 +55,10 @@ colorRect、drawText、assignImages、转场、System、模态pump、native ABI�
 
 该用例删除缓存、点击再次准备后，立即接受了上次的 ready／enabled 状态；随后关闭服务器，重载得到应用自定义的“离线缓存不完整”503 页面，再等待游戏启动按钮耗尽 30 秒。trace 显示游戏库仍在恢复，按钮点击前后页面布局发生变化；没有证明本次点击处理器收到操作或 REPAIR 实际执行。产品 PWA 源码不在本次 copyRect 变更内，不能把这一失败归因于像素复制。
 
-夹具修订先等待已保存游戏行恢复，再真实点击一次；只观察并原样转发 ServiceWorker.postMessage，要求本次 REPAIR 已发送后才接受完成状态。删除前后的缓存、重建的完整标记、全部资源 URL／状态／字节长度作为附件保留；随后仍关闭服务器、离线重载并启动原保存游戏。没有强制点击、重复点击或直接调用准备函数，也没有移除原离线启动断言。此修订尚待新 Actions，原失败完整产物和单独的 Firefox/PWA trace 分析继续保留。
+夹具修订先等待已保存游戏行恢复，再真实点击一次；只观察并原样转发 ServiceWorker.postMessage，要求本次 REPAIR 已发送后才接受完成状态。删除前后的缓存、重建的完整标记、全部资源 URL／状态／字节长度作为附件保留；随后仍关闭服务器、离线重载并启动原保存游戏。没有强制点击、重复点击或直接调用准备函数，也没有移除原离线启动断言。首次记录时此修订尚待新 Actions，原失败完整产物和单独的 Firefox/PWA trace 分析继续保留。
+
+## 第二次完整回归与兼容检查
+
+[第二次完整回归 34950275593](https://github.com/fenghengzhi/krkr2-web/actions/runs/34950275593)，提交 `9964b085b8f580ec5a93fb16b3e4d98d7aea1544`：Node **1,367／1,367**、直接运行时 **6／6** 通过；浏览器 **1,040／1,041** 通过，零跳过、重试、flaky 或未运行。Firefox PWA 已 **20／20** 通过。唯一失败为 WebKit Asyncify 的 `http.spec.ts:18` 远程 XP3 用例：首次启动、像素与 CORS／Range 检查通过，reload 后加载同一 URL 的第二次启动在恢复 v1 存档时等待 `zip-ready:42:1` 超过 12 秒。最终 DOM 为 `data-graphics=restoring`、21 个资源、0 个图层，Window 1 仍隐藏；24 个网络请求均返回 200／206／304，trace 没有 console、pageerror 或崩溃事件。这里只确认第二次启动的画面初始化未完成，根因未知，不能归为已证实的 context loss 或历史同因。完整产物、逐项摘要、原始错误和 trace 保存在 `out/verification/github-actions/34950275593/`；本轮仍为失败。
+
+[兼容检查 34949328491](https://github.com/fenghengzhi/krkr2-web/actions/runs/34949328491)通过原矩阵 **78／78**，零失败或未运行：KAG 36、debug panels 6、异常恢复 6、ABI 迁移 30，三浏览器各 26 项。测试提交为 `426ea38d562289ca572acca4394e7ae7de5c25cb`，复用构建 `34947500803` 的实际提交为 `a76af992bf39e6048341c646885544b0e17c79c5`；两提交仅五份 README／docs 不同，应用与测试定义一致。两种来源分别保留在 `out/verification/github-actions/34949328491/` 的 run.json、构建信息及逐项摘要中，不把复用产物改标为测试提交，也不以兼容矩阵通过替代完整回归。阶段 055 的后续运行结果单独记录，不追溯改变本阶段失败。

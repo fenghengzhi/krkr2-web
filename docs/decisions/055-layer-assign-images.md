@@ -1,6 +1,6 @@
 # 055：assignImages 保留目标字体与自身状态
 
-本阶段基于 054 的 `a76af99`，修正 `Layer.assignImages` 的字体、图像分配与自赋值语义。代码和回归用例尚待GitHub-hosted Actions验证，没有本地测试、构建、类型检查、浏览器或执行探针。本页不表示整个非插件运行时已完成。
+本阶段基于 054 的 `a76af99`，修正 `Layer.assignImages` 的字体、图像分配与自赋值语义。首轮GitHub-hosted Actions已有结果（见文末），整体失败，没有本地测试、构建、类型检查、浏览器或执行探针。本页不表示整个非插件运行时已完成。
 
 ## 原版依据
 
@@ -64,3 +64,11 @@ target.assignImages(target);
 - 现有64MiB图像预算仍生效；本片不承诺原版资源分配失败后的逐步骤部分状态完全一致，不运行历史allocation复现。
 - 无主图时clip属性getter在原版可读取ClipRect，当前getter仍要求bitmap。这是另外确认的接口差异，已报告；本片用copyRect／fillRect行为验证保留clip，不扩改getter。
 - 未改Font ABI、字体注册／栅格后端、其他文字混合语义、模态pump、窗口surface或其他工作树。
+
+## 首轮 Actions 结果
+
+[完整回归34952630856](https://github.com/fenghengzhi/krkr2-web/actions/runs/34952630856)，提交 `c35ac758`（实现 `c580810`，已并入054的离线缓存夹具修订）：Node **1,431／1,431**，包含本片64项全部实际通过；直接运行时 **6／6**；浏览器 **1,040／1,041**。三个常规浏览器各306项、PWA59项和trusted7项全部通过；library56／57。14个作业中12成功，WebKit library与汇总失败，零跳过、flaky或未报告。
+
+唯一失败为WebKit／JSPI远程XP3游戏库场景：首次加载后的ready断言明确报 `Page crashed`，实际等待240.964ms（预算12秒），整个case1075ms。尚未保存到游戏库、停止服务器或离线重载。XP3仅记录一字节Range读取，manifest／mjs／wasm均成功返回，全部10条网络记录状态成功；没有原生崩溃报告、调用栈或OOM证据，根因未知，不能与前轮graphics=restoring推为同因。完整14 artifacts／315文件、逐项结果、build-info与哈希独立归档，早期失败trace和作业日志保留原状。首轮失败不因新增Node全部通过而改计成功。
+
+另行启动的KAG及发布兼容矩阵 [34954688171](https://github.com/fenghengzhi/krkr2-web/actions/runs/34954688171)复用上述准确构建；记录时尚未完成，不计为通过。
