@@ -222,6 +222,7 @@ export class EngineSession {
   private paintedLayers = new Set<number>()
   private readonly redrawRequests = new Set<number>()
   private readonly deferredPaint = new Map<number, { generation: number; deadline?: number }>()
+  private readonly modalReadyRedraw = new Map<number, number>()
   private cancelRedraw?: () => void
   private redrawWakeAt?: number
   private redrawQueued = false
@@ -363,6 +364,7 @@ export class EngineSession {
       this.redrawWakeAt = undefined
       this.redrawRequests.clear()
       this.deferredPaint.clear()
+      this.modalReadyRedraw.clear()
       for (const cancel of [() => this.sounds?.pause(true), () => this.videos?.cancel()]) {
         try {
           const work = cancel()
@@ -810,6 +812,10 @@ export class EngineSession {
         this.executing = false
         if (this.exitAfterOperation) {
           this.exitAfterOperation = false
+          // The native entry has returned. Resolve completed admissions in
+          // this same host turn as requesting exit, so a user-close caller
+          // observes termination without cancelling remaining script code.
+          this.completeReadyReceipts()
           this.requestExit()
         }
         if (this.hasOutsideReceipts() && !this.control.cancelled) this.requestReceiptCheckpoint()
@@ -960,6 +966,7 @@ export class EngineSession {
       ) {
         this.redrawRequests.delete(id)
         this.deferredPaint.delete(id)
+        this.modalReadyRedraw.delete(id)
       }
     return this.redrawRequests.size !== 0
   }
@@ -1008,6 +1015,7 @@ export class EngineSession {
           return
         }
         if (this.modalLoop?.depth) {
+          for (const [id, generation] of due) this.modalReadyRedraw.set(id, generation)
           this.frameRequested = true
           this.dirty = true
           this.modalWakeup?.()
@@ -1373,15 +1381,20 @@ export class EngineSession {
     return native.drainingReleased || native.pendingHandles > 0 || native.pendingInvalidations > 0
   }
   private completeReadyReceipts(): void {
+    if (this.exitAfterOperation && !(this.modalLoop?.depth ?? 0)) return
     for (const receipt of [...this.eventReceipts.values()]) {
       if (!receipt.nativeDone || !receipt.tailDone || !receipt.epilogueDone) continue
-      const presented = receipt.frameWindows.every(
+      const frameComplete = receipt.frameWindows.every(
         (window) =>
           this.registeredWindow(window.id) !== window ||
+          // A hidden Window keeps the decoded Layer pixels but has no
+          // visible surface obligation. This is an explicit skipped frame,
+          // not evidence that presenting an empty layer list succeeded.
+          !window.state.visible ||
           (this.windowPresentationsCompleted.get(window.id) ?? 0) >=
             (receipt.frameAfter.get(window.id) ?? Infinity),
       )
-      if (receipt.failed || presented) this.finishReceipt(receipt)
+      if (receipt.failed || frameComplete) this.finishReceipt(receipt)
     }
   }
   private markReceiptNativeDone(receipt: SessionEventReceipt): void {
@@ -1696,9 +1709,13 @@ export class EngineSession {
   }
   private consumeReadyFrame(): void {
     if (this.systemEvents?.disabled || this.activity.state !== 'visible') return
-    const now = this.deps.now()
-    for (const [id, deferred] of this.deferredPaint)
-      if (deferred.deadline !== undefined && deferred.deadline <= now) this.deferredPaint.delete(id)
+    // Only a real scheduled wake may consume a deferred self-update. An
+    // unrelated event round (including eventDisabled=false) may see an old
+    // deadline but must preserve it until the rearmed timer actually fires.
+    for (const [id, generation] of this.modalReadyRedraw) {
+      if (this.deferredPaint.get(id)?.generation === generation) this.deferredPaint.delete(id)
+      this.modalReadyRedraw.delete(id)
+    }
   }
   private finishFrameDeadlines(): void {
     this.hasPendingRedraw()

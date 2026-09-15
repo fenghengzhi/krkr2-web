@@ -78,7 +78,7 @@ for (const binary of [false, true])
           assert.equal(manifest.capabilities?.nativeReleaseState, 1)
           assert.equal(vm.inspect().drainingReleased, false)
           const source = `class DrainMarker {
-          function finalize(){__host("DuringDrain");${outcome === 'throw' ? 'throw "drain-finalizer-failure";' : ''}}
+          function finalize(){__host("DuringDrain");${outcome === 'throw' ? 'throw new Exception("drain-finalizer-failure");' : ''}}
         }`
           const program = binary ? await vm.compile(source, 'drain-state.tjs') : source
           await vm.execute(program, binary ? 'drain-state.cjs' : 'drain-state.tjs')

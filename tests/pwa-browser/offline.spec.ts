@@ -165,22 +165,129 @@ test('a corrupt deployment leaves the last complete app usable and can be retrie
 test('explicit preparation repairs an evicted application cache without clearing game resources', async ({
   page,
 }) => {
-  const server = await pwaServer()
+  const server = await pwaServer(),
+    manifest = await releaseManifest('a')
+  type RepairMessage = { build: string | null; worker: string; time: number }
+  const repairs = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __offlineRepairMessages?: RepairMessage[] })
+          .__offlineRepairMessages ?? [],
+    )
+  const cacheEvidence = () =>
+    page.evaluate(async (base) => {
+      const names = (await caches.keys()).filter((name) => name.startsWith('krkr2-shell-v1:'))
+      return Promise.all(
+        names.map(async (name) => {
+          const cache = await caches.open(name),
+            marker = await cache.match(new URL('__offline_manifest__', base).href),
+            record = marker
+              ? ((await marker.json()) as { complete: boolean; manifest: { build: string } })
+              : undefined,
+            entries = await Promise.all(
+              (await cache.keys()).map(async (request) => {
+                const response = (await cache.match(request))!
+                return {
+                  url: request.url,
+                  status: response.status,
+                  bytes: (await response.arrayBuffer()).byteLength,
+                }
+              }),
+            )
+          return {
+            name,
+            complete: record?.complete ?? false,
+            build: record?.manifest.build,
+            entries,
+          }
+        }),
+      )
+    }, server.url)
+  let deleted: string[] = [],
+    evidence:
+      { repairs: RepairMessage[]; caches: Awaited<ReturnType<typeof cacheEvidence>> } | undefined
   try {
     await page.goto(server.url + '?backend=asyncify')
     await saveGame(page)
     await prepareOffline(page)
-    await page.evaluate(async () => {
-      for (const name of await caches.keys())
-        if (name.startsWith('krkr2-shell-v1:')) await caches.delete(name)
+    // prepareOffline may reload. Let the restored library finish changing the
+    // page layout before a real pointer click targets the panel below it.
+    await expect(page.locator('#library-games h3')).toHaveText('Offline game')
+    await expect(page.locator('#cancel-library')).toBeHidden()
+    await page.evaluate(() => {
+      const messages: RepairMessage[] = [],
+        original = ServiceWorker.prototype.postMessage
+      Object.assign(window, { __offlineRepairMessages: messages })
+      ServiceWorker.prototype.postMessage = function (
+        this: ServiceWorker,
+        message: unknown,
+        _options?: Transferable[] | StructuredSerializeOptions,
+      ) {
+        // Observe the real post only after the native method accepts it. Keep
+        // its receiver, arguments and transferred response port unchanged.
+        Reflect.apply(original, this, arguments)
+        if (!message || typeof message !== 'object') return
+        const request = message as { type?: unknown; build?: unknown }
+        if (request.type === 'REPAIR')
+          messages.push({
+            build: typeof request.build === 'string' ? request.build : null,
+            worker: this.scriptURL,
+            time: performance.now(),
+          })
+      }
     })
+    const eviction = await page.evaluate(async () => {
+      const deleted = (await caches.keys()).filter((name) => name.startsWith('krkr2-shell-v1:'))
+      for (const name of deleted) await caches.delete(name)
+      return {
+        deleted,
+        remaining: (await caches.keys()).filter((name) => name.startsWith('krkr2-shell-v1:')),
+      }
+    })
+    deleted = eviction.deleted
+    expect(deleted).toEqual([`krkr2-shell-v1:${encodeURIComponent('/player/')}:${manifest.build}`])
+    expect(eviction.remaining).toEqual([])
     await page.locator('#prepare-offline').click()
+    // Old ready/enabled values are insufficient: require this operation to
+    // send a real REPAIR request before accepting its completion state.
+    await expect.poll(async () => (await repairs()).length).toBe(1)
     await expect(page.locator('#prepare-offline')).toBeEnabled()
     await expect(page.locator('#offline-panel')).toHaveAttribute('data-ready', 'true')
+    evidence = { repairs: await repairs(), caches: await cacheEvidence() }
+    expect(evidence.repairs[0]!.build).toBe(manifest.build)
+    expect(evidence.repairs[0]!.worker).toBe(new URL('sw.js', server.url).href)
+    expect(evidence.caches).toHaveLength(1)
+    const repaired = evidence.caches[0]!
+    expect(repaired.name).toBe(deleted[0])
+    expect(repaired.complete).toBe(true)
+    expect(repaired.build).toBe(manifest.build)
+    expect(repaired.entries.map((entry) => entry.url).sort()).toEqual(
+      [
+        ...manifest.assets.map((asset) => new URL(asset.path, server.url).href),
+        new URL('__offline_manifest__', server.url).href,
+      ].sort(),
+    )
+    for (const asset of manifest.assets) {
+      const entry = repaired.entries.find(
+        (entry) => entry.url === new URL(asset.path, server.url).href,
+      )!
+      expect(entry.status).toBe(200)
+      expect(entry.bytes).toBe(asset.bytes)
+    }
     await server.close()
     await pageReload(page)
+    await expect(page.locator('#library-games h3')).toHaveText('Offline game')
     await startGame(page)
   } finally {
+    const captured =
+      evidence ??
+      (await Promise.all([repairs(), cacheEvidence()])
+        .then(([repairs, caches]) => ({ repairs, caches }))
+        .catch((error: unknown) => ({ captureError: String(error) })))
+    await test.info().attach('offline-cache-repair', {
+      body: Buffer.from(JSON.stringify({ deleted, ...captured }, null, 2)),
+      contentType: 'application/json',
+    })
     await server.close()
   }
 })

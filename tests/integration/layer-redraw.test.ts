@@ -223,10 +223,17 @@ root.update();
       await execute('System.eventDisabled=false;')
       assert.deepEqual(painted(), ['paint:1', 'paint:2'])
       assert.equal(clock.pending, 1)
-      await advance()
+      // Re-enabling events drains a synchronous round, even when already
+      // enabled. An overdue self-update still belongs to its scheduled wake.
+      await execute('System.eventDisabled=false;')
+      assert.deepEqual(painted(), ['paint:1', 'paint:2'])
+      assert.equal(clock.pending, 1)
+      await advance(0)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3'])
       assert.equal(clock.pending, 1)
-      await advance()
+      await advance(15)
+      assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3'])
+      await advance(1)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4'])
       assert.equal(clock.pending, 0)
     } finally {

@@ -104,6 +104,14 @@ CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原
 
 本片新增 17 项 ModalLoop 生命周期、8 项事件尾部、24 项真实 Session、14 项视频完成边界以及 7 项原生释放状态／缺能力拒绝检查，共预期 70 项 Node；其中原生状态覆盖源码／字节码的正常、析构抛错和取消。额外包含隐藏但未暂停时的普通票据尾部与非模态主窗口关闭后继续执行语句；所有这些检查均尚未执行，不能计为通过。新增接口也尚未在真正 Window.showModal／Menu.popup 嵌套场景下验收，后续仍需实际浏览器双后端验证。
 
+## 检查点首轮失败与修订
+
+[34953109684](https://github.com/fenghengzhi/krkr2-web/actions/runs/34953109684)，提交 `6b81180`，新内核、类型检查及生产构建成功。Node实际报告 **1,456通过、8失败、2取消（各60秒超时）／1,466项**，没有跳过或未报告。五组源码／字节码问题分别为：裸字符串析构异常没有message、旧零所有权期望缺四个字段、开启事件时提前消费延期重绘、主窗口关闭completion早于请求停止，以及隐藏视频窗口一直等待可见呈现。完整TAP、作业日志及逐项诊断保存在本次独立归档，均保留为失败证据。
+
+修订使用带message的Exception夹具并补齐所有权零值，保留原特定消息和清理断言；只有实际模态定时器捕获的Layer/generation才解锁延期绘制。非模态主窗口关闭继续执行当前VM剩余语句，在原生返回后的同一host turn完成票据并请求退出。隐藏视频窗口保留解码像素、明确跳过呈现义务，仍需callback／native／清理／尾部完成；不增加成功present计数，visible且renderer返回false仍必须等待。新增两项从visible转hidden的回归，修订后预期 **1,468 Node**，尚未执行。
+
+同一轮Firefox/PWA实际19／20通过，唯一失败为corrupt deployment夹具在浏览器启动时报 `cannot open display: :99`，进程exit 1，尚未创建页面或执行应用；没有足够Xvfb日志确定原因。旧REPAIR用例本轮通过，不能追认此前竞态已修。这里另外纳入054已加强且实际通过的REPAIR前置及缓存内容断言；该修订并不声称解决显示服务器失败。首轮最终浏览器1,058／1,059、直接运行时6／6；常规三浏览器各312项全通过。14作业中11成功，Node、Firefox/PWA与汇总失败。原早期快照保留，另存finalrun.json与完整逐项摘要。
+
 ## Window.showModal 业务接线（尚待验证）
 
 `Window.showModal()`通过既有ModalLoop返回HostReply continuation，在同一TJS调用栈上保留调用者局部变量。独立WindowModals管理窗口请求身份、关闭查询和接受结果，隐藏本身不结束modal；进入前拒绝可见、全屏、已模态或失效窗口。每次TJS调用持有独立request对象，native释放在pump进入前抛错时，catch只撤销匹配identity的尝试，不伤旧scope或同窗口后续调用。
