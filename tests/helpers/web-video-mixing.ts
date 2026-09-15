@@ -239,6 +239,7 @@ export async function exerciseWebVideoMixing(name: WebVideoMixingCase, bytes: Ui
         }
         let allocation: HTMLCanvasElement | undefined
         HTMLCanvasElement.prototype.getContext = function (
+          this: HTMLCanvasElement,
           ...args: Parameters<HTMLCanvasElement['getContext']>
         ) {
           if (this.classList.contains('video-mixing-bitmap') && this !== initial) {

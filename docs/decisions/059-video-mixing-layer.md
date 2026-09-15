@@ -49,3 +49,5 @@ Host 为全部视频的混合画布设置 64 MiB 存活 backing 总预算，独�
 [35004938171](https://github.com/fenghengzhi/krkr2-web/actions/runs/35004938171)（`46a7591`）和 [35005314239](https://github.com/fenghengzhi/krkr2-web/actions/runs/35005314239)（`5e2cd67`）都在 Worker 类型检查处失败：新的 DOM 混合画布模块被 Worker 的 backends 扫描纳入，因而找不到 HTMLCanvasElement／document。后者只同步了 058 的模态测试适配器修订，没有解决这一独立边界；两轮均未进入用例执行，不计任何测试通过。
 
 后续将 Worker 配置中只排除 video/browser/host.ts 改为排除其完整 DOM 宿主目录。主线程类型检查仍通过 createPlayer／WebVideoHost 的实际依赖检查其中两个模块；没有给 Worker 或 engine 加入 DOM 类型，也没有关闭类型检查。两轮原始构建日志与未执行状态独立保留，后续结果另记。
+
+[35005524084](https://github.com/fenghengzhi/krkr2-web/actions/runs/35005524084)（`0f5e9fc`）通过上述 Worker 边界后，在 tools 项目的 `web-video-mixing.ts:244` 报 TS2683：测试里临时替换 getContext 的函数断言丢失了 this 的上下文类型。后续仅为该故障注入函数添加 HTMLCanvasElement 的 this 参数类型；不改产品、断言或检查选项。这轮同样未执行用例，原始失败另存。
