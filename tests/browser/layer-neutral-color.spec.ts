@@ -1,4 +1,5 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
+import { evaluate } from '../helpers/browser-expression.ts'
 
 async function launch(page: Page, backend: string, binary: boolean, source: string) {
   const errors: string[] = []
@@ -37,10 +38,11 @@ async function pixels(
   name: string,
   width: number,
   samples: number[][],
+  height = 4,
 ) {
   const canvas = page.locator('canvas')
   await expect(canvas).toHaveJSProperty('width', width)
-  await expect(canvas).toHaveJSProperty('height', 4)
+  await expect(canvas).toHaveJSProperty('height', height)
   // Keep each source pixel an integer block, including on HiDPI runners.
   await canvas.evaluate((node) => {
     const surface = node as HTMLCanvasElement
@@ -51,14 +53,14 @@ async function pixels(
   const png = await canvas.screenshot()
   await testInfo.attach(name, { body: png, contentType: 'image/png' })
   return page.evaluate(
-    async ({ url, width, samples }) => {
+    async ({ url, width, height, samples }) => {
       const image = await createImageBitmap(await (await fetch(url)).blob())
       const context = new OffscreenCanvas(image.width, image.height).getContext('2d')!
       context.drawImage(image, 0, 0)
       const result = samples.map(([x, y]) => [
         ...context.getImageData(
           Math.floor(((x! + 0.5) * image.width) / width),
-          Math.floor(((y! + 0.5) * image.height) / 4),
+          Math.floor(((y! + 0.5) * image.height) / height),
           1,
           1,
         ).data,
@@ -66,7 +68,7 @@ async function pixels(
       image.close()
       return result
     },
-    { url: 'data:image/png;base64,' + png.toString('base64'), width, samples },
+    { url: 'data:image/png;base64,' + png.toString('base64'), width, height, samples },
   )
 }
 
@@ -175,6 +177,74 @@ Debug.message("neutral-color-ready:"+int(cleared.neutralColor==0xff00ffff && cha
           [255, 255, 255, 255],
           [255, 255, 255, 255],
         ])
+      } finally {
+        await stop()
+      }
+    })
+
+    test(`${mode}: opaque layers without images fill their frame and ancestor snapshots after neutralColor changes`, async ({
+      page,
+    }, testInfo) => {
+      const stop = await launch(
+        page,
+        backend,
+        binary,
+        String.raw`
+var win=new Window();win.visible=true;win.setInnerSize(20,8);
+var root=new Layer(win,null);root.setSize(20,8);root.fillRect(0,0,20,8,0xff000000);
+var scene=new Layer(win,root);scene.type=ltOpaque;scene.setImageSize(20,4);scene.setSize(20,4);
+scene.fillRect(0,0,20,4,0xff000000);scene.visible=true;
+var solid=new Layer(win,scene);solid.type=ltOpaque;solid.setSize(4,4);solid.hasImage=false;
+solid.neutralColor=0x00800000;solid.visible=true;
+var group=new Layer(win,scene);group.type=ltOpaque;group.setSize(8,4);group.left=4;
+group.hasImage=false;group.neutralColor=0x00800000;group.opacity=128;group.visible=true;
+var child=new Layer(win,group);child.type=ltOpaque;child.setImageSize(4,4);child.setSize(4,4);child.left=4;
+child.fillRect(0,0,4,4,0xff008000);child.visible=true;
+var alpha=new Layer(win,scene);alpha.setSize(4,4);alpha.left=12;alpha.hasImage=false;
+alpha.neutralColor=0xffff00ff;alpha.opacity=128;alpha.visible=true;
+var binder=new Layer(win,scene);binder.type=ltBinder;binder.setSize(4,4);binder.left=16;
+binder.neutralColor=0xffffff00;binder.opacity=128;binder.visible=true;
+var snapshot=new Layer(win,root);snapshot.type=ltOpaque;snapshot.setImageSize(20,4);snapshot.setSize(20,4);snapshot.top=4;
+var rejected=0;try{snapshot.piledCopy(0,0,solid,0,0,4,4);}catch(error){rejected++;}
+snapshot.piledCopy(0,0,scene,0,0,20,4);snapshot.visible=true;
+function changeNeutral(){
+  solid.neutralColor=0x00000080;group.neutralColor=0x00000080;
+  alpha.neutralColor=0xff00ff00;binder.neutralColor=0xff00ff00;
+  solid.update();group.update();alpha.update();binder.update();
+  snapshot.piledCopy(0,0,scene,0,0,20,4);
+  return int(!solid.hasImage && !group.hasImage && !alpha.hasImage && !binder.hasImage);
+}
+Debug.message("neutral-color-ready:"+int(rejected==1 && !solid.hasImage && !group.hasImage && !alpha.hasImage && !binder.hasImage));
+`,
+      )
+      try {
+        // The upper row is the live tree; the lower row is piledCopy through
+        // its drawable ancestor. The snapshot is opaque like that ancestor:
+        // piledCopy preserves masks, including the opaque child's zero alpha.
+        // Opaque 128-valued colors give an exact half-opacity result of 64.
+        const samples = [1, 5].flatMap((y) => [1, 6, 10, 14, 18].map((x) => [x, y]))
+        const red = [
+          [128, 0, 0, 255],
+          [64, 0, 0, 255],
+          [0, 64, 0, 255],
+          [0, 0, 0, 255],
+          [0, 0, 0, 255],
+        ]
+        expect(await pixels(page, testInfo, 'neutral-color-no-image-red', 20, samples, 8)).toEqual([
+          ...red,
+          ...red,
+        ])
+        await evaluate(page, 'changeNeutral()', '1')
+        const blue = [
+          [0, 0, 128, 255],
+          [0, 0, 64, 255],
+          [0, 64, 0, 255],
+          [0, 0, 0, 255],
+          [0, 0, 0, 255],
+        ]
+        expect(await pixels(page, testInfo, 'neutral-color-no-image-blue', 20, samples, 8)).toEqual(
+          [...blue, ...blue],
+        )
       } finally {
         await stop()
       }
