@@ -1,8 +1,10 @@
 # 059：VideoOverlay 的调用时混合图像
 
-本阶段实现 `VideoOverlay.setMixingLayer` / `resetMixingLayer`，让 `vomMixer` 视频使用调用时的 Layer 主图副本。本阶段仍在 Actions 验证中，已发生的类型检查和浏览器失败分别记录于文末。所有测试、类型检查、构建和浏览器验证只允许在 GitHub-hosted Actions 执行，没有运行本地可执行验证。
+本阶段实现 `VideoOverlay.setMixingLayer` / `resetMixingLayer`，让 `vomMixer` 视频使用调用时的 Layer 主图副本。[完整回归 35008104463](https://github.com/fenghengzhi/krkr2-web/actions/runs/35008104463) 在 `d4fe7cc633765f77dd59862f6000518d3c086768` 实际通过 **1,833 项 Node、1,278 项浏览器和 6 组直接运行时**，14 个作业全部成功，所选用例无失败、取消、跳过或重试。历次构建与浏览器失败仍分别保留于文末。所有可执行验证只在 GitHub-hosted Actions 进行，本机未执行测试、类型检查、构建或浏览器验证。
 
-组合基线为 `2b16fe5`，包含 058 System 对话框的焦点顺序及 Firefox 组合输入夹具修订。058 首轮已报告的失败与未报告案例仍分别保留，不能当成通过。本组合预期 1,833 项 Node、1,278 项浏览器和 6 组直接运行时，最终以本次 Actions 的实际报告为准。
+该绿色运行仍收集到一份 WebKit Networking 诊断：`is_simulated=1`、`EXC_GUARD/GUARD_TYPE_USER`，栈中有 `didReceiveInvalidMessage`；WebKit 的 385 项常规案例均通过。报告及 SHA-256 已归档，现有日志不能把该 PID 关联到具体案例，不将它称为已证实的进程崩溃，也不把原生诊断写成空。此前 WebKit 启动停顿或其他历史故障的根因没有因此被证明修复。
+
+组合基线为 `2b16fe5`，包含 058 System 对话框的焦点顺序及 Firefox 组合输入夹具修订。058 首轮已报告的失败与未报告案例仍分别保留，不能当成通过；后续原 KAG 与旧版本升级结果以组合版本的独立兼容工作流记录为准。
 
 ## 原版合同
 
@@ -63,3 +65,5 @@ Host 为全部视频的混合画布设置 64 MiB 存活 backing 总预算，独�
 Firefox 的 JSPI 混合透明度用例在更早的 ready 检查失败，必须单独解释。trace 中启动日志和执行按钮检查已通过，随后 27 次找到视频元素却没有 `data-presented-time`；原始 screencast 同时显示红色视频与紫色混合图。Host 在设置 src/load 之前注册 rVFC，并要求 loaded 与 presented 同时完成才结束 open；测试原先到 loadedmetadata 事件才另外注册观察回调。trace 没有记录这两个底层事件的精确先后，不能将其进一步描述为已证明的 Firefox 内部调度问题。
 
 修订只在本文件透明包装现有的 requestVideoFrameCallback，以真实浏览器 metadata 记录呈现时间，再保留原 this／参数转发同一个回调并返回原 request ID。没有新增或取消帧请求，不改生产加载、seek、播放或等待顺序；ready 仍要求时间 0、暂停且不在 seek，实际合成截图仍需通过。原 trace SHA256 为 `4618de17c3870d494412d10b72f5fe31c186608e77936b51f882b403a6d677d9`。三类修订均未在本地执行，仍须新的 Actions 结果验证。
+
+上述第四轮 `35005817503` 的最终实际结果为 Node **1,833/1,833**、浏览器 **1,265/1,278**、直接运行时 **6/6**。其中 WebKit 常规为 **380/385**：四项混合用例属于上述字符串／源 Layer 生命周期预期，另一项旧 `video-readiness.spec.ts:100` 在第二次启动等不到 `frame-open-ready`。失败前和 error-context 仍为 LOADING，但失败后晚 105.852 ms 的 trace snapshot 已出现该标记、第二个 video、运行中和 16 MiB VM；必须同时保留两组观察。为何断言未在预算内观察到它尚不确定，没有据泛化的浏览器错误文字推断 OOM。新一轮绿色结果没有追改这轮失败。
