@@ -188,8 +188,9 @@ export class EngineSession {
   private preparingFrame = false
   private readonly paintedLayers = new Set<number>()
   private readonly redrawRequests = new Set<number>()
-  private readonly deferredPaint = new Set<number>()
+  private readonly deferredPaint = new Map<number, { generation: number; deadline?: number }>()
   private cancelRedraw?: () => void
+  private redrawWakeAt?: number
   private redrawQueued = false
   private redrawGeneration = 0
   private layerObjects?: LayerService
@@ -272,6 +273,7 @@ export class EngineSession {
     this.control.onCancel(() => {
       this.cancelRedraw?.()
       this.cancelRedraw = undefined
+      this.redrawWakeAt = undefined
       this.redrawRequests.clear()
       this.deferredPaint.clear()
       this.detachRenderer?.()
@@ -596,6 +598,20 @@ export class EngineSession {
         }
         this.present()
         this.notify()
+        // A request made before an asynchronous callback yields starts its
+        // delay only after this execution completes. Other Layers keep their
+        // earlier deadlines, even when this execution painted another Layer.
+        this.hasPendingRedraw()
+        for (const id of this.redrawRequests) {
+          let deferred = this.deferredPaint.get(id)
+          // A later node can request an earlier node that had no paint flag
+          // when visited. It also needs a next frame after this traversal.
+          if (!deferred && !this.systemEvents?.disabled) {
+            deferred = { generation: ++this.redrawGeneration }
+            this.deferredPaint.set(id, deferred)
+          }
+          if (deferred) deferred.deadline ??= this.deps.now() + 16
+        }
         this.armRedraw()
         return display
       } catch (error) {
@@ -737,33 +753,57 @@ export class EngineSession {
     ) {
       this.cancelRedraw?.()
       this.cancelRedraw = undefined
+      this.redrawWakeAt = undefined
       return
     }
-    if (this.cancelRedraw || this.redrawQueued) return
-    const generation = this.redrawGeneration
+    if (this.redrawQueued) return
+    let deadline = Infinity
+    for (const deferred of this.deferredPaint.values())
+      if (deferred.deadline !== undefined) deadline = Math.min(deadline, deferred.deadline)
+    if (deadline === this.redrawWakeAt) return
+    this.cancelRedraw?.()
+    this.cancelRedraw = undefined
+    this.redrawWakeAt = undefined
+    // A Layer whose onPaint is still running has no deadline yet.
+    if (!Number.isFinite(deadline)) return
+    this.redrawWakeAt = deadline
     // Only one delayed frame and one serialized execution can be in flight.
-    // An onPaint that calls update() must yield to the host between frames.
-    this.cancelRedraw = this.deps.schedule(() => {
-      this.cancelRedraw = undefined
-      if (!this.hasPendingRedraw() || this.control.cancelled) return
-      this.redrawQueued = true
-      void this.execute(async () => {
-        // Recheck when the VM actually takes this task: it can have waited
-        // behind an asynchronous call, a newer paint, or a page transition.
-        if (
-          generation === this.redrawGeneration &&
-          !this.systemEvents?.disabled &&
-          this.activity.state === 'visible'
-        )
-          this.deferredPaint.clear()
-        return undefined
-      }, 2)
-        .catch(() => {}) // execute records and fails the session itself.
-        .finally(() => {
-          this.redrawQueued = false
+    // Its deadline belongs to the earliest waiting Layer, not the last Layer
+    // painted: frequent explicit paints must not starve an unrelated Layer.
+    this.cancelRedraw = this.deps.schedule(
+      () => {
+        this.cancelRedraw = undefined
+        this.redrawWakeAt = undefined
+        if (!this.hasPendingRedraw() || this.control.cancelled) return
+        const due = [...this.deferredPaint]
+          .filter(
+            ([, deferred]) =>
+              deferred.deadline !== undefined && deferred.deadline <= this.deps.now(),
+          )
+          .map(([id, deferred]) => [id, deferred.generation] as const)
+        if (!due.length) {
           this.armRedraw()
-        })
-    }, 16)
+          return
+        }
+        this.redrawQueued = true
+        void this.execute(async () => {
+          // Recheck when the VM actually takes this task: it can have waited
+          // behind an asynchronous call, a newer paint of the same Layer, or a
+          // page transition. A stale wake cannot unlock a replacement request.
+          if (!this.systemEvents?.disabled && this.activity.state === 'visible')
+            for (const [id, generation] of due)
+              if (this.deferredPaint.get(id)?.generation === generation)
+                this.deferredPaint.delete(id)
+          return undefined
+        }, 2)
+          .catch(() => {}) // execute records and fails the session itself.
+          .finally(() => {
+            this.redrawQueued = false
+            this.armRedraw()
+          })
+      },
+      Math.max(0, deadline - this.deps.now()),
+    )
   }
   private *prepareFrame(source = this.inputController.root()): InputOperation {
     if (this.preparingFrame) return
@@ -773,11 +813,9 @@ export class EngineSession {
       deferred = this.deferredPaint,
       pending = this.redrawRequests,
       beginPaint = () => {
-        // A synchronous completion can supersede a previously delayed frame.
-        // Its old wake must not expire during an asynchronous paint callback.
-        this.cancelRedraw?.()
-        this.cancelRedraw = undefined
-        this.redrawGeneration++
+        // Drop only the consumed Layer's scheduled wake, preserving the
+        // earliest deadline of other Layers while this callback is suspended.
+        this.armRedraw()
       }
     function* visit(id: number, paint: boolean, seen = new Set<number>()): InputOperation {
       if (!layers.has(id) || seen.has(id)) return
@@ -2300,7 +2338,8 @@ export class EngineSession {
           this.deferredPaint.delete(id)
         }
         if (this.layers.update(id, region) && this.inputController.attached(id)) {
-          if (this.preparingFrame && this.paintedLayers.has(id)) this.deferredPaint.add(id)
+          if (this.preparingFrame && this.paintedLayers.has(id) && !this.deferredPaint.has(id))
+            this.deferredPaint.set(id, { generation: ++this.redrawGeneration })
           this.redrawRequests.add(id)
           this.dirty = true
         }

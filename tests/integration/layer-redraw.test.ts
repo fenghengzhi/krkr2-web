@@ -479,4 +479,54 @@ root.update();
       await stop()
     }
   })
+
+  test(`${mode}: an old queued wake cannot unlock a newer request from the same Layer`, async () => {
+    let enter!: () => void, release!: () => void
+    const entered = new Promise<void>((resolve) => {
+        enter = resolve
+      }),
+      gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+    const { session, execute, painted, clock, advance, stop } = await fixture(
+      binary,
+      String.raw`
+root.onPaint=function(){paints++;Debug.message("paint:"+paints);if(paints<3)root.update();};
+root.update();
+`,
+      {
+        graphics: {
+          async decode() {
+            enter()
+            await gate
+            return { width: 8, height: 4, data: new Uint8Array(8 * 4 * 4) }
+          },
+          text() {
+            throw new Error('Unexpected text drawing')
+          },
+        },
+      },
+    )
+    try {
+      assert.deepEqual(painted(), ['paint:1'])
+      const operation = execute('root.loadImages("paint-image.bin");root.update();')
+      await Promise.race([entered, operation])
+      // The first generation's wake waits behind the suspended script. Its
+      // explicit update then consumes that request and paint:2 creates a new one.
+      clock.advance(16)
+      release()
+      await operation
+      await session.idle()
+      assert.deepEqual(painted(), ['paint:1', 'paint:2'])
+      assert.equal(clock.pending, 1)
+      await advance(15)
+      assert.deepEqual(painted(), ['paint:1', 'paint:2'])
+      await advance(1)
+      assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3'])
+      assert.equal(clock.pending, 0)
+    } finally {
+      release()
+      await stop()
+    }
+  })
 }
