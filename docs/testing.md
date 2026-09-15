@@ -4,6 +4,12 @@
 
 推送分支、创建/更新 PR 或手动运行 **Tests** 工作流都会启动验证。工作流定义见 [test.yml](../.github/workflows/test.yml)。
 
+手动设置 `node-only=true` 可独立执行构建、类型检查和 Node 套件，供完整浏览器回归仍在运行时定位问题。该入口使用独立队列，运行名称明确标为 Node diagnostic；浏览器、直接运行时和 All tests 汇总均跳过，因此它的成功只表示 Node 诊断成功，不能用于完整回归报告。正常推送和默认手动运行仍执行全部套件。
+
+```sh
+gh workflow run test.yml --ref BRANCH -f node-only=true
+```
+
 ## 已完成的云端回归
 
 [宿主生命周期最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)绑定 542 份证据，矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`。最新 [完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882175516)通过 **594 Node、639 浏览器、6 直接运行时**；[兼容性](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877215012)通过 **78 项**，所选测试无失败、跳过、flaky 或重试。

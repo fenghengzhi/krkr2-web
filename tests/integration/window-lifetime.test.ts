@@ -87,6 +87,52 @@ for (const binary of [false, true]) {
       await f.session.stop()
     }
   })
+  test(`${mode}: Window records a managed finalizer error and continues invalidating registrations`, async () => {
+    const f = await windowFixture(
+      binary,
+      'var failManaged=true;class ThrowingManaged {function finalize(){managedFinalized++;if(failManaged)throw new Exception("managed-finalizer");}}',
+    )
+    try {
+      await f.execute(
+        'makeWindow();var first=new ThrowingManaged(),second=new ManagedWindowObject();win.add(first);win.add(second);invalidate win;',
+      )
+      assert.equal(
+        await f.session.evaluate('(isvalid first)+","+(isvalid second)+","+managedFinalized'),
+        '1,0,2',
+      )
+      assert.equal(f.logs.length, 1)
+      assert.match(f.logs[0]!, /managed-finalizer/)
+      assert.equal(f.session.inspectOwnership().windowSources, 0)
+      await f.execute(
+        'failManaged=false;invalidate first;delete global.first;delete global.second;delete global.win;',
+      )
+      await f.restored()
+      assert.equal(await f.session.evaluate('managedFinalized'), '3')
+    } finally {
+      await f.session.stop()
+    }
+  })
+  test(`${mode}: Window locks add and remove during managed invalidation`, async () => {
+    const f = await windowFixture(
+      binary,
+      'class MutatingManaged {var owner,second,third;function MutatingManaged(w,s,t){owner=w;second=s;third=t;}function finalize(){owner.remove(second);owner.add(third);managedFinalized++;}}',
+    )
+    try {
+      await f.execute(
+        'makeWindow();var second=new ManagedWindowObject(),third=new ManagedWindowObject(),first=new MutatingManaged(win,second,third);win.add(first);win.add(second);invalidate win;',
+      )
+      assert.equal(
+        await f.session.evaluate('(isvalid second)+","+(isvalid third)+","+managedFinalized'),
+        '0,1,2',
+      )
+      await f.execute(
+        'invalidate third;delete global.first;delete global.second;delete global.third;delete global.win;',
+      )
+      await f.restored()
+    } finally {
+      await f.session.stop()
+    }
+  })
   test(`${mode}: Window.remove releases the registered object's final ownership`, async () => {
     const f = await windowFixture(binary)
     try {

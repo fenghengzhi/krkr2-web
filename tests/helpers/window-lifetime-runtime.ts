@@ -14,6 +14,9 @@ const definitions = windowLifetimeScript(`
 class ReadWindow {var owner;function ReadWindow(w){owner=w;}function finalize(){trace=owner.caption+":"+owner.marker+":"+(isvalid owner);managedFinalized++;}}
 class Replacer {function finalize(){global.replacement=new LifetimeWindow();replacement.caption="replacement";replacement.visible=true;trace=win.caption;}}
 class MediaCheck {function finalize(){trace=movie.status+":"+win.caption+":"+(isvalid win);managedFinalized++;}}
+var failManaged=true;
+class ThrowingManaged {function finalize(){managedFinalized++;if(failManaged)throw new Exception("managed-finalizer");}}
+class MutatingManaged {var owner,second,third;function MutatingManaged(w,s,t){owner=w;second=s;third=t;}function finalize(){owner.remove(second);owner.add(third);managedFinalized++;}}
 function bound(){return this.marker;}
 `)
 
@@ -165,6 +168,41 @@ export async function exerciseWindowLifetime(
     )
     await execute('delete global.item;delete global.win;')
     await record(members, memberResult)
+
+    active = 'managed-error-continues'
+    await execute(
+      'managedFinalized=0;makeWindow();var first=new ThrowingManaged(),second=new ManagedWindowObject();win.add(first);win.add(second);',
+    )
+    const throwing = state()
+    await execute('invalidate win;')
+    const failedManaged = await session.evaluate(
+      '(isvalid first)+","+(isvalid second)+","+managedFinalized',
+    )
+    check(failedManaged === '1,0,2', 'Managed failure prevented later Window registrations')
+    check(
+      logs.length === 1 && logs[0]!.includes('managed-finalizer'),
+      'Window did not record the managed finalizer error',
+    )
+    const managedDiagnostic = logs.splice(0).join('\n')
+    await execute(
+      'failManaged=false;invalidate first;delete global.first;delete global.second;delete global.win;',
+    )
+    await record(throwing, failedManaged + '; ' + managedDiagnostic)
+
+    active = 'managed-registration-lock'
+    await execute(
+      'managedFinalized=0;makeWindow();var second=new ManagedWindowObject(),third=new ManagedWindowObject(),first=new MutatingManaged(win,second,third);win.add(first);win.add(second);',
+    )
+    const locked = state()
+    await execute('invalidate win;')
+    const lockedResult = await session.evaluate(
+      '(isvalid second)+","+(isvalid third)+","+managedFinalized',
+    )
+    check(lockedResult === '0,1,2', 'Window registrations changed during native invalidation')
+    await execute(
+      'invalidate third;delete global.first;delete global.second;delete global.third;delete global.win;',
+    )
+    await record(locked, lockedResult)
 
     active = 'finalizer-retry'
     await execute(
