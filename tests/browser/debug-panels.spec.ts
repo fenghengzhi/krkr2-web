@@ -2,6 +2,83 @@ import { test, expect } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
 
 for (const backend of ['asyncify', 'jspi']) {
+  for (const panel of ['console', 'controller'])
+    test(`${backend}: delayed ${panel} hiding preserves newer game focus and shortcuts`, async ({
+      page,
+    }) => {
+      await page.addInitScript(() => {
+        const post = Worker.prototype.postMessage
+        let pending: (() => void) | undefined
+        const gate = {
+          requests: 0,
+          replied: false,
+          release() {
+            const send = pending
+            pending = undefined
+            send?.()
+          },
+        }
+        Reflect.set(window, 'debugVisibilityGate', gate)
+        Worker.prototype.postMessage = function (
+          message: unknown,
+          transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+        ) {
+          const request = message as {
+            id?: string
+            type?: string
+            argumentList?: { value?: unknown }[]
+          }
+          const send = () => Reflect.apply(post, this, [message, transferOrOptions])
+          if (
+            request.type === 'APPLY' &&
+            request.argumentList?.[0]?.value === 'setDebugVisibility' &&
+            gate.requests === 0
+          ) {
+            gate.requests++
+            const replied = (event: MessageEvent) => {
+              if (event.data?.id !== request.id) return
+              this.removeEventListener('message', replied)
+              gate.replied = true
+            }
+            this.addEventListener('message', replied)
+            pending = send
+          } else send()
+        }
+      })
+      await page.goto('/?backend=' + backend)
+      await page.locator('#files').setInputFiles({
+        name: 'startup.tjs',
+        mimeType: 'text/plain',
+        buffer: Buffer.from(String.raw`
+var window=new Window();window.visible=true;
+var item=new MenuItem(window,"Reopen panels");window.menu.add(item);item.shortcut="Shift+F4";
+item.onClick=function(){Debug.console.visible=true;Debug.controller.visible=true;Debug.message("focus-shortcut-ready");};
+Debug.message("focus-game-ready");
+`),
+      })
+      await expect(page.getByText('focus-game-ready', { exact: true })).toBeVisible()
+      await expect(page.locator('#evaluate')).toBeEnabled()
+      await page.locator(panel === 'console' ? '#hide-console' : '#toggle-controller').click()
+      expect(await page.evaluate(() => Reflect.get(window, 'debugVisibilityGate').requests)).toBe(1)
+      await page.locator('canvas').focus()
+      const focused = await page.evaluate(() => document.activeElement?.className)
+      expect(focused).toBe('game-text-input')
+      // Release the real request only after the user has moved to the game.
+      // Wait for its RPC reply as well as its earlier snapshot notification.
+      await page.evaluate(() => Reflect.get(window, 'debugVisibilityGate').release())
+      await expect
+        .poll(() => page.evaluate(() => Reflect.get(window, 'debugVisibilityGate').replied))
+        .toBe(true)
+      await expect(page.locator('#debug-' + panel)).toBeHidden()
+      await expect(page.locator('.game-text-input')).toBeFocused()
+      await page.keyboard.press('Shift+F4')
+      await expect(page.locator('#debug-console')).toBeVisible()
+      await expect(page.locator('#debug-controller')).toBeVisible()
+      await expect(page.getByText('focus-shortcut-ready', { exact: true })).toBeVisible()
+      await page.locator('#stop').click()
+      await expect(page.locator('#status')).toHaveText('待机')
+    })
+
   test(`${backend}: failure logs can be reopened and a replacement game restores its own panel state`, async ({
     page,
   }) => {

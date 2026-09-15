@@ -193,7 +193,6 @@ export function mountApp(root: HTMLDivElement): void {
       acceptSnapshot(next)
     } else debugVisibility = { ...debugVisibility, [panel]: visible }
     update()
-    if (!visible) el('toggle-' + panel).focus()
   }
   for (const panel of ['console', 'controller'] as const)
     el('toggle-' + panel).addEventListener('click', () => {
@@ -278,6 +277,9 @@ export function mountApp(root: HTMLDivElement): void {
         } else if (event.type === 'state') {
           acceptSnapshot(event.snapshot)
           update()
+          // A native main-window close finishes the engine independently of
+          // the transport button. Retire its page hosts and Worker as well.
+          if (event.snapshot.state === 'stopped') void stop().catch(report)
         }
       },
       (audio) => {

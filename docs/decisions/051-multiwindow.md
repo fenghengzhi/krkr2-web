@@ -30,6 +30,10 @@
 
 [首次兼容检查 34936746578](https://github.com/fenghengzhi/krkr2-web/actions/runs/34936746578)使用该轮精确构建失败：原 78 项矩阵中 **36 通过、6 失败、36 未运行**。KAG 流程在三浏览器各首个 XP3／Asyncify 案例失败，剩余 33 项未运行；debug panels 首个案例各失败，另 3 项未运行；6 项 KAG diagnostics 与 30 项 ABI 迁移通过。三份 trace 均证实退出全屏后，单窗嵌入布局仍继承 `left=-320/top=-240` 的原生位置，画布左边界为 `-286`，菜单及部分画布被 stage 裁剪。修订让嵌入布局固定在容器原点，保留脚本坐标用于浮动布局；新增真实点击、菜单、全屏退出与浮动切换回归。完整逐项核算见归档中的 evidence-summary.json/md；未运行项不能计为通过。
 
+[第五轮 Node 诊断 34939029480](https://github.com/fenghengzhi/krkr2-web/actions/runs/34939029480)，提交 `c5c342b`：类型检查、构建及 **1,292／1,292 Node** 通过，零失败、取消或跳过。该诊断未运行浏览器套件；完整产物及 run.json 单独归档。
+
+[第二次兼容检查 34939219647](https://github.com/fenghengzhi/krkr2-web/actions/runs/34939219647)使用上述精确构建：原 78 项中 **76 通过、1 失败、1 未运行**。Firefox、WebKit 各 26 项全通过；Chromium 原版 KAG 流程、存档、转场及其余诊断与迁移通过，但 Asyncify debug panels 在 Shift+F4 后控制台仍隐藏，后续 JSPI debug panels 未执行。trace 显示 canvas 已聚焦后，迟到的隐藏面板 RPC 又无条件聚焦 toggle-controller。修订删除这次异步抢焦点，保留 update() 对仍在待隐藏面板内的焦点迁移，新增受控延迟请求与真实快捷键回归；原 KAG probe 不添加等待或再次聚焦。
+
 ## 验证范围和边界
 
 新增单元、源码／字节码集成及浏览器场景覆盖窗口身份、动态画布、渲染隔离、输入队列与物理按键、菜单选择身份、视频路由及关闭清理。旧寿命测试仅在有意关闭主窗口后继续检查清理结果的路径明确设置 exitOnWindowClose=false，默认退出行为另有独立用例。

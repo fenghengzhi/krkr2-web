@@ -27,6 +27,13 @@ export interface InputInvocation {
 export type InputStep = InputCall | InputOwnershipStep | InputInvocation
 export type InputOperation = Generator<InputStep, InputValue, unknown>
 const ref = (layer: number): LayerRef => ({ layer })
+// Native Window legacy mouse callbacks receive tjs_int coordinates. Convert
+// only their arguments: physical observation and Layer transforms retain the
+// original fractional point. Web touch packets remain real-valued.
+const windowMousePoint = (x: number, y: number): number[] => [
+  Math.trunc(x) || 0,
+  Math.trunc(y) || 0,
+]
 export class InputController {
   epoch = 0
   /** Focus/modal leases survive a transient packet reset, but never a manager clear. */
@@ -656,7 +663,7 @@ export class InputController {
       yield {
         target: 0,
         method: 'onMouseWheel',
-        args: [packet.shift, packet.delta, packet.x, packet.y],
+        args: [packet.shift, packet.delta, ...windowMousePoint(packet.x, packet.y)],
       }
       const p = this.primary()
       if (this.focused)
@@ -715,7 +722,11 @@ export class InputController {
     if (!('clicks' in packet)) return
     this.point = { x: packet.x, y: packet.y }
     if (packet.type === 'move') {
-      yield { target: 0, method: 'onMouseMove', args: [packet.x, packet.y, packet.shift] }
+      yield {
+        target: 0,
+        method: 'onMouseMove',
+        args: [...windowMousePoint(packet.x, packet.y), packet.shift],
+      }
       yield* this.mouseMove(packet.x, packet.y, packet.shift)
       return
     }
@@ -723,7 +734,7 @@ export class InputController {
       yield {
         target: 0,
         method: 'onMouseDown',
-        args: [packet.x, packet.y, packet.button, packet.shift],
+        args: [...windowMousePoint(packet.x, packet.y), packet.button, packet.shift],
       }
       yield* this.mouseMove(packet.x, packet.y, packet.shift)
       const p = this.primary(),
@@ -752,7 +763,7 @@ export class InputController {
     }
     if (packet.clicks > 0) {
       const method = packet.clicks === 2 ? 'onDoubleClick' : 'onClick'
-      yield { target: 0, method, args: [packet.x, packet.y] }
+      yield { target: 0, method, args: windowMousePoint(packet.x, packet.y) }
       const p = this.primary(),
         hit = yield* this.hit(p.x, p.y)
       if (hit && (packet.clicks === 2 || this.capture === hit))
@@ -761,7 +772,7 @@ export class InputController {
     yield {
       target: 0,
       method: 'onMouseUp',
-      args: [packet.x, packet.y, packet.button, packet.shift],
+      args: [...windowMousePoint(packet.x, packet.y), packet.button, packet.shift],
     }
     const p = this.primary(),
       target = yield* this.target(p.x, p.y)

@@ -432,6 +432,29 @@ for (const backend of ['asyncify', 'jspi']) {
     test(`${mode}: the default main-window user close honors a rejected query then stops every surface`, async ({
       page,
     }) => {
+      await page.addInitScript(() => {
+        const post = Worker.prototype.postMessage,
+          terminate = Worker.prototype.terminate,
+          sessions = new Set<Worker>(),
+          retired = new Set<Worker>()
+        Reflect.set(window, 'mainCloseWorkers', () => ({
+          created: sessions.size,
+          terminated: retired.size,
+        }))
+        Worker.prototype.postMessage = function (
+          message: unknown,
+          transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+        ) {
+          const request = message as { type?: string; argumentList?: { value?: unknown }[] }
+          if (request.type === 'APPLY' && request.argumentList?.[0]?.value === 'initialize')
+            sessions.add(this)
+          return Reflect.apply(post, this, [message, transferOrOptions])
+        }
+        Worker.prototype.terminate = function () {
+          if (sessions.has(this)) retired.add(this)
+          return Reflect.apply(terminate, this, [])
+        }
+      })
       // Omit any assignment: this case proves the native default is true.
       const { a, b, canvasB, assertStopped, stop } = await launch(page, backend, binary)
       try {
@@ -447,6 +470,10 @@ for (const backend of ['asyncify', 'jspi']) {
         await a.getByRole('button', { name: '关闭游戏窗口', exact: true }).click()
         await expect(page.getByText('surface-close-query=A:0|A:1|', { exact: true })).toBeVisible()
         await assertStopped()
+        expect(await page.evaluate(() => Reflect.get(window, 'mainCloseWorkers')())).toEqual({
+          created: 1,
+          terminated: 1,
+        })
       } finally {
         await stop()
       }
