@@ -1,6 +1,10 @@
 # 当前实现范围
 
-Layer.update／onPaint 的参数、action 派发、异步后续重绘及多图层调度已接入，见[决策 045](../decisions/045-layer-redraw.md)。最新完整验证为 **1,019 项 Node、750 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**。其他图形／系统和媒体能力仍未完成，范围以[实现进度](../non-plugin-progress.md)为准。以下保留此前阶段记录。
+阶段 046 的 `Layer.neutralColor` 可写语义、无主图 opaque 填色与祖先快照，以及 `piledCopy` 在 onPaint 前的主图校验已通过验证，见[决策 046](../decisions/046-layer-neutral-color.md)。[完整回归 34930172005](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930172005)在 `551b97d` 通过全部 14 个作业：**1,043 项 Node、786 项浏览器（663 项常规、57 项游戏库、59 项 PWA、7 项原生生命周期）及 6 项直接运行时**；失败、取消、跳过、flaky 和重试均为 0。[兼容检查 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970)通过全部 **78 项原 KAG／旧 ABI 检查**，使用 `259c892` 的构建 34929264074；到 `551b97d` 仅修改浏览器夹具，应用源码相同。以上已纳入本版本。
+
+046 [首次完整回归 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074)保留 **19 项浏览器失败**：18 项旧夹具依赖 primary 默认颜色，另 1 项 PNG 编码停止点击发生在编码完成后。夹具已修正；后续完整通过不证明 PNG 停止时序已修复，050 的受控取消测试仍在独立分支。047 的 `Window.mainWindow` 已实现，但其[完整回归 34930203580](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930203580)为 821／822 项浏览器通过，另 1 项 WebKit JSPI 启动用例 `Page crashed`，仍待完整通过，未计入本页当前能力。049 的空矩形复制也仍在独立分支。其他图形／系统和媒体能力尚未完成，范围以[实现进度](../non-plugin-progress.md)为准。
+
+以下保留此前阶段记录及当时的验证范围。Layer.update／onPaint 的参数、action 派发、异步后续重绘及多图层调度已接入，见[决策 045](../decisions/045-layer-redraw.md)。045 完整验证为 **1,019 项 Node、750 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**。
 
 Layer／Font 生命周期、children 快照、输入角色持有及转场清理已通过本阶段回归，见[决策 044](../decisions/044-layer-object-lifetime.md)。当前验证为 **987 项 Node、726 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**；最新结论以[非插件实现进度](../non-plugin-progress.md)为准。Layer 的其余图形 API、完整多窗口和媒体能力仍在实现。
 
@@ -71,7 +75,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 | XP3          | 独立 XP3 的 raw/zlib 索引、分段、连续索引链、adlr 元数据、可选 Adler-32 校验、按文件懒加载及 archive>entry 限定路径                                                                                                                                |
 | 资源查找     | 相对路径、明确的挂载顺序、精确匹配后大小写回退、目录/归档 auto-path（后注册优先）、basename 回退；冲突时报错                                                                                                                                       |
 | 图像         | TS PNG/GIF/TLG5/TLG6 解码、PNG/TLG 标签和调色板索引；未压缩 BMP 1/4/8/24/32 位读取、8/24/32 位写入及 PNG/TLG 的 RGB/RGBA 写出；PNG zlib 使用 Web 压缩/解压；尺寸上限 4096 × 4096                                                                   |
-| 图层         | 显示/图像尺寸与偏移、默认 32×32 图像、父子/相对与绝对顺序、重挂/销毁、ARGB 填色、clip、复制、26 种混合、mask/province 像素和命中                                                                                                                   |
+| 图层         | 显示/图像尺寸与偏移、默认 32×32 图像、父子/相对与绝对顺序、重挂/销毁、ARGB 填色、clip、复制、26 种混合、mask/province 像素和命中；每实例可写 neutralColor、无主图 opaque 填色                                                                      |
 | 渲染         | Worker 中的 OffscreenCanvas + WebGL2；CPU 位图为像素权威，隔离合成需要整体透明度的子树与转场图像；按 revision 上传纹理                                                                                                                             |
 | 图形恢复     | 上下文丢失时保留 VM/CPU 像素并暂停；重建程序、uniform 和纹理后提交首帧；保留用户暂停意图，失败可重试显示/备份/停止                                                                                                                                 |
 | 转场/截图    | 三种内置转场、脚本时钟/暂停、图层树交换与完成回调；onPaint、piledCopy、stretchCopy、BMP 图像存档                                                                                                                                                   |
@@ -102,6 +106,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 - ZIP 支持 stored/deflate、ZIP64、UTF-8/CP437/Unicode Path、按需读取与 CRC 校验，提供普通名称和 `archive>entry` 地址。无效写入目标在 TJS 创建文本/二进制流时预检；原始归档保持只读。详见 [ZIP 资源决策](../decisions/015-zip-storage.md)。
 - `Window`：尺寸/位置/显示偏移/缩放、外观属性、`add/remove` 管理对象、`onResize`、`onCloseQuery/close`、`menu`、`primaryLayer`。新窗口初始不可见，脚本需设置 `visible=true`。
 - `Layer`：尺寸/图像尺寸与偏移、`setSizeToImageSize/setClip`、`fillRect/colorRect/copyRect/assignImages`、`loadImages`、`drawText`、像素访问、parent/children、order/absolute、moveBefore/moveBehind、翻转、命中及显式销毁。
+- `Layer.neutralColor`：每实例保存低 32 位 ARGB，设置本身不改现有像素或请求重绘；扩容、主图重新分配及仿射 clear 使用该值，真正改变 type 时恢复类型默认值。无主图 opaque 图层仍填色并参与祖先快照；`piledCopy` 在 onPaint 前拒绝无主图的来源或目标。详见[决策 046](../decisions/046-layer-neutral-color.md)。
 - `Layer.focus/focusNext/focusPrev`、`setMode/removeMode`、`releaseCapture/releaseTouchCapture`、焦点/按键/鼠标/触摸事件、`onHitTest` 和四参数 `getLayerAt`；`Window.focusedLayer/currentModalLayer/postInputEvent`、`System.getKeyState`。输入法模式、手势和系统事件仍有未完成项。
 - `Layer.adjustGamma`：独立 RGB 曲线与输出区间、裁剪、透明度保持及加算 Alpha 处理；图像加载支持常见浏览器格式的扩展名补全。
 - `Layer.beginTransition/stopTransition`：crossfade/universal/scroll、withchildren、selfupdate、callback 与完成事件；`piledCopy/stretchCopy/saveLayerImage` 接通子树截图、缩放和 BMP 写入。
