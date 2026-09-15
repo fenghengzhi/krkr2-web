@@ -2,6 +2,8 @@
 
 状态：实现及验证用例已编写，**尚未通过本阶段 GitHub-hosted Actions 验证**。首轮 [35009240317](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009240317) 在 `12af5df0a1c18702d7f89ac1a04fd0cb5847a48b` 构建失败：`game-clipboard.ts:247` 的条件表达式未能把联合类型收窄至写入请求（TS2339）。已改为明确的 operation 分支，仍在真实点击内直接调用 API。该轮实际测试执行数为 **0**，两个作业失败、四个作业跳过；不能记作剪贴板行为通过。本机未运行测试、build/check、浏览器或系统剪贴板探针，首次失败与原始 artifacts 继续保留。
 
+第二轮 [35009742804](https://github.com/fenghengzhi/krkr2-web/actions/runs/35009742804) 在 `53a37dc593a8e081b51d7f499f7f390b1473c6a1` 仍于构建阶段失败，实际测试执行数为 **0**。应用和 Worker 类型检查已通过，工具检查报 `clipboard.test.ts:468` TS2339：`assert.equal(stopped.ok, false)` 已收窄至拒绝结果，紧随的成功分支成为 `never`。删除重复的不可达分支，保留“必须拒绝”、错误类型/消息、日志和句柄清理断言。该失败独立保存，不替代首轮记录。
+
 ## 原版合同与本阶段接口
 
 固定依据是官方 `krkrz/krkr2@dec49af97e174d31059c3ccd7efc700ba3c6b788` 的 `kirikiri2/branches/2.32stable/kirikiri2/`。Clipboard 在原版 core 注册；仅提供全局 `cbfText=1`、静态方法 `Clipboard.hasFormat(format)` 和静态可读写属性 `Clipboard.asText`。没有增加图片剪贴板脚本 API、事件或插件入口。[ClipboardIntf.cpp](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/ClipboardIntf.cpp#L48)、[原版注册](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/base/ScriptMgnIntf.cpp#L474)。
