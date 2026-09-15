@@ -24,7 +24,8 @@ declare global {
 const unicode = '剪贴板の文字 😀 café\n第二行',
   panel = '.game-clipboard',
   prefix = 'clipboard-proof:',
-  recordedGrants = new WeakMap<Page, string[]>()
+  recordedGrants = new WeakMap<Page, string[]>(),
+  grantHistory = new WeakMap<Page, { fromCall: number; grants: string[] }[]>()
 
 // All clipboard cases share one sequential file. In particular, the hosted
 // headed Firefox job uses its display clipboard, not a headless private one.
@@ -142,6 +143,7 @@ async function evidence(
         headless: process.env.KRKR_TEST_HEADED !== '1',
         origin: new URL(page.url()).origin,
         grants,
+        grantHistory: grantHistory.get(page) ?? [{ fromCall: 0, grants }],
         input: info.title.startsWith('page-owned initial')
           ? 'Page-owned initial script, completed before automation evaluation'
           : info.title.startsWith('PNG-only')
@@ -174,6 +176,7 @@ async function prepare(page: Page, backend: string, browserName: string, assiste
   if (grants.length)
     await page.context().grantPermissions(grants, { origin: new URL(page.url()).origin })
   recordedGrants.set(page, grants)
+  grantHistory.set(page, [{ fromCall: 0, grants: [...grants] }])
   return { errors, grants }
 }
 
@@ -275,12 +278,21 @@ for (const backend of ['asyncify', 'jspi']) {
   for (const binary of [false, true]) {
     const variant = `${backend}/${binary ? 'bytecode' : 'source'}`
 
-    test(`${variant}: real Clipboard Unicode and empty-text round trip (Chromium driver grants; Firefox/WebKit no grants)`, async ({
+    test(`${variant}: real Clipboard Unicode, empty-write representation and recovery (Chromium driver grants; Firefox/WebKit no grants)`, async ({
       page,
       browserName,
     }, info) => {
-      const setup = await prepare(page, backend, browserName)
+      const setup = await prepare(page, backend, browserName),
+        emptyTextOmitted = browserName === 'chromium',
+        recovered = unicode + '\nRestored after the empty write'
       try {
+        if (emptyTextOmitted) {
+          // Hosted runs 35009940671 and 35009948147 exposed types=[[]]
+          // after writeText("") in this exact headless browser. This says
+          // nothing about whether an underlying OS format was removed.
+          expect(page.context().browser()?.version()).toBe('153.0.8010.12')
+          expect(process.env.KRKR_TEST_HEADED).not.toBe('1')
+        }
         await load(
           page,
           binary,
@@ -290,7 +302,9 @@ clipboardMark("before-format");clipboardMark("format:"+int(Clipboard.hasFormat(c
 clipboardMark("before-read");var text=Clipboard.asText;clipboardMark("unicode-read:"+typeof text+":"+int(text===${JSON.stringify(unicode)}));
 clipboardMark("before-empty-write");Clipboard.asText="";clipboardMark("after-empty-write");
 clipboardMark("before-empty-format");clipboardMark("empty-format:"+int(Clipboard.hasFormat(cbfText)));
-clipboardMark("before-empty-read");var empty=Clipboard.asText;clipboardMark("empty-read:"+typeof empty+":"+empty.length);
+clipboardMark("before-empty-read");var empty=Clipboard.asText;clipboardMark("empty-read:"+(empty===void?"void":typeof empty+":"+empty.length));
+clipboardMark("before-restored-write");Clipboard.asText=${JSON.stringify(recovered)};clipboardMark("after-restored-write");
+var restored=Clipboard.asText;clipboardMark("restored-read:"+int(restored===${JSON.stringify(recovered)}));
 clipboardMark("done");`),
         )
         await open(page)
@@ -307,13 +321,37 @@ clipboardMark("done");`),
         await perform(page, 'has-text', 'before-format', 'format:1')
         await perform(page, 'read-text', 'before-read', 'unicode-read:String:1')
         await perform(page, 'write-text', 'before-empty-write', 'after-empty-write')
-        await perform(page, 'has-text', 'before-empty-format', 'empty-format:1')
-        await perform(page, 'read-text', 'before-empty-read', 'empty-read:String:0')
+        await perform(
+          page,
+          'has-text',
+          'before-empty-format',
+          emptyTextOmitted ? 'empty-format:0' : 'empty-format:1',
+        )
+        await perform(
+          page,
+          'read-text',
+          'before-empty-read',
+          emptyTextOmitted ? 'empty-read:void' : 'empty-read:String:0',
+        )
+        await perform(page, 'write-text', 'before-restored-write', 'after-restored-write')
+        await perform(page, 'read-text', 'after-restored-write', 'restored-read:1')
         await expect(mark(page, 'done')).toBeVisible()
         const calls = await evidence(page, info, setup.grants)
-        successful(calls, ['writeText', 'read', 'read', 'writeText', 'read', 'read'])
-        for (const call of calls.filter((call) => call.method === 'read'))
+        successful(calls, [
+          'writeText',
+          'read',
+          'read',
+          'writeText',
+          'read',
+          'read',
+          'writeText',
+          'read',
+        ])
+        for (const call of [calls[1], calls[2], calls[7]])
           expect(call.types!.some((types) => types.includes('text/plain'))).toBe(true)
+        for (const call of [calls[4], calls[5]])
+          if (emptyTextOmitted) expect(call.types).toEqual([[]])
+          else expect(call.types!.some((types) => types.includes('text/plain'))).toBe(true)
       } finally {
         await stop(page, setup.errors)
       }
@@ -474,41 +512,88 @@ var text=Clipboard.asText;clipboardMark("png-replaced:"+int(text===${JSON.string
   }
 })
 
-test('real same-origin buttons without permission grants preserve browser read policy and TJS errors', async ({
+test('real ungranted Clipboard buttons follow fixed browser policy and recover after explicit Chromium grants', async ({
   page,
   browserName,
 }, info) => {
-  const setup = await prepare(page, 'asyncify', browserName, false)
+  const setup = await prepare(page, 'asyncify', browserName, false),
+    denied = browserName === 'chromium',
+    recovered = unicode + '\nAfter the permission boundary'
   try {
+    if (denied) {
+      expect(page.context().browser()?.version()).toBe('153.0.8010.12')
+      expect(process.env.KRKR_TEST_HEADED).not.toBe('1')
+    }
     await load(
       page,
       false,
       program(`
-clipboardMark("policy-before-write");Clipboard.asText=${JSON.stringify(unicode)};clipboardMark("policy-written");
+clipboardMark("policy-before-write");
+try{Clipboard.asText=${JSON.stringify(unicode)};clipboardMark("policy-written");}
+catch(e){clipboardMark("policy-write-error:"+int(e.message.indexOf("NotAllowedError:")==0));}
+clipboardMark("policy-before-read");
 try{var text=Clipboard.asText;clipboardMark("policy-read:"+int(text===${JSON.stringify(unicode)}));}
-catch(e){clipboardMark("policy-error:"+int(e.message.indexOf("NotAllowedError")>=0));}
+catch(e){clipboardMark("policy-read-error:"+int(e.message.indexOf("NotAllowedError:")==0));}
+clipboardMark("policy-before-recovery");Clipboard.asText=${JSON.stringify(recovered)};clipboardMark("policy-recovery-written");
+var recovery=Clipboard.asText;clipboardMark("policy-recovered:"+int(recovery===${JSON.stringify(recovered)}));
 clipboardMark("policy-done");`),
     )
     await open(page)
-    await perform(page, 'write-text', 'policy-before-write', 'policy-written')
+    await perform(
+      page,
+      'write-text',
+      'policy-before-write',
+      denied ? 'policy-write-error:1' : 'policy-written',
+    )
     await perform(
       page,
       'read-text',
-      'policy-written',
-      browserName === 'chromium' ? 'policy-error:1' : 'policy-read:1',
+      'policy-before-read',
+      denied ? 'policy-read-error:1' : 'policy-read:1',
     )
-    await expect(mark(page, 'policy-done')).toBeVisible()
-    const calls = await evidence(page, info, setup.grants)
+    const calls = await evidence(page, info, setup.grants, 'clipboard-before-permission-change')
     expect(calls.map((call) => call.method)).toEqual(['writeText', 'read'])
-    successful(calls.slice(0, 1), ['writeText'])
-    if (browserName === 'chromium') {
-      // With this repository's default no-channel headless launch, Playwright
-      // uses chromium-headless-shell. A real Chrome native prompt is not tested.
-      expect(process.env.KRKR_TEST_HEADED).not.toBe('1')
-      expect(calls[1].state).toBe('rejected')
-      expect(calls[1].error?.name).toBe('NotAllowedError')
+    if (denied) {
+      for (const call of calls) {
+        expect(call.state).toBe('rejected')
+        expect(call.error?.name).toBe('NotAllowedError')
+        expect(call.active).toBe(true)
+        expect(call.hasBeenActive).toBe(true)
+        expect(call.focused).toBe(true)
+        expect(call.secure).toBe(true)
+      }
+      expect(calls[0].error?.message).toBe(
+        "Failed to execute 'writeText' on 'Clipboard': Write permission denied.",
+      )
+      // The first failing runs stopped at writeText. This read denial is a
+      // separate assertion awaiting the next hosted run, not earlier evidence.
+      expect(calls[1].error?.message).toContain('Read permission denied')
+      await expect(mark(page, 'policy-written')).toHaveCount(0)
       await expect(mark(page, 'policy-read:1')).toHaveCount(0)
-    } else successful(calls.slice(1), ['read'])
+      const granted = ['clipboard-read', 'clipboard-write']
+      await page.context().grantPermissions(granted, { origin: new URL(page.url()).origin })
+      recordedGrants.set(page, granted)
+      grantHistory.set(page, [
+        { fromCall: 0, grants: [] },
+        { fromCall: calls.length, grants: [...granted] },
+      ])
+    } else {
+      successful(calls, ['writeText', 'read'])
+      await expect(mark(page, 'policy-write-error:1')).toHaveCount(0)
+      await expect(mark(page, 'policy-read-error:1')).toHaveCount(0)
+    }
+    await perform(page, 'write-text', 'policy-before-recovery', 'policy-recovery-written')
+    await perform(page, 'read-text', 'policy-recovery-written', 'policy-recovered:1')
+    await expect(mark(page, 'policy-done')).toBeVisible()
+    const complete = await evidence(
+      page,
+      info,
+      recordedGrants.get(page) ?? [],
+      'clipboard-policy-and-recovery',
+    )
+    expect(complete).toHaveLength(4)
+    successful(complete.slice(2), ['writeText', 'read'])
+    expect(complete[3].types!.some((types) => types.includes('text/plain'))).toBe(true)
   } finally {
     await stop(page, setup.errors)
   }
