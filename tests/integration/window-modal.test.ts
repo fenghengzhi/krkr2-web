@@ -628,7 +628,7 @@ child.keyHandler=function(key){
     }
   })
 
-  test(`${mode}: an internal close query cancelled before entry by a child modal is retried after that child returns`, async () => {
+  test(`${mode}: an internal close query cancelled by a child modal stays pending until a base answer permits a new close`, async () => {
     const f = await fixture(
       binary,
       String.raw`
@@ -643,6 +643,9 @@ modalRoot.onPaint=function(){
 modal.keyHandler=function(key){
   if(key==65){modal.close();queryPaintArmed=true;modalRoot.update();mark("request-return:"+modal.queries);}
   if(key==66){mark("child-before:"+modal.queries);child.showModal();mark("child-after:"+modal.queries);}
+  if(key==67){modal.close();modal.close();mark("cancelled-reclose:"+modal.queries);}
+  if(key==68){modal.respond(false);mark("cancelled-refusal:"+modal.queries);}
+  if(key==69){modal.close();mark("fresh-close-return:"+modal.queries);}
 };
 `,
       false,
@@ -669,13 +672,33 @@ modal.keyHandler=function(key){
       await succeeded(f.close('child'), 'finish child that removed the queued parent query')
       await succeeded(childCall)
       await succeeded(request)
-      // No new parent close/respond request follows the child: the original
-      // request must be restored by cancellation of its unentered query.
-      await f.finished(opening)
+      await f.waitModal(1, opening)
+      // The original FormCloseQuery already set Closing when it queued input.
+      // Clearing that input for the child leaves Closing set after child return.
+      assert.equal(f.view('modal').view.visible, true)
+      assert.equal(f.view('child').view.visible, false)
+      assert.equal(opening.settled(), false)
+      assert.ok(!f.logs.includes('modal:query:1'))
       assert.ok(f.logs.indexOf('query-paint:begin') < f.logs.indexOf('query-paint:end'))
       assert.ok(f.logs.indexOf('query-paint:end') < f.logs.indexOf('child-before:0'))
       assert.ok(f.logs.includes('child-after:0'))
-      assert.ok(f.logs.indexOf('child-after:0') < f.logs.indexOf('modal:query:1'))
+      await succeeded(f.key('modal', 67), 'repeat Close while the cancelled query remains pending')
+      await f.waitModal(1, opening)
+      assert.ok(f.logs.includes('cancelled-reclose:0'))
+      assert.ok(!f.logs.includes('modal:query:1'))
+      assert.equal(opening.settled(), false)
+      await succeeded(f.key('modal', 68), 'explicit base refusal clears native Closing')
+      await f.waitModal(1, opening)
+      assert.ok(f.logs.includes('cancelled-refusal:0'))
+      assert.ok(!f.logs.includes('modal:query:1'))
+      assert.equal(f.view('modal').view.visible, true)
+      await succeeded(f.key('modal', 69), 'request a fresh query after the explicit refusal')
+      await f.finished(opening)
+      assert.ok(f.logs.includes('fresh-close-return:0'))
+      assert.ok(f.logs.indexOf('child-after:0') < f.logs.indexOf('cancelled-reclose:0'))
+      assert.ok(f.logs.indexOf('cancelled-reclose:0') < f.logs.indexOf('cancelled-refusal:0'))
+      assert.ok(f.logs.indexOf('cancelled-refusal:0') < f.logs.indexOf('fresh-close-return:0'))
+      assert.ok(f.logs.indexOf('fresh-close-return:0') < f.logs.indexOf('modal:query:1'))
       assert.ok(f.logs.indexOf('modal:query:1') < f.logs.indexOf('run:after:1:kept:37'))
       assert.deepEqual(
         f.logs.filter((text) => text.startsWith('modal:query:')),

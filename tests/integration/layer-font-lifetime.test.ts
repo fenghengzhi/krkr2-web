@@ -165,7 +165,7 @@ try{new Font(%[__id:owner.__id]);}catch(error){rejected++;}
       }
       const { session } = await fixture(
         binary,
-        'var owner=new FontOwnerLayer(win);owner.setSize(8,8);var font=owner.font;font.height=23;font.bold=true;invalidate font;owner.drawText(0,0,"A");',
+        'var owner=new FontOwnerLayer(win);owner.setSize(8,8);var font=owner.font;font.height=23;font.bold=true;invalidate font;owner.drawText(0,0,"A",0xffffff);',
         graphics,
       )
       try {

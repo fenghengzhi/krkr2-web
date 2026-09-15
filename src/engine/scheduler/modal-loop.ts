@@ -44,6 +44,9 @@ export class ModalLoop {
   get activeToken(): number | undefined {
     return this.scopes.top
   }
+  get stopped(): boolean {
+    return this.disposed
+  }
   get depth(): number {
     return this.scopes.depth
   }

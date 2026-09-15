@@ -183,11 +183,12 @@ export class LayerService {
       throw error
     }
   }
-  fontState(owner: ScriptValue): ScriptWeakObject {
+  fontState(owner: ScriptValue, requireImage = false): ScriptWeakObject {
     if (!isScriptObject(owner)) throw new Error('Expected a Font instance')
     const id = this.objects.nativeLifetimeIdentifier(owner, 'Font.invalidate')
     const font = id === undefined ? undefined : this.fonts.get(id)
     if (!font || font.layer.finished) throw new Error('Font has no live Layer')
+    if (requireImage) this.tree.bitmap(font.layer.id)
     return font.layer.state
   }
   finishFont(id: number): void {

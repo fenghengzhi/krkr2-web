@@ -349,13 +349,14 @@ test('modal Close queues one query only on its own wait boundary and a refusal p
   await f.stop()
 })
 
-test('synchronous close-query admission failure preserves the request for retry', async () => {
+test('synchronous close-query admission failure preserves the request for retry even while hidden', async () => {
   const f = await fixture(),
     failure = new Error('query admission failed'),
     current = f.show(f.parent, 'query-retry')
   f.hooks.query = () => {
     throw failure
   }
+  f.parent.state.set('visible', 0)
   f.modals.requestClose(f.parent.id)
   assert.throws(
     () => f.modals.beforeWait(current),
@@ -369,6 +370,45 @@ test('synchronous close-query admission failure preserves the request for retry'
   await f.host('Modal.dispatch', current)
   await complete(f, f.parent, current)
   await f.stop()
+})
+
+test('an older synchronous admission failure cannot reset a reentrant query generation or replacement scope', async () => {
+  for (const replace of [false, true]) {
+    const f = await fixture(),
+      failure = new Error('old admission failed'),
+      old = f.show(f.parent, 'old-admission')
+    let current = old
+    try {
+      f.hooks.query = () => {
+        delete f.hooks.query
+        if (replace) {
+          assert.equal(f.modals.abort(f.parent.id, 'old-admission'), true)
+          current = f.show(f.parent, 'replacement-admission')
+        } else {
+          f.modals.respond(f.parent.id, false)
+        }
+        f.modals.requestClose(f.parent.id)
+        f.modals.beforeWait(current)
+        throw failure
+      }
+      f.modals.requestClose(f.parent.id)
+      assert.throws(
+        () => f.modals.beforeWait(old),
+        (error) => error === failure,
+      )
+      assert.deepEqual(f.queries, [f.parent])
+      assert.deepEqual(f.pending, [f.parent])
+      f.modals.beforeWait(current)
+      assert.deepEqual(f.queries, [f.parent], 'The newer admitted query must remain pending')
+      assert.equal(f.loop.activeToken, current)
+      assert.equal(f.modals.count, 1)
+      await f.host('Modal.dispatch', current)
+      await complete(f, f.parent, current)
+    } finally {
+      delete f.hooks.query
+      await f.stop()
+    }
+  }
 })
 
 test('resume and a delayed answer wake the owning modal wait without duplicating its query', async () => {
@@ -395,9 +435,9 @@ test('resume and a delayed answer wake the owning modal wait without duplicating
   await f.stop()
 })
 
-test('a query cancelled before entry is retried after its child unwinds and old generations cannot retry again', async () => {
+test('a query cancelled before entry stays pending after its child unwinds until an explicit base answer', async () => {
   const f = await fixture(),
-    parent = f.show(f.parent, 'retry-cancelled')
+    parent = f.show(f.parent, 'cancelled-query')
   f.modals.requestClose(f.parent.id)
   await f.host('Modal.wait', parent)
   const firstCancelled = f.notEntered[0]!
@@ -407,24 +447,38 @@ test('a query cancelled before entry is retried after its child unwinds and old 
   firstCancelled()
   f.modals.beforeWait(parent)
   assert.deepEqual(f.queries, [f.parent])
+  assert.equal(f.loop.activeToken, child)
+  assert.equal(f.child.state.visible, true)
   await complete(f, f.child, child)
+  assert.equal(f.child.state.visible, false)
+  assert.equal(f.child.finished, false)
+  assert.equal(f.loop.activeToken, parent)
+  f.modals.beforeWait(parent)
+  assert.deepEqual(f.queries, [f.parent], 'Cancelling input does not clear native Closing')
+  assert.deepEqual(f.pending, [])
+  assert.equal(f.modals.requestClose(f.parent.id), true)
+  f.modals.beforeWait(parent)
+  assert.deepEqual(f.queries, [f.parent], 'Close remains a no-op while Closing is set')
+  assert.equal(f.modals.count, 1)
+  assert.equal(f.parent.state.visible, true)
+  firstCancelled()
+  f.modals.beforeWait(parent)
+  assert.equal(f.queries.length, 1)
+  f.modals.respond(f.parent.id, false)
+  firstCancelled()
+  f.modals.beforeWait(parent)
+  assert.equal(f.queries.length, 1, 'A base refusal clears Closing without making another request')
+  f.modals.requestClose(f.parent.id)
   await f.host('Modal.wait', parent)
   assert.deepEqual(f.queries, [f.parent, f.parent])
   firstCancelled()
   f.modals.beforeWait(parent)
-  assert.equal(f.queries.length, 2)
-  await f.host('Modal.dispatch', parent)
-  f.modals.respond(f.parent.id, false)
-  f.notEntered[1]!()
-  f.modals.beforeWait(parent)
-  assert.equal(f.queries.length, 2, 'An answered generation cannot restore a close request')
-  f.modals.requestClose(f.parent.id)
-  await f.host('Modal.wait', parent)
+  assert.equal(f.queries.length, 2, 'An old cancellation cannot modify the new pending query')
   await f.host('Modal.dispatch', parent)
   f.modals.respond(f.parent.id, true)
-  f.notEntered[2]!()
+  f.notEntered[1]!()
   await f.host('Modal.wait', parent)
-  assert.equal(f.queries.length, 3)
+  assert.equal(f.queries.length, 2)
   await f.host('Modal.end', parent)
   await f.stop()
 })
