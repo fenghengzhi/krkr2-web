@@ -365,7 +365,7 @@ void loadBinary(Vm* vm, const tjs_uint8* bytes, std::size_t length,
 
 void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
     if(reply.kind == 1) TJS_eTJSError(ttstr(reply.value));
-    if(reply.kind == 2 || reply.kind == 7) {
+    if(reply.kind == 2 || reply.kind == 7 || reply.kind == 9) {
         krkr::ExecutionFrame delegation(2);
         if(reply.args.size() > 1000000) throw krkr::ExecutionLimitError(u"VM call exceeds 1000000 arguments");
         krkr::TemporaryMemory memory;
@@ -377,7 +377,7 @@ void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
         auto status = closure.FuncCall(0, reply.name.GetLen() ? reply.name.c_str() : nullptr, nullptr, reply.kind == 7 ? nullptr : result,
             args.size(), args.data(), reply.name.GetLen() ? closure.Object : nullptr);
         if(reply.kind == 7) { if(result) *result = static_cast<tjs_int>(status); }
-        else if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, reply.name.GetLen() ? reply.name.c_str() : nullptr);
+        else if(reply.kind != 9 && TJS_FAILED(status)) TJSThrowFrom_tjs_error(status, reply.name.GetLen() ? reply.name.c_str() : nullptr);
     } else if(reply.kind == 3) {
         krkr::ExecutionFrame delegation(2);
         auto context = reply.context.Type() == tvtObject ? reply.context.AsObjectNoAddRef() : nullptr;

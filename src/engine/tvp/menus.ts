@@ -35,7 +35,7 @@ class MenuItem {
     if(selected && !(flags & (tpmNoNotify|tpmReturnCmd)) && !System.eventDisabled) __menuWindow.__menuClick(selected);
     return selected;
   }
-  function onClick() {}
+  function onClick() {return __host("Menu.action",__menuWindow,this);}
   property parent { getter() { return __menuParent; } }
   property children { getter() { var copy=[];copy.assign(__menuChildren);return copy; } }
   property window { getter() { return __menuWindow; } }

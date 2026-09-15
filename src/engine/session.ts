@@ -1478,6 +1478,17 @@ export class EngineSession {
       case 'Menu.create':
         value = BigInt(this.menus.create(text(0)))
         break
+      case 'Menu.action':
+        if (args[0] === null) break
+        if (!isScriptObject(args[0]) || !isScriptObject(args[1]))
+          throw new Error('MenuItem action requires an object owner and target')
+        return {
+          kind: 'invoke',
+          callback: args[0],
+          member: 'action',
+          args: [scriptRecord({ type: 'onClick', target: args[1] })],
+          ignoreStatus: true,
+        }
       case 'Menu.root': {
         const window = this.windows!.get(number(1))
         this.menus.get(number(0))

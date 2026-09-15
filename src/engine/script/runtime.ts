@@ -85,6 +85,9 @@ export type HostReply =
       args: ScriptValue[]
       member?: string
       statusOnly?: boolean
+      /** Native TVP action dispatch ignores negative FuncCall statuses while
+       * preserving a successful result and propagating thrown exceptions. */
+      ignoreStatus?: boolean
     }
   | {
       kind: 'script'
