@@ -127,7 +127,7 @@ class Layer {
     __host("Layer.affine",__id,source.__id,int(left),int(top),int(width),int(height),int(!!matrix),real(a),real(b),real(c),real(d),real(tx),real(ty),int(type),omOpaque,int(opacity),0,1);
   }
   function saveLayerImage(name,type="bmp"){__host("Layer.saveImage",__id,string(name),string(type));}
-  function assignImages(source) { __host("Layer.assignImages",__id,source.__id); (Dictionary.assign incontextof __fontData)(source.__fontData); }
+  function assignImages(source) { __host("Layer.assignImages",__id,source.__id); }
   function loadImages(name,key=clNone) { return __host("Layer.image",__id,string(name),int(key)); }
   function loadProvinceImage(name) { __host("Layer.provinceImage",__id,string(name)); }
   function drawText(x,y,text,color=0xffffff,opa=255,aa=true,shadowlevel=0,shadowcolor=0,shadowwidth=0,shadowofsx=0,shadowofsy=0) {

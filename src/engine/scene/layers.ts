@@ -516,23 +516,36 @@ export class LayerTree {
     bitmap.touch()
     this.get(id).imageModified = true
   }
-  assignImages(id: number, source: number): void {
-    if (id === source) return
+  assignImages(id: number, source: number): boolean {
     const layer = this.get(id),
       bitmap = this.get(source).bitmap
     if (!bitmap) {
       this.set(id, 'hasImage', 0)
-      return
+      return true
     }
-    this.set(id, 'hasImage', 1)
-    this.resizeImage(id, bitmap.width, bitmap.height)
-    const dest = this.bitmap(id)
-    this.budget((bitmap.province?.length ?? 0) - (dest.province?.length ?? 0))
+    if (id === source) {
+      bitmap.resetClip()
+      layer.imageModified = true
+      // Native bitmap Assign reports no main-image change for self-assignment,
+      // but Layer.AssignImages still resets its clip and modified flag.
+      return false
+    }
+    this.budget(bitmap.bytes - (layer.bitmap?.bytes ?? 0))
+    // AssignImages copies the image directly, even for a binder. AllocateImage
+    // would wrongly reject that type and reset the destination image offset.
+    const dest = new Bitmap(bitmap.width, bitmap.height)
     dest.pixels.data.set(bitmap.pixels.data)
     dest.province = bitmap.province?.slice()
-    dest.resetClip()
-    dest.touch()
+    layer.bitmap = dest
+    // InternalSetImageSize keeps the destination geometry when it still fits,
+    // otherwise shrinking the display and moving its viewport inside the image.
+    layer.width = Math.min(layer.width, dest.width)
+    layer.height = Math.min(layer.height, dest.height)
+    layer.imageLeft = Math.max(layer.imageLeft, layer.width - dest.width)
+    layer.imageTop = Math.max(layer.imageTop, layer.height - dest.height)
+    layer.revision++
     layer.imageModified = true
+    return true
   }
   face(id: number): number {
     const layer = this.get(id)

@@ -2427,8 +2427,7 @@ export class EngineSession {
         break
       }
       case 'Layer.assignImages':
-        this.layers.assignImages(number(0), number(1))
-        this.dirty = true
+        if (this.layers.assignImages(number(0), number(1))) this.dirty = true
         break
       case 'Layer.copy':
         if (
