@@ -111,3 +111,9 @@ CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原
 修订使用带message的Exception夹具并补齐所有权零值，保留原特定消息和清理断言；只有实际模态定时器捕获的Layer/generation才解锁延期绘制。非模态主窗口关闭继续执行当前VM剩余语句，在原生返回后的同一host turn完成票据并请求退出。隐藏视频窗口保留解码像素、明确跳过呈现义务，仍需callback／native／清理／尾部完成；不增加成功present计数，visible且renderer返回false仍必须等待。新增两项从visible转hidden的回归，修订后预期 **1,468 Node**，尚未执行。
 
 同一轮Firefox/PWA实际19／20通过，唯一失败为corrupt deployment夹具在浏览器启动时报 `cannot open display: :99`，进程exit 1，尚未创建页面或执行应用；没有足够Xvfb日志确定原因。旧REPAIR用例本轮通过，不能追认此前竞态已修。这里另外纳入054已加强且实际通过的REPAIR前置及缓存内容断言；该修订并不声称解决显示服务器失败。记录时其他矩阵仍未全部结束，本段不报告整轮终态或完整浏览器总数。
+
+## 检查点第二轮 Node 证据
+
+[34954669374](https://github.com/fenghengzhi/krkr2-web/actions/runs/34954669374)，提交 `3274d3e`，Node作业失败：TAP的1,467条记录包含1,464个命名案例通过、2个命名案例断言失败，以及1个文件级SIGTRAP占位。预期1,468个真实案例中，graphics-lifecycle.test.ts后两项没有报告，不能计为跳过或通过，也不能用占位编号差推定是否开始执行。其前四项已报告通过。V8报 `jit_page.has_value()`，栈含UnregisterWasmAllocation／FreeCode／FreeDeadCode／TierUpWasmToJSWrapper；这是不同于历史erase断言的新证据，glibc build-id不匹配限制系统帧可信度，根因未知。完整日志、core哈希及回溯独立保留，未运行本地复现。
+
+两个命名失败都是新visible→hidden视频用例：视频票据已完成，但隐藏活跃窗口另产生一项deactivate输入票据，严格全局计数把它误作视频残留。修订在发帧前明确完成deactivate作为setup，关键视频completion之后不追加idle、不放宽计数或呈现断言。测试预期仍为1,468。首轮十项非通过案例本轮均实际通过；这些局部结果不能把第二轮改计成功，修订也尚待新Actions。记录时浏览器矩阵仍在运行。
