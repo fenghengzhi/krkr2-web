@@ -5,7 +5,7 @@ import { expectAttentionAnchor, launchWindowAttention } from '../helpers/web-win
 const source = String.raw`
 System.exitOnWindowClose=false;
 var attentionText="",w=new Window();w.caption="Attention";w.setInnerSize(200,100);w.setPos(37,29);w.visible=true;
-var root=new Layer(w,null);root.type=ltOpaque;root.setSize(200,100);root.setPos(70,60);root.fillRect(0,0,200,100,0xff304050);
+var root=new Layer(w,null);root.type=ltOpaque;root.setSize(200,100);root.fillRect(0,0,200,100,0xff304050);
 root.setAttentionPos(-20,5);root.font.face="serif";root.font.height=36;
 var parent=new Layer(w,root);parent.setSize(100,70);parent.setPos(20,10);parent.visible=true;
 parent.setAttentionPos(8,6);parent.font.face="serif";parent.font.height=32;
@@ -34,6 +34,13 @@ for (const backend of ['asyncify', 'jspi']) {
           page,
           'int(root.useAttention)+","+int(parent.useAttention)+","+int(child.useAttention)',
           '0,0,0',
+        )
+        // Primary Layer coordinates are fixed at zero. Nonzero positions are
+        // rejected by the original API, so they are not valid setup geometry.
+        await evaluate(
+          page,
+          '(function(){try{root.setPos(70,60);}catch(error){return root.left+","+root.top;}return "unexpected-primary-move";})()',
+          '0,0',
         )
         await evaluate(page, '(parent.useAttention=true,0)', '0')
         await expectAttentionAnchor(surface, 0, 0)
@@ -104,14 +111,15 @@ var witnessRoot=new Layer(witness,null);witnessRoot.setSize(60,40);
           '0',
         )
         // Web policy follows the actually rendered canvas: layer offset plus
-        // sampled primary point times zoom, then CSS projection. Root Rect and
-        // outer Window left/top must not be added a second time.
+        // sampled primary point times zoom, then CSS projection. The primary
+        // stays at (0,0); outer Window left/top must not be added a second time.
         await expectAttentionAnchor(surface, 49 / 200, 35 / 100)
         await evaluate(
           page,
-          '(child.setImagePos(90,-40),child.setClip(2,3,10,11),child.opacity=41,root.setPos(120,90),0)',
-          '0',
+          '(child.setImageSize(150,70),child.setImagePos(-90,-40),child.setClip(2,3,10,11),child.opacity=41,child.imageLeft+","+child.imageTop)',
+          '-90,-40',
         )
+        await evaluate(page, 'root.left+","+root.top', '0,0')
         await expectAttentionAnchor(surface, 49 / 200, 35 / 100)
         await evaluate(
           page,

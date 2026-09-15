@@ -22,7 +22,7 @@ class TrapWindow extends Window {
     global.trapClicks.add(tag);
     var flow=global.trapFlow;global.trapFlow="";
     if(flow=="system")Debug.message("trap-system:"+System.inputString("Trap system input","Host text remains editable",""));
-    if(flow=="font")Debug.message("trap-font:"+global.rootA.font.doUserSelect(fsfTrueTypeOnly,"Trap font","Host font choice","AV")+":"+global.rootA.font.face);
+    if(flow=="font")Debug.message("trap-font:"+global.rootA.font.doUserSelect(fsfTrueTypeOnly|fsfNoVertical,"Trap font","Host font choice","AV")+":"+global.rootA.font.face);
     if(flow=="clipboard"){
       try{var text=Clipboard.asText;Debug.message("trap-clipboard-unexpected:"+text);}
       catch(error){Debug.message("trap-clipboard-cancelled");}

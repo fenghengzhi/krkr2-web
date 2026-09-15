@@ -502,13 +502,25 @@ for (const binary of [false, true]) {
   test(`${mode}: invalidating a trapped Window inside its callback suppresses the old Layer tail`, async () => {
     const f = await fixture(
       binary,
-      `b.trapKey=true;b.onKeyDown=function(key,shift){trace.add("B:W:retire");invalidate b;newest();};`,
+      `b.trapKey=true;b.onKeyDown=function(key,shift){
+        trace.add("B:W:retire");invalidate b;
+        // Unqualified lookup visits the invalidated this before global.
+        global.newest();
+      };`,
     )
     try {
       await f.session.input({ type: 'keyDown', key: 65, shift: 0, windowId: f.a })
       assert.equal(await f.trace(), 'B:W:retire')
       assert.equal(await f.session.evaluate('(isvalid br)+","+(br.window===null)'), '1,1')
       assert.equal(f.session.inspectOwnership().pendingHandles, 0)
+      assert.equal(f.session.snapshot().eventDisabled, false, f.logs.join('\n'))
+      assert.equal(await f.session.evaluate('isvalid c'), '1')
+      const replacement = Number(await f.session.evaluate('c.__windowId'))
+      assert.notEqual(replacement, f.a)
+      assert.notEqual(replacement, f.b)
+      const windows = f.session.snapshot().windows
+      assert.ok(windows)
+      assert.ok(windows.some((window) => window.id === replacement))
       await f.session.input({ type: 'keyDown', key: 66, shift: 0, windowId: f.a })
       assert.equal(await f.trace(), 'B:W:retire|C:W:down:66|C:L:down:66')
     } finally {

@@ -44,7 +44,15 @@ export async function launchWindowAttention(
   return {
     surface,
     async stop() {
-      if (await page.locator('#stop').isEnabled()) await page.locator('#stop').click()
+      // A failed assertion can leave a native modal open, making page controls
+      // inert. Use its real Stop action so cleanup cannot hide that failure
+      // behind a second click timeout.
+      const dialogStop = page.locator('dialog[open]:visible').getByRole('button', {
+        name: '停止游戏',
+        exact: true,
+      })
+      if (await dialogStop.count()) await dialogStop.last().click()
+      else if (await page.locator('#stop').isEnabled()) await page.locator('#stop').click()
       await expect(page.locator('#status')).toHaveText('待机')
       await expect(page.locator('.game-window[data-window-id]')).toHaveCount(0)
       await expect(page.locator('.game-text-input')).toHaveCount(0)

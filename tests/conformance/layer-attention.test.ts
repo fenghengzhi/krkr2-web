@@ -101,7 +101,7 @@ child.focus();
       assert.equal(errors.length, 2)
       for (const error of errors) assert.match(error, /argument/i)
       assert.equal(await f.session.evaluate('missingState'), '0,0,0')
-      assert.equal(await f.session.evaluate('converted'), '-8,12,0,undefined')
+      assert.equal(await f.session.evaluate('converted'), '-8,12,0,void')
       assert.equal(await f.session.evaluate('explicitVoid'), '0,1,0')
       assert.equal(await f.session.evaluate('booleanAndNegative'), '0,-4,0')
       assert.equal(await f.session.evaluate('fractionalUse'), '1')
@@ -179,9 +179,10 @@ child.useAttention=true;child.focus();
       String.raw`
 child.hasImage=false;child.setAttentionPos(-30,7);child.useAttention=true;child.focus();
 function invalidateAndCall(){
-  var setter=child.setAttentionPos;
+  var savedAttentionMethod=child.setAttentionPos;
+  savedAttentionMethod(-30,7);
   invalidate child;
-  try{setter(1,2);}catch(error){return "rejected";}
+  try{savedAttentionMethod(1,2);}catch(error){return "rejected";}
   return "accepted";
 }
 `,
@@ -297,6 +298,7 @@ function samePosition(){child.setAttentionPos(child.attentionLeft,child.attentio
       String.raw`
 child.setAttentionPos(4,6);child.useAttention=true;child.focus();
 function changeAppearance(){
+  child.setImageSize(42,31);parent.setImageSize(104,95);
   child.setImagePos(-2,-1);child.setClip(2,3,10,11);child.opacity=0;
   parent.setImagePos(-4,-5);parent.setClip(1,2,20,21);parent.opacity=37;
   child.useAttention=child.useAttention;
@@ -306,6 +308,12 @@ function changeAppearance(){
     try {
       const before = structuredClone(f.view().attention)
       await f.run('changeAppearance')
+      assert.equal(
+        await f.session.evaluate(
+          '[child.imageLeft,child.imageTop,parent.imageLeft,parent.imageTop].join(",")',
+        ),
+        '-2,-1,-4,-5',
+      )
       assert.deepEqual(f.view().attention, before)
       assert.deepEqual(point(f.view()), {
         x: 27,
@@ -467,14 +475,17 @@ function finishRelease(){failFont=false;invalidate child;}
       assert.equal(f.session.inspectOwnership().fontSources, baseline.fontSources + 1)
       assert.equal(await f.run('attemptRelease'), 'attention-font-finalizer')
       assert.equal(await f.session.evaluate('(isvalid child)+","+(isvalid font)'), '1,1')
-      assert.equal(await f.session.evaluate('fontTrace'), '0:Finalizer font:1;')
+      assert.equal(await f.session.evaluate('fontTrace'), '+0.0:Finalizer font:1;')
       assert.equal(f.session.inspectOwnership().closingLayers, 0)
       assert.equal(f.session.inspectOwnership().fontSources, baseline.fontSources + 1)
       assert.equal(await f.run('writeAfterFailure'), '1048576')
       await f.run('finishRelease')
       assert.equal(await f.session.evaluate('(isvalid child)+","+(isvalid font)'), '0,0')
       assert.equal(await f.session.evaluate('fontDeaths'), '2')
-      assert.equal(await f.session.evaluate('fontTrace'), '0:Finalizer font:1;0:Finalizer font:1;')
+      assert.equal(
+        await f.session.evaluate('fontTrace'),
+        '+0.0:Finalizer font:1;+0.0:Finalizer font:1;',
+      )
       assert.equal(f.session.inspectOwnership().closingLayers, 0)
       assert.equal(f.session.inspectOwnership().fontSources, baseline.fontSources)
       assert.equal(f.session.inspectOwnership().layerSources, baseline.layerSources - 1)

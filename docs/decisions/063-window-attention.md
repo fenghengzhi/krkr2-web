@@ -4,6 +4,14 @@
 
 当前实现尚未通过完整回归。与 062 整合的首轮 [35013970344](https://github.com/fenghengzhi/krkr2-web/actions/runs/35013970344) 在 `8cf6ae9bb1b1b26a0d96cf53ba51f65f4fcf6c2f` 完成 native 内核构建后，于 Web Crypto 适配器类型检查报 TS2345；Node／浏览器／直接运行时用例实际执行数均为 **0**。后续将 UUID 自有缓冲区的类型明确为 `Uint8Array<ArrayBuffer>`，不改随机源或输入行为。没有运行本地测试、构建、类型检查或浏览器探针，原始失败继续保留。
 
+第二轮 [35014679688](https://github.com/fenghengzhi/krkr2-web/actions/runs/35014679688) 的 `540e66e48ea098f2d3d817c7fec82f40b7d22f60` 已完成 Node：**2144 通过、8 失败、2 取消，共 2154 个实际记录**；没有缺失编号或文件级崩溃占位。8 个失败是四组 attention 夹具在 source/bytecode 下各一次：TJS typeof 返回 `void`、`setter` 是保留字、图像偏移超出合法范围、Font 高度经 Math.abs 后的零字符串是 `+0.0`。后续仅校正这些夹具，并保留参数错误、保存方法失效、实际图像偏移、字体 finalizer 重试及所有权的强断言。浏览器和直接运行时结果独立记录，不能从此 Node 结果推断完整回归成功。
+
+同一次静态检查还发现浏览器 attention 几何夹具对 60×30 的图像使用 `(90,-40)` 偏移，本身违反显示矩形必须落在图像内的约束。现将图像扩大到 150×70 并使用合法的 `(-90,-40)`，精确断言偏移值，保留注视点不受图像偏移影响的预期。这个修正依据静态范围检查，不预先声称正在运行的远端浏览器用例已失败或已通过。
+
+两项取消是接收 Window 在自身回调内失效后创建替代窗口的 source/bytecode 场景，各自实际等待 60000 ms；不是未执行项。固定 TJS 源码推导表明，原夹具的 `invalidate b;newest();` 在失效 this 上查未限定的 newest：THIS_PROXY 先访问 B，只在 MEMBERNOTFOUND 时回退 global，而失效 B 返回 INVALIDOBJECT。未处理事件错误会禁用后续事件，造成后续输入等待。原始 TAP 没有每个 await 的动态栈，不能把最后等待点称为已观测的动态根因。修正为 `global.newest()`，并在下一次输入前**断言**事件未禁用、C 已创建且有效；不赋值恢复 eventDisabled，不删替代窗口动作，不增加超时，不修改生产调度器。原件保存在 `out/run35014679688/early-node/node.tap` 及同目录摘要，原失败／取消结果继续保留。
+
+同轮 Chromium 普通浏览器组实际 **451 通过、12 失败、4 超时，共 467 个用例**。12 个 attention 用例均未越过启动标记，原 error-context 记录 `The primary layer cannot move`：夹具对 Primary 调用 `setPos(70,60)`，不是启动速度问题。删除非法 Primary 移动，并在几何场景精确断言其坐标仍为 `(0,0)`；不改变引擎约束。4 个宿主编辑场景的原 trace 先记录字体选项期望 2、实际 3（包括 `@Selection Mono`），随后 finally 的页面 Stop 被仍打开的字体对话框拦截，最终报告 30000 ms 超时；Clipboard 阶段尚未到达。夹具改为显式 `fsfNoVertical`，清理通过开放对话框内真实“停止游戏”按钮完成，保留原字号／键盘选择／宿主隔离断言及原超时。其它浏览器结果独立记录；这些 fixture 修正仍待下一轮 Actions。
+
 ## 原版依据
 
 固定官方源码为 `krkrz/krkr2@dec49af97e174d31059c3ccd7efc700ba3c6b788` 的 `kirikiri2/branches/2.32stable/kirikiri2/src/core/`。完整只读审计及 12 份原始源码的 SHA-256 保存于工作区 `out/verification/window-attention/contract.md` 与 `reference/SHA256SUMS`；该目录是验证归档，不是分发依赖。
