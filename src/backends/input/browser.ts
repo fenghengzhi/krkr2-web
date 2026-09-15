@@ -119,6 +119,7 @@ export class BrowserInput {
   private active = false
   private composing = false
   private composed = ''
+  private retiredComposition = ''
   private composeTimer?: ReturnType<typeof setTimeout>
   private mouseButtons = 0
   private pressed = new Set<number>()
@@ -127,6 +128,8 @@ export class BrowserInput {
   private clicks = new Map<number, number>()
   private view?: WindowView
   private input?: InputView
+  private sourceWindowId?: number
+  private keyboardRoute = ''
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly sendPacket: (packet: InputPacket) => Promise<void>,
@@ -220,8 +223,10 @@ export class BrowserInput {
       'compositionstart',
       () => {
         if (!this.keyboard()) return
+        clearTimeout(this.composeTimer)
         this.composing = true
         this.composed = ''
+        this.retiredComposition = ''
       },
       options,
     )
@@ -231,6 +236,7 @@ export class BrowserInput {
         const commit = this.keyboard() && this.composing
         this.composing = false
         this.composed = event.data
+        if (!commit) this.retiredComposition = event.data
         this.text.value = ''
         if (commit && event.data) this.push({ type: 'text', text: event.data })
         clearTimeout(this.composeTimer)
@@ -247,11 +253,25 @@ export class BrowserInput {
           this.text.value = ''
           return
         }
-        if (this.composing || (event as InputEvent).isComposing) return
-        const value = this.text.value
+        const inputEvent = event as InputEvent
+        if (this.composing || inputEvent.isComposing) return
+        const value = this.text.value,
+          compositionInput =
+            !inputEvent.inputType ||
+            inputEvent.inputType === 'insertCompositionText' ||
+            inputEvent.inputType === 'insertFromComposition'
         this.text.value = ''
-        if (value && value !== this.composed) this.push({ type: 'text', text: value })
+        // A paste/drop or other new editing operation is not a late IME
+        // duplicate merely because it contains the same characters. Retired
+        // ownership only suppresses composition commits (and legacy events
+        // without an inputType); the short live-commit dedupe is separate.
+        if (!compositionInput) this.retiredComposition = ''
+        if (inputEvent.inputType === 'insertFromPaste' || inputEvent.inputType === 'insertFromDrop')
+          this.composed = ''
+        if (value && value !== this.composed && value !== this.retiredComposition)
+          this.push({ type: 'text', text: value })
         this.composed = ''
+        this.retiredComposition = ''
       },
       options,
     )
@@ -279,8 +299,22 @@ export class BrowserInput {
     this.view = view
     this.appearance()
   }
-  setInput(input: InputView): void {
+  setInput(input: InputView, sourceWindowId?: number): void {
+    const route = input.keyboardRoute,
+      signature = [
+        sourceWindowId ?? '',
+        input.focused,
+        route?.windowId ?? '',
+        route?.revision ?? '',
+        route?.focused ?? '',
+      ].join(':')
+    // A roster/input refresh may update presentation without changing logical
+    // ownership. Only identity/focus/route changes retire an in-flight edit;
+    // zoom, attention coordinates and CSS resize never restart composition.
+    if ((this.input || this.composing) && this.keyboardRoute !== signature) this.cancelComposition()
+    this.keyboardRoute = signature
     this.input = input
+    this.sourceWindowId = sourceWindowId
     this.appearance()
   }
   setSuspended(suspended: boolean): void {
@@ -290,10 +324,7 @@ export class BrowserInput {
       this.epoch++
       this.queue = []
       this.active = false
-      this.composing = false
-      this.composed = ''
-      clearTimeout(this.composeTimer)
-      this.text.value = ''
+      this.cancelComposition()
       this.mouseButtons = 0
       this.mouseTouch = undefined
       this.clicks.clear()
@@ -309,11 +340,29 @@ export class BrowserInput {
       ? 'none'
       : (cursors[this.input?.cursor ?? 0] ?? 'default')
     this.canvas.title = this.input?.hint ?? ''
-    const x = this.input?.attentionX ?? 0,
-      y = this.input?.attentionY ?? 0
+    const route = this.input?.keyboardRoute,
+      crossWindow = !!route && route.windowId !== this.sourceWindowId,
+      attention = crossWindow ? null : this.input?.attention,
+      x = attention?.x ?? 0,
+      y = attention?.y ?? 0,
+      font = attention?.font,
+      height = Math.abs(font?.height ?? 16)
     this.text.style.left = `${this.canvas.offsetLeft + (x * this.canvas.clientWidth) / (this.view?.width ?? 800)}px`
     this.text.style.top = `${this.canvas.offsetTop + (y * this.canvas.clientHeight) / (this.view?.height ?? 600)}px`
-    this.text.inputMode = this.input?.imeMode === 0 ? 'none' : 'text'
+    // This is a CSS input hint using the focused Layer's sampled Font, not an
+    // operating-system candidate-window font. Cross-Window routing retains the
+    // real source textarea and its default placement instead of focusing the
+    // receiver's (possibly nonfocusable) surface.
+    this.text.style.fontFamily = font?.face ?? ''
+    this.text.style.fontSize = `${Number.isFinite(height) && height >= 1 && height <= 256 ? height : 16}px`
+    this.text.style.fontWeight = font ? (font.bold ? 'bold' : 'normal') : ''
+    this.text.style.fontStyle = font ? (font.italic ? 'italic' : 'normal') : ''
+    this.text.style.textDecorationLine = font
+      ? [font.underline ? 'underline' : '', font.strikeout ? 'line-through' : '']
+          .filter(Boolean)
+          .join(' ') || 'none'
+      : ''
+    this.text.inputMode = (route?.imeMode ?? this.input?.imeMode) === 0 ? 'none' : 'text'
   }
   private point(x: number, y: number) {
     const bounds = this.canvas.getBoundingClientRect()
@@ -457,6 +506,7 @@ export class BrowserInput {
   private key(event: KeyboardEvent, down: boolean): void {
     if (!this.keyboard()) return
     if (this.composing || event.isComposing || event.keyCode === 229) return
+    if (down) this.retiredComposition = ''
     const key = virtualKey(event),
       shift = shiftState(
         {
@@ -473,7 +523,15 @@ export class BrowserInput {
     this.shared?.key(key, down)
     this.modifiers(shift, false)
     if (event.defaultPrevented) return
-    this.push({ type: down ? 'keyDown' : 'keyUp', key, shift })
+    // DOM has no WM_SYSKEY message class. This explicit Web mapping only
+    // covers Alt-modified keys, Alt itself and F10; it does not claim to
+    // classify every native Windows system-key message.
+    this.push({
+      type: down ? 'keyDown' : 'keyUp',
+      key,
+      shift,
+      ...(event.altKey || key === 18 || key === 121 ? { systemKey: true } : {}),
+    })
     const controls: Record<string, string> = { Enter: '\r', Escape: '\u001b', Backspace: '\b' }
     if (down && controls[event.key] !== undefined) {
       event.preventDefault()
@@ -495,7 +553,12 @@ export class BrowserInput {
       event.preventDefault()
   }
   private keyboard(): boolean {
-    return !this.suspended && !this.disposed && (this.shared?.keyboard() ?? true)
+    return (
+      !this.suspended &&
+      !this.disposed &&
+      this.ownsFocus(document.activeElement) &&
+      (this.shared?.keyboard() ?? true)
+    )
   }
   private activate(): void {
     if (this.suspended || this.disposed || this.active) return
@@ -523,11 +586,18 @@ export class BrowserInput {
     this.releasePointerCaptures()
     this.mouseTouch = undefined
     this.pressed.clear()
+    this.cancelComposition()
+    this.keys()
+  }
+  private cancelComposition(): void {
+    // Keep one retired commit solely to reject its trailing input event if a
+    // route/focus change occurs between compositionend and that duplicate.
+    // A new composition or ordinary keydown starts a fresh editing sequence.
+    this.retiredComposition = this.composed || this.retiredComposition
     this.composing = false
     this.composed = ''
     this.text.value = ''
     clearTimeout(this.composeTimer)
-    this.keys()
   }
   private deactivate(pageBlur = false, nextTarget: EventTarget | null = null): void {
     const captured = !!(this.mouseButtons || this.touches.size || this.captured.size)
@@ -546,6 +616,11 @@ export class BrowserInput {
   }
   private push(packet: InputPacket): void {
     if (this.disposed || this.suspended) return
+    if (
+      this.input?.keyboardRoute &&
+      (packet.type === 'keyDown' || packet.type === 'keyUp' || packet.type === 'text')
+    )
+      packet = { ...packet, keyboardRouteRevision: this.input.keyboardRoute.revision }
     if (
       packet.type === 'down' ||
       packet.type === 'move' ||

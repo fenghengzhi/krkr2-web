@@ -224,6 +224,11 @@ export class EngineSession {
   private inputs?: InputService
   private inputView = ''
   private readonly windowInputViews = new Map<number, string>()
+  private readonly keyboardRoutes = new Map<
+    number,
+    { signature: string; route: NonNullable<InputView['keyboardRoute']> }
+  >()
+  private nextKeyboardRouteRevision = 1
   private windowsView = ''
   private transitions?: SceneTransitions
   private readonly composer = new SceneComposer(this.layers, (id) => this.transitions?.frame(id))
@@ -588,6 +593,7 @@ export class EngineSession {
           this.inputControllers.create(window.id, () => window.state).keys = new Set(
             this.physicalKeys,
           )
+          this.refreshKeyboardRoutes()
           try {
             this.deps.renderer.openWindow?.(window.id)
             this.inputControllers.releaseCaptures()
@@ -624,6 +630,8 @@ export class EngineSession {
           this.inputControllers.remove(window.id)
           this.windowPointers.delete(window.id)
           this.windowInputViews.delete(window.id)
+          this.keyboardRoutes.delete(window.id)
+          this.refreshKeyboardRoutes()
           this.windowPresentationsCompleted.delete(window.id)
           this.videoFrameChanges.delete(window.id)
           this.deps.renderer.closeWindow?.(window.id)
@@ -1789,6 +1797,47 @@ export class EngineSession {
       if (!this.control.cancelled) this.fail(error)
     })
   }
+  private keyboardReceiver(source: WindowRecord): WindowRecord {
+    return this.windows?.keyTrapper((window) => !this.windowModals?.blocked(window.id)) ?? source
+  }
+  private keyboardRoute(source: WindowRecord): NonNullable<InputView['keyboardRoute']> {
+    const receiver = this.keyboardReceiver(source),
+      controller = this.inputControllers.get(receiver.id),
+      sourceController = this.inputControllers.get(source.id),
+      focused = controller?.focused ?? 0,
+      imeMode = controller?.view().imeMode ?? 0,
+      signature = JSON.stringify([
+        receiver.id,
+        focused,
+        controller?.focusRevision ?? 0,
+        controller?.epoch ?? 0,
+        controller?.ownershipEpoch ?? 0,
+        sourceController?.focusRevision ?? 0,
+        sourceController?.epoch ?? 0,
+        sourceController?.ownershipEpoch ?? 0,
+        imeMode,
+        receiver.state.keyboardRevision,
+        source.state.keyboardRevision,
+        this.windowInputGeneration,
+        !!this.windowModals?.blocked(source.id),
+        this.fontSelection.active,
+      ]),
+      previous = this.keyboardRoutes.get(source.id)
+    if (previous?.signature === signature) return previous.route
+    const route = {
+      windowId: receiver.id,
+      focused,
+      imeMode,
+      revision: this.nextKeyboardRouteRevision++,
+    }
+    this.keyboardRoutes.set(source.id, { signature, route })
+    return route
+  }
+  private refreshKeyboardRoutes(): void {
+    // Observe intermediate routing changes even when a script restores the old
+    // visible/trap values before the next frame reaches the browser.
+    for (const source of this.windows?.registered() ?? []) this.keyboardRoute(source)
+  }
   acceptInput(packet: InputPacket, observe = true): SessionAdmission {
     if (this.fontSelection.active && packet.type !== 'cancel' && packet.type !== 'deactivate')
       return ignoredAdmission()
@@ -1800,6 +1849,17 @@ export class EngineSession {
         throw new Error('Invalid input coordinates or key')
     if (packet.type === 'text' && packet.text.length > 65536)
       throw new Error('Input text budget exceeded')
+    if (
+      packet.keyboardRouteRevision !== undefined &&
+      (!Number.isSafeInteger(packet.keyboardRouteRevision) || packet.keyboardRouteRevision < 1)
+    )
+      throw new Error('Invalid keyboard route revision')
+    if (
+      (packet.type === 'keyDown' || packet.type === 'keyUp') &&
+      packet.systemKey !== undefined &&
+      typeof packet.systemKey !== 'boolean'
+    )
+      throw new Error('Invalid system key classification')
     if (this.activity.state !== 'visible') return ignoredAdmission()
     const windowId = packet.windowId ?? this.windowId,
       window = this.registeredWindow(windowId),
@@ -1859,22 +1919,66 @@ export class EngineSession {
         this.pointerState(packet.x, packet.y, windowId)
     }
     if (this.state !== 'running') return ignoredAdmission()
+    const keyboard = packet.type === 'keyDown' || packet.type === 'keyUp' || packet.type === 'text',
+      receiver = keyboard ? this.keyboardReceiver(window) : window,
+      receiverController = this.inputControllers.get(receiver.id)
+    if (!receiverController) return ignoredAdmission()
+    if (keyboard) {
+      if (!window.state.visible) return ignoredAdmission()
+      const route = this.keyboardRoute(window)
+      // Physical observation above must still release keys whose old logical
+      // route was retired while DOM/Worker messages were crossing.
+      if (
+        packet.keyboardRouteRevision !== undefined &&
+        packet.keyboardRouteRevision !== route.revision
+      )
+        return ignoredAdmission()
+      if (
+        receiver.state.trapKey &&
+        receiver.state.visible &&
+        !receiver.state.admitTrappedKey(
+          packet.type as 'keyDown' | 'keyUp' | 'text',
+          packet.type === 'keyDown' || packet.type === 'keyUp' ? packet.systemKey : false,
+        )
+      )
+        return ignoredAdmission()
+    }
+    // Freeze the receiver at admission. Changes to trapKey while this receipt
+    // waits must not retarget it or change the physical source's active Window.
+    const routedPacket = { ...packet, windowId: receiver.id }
     const epoch = controller.epoch,
+      receiverEpoch = receiverController.epoch,
       generation = this.windowInputGeneration
-    return this.acceptEvent(() => this.inputs!.packet(packet), {
-      valid: () =>
-        this.registeredWindow(windowId) === window &&
-        generation === this.windowInputGeneration &&
-        (!this.windowModals?.blocked(windowId) ||
-          packet.type === 'cancel' ||
-          packet.type === 'deactivate') &&
-        epoch === controller.epoch &&
-        this.state === 'running' &&
-        this.activity.state === 'visible',
-      priority: 1,
-      discardable: packet.type === 'move',
-      source: window,
-    })
+    return this.acceptEvent(
+      () =>
+        this.inputs!.packet(
+          routedPacket,
+          receiver === window
+            ? undefined
+            : () =>
+                this.registeredWindow(windowId) === window &&
+                window.state.visible &&
+                controller.epoch === epoch,
+        ),
+      {
+        valid: () =>
+          this.registeredWindow(windowId) === window &&
+          this.registeredWindow(receiver.id) === receiver &&
+          (!keyboard || window.state.visible) &&
+          generation === this.windowInputGeneration &&
+          (!this.windowModals?.blocked(windowId) ||
+            packet.type === 'cancel' ||
+            packet.type === 'deactivate') &&
+          epoch === controller.epoch &&
+          receiverEpoch === receiverController.epoch &&
+          (!keyboard || !this.windowModals?.blocked(receiver.id)) &&
+          this.state === 'running' &&
+          this.activity.state === 'visible',
+        priority: 1,
+        discardable: packet.type === 'move',
+        source: receiver,
+      },
+    )
   }
   private postInput(packet: InputPacket, window: WindowRecord): void {
     const controller = this.inputControllers.get(window.id)
@@ -2024,8 +2128,9 @@ export class EngineSession {
   }
   present(): void {
     for (const window of this.windows?.registered() ?? []) {
-      const input = this.inputControllers.get(window.id)?.view()
-      if (!input) continue
+      const view = this.inputControllers.get(window.id)?.view()
+      if (!view) continue
+      const input = { ...view, keyboardRoute: this.keyboardRoute(window) }
       const serialized = JSON.stringify(input)
       if (this.windowInputViews.get(window.id) !== serialized) {
         this.windowInputViews.set(window.id, serialized)
@@ -2038,7 +2143,11 @@ export class EngineSession {
       this.windowsView = windowViews
       this.deps.event({ type: 'windows', windows })
     }
-    const input = this.inputController.view(),
+    const active = this.registeredWindow(this.windowId),
+      input = {
+        ...this.inputController.view(),
+        ...(active ? { keyboardRoute: this.keyboardRoute(active) } : {}),
+      },
       serialized = JSON.stringify(input)
     if (serialized !== this.inputView) {
       this.inputView = serialized
@@ -2486,6 +2595,7 @@ export class EngineSession {
       await attempt(() => this.layerObjects?.dispose())
       await attempt(() => this.kag.clear())
       await attempt(() => this.windows?.dispose())
+      this.keyboardRoutes.clear()
       await attempt(() => this.menuItems?.dispose())
       await attempt(() => this.menus.clear())
       await attempt(() => this.presentMenus())
@@ -3175,6 +3285,8 @@ export class EngineSession {
           before = [window.state.width, window.state.height],
           property = text(1)
         window.state.set(text(1), typeof args[2] === 'string' ? text(2) : number(2))
+        if (property === 'visible' || property === 'focusable' || property === 'trapKey')
+          this.refreshKeyboardRoutes()
         if (before[0] !== window.state.width || before[1] !== window.state.height)
           this.queueResize(window)
         if (property === 'fullScreen' && window.state.fullScreen)
@@ -3314,10 +3426,15 @@ export class EngineSession {
               text(1),
               typeof args[2] === 'string'
                 ? text(2)
-                : text(1).startsWith('clip')
+                : text(1).startsWith('clip') ||
+                    text(1) === 'attentionLeft' ||
+                    text(1) === 'attentionTop'
                   ? clipInteger(2)
                   : number(2),
             )
+            if (['attentionLeft', 'attentionTop', 'useAttention'].includes(text(1)))
+              this.inputControllers.forLayer(number(0)).attentionChanged(number(0))
+            if (text(1) === 'imeMode') this.refreshKeyboardRoutes()
             if (text(1) === 'callOnPaint' && !this.preparingFrame) {
               this.paintedLayers.delete(number(0))
               this.deferredPaint.delete(number(0))
@@ -3326,6 +3443,15 @@ export class EngineSession {
           },
           this.inputControllers.forLayer(number(0)),
         )
+      case 'Layer.setAttentionPos': {
+        const id = number(0),
+          left = clipInteger(1),
+          top = clipInteger(2)
+        this.layers.setAttentionPos(id, left, top)
+        this.inputControllers.forLayer(id).attentionChanged(id)
+        this.dirty = true
+        break
+      }
       case 'Layer.resize':
         this.layers.resize(number(0), number(1), number(2))
         this.dirty = true
@@ -3447,6 +3573,23 @@ export class EngineSession {
         )
         this.layers.get(id).imageModified = true
         this.dirty = true
+        break
+      }
+      case 'Font.attention': {
+        const layer = this.layerObjects!.fontLayer(args[0])
+        if (!isScriptObject(args[1])) throw new Error('Expected font data')
+        const data = context.snapshot(args[1])
+        if (data.type !== 'dictionary') throw new Error('Expected font dictionary')
+        const entry = data.entries,
+          height = Number(entry.height)
+        this.layers.get(layer.id).attentionFont = {
+          face: typeof entry.face === 'string' ? entry.face : 'sans-serif',
+          height: Number.isFinite(height) ? height : 0,
+          bold: !!entry.bold,
+          italic: !!entry.italic,
+          underline: !!entry.underline,
+          strikeout: !!entry.strikeout,
+        }
         break
       }
       case 'Font.measure': {

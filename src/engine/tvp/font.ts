@@ -18,13 +18,14 @@ class Font {
     if(args.count<4)throw new Exception("Missing font selection arguments");
     var selected=__host("Font.select",int(args[0])&0xffffffff,string(args[1]),string(args[2]),string(args[3]),__data);
     if(selected===null)return false;
-    __data.face=selected;__data.faceIsFileName=false;return true;
+    __data.face=selected;__data.faceIsFileName=false;
+    __host("Font.attention",this,__data);return true;
   }
   ${['height', 'face', 'bold', 'italic', 'underline', 'strikeout', 'angle', 'faceIsFileName']
     .map(
       (name) => `property ${name} {
     getter() { return __data.${name}; }
-    setter(value) { __data.${name}=${name === 'face' ? 'string(value)' : name === 'height' ? 'Math.abs(int(value))' : name === 'angle' ? '((int(value)%3600)+3600)%3600' : 'int(!!value)'}; }
+    setter(value) { __data.${name}=${name === 'face' ? 'string(value)' : name === 'height' ? 'Math.abs(int(value))' : name === 'angle' ? '((int(value)%3600)+3600)%3600' : 'int(!!value)'};__host("Font.attention",this,__data); }
   }`,
     )
     .join('\n')}

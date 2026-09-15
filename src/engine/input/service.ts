@@ -27,6 +27,7 @@ export class InputService {
       epoch: number
       ownershipEpoch: number
       guard: 'none' | 'lifetime' | 'packet'
+      sourceValid?: () => boolean
       sourceWindow?: ScriptObject | ScriptWeakObject
       pending?: IteratorResult<InputStep, InputValue>
       unwinding: boolean
@@ -62,6 +63,7 @@ export class InputService {
     operation: InputOperation,
     controller = this.controllers.active,
     guard: 'none' | 'lifetime' | 'packet' = 'none',
+    sourceValid?: () => boolean,
   ): HostReply {
     if (!this.pump || !this.ownership) throw new Error('Input dispatcher is unavailable')
     if (this.operations.size >= 64) throw new Error('Input callback nesting limit exceeded')
@@ -72,6 +74,7 @@ export class InputService {
       epoch: controller.epoch,
       ownershipEpoch: controller.ownershipEpoch,
       guard,
+      sourceValid,
       sourceWindow: this.window(controller.sourceWindowId),
       unwinding: false,
     })
@@ -80,13 +83,13 @@ export class InputService {
   private startInput(operation: InputOperation, controller: InputController): HostReply {
     return this.start(operation, controller, 'lifetime')
   }
-  packet(packet: InputPacket): HostReply {
+  packet(packet: InputPacket, sourceValid?: () => boolean): HostReply {
     const controller =
       packet.windowId === undefined
         ? this.controllers.active
         : this.controllers.get(packet.windowId)
     if (!controller) return { kind: 'value', value: undefined }
-    return this.start(controller.packet(packet), controller, 'packet')
+    return this.start(controller.packet(packet), controller, 'packet', sourceValid)
   }
   change(action: () => void, controller = this.controllers.active): HostReply {
     return this.start(controller.change(action), controller)
@@ -120,7 +123,8 @@ export class InputService {
     if (
       (unwind ||
         (record.guard !== 'none' && record.ownershipEpoch !== record.controller.ownershipEpoch) ||
-        (record.guard === 'packet' && record.epoch !== record.controller.epoch)) &&
+        (record.guard === 'packet' && record.epoch !== record.controller.epoch) ||
+        (record.sourceValid && !record.sourceValid())) &&
       !record.unwinding
     ) {
       record.unwinding = true

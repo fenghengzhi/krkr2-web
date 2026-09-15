@@ -1,4 +1,5 @@
 import type { Pixels, Rect } from '../ports/graphics.ts'
+import type { InputAttentionFont } from '../ports/input.ts'
 import { Bitmap, dimension, intersect, textOpacity } from '../graphics/bitmap.ts'
 import { ProvincePlane } from '../graphics/province.ts'
 import { imageTypes, autoFace, neutralColor } from '../graphics/blend.ts'
@@ -47,6 +48,8 @@ export interface LayerState {
   attentionLeft: number
   attentionTop: number
   useAttention: boolean
+  /** Latest public Font properties; the manager samples a copy on attention refresh. */
+  attentionFont: InputAttentionFont
   imeMode: number
 }
 export interface ProvinceImageLoad {
@@ -205,6 +208,14 @@ export class LayerTree {
         attentionLeft: 0,
         attentionTop: 0,
         useAttention: false,
+        attentionFont: {
+          face: 'sans-serif',
+          height: 18,
+          bold: false,
+          italic: false,
+          underline: false,
+          strikeout: false,
+        },
         imeMode: 0,
       }
     this.layers.set(id, layer)
@@ -230,6 +241,11 @@ export class LayerTree {
       layer = this.get(layer.parent)
     }
     return { x, y }
+  }
+  setAttentionPos(id: number, left: number, top: number): void {
+    const layer = this.get(id)
+    layer.attentionLeft = left
+    layer.attentionTop = top
   }
   bitmap(id: number): Bitmap {
     const bitmap = this.get(id).bitmap

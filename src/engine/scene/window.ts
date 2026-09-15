@@ -55,6 +55,9 @@ export class WindowState implements WindowView {
   maxHeight = 0
   imeMode = 0
   trapKey = false
+  /** Native trapped-message admission is a Window-wide latch, not a key set. */
+  trappedKeysArmed = false
+  keyboardRevision = 0
   useMouseKey = false
   stayOnTop = false
   revision = 0
@@ -73,20 +76,24 @@ export class WindowState implements WindowView {
       else if (property === 'height' || property === 'innerHeight') this.resize(this.width, number)
       else if (['left', 'top', 'layerLeft', 'layerTop'].includes(property))
         this[property as 'left'] = number
-      else if (
+      else if (property === 'trapKey') {
+        this.trapKey = !!number
+        if (this.trapKey) this.trappedKeysArmed = false
+        this.keyboardRevision++
+      } else if (
         [
           'visible',
           'innerSunken',
           'showScrollBars',
           'focusable',
           'fullScreen',
-          'trapKey',
           'useMouseKey',
           'stayOnTop',
         ].includes(property)
-      )
+      ) {
         this[property as 'visible'] = !!number
-      else if (property === 'borderStyle') {
+        if (property === 'visible' || property === 'focusable') this.keyboardRevision++
+      } else if (property === 'borderStyle') {
         if (number < 0 || number > 5) throw new Error('Invalid window border style')
         this.borderStyle = number
       } else if (property === 'mouseCursorState') {
@@ -102,6 +109,12 @@ export class WindowState implements WindowView {
       } else throw new Error(`Unsupported Window property: ${property}`)
     }
     this.revision++
+  }
+  admitTrappedKey(type: 'keyDown' | 'keyUp' | 'text', systemKey = false): boolean {
+    if (type === 'keyDown' && !systemKey) this.trappedKeysArmed = true
+    const admitted = this.trappedKeysArmed
+    if (type === 'keyUp' && !systemKey) this.trappedKeysArmed = true
+    return admitted
   }
   resize(width: number, height: number): void {
     if (![width, height].every((value) => Number.isInteger(value) && value > 0 && value <= 4096))

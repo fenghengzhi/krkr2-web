@@ -40,6 +40,12 @@ class Layer {
   function focus(direction=true){__host("Input.focus",__id,int(direction));}
   function focusNext(){return __host("Input.moveFocus",1,__id);}
   function focusPrev(){return __host("Input.moveFocus",0,__id);}
+  function setAttentionPos(args*) {
+    var id=__host("Layer.identity",this);
+    if(args.count<2)throw new global.Exception("Missing attention position arguments");
+    var left=int(args[0]),top=int(args[1]);
+    __host("Layer.setAttentionPos",id,left,top);
+  }
   function setMode(){__host("Input.mode",__id,1);}
   function removeMode(){__host("Input.mode",__id,0);}
   function releaseCapture(){__host("Input.release",__id);}
@@ -253,7 +259,7 @@ class Layer {
     .map(
       (name) => `property ${name} {
     getter(){return __host("Layer.get",__id,"${name}");}
-    setter(value){__host("Layer.set",__id,"${name}",${name === 'name' || name === 'hint' ? 'string' : 'int'}(value));}
+    setter(value){__host("Layer.set",__id,"${name}",${name === 'useAttention' ? 'int(!!value)' : `${name === 'name' || name === 'hint' ? 'string' : 'int'}(value)`});}
   }`,
     )
     .join('\n')}

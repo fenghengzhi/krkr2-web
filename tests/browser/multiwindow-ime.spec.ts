@@ -4,10 +4,10 @@ import { evaluate } from '../helpers/browser-expression.ts'
 const source = String.raw`
 var a=new Window();a.caption="IME A";a.setInnerSize(200,100);a.visible=true;
 var rootA=new Layer(a,null);rootA.setSize(200,100);rootA.focusable=true;
-rootA.attentionLeft=40;rootA.attentionTop=30;rootA.imeMode=imOpen;rootA.focus();
+rootA.attentionLeft=40;rootA.attentionTop=30;rootA.useAttention=true;rootA.imeMode=imOpen;rootA.focus();
 var b=new Window();b.caption="IME B";b.setInnerSize(160,80);b.setPos(420,0);b.visible=true;
 var rootB=new Layer(b,null);rootB.setSize(160,80);rootB.focusable=true;
-rootB.attentionLeft=80;rootB.attentionTop=20;rootB.imeMode=imOpen;rootB.focus();
+rootB.attentionLeft=80;rootB.attentionTop=20;rootB.useAttention=true;rootB.imeMode=imOpen;rootB.focus();
 Debug.message("multiwindow-ime-ready");
 `
 

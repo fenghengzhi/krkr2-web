@@ -41,6 +41,12 @@ export class WindowService {
   registered(): WindowRecord[] {
     return [...this.records.values()].filter((window) => !window.closing && !window.finished)
   }
+  /** Creation order is independent of activation, stacking and property writes. */
+  keyTrapper(allowed: (window: WindowRecord) => boolean): WindowRecord | undefined {
+    return this.registered()
+      .reverse()
+      .find((window) => window.state.visible && window.state.trapKey && allowed(window))
+  }
   activate(id: number): WindowRecord | undefined {
     const previous = this.current
     if (id === 0) this.current = undefined

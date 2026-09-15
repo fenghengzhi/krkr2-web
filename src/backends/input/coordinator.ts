@@ -230,7 +230,7 @@ export class BrowserInputCoordinator {
     const view = this.views.get(windowId),
       state = this.inputs.get(windowId)
     if (view) input.setWindow(view)
-    if (state) input.setInput(state)
+    if (state) input.setInput(state, windowId)
     input.setSuspended(this.suspended || !surface.visible || surface.blocked)
   }
 
@@ -333,7 +333,7 @@ export class BrowserInputCoordinator {
   setInput(windowId: number, view: InputView): void {
     if (this.closed) return
     this.inputs.set(windowId, view)
-    this.surfaces.get(windowId)?.input.setInput(view)
+    this.surfaces.get(windowId)?.input.setInput(view, windowId)
   }
 
   setSuspended(suspended: boolean): void {

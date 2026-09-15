@@ -1,6 +1,11 @@
 import { LayerTree } from '../scene/layers.ts'
 import type { WindowView } from '../scene/window.ts'
-import { shiftButtons, type InputPacket, type InputView } from '../ports/input.ts'
+import {
+  shiftButtons,
+  type InputAttention,
+  type InputPacket,
+  type InputView,
+} from '../ports/input.ts'
 import type { ScriptObject, ScriptValue } from '../script/runtime.ts'
 export interface LayerRef {
   layer: number
@@ -39,6 +44,8 @@ export class InputController {
   /** Focus/modal leases survive a transient packet reset, but never a manager clear. */
   ownershipEpoch = 0
   focused = 0
+  /** Monotonic logical focus identity, including changes within one script entry. */
+  focusRevision = 0
   modal: number[] = []
   capture = 0
   hover = 0
@@ -63,6 +70,10 @@ export class InputController {
   private owners = new Map<string, number>()
   private pendingOwnership: InputOwnershipStep[] = []
   private detaching = new Set<number>()
+  // This is a primary-coordinate sample, not a live tree projection. Native
+  // ancestor/geometry changes do not refresh the manager's attention point.
+  // All identities and font fields are values, without script ownership.
+  private attention: InputAttention | null = null
   constructor(
     readonly layers: LayerTree,
     private readonly window: () => WindowView,
@@ -219,6 +230,7 @@ export class InputController {
       previousManager = this.ownerManager('focus', previous),
       manager = this.manager(id) || previousManager
     this.focused = id
+    this.focusRevision++
     try {
       if (this.layers.has(previous)) yield { target: previous, method: 'onBlur', args: [ref(id)] }
       if (epoch !== this.epoch) return false
@@ -237,7 +249,41 @@ export class InputController {
         this.focusLock = false
       }
     }
+    if (epoch === this.epoch && ownershipEpoch === this.ownershipEpoch) this.sampleAttention()
     return true
+  }
+  /** Only the focused Layer's notification refreshes the native manager. */
+  attentionChanged(from: number): void {
+    if (from !== 0 && from === this.focused) this.sampleAttention()
+  }
+  private sampleAttention(): void {
+    this.attention = null
+    if (!this.focused || !this.attached(this.focused)) return
+    const focus = this.layers.get(this.focused)
+    for (let point = focus; ; point = this.layers.get(point.parent)) {
+      if (point.useAttention) {
+        let x = point.attentionLeft,
+          y = point.attentionTop,
+          ancestor = point
+        // Attention is a Layer display point: image offsets and clip do not
+        // participate, and the primary rectangle itself is never added.
+        while (!ancestor.primary) {
+          x += ancestor.left
+          y += ancestor.top
+          if (!ancestor.parent) break
+          ancestor = this.layers.get(ancestor.parent)
+        }
+        this.attention = {
+          x,
+          y,
+          focusLayerId: focus.id,
+          pointLayerId: point.id,
+          font: focus.bitmap ? { ...focus.attentionFont } : null,
+        }
+        return
+      }
+      if (!point.parent) return
+    }
   }
   *moveFocus(forward: boolean): InputOperation {
     const next = this.focused
@@ -796,15 +842,33 @@ export class InputController {
       source = this.layers.get(source.parent)
       hint = source.hint
     }
-    const local = focus ? this.layers.localPoint(focus.id, 0, 0) : { x: 0, y: 0 },
-      window = this.window(),
-      zoom = window.zoomNumer / window.zoomDenom
+    // A view may discard retired samples, but never search ancestry or refresh
+    // a still-live one. This also covers exceptional invalidation cleanup.
+    if (
+      this.attention &&
+      (!focus ||
+        !this.attached(focus.id) ||
+        !this.attached(this.attention.focusLayerId) ||
+        !this.attached(this.attention.pointLayerId))
+    )
+      this.attention = null
+    const window = this.window(),
+      zoom = window.zoomNumer / window.zoomDenom,
+      attention = this.attention
+        ? {
+            ...this.attention,
+            x: window.layerLeft + this.attention.x * zoom,
+            y: window.layerTop + this.attention.y * zoom,
+            font: this.attention.font ? { ...this.attention.font } : null,
+          }
+        : null
     return {
       cursor: layer?.cursor ?? 0,
       hint,
       focused: this.focused,
-      attentionX: window.layerLeft + ((focus?.attentionLeft ?? 0) - local.x) * zoom,
-      attentionY: window.layerTop + ((focus?.attentionTop ?? 0) - local.y) * zoom,
+      attention,
+      attentionX: attention?.x ?? 0,
+      attentionY: attention?.y ?? 0,
       imeMode: focus?.imeMode ?? 0,
     }
   }
@@ -818,6 +882,8 @@ export class InputController {
     this.owners.clear()
     this.modal = []
     this.capture = this.hover = this.focused = 0
+    this.focusRevision++
+    this.attention = null
     this.focusLock = false
     this.released = true
     this.point = this.mouseAt = { x: -1, y: -1 }

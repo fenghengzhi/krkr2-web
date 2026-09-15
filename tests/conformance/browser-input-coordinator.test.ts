@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { BrowserInputCoordinator } from '../../src/backends/input/coordinator.ts'
-import type { InputPacket } from '../../src/engine/ports/input.ts'
+import type { InputPacket, InputView } from '../../src/engine/ports/input.ts'
 import { WindowState } from '../../src/engine/scene/window.ts'
 
 // This fixture exercises event observation and asynchronous scheduling, not browser
@@ -23,6 +23,7 @@ function dom() {
   class Element extends EventTarget {
     style: Record<string, string> = {}
     value = ''
+    inputMode = ''
     offsetLeft = 0
     offsetTop = 0
     clientWidth = 800
@@ -137,6 +138,20 @@ function deferred() {
     reject = no
   })
   return { promise, resolve, reject }
+}
+
+function inputView(overrides: Partial<InputView> = {}): InputView {
+  return {
+    cursor: 0,
+    hint: '',
+    focused: 11,
+    attentionX: 0,
+    attentionY: 0,
+    attention: null,
+    imeMode: 1,
+    keyboardRoute: { windowId: 101, revision: 10, focused: 11, imeMode: 1 },
+    ...overrides,
+  }
 }
 
 function fixture(
@@ -856,6 +871,586 @@ test('page resume leaves blocked canvases suspended until an explicit unblocked 
     assert.equal(f.coordinator.isActive(101), false)
     assert.equal(f.coordinator.focus(101), true)
     await settle()
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('queued game keyboard packets retain the route revision observed before a waiting callback', async () => {
+  const waiting = deferred(),
+    f = fixture(async (packet) => {
+      if (packet.windowId === 101 && packet.type === 'activate') await waiting.promise
+    }),
+    view = inputView()
+  try {
+    f.coordinator.setInput(101, view)
+    f.coordinator.focus(101)
+    f.key(f.textareas[0]!, 'a')
+    f.textareas[0]!.value = 'observed before route change'
+    f.dispatch(f.textareas[0]!, 'input')
+    f.coordinator.setInput(
+      101,
+      inputView({ keyboardRoute: { windowId: 202, revision: 11, focused: 22, imeMode: 1 } }),
+    )
+    f.key(f.textareas[0]!, 'a', false)
+    f.textareas[0]!.value = 'observed after route change'
+    f.dispatch(f.textareas[0]!, 'input')
+    f.mouse(f.a, 'mousemove', 0, 20)
+    assert.deepEqual(
+      f.packets.map((packet) => packet.type),
+      ['activate'],
+    )
+    assert.deepEqual(f.keys.at(-1), [])
+    waiting.resolve()
+    await settle()
+    assert.deepEqual(
+      f.packets.map((packet) => [
+        packet.windowId,
+        packet.type,
+        packet.keyboardRouteRevision,
+        packet.type === 'text' ? packet.text : undefined,
+      ]),
+      [
+        [101, 'activate', undefined, undefined],
+        [101, 'keyDown', 10, undefined],
+        [101, 'text', 10, 'observed before route change'],
+        [101, 'keyUp', 11, undefined],
+        [101, 'text', 11, 'observed after route change'],
+        [101, 'move', undefined, undefined],
+      ],
+    )
+    assert.equal(f.document.activeElement, f.textareas[0])
+    assert.equal(f.coordinator.isActive(202), false)
+    assert.deepEqual(f.errors, [])
+  } finally {
+    waiting.resolve()
+    f.close()
+  }
+})
+
+test('keyboard receiver changes preserve source focus, capture and physical key ownership', async () => {
+  const f = fixture()
+  try {
+    f.coordinator.setInput(101, inputView())
+    f.dispatch(f.a, 'pointerdown', { pointerType: 'mouse', pointerId: 7 })
+    f.mouse(f.a, 'mousedown', 1, 10)
+    f.key(f.textareas[0]!, 'a')
+    const focusRevision = f.coordinator.focusRevision,
+      keyPublications = f.keys.length
+    f.coordinator.setInput(
+      101,
+      inputView({ keyboardRoute: { windowId: 202, revision: 11, focused: 22, imeMode: 0 } }),
+    )
+    assert.equal(f.document.activeElement, f.textareas[0])
+    assert.equal(f.coordinator.isActive(101), true)
+    assert.equal(f.coordinator.isActive(202), false)
+    assert.equal(f.coordinator.focusRevision, focusRevision)
+    assert.equal(f.a.captures.has(7), true)
+    assert.equal(f.keys.length, keyPublications)
+    assert.deepEqual(f.keys.at(-1), [1, 65])
+
+    // Blocking the logical receiver must not clear keys physically held on A.
+    // Blocking the actual source must clear them even though its route points to B.
+    const blocked = { ...new WindowState().view(), visible: true, blocked: true }
+    f.coordinator.setWindow(202, blocked)
+    assert.deepEqual(f.keys.at(-1), [1, 65])
+    assert.equal(f.keys.length, keyPublications)
+    f.coordinator.setWindow(101, blocked)
+    assert.deepEqual(f.keys.at(-1), [])
+    assert.equal(f.a.captures.size, 0)
+    await settle()
+    assert.deepEqual(
+      f.packets.filter((packet) => packet.type === 'activate').map((packet) => packet.windowId),
+      [101],
+    )
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+for (const [changed, route] of [
+  ['revision', { windowId: 202, revision: 11, focused: 22, imeMode: 1 }],
+  ['receiver', { windowId: 303, revision: 10, focused: 22, imeMode: 1 }],
+  ['focused Layer', { windowId: 202, revision: 10, focused: 23, imeMode: 1 }],
+] as const)
+  test(`a changed keyboard ${changed} rejects late composition and its duplicate input without losing the next composition`, async () => {
+    const f = fixture()
+    try {
+      f.coordinator.setInput(
+        101,
+        inputView({ keyboardRoute: { windowId: 202, revision: 10, focused: 22, imeMode: 1 } }),
+      )
+      f.coordinator.focus(101)
+      f.dispatch(f.textareas[0]!, 'compositionstart')
+      f.textareas[0]!.value = 'unfinished old text'
+      f.coordinator.setInput(101, inputView({ keyboardRoute: route }))
+      assert.equal(f.textareas[0]!.value, '')
+      f.dispatch(f.textareas[0]!, 'compositionend', { data: 'late old text' })
+      f.textareas[0]!.value = 'late old text'
+      f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertFromComposition' })
+      f.dispatch(f.textareas[0]!, 'compositionstart')
+      f.dispatch(f.textareas[0]!, 'compositionend', { data: 'new receiver text' })
+      f.textareas[0]!.value = 'new receiver text'
+      f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertFromComposition' })
+      await settle()
+      assert.deepEqual(
+        f.packets.flatMap((packet) =>
+          packet.type === 'text'
+            ? [[packet.windowId, packet.keyboardRouteRevision, packet.text]]
+            : [],
+        ),
+        [[101, route.revision, 'new receiver text']],
+      )
+      assert.equal(f.textareas[0]!.value, '')
+      assert.equal(f.document.activeElement, f.textareas[0])
+      assert.deepEqual(f.errors, [])
+    } finally {
+      f.close()
+    }
+  })
+
+test('equal route snapshots and appearance updates preserve an in-progress composition', async () => {
+  const f = fixture(),
+    view = inputView({
+      attentionX: 40,
+      attentionY: 60,
+      attention: { x: 40, y: 60, focusLayerId: 11, pointLayerId: 12, font: null },
+    })
+  try {
+    f.coordinator.setInput(101, view)
+    f.coordinator.focus(101)
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    f.textareas[0]!.value = 'still composing'
+    f.coordinator.setInput(
+      101,
+      inputView({
+        ...view,
+        keyboardRoute: { ...view.keyboardRoute! },
+        attention: { ...view.attention! },
+      }),
+    )
+    f.coordinator.setInput(
+      101,
+      inputView({
+        ...view,
+        cursor: -4,
+        hint: 'updated presentation',
+        attentionX: 90,
+        attentionY: 110,
+        attention: { ...view.attention!, x: 90, y: 110 },
+      }),
+    )
+    f.a.clientWidth = 400
+    f.a.clientHeight = 300
+    f.coordinator.setWindow(101, { ...new WindowState().view(), visible: true })
+    f.dispatch(f.page, 'resize')
+    f.dispatch(f.page, 'scroll')
+    assert.equal(f.textareas[0]!.value, 'still composing')
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'composition survives layout' })
+    f.textareas[0]!.value = 'composition survives layout'
+    f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertFromComposition' })
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'text' ? [[packet.text, packet.keyboardRouteRevision]] : [],
+      ),
+      [['composition survives layout', 10]],
+    )
+    assert.equal(f.document.activeElement, f.textareas[0])
+    assert.equal(f.packets.filter((packet) => packet.type === 'activate').length, 1)
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('a game keyboard route cannot intercept external or transient host editing', async () => {
+  const transient = new Set<EventTarget>(),
+    f = fixture(undefined, false, (target) => !!target && transient.has(target)),
+    editor = f.canvas(),
+    popup = f.canvas()
+  transient.add(popup)
+  try {
+    f.coordinator.setInput(101, inputView())
+    f.coordinator.focus(101)
+    f.key(f.textareas[0]!, 'a')
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    editor.focus()
+    f.coordinator.setInput(
+      101,
+      inputView({ keyboardRoute: { windowId: 202, revision: 11, focused: 22, imeMode: 1 } }),
+    )
+    const hostKey = f.key(editor, 'b')
+    editor.value = 'host editor text'
+    f.dispatch(editor, 'input')
+    f.dispatch(editor, 'compositionstart')
+    f.dispatch(editor, 'compositionend', { data: 'host composition' })
+    f.key(f.textareas[0]!, 'c')
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'old game composition' })
+    f.textareas[0]!.value = 'old game composition'
+    f.dispatch(f.textareas[0]!, 'input')
+    f.key(f.page, 'a', false)
+    await settle()
+    assert.equal(hostKey.defaultPrevented, false)
+    assert.equal(editor.value, 'host editor text')
+    assert.equal(f.document.activeElement, editor)
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.equal(f.coordinator.isActive(202), false)
+    assert.deepEqual(f.keys.at(-1), [])
+    assert.deepEqual(
+      f.packets.flatMap((packet) => (packet.type === 'keyDown' ? [packet.key] : [])),
+      [65],
+    )
+    assert.equal(
+      f.packets.some((packet) => packet.type === 'text'),
+      false,
+    )
+    assert.equal(f.coordinator.focus(101), true)
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'new game composition' })
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'text' ? [[packet.text, packet.keyboardRouteRevision]] : [],
+      ),
+      [['new game composition', 11]],
+    )
+
+    // A transient popup preserves Window ownership, but its DOM editing still
+    // belongs to the host. A late event on the old textarea is not game input.
+    popup.focus()
+    assert.equal(f.coordinator.isActive(101), true)
+    assert.equal(f.document.activeElement, popup)
+    f.coordinator.setInput(
+      101,
+      inputView({ keyboardRoute: { windowId: 202, revision: 12, focused: 23, imeMode: 1 } }),
+    )
+    const popupKey = f.key(popup, 'd'),
+      before = f.packets.length
+    f.key(f.textareas[0]!, 'e')
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'late transient game text' })
+    f.textareas[0]!.value = 'late transient game text'
+    f.dispatch(f.textareas[0]!, 'input')
+    await settle()
+    assert.equal(popupKey.defaultPrevented, false)
+    assert.equal(f.packets.length, before)
+    assert.equal(f.coordinator.isActive(101), true)
+    assert.equal(f.coordinator.isActive(202), false)
+    assert.equal(f.document.activeElement, popup)
+    assert.deepEqual(f.keys.at(-1), [])
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('a completed composition keeps duplicate suppression when its route changes before the input event', async () => {
+  const f = fixture()
+  try {
+    f.coordinator.setInput(101, inputView())
+    f.coordinator.focus(101)
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'repeated text' })
+    f.coordinator.setInput(
+      101,
+      inputView({ keyboardRoute: { windowId: 202, revision: 11, focused: 22, imeMode: 1 } }),
+    )
+    f.textareas[0]!.value = 'repeated text'
+    f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertFromComposition' })
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'text' ? [[packet.text, packet.keyboardRouteRevision]] : [],
+      ),
+      [['repeated text', 10]],
+    )
+    f.key(f.textareas[0]!, 'b')
+    f.textareas[0]!.value = 'repeated text'
+    f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertText' })
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'repeated text' })
+    f.textareas[0]!.value = 'repeated text'
+    f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertFromComposition' })
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'text' ? [[packet.text, packet.keyboardRouteRevision]] : [],
+      ),
+      [
+        ['repeated text', 10],
+        ['repeated text', 11],
+        ['repeated text', 11],
+      ],
+    )
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('retired composition text does not swallow later ordinary insertion, paste or drop without a keydown', async () => {
+  const f = fixture(),
+    text = 'same text in a new edit',
+    route = (revision: number) =>
+      inputView({ keyboardRoute: { windowId: 202, revision, focused: 22, imeMode: 1 } })
+  try {
+    f.coordinator.setInput(101, inputView())
+    f.coordinator.focus(101)
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    f.coordinator.setInput(101, route(11))
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: text })
+    // No duplicate input follows this retired composition. Register after its
+    // cleanup timer so the next edit runs after that event-loop task.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    assert.equal(
+      f.packets.some((packet) => packet.type === 'text'),
+      false,
+    )
+    f.textareas[0]!.value = text
+    f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertText' })
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'text' ? [[packet.text, packet.keyboardRouteRevision]] : [],
+      ),
+      [[text, 11]],
+    )
+
+    for (const [inputType, revision] of [
+      ['insertFromPaste', 12],
+      ['insertFromDrop', 13],
+    ] as const) {
+      f.dispatch(f.textareas[0]!, 'compositionstart')
+      f.dispatch(f.textareas[0]!, 'compositionend', { data: text })
+      f.coordinator.setInput(101, route(revision))
+      // These explicitly new edits must be accepted even before the old
+      // compositionend cleanup task, with exactly the same string payload.
+      f.textareas[0]!.value = text
+      f.dispatch(f.textareas[0]!, 'input', { inputType })
+      await settle()
+    }
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'text'
+          ? [[packet.windowId, packet.text, packet.keyboardRouteRevision]]
+          : [],
+      ),
+      [
+        [101, text, 11],
+        [101, text, 11],
+        [101, text, 12],
+        [101, text, 12],
+        [101, text, 13],
+      ],
+    )
+    assert.deepEqual(f.keys, [])
+    assert.equal(f.document.activeElement, f.textareas[0])
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('attention uses source canvas coordinates and resets its font and anchor for null or cross-window routing', async () => {
+  const f = fixture(),
+    view = inputView({
+      attentionX: 800,
+      attentionY: 600,
+      attention: {
+        x: 80,
+        y: 120,
+        focusLayerId: 11,
+        pointLayerId: 12,
+        font: {
+          face: 'serif',
+          height: -30,
+          bold: true,
+          italic: true,
+          underline: true,
+          strikeout: true,
+        },
+      },
+    })
+  try {
+    f.a.offsetLeft = 13
+    f.a.offsetTop = 17
+    f.a.clientWidth = 400
+    f.a.clientHeight = 300
+    f.coordinator.setInput(101, view)
+    f.coordinator.focus(101)
+    const text = f.textareas[0]!,
+      appearance = () => [
+        text.style.left,
+        text.style.top,
+        text.style.fontFamily,
+        text.style.fontSize,
+        text.style.fontWeight,
+        text.style.fontStyle,
+        text.style.textDecorationLine,
+        text.inputMode,
+      ]
+    assert.deepEqual(appearance(), [
+      '53px',
+      '77px',
+      'serif',
+      '30px',
+      'bold',
+      'italic',
+      'underline line-through',
+      'text',
+    ])
+    f.coordinator.setInput(101, { ...view, attention: { ...view.attention!, font: null } })
+    assert.deepEqual(appearance(), ['53px', '77px', '', '16px', '', '', '', 'text'])
+    f.coordinator.setInput(101, view)
+    f.coordinator.setInput(101, { ...view, attention: null })
+    assert.deepEqual(appearance(), ['13px', '17px', '', '16px', '', '', '', 'text'])
+    f.coordinator.setInput(101, view)
+    f.coordinator.setInput(101, {
+      ...view,
+      keyboardRoute: { windowId: 202, revision: 11, focused: 22, imeMode: 0 },
+    })
+    assert.deepEqual(appearance(), ['13px', '17px', '', '16px', '', '', '', 'none'])
+    assert.equal(f.document.activeElement, text)
+    assert.equal(f.coordinator.isActive(101), true)
+    assert.equal(f.coordinator.isActive(202), false)
+    f.a.offsetLeft = 29
+    f.a.offsetTop = 31
+    f.a.clientWidth = 1600
+    f.a.clientHeight = 1200
+    f.dispatch(f.page, 'resize')
+    assert.deepEqual(appearance(), ['29px', '31px', '', '16px', '', '', '', 'none'])
+    f.coordinator.setInput(101, view)
+    assert.deepEqual(appearance(), [
+      '189px',
+      '271px',
+      'serif',
+      '30px',
+      'bold',
+      'italic',
+      'underline line-through',
+      'text',
+    ])
+    for (const height of [0, Infinity, 257]) {
+      f.coordinator.setInput(101, {
+        ...view,
+        attention: {
+          ...view.attention!,
+          font: { ...view.attention!.font!, height },
+        },
+      })
+      assert.equal(text.style.fontSize, '16px', `unsupported font height ${height}`)
+    }
+    await settle()
+    assert.equal(f.packets.filter((packet) => packet.type === 'activate').length, 1)
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('input cached before attachment preserves source identity across replacement canvases', async () => {
+  const f = fixture(),
+    original = f.canvas(),
+    replacement = f.canvas(),
+    view = inputView({
+      focused: 33,
+      attentionX: 80,
+      attentionY: 120,
+      attention: { x: 80, y: 120, focusLayerId: 33, pointLayerId: 34, font: null },
+      keyboardRoute: { windowId: 303, revision: 12, focused: 33, imeMode: 0 },
+    })
+  try {
+    original.offsetLeft = 5
+    original.offsetTop = 7
+    f.coordinator.setInput(303, view)
+    f.coordinator.attach(303, 1, original as unknown as HTMLCanvasElement)
+    assert.equal(f.textareas[2]!.style.left, '85px')
+    assert.equal(f.textareas[2]!.style.top, '127px')
+    assert.equal(f.textareas[2]!.inputMode, 'none')
+    assert.equal(f.coordinator.focus(303), true)
+    f.dispatch(f.textareas[2]!, 'compositionstart')
+    f.coordinator.setInput(303, {
+      ...view,
+      keyboardRoute: { windowId: 202, revision: 13, focused: 22, imeMode: 1 },
+    })
+    replacement.offsetLeft = 19
+    replacement.offsetTop = 23
+    f.coordinator.attach(303, 2, replacement as unknown as HTMLCanvasElement)
+    assert.equal(f.textareas[2]!.removed, true)
+    assert.equal(f.textareas[3]!.style.left, '19px')
+    assert.equal(f.textareas[3]!.style.top, '23px')
+    assert.equal(f.textareas[3]!.inputMode, 'text')
+    f.dispatch(f.textareas[2]!, 'compositionend', { data: 'old canvas text' })
+    assert.equal(f.coordinator.focus(303, 2), true)
+    f.key(f.textareas[3]!, 'a')
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'keyDown' ? [[packet.windowId, packet.keyboardRouteRevision]] : [],
+      ),
+      [[303, 13]],
+    )
+    assert.equal(
+      f.packets.some((packet) => packet.type === 'text'),
+      false,
+    )
+    assert.equal(f.document.activeElement, f.textareas[3])
+    assert.equal(f.coordinator.isActive(202), false)
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('Alt combinations and F10 carry system-key intent without changing physical observation', async () => {
+  const f = fixture(),
+    emit = (type: 'keydown' | 'keyup', key: string, keyCode: number, altKey: boolean) =>
+      f.dispatch(f.textareas[0]!, type, {
+        key,
+        code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+        keyCode,
+        altKey,
+        shiftKey: false,
+        ctrlKey: false,
+        repeat: false,
+        isComposing: false,
+      })
+  try {
+    f.coordinator.setInput(101, inputView())
+    f.coordinator.focus(101)
+    emit('keydown', 'Alt', 18, true)
+    emit('keydown', 'a', 65, true)
+    emit('keyup', 'a', 65, true)
+    emit('keyup', 'Alt', 18, false)
+    emit('keydown', 'F10', 121, false)
+    emit('keyup', 'F10', 121, false)
+    emit('keydown', 'b', 66, false)
+    emit('keyup', 'b', 66, false)
+    assert.deepEqual(f.keys, [[18], [18, 65], [18], [], [121], [], [66], []])
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'keyDown' || packet.type === 'keyUp'
+          ? [[packet.type, packet.key, packet.systemKey, packet.keyboardRouteRevision]]
+          : [],
+      ),
+      [
+        ['keyDown', 18, true, 10],
+        ['keyDown', 65, true, 10],
+        ['keyUp', 65, true, 10],
+        ['keyUp', 18, true, 10],
+        ['keyDown', 121, true, 10],
+        ['keyUp', 121, true, 10],
+        ['keyDown', 66, undefined, 10],
+        ['keyUp', 66, undefined, 10],
+      ],
+    )
+    for (const packet of f.packets)
+      if ((packet.type === 'keyDown' || packet.type === 'keyUp') && packet.key === 66)
+        assert.equal(Object.hasOwn(packet, 'systemKey'), false)
     assert.deepEqual(f.errors, [])
   } finally {
     f.close()
