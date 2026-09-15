@@ -10,7 +10,11 @@ function __krkrWindowInvalidate(window,id) {
       objects.clear();
     }
     if(window.__windowMenu!==null && window.__windowMenu!==void) invalidate window.__windowMenu;
-  } finally { __host("Window.finish",id); }
+  } catch(error) {
+    __host("Window.finish",id);
+    throw error;
+  }
+  __host("Window.finish",id);
 }
 class Window {
   var __windowId, __windowMenu=null, __windowObjects, __windowKeys, __windowClosing=false, __windowCanClose=false;
