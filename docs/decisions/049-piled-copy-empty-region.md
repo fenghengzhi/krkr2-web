@@ -13,3 +13,9 @@
 新增 `tests/integration/piled-copy-empty-region.test.ts` 覆盖源码与原生字节码：空尺寸和四边界外请求、空目标裁剪框和子层回调、部分重叠的源坐标、忽略源绘图 clip、回调修改目标 clip/图像尺寸、源越界和回调扩图，以及缺少主图像先于空区域返回的错误次序。断言记录在 `piledCopy` 内完成的脚本语句之后，区别于脚本返回后普通绘制流程可以继续消费的待绘制事件。
 
 原生依据：krkr2 2.32stable [ClipDestPointAndSrcRect](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp#L3553) 与 [PiledCopy](https://github.com/krkrz/krkr2/blob/master/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp#L3858)。原生 `CopyRect` 的物理图像裁剪与 Layer 绘图裁剪属于不同步骤；此实现保留该顺序，不把源图像当前范围提前当作空操作判定。
+
+[Node 诊断 34930516583](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930516583) 在 `f48429c` 通过全部 1,087 项，无失败、取消或跳过。后续增加两组浏览器模板，覆盖源码／字节码和双后端，三浏览器共 24 项。
+
+[首次完整回归 34931093453](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931093453) 的 Node 子进程在 `layer-redraw.test.ts` 触发 V8 内部断言 `jit_page_->allocations_.erase(addr)==1` 并以 SIGTRAP 退出。已报告 1,068 项通过、1 个文件失败；该文件余下 19 项没有结果，不能计为通过。与前次 Node 诊断相比，仅增加浏览器测试，Node／应用／原生源码和 Node v24.19.0 相同。保存了 core 哈希和原生回溯；其中 libc 符号存在版本不匹配警告，根因尚未确定。
+
+该轮 Chromium 的一个新测试还错误假定了控制台动作之间已有普通帧消费 onPaint。四项同脚本顺序证明全部通过，之后读取到的状态仍为 pending。修订改为显式执行一次非空 piledCopy，不重置计数或重新设置 pending，精确验证总回调次数为 1、pending 清除和复制像素；其他原断言保持不变。后续完整验证随阶段 050 执行，首次失败与早期产物独立保存。
