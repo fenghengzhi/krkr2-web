@@ -169,6 +169,8 @@ export class SceneComposer {
       ]),
       () => {
         const pixels = blank(layer.width, layer.height),
+          // Internal transparent backing is defined by the blend type. A
+          // user-set allocation/clear color must not make this backing opaque.
           neutral = neutralColor(type)
         for (let at = 0; at < pixels.data.length; at += 4) {
           pixels.data[at] = (neutral >>> 16) & 255

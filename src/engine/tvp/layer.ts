@@ -196,6 +196,7 @@ class Layer {
     'holdAlpha',
     'hasImage',
     'imageModified',
+    'neutralColor',
     'enabled',
     'focusable',
     'joinFocusChain',
@@ -226,6 +227,6 @@ class Layer {
   }`,
     )
     .join('\n')}
-  ${['isPrimary', 'nodeVisible', 'neutralColor', 'cursorX', 'cursorY'].map((name) => `property ${name} {getter(){return __host("Layer.get",__id,"${name}");}}`).join('\n')}
+  ${['isPrimary', 'nodeVisible', 'cursorX', 'cursorY'].map((name) => `property ${name} {getter(){return __host("Layer.get",__id,"${name}");}}`).join('\n')}
 }
 `

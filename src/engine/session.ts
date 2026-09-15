@@ -69,7 +69,7 @@ import { decodePng } from '../formats/image/png.ts'
 import { decodeGif } from '../formats/image/gif.ts'
 import { decodeTlg } from '../formats/image/tlg/index.ts'
 import { stretchPixels } from './graphics/resample.ts'
-import { validateBlend, neutralColor } from './graphics/blend.ts'
+import { validateBlend } from './graphics/blend.ts'
 import { affinePixels } from './graphics/affine.ts'
 import { boxBlur } from './graphics/processing.ts'
 import type { InputOperation } from './input/controller.ts'
@@ -1929,6 +1929,17 @@ export class EngineSession {
         break
       }
       case 'Layer.set':
+        if (text(1) === 'neutralColor') {
+          // The native setter accepts an int64, then stores its low uint32.
+          // Mask before converting to Number so large TJS integers stay exact.
+          const color = args[2]
+          this.layers.set(
+            number(0),
+            'neutralColor',
+            typeof color === 'bigint' ? Number(BigInt.asUintN(32, color)) : number(2),
+          )
+          break
+        }
         return this.inputs!.change(() => {
           this.layers.set(number(0), text(1), typeof args[2] === 'string' ? text(2) : number(2))
           if (text(1) === 'callOnPaint' && !this.preparingFrame) {
@@ -2229,7 +2240,7 @@ export class EngineSession {
             face,
             number(15),
             layer.holdAlpha,
-            copy && number(16) ? neutralColor(layer.type) : undefined,
+            copy && number(16) ? layer.neutralColor : undefined,
           )
         ) {
           layer.imageModified = true
