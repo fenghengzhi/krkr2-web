@@ -77,3 +77,36 @@ reshow or subsequent hidden-close recovery behavior has been observed here.
 Each scenario runs in its own process so a failure cannot hide the other
 scenarios. No hardware input, menu notifications, browser behavior or native
 plugin behavior is covered by these fixtures.
+
+## Owned keyboard menu observations
+
+The workflow's `menu` suite selects eight independent scenarios: flags `0`,
+`tpmNoNotify` (`128`), `tpmReturnCmd` (`256`) and both (`384`), each with target
+selection or Escape cancellation. The `modal` suite remains the default.
+
+The official SDK documents popup's Window menu-tree requirement and client
+coordinates. Fixed `2.32stable` native source exposes read-only `Window.HWND` and
+`MenuItem.HMENU` properties without requiring a plugin. The fixture publishes
+these handles and a random owner caption. The hosted driver verifies the HWND's
+PID against the held engine process, its exact caption, the owner's actual menu
+tree, two exact leaf captions and independently read command IDs before posting
+any input. `GetGUIThreadInfo` always uses that explicit nonzero thread ID and
+must show its owned active popup.
+
+The driver uses only owned-HWND `PostMessageW` key pairs. Selection has at most
+two Down presses and requires an actual `MF_HILITE` target before a single
+Enter. Cancellation sends one Escape. There is no fallback Escape for failed
+selection, no `WM_COMMAND` synthesis, no hook, injected code, `SendInput` or
+foreground manipulation. A terminal key delivered to the script's ordinary
+Window handler invalidates the menu-input evidence. An unverified input path is
+`not-executable`, never a successful cancellation or selection.
+
+Each popup has a 3-second observation budget; the complete held process has a
+30-second budget. The TJS script records before/after, raw return and target/other
+onClick counts, then observes at least 600 ms after return using its own Timer.
+The unknown NoNotify callback count is recorded, not compared with a Web
+implementation expectation. Selection with ReturnCmd must identify the actual
+target command; cancellation must not produce selection evidence. Other return
+and callback values remain observations. This protocol proves bounded posted
+keyboard behavior; it does not cover physical keyboard input, mouse input,
+recursive menus or command-ID allocation beyond these actual leaves.

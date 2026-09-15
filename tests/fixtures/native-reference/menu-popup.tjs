@@ -1,0 +1,42 @@
+// Original SDK keyboard menu observation. Its driver addresses only this engine's
+// own published HWND after verifying PID, caption, menu tree and active popup.
+var nativeRows=[];
+function nativeRecord(text){nativeRows.add(text);nativeRows.save("native-events.txt");}
+System.exceptionHandler=function(error){nativeRecord("error:"+error.message);System.exit();return true;};
+nativeRecord("start");nativeRecord("version:"+System.versionString);
+var nativeFlags=__NATIVE_FLAGS__;
+var nativeAction="__NATIVE_ACTION__";
+var nativeToken="__NATIVE_TOKEN__";
+var nativeReturned=false,nativeReturnedAt=0,nativeClicks=0,nativeOtherClicks=0,nativeInsideTicks=0;
+class NativeMenuWindow extends Window {
+  function NativeMenuWindow(){super.Window();caption="KRKR2 Menu "+global.nativeToken;setInnerSize(320,240);visible=true;}
+  function onKeyDown(key,shift){global.nativeRecord("owner-key-down:"+key);}
+}
+var nativeWindow=new NativeMenuWindow();
+var nativeGroup=new MenuItem(nativeWindow,"Native Popup");
+nativeGroup.caption="Native Popup";
+var nativeTarget=new MenuItem(nativeWindow,"Target "+nativeToken);
+nativeTarget.caption="Target "+nativeToken;
+var nativeOther=new MenuItem(nativeWindow,"Other "+nativeToken);
+nativeOther.caption="Other "+nativeToken;
+nativeTarget.onClick=function(){global.nativeClicks++;global.nativeRecord("target-onClick:"+global.nativeClicks+":returned="+int(global.nativeReturned));};
+nativeOther.onClick=function(){global.nativeOtherClicks++;global.nativeRecord("other-onClick:"+global.nativeOtherClicks+":returned="+int(global.nativeReturned));};
+nativeGroup.add(nativeTarget);nativeGroup.add(nativeOther);nativeWindow.menu.add(nativeGroup);
+nativeRecord("flags:"+nativeFlags);nativeRecord("action:"+nativeAction);
+nativeRecord("window-hwnd:"+nativeWindow.HWND);nativeRecord("popup-hmenu:"+nativeGroup.HMENU);
+function nativeObserveTimer(event){
+  if(!nativeReturned){
+    if(nativeInsideTicks++==0)nativeRecord("timer-inside-popup");
+  }else if(System.getTickCount()-nativeReturnedAt>=600){
+    nativeTimer.enabled=false;
+    nativeRecord("after-return-observed-ms:"+(System.getTickCount()-nativeReturnedAt));
+    nativeRecord("final-clicks:"+nativeClicks+":"+nativeOtherClicks);
+    nativeRecord("observations-complete");
+    System.exit();
+  }
+}
+var nativeTimer=new Timer(global,"nativeObserveTimer");nativeTimer.enabled=false;nativeTimer.interval=100;
+nativeRecord("popup-before");nativeTimer.enabled=true;
+var nativeResult=nativeGroup.popup(nativeFlags,20,30);
+nativeReturned=true;nativeReturnedAt=System.getTickCount();
+nativeRecord("popup-after:return="+nativeResult+":clicks="+nativeClicks+":other="+nativeOtherClicks);

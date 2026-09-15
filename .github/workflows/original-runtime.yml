@@ -2,6 +2,12 @@ name: Original KRKR2 runtime observations
 
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Original SDK observation suite
+        type: choice
+        options: [modal, menu]
+        default: modal
 
 permissions:
   contents: read
@@ -15,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
-        scenario: [modal-close, modal-accepted-reclose, modal-hidden-timer, modal-parent-child]
+        scenario: ${{ inputs.suite == 'menu' && fromJSON('["menu-0-select","menu-0-cancel","menu-128-select","menu-128-cancel","menu-256-select","menu-256-cancel","menu-384-select","menu-384-cancel"]') || fromJSON('["modal-close","modal-accepted-reclose","modal-hidden-timer","modal-parent-child"]') }}
     defaults:
       run:
         shell: pwsh
@@ -23,7 +29,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Observe original modal close without external input
+      - name: Observe the original SDK on its owned Windows process
         env:
           NATIVE_OS: ${{ matrix.os }}
           NATIVE_SCENARIO: ${{ matrix.scenario }}
@@ -68,8 +74,23 @@ jobs:
               bytes = (Get-Item $engine).Length; sha256 = (Get-FileHash $engine -Algorithm SHA256).Hash.ToLowerInvariant()
               fileVersion = (Get-Item $engine).VersionInfo.FileVersion; productVersion = (Get-Item $engine).VersionInfo.ProductVersion
             }
-            $fixture = Join-Path 'tests/fixtures/native-reference' ($env:NATIVE_SCENARIO + '.tjs')
+            $isMenu = $env:NATIVE_SCENARIO -match '^menu-(0|128|256|384)-(select|cancel)$'
+            if ($isMenu) {
+              $menuFlags = [int] $Matches[1]
+              $menuAction = $Matches[2]
+              $menuToken = [Guid]::NewGuid().ToString('N')
+              $fixture = 'tests/fixtures/native-reference/menu-popup.tjs'
+              $driver = 'tests/probes/original-menu-driver.cs'
+              Copy-Item $driver (Join-Path $output 'original-menu-driver.cs')
+              $status.driverSha256 = (Get-FileHash $driver -Algorithm SHA256).Hash.ToLowerInvariant()
+              Add-Type -Path $driver
+            } else {
+              $fixture = Join-Path 'tests/fixtures/native-reference' ($env:NATIVE_SCENARIO + '.tjs')
+            }
             $script = Get-Content $fixture -Raw -Encoding utf8
+            if ($isMenu) {
+              $script = $script.Replace('__NATIVE_FLAGS__', [string]$menuFlags).Replace('__NATIVE_ACTION__', $menuAction).Replace('__NATIVE_TOKEN__', $menuToken)
+            }
             $startup = Join-Path $work 'startup.tjs'
             [IO.File]::WriteAllText($startup, $script, [Text.UnicodeEncoding]::new($false, $true))
             Copy-Item $startup (Join-Path $output 'startup.tjs')
@@ -80,12 +101,21 @@ jobs:
             # not a project-selection rule. Keep the exact arguments as evidence.
             $arguments = '"' + $work + '" -forcelog=yes'
             $status.arguments = $arguments
+            $processClock = [Diagnostics.Stopwatch]::StartNew()
             $process = Start-Process -FilePath $engine -WorkingDirectory $work -ArgumentList $arguments -PassThru `
               -RedirectStandardOutput (Join-Path $output 'stdout.log') `
               -RedirectStandardError (Join-Path $output 'stderr.log')
             $status.processId = $process.Id
             $null = $process.Handle
-            if (-not $process.WaitForExit(30000)) {
+            if ($isMenu) {
+              $status.input = [OriginalMenuDriver]::Observe($process, $work, $menuToken, $menuFlags, $menuAction, $processClock)
+              if ($status.input.State -cne 'observed') {
+                $status.stage = 'menu-input'
+                throw ('Owned menu input was not established: ' + $status.input.Reason)
+              }
+            }
+            $remainingMs = [Math]::Max(0, 30000 - [int]$processClock.ElapsedMilliseconds)
+            if (-not $process.WaitForExit($remainingMs)) {
               $status.timedOut = $true
               $status.state = 'timed-out'
               Stop-Process -Id $process.Id -Force
