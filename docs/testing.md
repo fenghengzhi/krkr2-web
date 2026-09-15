@@ -18,13 +18,25 @@ gh workflow run test.yml --ref BRANCH -f runtime-only=true
 
 ## 已完成的云端回归
 
+[050 组合版本完整回归 34931803098](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931803098)在 `f1f6a3d` 通过 **1,118 Node、846 浏览器、6 组直接运行时**，全部 14 个 job 成功。846 包含常规 723、游戏库 57、PWA 59、可信生命周期 7；所选测试零失败、取消、跳过、flaky 或重试，最大重试次数为 0。完整产物和 run.json 已归档于 `out/verification/github-actions/34931803098/`。
+
+该组合验证阶段 [047 Window.mainWindow](decisions/047-window-main-instance.md)、[049 空区域 piledCopy](decisions/049-piled-copy-empty-region.md)和 [050 图像保存取消](decisions/050-image-save-cancellation.md)。32 项编码器内部取消案例包含在 Node 总数内，18 个页面停止观察器场景包含在浏览器总数内；两者分别验证编码开始后的取消与页面及时触发停止，不重复计数，也不等同于真实用户控制延迟测量。051 多窗口仍为独立未验证实现，本版本仍限制一个活动 Window。
+
+[兼容检查 34931188627](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931188627)在 `54ecd16` 使用[构建 34931093453](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931093453)的精确产物通过 **78 项**，三浏览器各 26 项。至 `f1f6a3d` 的 `src/`、原生源码、third_party、scripts、public、依赖和构建配置没有差异；这是相同应用源码的兼容证据，没有重跑最终完整回归的构建。
+
+[049 首次完整回归 34931093453](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931093453)终态为失败：Node 已报告 1,068 项通过，`layer-redraw.test.ts` 因 V8 内部断言和 SIGTRAP 产生 1 个文件失败，余下 19 项没有结果；浏览器 842/846 通过，6 组直接运行时通过。四项浏览器失败分别是 Chromium 复制正对照，以及 WebKit 暂停视频约 1.228 ms 漂移、player 重启失败、Scripts JSPI 初始化 SyntaxError。原始日志、core／回溯和完整产物继续保留，没有将未报告测试计为通过。
+
+[050 首次完整回归 34931476851](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931476851)在 `65c7e16` 的浏览器为 845/846 通过，旧复制正对照的 Asyncify／字节码场景预期 `1,0`、实际 `0,1`，该轮也保持失败。后续夹具显式设置有效目标 clip 并复制已知像素，保留计数与 pending；最终完整通过不证明历史 V8／WebKit 故障根因已修复。以下继续保留各阶段证据。
+
 [Layer neutralColor 完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930172005)在 `551b97d` 通过 **1,043 Node、786 浏览器、6 组直接运行时**，全部 14 个 job 成功。786 包含常规 663、游戏库 57、PWA 59、可信生命周期 7；所选测试零失败、取消、跳过、flaky 或重试，最大重试次数为 0。已归档完整产物和 run.json，路径为 `out/verification/github-actions/34930172005/`；实现范围与失败历史见[决策 046](decisions/046-layer-neutral-color.md)。
 
 [原 KAG／旧 ABI 升级 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970)在 `259c892` 使用[构建 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074)的精确产物通过 **78 项**。后续 `551b97d` 只有浏览器夹具变更，应用源码相同；该兼容检查没有使用后来完整回归的构建。
 
-046 首轮 Node 诊断的 2 个 raw-mask 预期失败，以及首次完整回归的 **19 个浏览器失败**均保留。后者的 18 个图形夹具已改为明确设置图层类型／颜色；另 1 个 WebKit Asyncify PNG 停止用例的实际点击发生在编码结束之后，后续绿色重跑不能证明此时序已修复。阶段 050 的受控取消测试仍在分支，尚未计入上述结果。
+046 首轮 Node 诊断的 2 个 raw-mask 预期失败，以及首次完整回归的 **19 个浏览器失败**均保留。后者的 18 个图形夹具已改为明确设置图层类型／颜色；另 1 个 WebKit Asyncify PNG 停止用例的实际点击发生在编码结束之后，046 的绿色重跑不能证明此时序已修复。阶段 050 随后增加页面观察器和编码器内受控取消，两类新证据见本文开头，不追记到 046 的原结果。
 
-阶段 047 的 Window.mainWindow 已实现。[完整回归 34930203580](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930203580)在 `60737a2` 通过 1,065 项 Node 和 6 组直接运行时，浏览器为 **821/822 通过、1 项 WebKit JSPI 启动用例 Page crashed**；新增 Window 用例均通过，仍不能把该轮完整回归记为成功。[兼容检查 34930256236](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930256236)使用该轮精确构建另通过 78 项，也不代替失败的完整回归。阶段 049 的空矩形 piledCopy 及阶段 050 的取消测试也在独立分支，均不属于 046 当前已验证范围。以下按阶段保留此前结果；未完成或失败的运行不计为通过。
+阶段 047 的[首次完整回归 34930203580](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930203580)在 `60737a2` 通过 1,065 项 Node 和 6 组直接运行时，浏览器为 **821/822 通过、1 项 WebKit JSPI 启动用例 Page crashed**；新增 Window 用例均通过，仍不能把该轮完整回归记为成功。[兼容检查 34930256236](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930256236)使用该轮精确构建另通过 78 项，也不代替失败的完整回归。
+
+[原 player 场景诊断 34931403366](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931403366)在 `9f4bdc4` 使用构建 `34930203580` 的精确产物，两个后端各重复 10 次，全部 **20 次通过**。原生崩溃 manifest 的 `reports` 和 `errors` 均为空；没有收集到新报告不等于已有该次崩溃的根因证据。该诊断与最终组合回归均不把首次 Page crashed 改记为已修复。以下按阶段保留此前结果；未完成或失败的运行不计为通过。
 
 [Layer 重绘完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927280464)在 `ebae14e` 通过 **1,019 Node、750 浏览器、6 组直接运行时**，全部 14 个 job 成功。750 包含常规 627、游戏库 57、PWA 59、可信生命周期 7，零失败、取消、跳过、flaky 或重试。同次构建的[原 KAG／旧 ABI 升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34927347461)通过 **78 项**。初版与公平性修正的 Node 诊断分别保留，详见[决策 045](decisions/045-layer-redraw.md)。
 

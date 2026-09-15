@@ -1,10 +1,18 @@
 # 当前实现范围
 
-阶段 046 的 `Layer.neutralColor` 可写语义、无主图 opaque 填色与祖先快照，以及 `piledCopy` 在 onPaint 前的主图校验已通过验证，见[决策 046](../decisions/046-layer-neutral-color.md)。[完整回归 34930172005](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930172005)在 `551b97d` 通过全部 14 个作业：**1,043 项 Node、786 项浏览器（663 项常规、57 项游戏库、59 项 PWA、7 项原生生命周期）及 6 项直接运行时**；失败、取消、跳过、flaky 和重试均为 0。[兼容检查 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970)通过全部 **78 项原 KAG／旧 ABI 检查**，使用 `259c892` 的构建 34929264074；到 `551b97d` 仅修改浏览器夹具，应用源码相同。以上已纳入本版本。
+当前已验证阶段为 050，同时包含 [047 的 Window.mainWindow 实例查询](../decisions/047-window-main-instance.md)、[049 的 piledCopy 空目标区域及回调顺序](../decisions/049-piled-copy-empty-region.md)和 [050 的图像保存取消验证](../decisions/050-image-save-cancellation.md)。此前 [046 的 neutralColor](../decisions/046-layer-neutral-color.md)、无主图 opaque 填色与祖先快照继续保留。**仍只允许一个活动 Window**；051 多窗口在独立分支开发，尚未验证，不能计入本页当前能力。其他图形／系统和媒体能力仍未完成，见[实现进度](../non-plugin-progress.md)与[多窗口规划](../decisions/048-multiwindow-plan.md)。
 
-046 [首次完整回归 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074)保留 **19 项浏览器失败**：18 项旧夹具依赖 primary 默认颜色，另 1 项 PNG 编码停止点击发生在编码完成后。夹具已修正；后续完整通过不证明 PNG 停止时序已修复，050 的受控取消测试仍在独立分支。047 的 `Window.mainWindow` 已实现，但其[完整回归 34930203580](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930203580)为 821／822 项浏览器通过，另 1 项 WebKit JSPI 启动用例 `Page crashed`，仍待完整通过，未计入本页当前能力。049 的空矩形复制也仍在独立分支。其他图形／系统和媒体能力尚未完成，范围以[实现进度](../non-plugin-progress.md)为准。
+[完整回归 34931803098](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931803098)在 `f1f6a3d` 通过全部 14 个作业：**1,118 项 Node、846 项浏览器（723 项常规、57 项游戏库、59 项 PWA、7 项原生生命周期）及 6 项直接运行时**；失败、取消、跳过、flaky 和重试均为 0，最大重试次数为 0。总数包含 18 项观察器内调用 Stop 的浏览器场景和 32 项编码器内部取消检查点的 Node 场景，二者分别验证按钮调用顺序和编码已进入后取消的行为，不互相代替。
 
-以下保留此前阶段记录及当时的验证范围。Layer.update／onPaint 的参数、action 派发、异步后续重绘及多图层调度已接入，见[决策 045](../decisions/045-layer-redraw.md)。045 完整验证为 **1,019 项 Node、750 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**。
+[兼容检查 34931188627](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931188627)通过全部 **78 项原 KAG／旧 ABI 检查**，每种浏览器 26 项，使用 `54ecd16` 的[构建 34931093453](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931093453)。`54ecd16` 到 `f1f6a3d` 没有应用路径差异，因此该结果适用于相同应用源码；它不是最终完整回归的同次构建证据。所有本轮构建、类型检查、测试和执行探针均由 GitHub-hosted Actions 运行。
+
+历史失败继续保留。046 [首轮 34929264074](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929264074)的 **19 项浏览器失败**包含 18 项 primary 默认颜色夹具问题，以及 1 项 PNG 停止点击晚于编码完成；050 的新增顺序与检查点证据不改变该事实。047 [完整回归 34930203580](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930203580)为 **821／822 项浏览器通过**，另 1 项 WebKit JSPI 启动报 `Page crashed`。[诊断 34931403366](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931403366)在 `9f4bdc4` 复用该轮精确构建，原 player 用例重复 20 次均通过，原生报告清单为 `reports: []`、`errors: []`；没有确定或修复该崩溃的根因，详见 [047](../decisions/047-window-main-instance.md)。
+
+049 [完整回归 34931093453](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931093453)最终失败：Node **1,068 项已报告通过、1 个文件 SIGTRAP 失败、19 项未报告**；浏览器 **842／846**，失败为 Chromium 复制正对照，以及 WebKit 暂停视频 1.228 ms 漂移、player 重启和 Scripts JSPI 初始化 SyntaxError；6 项直接运行时通过。050 [首轮 34931476851](https://github.com/fenghengzhi/krkr2-web/actions/runs/34931476851)在 `65c7e16` 为 **845／846 项浏览器通过**，旧复制正对照的 Asyncify 字节码场景期望 `1,0`、实际 `0,1`；包含修正后正对照的 `f1f6a3d` 完整通过。未报告案例不能计为通过，绿色重跑也不抹除失败；完整证据和各自的修订边界见 [049](../decisions/049-piled-copy-empty-region.md)与 [050](../decisions/050-image-save-cancellation.md)。
+
+以下保留此前阶段记录及当时的验证范围。046 [完整回归 34930172005](https://github.com/fenghengzhi/krkr2-web/actions/runs/34930172005)在 `551b97d` 通过 **1,043 项 Node、786 项浏览器和 6 项直接运行时**；[78 项兼容检查 34929350970](https://github.com/fenghengzhi/krkr2-web/actions/runs/34929350970)使用 `259c892` 的构建 34929264074，到 `551b97d` 仅浏览器夹具变化，应用源码相同。
+
+Layer.update／onPaint 的参数、action 派发、异步后续重绘及多图层调度已接入，见[决策 045](../decisions/045-layer-redraw.md)。045 完整验证为 **1,019 项 Node、750 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**。
 
 Layer／Font 生命周期、children 快照、输入角色持有及转场清理已通过本阶段回归，见[决策 044](../decisions/044-layer-object-lifetime.md)。当前验证为 **987 项 Node、726 项浏览器、6 组直接运行时及 78 项原 KAG／旧 ABI 兼容检查**；最新结论以[非插件实现进度](../non-plugin-progress.md)为准。Layer 的其余图形 API、完整多窗口和媒体能力仍在实现。
 
@@ -83,7 +91,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 | KAGParser    | TypeScript 词法与状态机；标签、宏/参数转发、条件、emb、内嵌脚本、跳转/调用栈、store/restore/assign、回调与中断                                                                                                                                     |
 | 菜单         | MenuItem 树、Window.menu、顺序、可见/禁用、单选组、onClick、页面菜单/快捷键、弹出选择/取消；按 ID 更新保留未移除项的展开、焦点与点击                                                                                                               |
 | 系统         | createAppLock 使用按游戏分区的 Web Locks，停止释放；exit/terminate 取消执行并提交待写存档                                                                                                                                                          |
-| 窗口         | 单窗口的逻辑尺寸、缩放、显示偏移、外观、可见性、resize 通知、管理对象 add/remove、closeQuery/close；可退出的页面内全屏                                                                                                                             |
+| 窗口         | 单活动窗口的逻辑尺寸、缩放、显示偏移、外观、可见性、resize 通知、管理对象 add/remove、closeQuery/close；mainWindow 返回实际实例或 null；可退出的页面内全屏                                                                                         |
 | 输入         | 鼠标/触摸、捕获、键盘/提交文字、物理按键状态、focus chain、模态栈、onHitTest、异步 postInputEvent、光标与 hint                                                                                                                                     |
 | 字体         | 独立 FreeType 文件字体、Canvas 系统字体/缺字回退、预渲染版本 0/1 与共享映射、getGlyphDrawRect/Rect、样式与阴影；getList/doUserSelect；逻辑纵排家族、vert/vrt2、Unicode 朝向/呈现形式、按索引变换与竖向装饰线；普通文件路径保留原 FreeType 角度语义 |
 | 声音         | Wave/MIDI 宿主、AudioWorklet 混音、WAV/Vorbis/MP3、SLI 循环/标志/标签、定位、音量/声像、淡入淡出、完成事件及静音                                                                                                                                   |
@@ -104,18 +112,19 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 - `Scripts.execStorage/evalStorage(name, mode, context)` 和 `Scripts.exec/eval(source, name, lineOffset, context)`，支持嵌套执行、上下文和来源行偏移。
 - `Storages.isExistentStorage(name)`、`Storages.addAutoPath/removeAutoPath(directory)`、`getPlacedPath`、路径提取函数。
 - ZIP 支持 stored/deflate、ZIP64、UTF-8/CP437/Unicode Path、按需读取与 CRC 校验，提供普通名称和 `archive>entry` 地址。无效写入目标在 TJS 创建文本/二进制流时预检；原始归档保持只读。详见 [ZIP 资源决策](../decisions/015-zip-storage.md)。
-- `Window`：尺寸/位置/显示偏移/缩放、外观属性、`add/remove` 管理对象、`onResize`、`onCloseQuery/close`、`menu`、`primaryLayer`。新窗口初始不可见，脚本需设置 `visible=true`。
+- `Window`：尺寸/位置/显示偏移/缩放、外观属性、`add/remove` 管理对象、`onResize`、`onCloseQuery/close`、`menu`、`primaryLayer`。只读 `mainWindow` 返回实际主窗口实例或 null，类／派生类／实例均可查询；登记不额外持有窗口，失效开始即撤销查询身份，详见 [047](../decisions/047-window-main-instance.md)。新窗口初始不可见，脚本需设置 `visible=true`；第二个活动 Window 仍报错。
 - `Layer`：尺寸/图像尺寸与偏移、`setSizeToImageSize/setClip`、`fillRect/colorRect/copyRect/assignImages`、`loadImages`、`drawText`、像素访问、parent/children、order/absolute、moveBefore/moveBehind、翻转、命中及显式销毁。
 - `Layer.neutralColor`：每实例保存低 32 位 ARGB，设置本身不改现有像素或请求重绘；扩容、主图重新分配及仿射 clear 使用该值，真正改变 type 时恢复类型默认值。无主图 opaque 图层仍填色并参与祖先快照；`piledCopy` 在 onPaint 前拒绝无主图的来源或目标。详见[决策 046](../decisions/046-layer-neutral-color.md)。
 - `Layer.focus/focusNext/focusPrev`、`setMode/removeMode`、`releaseCapture/releaseTouchCapture`、焦点/按键/鼠标/触摸事件、`onHitTest` 和四参数 `getLayerAt`；`Window.focusedLayer/currentModalLayer/postInputEvent`、`System.getKeyState`。输入法模式、手势和系统事件仍有未完成项。
 - `Layer.adjustGamma`：独立 RGB 曲线与输出区间、裁剪、透明度保持及加算 Alpha 处理；图像加载支持常见浏览器格式的扩展名补全。
 - `Layer.beginTransition/stopTransition`：crossfade/universal/scroll、withchildren、selfupdate、callback 与完成事件；`piledCopy/stretchCopy/saveLayerImage` 接通子树截图、缩放和 BMP 写入。
+- `Layer.piledCopy`：目标与源的主图校验先于空区域返回；空尺寸或目标绘图 clip 外的请求不调用 onPaint、不消费待绘制标志、不设置 imageModified。有效请求保留调用开始时的目标裁剪结果，回调后按当前图像物理边界复制；源绘图 clip 不限制读取，详见 [049](../decisions/049-piled-copy-empty-region.md)。
 - `Layer.operateRect/operateStretch`：26 种图像运算、omAuto、目标 face/holdAlpha、裁剪及重叠自复制；旧式 `pileRect/blendRect/stretchPile/stretchBlend` 也已接入。基础与 Photoshop 类型参与场景合成和截图。
 - `Layer.affineCopy/operateAffine/affinePile/affineBlend`：矩阵/三顶点变换、局部源坐标、旋转/镜像/剪切、滤波、clip、clear 和重叠自复制；耗时采样支持暂停/取消。基础与 Photoshop 运算在 mask/province face 下仍操作主图像。
 - `Layer.convertType/doGrayScale/doBoxBlur`：整图 Alpha 表示转换、clip 内灰度和 Alpha 感知矩形模糊；模糊可暂停/取消。`flipLR/flipUD` 翻转整图及 province，不受 clip 影响。
 - `Layer.loadImages` 支持 TLG5 RGB/RGBA、TLG6 灰度/RGB/RGBA，返回 TLG0 SDS 标签字典，无标签返回 null；解码可暂停/取消，灰度 TLG6 也可用作 universal 转场规则。
 - `Layer.loadImages` 自动读取 `_m` mask 与 `_p` province，支持 RGB/adaptive/palette/AlphaMat 颜色键和 PNG 位置/分辨率标签；`loadProvinceImage` 仅替换索引平面，保留颜色、Alpha 与 clip。全部资源准备成功后提交图层。
-- `Layer.saveLayerImage` 支持 BMP、PNG、TLG5/TLG6 的已列明模式，保存整幅主图，24 位模式丢弃 Alpha；TLG 自动写入图层 mode 标签。PNG/TLG 编码可暂停/取消，完整编码后才更新存档文件。
+- `Layer.saveLayerImage` 支持 BMP、PNG、TLG5/TLG6 的已列明模式，保存整幅主图，24 位模式丢弃 Alpha；TLG 自动写入图层 mode 标签。PNG/TLG 编码可暂停/取消，完整编码后才更新存档文件。050 已验证浏览器及时调用 Stop 的顺序，以及源码／字节码、8 种 PNG/TLG 模式、覆盖／新建目标的 32 项编码器内部取消场景；取消保留旧字节、不发布未完成文件，详见 [050](../decisions/050-image-save-cancellation.md)。
 - `WaveSoundBuffer` / `MIDISoundBuffer`：`open/play/stop/fade/stopFade`、status/position/samplePosition/paused/looping/volume/volume2/pan/frequency、标签与完成回调。Wave 提供即时 indexed flags、labels、globalVolume/globalFocusMode，MIDI 提供基础 `midiOut` 合成。
 - `VideoOverlay`：`open/play/stop/pause/close/rewind/prepare`，位置/尺寸/显示、MP4 的 position/frame/fps、layer1/layer2、setSegmentLoop/setPeriodEvent、默认音轨的音量/声像与关闭声音、帧/周期/状态回调。mode 支持 overlay/layer 和基础 mixer；完整 mixer 未完成。
 - `System.getArgument(name)` / `setArgument(name,value)`：未提供的选项返回 void；宿主和脚本可提供字符串选项，Web 默认没有命令行参数。
