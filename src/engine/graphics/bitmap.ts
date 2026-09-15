@@ -35,7 +35,6 @@ let nextRevision = 1
 
 export class Bitmap {
   pixels: Pixels
-  province?: Uint8Array
   clip: Rect
   revision = nextRevision++
   constructor(width: number, height: number, color = 0x00ffffff) {
@@ -49,7 +48,7 @@ export class Bitmap {
     this.revision = nextRevision++
   }
   get bytes(): number {
-    return this.pixels.data.length + (this.province?.length ?? 0)
+    return this.pixels.data.length
   }
   get width(): number {
     return this.pixels.width
@@ -66,16 +65,7 @@ export class Bitmap {
         this.pixels.data.subarray(y * this.width * 4, (y * this.width + columns) * 4),
         y * width * 4,
       )
-    if (this.province) {
-      replacement.province = new Uint8Array(width * height)
-      for (let y = 0; y < rows; y++)
-        replacement.province.set(
-          this.province.subarray(y * this.width, y * this.width + columns),
-          y * width,
-        )
-    }
     this.pixels = replacement.pixels
-    this.province = replacement.province
     this.resetClip()
     this.touch()
   }
@@ -104,28 +94,18 @@ export class Bitmap {
     const c = this.clip
     return x >= c.x && y >= c.y && x < c.x + c.width && y < c.y + c.height
   }
-  getPixel(x: number, y: number, plane: 'main' | 'mask' | 'province'): number {
-    if (
-      plane === 'province' &&
-      (!this.province || x < 0 || y < 0 || x >= this.width || y >= this.height)
-    )
-      return 0
+  getPixel(x: number, y: number, plane: 'main' | 'mask'): number {
     const index = this.offset(x, y),
       data = this.pixels.data
-    return plane === 'province'
-      ? this.province![index]!
-      : plane === 'mask'
-        ? data[index * 4 + 3]!
-        : data[index * 4]! * 65536 + data[index * 4 + 1]! * 256 + data[index * 4 + 2]!
+    return plane === 'mask'
+      ? data[index * 4 + 3]!
+      : data[index * 4]! * 65536 + data[index * 4 + 1]! * 256 + data[index * 4 + 2]!
   }
-  setPixel(x: number, y: number, value: number, plane: 'main' | 'mask' | 'province'): boolean {
+  setPixel(x: number, y: number, value: number, plane: 'main' | 'mask'): boolean {
     if (!this.writable(x, y)) return false
     const index = this.offset(x, y),
       data = this.pixels.data
-    if (plane === 'province') {
-      this.province ??= new Uint8Array(this.width * this.height)
-      this.province[index] = value & 255
-    } else if (plane === 'mask') data[index * 4 + 3] = value & 255
+    if (plane === 'mask') data[index * 4 + 3] = value & 255
     else {
       data[index * 4] = (value >>> 16) & 255
       data[index * 4 + 1] = (value >>> 8) & 255
@@ -164,17 +144,15 @@ export class Bitmap {
     this.touch()
   }
   fill(rect: Rect, color: number, face: number, holdAlpha: boolean): boolean {
+    if (face === 3) throw new Error('Province drawing requires a ProvincePlane')
     const area = intersect(this.clip, rect),
       data = this.pixels.data
     if (!area.width || !area.height) return false
-    if (face === 3 && color & 255) this.province ??= new Uint8Array(this.width * this.height)
     for (let y = area.y; y < area.y + area.height; y++)
       for (let x = area.x; x < area.x + area.width; x++) {
         const index = y * this.width + x,
           p = index * 4
-        if (face === 3) {
-          if (this.province) this.province[index] = color & 255
-        } else if (face === 2) data[p + 3] = color & 255
+        if (face === 2) data[p + 3] = color & 255
         else {
           data[p] = (color >>> 16) & 255
           data[p + 1] = (color >>> 8) & 255
@@ -182,15 +160,6 @@ export class Bitmap {
           if (face !== 1 || !holdAlpha) data[p + 3] = (color >>> 24) & 255
         }
       }
-    if (
-      face === 3 &&
-      !(color & 255) &&
-      area.x === 0 &&
-      area.y === 0 &&
-      area.width === this.width &&
-      area.height === this.height
-    )
-      this.province = undefined
     this.touch()
     return true
   }
@@ -202,6 +171,7 @@ export class Bitmap {
     face: number,
     holdAlpha = false,
   ): boolean {
+    if (face === 3) throw new Error('Province copying requires a ProvincePlane')
     let target = intersect(this.clip, { x: left, y: top, width: rect.width, height: rect.height })
     target = intersect(target, {
       x: left - rect.x,
@@ -209,18 +179,13 @@ export class Bitmap {
       width: source.width,
       height: source.height,
     })
-    // Province allocation and absent-source clearing have separate native
-    // modified rules. Keep that existing path independent of main/mask copies.
-    if ((!target.width || !target.height) && face !== 3) return false
+    if (!target.width || !target.height) return false
     const pixels = source === this ? source.pixels.data.slice() : source.pixels.data
-    const province = source === this ? source.province?.slice() : source.province
-    if (face === 3) this.province ??= new Uint8Array(this.width * this.height)
     for (let y = target.y; y < target.y + target.height; y++)
       for (let x = target.x; x < target.x + target.width; x++) {
         const src = (y - top + rect.y) * source.width + x - left + rect.x,
           dst = y * this.width + x
-        if (face === 3) this.province![dst] = province?.[src] ?? 0
-        else if (face === 2) this.pixels.data[dst * 4 + 3] = pixels[src * 4 + 3]!
+        if (face === 2) this.pixels.data[dst * 4 + 3] = pixels[src * 4 + 3]!
         else
           for (let c = 0; c < (face === 1 && holdAlpha ? 3 : 4); c++)
             this.pixels.data[dst * 4 + c] = pixels[src * 4 + c]!
@@ -257,7 +222,8 @@ export class Bitmap {
     return true
   }
   color(rect: Rect, color: number, opacity: number, face: number): void {
-    if (face === 2 || face === 3) {
+    if (face === 3) throw new Error('Province drawing requires a ProvincePlane')
+    if (face === 2) {
       this.fill(rect, color, face, true)
       return
     }
@@ -421,11 +387,6 @@ export class Bitmap {
           const value = data[first * 4 + c]!
           data[first * 4 + c] = data[last * 4 + c]!
           data[last * 4 + c] = value
-        }
-        if (this.province) {
-          const value = this.province[first]!
-          this.province[first] = this.province[last]!
-          this.province[last] = value
         }
       }
     this.touch()

@@ -17,7 +17,7 @@ import {
   type ScriptValue,
 } from './script/runtime.ts'
 import { StorageResolver, normalizePath } from './storage/resolver.ts'
-import { ImageLoader } from './storage/images.ts'
+import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree } from './scene/layers.ts'
 import { LayerService } from './scene/layer-objects.ts'
@@ -2659,7 +2659,7 @@ export class EngineSession {
         throw new Error(`${operation}: expected a finite numeric argument at ${i}`)
       return Number(value)
     }
-    // Clip and text entry points narrow TJS integers to native tjs_int.
+    // Drawing entry points narrow TJS integers to native tjs_int.
     // Preserve the low bits before Number conversion.
     const clipInteger = (i: number) => {
       const value = args[i]
@@ -3162,10 +3162,7 @@ export class EngineSession {
         return this.inputs!.detach(id, () => this.layers.detach(id), true)
       }
       case 'Layer.releaseImage': {
-        const layer = this.layers.get(number(0))
-        if (layer.bitmap) layer.clipBeforeRelease = { ...layer.bitmap.clip }
-        layer.bitmap = undefined
-        layer.revision++
+        this.layers.releaseImages(number(0))
         this.dirty = true
         break
       }
@@ -3264,29 +3261,67 @@ export class EngineSession {
         if (
           this.layers.fill(
             number(0),
-            { x: number(1), y: number(2), width: number(3), height: number(4) },
-            number(5),
+            { x: clipInteger(1), y: clipInteger(2), width: clipInteger(3), height: clipInteger(4) },
+            clipInteger(5),
           )
         )
           this.dirty = true
         break
       case 'Layer.image': {
-        const id = number(0)
-        this.layers.bitmap(id)
-        const { image, province } = await this.images.load(text(1), number(2))
-        this.control.check()
-        this.layers.image(id, image, province)
-        value = image.metadata ? scriptRecord(Object.fromEntries(image.metadata)) : null
-        this.dirty = true
+        const id = number(0),
+          record = this.layerObjects!.get(id),
+          ticket = this.layers.beginImageLoad(id)
+        try {
+          const { image, province } = await cancelable(
+            this.images.load(text(1), number(2)),
+            this.control,
+          )
+          this.control.check()
+          if (record.finished) throw new Error('Layer has been invalidated')
+          if (!this.layers.finishImageLoad(ticket, image, province))
+            throw new Error('Image load destination changed')
+          value = image.metadata ? scriptRecord(Object.fromEntries(image.metadata)) : null
+          this.dirty = true
+        } catch (error) {
+          if (error instanceof ProvinceImageLoadError) {
+            this.control.check()
+            // Native keeps the completed main image when its companion fails.
+            // A changed destination or stopped session must not receive it.
+            if (!record.finished) {
+              const { width, height } = ticket.layer
+              // The failure skips LoadImages' final Update. Only a change to
+              // the Layer's display dimensions requests one during that load.
+              if (
+                this.layers.finishImageLoad(ticket, error.image) &&
+                (ticket.layer.width !== width || ticket.layer.height !== height)
+              )
+                this.dirty = true
+            }
+            throw error.cause
+          }
+          throw error
+        }
         break
       }
       case 'Layer.provinceImage': {
         const id = number(0),
-          bitmap = this.layers.bitmap(id),
-          province = await this.images.province(text(1), bitmap.width, bitmap.height)
-        this.control.check()
-        this.layers.provinceImage(id, province)
-        this.dirty = true
+          record = this.layerObjects!.get(id),
+          ticket = this.layers.beginProvinceImage(id)
+        try {
+          const province = await cancelable(
+            this.images.province(text(1), ticket.width, ticket.height),
+            this.control,
+          )
+          this.control.check()
+          // Font finalizers may load while the Layer is closing: native images
+          // remain usable until releaseImage. That release revokes the ticket.
+          if (record.finished) throw new Error('Layer has been invalidated')
+          if (!this.layers.finishProvinceImage(ticket, province))
+            throw new Error('Province image load destination changed')
+        } catch (error) {
+          this.layers.failProvinceImage(ticket)
+          throw error
+        }
         break
       }
       case 'Layer.text': {
@@ -3402,13 +3437,15 @@ export class EngineSession {
         this.dirty = true
         break
       case 'Layer.color':
-        this.layers.color(
-          number(0),
-          { x: number(1), y: number(2), width: number(3), height: number(4) },
-          number(5),
-          number(6),
+        if (
+          this.layers.color(
+            number(0),
+            { x: clipInteger(1), y: clipInteger(2), width: clipInteger(3), height: clipInteger(4) },
+            clipInteger(5),
+            clipInteger(6),
+          )
         )
-        this.dirty = true
+          this.dirty = true
         break
       case 'Layer.imagePos':
         this.layers.imagePosition(number(0), number(1), number(2))
@@ -3429,13 +3466,22 @@ export class EngineSession {
       case 'Layer.assignImages':
         if (this.layers.assignImages(number(0), number(1))) this.dirty = true
         break
+      case 'Layer.independImage': {
+        const plane = text(1)
+        if (plane !== 'main' && plane !== 'province') throw new Error('Invalid image plane')
+        // Both buffers are already exclusively owned. Still validate the live
+        // Layer and accept the TJS-converted copy argument without allocating.
+        number(2)
+        this.layers.independImage(number(0), plane)
+        break
+      }
       case 'Layer.copy':
         if (
-          this.layers.copy(number(0), number(1), number(2), number(3), {
-            x: number(4),
-            y: number(5),
-            width: number(6),
-            height: number(7),
+          this.layers.copy(number(0), clipInteger(1), clipInteger(2), number(3), {
+            x: clipInteger(4),
+            y: clipInteger(5),
+            width: clipInteger(6),
+            height: clipInteger(7),
           })
         )
           this.dirty = true
@@ -3620,8 +3666,7 @@ export class EngineSession {
         break
       }
       case 'Layer.flip':
-        this.layers.bitmap(number(0)).flip(!!number(1))
-        this.layers.get(number(0)).imageModified = true
+        this.layers.flip(number(0), !!number(1))
         this.dirty = true
         break
       case 'Layer.convertType': {
@@ -3685,9 +3730,11 @@ export class EngineSession {
         if (plane !== 'main' && plane !== 'mask' && plane !== 'province')
           throw new Error('Invalid pixel plane')
         if (operation === 'Layer.pixelGet')
-          value = BigInt(this.layers.bitmap(number(0)).getPixel(number(1), number(2), plane))
+          value = BigInt(this.layers.getPixel(number(0), clipInteger(1), clipInteger(2), plane))
         else {
-          if (this.layers.setPixel(number(0), number(1), number(2), number(4), plane))
+          if (
+            this.layers.setPixel(number(0), clipInteger(1), clipInteger(2), clipInteger(4), plane)
+          )
             this.dirty = true
         }
         break

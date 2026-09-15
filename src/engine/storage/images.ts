@@ -24,6 +24,16 @@ export interface LoadedImage {
   image: DecodedImage
   province?: Uint8Array
 }
+/** The main image finished loading before its optional province companion failed. */
+export class ProvinceImageLoadError extends Error {
+  constructor(
+    readonly image: DecodedImage,
+    readonly cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'ProvinceImageLoadError'
+  }
+}
 interface ImageScheduler {
   now(): number
   check(): void
@@ -142,15 +152,16 @@ export class ImageLoader {
     if (mask) await this.finish(applyImageMask(image, await this.cache.read(mask)))
     await this.finish(matteImage(image, key))
     const province = this.companion(name, '_p', false)
-    return {
-      image,
-      ...(province
-        ? {
-            province: await this.finish(
-              provincePixels(await this.cache.read(province), image.width, image.height),
-            ),
-          }
-        : {}),
+    if (!province) return { image }
+    try {
+      return {
+        image,
+        province: await this.finish(
+          provincePixels(await this.cache.read(province), image.width, image.height),
+        ),
+      }
+    } catch (cause) {
+      throw new ProvinceImageLoadError(image, cause)
     }
   }
   async province(name: string, width: number, height: number): Promise<Uint8Array> {

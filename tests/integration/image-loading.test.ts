@@ -29,13 +29,16 @@ layer.imageModified=false;var failures=0;
 try{layer.loadImages("bad");}catch(e){failures++;}
 try{layer.loadImages("invalid");}catch(e){failures++;}
 try{layer.loadProvinceImage("plain");}catch(e){failures++;}
-var preserved=failures==3 && layer.clipLeft==1 && layer.getProvincePixel(1,0)==1 && layer.getMaskPixel(1,0)==128 && !layer.imageModified;
+var failureState=failures==3 && layer.clipLeft==0 && layer.getProvincePixel(1,0)==0 && layer.getMainPixel(0,0)==0xc86432 && layer.getMaskPixel(0,0)==64 && layer.getMaskPixel(1,0)==128 && layer.imageModified;
 layer.loadImages("plain");var cleared=layer.getProvincePixel(1,0)==0 && layer.getMaskPixel(0,0)==64 && layer.clipLeft==0;
 `,
   })
   try {
     await session.start()
-    assert.equal(await session.evaluate('loaded && tiled && province && preserved && cleared'), '1')
+    assert.equal(
+      await session.evaluate('loaded && tiled && province && failureState && cleared'),
+      '1',
+    )
   } finally {
     await session.stop()
   }

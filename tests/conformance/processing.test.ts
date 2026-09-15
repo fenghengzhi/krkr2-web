@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { Bitmap } from '../../src/engine/graphics/bitmap.ts'
 import { boxBlur } from '../../src/engine/graphics/processing.ts'
+import { LayerTree } from '../../src/engine/scene/layers.ts'
 import { processingCases } from '../helpers/processing-vectors.ts'
 function finish<T>(work: Generator<void, T>): T {
   let result = work.next()
@@ -101,32 +102,35 @@ test('blur samples outside the clip, bounds its work by the bitmap and skips zer
 })
 
 test('conversion and flipping cover the whole bitmap while grayscale obeys clip', () => {
-  const bitmap = new Bitmap(3, 2)
+  const tree = new LayerTree(),
+    id = tree.create(0)
+  tree.resizeImage(id, 3, 2)
+  const bitmap = tree.bitmap(id)
   for (let y = 0; y < 2; y++)
     for (let x = 0; x < 3; x++) {
       const index = y * 3 + x + 1
       bitmap.setPixel(x, y, index * 0x10000, 'main')
       bitmap.setPixel(x, y, index + 10, 'mask')
-      bitmap.setPixel(x, y, index + 40, 'province')
+      tree.setPixel(id, x, y, index + 40, 'province')
     }
   bitmap.setClip({ x: 1, y: 0, width: 1, height: 1 })
-  bitmap.flip(true)
-  bitmap.flip(false)
+  tree.flip(id, true)
+  tree.flip(id, false)
   for (let y = 0; y < 2; y++)
     for (let x = 0; x < 3; x++) {
       const index = 6 - y * 3 - x
       assert.equal(bitmap.getPixel(x, y, 'main'), index * 0x10000)
       assert.equal(bitmap.getPixel(x, y, 'mask'), index + 10)
-      assert.equal(bitmap.getPixel(x, y, 'province'), index + 40)
+      assert.equal(tree.getPixel(id, x, y, 'province'), index + 40)
     }
   bitmap.grayscale()
   assert.equal(bitmap.getPixel(1, 0, 'main'), 0x010101)
   assert.equal(bitmap.getPixel(0, 0, 'main'), 0x060000)
-  const province = bitmap.province!.slice()
+  const province = tree.get(id).province!.data.slice()
   bitmap.convert(true)
   assert.equal(bitmap.getPixel(0, 0, 'main'), 0)
   assert.equal(bitmap.getPixel(0, 0, 'mask'), 16)
-  assert.deepEqual(bitmap.province, province)
+  assert.deepEqual(tree.get(id).province!.data, province)
   bitmap.convert(false)
   assert.equal(bitmap.getPixel(0, 0, 'mask'), 16)
 })

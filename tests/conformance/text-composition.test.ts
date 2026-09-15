@@ -16,14 +16,19 @@ test('text composition rejects unsupported faces before touching empty or transp
     [3, 255],
     [4, -1],
   ]) {
-    const bitmap = new Bitmap(3, 1, 0x7f123456),
-      before = bitmap.pixels.data.slice(),
+    const tree = new LayerTree(),
+      id = tree.create(0)
+    tree.resizeImage(id, 3, 1)
+    const bitmap = tree.bitmap(id)
+    bitmap.fill(bitmap.clip, 0x7f123456, 0, false)
+    tree.get(id).face = face!
+    const before = bitmap.pixels.data.slice(),
       revision = bitmap.revision
     for (const image of [glyph, { width: 0, height: 0, data: new Uint8Array() }])
-      assert.throws(() => bitmap.composite(image, 20, 20, face!, opacity!), /dfAlpha|dfAddAlpha/)
+      assert.throws(() => tree.composite(id, image, 20, 20, opacity!), /dfAlpha|dfAddAlpha/)
     assert.deepEqual(bitmap.pixels.data, before)
     assert.equal(bitmap.revision, revision)
-    assert.equal(bitmap.province, undefined)
+    assert.equal(tree.get(id).province, undefined)
   }
 })
 
@@ -36,13 +41,20 @@ test('zero text opacity and negative opaque opacity preserve every plane and rev
     [1, -1000],
   ])
     for (const hold of [false, true]) {
-      const bitmap = new Bitmap(3, 1, 0x7f123456),
-        before = bitmap.pixels.data.slice(),
+      const tree = new LayerTree(),
+        id = tree.create(0)
+      tree.resizeImage(id, 3, 1)
+      const bitmap = tree.bitmap(id),
+        layer = tree.get(id)
+      bitmap.fill(bitmap.clip, 0x7f123456, 0, false)
+      for (let x = 0; x < 3; x++) tree.setPixel(id, x, 0, x + 7, 'province')
+      layer.face = face!
+      layer.holdAlpha = hold
+      const before = bitmap.pixels.data.slice(),
         revision = bitmap.revision
-      bitmap.province = new Uint8Array([7, 8, 9])
-      assert.equal(bitmap.composite(glyph, 0, 0, face!, opacity!, hold), false)
+      assert.equal(tree.composite(id, glyph, 0, 0, opacity!), false)
       assert.deepEqual(bitmap.pixels.data, before)
-      assert.deepEqual([...bitmap.province], [7, 8, 9])
+      assert.deepEqual([...layer.province!.data], [7, 8, 9])
       assert.equal(bitmap.revision, revision)
     }
 })

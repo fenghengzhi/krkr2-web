@@ -95,9 +95,18 @@ class Layer {
       __host("Layer.clip",__id,int(args[0]),int(args[1]),int(args[2]),int(args[3]));
     }
   }
-  function fillRect(x,y,width,height,color) { __host("Layer.fill",__id,int(x),int(y),int(width),int(height),int(color)); }
-  function colorRect(x,y,width,height,color,opacity=255) { __host("Layer.color",__id,int(x),int(y),int(width),int(height),int(color),int(opacity)); }
-  function copyRect(x,y,source,left,top,width,height) { __host("Layer.copy",__id,int(x),int(y),source.__id,int(left),int(top),int(width),int(height)); }
+  function fillRect(args*) {
+    if(args.count<5)throw new global.Exception("Layer.fillRect requires at least five arguments");
+    __host("Layer.fill",__id,int(args[0]),int(args[1]),int(args[2]),int(args[3]),int(args[4]));
+  }
+  function colorRect(args*) {
+    if(args.count<5)throw new global.Exception("Layer.colorRect requires at least five arguments");
+    __host("Layer.color",__id,int(args[0]),int(args[1]),int(args[2]),int(args[3]),int(args[4]),int(args[5]===void?255:args[5]));
+  }
+  function copyRect(args*) {
+    if(args.count<7)throw new global.Exception("Layer.copyRect requires at least seven arguments");
+    __host("Layer.copy",__id,int(args[0]),int(args[1]),args[2].__id,int(args[3]),int(args[4]),int(args[5]),int(args[6]));
+  }
   function operateRect(x,y,source,left,top,width,height,mode=omAuto,opacity=255) {__host("Layer.operate",__id,int(x),int(y),source.__id,int(left),int(top),int(width),int(height),int(mode),int(opacity),0);}
   function pileRect(x,y,source,left,top,width,height,opacity=255) {__host("Layer.operate",__id,int(x),int(y),source.__id,int(left),int(top),int(width),int(height),omAlpha,int(opacity),1);}
   function blendRect(x,y,source,left,top,width,height,opacity=255) {__host("Layer.operate",__id,int(x),int(y),source.__id,int(left),int(top),int(width),int(height),omOpaque,int(opacity),1);}
@@ -128,8 +137,16 @@ class Layer {
   }
   function saveLayerImage(name,type="bmp"){__host("Layer.saveImage",__id,string(name),string(type));}
   function assignImages(source) { __host("Layer.assignImages",__id,source.__id); }
-  function loadImages(name,key=clNone) { return __host("Layer.image",__id,string(name),int(key)); }
-  function loadProvinceImage(name) { __host("Layer.provinceImage",__id,string(name)); }
+  function independMainImage(copy=void) { __host("Layer.independImage",__id,"main",int(copy===void?true:!!copy)); }
+  function independProvinceImage(copy=void) { __host("Layer.independImage",__id,"province",int(copy===void?true:!!copy)); }
+  function loadImages(args*) {
+    if(args.count<1)throw new global.Exception("Layer.loadImages requires at least one argument");
+    return __host("Layer.image",__id,string(args[0]),int(args[1]===void?clNone:args[1]));
+  }
+  function loadProvinceImage(args*) {
+    if(args.count<1)throw new global.Exception("Layer.loadProvinceImage requires at least one argument");
+    __host("Layer.provinceImage",__id,string(args[0]));
+  }
   function drawText(args*) {
     if(args.count<4)throw new global.Exception("Layer.drawText requires at least four arguments");
     __host("Layer.text",__id,int(args[0]),int(args[1]),string(args[2]),int(args[3]),__fontData,
@@ -159,10 +176,14 @@ class Layer {
   function getLayerAt(x,y,excludeSelf=false,getDisabled=false) { return __host("Input.hit",__id,int(x),int(y),int(excludeSelf),int(getDisabled)); }
   ${['Main', 'Mask', 'Province']
     .map(
-      (
-        plane,
-      ) => `function get${plane}Pixel(x,y){return __host("Layer.pixelGet",__id,int(x),int(y),"${plane.toLowerCase()}");}
-  function set${plane}Pixel(x,y,value){__host("Layer.pixelSet",__id,int(x),int(y),"${plane.toLowerCase()}",int(value));}`,
+      (plane) => `function get${plane}Pixel(args*){
+    if(args.count<2)throw new global.Exception("Layer.get${plane}Pixel requires at least two arguments");
+    return __host("Layer.pixelGet",__id,int(args[0]),int(args[1]),"${plane.toLowerCase()}");
+  }
+  function set${plane}Pixel(args*){
+    if(args.count<3)throw new global.Exception("Layer.set${plane}Pixel requires at least three arguments");
+    __host("Layer.pixelSet",__id,int(args[0]),int(args[1]),"${plane.toLowerCase()}",int(args[2]));
+  }`,
     )
     .join('\n')}
   property window { getter(){return __host("Layer.relation",__id,"window");} }
