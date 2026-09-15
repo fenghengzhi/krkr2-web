@@ -49,7 +49,7 @@ import { FontService } from './graphics/fonts.ts'
 import { FontCatalog } from './graphics/font-catalog.ts'
 import { FontSelection } from './graphics/font-selection.ts'
 import { cancelable } from './scheduler/cancelable.ts'
-import { Bitmap } from './graphics/bitmap.ts'
+import { Bitmap, intersect } from './graphics/bitmap.ts'
 import type { FontDescriptor, FontPreview, FontSelectionRequest } from './ports/fonts.ts'
 import { fontPreviewSize } from './ports/fonts.ts'
 import type { AudioBackend } from './ports/audio.ts'
@@ -2129,14 +2129,44 @@ export class EngineSession {
           rect = { x: number(4), y: number(5), width: number(6), height: number(7) }
         // Native PiledCopy rejects either missing main image before Complete
         // can run onPaint. A callback cannot repair an invalid copy request.
-        this.layers.bitmap(id)
+        const destination = this.layers.bitmap(id)
         this.layers.bitmap(source)
+        // ClipDestPointAndSrcRect precedes native Complete. An empty target
+        // leaves its source's pending paint untouched; the source drawing clip
+        // does not participate in this preflight.
+        const target = intersect(destination.clip, {
+          x: left,
+          y: top,
+          width: rect.width,
+          height: rect.height,
+        })
+        if (!target.width || !target.height) break
+        const clippedSource = {
+          x: rect.x + target.x - left,
+          y: rect.y + target.y - top,
+          width: target.width,
+          height: target.height,
+        }
         const session = this
         return this.inputs!.start(
           (function* () {
             yield* session.prepareFrame(source)
-            session.layers.bitmap(id).copyPixels(session.composer.snapshot(source), left, top, rect)
-            session.layers.get(id).imageModified = true
+            // onPaint can change the destination's clip or replace its image.
+            // Keep the original clipped request, but use the current image and
+            // its bounds, as native MainImage->CopyRect does after Complete.
+            if (
+              session.layers
+                .bitmap(id)
+                .copyPixels(
+                  session.composer.snapshot(source),
+                  target.x,
+                  target.y,
+                  clippedSource,
+                  false,
+                  target,
+                )
+            )
+              session.layers.get(id).imageModified = true
             session.dirty = true
             return undefined
           })(),
