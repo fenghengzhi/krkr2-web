@@ -74,6 +74,14 @@ source.hasImage=true;target.hasImage=false;var targetErrors=0;
 try{target.piledCopy(9,0,source,0,0,1,1);}catch(error){targetErrors++;}
 var missingTargetProof=targetErrors+","+paints+","+int(source.callOnPaint)+","+int(target.hasImage);
 target.hasImage=true;
+function completePendingPaint(){
+  // Preserve the existing paint request and count. An ordinary frame may
+  // already have consumed it; otherwise this nonempty copy must complete it.
+  target.setClip(0,0,4,2);
+  source.setMainPixel(0,0,0x123456);source.setMaskPixel(0,0,71);
+  target.piledCopy(0,0,source,0,0,1,1);
+  return paints+","+int(source.callOnPaint)+","+target.getMainPixel(0,0)+","+target.getMaskPixel(0,0);
+}
 `,
       )
       try {
@@ -83,7 +91,10 @@ target.hasImage=true;
         await evaluate(page, 'emptyProof', '0,1,0,85')
         await evaluate(page, 'missingSourceProof', '1,0,1,0')
         await evaluate(page, 'missingTargetProof', '1,0,1,0')
-        await evaluate(page, 'paints+","+int(source.callOnPaint)', '1,0')
+        // Force a real completion rather than relying on an autonomous frame
+        // between console actions. No rearming or counter reset masks a lost
+        // or duplicated original request, and exact pixels prove a real copy.
+        await evaluate(page, 'completePendingPaint()', '1,0,1193046,71')
       } finally {
         await stop()
       }
