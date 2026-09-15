@@ -1,5 +1,7 @@
 # 054：copyRect 的 mask 复制和空写入
 
+当前状态：本片代码已随055组合的[完整回归34955337265](https://github.com/fenghengzhi/krkr2-web/actions/runs/34955337265)通过；完整来源与78项兼容结果见[055](055-layer-assign-images.md)。下文保留此前单独阶段的失败和当时状态。
+
 本阶段基于 053 的 `40cedd4`，修正 `copyRect` 的 opaque mask 复制，以及 `copyRect`／`fillRect`／main、mask 单像素写入的空区域和主图检查顺序。Node 与原 78 项兼容矩阵已通过 GitHub Actions；两轮完整回归各有一个浏览器失败，尚不能计为完整通过。没有本地测试、构建、类型检查、浏览器或执行探针；没有运行历史 allocation reproduction。
 
 ## 固定原版依据

@@ -1,6 +1,6 @@
 # 055：assignImages 保留目标字体与自身状态
 
-本阶段基于 054 的 `a76af99`，修正 `Layer.assignImages` 的字体、图像分配与自赋值语义。首轮GitHub-hosted Actions已有结果（见文末），整体失败，没有本地测试、构建、类型检查、浏览器或执行探针。本页不表示整个非插件运行时已完成。
+本阶段基于 054 的 `a76af99`，修正 `Layer.assignImages` 的字体、图像分配与自赋值语义。第二轮组合GitHub-hosted Actions已全部通过（见文末），首轮失败原样保留，没有本地测试、构建、类型检查、浏览器或执行探针。本页不表示整个非插件运行时已完成。
 
 ## 原版依据
 
@@ -72,3 +72,9 @@ target.assignImages(target);
 唯一失败为WebKit／JSPI远程XP3游戏库场景：首次加载后的ready断言明确报 `Page crashed`，实际等待240.964ms（预算12秒），整个case1075ms。尚未保存到游戏库、停止服务器或离线重载。XP3仅记录一字节Range读取，manifest／mjs／wasm均成功返回，全部10条网络记录状态成功；没有原生崩溃报告、调用栈或OOM证据，根因未知，不能与前轮graphics=restoring推为同因。完整14 artifacts／315文件、逐项结果、build-info与哈希独立归档，早期失败trace和作业日志保留原状。首轮失败不因新增Node全部通过而改计成功。
 
 另行启动的KAG及发布兼容矩阵 [34954688171](https://github.com/fenghengzhi/krkr2-web/actions/runs/34954688171)复用上述准确构建；记录时尚未完成，不计为通过。
+
+## 组合版本完整通过
+
+[完整回归 34955337265](https://github.com/fenghengzhi/krkr2-web/actions/runs/34955337265)在 `cf564282` 通过 **1,431 项 Node、1,041 项浏览器和 6 组直接运行时**，14个作业全部成功；浏览器包含918常规、57游戏库、59 PWA、7可信生命周期，零失败、取消、跳过或flaky。[兼容检查 34954688171](https://github.com/fenghengzhi/krkr2-web/actions/runs/34954688171)在 `c35ac758` 复用构建34952630856通过 **78 项原 KAG／旧 ABI 检查**；到当前提交，应用及内核源码不变，仅文档与runner诊断改变，两个构建的来源分别保留。
+
+本片64项、053的20项与054的30项新增Node全部包含在1,431项中。当前构建完整证据为14 artifacts／382原件，13份独立build-info及test-build归档内第14份均绑定cf564282；逐项结果和SHA-256另存root-evidence-summary.json／md。新增runner诊断实际保存12份Linux display时间线及3份macOS crash manifest，本轮没有收集到匹配崩溃报告；这不等于证明没有崩溃或已修复历史根因。原各轮失败、早期快照和未完成范围继续保留。

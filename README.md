@@ -48,7 +48,7 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 `Layer.neutralColor` 已支持每实例的可写 32 位 ARGB，供图像扩容、重新分配和仿射清除使用。无主图的 opaque 图层按该颜色显示并参与祖先快照；`piledCopy` 会在 onPaint 前拒绝缺少主图的来源或目标。详见[中性颜色](docs/decisions/046-layer-neutral-color.md)。
 
-`Window.mainWindow` 已返回实际主窗口实例或 null；`piledCopy` 的空目标区域会在 onPaint 前返回，并保留待绘制状态。图像保存取消新增浏览器按钮调用顺序和编码器内部检查点验证，三项已随 050 完整回归通过，见 [Window 查询](docs/decisions/047-window-main-instance.md)、[空矩形复制](docs/decisions/049-piled-copy-empty-region.md)及[保存取消](docs/decisions/050-image-save-cancellation.md)。同一会话现支持多个页面内 Window，各自拥有画布、图层输入、菜单和视频平面；共享一个 Worker 与 TJS VM。单窗嵌入布局、浮动窗口、主窗退出和画布恢复见[多窗口实现](docs/decisions/051-multiwindow.md)。Window.showModal 与菜单嵌套事件循环仍待完成。
+`Window.mainWindow` 已返回实际主窗口实例或 null；`piledCopy` 的空目标区域会在 onPaint 前返回，并保留待绘制状态。图像保存取消新增浏览器按钮调用顺序和编码器内部检查点验证，三项已随 050 完整回归通过，见 [Window 查询](docs/decisions/047-window-main-instance.md)、[空矩形复制](docs/decisions/049-piled-copy-empty-region.md)及[保存取消](docs/decisions/050-image-save-cancellation.md)。同一会话现支持多个页面内 Window，各自拥有画布、图层输入、菜单和视频平面；共享一个 Worker 与 TJS VM。单窗嵌入布局、浮动窗口、主窗退出和画布恢复见[多窗口实现](docs/decisions/051-multiwindow.md)。Window.showModal 与菜单嵌套事件循环仍待完成。 图层裁剪、copyRect空写入和assignImages目标字体保留已随055组合验证，参见[裁剪](docs/decisions/053-layer-clip.md)、[复制](docs/decisions/054-layer-copy-rect.md)和[图像赋值](docs/decisions/055-layer-assign-images.md)。
 
 菜单更新保留仍存在的项目节点，避免更新打断展开或点击。视频打开等待真实首帧，周期和区间事件使用媒体时钟补充呈现回调；错误历史和精度边界见 [视频首帧与时钟](docs/decisions/035-video-readiness.md)。
 
@@ -125,6 +125,12 @@ docs/             架构、已验证决策与兼容范围
 [ZIP 资源](docs/decisions/015-zip-storage.md)说明 TypeScript 索引、Web 按需解压、ZIP64、Unicode 文件名、CRC 校验及 `archive>entry` 地址。文件导入支持 ZIP，游戏写入继续进入存档覆盖层。
 
 ## 验证
+
+[完整回归 34955337265](https://github.com/fenghengzhi/krkr2-web/actions/runs/34955337265)在 `cf564282` 通过 **1,431 项 Node、1,041 项浏览器和 6 组直接运行时**，14个作业全部成功；浏览器包含918常规、57游戏库、59 PWA、7可信生命周期，零失败、取消、跳过或flaky。[兼容检查 34954688171](https://github.com/fenghengzhi/krkr2-web/actions/runs/34954688171)在 `c35ac758` 复用构建34952630856通过 **78 项原 KAG／旧 ABI 检查**；到当前提交，应用及内核源码不变，仅文档与runner诊断改变，两个构建的来源分别保留。
+
+052的输入ACK、原生检查点与Window.showModal仍在独立分支验收，尚未纳入这里的已验证版本。菜单嵌套、其他图形／系统API、流式媒体与旧视频编码仍未完成。此前V8、WebKit及Xvfb故障证据保留；本次全绿不证明其根因已修复。全部可执行验证只在GitHub-hosted Actions进行。
+
+以下保留051及更早阶段的验证历史。
 
 [完整回归 34945014092](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945014092)在 `3ef7f09` 通过 **1,317 项 Node、1,041 项浏览器和 6 组直接运行时**；浏览器包含 918 项常规、57 项游戏库、59 项 PWA、7 项可信生命周期。[兼容检查 34945755032](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945755032)使用同一提交、同次构建通过 **78 项原 KAG／旧 ABI 检查**，三浏览器各 26 项。
 

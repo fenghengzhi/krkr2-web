@@ -1,5 +1,13 @@
 # 当前实现范围
 
+当前已验证组合包含053裁剪、054 copyRect／空写入与055 assignImages：赋值保留目标Font身份及映射，深复制图像，正确处理自赋值；Binder显示透传与直接复制使用各自的完成规则。阶段边界及保留的失败见[053](../decisions/053-layer-clip.md)、[054](../decisions/054-layer-copy-rect.md)和[055](../decisions/055-layer-assign-images.md)。 会话协议10、TJS ABI5、字体ABI2保持。
+
+[完整回归 34955337265](https://github.com/fenghengzhi/krkr2-web/actions/runs/34955337265)在 `cf564282` 通过 **1,431 项 Node、1,041 项浏览器和 6 组直接运行时**，14个作业全部成功；浏览器包含918常规、57游戏库、59 PWA、7可信生命周期，零失败、取消、跳过或flaky。[兼容检查 34954688171](https://github.com/fenghengzhi/krkr2-web/actions/runs/34954688171)在 `c35ac758` 复用构建34952630856通过 **78 项原 KAG／旧 ABI 检查**；到当前提交，应用及内核源码不变，仅文档与runner诊断改变，两个构建的来源分别保留。
+
+052的输入ACK、原生检查点与Window.showModal仍在独立分支验收，尚未纳入这里的已验证版本。菜单嵌套、其他图形／系统API、流式媒体与旧视频编码仍未完成。此前V8、WebKit及Xvfb故障证据保留；本次全绿不证明其根因已修复。全部可执行验证只在GitHub-hosted Actions进行。
+
+以下保留051及更早阶段的验证历史，最新结论以上文为准。
+
 当前已验证阶段为 [051 多窗口](../decisions/051-multiwindow.md)：同一 Worker／TJS VM 内有独立 Window 身份、画布、输入、菜单和视频平面；支持页面内浮动布局、单窗嵌入布局、关闭及恢复。会话协议为 10，TJS ABI 5 与字体 ABI 2 保持。
 
 [完整回归 34945014092](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945014092)在 `3ef7f09` 通过 **1,317 项 Node、1,041 项浏览器和 6 组直接运行时**；浏览器包含 918 项常规、57 项游戏库、59 项 PWA、7 项可信生命周期。[兼容检查 34945755032](https://github.com/fenghengzhi/krkr2-web/actions/runs/34945755032)使用同一提交、同次构建通过 **78 项原 KAG／旧 ABI 检查**，三浏览器各 26 项。

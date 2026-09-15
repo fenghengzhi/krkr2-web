@@ -1,5 +1,7 @@
 # 053：Layer 绘图裁剪的参数与分配重置
 
+当前状态：本片代码已随055组合的[完整回归34955337265](https://github.com/fenghengzhi/krkr2-web/actions/runs/34955337265)通过；完整来源与78项兼容结果见[055](055-layer-assign-images.md)。下文保留此前单独阶段的失败和当时状态。
+
 本阶段仅实现 `Layer.setClip` 和图像分配路径的裁剪语义。当前提交 `40cedd4` 包含 051 的 `3ef7f09`；Node 和兼容检查通过，但完整回归有一项 WebKit 启动失败，尚未合入已验证主分支。所有执行验证由 GitHub-hosted runner 完成，本地只读源码、编辑和格式化。
 
 ## 原版依据
