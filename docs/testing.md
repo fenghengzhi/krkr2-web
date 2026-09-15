@@ -10,6 +10,12 @@
 gh workflow run test.yml --ref BRANCH -f node-only=true
 ```
 
+`runtime-only=true` 同理单独运行三浏览器、双 WASM 后端的直接运行时检查；它跳过 Node 和应用场景套件。两个诊断开关互斥，各自的成功都只覆盖选中的检查，完整回归仍使用两个开关均关闭的默认运行。
+
+```sh
+gh workflow run test.yml --ref BRANCH -f runtime-only=true
+```
+
 ## 已完成的云端回归
 
 [宿主生命周期最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)绑定 542 份证据，矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`。最新 [完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882175516)通过 **594 Node、639 浏览器、6 直接运行时**；[兼容性](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877215012)通过 **78 项**，所选测试无失败、跳过、flaky 或重试。
