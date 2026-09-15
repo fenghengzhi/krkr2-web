@@ -1,0 +1,58 @@
+// Original SDK observation, run only by the hosted Windows workflow.
+var nativeRows=[];
+function nativeRecord(text) {
+  nativeRows.add(text);
+  nativeRows.save("native-events.txt");
+}
+System.exceptionHandler=function(error) {
+  nativeRecord("error:"+error.message);
+  System.exit();
+  return true;
+};
+nativeRecord("start");
+nativeRecord("version:"+System.versionString);
+// The third timer tick is a bounded recovery close, not an expected ordering.
+class NativeModalWindow extends Window {
+  var queries=0;
+  function NativeModalWindow() { super.Window(); caption="KRKR2 accepted reclose reference"; }
+  function onCloseQuery(canClose) {
+    var emit=global.nativeRecord incontextof global;
+    var target=this;
+    var number=++queries;
+    var accept=number!=2;
+    emit("query:"+number+":"+int(accept));
+    super.onCloseQuery(accept);
+    emit("query-base-return:"+number+":"+int(isvalid target));
+    if(number==1 && (isvalid target)) {
+      emit("reclose-before");
+      target.close();
+      emit("reclose-after");
+    }
+    emit("query-return:"+number);
+  }
+}
+var nativeMain=new Window();
+nativeMain.visible=true;
+var nativeModal=new NativeModalWindow();
+var nativeTicks=0;
+function nativeTick(event) {
+  nativeTicks++;
+  nativeRecord("tick:"+nativeTicks);
+  if(nativeTicks==1 || nativeTicks==3) {
+    if(nativeTicks==3)nativeTimer.enabled=false;
+    nativeRecord("close-before:"+nativeTicks);
+    nativeModal.close();
+    nativeRecord("close-after:"+nativeTicks);
+  }
+}
+var nativeTimer=new Timer(global,"nativeTick");
+nativeTimer.enabled=false;
+nativeTimer.interval=150;
+nativeRecord("modal-before");
+nativeTimer.enabled=true;
+var nativeResult=nativeModal.showModal();
+nativeTimer.enabled=false;
+nativeRecord("modal-after:"+int(nativeResult===void)+":"+int(isvalid nativeModal)+":ticks="+nativeTicks);
+if(isvalid nativeModal)nativeRecord("visible-after:"+int(nativeModal.visible)+":queries="+nativeModal.queries);
+nativeRecord("observations-complete");
+System.exit();

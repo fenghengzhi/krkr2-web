@@ -1,0 +1,70 @@
+// Original SDK observation, run only by the hosted Windows workflow.
+var nativeRows=[];
+function nativeRecord(text) {
+  nativeRows.add(text);
+  nativeRows.save("native-events.txt");
+}
+System.exceptionHandler=function(error) {
+  nativeRecord("error:"+error.message);
+  System.exit();
+  return true;
+};
+nativeRecord("start");
+nativeRecord("version:"+System.versionString);
+// Observe a child showModal opened after its parent's close has been accepted.
+class NativeChildWindow extends Window {
+  function NativeChildWindow() { super.Window(); caption="KRKR2 child modal reference"; }
+  function onCloseQuery(canClose) {
+    var emit=global.nativeRecord incontextof global;
+    emit("child-query");
+    super.onCloseQuery(true);
+    emit("child-query-return");
+  }
+}
+class NativeParentWindow extends Window {
+  function NativeParentWindow() { super.Window(); caption="KRKR2 parent modal reference"; }
+  function onCloseQuery(canClose) {
+    var emit=global.nativeRecord incontextof global;
+    var child=global.nativeChild;
+    var target=this;
+    emit("parent-query");
+    super.onCloseQuery(true);
+    emit("parent-accepted:"+int(isvalid target));
+    emit("child-modal-before");
+    var result=child.showModal();
+    emit("child-modal-after:"+int(result===void)+":"+int(isvalid child));
+    if(isvalid target)emit("parent-after-child-visible:"+int(target.visible));
+    emit("parent-query-return");
+  }
+}
+var nativeMain=new Window();
+nativeMain.visible=true;
+var nativeParent=new NativeParentWindow();
+var nativeChild=new NativeChildWindow();
+var nativeTicks=0;
+function nativeTick(event) {
+  nativeTicks++;
+  nativeRecord("tick:"+nativeTicks);
+  if(nativeTicks==1) {
+    nativeRecord("parent-close-before");
+    nativeParent.close();
+    nativeRecord("parent-close-after");
+  } else {
+    nativeTimer.enabled=false;
+    nativeRecord("child-close-before");
+    nativeChild.close();
+    nativeRecord("child-close-after");
+  }
+}
+var nativeTimer=new Timer(global,"nativeTick");
+nativeTimer.enabled=false;
+nativeTimer.interval=150;
+nativeRecord("parent-modal-before");
+nativeTimer.enabled=true;
+var nativeResult=nativeParent.showModal();
+nativeTimer.enabled=false;
+nativeRecord("parent-modal-after:"+int(nativeResult===void)+":"+int(isvalid nativeParent));
+if(isvalid nativeParent)nativeRecord("parent-visible-after:"+int(nativeParent.visible));
+if(isvalid nativeChild)nativeRecord("child-visible-after:"+int(nativeChild.visible));
+nativeRecord("observations-complete");
+System.exit();
