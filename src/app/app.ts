@@ -187,6 +187,9 @@ export function mountApp(root: HTMLDivElement): void {
   const setDebugVisibility = async (panel: DebugPanel, visible: boolean) => {
     const current = generation,
       instance = player
+    // Pointer clicks do not focus buttons on every browser. Move focus as part
+    // of this user action, before a delayed reply can outlive a later focus move.
+    if (!visible) el('toggle-' + panel).focus()
     if (snapshot && instance) {
       const next = await instance.session.setDebugVisibility(panel, visible)
       if (current !== generation || player !== instance) return

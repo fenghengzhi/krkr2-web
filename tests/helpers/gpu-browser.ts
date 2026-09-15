@@ -12,9 +12,6 @@ interface GpuState {
   failProgram: number
   failTexture: number
   loseOnUpload: boolean
-  startupGateReads: number
-  startupGateReturns: number
-  releaseStartupGate?: () => void
 }
 type InstrumentedGlobal = typeof globalThis & { __gpuTest: GpuState }
 
@@ -23,7 +20,6 @@ export async function injectGpu(
   page: Page,
   loseOnUpload = false,
   loseAtCreation = false,
-  startupGate?: string,
 ): Promise<void> {
   await page.addInitScript(() => {
     const NativeWorker = window.Worker
@@ -40,35 +36,7 @@ export async function injectGpu(
     const response = await route.fetch()
     const instrumentation = `(() => {
       const stats = self.__gpuTest = { lost:0, restored:0, programs:0, uploads:0, draws:0,
-        failProgram:0, failTexture:0, loseOnUpload:${loseOnUpload}, startupGateReads:0, startupGateReturns:0 };
-      const startupGate = ${JSON.stringify(startupGate ?? null)};
-      if (startupGate !== null) {
-        let heldRequest, heldOnce = false;
-        const post = MessagePort.prototype.postMessage;
-        MessagePort.prototype.postMessage = function(message, ...transfer) {
-          if (!heldOnce && message?.type === 'request' &&
-              [message.generation, message.windowId, message.surfaceEpoch].every(value => Number.isSafeInteger(value) && value > 0)) {
-            heldOnce = true;
-            heldRequest = () => post.call(this, message, ...transfer);
-            return;
-          }
-          return post.call(this, message, ...transfer);
-        };
-        const read = Blob.prototype.arrayBuffer;
-        Blob.prototype.arrayBuffer = async function() {
-          const bytes = await read.call(this);
-          if (heldRequest && new TextDecoder().decode(bytes) === startupGate) {
-            stats.startupGateReads++;
-            const pending = new Promise(resolve => { stats.releaseStartupGate = resolve; });
-            const request = heldRequest;
-            heldRequest = undefined;
-            request();
-            await pending;
-            stats.startupGateReturns++;
-          }
-          return bytes;
-        };
-      }
+        failProgram:0, failTexture:0, loseOnUpload:${loseOnUpload} };
       const get = OffscreenCanvas.prototype.getContext;
       OffscreenCanvas.prototype.getContext = function(...args) {
         const gl = get.apply(this,args);
@@ -105,43 +73,19 @@ export async function gpuWorker(page: Page): Promise<Worker> {
 }
 export function gpuStats(worker: Worker) {
   return worker.evaluate(() => {
-    const {
-      gl,
-      extension,
-      lost,
-      restored,
-      programs,
-      uploads,
-      draws,
-      startupGateReads,
-      startupGateReturns,
-    } = (globalThis as InstrumentedGlobal).__gpuTest
+    const { gl, extension, lost, restored, programs, uploads, draws } = (
+      globalThis as InstrumentedGlobal
+    ).__gpuTest
     return {
       lost,
       restored,
       programs,
       uploads,
       draws,
-      startupGateReads,
-      startupGateReturns,
       isLost: gl.isContextLost(),
       extension: !!extension,
     }
   })
-}
-/** Complete the real startup read while the GPU is still lost, outside the VM queue. */
-export async function releaseGpuStartupGate(worker: Worker): Promise<void> {
-  await worker.evaluate(async () => {
-    const state = (globalThis as InstrumentedGlobal).__gpuTest
-    if (!state.releaseStartupGate || state.startupGateReads !== 1)
-      throw new Error('The pending startup read was not reached')
-    state.releaseStartupGate()
-    state.releaseStartupGate = undefined
-    // Drain I/O continuations and a Worker task turn. A broken pause checkpoint
-    // can now advance startup; the test checks its output before restoring GPU.
-    await new Promise<void>((resolve) => setTimeout(resolve, 0))
-  })
-  await expect.poll(async () => (await gpuStats(worker)).startupGateReturns).toBe(1)
 }
 export async function loseGpu(worker: Worker, failure?: 'program' | 'texture') {
   const before = await gpuStats(worker)

@@ -6,7 +6,7 @@
 
 保留一个 Worker、TJS VM、系统事件队列与音频混音器。Window 登记、mainWindow 和当前活动窗口分开管理；每个 Window 分别拥有 Layer 输入控制器、菜单根、视频显示平面和 OffscreenCanvas Renderer。页面内窗口宿主提供标题、拖动、大小调整及全屏协调。
 
-画布通过独立 MessagePort 动态连接，以 generation、windowId、surfaceEpoch 标识生命周期。首次连接和第一帧之前使用 restoring/pending 状态，不暂停其他窗口的脚本或媒体。真正的图形故障及恢复仍沿用会话整体暂停策略；晚到的连接、输入、菜单选择和视频请求不能重新建立已关闭窗口。
+画布通过独立 MessagePort 动态连接，以 generation、windowId、surfaceEpoch 标识生命周期。首次连接的 restoring/pending 状态不改变全会话暂停状态；Window 构造等待自身画布完成 GPU 初始化，再继续后续 TJS 和图像分配，既有媒体继续播放。真正的图形故障及恢复仍沿用会话整体暂停策略；晚到的连接、输入、菜单选择和视频请求不能重新建立已关闭窗口。
 
 脚本 close 销毁指定窗口。用户关闭主窗口会销毁，用户关闭普通窗口则隐藏；onCloseQuery 可拒绝。System.exitOnWindowClose 默认为 true，主窗口开始原生失效后，在当前 VM 操作结束时请求退出。设置 false 可继续运行其他窗口；关闭主窗口不会把现有普通窗口提升为 mainWindow，所有已登记窗口关闭后新建的窗口才成为新的主窗口。原生依据见 [048](048-multiwindow-plan.md)。
 
@@ -33,6 +33,16 @@
 [第五轮 Node 诊断 34939029480](https://github.com/fenghengzhi/krkr2-web/actions/runs/34939029480)，提交 `c5c342b`：类型检查、构建及 **1,292／1,292 Node** 通过，零失败、取消或跳过。该诊断未运行浏览器套件；完整产物及 run.json 单独归档。
 
 [第二次兼容检查 34939219647](https://github.com/fenghengzhi/krkr2-web/actions/runs/34939219647)使用上述精确构建：原 78 项中 **76 通过、1 失败、1 未运行**。Firefox、WebKit 各 26 项全通过；Chromium 原版 KAG 流程、存档、转场及其余诊断与迁移通过，但 Asyncify debug panels 在 Shift+F4 后控制台仍隐藏，后续 JSPI debug panels 未执行。trace 显示 canvas 已聚焦后，迟到的隐藏面板 RPC 又无条件聚焦 toggle-controller。修订删除这次异步抢焦点，保留 update() 对仍在待隐藏面板内的焦点迁移，新增受控延迟请求与真实快捷键回归；原 KAG probe 不添加等待或再次聚焦。
+
+[第二次完整回归 34939326752](https://github.com/fenghengzhi/krkr2-web/actions/runs/34939326752)，提交 `c5c342b`：Node **1,292／1,292** 通过；浏览器 **992／1,029 通过、37 失败**，零跳过或 flaky；6 组直接运行时通过。常规 Chromium、Firefox 各 290／302，WebKit 289／302。36 个失败来自 Window 鼠标回调泄漏小数坐标，以及原生主窗关闭后页面宿主／Worker 未完成退出。修订只在 Window 六类鼠标回调参数边界向零截断，保留物理指针、Layer 变换和触摸精度；原生正常退出会继续清理页面和 Worker，并在原用例中观察实际 Worker 终止。
+
+[Node 诊断 34940763466](https://github.com/fenghengzhi/krkr2-web/actions/runs/34940763466)，提交 `e7da203`，通过 **1,296／1,296**，零失败、取消或跳过。[第三次完整回归 34940746392](https://github.com/fenghengzhi/krkr2-web/actions/runs/34940746392)的 Node 同样全通过，浏览器 **1,036／1,041 通过、5 失败**：Chromium 304／306、Firefox 306／306、WebKit 303／306，其他 123 项与 6 组直接运行时通过。两项 Chromium 启动失败状态被退出清理重置为待机，已分开失败清理与正常退出；两项 WebKit 隐藏按钮没有迁移焦点，改为用户操作开始时同步聚焦 toggle，不在 RPC 回复后抢走新焦点。原断言保留。
+
+[第四次完整回归 34941841853](https://github.com/fenghengzhi/krkr2-web/actions/runs/34941841853)，提交 `2593a71`：浏览器 **1,039／1,041 通过、2 失败**（仍是 WebKit 的隐藏按钮焦点），6 组直接运行时通过。Node 实际 **1,282 个案例通过、1 个文件因 SIGTRAP 失败**，预期 1,296 个案例中 **14 个未报告**；文件失败占位不能计为普通案例。`layer-lifetime.test.ts` 命中已有的 V8 `jit_page_->allocations_.erase(addr) == 1` 断言，保留回溯及未知根因，不能把本轮计为通过。
+
+[第三次兼容检查 34940921002](https://github.com/fenghengzhi/krkr2-web/actions/runs/34940921002)在 `e7da203` 使用构建 `34940763466`，以及[第四次兼容检查 34943130101](https://github.com/fenghengzhi/krkr2-web/actions/runs/34943130101)在 `2593a71` 使用构建 `34941841853`，均通过原 **78／78** 项。每次完整产物及 run.json 独立保留。
+
+第二、三次完整回归另各有一项 WebKit JSPI TLG5 页面停止测试在 `encode-start` 前发生 WebGL context loss，Stop 观察记录为空，未走到编码取消。第四次该项通过，不能证明历史故障已修复。只读证据确认 050 在 VM 初始化前建立 GPU，051 原异步连接可能与大图 CPU 分配重叠，但没有证明泄漏或 OOM。当前修订让 Window 构造等待自己的初始画布就绪，空白 1×1 帧不依赖 VM 绘制；等待可取消，lost/failed 可跨重试继续，Stop 在 queue drain 前解除等待。新增 11 项渲染等待测试和 10 项真实 Session 源码／字节码检查；构造 GPU 场景直接验证原构造挂起、恢复后只返回一次，删除旧构造后文件门闩。这些新改动仍待 Actions 验证，不预先认定历史上下文丢失根因已修复。
 
 ## 验证范围和边界
 

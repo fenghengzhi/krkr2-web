@@ -551,7 +551,7 @@ test('worker surfaces buffer the latest frame and reject stale, duplicate and cl
   assert.equal(port.listeners.size, 0)
 })
 
-test('surface attachment bootstraps an awaiting VM without requiring a frame from its serial queue', () => {
+test('surface attachment bootstraps an awaiting VM without requiring a frame from its serial queue', async () => {
   const port = new FakePort(),
     backend = new FakeRenderer(),
     statuses: string[] = [],
@@ -559,7 +559,10 @@ test('surface attachment bootstraps an awaiting VM without requiring a frame fro
   worker.subscribe((status) => statuses.push(status.state))
   try {
     worker.openWindow(1)
+    const waiting = worker.waitWindowReady(1)
     port.receive(attach())
+    await waiting.promise
+    waiting.cancel()
     assert.equal(statuses.at(-1), 'ready')
     assert.deepEqual(backend.frames[0], { layers: [], width: 1, height: 1, windowId: 1 })
     assert.ok(statuses.includes('restoring'))
@@ -674,7 +677,7 @@ for (const result of [true, undefined] as const)
   })
 
 for (const failure of ['host', 'factory'] as const)
-  test(`worker retries a ${failure} failure with a new epoch and never adopts the old canvas`, () => {
+  test(`worker retries a ${failure} failure with a new epoch and never adopts the old canvas`, async () => {
     const port = new FakePort(),
       backend = new FakeRenderer()
     let factories = 0
@@ -687,11 +690,19 @@ for (const failure of ['host', 'factory'] as const)
     })
     try {
       worker.openWindow(1)
+      const waiting = worker.waitWindowReady(1),
+        outcomes: string[] = []
+      void waiting.promise.then(
+        () => outcomes.push('ready'),
+        () => outcomes.push('rejected'),
+      )
       port.receive(
         failure === 'host' ? { type: 'failed', ...identity(), message: 'DOM failed' } : attach(),
       )
       assert.equal(worker.getStatus(1)?.state, 'failed')
       assert.equal(worker.getStatus(1)?.pending, undefined)
+      await Promise.resolve()
+      assert.deepEqual(outcomes, [])
       worker.retry(1)
       assert.equal(worker.getStatus(1)?.state, 'restoring')
       assert.equal(worker.getStatus(1)?.pending, undefined)
@@ -707,7 +718,12 @@ for (const failure of ['host', 'factory'] as const)
       port.receive(attach())
       port.receive({ type: 'failed', ...identity(), message: 'Late failure' })
       assert.equal(factories, before)
+      await Promise.resolve()
+      assert.deepEqual(outcomes, [])
       port.receive(attach(1, 2))
+      await waiting.promise
+      waiting.cancel()
+      assert.deepEqual(outcomes, ['ready'])
       assert.equal(worker.getStatus(1)?.state, 'ready')
       assert.equal(factories, before + 1)
       worker.closeWindow(1)
@@ -719,6 +735,27 @@ for (const failure of ['host', 'factory'] as const)
       worker.dispose()
     }
   })
+
+test('a cancelled readiness wait can retire an unattached Window without creating GPU resources', async () => {
+  const port = new FakePort()
+  let created = 0
+  const worker = new WorkerWindowSurfaces(port.port, 7, {
+    createRenderer() {
+      created++
+      return new FakeRenderer()
+    },
+  })
+  worker.openWindow(1)
+  const waiting = worker.waitWindowReady(1),
+    rejected = assert.rejects(waiting.promise, /readiness wait was cancelled/)
+  waiting.cancel()
+  await rejected
+  worker.closeWindow(1)
+  port.receive(attach())
+  assert.equal(created, 0)
+  worker.dispose()
+  assert.equal(port.closed, 1)
+})
 
 test('context recovery keeps the same surface and one ready Window cannot clear another failure', () => {
   const port = new FakePort(),

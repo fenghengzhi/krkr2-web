@@ -2010,7 +2010,18 @@ export class EngineSession {
       case 'Window.create': {
         if (!isScriptObject(args[0]) || !isScriptObject(args[1]))
           throw new Error('Expected Window instance and native cleanup')
-        value = BigInt(this.windows!.create(args[0], args[1], context).id)
+        const window = this.windows!.create(args[0], args[1], context),
+          readiness = this.deps.renderer.waitWindowReady?.(window.id)
+        if (readiness) {
+          try {
+            // Finish this Window's surface before the constructor continues
+            // into image allocation. Stop must unblock this wait before drain.
+            await cancelable(readiness.promise, this.control)
+          } finally {
+            readiness.cancel()
+          }
+        }
+        value = BigInt(window.id)
         break
       }
       case 'Window.main':
