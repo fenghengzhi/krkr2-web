@@ -2167,6 +2167,7 @@ export class EngineSession {
       }
       case 'Layer.releaseImage': {
         const layer = this.layers.get(number(0))
+        if (layer.bitmap) layer.clipBeforeRelease = { ...layer.bitmap.clip }
         layer.bitmap = undefined
         layer.revision++
         this.dirty = true
@@ -2264,12 +2265,14 @@ export class EngineSession {
         this.dirty = true
         break
       case 'Layer.fill':
-        this.layers.fill(
-          number(0),
-          { x: number(1), y: number(2), width: number(3), height: number(4) },
-          number(5),
+        if (
+          this.layers.fill(
+            number(0),
+            { x: number(1), y: number(2), width: number(3), height: number(4) },
+            number(5),
+          )
         )
-        this.dirty = true
+          this.dirty = true
         break
       case 'Layer.image': {
         const id = number(0)
@@ -2428,13 +2431,15 @@ export class EngineSession {
         this.dirty = true
         break
       case 'Layer.copy':
-        this.layers.copy(number(0), number(1), number(2), number(3), {
-          x: number(4),
-          y: number(5),
-          width: number(6),
-          height: number(7),
-        })
-        this.dirty = true
+        if (
+          this.layers.copy(number(0), number(1), number(2), number(3), {
+            x: number(4),
+            y: number(5),
+            width: number(6),
+            height: number(7),
+          })
+        )
+          this.dirty = true
         break
       case 'Layer.piledCopy': {
         const id = number(0),
@@ -2683,8 +2688,8 @@ export class EngineSession {
         if (operation === 'Layer.pixelGet')
           value = BigInt(this.layers.bitmap(number(0)).getPixel(number(1), number(2), plane))
         else {
-          this.layers.setPixel(number(0), number(1), number(2), number(4), plane)
-          this.dirty = true
+          if (this.layers.setPixel(number(0), number(1), number(2), number(4), plane))
+            this.dirty = true
         }
         break
       }

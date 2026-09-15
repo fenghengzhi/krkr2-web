@@ -98,7 +98,7 @@ test('overlapping copies use original source pixels and main-only copies preserv
     [1, 1, 2, 3],
   )
   const source = new Bitmap(4, 1, 0xff123456)
-  bitmap.copy(source, 0, 0, { x: 0, y: 0, width: 4, height: 1 }, 1)
+  bitmap.copy(source, 0, 0, { x: 0, y: 0, width: 4, height: 1 }, 1, true)
   assert.equal(bitmap.getPixel(2, 0, 'mask'), 127)
   bitmap.setClip({ x: 1, y: 0, width: 2, height: 1 })
   bitmap.setPixel(1, 0, 1, 'main')

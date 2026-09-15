@@ -1,5 +1,5 @@
 import type { Pixels, Rect } from '../ports/graphics.ts'
-import { Bitmap, dimension } from '../graphics/bitmap.ts'
+import { Bitmap, dimension, intersect } from '../graphics/bitmap.ts'
 import { imageTypes, autoFace, neutralColor } from '../graphics/blend.ts'
 
 export interface LayerState {
@@ -19,6 +19,8 @@ export interface LayerState {
   imageLeft: number
   imageTop: number
   bitmap?: Bitmap
+  /** Native ClipRect survives deletion of MainImage, without retaining pixels. */
+  clipBeforeRelease: Rect
   revision: number
   type: number
   neutralColor: number
@@ -163,6 +165,7 @@ export class LayerTree {
         imageLeft: 0,
         imageTop: 0,
         bitmap: new Bitmap(32, 32),
+        clipBeforeRelease: { x: 0, y: 0, width: 32, height: 32 },
         revision: 0,
         type: parent ? 2 : 1,
         // Construct promotes a primary's neutral color after allocating the
@@ -377,7 +380,10 @@ export class LayerTree {
         this.budget(layer.width * layer.height * 4)
         layer.bitmap = new Bitmap(layer.width, layer.height, this.neutral(layer))
         layer.imageLeft = layer.imageTop = 0
-      } else if (!value) layer.bitmap = undefined
+      } else if (!value) {
+        if (layer.bitmap) layer.clipBeforeRelease = { ...layer.bitmap.clip }
+        layer.bitmap = undefined
+      }
       // AllocateImage resets the drawing clip even when the backing image
       // already exists. Its pixels, province and image offset remain intact.
       if (value) layer.bitmap!.resetClip()
@@ -532,13 +538,16 @@ export class LayerTree {
     const layer = this.get(id)
     return layer.face === 128 ? autoFace(layer.type) : layer.face
   }
-  fill(id: number, rect: Rect, color: number): void {
+  fill(id: number, rect: Rect, color: number): boolean {
     const layer = this.get(id),
-      bitmap = this.bitmap(id),
+      target = intersect(layer.bitmap?.clip ?? layer.clipBeforeRelease, rect)
+    // Native FillRect clips before looking for the plane it would write.
+    if (!target.width || !target.height) return false
+    const bitmap = this.bitmap(id),
       face = this.face(id)
     if (face === 3 && !bitmap.province && color & 255) this.budget(bitmap.width * bitmap.height)
-    bitmap.fill(rect, color, face, layer.holdAlpha)
-    layer.imageModified = true
+    if (bitmap.fill(rect, color, face, layer.holdAlpha)) layer.imageModified = true
+    return true
   }
   composite(id: number, image: Pixels, left: number, top: number, opacity = 255): void {
     const layer = this.get(id),
@@ -555,12 +564,27 @@ export class LayerTree {
     bitmap.color(rect, color, opacity, face)
     this.get(id).imageModified = true
   }
-  copy(id: number, left: number, top: number, source: number, rect: Rect): void {
+  copy(id: number, left: number, top: number, source: number, rect: Rect): boolean {
+    const layer = this.get(id)
+    // The source must still be a live Layer even when no pixels are requested.
+    this.get(source)
+    const target = intersect(layer.bitmap?.clip ?? layer.clipBeforeRelease, {
+      x: left,
+      y: top,
+      width: rect.width,
+      height: rect.height,
+    })
+    if (!target.width || !target.height) return false
+    // Only the destination clip participates in this preflight. Missing main
+    // images still throw before the bitmap clips against source dimensions.
     const dest = this.bitmap(id),
       face = this.face(id)
     if (face === 3 && !dest.province) this.budget(dest.width * dest.height)
-    dest.copy(this.bitmap(source), left, top, rect, face)
-    this.get(id).imageModified = true
+    if (dest.copy(this.bitmap(source), left, top, rect, face, layer.holdAlpha))
+      layer.imageModified = true
+    // Native requests an update for this destination even when the source
+    // bitmap clips the actual transfer to empty. This is not imageModified.
+    return true
   }
   setPixel(
     id: number,
@@ -568,11 +592,14 @@ export class LayerTree {
     y: number,
     value: number,
     plane: 'main' | 'mask' | 'province',
-  ): void {
+  ): boolean {
     const bitmap = this.bitmap(id)
     if (plane === 'province' && !bitmap.province) this.budget(bitmap.width * bitmap.height)
-    bitmap.setPixel(x, y, value, plane)
-    this.get(id).imageModified = true
+    const written = bitmap.setPixel(x, y, value, plane)
+    // Province allocation has its own modified semantics; this slice changes
+    // only the main/mask paths whose clip check follows the main-image check.
+    if (written || plane === 'province') this.get(id).imageModified = true
+    return written || plane === 'province'
   }
   *hitCandidates(
     x: number,
