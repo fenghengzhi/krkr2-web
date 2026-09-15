@@ -195,3 +195,11 @@ returned void. Unicode input was separately recorded at the driver, ANSI Edit
 and native return boundaries, preserving the SDK's observed conversion without
 making character loss a Web requirement. These results are original runtime
 observations, not Web test results; the failed first attempt remains preserved.
+
+## System color reference (authored, not executed)
+
+The manual `system-colors` suite is specified in
+[system-colors-plan.md](system-colors-plan.md). It is prepared to record 97 TJS
+source observations plus a separate read-only hosted Windows palette, with
+fixed original source bytes and a structured-output schema. This candidate has
+not run; no VCL high-byte behavior or Web compatibility result is asserted.

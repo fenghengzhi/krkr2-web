@@ -1,0 +1,207 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Original KRKR2 system-color observations and independent Windows palette",
+  "description": "Actual data only. Static source expectations stay in system-colors-cases.json and are never an output oracle.",
+  "oneOf": [
+    { "$ref": "#/definitions/observations" },
+    { "$ref": "#/definitions/palette" }
+  ],
+  "definitions": {
+    "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nullableHash": { "oneOf": [{ "$ref": "#/definitions/hash" }, { "type": "null" }] },
+    "strings": { "type": "array", "items": { "type": "string" } },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "attempt", "commit", "runner", "scenario"],
+      "properties": {
+        "runId": { "type": "string", "pattern": "^[0-9]+$" },
+        "attempt": { "type": "string", "pattern": "^[0-9]+$" },
+        "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "runner": { "enum": ["windows-2022", "windows-2025"] },
+        "scenario": { "const": "system-colors" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["OSDescription", "OSVersion", "ImageOS", "ImageVersion", "processArchitecture", "processArchitectureScope"],
+      "properties": {
+        "OSDescription": { "type": "string" },
+        "OSVersion": { "type": "string" },
+        "ImageOS": { "type": ["string", "null"] },
+        "ImageVersion": { "type": ["string", "null"] },
+        "processArchitecture": { "type": "string" },
+        "processArchitectureScope": { "type": "string" }
+      }
+    },
+    "sourceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit", "branchPath", "relationshipToSdk"],
+      "properties": {
+        "repository": { "const": "https://github.com/krkrz/krkr2" },
+        "commit": { "const": "dec49af97e174d31059c3ccd7efc700ba3c6b788" },
+        "branchPath": { "const": "kirikiri2/branches/2.32stable/kirikiri2/src/" },
+        "relationshipToSdk": { "type": "string" }
+      }
+    },
+    "inputFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": { "type": "string" },
+        "sha256": { "$ref": "#/definitions/hash" }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "sha256", "fileVersion", "productVersion"],
+      "properties": {
+        "bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/definitions/hash" },
+        "fileVersion": { "type": ["string", "null"] },
+        "productVersion": { "type": ["string", "null"] }
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId", "outcome", "inputType", "inputText", "resultType", "resultText", "effectCount", "errorMessageEscaped", "rawLineNumber"],
+      "properties": {
+        "caseId": { "type": "string" },
+        "outcome": { "enum": ["returned", "error"] },
+        "inputType": { "type": "string" },
+        "inputText": { "type": "string" },
+        "resultType": { "type": "string" },
+        "resultText": { "type": "string" },
+        "effectCount": { "type": "integer", "minimum": 0 },
+        "errorMessageEscaped": { "type": "string" },
+        "rawLineNumber": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "returned" } } },
+          "then": { "properties": { "errorMessageEscaped": { "const": "" } } }
+        },
+        {
+          "if": { "properties": { "outcome": { "const": "error" } } },
+          "then": { "properties": { "resultType": { "const": "" }, "resultText": { "const": "" } } }
+        }
+      ]
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "kind", "state", "scope", "executionMode", "capturedAt", "run", "environment", "sourceReference", "engine", "scriptVersions", "execution", "evidence", "completeness", "records"],
+      "properties": {
+        "schema": { "const": 1 },
+        "kind": { "const": "original-system-colors-observations" },
+        "state": { "enum": ["observed", "incomplete", "not-run"] },
+        "scope": { "type": "string" },
+        "executionMode": { "const": "source" },
+        "capturedAt": { "type": "string" },
+        "run": { "$ref": "#/definitions/run" },
+        "environment": { "$ref": "#/definitions/environment" },
+        "sourceReference": { "$ref": "#/definitions/sourceReference" },
+        "engine": { "$ref": "#/definitions/engine" },
+        "scriptVersions": { "$ref": "#/definitions/strings" },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["processId", "exitCode", "timedOut", "processDeadlineMs", "workflowStateAtConversion", "workflowStageAtConversion", "workflowErrorAtConversion"],
+          "properties": {
+            "processId": { "type": ["integer", "null"] },
+            "exitCode": { "type": ["integer", "null"] },
+            "timedOut": { "type": "boolean" },
+            "processDeadlineMs": { "const": 30000 },
+            "workflowStateAtConversion": { "type": "string" },
+            "workflowStageAtConversion": { "type": "string" },
+            "workflowErrorAtConversion": { "type": ["string", "null"] }
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["eventsFile", "eventsPresent", "eventsSha256", "generatedScriptSha256", "inputs"],
+          "properties": {
+            "eventsFile": { "const": "native-events.txt" },
+            "eventsPresent": { "type": "boolean" },
+            "eventsSha256": { "$ref": "#/definitions/nullableHash" },
+            "generatedScriptSha256": { "$ref": "#/definitions/nullableHash" },
+            "inputs": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["fixture", "plan", "cases", "schema", "sourceManifest", "driver"],
+              "properties": {
+                "fixture": { "$ref": "#/definitions/inputFile" },
+                "plan": { "$ref": "#/definitions/inputFile" },
+                "cases": { "$ref": "#/definitions/inputFile" },
+                "schema": { "$ref": "#/definitions/inputFile" },
+                "sourceManifest": { "$ref": "#/definitions/inputFile" },
+                "driver": { "$ref": "#/definitions/inputFile" }
+              }
+            }
+          }
+        },
+        "completeness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requestedCaseCount", "recordedCaseCount", "startCount", "scenarioCount", "modeCount", "completionMarkerCount", "missingCaseIds", "duplicateCaseIds", "unexpectedCaseIds", "parseErrors", "fatalErrorsEscaped"],
+          "properties": {
+            "requestedCaseCount": { "type": "integer", "minimum": 1 },
+            "recordedCaseCount": { "type": "integer", "minimum": 0 },
+            "startCount": { "type": "integer", "minimum": 0 },
+            "scenarioCount": { "type": "integer", "minimum": 0 },
+            "modeCount": { "type": "integer", "minimum": 0 },
+            "completionMarkerCount": { "type": "integer", "minimum": 0 },
+            "missingCaseIds": { "$ref": "#/definitions/strings" },
+            "duplicateCaseIds": { "$ref": "#/definitions/strings" },
+            "unexpectedCaseIds": { "$ref": "#/definitions/strings" },
+            "parseErrors": { "$ref": "#/definitions/strings" },
+            "fatalErrorsEscaped": { "$ref": "#/definitions/strings" }
+          }
+        },
+        "records": { "type": "array", "items": { "$ref": "#/definitions/record" } }
+      }
+    },
+    "palette": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "kind", "state", "scope", "api", "capturedAt", "run", "environment", "entries"],
+      "properties": {
+        "schema": { "const": 1 },
+        "kind": { "const": "original-system-colors-palette" },
+        "state": { "const": "observed" },
+        "scope": { "type": "string" },
+        "api": { "const": "https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getsyscolor" },
+        "capturedAt": { "type": "string" },
+        "run": { "$ref": "#/definitions/run" },
+        "environment": { "$ref": "#/definitions/environment" },
+        "entries": {
+          "type": "array",
+          "minItems": 25,
+          "maxItems": 25,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["index", "constantName", "colorrefBgrDecimal", "colorrefBgrHex", "rgbDecimal", "rgbHex", "red", "green", "blue"],
+            "properties": {
+              "index": { "type": "integer", "minimum": 0, "maximum": 24 },
+              "constantName": { "type": "string" },
+              "colorrefBgrDecimal": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+              "colorrefBgrHex": { "type": "string", "pattern": "^0x[a-f0-9]{8}$" },
+              "rgbDecimal": { "type": "integer", "minimum": 0, "maximum": 16777215 },
+              "rgbHex": { "type": "string", "pattern": "^0x[a-f0-9]{6}$" },
+              "red": { "type": "integer", "minimum": 0, "maximum": 255 },
+              "green": { "type": "integer", "minimum": 0, "maximum": 255 },
+              "blue": { "type": "integer", "minimum": 0, "maximum": 255 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

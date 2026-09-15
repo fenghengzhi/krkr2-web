@@ -1,0 +1,149 @@
+// Original SDK observation, only through the GitHub-hosted Windows workflow.
+// Records unknown VCL results without predeclaring their values. No plugin,
+// external input, timers, fonts, browser runtime or allocation stress is used.
+var nativeRows=[],nativeEffects=0;
+function nativeRecord(text){nativeRows.add(text);nativeRows.save("native-events.txt");}
+function nativeErrorText(error){return (string(error.message)).escape();}
+System.exceptionHandler=function(error){nativeRecord("error:"+nativeErrorText(error));System.exit();return true;};
+function nativeResult(id,outcome,inputType,inputText,resultType,resultText,errorText){
+  nativeRecord("case|"+id+"|"+outcome+"|"+inputType+"|"+inputText+"|"+resultType+"|"+resultText+"|"+nativeEffects+"|"+errorText);
+}
+function nativeColor(id,value){
+  nativeEffects=0;
+  var inputType=typeof value,inputText=value===void?"void":string(value);
+  try{
+    var result=System.toActualColor(value);
+    nativeResult(id,"returned",inputType,inputText,typeof result,string(result),"");
+  }catch(error){nativeResult(id,"error",inputType,inputText,"","",nativeErrorText(error));}
+}
+function nativeEntry(id,action){
+  nativeEffects=0;
+  try{
+    var result=action();
+    nativeResult(id,"returned","entry","see-case-manifest",typeof result,string(result),"");
+  }catch(error){nativeResult(id,"error","entry","see-case-manifest","","",nativeErrorText(error));}
+}
+property nativeBadColor {getter(){nativeEffects++;return <% 01 02 %>;}}
+nativeRecord("start");nativeRecord("scenario:system-colors");
+nativeRecord("version:"+System.versionString);nativeRecord("mode:source");
+nativeColor("constant-clScrollBar",clScrollBar);
+nativeColor("constant-clBackground",clBackground);
+nativeColor("constant-clActiveCaption",clActiveCaption);
+nativeColor("constant-clInactiveCaption",clInactiveCaption);
+nativeColor("constant-clMenu",clMenu);
+nativeColor("constant-clWindow",clWindow);
+nativeColor("constant-clWindowFrame",clWindowFrame);
+nativeColor("constant-clMenuText",clMenuText);
+nativeColor("constant-clWindowText",clWindowText);
+nativeColor("constant-clCaptionText",clCaptionText);
+nativeColor("constant-clActiveBorder",clActiveBorder);
+nativeColor("constant-clInactiveBorder",clInactiveBorder);
+nativeColor("constant-clAppWorkSpace",clAppWorkSpace);
+nativeColor("constant-clHighlight",clHighlight);
+nativeColor("constant-clHighlightText",clHighlightText);
+nativeColor("constant-clBtnFace",clBtnFace);
+nativeColor("constant-clBtnShadow",clBtnShadow);
+nativeColor("constant-clGrayText",clGrayText);
+nativeColor("constant-clBtnText",clBtnText);
+nativeColor("constant-clInactiveCaptionText",clInactiveCaptionText);
+nativeColor("constant-clBtnHighlight",clBtnHighlight);
+nativeColor("constant-cl3DDkShadow",cl3DDkShadow);
+nativeColor("constant-cl3DLight",cl3DLight);
+nativeColor("constant-clInfoText",clInfoText);
+nativeColor("constant-clInfoBk",clInfoBk);
+nativeColor("rgb-zero",0);
+nativeColor("rgb-one",1);
+nativeColor("rgb-123456",0x123456);
+nativeColor("rgb-abcdef",0xabcdef);
+nativeColor("rgb-white",0xffffff);
+nativeColor("rgb-red",0xff0000);
+nativeColor("rgb-green",0x00ff00);
+nativeColor("rgb-blue",0x0000ff);
+nativeColor("high-byte-01010203",0x01010203);
+nativeColor("high-byte-02010203",0x02010203);
+nativeColor("high-byte-03010203",0x03010203);
+nativeColor("high-byte-04010203",0x04010203);
+nativeColor("high-byte-7f010203",0x7f010203);
+nativeColor("high-byte-81000005",0x81000005);
+nativeColor("high-byte-ff000005",0xff000005);
+nativeColor("high-byte-ffffffff",0xffffffff);
+nativeColor("high-byte-80000105",0x80000105);
+nativeColor("high-byte-80010005",0x80010005);
+nativeColor("high-byte-80800005",0x80800005);
+nativeColor("high-byte-c0000005",0xc0000005);
+nativeColor("high-byte-80000019",0x80000019);
+nativeColor("high-byte-8000001a",0x8000001a);
+nativeColor("high-byte-8000001e",0x8000001e);
+nativeColor("high-byte-8000001f",0x8000001f);
+nativeColor("high-byte-800000ff",0x800000ff);
+nativeColor("high-byte-80000100",0x80000100);
+nativeColor("high-byte-8000ffff",0x8000ffff);
+nativeColor("image-marker-none",clNone);
+nativeColor("image-marker-adapt",clAdapt);
+nativeColor("image-marker-palette-18",clPalIdx+0x12);
+nativeColor("image-marker-alpha-mat-123456",clAlphaMat+0x123456);
+nativeColor("integer-width-signed-window",-2147483643);
+nativeColor("integer-width-signed-min32",-2147483648);
+nativeColor("integer-width-minus-one",-1);
+nativeColor("integer-width-exact32",0x100000000);
+nativeColor("integer-width-above32-rgb",0x100123456);
+nativeColor("integer-width-above32-window",0x180000005);
+nativeColor("integer-width-negative32-rgb",(-0x100000000+0x123456));
+nativeColor("integer-width-above-safe-odd",9007199254740993);
+nativeColor("integer-width-above-safe-window",9007201402224645);
+nativeColor("integer-width-negative-safe-odd",-9007199254740993);
+nativeColor("integer-width-wide-rgb",0x1000000000123456);
+nativeColor("integer-width-wide-window",0x1000000080000005);
+nativeColor("integer-width-max-int64",0x7fffffffffffffff);
+nativeColor("integer-width-min-int64",(-9223372036854775807-1));
+nativeColor("coercion-void",void);
+nativeColor("coercion-numeric-string","1193046");
+nativeColor("coercion-fraction",1193046.75);
+
+// Entry calls distinguish argument evaluation from native conversion.
+nativeEntry("entry-missing-used",function(){return System.toActualColor();});
+nativeEntry("entry-missing-discarded",function(){System.toActualColor();return "returned";});
+nativeEntry("entry-octet-used",function(){return System.toActualColor(nativeBadColor);});
+nativeEntry("entry-octet-discarded",function(){System.toActualColor(nativeBadColor);return "returned";});
+nativeEntry("entry-object-used",function(){return System.toActualColor(%[]);});
+nativeEntry("entry-object-discarded",function(){System.toActualColor(%[]);return "returned";});
+nativeEntry("entry-extra-argument",function(){return System.toActualColor(0x123456,nativeBadColor);});
+nativeEntry("entry-borrowed-receiver",function(){var method=System.toActualColor incontextof %[];return method(0x123456);});
+nativeEntry("entry-null-receiver",function(){var method=System.toActualColor incontextof null;return method(0x123456);});
+
+// One private hidden window and one 2x2 Layer, reset before every pixel case.
+// Setup failure is fatal; per-operation errors remain recorded observations.
+var nativeWindow=new Window();nativeWindow.visible=false;
+var nativeLayer=new Layer(nativeWindow,null);
+nativeLayer.type=ltAlpha;nativeLayer.setSize(2,2);nativeLayer.setImageSize(2,2);
+nativeLayer.setClip(0,0,2,2);
+function nativeResetLayer(){
+  nativeLayer.face=dfAlpha;nativeLayer.holdAlpha=false;
+  nativeLayer.fillRect(0,0,2,2,0x57112233);
+  nativeLayer.setProvincePixel(0,0,0);
+}
+function nativeLayerCase(id,action){
+  nativeEffects=0;nativeResetLayer();
+  try{
+    action();
+    var result=string(nativeLayer.getMainPixel(0,0))+","+string(nativeLayer.getMaskPixel(0,0))+","+string(nativeLayer.getProvincePixel(0,0));
+    nativeResult(id,"returned","layer-operation","see-case-manifest","pixel-triplet",result,"");
+  }catch(error){nativeResult(id,"error","layer-operation","see-case-manifest","","",nativeErrorText(error));}
+}
+nativeLayerCase("layer-fill-opaque-hold",function(){nativeLayer.face=dfOpaque;nativeLayer.holdAlpha=true;nativeLayer.fillRect(0,0,1,1,clWindow);});
+nativeLayerCase("layer-fill-opaque-replace",function(){nativeLayer.face=dfOpaque;nativeLayer.holdAlpha=false;nativeLayer.fillRect(0,0,1,1,clWindow);});
+nativeLayerCase("layer-fill-alpha",function(){nativeLayer.face=dfAlpha;nativeLayer.fillRect(0,0,1,1,clWindow);});
+nativeLayerCase("layer-fill-addalpha",function(){nativeLayer.face=dfAddAlpha;nativeLayer.fillRect(0,0,1,1,clWindow);});
+nativeLayerCase("layer-set-main-window",function(){nativeLayer.setMainPixel(0,0,clWindow);});
+nativeLayerCase("layer-set-main-high01",function(){nativeLayer.setMainPixel(0,0,0x01010203);});
+nativeLayerCase("layer-color-alpha",function(){nativeLayer.face=dfAlpha;nativeLayer.colorRect(0,0,1,1,clWindow,255);});
+nativeLayerCase("layer-color-alpha-zero",function(){nativeLayer.face=dfAlpha;nativeLayer.colorRect(0,0,1,1,clWindow,0);});
+nativeLayerCase("layer-color-alpha-negative",function(){nativeLayer.face=dfAlpha;nativeLayer.colorRect(0,0,1,1,clWindow,-255);});
+nativeLayerCase("layer-color-opaque",function(){nativeLayer.face=dfOpaque;nativeLayer.colorRect(0,0,1,1,clWindow,255);});
+nativeLayerCase("layer-color-addalpha-zero",function(){nativeLayer.face=dfAddAlpha;nativeLayer.colorRect(0,0,1,1,clWindow,0);});
+nativeLayerCase("layer-fill-mask",function(){nativeLayer.face=dfMask;nativeLayer.fillRect(0,0,1,1,clWindow);});
+nativeLayerCase("layer-color-mask",function(){nativeLayer.face=dfMask;nativeLayer.colorRect(0,0,1,1,clWindow,255);});
+nativeLayerCase("layer-fill-province",function(){nativeLayer.face=dfProvince;nativeLayer.fillRect(0,0,1,1,clWindow);});
+nativeLayerCase("layer-set-province",function(){nativeLayer.setProvincePixel(0,0,clWindow);});
+nativeRecord("observations-complete");
+System.exit();
