@@ -1,6 +1,6 @@
 # 059：VideoOverlay 的调用时混合图像
 
-本阶段实现 `VideoOverlay.setMixingLayer` / `resetMixingLayer`，让 `vomMixer` 视频使用调用时的 Layer 主图副本。此文记录实现和拟验收范围；尚未运行本阶段验证。所有测试、类型检查、构建和浏览器验证只允许在 GitHub-hosted Actions 执行，没有运行本地可执行验证。
+本阶段实现 `VideoOverlay.setMixingLayer` / `resetMixingLayer`，让 `vomMixer` 视频使用调用时的 Layer 主图副本。本阶段仍在 Actions 验证中，已发生的类型检查和浏览器失败分别记录于文末。所有测试、类型检查、构建和浏览器验证只允许在 GitHub-hosted Actions 执行，没有运行本地可执行验证。
 
 组合基线为 `2b16fe5`，包含 058 System 对话框的焦点顺序及 Firefox 组合输入夹具修订。058 首轮已报告的失败与未报告案例仍分别保留，不能当成通过。本组合预期 1,833 项 Node、1,278 项浏览器和 6 组直接运行时，最终以本次 Actions 的实际报告为准。
 
@@ -38,7 +38,7 @@ Host 为全部视频的混合画布设置 64 MiB 存活 backing 总预算，独�
 
 新增 6 项纯测试检查 RGB/mask 分离、独立副本、可见无图检查顺序、非 mixer 空操作、float32 alpha、各边 MulDiv 取整与 video/image 坐标；另有 1 项真实 MessageChannel 传输用例检查原始数组有效性。真实 TJS 的源码与字节码各 10 项检查参数、native 身份、跨 Window、调用时快照、close/open、待决请求和 Stop 释放。浏览器新增 6 个实际 Session 模板（三浏览器共 18 项），使用实际 colors.mp4、真实 TJS 与混合容器截图，比较源图变化前后、重新 set、reset、独立 alpha、缩放及 Window 生命周期的实际像素；其中分数 zoom 同时检查输出矩形取整与合成像素。Host 新增 8 个模板（三浏览器共 24 项），检查预算、失败替换、过期 epoch 和资源清理。
 
-这些用例已编写不等于已通过；本阶段尚待 Actions，所有失败和未完成结果须分别保留。此前阶段的通过也不能替代本阶段证据。
+这些用例已编写或部分作业通过，不等于本阶段完整通过；所有失败和未完成结果须分别保留。此前阶段的通过也不能替代本阶段证据。
 
 原生请求 bitmap point filtering，但[最终 presenter](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/krmovie/CVMRCustomAllocatorPresenter9.cpp#L664)优先线性缩放整张已合成视频。独立 Web Canvas 的分数坐标、缩放滤波、色彩转换和 alpha 舍入尚未与 VMR9 逐像素标定；这里保留可解释的 normalized geometry 和核心快照行为，不声称所有 VMR9 屏幕像素等价。原版设备重建后的 bitmap 保留行为也未取得实测证据。
 
@@ -51,3 +51,15 @@ Host 为全部视频的混合画布设置 64 MiB 存活 backing 总预算，独�
 后续将 Worker 配置中只排除 video/browser/host.ts 改为排除其完整 DOM 宿主目录。主线程类型检查仍通过 createPlayer／WebVideoHost 的实际依赖检查其中两个模块；没有给 Worker 或 engine 加入 DOM 类型，也没有关闭类型检查。两轮原始构建日志与未执行状态独立保留，后续结果另记。
 
 [35005524084](https://github.com/fenghengzhi/krkr2-web/actions/runs/35005524084)（`0f5e9fc`）通过上述 Worker 边界后，在 tools 项目的 `web-video-mixing.ts:244` 报 TS2683：测试里临时替换 getContext 的函数断言丢失了 this 的上下文类型。后续仅为该故障注入函数添加 HTMLCanvasElement 的 this 参数类型；不改产品、断言或检查选项。这轮同样未执行用例，原始失败另存。
+
+## 首轮浏览器执行与夹具修订
+
+[35005817503](https://github.com/fenghengzhi/krkr2-web/actions/runs/35005817503)（`a7bea99`）构建和 Node 作业成功。已下载的 Chromium 与 Firefox 常规浏览器报告均为 **381 通过、4 失败／385**；本节不把部分作业结果视为整轮通过，也不覆盖该轮原始失败。原始 ZIP、trace 和 error-context 分别保存在 `out/verification/github-actions/35005817503/early-chromium/` 与 `early-firefox/`，逐项静态提取另记 `out/verification/video-mixing/35005817503-failure-classification.json`。
+
+三项混合透明度用例已完成原始 RGB、mask、副本不随编辑改变及 opacity=128 的截图检查，随后等待错误的字符串 `0` 超时。原始日志实际有对应 marker 的 `+0.0`，表达式已经执行结束；这是 TJS real 零的字符串形式。修订保留相同表达式和零透明度预期，精确匹配 `+0.0`，并同步修正后续 reset 的组合结果为 `+0.0,255`。没有改动属性实现或放宽像素断言。
+
+四项跨 Window 用例原始日志返回 `0,1`，原夹具误期望 `0,0`。Window 关闭仅失效显式 `Window.add` 的对象；本夹具仍用全局变量持有 source 和 rootA。DrawDevice 释放 manager 引用不等于失效仍被引用的 Layer，图像在 Layer 自身失效时释放。[原版 Window 清理](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/WindowIntf.cpp#L181)、[DrawDevice 析构](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/DrawDevice.cpp#L34)、[Layer 构造与清理](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerIntf.cpp#L397)。修订明确要求 Window 已无效、source 仍有效且 `.window===null`、原主图仍可读；再显式失效 source，并再次检查目标视频的 magenta 快照。原有 Window 消失、只剩一份 video／bitmap 和全部截图断言保留。
+
+Firefox 的 JSPI 混合透明度用例在更早的 ready 检查失败，必须单独解释。trace 中启动日志和执行按钮检查已通过，随后 27 次找到视频元素却没有 `data-presented-time`；原始 screencast 同时显示红色视频与紫色混合图。Host 在设置 src/load 之前注册 rVFC，并要求 loaded 与 presented 同时完成才结束 open；测试原先到 loadedmetadata 事件才另外注册观察回调。trace 没有记录这两个底层事件的精确先后，不能将其进一步描述为已证明的 Firefox 内部调度问题。
+
+修订只在本文件透明包装现有的 requestVideoFrameCallback，以真实浏览器 metadata 记录呈现时间，再保留原 this／参数转发同一个回调并返回原 request ID。没有新增或取消帧请求，不改生产加载、seek、播放或等待顺序；ready 仍要求时间 0、暂停且不在 seek，实际合成截图仍需通过。原 trace SHA256 为 `4618de17c3870d494412d10b72f5fe31c186608e77936b51f882b403a6d677d9`。三类修订均未在本地执行，仍须新的 Actions 结果验证。

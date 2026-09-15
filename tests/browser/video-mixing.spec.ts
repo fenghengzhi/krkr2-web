@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { evaluate } from '../helpers/browser-expression.ts'
-import { test, expect, observeVideoFrames } from '../helpers/video-presentation-browser.ts'
+import { test, expect } from '../helpers/video-presentation-browser.ts'
 
 type Color = readonly [number, number, number]
 type Sample = { x: number; y: number; color: Color }
@@ -12,10 +12,26 @@ const yellow: Color = [255, 255, 0]
 const red: Color = [255, 0, 0]
 const blue: Color = [0, 0, 255]
 
+/** Observe the host's pre-load frame request. A second subscription started at
+ * loadedmetadata can miss the only frame of a paused movie. No requests are added. */
+async function observeMixingFrames(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const request = HTMLVideoElement.prototype.requestVideoFrameCallback
+    HTMLVideoElement.prototype.requestVideoFrameCallback = function (callback) {
+      const video = this
+      return request.call(video, function (this: unknown, now, metadata) {
+        video.dataset.presentedTime = String(metadata.mediaTime)
+        video.dataset.presentedFrames = String(metadata.presentedFrames)
+        callback.call(this, now, metadata)
+      })
+    }
+  })
+}
+
 async function launch(page: Page, backend: string, source: string) {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await observeVideoFrames(page)
+  await observeMixingFrames(page)
   await page.goto(`/?backend=${backend}`)
   test.skip(
     backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)),
@@ -190,7 +206,7 @@ for (const backend of ['asyncify', 'jspi']) {
       await evaluate(
         page,
         '(function(){movie.mixingMovieBGColor=0x0000ff;movie.mixingMovieAlpha=0;return movie.mixingMovieAlpha;})()',
-        '0',
+        '+0.0',
       )
       await pixels(page, f.container, 'bitmap-above-zero-alpha-movie', 160, 100, [
         { x: 16, y: 14, color: [0, 128, 127] },
@@ -218,7 +234,7 @@ for (const backend of ['asyncify', 'jspi']) {
       await evaluate(
         page,
         '(function(){movie.resetMixingLayer();return movie.mixingMovieAlpha+","+movie.mixingMovieBGColor;})()',
-        '0,255',
+        '+0.0,255',
       )
       await expect(f.container.locator('.video-mixing-bitmap')).toHaveCount(0)
       await pixels(page, f.container, 'reset-leaves-movie-background', 160, 100, [
@@ -393,12 +409,18 @@ var movieB=new VideoOverlay(b);movieB.mode=vomMixer;movieB.visible=true;movieB.s
       await evaluate(
         page,
         '(function(){movieA.setMixingLayer(own);a.close();return int(isvalid a)+","+int(isvalid source);})()',
-        '0,0',
+        '0,1',
       )
       await expect(a.window).toHaveCount(0)
       await expect(page.locator('video')).toHaveCount(1)
       await expect(page.locator('.video-mixing-bitmap')).toHaveCount(1)
       await check(b.container, 'source-window-retirement-keeps-destination-snapshot', magenta)
+      await evaluate(
+        page,
+        '(function(){var detached=source.window===null,original=source.getMainPixel(8,8);invalidate source;return int(detached)+","+original+","+int(isvalid source);})()',
+        '1,16711935,0',
+      )
+      await check(b.container, 'retired-window-source-invalidation-keeps-snapshot', magenta)
       await evaluate(
         page,
         '(function(){var hidden=new Layer(b,rootB);hidden.visible=false;hidden.hasImage=false;movieB.setMixingLayer(hidden);return 1;})()',

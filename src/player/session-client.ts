@@ -61,6 +61,7 @@ export class SessionClient {
     audio: MessagePort,
     video: MessagePort,
     debugMode = false,
+    clipboard?: MessagePort,
   ) {
     const request = {
       version: PROTOCOL_VERSION,
@@ -73,12 +74,19 @@ export class SessionClient {
       gameId,
       audio,
       video,
+      clipboard,
       activity: this.activity,
       systemFonts: this.systemFonts,
     }
     const snapshot = await this.call(
       'initialize',
-      transfer(request, [surfaces, this.channel.port2, audio, video]),
+      transfer(request, [
+        surfaces,
+        this.channel.port2,
+        audio,
+        video,
+        ...(clipboard ? [clipboard] : []),
+      ]),
     )
     this.initialized = true
     if (this.systemFonts !== request.systemFonts)

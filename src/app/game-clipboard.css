@@ -1,0 +1,67 @@
+.game-clipboard {
+  position: fixed;
+  z-index: 1100;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  width: min(440px, calc(100vw - 40px));
+  max-height: min(560px, calc(100dvh - 40px));
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid #607d90;
+  border-radius: 12px;
+  background: #13202c;
+  color: #e8edf4;
+  box-shadow: 0 12px 44px #0008;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.6;
+}
+dialog:modal > .game-clipboard {
+  position: relative;
+  inset: auto;
+  width: auto;
+  margin-top: 16px;
+  max-height: min(440px, 60dvh);
+  box-shadow: none;
+}
+.game-clipboard h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.game-clipboard p {
+  margin: 8px 0;
+}
+.game-clipboard-status {
+  min-height: 1.6em;
+  color: #b8c9d9;
+  overflow-wrap: anywhere;
+}
+.game-clipboard[data-state='error'] .game-clipboard-status {
+  color: #ffd4b1;
+}
+.game-clipboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.game-clipboard button[data-action='perform'] {
+  border-color: #76dfc1;
+  color: #b0f4df;
+}
+.game-clipboard summary {
+  cursor: pointer;
+  color: #b8dbed;
+}
+.game-clipboard-preview {
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  border-radius: 6px;
+  background: #0c151f;
+  color: #e8edf4;
+  font: inherit;
+}

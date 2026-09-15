@@ -1,4 +1,6 @@
 import { SessionClient } from './session-client.ts'
+import { ClipboardChannel } from './clipboard-channel.ts'
+import type { ClipboardRequest } from '../protocol/clipboard.ts'
 import type { BackendPreference, GameInput, SessionEvent } from '../protocol/session.ts'
 import { WebAudioHost } from '../backends/audio/web/host.ts'
 import type { AudioState } from '../protocol/audio.ts'
@@ -32,6 +34,8 @@ export interface PlayerWindowHost {
 
 export interface PlayerOptions {
   windows: PlayerWindowHost
+  onClipboardRequest?(request: ClipboardRequest | null): void
+  ownsClipboardFocus?(target: EventTarget | null): boolean
   /** Input and video are attached, and the canvas has not yet been transferred. */
   onSurfaceAttach?(surface: PlayerWindowSurface, identity: WindowSurfaceIdentity): void
   /** Input and video are detached; the surface DOM is still available. */
@@ -50,6 +54,7 @@ export function createPlayer(
   const audio = new WebAudioHost(audioChannel.port1, onAudio)
   const videoChannel = new MessageChannel()
   const video = new WebVideoHost(videoChannel.port1, audio)
+  const clipboardChannel = new MessageChannel()
   const surfaceChannel = new MessageChannel()
   const windows = new Map<number, WindowPresentation>()
   const inputViews = new Map<number, InputView>()
@@ -136,6 +141,16 @@ export function createPlayer(
     // focus supersedes a request still waiting for its surface or dialog.
     syncInput()
   })
+  const clipboard = new ClipboardChannel(clipboardChannel.port1, session.generation, (request) => {
+    if (options.onClipboardRequest) options.onClipboardRequest(request)
+    else if (request)
+      clipboard.respond({
+        id: request.id,
+        generation: request.generation,
+        ok: false,
+        error: { name: 'NotSupportedError', message: 'A clipboard presentation is not available' },
+      })
+  })
   input = new BrowserInputCoordinator(
     (packet) => session.input(packet),
     (keys) => session.keyState(keys),
@@ -143,6 +158,7 @@ export function createPlayer(
     onError,
     {
       isTransientFocus: (target) => {
+        if (options.ownsClipboardFocus?.(target)) return true
         if (!(target instanceof Element)) return false
         const popup = target.closest<HTMLElement>(
           '.game-menu-overlay[data-window-id][data-request-id]',
@@ -243,6 +259,7 @@ export function createPlayer(
         audioChannel.port2,
         videoChannel.port2,
         debugMode,
+        clipboardChannel.port2,
       )
       await session.mount()
       // Only ordered Session events update the host. A start RPC snapshot can
@@ -250,6 +267,7 @@ export function createPlayer(
       return session.start(entry)
     },
     session,
+    clipboard,
     toggleAudio() {
       audio.toggle()
       video.activate()
@@ -261,7 +279,13 @@ export function createPlayer(
       if (stopping) return stopping
       stopping = (async () => {
         const errors: unknown[] = []
-        for (const action of [() => video.setPagePaused(true), () => input?.close()]) {
+        for (const action of [
+          // Retire the buttons locally. A clipboard-close message on its own
+          // port must not resume TJS catch before the stop RPC cancels control.
+          () => options.onClipboardRequest?.(null),
+          () => video.setPagePaused(true),
+          () => input?.close(),
+        ]) {
           try {
             action()
           } catch (error) {
@@ -274,6 +298,11 @@ export function createPlayer(
         } catch (error) {
           errors.push(error)
         }
+        try {
+          clipboard.close()
+        } catch (error) {
+          errors.push(error)
+        }
         if (session.isDisposed) {
           for (const action of [
             () => pageActivity.close(),
@@ -281,7 +310,7 @@ export function createPlayer(
             () => options.windows.dispose(),
             () => video.close(),
             () => audio.close(),
-            ...[surfaceChannel, videoChannel, audioChannel].flatMap((channel) => [
+            ...[surfaceChannel, videoChannel, audioChannel, clipboardChannel].flatMap((channel) => [
               () => channel.port1.close(),
               () => channel.port2.close(),
             ]),

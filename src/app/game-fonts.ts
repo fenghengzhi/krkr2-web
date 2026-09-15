@@ -25,6 +25,10 @@ export function createGameFonts(actions: FontActions) {
     preview: HTMLCanvasElement | undefined,
     status: HTMLElement | undefined,
     confirm: HTMLButtonElement | undefined,
+    readButton: HTMLButtonElement | undefined,
+    cancelButton: HTMLButtonElement | undefined,
+    enabled = true,
+    readingLocal = false,
     selected = '',
     wantedPreview = '',
     busy = false,
@@ -35,6 +39,13 @@ export function createGameFonts(actions: FontActions) {
     labels: string[] = []
   const showError = (error: unknown) => {
     if (status) status.textContent = error instanceof Error ? error.message : String(error)
+  }
+  const controls = () => {
+    for (const row of rows.values()) row.disabled = !enabled
+    if (confirm) confirm.disabled = !enabled || !rows.has(selected)
+    if (readButton) readButton.disabled = !enabled || readingLocal || !canReadLocalFonts()
+    if (cancelButton) cancelButton.disabled = !enabled
+    choices?.setAttribute('aria-disabled', String(!enabled))
   }
   const paint = (canvas: HTMLCanvasElement, image: FontPreview) => {
     canvas.dataset.fontFace = image.face
@@ -80,12 +91,12 @@ export function createGameFonts(actions: FontActions) {
   const select = (name: string) => {
     selected = name
     for (const [face, row] of rows) row.setAttribute('aria-selected', String(face === name))
-    if (confirm) confirm.disabled = !rows.has(name)
+    if (confirm) confirm.disabled = !enabled || !rows.has(name)
     wantedPreview = name
     void pump()
   }
   const dismiss = () => {
-    if (current) void actions.choose(current.id, null)?.catch(showError)
+    if (enabled && current) void actions.choose(current.id, null)?.catch(showError)
   }
   const close = () => {
     epoch++
@@ -101,6 +112,9 @@ export function createGameFonts(actions: FontActions) {
     choices = undefined
     preview = undefined
     confirm = undefined
+    readButton = undefined
+    cancelButton = undefined
+    readingLocal = false
     status = undefined
     if (previousFocus?.isConnected) previousFocus.focus()
     previousFocus = null
@@ -123,9 +137,11 @@ export function createGameFonts(actions: FontActions) {
           : font.source === 'system'
             ? '本机字体'
             : '浏览器通用字体'
-      row.addEventListener('click', () => select(font.name))
+      row.addEventListener('click', () => {
+        if (enabled) select(font.name)
+      })
       row.addEventListener('dblclick', () => {
-        if (current) void actions.choose(current.id, font.name)?.catch(showError)
+        if (enabled && current) void actions.choose(current.id, font.name)?.catch(showError)
       })
       if (current.flags & 256) {
         if (font.source === 'game') {
@@ -147,6 +163,7 @@ export function createGameFonts(actions: FontActions) {
     if (!rows.size && status)
       status.textContent = '没有符合筛选条件的字体。可以读取本机字体，或取消选择。'
     select(selected)
+    controls()
   }
   return {
     update(request: FontSelectionRequest | null) {
@@ -177,6 +194,7 @@ export function createGameFonts(actions: FontActions) {
       choices.setAttribute('role', 'listbox')
       choices.setAttribute('aria-label', '字体')
       choices.addEventListener('keydown', (event) => {
+        if (!enabled) return
         const names = [...rows.keys()],
           index = names.indexOf(selected)
         let next = index
@@ -204,14 +222,16 @@ export function createGameFonts(actions: FontActions) {
       status.className = 'font-status'
       status.setAttribute('role', 'status')
       const read = element('button', '读取本机字体')
+      readButton = read
       read.type = 'button'
       read.disabled = !canReadLocalFonts()
       read.addEventListener('click', () => {
-        if (!current) return
+        if (!enabled || !current) return
         const version = epoch
         controller?.abort()
         controller = new AbortController()
         read.disabled = true
+        readingLocal = true
         void readLocalFonts(controller.signal, (done, total) => {
           if (version === epoch && status) status.textContent = `读取本机字体 ${done}/${total}`
         })
@@ -225,7 +245,10 @@ export function createGameFonts(actions: FontActions) {
             if (version === epoch) showError(error)
           })
           .finally(() => {
-            if (version === epoch) read.disabled = !canReadLocalFonts()
+            if (version === epoch) {
+              readingLocal = false
+              controls()
+            }
           })
       })
       if (!canReadLocalFonts())
@@ -238,12 +261,14 @@ export function createGameFonts(actions: FontActions) {
         void actions.stop().catch(showError)
       })
       const cancel = element('button', '取消')
+      cancelButton = cancel
       cancel.type = 'button'
       cancel.addEventListener('click', dismiss)
       confirm = element('button', '确定')
       confirm.type = 'button'
       confirm.addEventListener('click', () => {
-        if (current && selected) void actions.choose(current.id, selected)?.catch(showError)
+        if (enabled && current && selected)
+          void actions.choose(current.id, selected)?.catch(showError)
       })
       footer.append(read, stop, cancel, confirm)
       dialog.addEventListener('cancel', (event) => {
@@ -257,7 +282,8 @@ export function createGameFonts(actions: FontActions) {
           choices?.contains(event.target as Node)
         ) {
           event.preventDefault()
-          if (current && selected) void actions.choose(current.id, selected)?.catch(showError)
+          if (enabled && current && selected)
+            void actions.choose(current.id, selected)?.catch(showError)
         }
       })
       dialog.append(heading, prompt, choices, preview, status, footer)
@@ -265,6 +291,10 @@ export function createGameFonts(actions: FontActions) {
       renderChoices()
       dialog.showModal()
       rows.get(selected)?.focus()
+    },
+    state(active: boolean) {
+      enabled = active
+      controls()
     },
     close,
   }
