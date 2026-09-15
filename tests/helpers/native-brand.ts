@@ -115,7 +115,107 @@ export async function exerciseNativeBrand(
       native.call('krkr_native_hook_count') === 0,
       'Native metadata survived actual object release',
     )
-    return { variant, debugMode, binary, baseline, before, ids, calls, invalidated, after }
+    // Native state must keep an ordinary owner cycle until explicit invalidation,
+    // while observations alone remain non-owning.
+    const nativeCalls = [...calls]
+    let expired = 0
+    owner = await acquire('new Branded()')
+    const weak = vm.observe(owner, () => {
+        expired++
+      }),
+      cycle = await acquire('%[owner:__host("Owner")]')
+    vm.registerNativeLifetime(owner, 'Tag.A', 7, cycle)
+    for (const value of held.splice(0)) vm.release(value)
+    owner = undefined
+    await vm.collect()
+    check(
+      native.call('krkr_native_hook_count') === 1 && expired === 0,
+      'Native state lost its owner cycle',
+    )
+    owner = vm.upgrade(weak)
+    check(!!owner, 'Native state cycle could not be observed')
+    held.push(owner!)
+    await execute('invalidate __host("Owner");')
+    check(expired === 1, 'Native cycle invalidation did not revoke its observation')
+    vm.unobserve(weak)
+    for (const value of held.splice(0)) vm.release(value)
+    owner = undefined
+    await vm.collect()
+    check(
+      native.call('krkr_native_hook_count') === 0,
+      'Explicit invalidation retained a native cycle',
+    )
+    const cycleAfter = vm.inspect()
+    for (const key of ['handles', 'scriptObjects', 'weakOwners', 'pendingHandles'] as const)
+      check(cycleAfter[key] === baseline[key], 'Native cycle retained ' + key)
+
+    await execute(
+      'class ThrowingBrand {function finalize(){throw new Exception("private-owner-failure");}} class ThrowingState {function finalize(){stateDeaths++;throw new Exception("private-state-failure");}}',
+    )
+    const failureBaseline = vm.inspect()
+    owner = await acquire('new ThrowingBrand()')
+    const failingState = await acquire('new ThrowingState()')
+    vm.registerNativeLifetime(owner, 'Tag.A', 8, failingState)
+    // Release the state argument first; only the native instance retains it.
+    held.splice(held.indexOf(failingState), 1)
+    vm.release(failingState)
+    await vm.collect()
+    for (const value of held.splice(0)) vm.release(value)
+    owner = undefined
+    let implicitError = ''
+    try {
+      await vm.collect()
+    } catch (error) {
+      implicitError = String(error)
+    }
+    check(
+      implicitError.includes('private-owner-failure'),
+      'Implicit native state cleanup lost the primary error: ' + implicitError,
+    )
+    check(
+      (await execute('stateDeaths', true)) === 2n,
+      'A failed owner destructor did not release native state',
+    )
+    check(
+      native.call('krkr_native_hook_count') === 0,
+      'Failed owner destruction retained a native slot',
+    )
+    const failureAfter = vm.inspect()
+    for (const key of ['handles', 'scriptObjects', 'weakOwners', 'pendingHandles'] as const)
+      check(
+        failureAfter[key] === failureBaseline[key],
+        'Failed native state cleanup retained ' + key,
+      )
+    owner = await acquire('new Branded()')
+    const shutdownCycle = await acquire('%[owner:__host("Owner")]')
+    vm.registerNativeLifetime(owner, 'Tag.A', 9, shutdownCycle)
+    for (const value of held.splice(0)) vm.release(value)
+    owner = undefined
+    await vm.collect()
+    check(native.call('krkr_native_hook_count') === 1, 'Shutdown fixture lost its native cycle')
+    const callsBeforeShutdown = calls.length
+    vm.dispose()
+    const shutdownHooks = native.call('krkr_native_hook_count')
+    check(
+      shutdownHooks === 0 && calls.length === callsBeforeShutdown,
+      'Terminal disposal retained native state or ran a host callback',
+    )
+    return {
+      variant,
+      debugMode,
+      binary,
+      baseline,
+      before,
+      ids,
+      calls: nativeCalls,
+      invalidated,
+      after,
+      cycleAfter,
+      implicitError,
+      failureBaseline,
+      failureAfter,
+      shutdownHooks,
+    }
   } finally {
     for (const value of held) vm.release(value)
     vm.dispose()

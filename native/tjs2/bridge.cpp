@@ -97,6 +97,7 @@ struct Vm {
     bool ownerUpgradeFailed = false;
     unsigned nextDependent = 1;
     std::map<unsigned, std::unique_ptr<DependentOwner>> dependents;
+    std::set<tTJSVariant*> nativeStates; // non-owning; native instances own the variants
     ~Vm() {
         krkr::CleanupErrors cleanup;
         cleanup.suppress();
@@ -115,6 +116,18 @@ struct Vm {
             const auto id = owners.begin()->first;
             WeakOwner::Expired(owners.begin()->second.get());
             owners.erase(id); // the host may already have removed this token
+        }
+        // Native private state can deliberately retain its own script owner.
+        // Terminal disposal must sever these edges even when no global/handle
+        // still points into the cycle. Script callbacks are already suppressed.
+        while(!nativeStates.empty()) {
+            auto* state = *nativeStates.begin();
+            nativeStates.erase(nativeStates.begin());
+            // Copy before clearing the field: releasing the last reference can
+            // destroy the containing native instance and its variant member.
+            tTJSVariant pending(*state);
+            try { state->Clear(); } catch(...) {}
+            try { pending.Clear(); } catch(...) {}
         }
         // All script execution is suppressed for terminal VM disposal. Detach
         // both notifications before releasing the dependent's extra reference.
@@ -409,10 +422,13 @@ class HostLifetime final : public tTJSNativeInstance {
     bool running = false, completed = false;
 public:
     HostLifetime(Vm* vm, tTJSCustomObject* owner, const ttstr& operation, unsigned identifier, const tTJSVariant& state)
-        : vm(vm), owner(owner), operation(operation), identifier(identifier), state(state) { ++nativeLifetimeCount; }
+        : vm(vm), owner(owner), operation(operation), identifier(identifier), state(state) {
+        if(state.Type() != tvtVoid) vm->nativeStates.insert(&this->state);
+        ++nativeLifetimeCount;
+    }
     // The variant destructor defers cleanup exceptions. Calling Clear directly
     // from this noexcept destructor would terminate on a failing finalizer.
-    ~HostLifetime() override { --nativeLifetimeCount; }
+    ~HostLifetime() override { vm->nativeStates.erase(&state); --nativeLifetimeCount; }
     double Identifier(Vm* context) const { return vm == context ? static_cast<double>(identifier) : -1; }
     void Invalidate() override {
         if(completed || running || shuttingDown) return;
@@ -424,6 +440,7 @@ public:
         if(!reply) TJS_eTJSError(u"Native lifetime returned no response");
         resolveReply(vm, *reply, nullptr);
         state.Clear();
+        vm->nativeStates.erase(&state);
         completed = true;
     }
 };
