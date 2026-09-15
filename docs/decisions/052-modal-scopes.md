@@ -129,3 +129,7 @@ CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原
 固定原版 `WindowFormUnit.cpp` 的OnCloseQueryCalled明确只为自身写ModalResult，false不清已有结果；已下载原始文件及SHA-256。旧发行使用的具体VCL Forms实现没有随仓库提供，因此“script close先写mrCancel、稍后自己的modal loop发query”及“已接受后再次close可重开查询”是依据原包装与现代VCL合同作出的实现选择，不能写成已观察到的旧VCL运行结果。相关源审记录为 `out/verification/multiwindow/window-modal-close-contract.md`。
 
 本片新增24项纯WindowModals、8项BrowserInputCoordinator、16模板×源码／字节码共32项真实TJS，以及6个两内核真实浏览器模态模板；页面另有6个host交互模板。Node共新增64项，浏览器新增12模板×三浏览器共36项。当前均仅编写，未本地执行，也未以之前基础组件的绿色记录替代这些新路径。完整Menu.popup循环、flags与递归通知仍待后续实现。
+
+## Window业务首轮构建失败
+
+[34955651956](https://github.com/fenghengzhi/krkr2-web/actions/runs/34955651956)，提交 `1795766`，在测试类型检查失败：新增BrowserInputCoordinator用例的空数组deepEqual断言将后续packet元素收窄为never，报TS2339。修订为等价的length=0断言，保留随后另一窗口实际activate包的精确内容检查；未放宽类型检查或产品行为。本轮Node、浏览器、直接运行时案例均未执行，不能报告新模态功能通过。完整build logs与工作流记录独立保留。

@@ -674,7 +674,7 @@ test('blocked surfaces reject focus, pointer, touch, keyboard and text while ret
     assert.deepEqual(f.keys, [])
     assert.deepEqual(f.pointers, [])
     await settle()
-    assert.deepEqual(f.packets, [])
+    assert.equal(f.packets.length, 0)
     assert.equal(f.coordinator.focus(202), true)
     await settle()
     assert.deepEqual(
