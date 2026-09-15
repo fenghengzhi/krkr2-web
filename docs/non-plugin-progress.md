@@ -1,5 +1,11 @@
 # 插件以外的实现进度
 
+Window 生命周期的[完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34914435535)已通过 **900 项 Node、678 项浏览器检查和 6 组直接运行时**；[原 KAG／离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913200791)另通过 **78 项**。[最终证据报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34916018555)绑定 543 份证据，矩阵 SHA-256 为 `e5a2da13b7838024e29c01b51c03c8629377d4a7d8aa6cb21e6eb59c7a435f5e`。
+
+Window 现使用实际对象的弱登记和原生失效入口；清理前保留成员可见性，等待视频关闭，再处理托管对象。输入、resize 和菜单事件只在投递时临时持有窗口；窗口属性按实例路由，旧窗口清理与替代窗口隔离。primaryLayer 为只读查询，惰性菜单、登记去重／移除、析构异常和重试已有验证。三浏览器双后端包括 156 个真实 Window 场景、264 个原生失效入口场景和 216 个撤销登记场景；独立句柄、对象和分配诊断也通过。详见[决策 042](decisions/042-window-object-lifetime.md)。完整多窗口、Layer、MenuItem、其他图形／系统 API 和流式媒体等仍未完成，全部非插件目标继续进行。
+
+以下保留此前阶段的实现与验证记录。
+
 视频生命周期的[当前版本完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34905170428)已通过 **776 项 Node、678 项浏览器检查和 6 组直接运行时**；[KAG/离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34905448820)另通过 **78 项**。[最终证据报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34906206305)已通过，绑定 543 份证据；矩阵 SHA-256 为 `7996d5d822fbdbbc1acde1c019e247a3cb60b994f474cbe766d6fe78e2921a5d`。
 
 VideoOverlay 自身、窗口和图层引用现采用独立弱观察；后台事件按实际投递持有对象，完成或取消后回收。临时返回对象在显示后释放；视频打开竞态、创建回滚、异步关闭等待及取消/关闭过程中单项失败后的继续清理已接通。三浏览器双后端覆盖 120 个真实视频 Session 场景、144 个弱引用返回/collect 场景，另有 18 个浏览器视频宿主场景、96 个受控音频故障点和 9 个对照。独立对象、句柄、分配诊断也通过，详见[决策 041](decisions/041-video-object-lifetime.md)。Window、Layer、MenuItem、完整图形/系统 API、流式媒体等仍未完成；窗口断开事件的精确原生时序及历史 SIGSEGV/WebKit 中断仍需继续定位。全部非插件功能尚未完成。
@@ -8,7 +14,7 @@ VideoOverlay 自身、窗口和图层引用现采用独立弱观察；后台事�
 
 声音实例现由服务弱观察，后台事件独立持有并支持动态成员替换，失效时取消事件并等待异步关闭。外部 flags、labels 的失效和 filters Array 的独立所有权已接通；后端阻止迟到解码重新加载关闭资源，Headless 空闲时钟会停止。三浏览器双后端覆盖 60 个真实声音场景、168 个从属对象场景；独立句柄 64 项、对象 120 项和分配诊断均通过，详见 [决策 040](decisions/040-sound-object-lifetime.md)。TJS ABI 5 新增 `soundObjectLifetime: 1`，字体 ABI 2、协议 9 不变。
 
-原引擎不收集任意引用环。历史会话中断等未定位问题保留，原始失败不会被后续通过覆盖。以下为历史阶段记录，当前状态以上述视频回归与决策 041 为准。
+原引擎不收集任意引用环。历史会话中断等未定位问题保留，原始失败不会被后续通过覆盖。当前状态以最上方的窗口回归与决策 042 为准。
 
 [宿主生命周期最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)已通过，绑定 542 份证据。矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`，可信冻结为 21,059.1 ms。
 

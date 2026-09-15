@@ -18,6 +18,10 @@ gh workflow run test.yml --ref BRANCH -f runtime-only=true
 
 ## 已完成的云端回归
 
+[Window 生命周期完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34914435535)通过 **900 Node、678 浏览器、6 直接运行时**；[KAG／离线升级](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913200791)通过 **78 项**。[最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34916018555)生成 `window-object-lifetime-matrix.json`，绑定 543 份证据，SHA-256 为 `e5a2da13b7838024e29c01b51c03c8629377d4a7d8aa6cb21e6eb59c7a435f5e`。所选案例零失败、跳过、flaky 和重试；可信冻结为 21,059.9 ms。Node-only/runtime-only 的独立结果未替代完整回归。
+
+另有 [64 项句柄](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913202815)、[120 项对象](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913204662)和[分配诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/34913216710)通过：600 个 owner、24 个 dependent、20 个集合终结、1,062 个执行及 188 个字节码分配失败检查。原始失败与中间诊断继续归档，范围及未完成项见[决策 042](decisions/042-window-object-lifetime.md)。以下保留历史阶段证据。
+
 [宿主生命周期最终报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/34883625695)绑定 542 份证据，矩阵 `out/verification/host-object-lifetime-matrix.json` 的 SHA-256 为 `e2c75876777e77b4b834551a7558d3527e4431ef5f7daf6180fd85d148368d9c`。最新 [完整回归](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882175516)通过 **594 Node、639 浏览器、6 直接运行时**；[兼容性](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877215012)通过 **78 项**，所选测试无失败、跳过、flaky 或重试。
 
 专项通过 [64 个隔离宿主句柄用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877207118)、[120 个隔离对象用例](https://github.com/fenghengzhi/krkr2-web/actions/runs/34877210694)、[600 次 owner、20 次集合、1,064 次执行和 188 次字节码分配失败](https://github.com/fenghengzhi/krkr2-web/actions/runs/34876790697)，以及 [20 次 WebKit 字体取消/重启](https://github.com/fenghengzhi/krkr2-web/actions/runs/34882204693)。直接运行时另记录 144 条宿主句柄、48 条控制、240 条弱观察和 48 条事件所有权场景；可信冻结 21,059.1 ms。
