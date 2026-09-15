@@ -378,6 +378,9 @@ export class LayerTree {
         layer.bitmap = new Bitmap(layer.width, layer.height, this.neutral(layer))
         layer.imageLeft = layer.imageTop = 0
       } else if (!value) layer.bitmap = undefined
+      // AllocateImage resets the drawing clip even when the backing image
+      // already exists. Its pixels, province and image offset remain intact.
+      if (value) layer.bitmap!.resetClip()
       layer.revision++
       layer.imageModified = true
     } else if (name === 'order' || name === 'absolute') this.order(id, value, name === 'absolute')

@@ -1686,6 +1686,12 @@ export class EngineSession {
         throw new Error(`${operation}: expected a finite numeric argument at ${i}`)
       return Number(value)
     }
+    // Clip entry points narrow TJS integers to native tjs_int before using
+    // them as coordinates. Preserve the low bits before Number conversion.
+    const clipInteger = (i: number) => {
+      const value = args[i]
+      return typeof value === 'bigint' ? Number(BigInt.asIntN(32, value)) : number(i) | 0
+    }
     const text = (i: number) => {
       if (typeof args[i] !== 'string') throw new Error(`${operation}: expected text at ${i}`)
       return args[i] as string
@@ -2225,7 +2231,15 @@ export class EngineSession {
         }
         return this.inputs!.change(
           () => {
-            this.layers.set(number(0), text(1), typeof args[2] === 'string' ? text(2) : number(2))
+            this.layers.set(
+              number(0),
+              text(1),
+              typeof args[2] === 'string'
+                ? text(2)
+                : text(1).startsWith('clip')
+                  ? clipInteger(2)
+                  : number(2),
+            )
             if (text(1) === 'callOnPaint' && !this.preparingFrame) {
               this.paintedLayers.delete(number(0))
               this.deferredPaint.delete(number(0))
@@ -2386,11 +2400,18 @@ export class EngineSession {
         this.layers.imagePosition(number(0), number(1), number(2))
         this.dirty = true
         break
-      case 'Layer.clip':
-        this.layers
-          .bitmap(number(0))
-          .setClip({ x: number(1), y: number(2), width: number(3), height: number(4) })
+      case 'Layer.clip': {
+        const bitmap = this.layers.bitmap(number(0))
+        if (args.length === 1) bitmap.resetClip()
+        else
+          bitmap.setClip({
+            x: clipInteger(1),
+            y: clipInteger(2),
+            width: clipInteger(3),
+            height: clipInteger(4),
+          })
         break
+      }
       case 'Layer.assignImages':
         this.layers.assignImages(number(0), number(1))
         this.dirty = true

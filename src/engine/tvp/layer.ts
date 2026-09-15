@@ -88,7 +88,13 @@ class Layer {
   function setSizeToImageSize() { setSize(imageWidth,imageHeight); }
   function setPos(left,top,width=void,height=void) { this.left=left;this.top=top;if(width!==void&&height!==void)setSize(width,height); }
   function setImagePos(left,top) { __host("Layer.imagePos",__id,int(left),int(top)); }
-  function setClip(left,top,width,height) { __host("Layer.clip",__id,int(left),int(top),int(width),int(height)); }
+  function setClip(args*) {
+    if(args.count==0)__host("Layer.clip",__id);
+    else {
+      if(args.count<4)throw new global.Exception("Layer.setClip requires zero or at least four arguments");
+      __host("Layer.clip",__id,int(args[0]),int(args[1]),int(args[2]),int(args[3]));
+    }
+  }
   function fillRect(x,y,width,height,color) { __host("Layer.fill",__id,int(x),int(y),int(width),int(height),int(color)); }
   function colorRect(x,y,width,height,color,opacity=255) { __host("Layer.color",__id,int(x),int(y),int(width),int(height),int(color),int(opacity)); }
   function copyRect(x,y,source,left,top,width,height) { __host("Layer.copy",__id,int(x),int(y),source.__id,int(left),int(top),int(width),int(height)); }

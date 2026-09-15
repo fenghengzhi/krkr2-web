@@ -74,8 +74,9 @@ export class Bitmap {
     this.clip = { x: 0, y: 0, width: this.width, height: this.height }
   }
   setClip(rect: Rect): void {
-    if (!Object.values(rect).every(Number.isSafeInteger) || rect.width < 0 || rect.height < 0)
-      throw new Error('Invalid drawing clip')
+    if (!Object.values(rect).every(Number.isSafeInteger)) throw new Error('Invalid drawing clip')
+    // Native SetClip clamps each far edge to its near edge. Negative extents
+    // therefore produce an empty drawing area rather than an invalid size.
     this.clip = intersect(rect, { x: 0, y: 0, width: this.width, height: this.height })
   }
   private offset(x: number, y: number): number {
