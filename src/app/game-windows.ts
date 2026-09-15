@@ -99,6 +99,8 @@ export function createGameWindows(
     windows.get(surface.windowId) === surface &&
     epochs.get(surface.windowId)?.epoch === surface.surfaceEpoch &&
     !epochs.get(surface.windowId)?.retired
+  const interactive = (surface: WindowElement) =>
+    live(surface) && surface.view.visible && !surface.view.blocked
   const emit = (
     surface: WindowElement,
     action:
@@ -128,6 +130,8 @@ export function createGameWindows(
       embedded = windows.size === 1 && surface.primary,
       isFullscreen = fullscreen === surface
     element.hidden = !view.visible
+    element.inert = !!view.blocked
+    element.setAttribute('aria-disabled', String(!!view.blocked))
     element.classList.toggle('game-window-embedded', embedded)
     element.classList.toggle('game-window-active', surface.active)
     element.classList.toggle('game-window-sunken', view.innerSunken)
@@ -135,6 +139,7 @@ export function createGameWindows(
     element.dataset.border = String(view.borderStyle)
     element.dataset.active = String(surface.active)
     element.dataset.focusable = String(view.focusable)
+    element.dataset.blocked = String(!!view.blocked)
     element.dataset.zoom = `${view.zoomNumer}/${view.zoomDenom}`
     element.style.setProperty('--game-window-width', `${geometry.width}px`)
     element.style.setProperty('--game-window-left', `${geometry.left}px`)
@@ -142,9 +147,11 @@ export function createGameWindows(
     surface.title.textContent = view.caption
     element.setAttribute('aria-label', view.caption || '游戏窗口')
     canvas.setAttribute('aria-label', view.caption ? `游戏画布：${view.caption}` : '游戏画布')
-    canvas.tabIndex = view.focusable && view.visible ? 0 : -1
-    surface.close.tabIndex = view.focusable ? 0 : -1
-    surface.leaveFullscreen.tabIndex = view.focusable ? 0 : -1
+    canvas.tabIndex = view.focusable && view.visible && !view.blocked ? 0 : -1
+    surface.close.tabIndex = view.focusable && !view.blocked ? 0 : -1
+    surface.leaveFullscreen.tabIndex = view.focusable && !view.blocked ? 0 : -1
+    surface.close.disabled = !!view.blocked
+    surface.leaveFullscreen.disabled = !!view.blocked
     canvas.style.aspectRatio = `${geometry.width} / ${geometry.height}`
     // Game zoom transforms layers in the renderer; responsive CSS does not
     // change logical size and must never report a Window.resize by itself.
@@ -185,10 +192,23 @@ export function createGameWindows(
     if (sole) stage.dataset.border = String(sole.view.borderStyle)
     else delete stage.dataset.border
     const stack = [...windows.values()].sort(
-      (a, b) => Number(!!a.view.stayOnTop) - Number(!!b.view.stayOnTop) || a.order - b.order,
+      (a, b) =>
+        Number(!!b.view.blocked) - Number(!!a.view.blocked) ||
+        Number(a === fullscreen) - Number(b === fullscreen) ||
+        Number(!!a.view.stayOnTop) - Number(!!b.view.stayOnTop) ||
+        a.order - b.order,
     )
     for (const [index, surface] of stack.entries()) {
-      surface.element.style.zIndex = String(fullscreen === surface ? stack.length + 1 : index + 1)
+      // The fullscreen desktop can outlive page scrolling. A modal above its
+      // blocked owner shares the viewport origin. Cancel any pointer preview
+      // before changing coordinate systems; unblocking restores page layout.
+      const position =
+        fullscreen?.view.blocked && !surface.view.blocked && fullscreen !== surface ? 'fixed' : ''
+      if (surface.element.style.position !== position) {
+        surface.gesture?.()
+        surface.element.style.position = position
+      }
+      surface.element.style.zIndex = String(index + 1)
       layout(surface)
     }
   }
@@ -208,6 +228,7 @@ export function createGameWindows(
     if (
       !view.visible ||
       !view.focusable ||
+      !!view.blocked !== !!surface.view.blocked ||
       gestureProperties.some((property) => view[property] !== surface.view[property])
     )
       surface.gesture?.()
@@ -221,13 +242,12 @@ export function createGameWindows(
     synchronize()
   }
   const activate = (surface: WindowElement) => {
-    if (live(surface) && surface.view.visible && surface.view.focusable && !surface.active)
+    if (interactive(surface) && surface.view.focusable && !surface.active)
       emit(surface, { type: 'activate' })
   }
   const gesture = (surface: WindowElement, event: PointerEvent, resizing: boolean) => {
     if (
-      !live(surface) ||
-      !surface.view.visible ||
+      !interactive(surface) ||
       event.button !== 0 ||
       fullscreen === surface ||
       // Responsive embedded playback has a fixed page origin. Script position
@@ -260,7 +280,7 @@ export function createGameWindows(
       surface.element.classList.remove('game-window-dragging')
       if (target.hasPointerCapture(pointer)) target.releasePointerCapture(pointer)
       if (!live(surface)) return
-      if (commit && result) {
+      if (commit && result && interactive(surface)) {
         if (resizing) {
           surface.view = { ...surface.view, width: result.width, height: result.height }
           emit(surface, { type: 'resize', width: result.width, height: result.height })
@@ -275,7 +295,7 @@ export function createGameWindows(
     surface.element.classList.add('game-window-dragging')
     const move = (next: PointerEvent) => {
       if (next.pointerId !== pointer) return
-      if (!live(surface)) return finish(false)
+      if (!interactive(surface)) return finish(false)
       next.preventDefault()
       next.stopPropagation()
       const dx = next.clientX - origin.x + stage.scrollLeft - origin.left,
@@ -343,7 +363,13 @@ export function createGameWindows(
   browser.addEventListener(
     'keydown',
     (event) => {
-      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || !fullscreen)
+      if (
+        event.key !== 'Escape' ||
+        event.isComposing ||
+        event.defaultPrevented ||
+        !fullscreen ||
+        !interactive(fullscreen)
+      )
         return
       event.preventDefault()
       emit(fullscreen, { type: 'exitFullScreen' })
@@ -448,10 +474,18 @@ export function createGameWindows(
             options,
           )
       }
-      close.addEventListener('click', () => emit(surface, { type: 'close' }), options)
+      close.addEventListener(
+        'click',
+        () => {
+          if (interactive(surface)) emit(surface, { type: 'close' })
+        },
+        options,
+      )
       leaveFullscreen.addEventListener(
         'click',
-        () => emit(surface, { type: 'exitFullScreen' }),
+        () => {
+          if (interactive(surface)) emit(surface, { type: 'exitFullScreen' })
+        },
         options,
       )
       pending.delete(windowId)

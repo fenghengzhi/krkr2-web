@@ -9,6 +9,8 @@ export interface WindowView {
   innerSunken: boolean
   showScrollBars: boolean
   focusable: boolean
+  /** Host modal routing state; this never changes the script's Window properties. */
+  blocked?: boolean
   fullScreen: boolean
   layerLeft: number
   layerTop: number

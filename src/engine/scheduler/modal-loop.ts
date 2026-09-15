@@ -19,6 +19,8 @@ export interface ModalLoopDependencies {
   hasWork(): boolean
   /** A continuation for the existing event pump, including its frame tail. */
   dispatch(): HostReply
+  /** Prepare the current scope's close query/result without taking an event or entering the VM. */
+  beforeWait?(token: number): void
   /** Host presentation/state bookkeeping only. */
   changed(): void
 }
@@ -39,6 +41,9 @@ export class ModalLoop {
     private readonly deps: ModalLoopDependencies,
   ) {}
 
+  get activeToken(): number | undefined {
+    return this.scopes.top
+  }
   get depth(): number {
     return this.scopes.depth
   }
@@ -152,7 +157,12 @@ export class ModalLoop {
       scope = this.scopes.info(token)
     if (!scope || !this.invoked.has(token)) throw new Error('Modal continuation is not active')
     if (operation === 'Modal.wait') {
-      const outcome = await this.scopes.wait(token, () => this.deps.hasWork())
+      const outcome = await this.scopes.wait(token, () => {
+        // The scope installed its wake latch and checked top/paused/terminal
+        // state before this hook; it rechecks those facts after the hook too.
+        this.deps.beforeWait?.(token)
+        return this.deps.hasWork()
+      })
       this.control.check()
       if (this.disposed || this.scopes.info(token) !== scope || !this.invoked.has(token))
         throw new Error('Modal scope has ended')

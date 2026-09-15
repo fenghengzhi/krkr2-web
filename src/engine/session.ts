@@ -31,6 +31,7 @@ import { SystemEvents, type EventOptions, type EventOutcome } from './scheduler/
 import { systemEventsBridge } from './tvp/system.ts'
 import { checkpointBridge } from './tvp/checkpoints.ts'
 import { ModalLoop } from './scheduler/modal-loop.ts'
+import { WindowModals } from './scene/window-modal.ts'
 import { modalBridge } from './tvp/modal.ts'
 import type {
   CheckpointCallbacks,
@@ -229,6 +230,8 @@ export class EngineSession {
   private runtime?: ScriptRuntime
   private systemEvents?: SystemEvents
   private modalLoop?: ModalLoop
+  private windowModals?: WindowModals
+  private windowInputGeneration = 0
   private modalWakeup?: () => void
   private detachPendingEvents?: () => void
   private checkpointCallbacks?: CheckpointCallbacks
@@ -434,6 +437,7 @@ export class EngineSession {
       this.modalLoop = new ModalLoop(this.runtime, this.control, {
         hasWork: () => this.hasModalWork(),
         dispatch: () => this.beginModalDispatch(),
+        beforeWait: (token) => this.windowModals?.beforeWait(token),
         changed: () => {
           this.present()
           this.notify()
@@ -562,6 +566,7 @@ export class EngineSession {
           }
         },
         async (window) => {
+          this.windowModals?.invalidate(window.id)
           this.systemEvents!.cancelSource(window)
           window.resizePending = false
           window.inputActive = false
@@ -577,6 +582,7 @@ export class EngineSession {
           await this.videos?.flushCloses()
         },
         (window) => {
+          this.windowModals?.invalidate(window.id)
           this.systemEvents?.cancelSource(window)
           this.videos?.disconnectWindow(window.id)
           this.menuItems?.disconnectWindow(window)
@@ -590,6 +596,46 @@ export class EngineSession {
           this.dirty = true
         },
       )
+      this.windowModals = new WindowModals(this.windows, this.modalLoop, {
+        enter: (window) => {
+          // Clear queued input without invalidating the currently executing
+          // input generator or its suspended caller's continuation.
+          this.windowInputGeneration++
+          for (const existing of this.windows!.registered())
+            this.systemEvents!.cancelSource(existing)
+          this.inputControllers.releaseCaptures()
+          window.state.set('visible', 1)
+          this.dirty = true
+          // Publish blocking before the browser receives a new focus command.
+          this.present()
+          this.observeAdmission(this.acceptActivateWindow(window.id))
+        },
+        leave: (window, previousId) => {
+          if (this.registeredWindow(window.id) === window) {
+            window.state.set('visible', 0)
+            window.inputActive = false
+            this.inputControllers.get(window.id)?.resetTransient()
+            this.menus.dismiss(window.id)
+          }
+          if (this.windowId === window.id) this.windows!.activate(0)
+          this.syncActiveWindow()
+          this.dirty = true
+          this.present()
+          if (this.control.cancelled) return
+          const eligible = (candidate: WindowRecord | undefined) =>
+            candidate &&
+            candidate.state.visible &&
+            candidate.state.focusable &&
+            !this.windowModals!.blocked(candidate.id)
+          const previous = this.registeredWindow(previousId)
+          const restore = eligible(previous)
+            ? previous
+            : this.windows!.registered().reverse().find(eligible)
+          if (restore) this.observeAdmission(this.acceptActivateWindow(restore.id))
+        },
+        query: (window, onNotEntered) =>
+          this.observeAdmission(this.enqueueCloseWindow(window.id, onNotEntered)),
+      })
       this.menuItems = new MenuService(this.runtime, this.menus, this.windows, (item) => {
         this.systemEvents?.cancelSource(item)
       })
@@ -1147,7 +1193,7 @@ export class EngineSession {
   private windowPresentations(): WindowPresentation[] {
     return (this.windows?.registered() ?? []).map((window) => ({
       id: window.id,
-      view: window.state.view(),
+      view: { ...window.state.view(), blocked: this.windowModals?.blocked(window.id) ?? false },
       main: this.windows?.mainId === window.id,
       active: this.windowId === window.id,
     }))
@@ -1159,7 +1205,7 @@ export class EngineSession {
       throw new Error('Invalid physical cursor coordinates')
     if (this.activity.state !== 'visible' || this.state !== 'running') return
     const window = this.registeredWindow(windowId)
-    if (!window) return
+    if (!window || this.windowModals?.blocked(windowId)) return
     this.windowPointers.set(windowId, { x, y })
     if (window.state.mouseCursorState === 1) window.state.set('mouseCursorState', 0)
   }
@@ -1671,6 +1717,11 @@ export class EngineSession {
     for (const waiter of this.frameWaiters) waiter.resolve()
     this.frameWaiters.clear()
   }
+  private observeAdmission(admission: SessionAdmission): void {
+    void admission.completion.catch((error) => {
+      if (!this.control.cancelled) this.fail(error)
+    })
+  }
   acceptInput(packet: InputPacket, observe = true): SessionAdmission {
     if (this.fontSelection.active && packet.type !== 'cancel' && packet.type !== 'deactivate')
       return ignoredAdmission()
@@ -1687,6 +1738,12 @@ export class EngineSession {
       window = this.registeredWindow(windowId),
       controller = this.inputControllers.get(windowId)
     if (!window || !controller) return ignoredAdmission()
+    if (
+      this.windowModals?.blocked(windowId) &&
+      packet.type !== 'cancel' &&
+      packet.type !== 'deactivate'
+    )
+      return ignoredAdmission()
     packet = { ...packet, windowId }
     if (
       packet.type === 'activate' &&
@@ -1735,10 +1792,15 @@ export class EngineSession {
         this.pointerState(packet.x, packet.y, windowId)
     }
     if (this.state !== 'running') return ignoredAdmission()
-    const epoch = controller.epoch
+    const epoch = controller.epoch,
+      generation = this.windowInputGeneration
     return this.acceptEvent(() => this.inputs!.packet(packet), {
       valid: () =>
         this.registeredWindow(windowId) === window &&
+        generation === this.windowInputGeneration &&
+        (!this.windowModals?.blocked(windowId) ||
+          packet.type === 'cancel' ||
+          packet.type === 'deactivate') &&
         epoch === controller.epoch &&
         this.state === 'running' &&
         this.activity.state === 'visible',
@@ -1751,7 +1813,8 @@ export class EngineSession {
     const controller = this.inputControllers.get(window.id)
     if (this.registeredWindow(window.id) !== window || !controller) return
     if (this.postedInputPending >= 256) throw new Error('Posted input queue budget exceeded')
-    const epoch = controller.epoch
+    const epoch = controller.epoch,
+      generation = this.windowInputGeneration
     packet = { ...packet, windowId: window.id }
     this.postedInputPending++
     // Queue a VM call, never reenter the active TJS host import. A destroyed
@@ -1759,6 +1822,8 @@ export class EngineSession {
     void this.systemEvents!.post(() => this.inputs!.packet(packet), {
       valid: () =>
         this.registeredWindow(window.id) === window &&
+        generation === this.windowInputGeneration &&
+        !this.windowModals?.blocked(window.id) &&
         epoch === controller.epoch &&
         this.activity.state === 'visible',
       priority: 1,
@@ -1770,6 +1835,7 @@ export class EngineSession {
       .finally(() => this.postedInputPending--)
   }
   exitFullScreen(windowId = this.windowId): void {
+    if (this.windowModals?.blocked(windowId)) return
     this.registeredWindow(windowId)?.state.set('fullScreen', 0)
     this.present()
   }
@@ -1779,7 +1845,13 @@ export class EngineSession {
   acceptActivateWindow(windowId: number): SessionAdmission {
     if (this.state !== 'running' || this.activity.state !== 'visible') return ignoredAdmission()
     const window = this.registeredWindow(windowId)
-    if (!window || !window.state.visible || !window.state.focusable) return ignoredAdmission()
+    if (
+      !window ||
+      !window.state.visible ||
+      !window.state.focusable ||
+      this.windowModals?.blocked(windowId)
+    )
+      return ignoredAdmission()
     const previous = this.windows?.active
     // Enqueue both notifications now, in observed order. Waiting for the old
     // callback before selecting the target lets an older request steal focus
@@ -1814,6 +1886,7 @@ export class EngineSession {
     }
   }
   moveWindow(windowId: number, left: number, top: number): void {
+    if (this.windowModals?.blocked(windowId)) return
     const window = this.registeredWindow(windowId)
     if (!window) return
     window.state.set('left', left)
@@ -1821,6 +1894,7 @@ export class EngineSession {
     this.present()
   }
   resizeWindow(windowId: number, width: number, height: number): void {
+    if (this.windowModals?.blocked(windowId)) return
     const window = this.registeredWindow(windowId)
     if (!window) return
     window.state.resize(width, height)
@@ -1832,11 +1906,24 @@ export class EngineSession {
     await this.acceptCloseWindow(windowId).completion
   }
   acceptCloseWindow(windowId: number): SessionAdmission {
+    return this.enqueueCloseWindow(windowId)
+  }
+  private enqueueCloseWindow(windowId: number, onNotEntered?: () => void): SessionAdmission {
     const window = this.registeredWindow(windowId)
-    if (!window || !['running', 'paused'].includes(this.state)) return ignoredAdmission()
-    let lease: ScriptObject | undefined
-    return this.acceptEvent(
+    if (
+      !window ||
+      this.windowModals?.blocked(windowId) ||
+      !['running', 'paused'].includes(this.state)
+    ) {
+      if (onNotEntered) throw new Error('Modal close query is no longer eligible')
+      return ignoredAdmission()
+    }
+    let lease: ScriptObject | undefined,
+      entered = false,
+      modalCompletion: Promise<void> | undefined
+    const admission = this.acceptEvent(
       () => {
+        entered = true
         lease = this.runtime!.upgrade(window.owner)
         return lease
           ? { kind: 'invoke', callback: lease, member: '__windowUserClose', args: [] }
@@ -1845,14 +1932,26 @@ export class EngineSession {
       {
         source: window,
         priority: 1,
-        valid: () => this.registeredWindow(windowId) === window && !this.systemEvents!.disabled,
+        valid: () =>
+          this.registeredWindow(windowId) === window &&
+          !this.windowModals?.blocked(windowId) &&
+          !this.systemEvents!.disabled,
         onSettled: () => {
+          modalCompletion = this.windowModals?.acceptedCompletion(windowId)
           const owned = lease
           lease = undefined
-          if (owned) this.runtime!.release(owned)
+          try {
+            if (owned) this.runtime!.release(owned)
+          } finally {
+            if (!entered) onNotEntered?.()
+          }
         },
       },
     )
+    return {
+      status: admission.status,
+      completion: admission.completion.then(() => modalCompletion),
+    }
   }
   present(): void {
     for (const window of this.windows?.registered() ?? []) {
@@ -1974,7 +2073,14 @@ export class EngineSession {
     const item = this.menuItems?.byView(id),
       window = this.menuItems?.windowByView(id),
       controller = window && this.inputControllers.get(window.id)
-    if (!item || item.closing || item.finished || !window?.state.visible || !controller)
+    if (
+      !item ||
+      item.closing ||
+      item.finished ||
+      !window?.state.visible ||
+      !controller ||
+      this.windowModals?.blocked(window.id)
+    )
       return ignoredAdmission()
     if (popup && popup.windowId !== window.id) return ignoredAdmission()
     if (this.systemEvents!.disabled && !this.menus.hasPopup) return ignoredAdmission()
@@ -1982,7 +2088,8 @@ export class EngineSession {
       this.presentMenus()
       return ignoredAdmission()
     }
-    const epoch = controller.epoch
+    const epoch = controller.epoch,
+      generation = this.windowInputGeneration
     let lease: ScriptObject | undefined
     return this.acceptEvent(
       () => {
@@ -1994,6 +2101,8 @@ export class EngineSession {
       {
         valid: () =>
           epoch === controller.epoch &&
+          generation === this.windowInputGeneration &&
+          !this.windowModals?.blocked(window.id) &&
           this.inputControllers.get(window.id) === controller &&
           this.activity.state === 'visible' &&
           this.state === 'running' &&
@@ -2768,6 +2877,19 @@ export class EngineSession {
         value = BigInt(window.id)
         break
       }
+      case 'Window.showModal':
+        if (!isScriptObject(args[1])) throw new Error('Modal Window request must be an object')
+        return this.windowModals!.show(number(0), this.runtime!.objectIdentity(args[1]))
+      case 'Window.modalAbort':
+        if (isScriptObject(args[1]))
+          this.windowModals?.abort(number(0), this.runtime!.objectIdentity(args[1]))
+        break
+      case 'Window.modalClose':
+        value = this.windowModals?.requestClose(number(0)) ? 1n : 0n
+        break
+      case 'Window.modalRespond':
+        value = this.windowModals?.respond(number(0), !!number(1)) ? 1n : 0n
+        break
       case 'Window.main':
         value = this.windows!.main
         break

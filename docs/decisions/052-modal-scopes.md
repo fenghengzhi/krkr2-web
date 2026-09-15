@@ -1,6 +1,6 @@
 # 052 — 合作式模态循环的 scope 基础
 
-当前工作分支已接入浏览器接收确认；逐事件 native checkpoint、视频完成票据和 ModalLoop 也已写入，尚待本片 Actions。Window.showModal／Menu.popup 的模态业务仍未接通。下面保留各步骤当时的状态和失败记录，新接线详见文末，不以基础组件通过代替完整模态功能。
+当前工作分支已接入浏览器接收确认；逐事件 native checkpoint、视频完成票据和 ModalLoop 也已写入，尚待本片 Actions。Window.showModal 业务已接通、尚待首轮Actions；Menu.popup 的模态业务仍未接通。下面保留各步骤当时的状态和失败记录，新接线详见文末，不以基础组件通过代替完整模态功能。
 
 本阶段先实现独立的 `src/engine/scheduler/modal-scopes.ts`。它管理 host 侧身份、栈和等待生命周期，尚未接入 Session、SystemEvents、ExecutionControl、TJS pump 或 DOM。`Window.showModal` 与 `Menu.popup` 的完整嵌套事件循环仍未实现，不能以此组件的测试代替实际 VM/浏览器验证。总体边界见[多窗口规划](048-multiwindow-plan.md)。
 
@@ -103,3 +103,15 @@ CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原
 新增只读 `krkr_release_draining` 导出及 `runtime.inspect().drainingReleased`。原生释放会先将当前对象从待释放集合移出，再执行可挂起的析构；因此 pendingHandles=0 不代表整个 drain 已完成。新字段直接读取该活动状态。ABI 5 的既有调用形状不变，manifest 新增 `nativeReleaseState:1`；新页面检查该能力，运行时在创建 VM 前检查真实导出，缺少支持的旧内核明确拒绝，不能以默认 false 掩盖缺失。
 
 本片新增 17 项 ModalLoop 生命周期、8 项事件尾部、24 项真实 Session、14 项视频完成边界以及 7 项原生释放状态／缺能力拒绝检查，共预期 70 项 Node；其中原生状态覆盖源码／字节码的正常、析构抛错和取消。额外包含隐藏但未暂停时的普通票据尾部与非模态主窗口关闭后继续执行语句；所有这些检查均尚未执行，不能计为通过。新增接口也尚未在真正 Window.showModal／Menu.popup 嵌套场景下验收，后续仍需实际浏览器双后端验证。
+
+## Window.showModal 业务接线（尚待验证）
+
+`Window.showModal()`通过既有ModalLoop返回HostReply continuation，在同一TJS调用栈上保留调用者局部变量。独立WindowModals管理窗口请求身份、关闭查询和接受结果，隐藏本身不结束modal；进入前拒绝可见、全屏、已模态或失效窗口。每次TJS调用持有独立request对象，native释放在pump进入前抛错时，catch只撤销匹配identity的尝试，不伤旧scope或同窗口后续调用。
+
+脚本close记录请求，当前窗口自己的wait就绪检查才准备onCloseQuery；父窗口的查询与接受结果不提前结束正在执行的子模态。base onCloseQuery(true)先记录本窗口结果，当前回调仍可继续开子窗口；自己的循环恢复后才消费结果并隐藏。false只清等待查询，不撤销已有接受结果；不调用base或仅return true不构成接受。实际mainWindow按原默认规则失效并请求退出。未进入回调的内部查询被子modal清掉旧输入时，记录带generation的重新查询请求，避免永久queryPending。宿主close completion在已接受时还等待对应scope真正隐藏、解除阻塞和清理；否决或等待异步答复时只等待本次query收尾。
+
+原版固定WindowIntf.cpp的ShowModal调用ClearAllWindowInputEvents；此处清除旧排队输入，保留正在执行的输入generator及其父调用栈。WindowView新增host-only可选blocked；脚本visible/focusable不被改写。页面以inert、Tab排除与输入协调器停止接收处理阻塞，Session也拒绝过期或被阻塞窗口的输入、激活、菜单及宿主几何操作。可交互的模态窗口位于被阻塞的置顶／全屏窗口上方，解除后恢复原堆叠规则。退出时隐藏存活窗口、恢复仍可见可聚焦的原窗口或合格后备；新焦点命令在解除blocked的roster之后发送。
+
+固定原版 `WindowFormUnit.cpp` 的OnCloseQueryCalled明确只为自身写ModalResult，false不清已有结果；已下载原始文件及SHA-256。旧发行使用的具体VCL Forms实现没有随仓库提供，因此“script close先写mrCancel、稍后自己的modal loop发query”及“已接受后再次close可重开查询”是依据原包装与现代VCL合同作出的实现选择，不能写成已观察到的旧VCL运行结果。相关源审记录为 `out/verification/multiwindow/window-modal-close-contract.md`。
+
+本片新增24项纯WindowModals、8项BrowserInputCoordinator、16模板×源码／字节码共32项真实TJS，以及6个两内核真实浏览器模态模板；页面另有6个host交互模板。Node共新增64项，浏览器新增12模板×三浏览器共36项。当前均仅编写，未本地执行，也未以之前基础组件的绿色记录替代这些新路径。完整Menu.popup循环、flags与递归通知仍待后续实现。

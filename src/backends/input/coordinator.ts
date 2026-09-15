@@ -9,6 +9,9 @@ interface SurfaceInput {
   readonly focusRoot?: HTMLElement
   visible: boolean
   focusable: boolean
+  blocked: boolean
+  revision: number
+  resumingFromModal: boolean
 }
 interface QueuedInput {
   readonly surface: SurfaceInput
@@ -27,6 +30,7 @@ export class BrowserInputCoordinator {
   private readonly views = new Map<number, WindowView>()
   private readonly inputs = new Map<number, InputView>()
   private readonly pressed = new Set<number>()
+  private readonly physicalOwners = new Map<number, number>()
   private publishedKeys = ''
   private queue: QueuedInput[] = []
   private active?: SurfaceInput
@@ -60,7 +64,9 @@ export class BrowserInputCoordinator {
       'keyup',
       (event) => {
         if (this.closed || this.suspended) return
-        if (this.pressed.delete(virtualKey(event))) this.keys()
+        const key = virtualKey(event)
+        this.physicalOwners.delete(key)
+        if (this.pressed.delete(key)) this.keys()
       },
       { signal: this.abort.signal, capture: true },
     )
@@ -75,7 +81,10 @@ export class BrowserInputCoordinator {
           [5, 8],
           [6, 16],
         ] as const)
-          if (!(event.buttons & button)) this.pressed.delete(key)
+          if (!(event.buttons & button)) {
+            this.pressed.delete(key)
+            this.physicalOwners.delete(key)
+          }
         this.keys()
       },
       { signal: this.abort.signal, capture: true },
@@ -114,28 +123,45 @@ export class BrowserInputCoordinator {
     if (previous && previous.epoch >= epoch) return
     if (previous) this.remove(previous)
     let surface: SurfaceInput
-    const current = () => !!surface && this.current(surface) && !this.suspended && surface.visible
+    const current = () =>
+      !!surface && this.current(surface) && !this.suspended && surface.visible && !surface.blocked
     const hooks: BrowserInputHooks = {
       enqueue: (packet) => {
         if (current()) this.enqueue(surface, packet)
       },
       pointer: (x, y) => {
         if (!current()) return
-        const generation = this.generation
+        const generation = this.generation,
+          revision = surface.revision
         try {
           // Physical cursor reads must keep working while an earlier TJS callback
           // awaits input, storage, or a timer; they do not enter the script queue.
           void Promise.resolve(this.sendPointer(x, y, windowId)).catch((error) => {
-            if (this.current(surface) && generation === this.generation) this.error(error)
+            if (
+              this.current(surface) &&
+              generation === this.generation &&
+              revision === surface.revision
+            )
+              this.error(error)
           })
         } catch (error) {
-          if (this.current(surface) && generation === this.generation) this.error(error)
+          if (
+            this.current(surface) &&
+            generation === this.generation &&
+            revision === surface.revision
+          )
+            this.error(error)
         }
       },
       key: (key, down) => {
         if (!current() || this.active !== surface || !key) return
-        if (down) this.pressed.add(key)
-        else this.pressed.delete(key)
+        if (down) {
+          this.pressed.add(key)
+          this.physicalOwners.set(key, surface.id)
+        } else {
+          this.pressed.delete(key)
+          this.physicalOwners.delete(key)
+        }
       },
       modifiers: (shift, pointer) => {
         if (!current()) return
@@ -150,12 +176,18 @@ export class BrowserInputCoordinator {
           [6, 512],
         ] as const) {
           if (!pointer && mask >= 8) continue
-          shift & mask ? this.pressed.add(key) : this.pressed.delete(key)
+          if (shift & mask) {
+            this.pressed.add(key)
+            this.physicalOwners.set(key, surface.id)
+          } else {
+            this.pressed.delete(key)
+            this.physicalOwners.delete(key)
+          }
         }
         this.keys()
       },
       activate: () => {
-        if (!current() || !surface.focusable) return false
+        if (!current() || !surface.focusable || surface.resumingFromModal) return false
         this.setActive(surface)
         return true
       },
@@ -190,13 +222,16 @@ export class BrowserInputCoordinator {
       focusRoot,
       visible: this.views.get(windowId)?.visible ?? true,
       focusable: this.views.get(windowId)?.focusable ?? true,
+      blocked: !!this.views.get(windowId)?.blocked,
+      revision: 0,
+      resumingFromModal: false,
     }
     this.surfaces.set(windowId, surface)
     const view = this.views.get(windowId),
       state = this.inputs.get(windowId)
     if (view) input.setWindow(view)
     if (state) input.setInput(state)
-    input.setSuspended(this.suspended || !surface.visible)
+    input.setSuspended(this.suspended || !surface.visible || surface.blocked)
   }
 
   detach(windowId: number, epoch: number): void {
@@ -214,6 +249,7 @@ export class BrowserInputCoordinator {
       this.suspended ||
       !surface?.visible ||
       !surface.focusable ||
+      surface.blocked ||
       (epoch !== undefined && surface.epoch !== epoch)
     )
       return false
@@ -238,6 +274,7 @@ export class BrowserInputCoordinator {
       !this.suspended &&
       surface.visible &&
       surface.focusable &&
+      !surface.blocked &&
       surface.id === windowId &&
       (epoch === undefined || surface.epoch === epoch)
     )
@@ -245,11 +282,35 @@ export class BrowserInputCoordinator {
 
   setWindow(windowId: number, view: WindowView): void {
     if (this.closed) return
-    this.views.set(windowId, view)
+    const previous = this.views.get(windowId),
+      blocked = !!view.blocked,
+      blockingChanged = !!previous?.blocked !== blocked
+    this.views.set(windowId, { ...view })
+    // An activation awaiting a Worker reply or a replacement canvas must not
+    // regain focus after its modal access was revoked, even if no DOM blur ran.
+    if (blockingChanged) this.focusVersion++
     const surface = this.surfaces.get(windowId)
     if (!surface) return
+    const resumingFromModal = surface.blocked && !blocked
     surface.input.setWindow(view)
     surface.focusable = view.focusable
+    if (surface.blocked !== blocked) {
+      surface.blocked = blocked
+      surface.revision++
+      if (blocked) {
+        this.queue = this.queue.filter((entry) => entry.surface !== surface)
+        if (this.active === surface) this.setActive(undefined)
+        if (this.mouseOwner === surface) this.mouseOwner = undefined
+        // Applying inert may already have blurred the DOM before this roster
+        // arrives here. Physical ownership survives that blur until released.
+        for (const [key, owner] of this.physicalOwners)
+          if (owner === surface.id) {
+            this.physicalOwners.delete(key)
+            this.pressed.delete(key)
+          }
+        this.keys()
+      }
+    }
     if (!view.focusable && this.active === surface) this.setActive(undefined)
     if (surface.visible !== view.visible) {
       surface.visible = view.visible
@@ -260,7 +321,12 @@ export class BrowserInputCoordinator {
         }
         if (this.mouseOwner === surface) this.mouseOwner = undefined
       }
-      surface.input.setSuspended(this.suspended || !view.visible)
+    }
+    surface.resumingFromModal = resumingFromModal
+    try {
+      surface.input.setSuspended(this.suspended || !view.visible || blocked)
+    } finally {
+      surface.resumingFromModal = false
     }
   }
 
@@ -281,7 +347,7 @@ export class BrowserInputCoordinator {
       this.clearPhysical()
     }
     for (const surface of this.surfaces.values())
-      surface.input.setSuspended(suspended || !surface.visible)
+      surface.input.setSuspended(suspended || !surface.visible || surface.blocked)
   }
 
   private current(surface: SurfaceInput): boolean {
@@ -295,6 +361,7 @@ export class BrowserInputCoordinator {
       (surface) =>
         surface.visible &&
         surface.focusable &&
+        !surface.blocked &&
         (surface.input.ownsFocus(target) ||
           (!!target && surface.focusRoot?.contains(target as Node))),
     )
@@ -327,6 +394,7 @@ export class BrowserInputCoordinator {
   private clearPhysical(): void {
     if (this.closed) return
     this.pressed.clear()
+    this.physicalOwners.clear()
     this.keys()
   }
 
@@ -346,7 +414,7 @@ export class BrowserInputCoordinator {
   }
 
   private enqueue(surface: SurfaceInput, packet: InputPacket): void {
-    if (!this.current(surface) || this.suspended) return
+    if (!this.current(surface) || this.suspended || surface.blocked) return
     const entry = { surface, packet: { ...packet, windowId: surface.id } },
       last = this.queue.at(-1)
     if (
@@ -373,12 +441,17 @@ export class BrowserInputCoordinator {
     try {
       while (!this.closed && !this.suspended && this.queue.length) {
         const entry = this.queue.shift()!
-        if (!this.current(entry.surface)) continue
-        const generation = this.generation
+        if (!this.current(entry.surface) || entry.surface.blocked) continue
+        const generation = this.generation,
+          revision = entry.surface.revision
         try {
           await this.send(entry.packet)
         } catch (error) {
-          if (this.current(entry.surface) && generation === this.generation) {
+          if (
+            this.current(entry.surface) &&
+            generation === this.generation &&
+            revision === entry.surface.revision
+          ) {
             this.queue = this.queue.filter((pending) => pending.surface !== entry.surface)
             this.error(error)
           }

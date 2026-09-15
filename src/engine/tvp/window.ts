@@ -43,8 +43,19 @@ class Window {
   } }
   property primaryLayer { getter() { return __host("Window.primary",__windowId); } }
   function __windowDispatch(name,args) { return this[name](args*); }
+  function showModal() {
+    // Keep the attempt alive on the TJS stack. If native release fails before
+    // the modal continuation starts, only this attempt may be rolled back.
+    var request=[];
+    try { return __host("Window.showModal",__windowId,request); }
+    catch(error) {
+      try { __host("Window.modalAbort",__windowId,request); } catch(cleanupError) {}
+      throw error;
+    }
+  }
   function close() {
     if(__windowUserClosing)return;
+    if(__host("Window.modalClose",__windowId))return;
     var window=this;
     __windowCanClose=true;
     onCloseQuery(true);
@@ -57,6 +68,11 @@ class Window {
   }
   function bringToFront() { __host("Window.activate",__windowId); }
   function onCloseQuery(canClose) {
+    if(__host("Window.modalRespond",__windowId,int(!!canClose))) {
+      __windowUserClosing=false;
+      if(canClose && __host("Window.isMain",__windowId)) invalidate this;
+      return;
+    }
     if(!__windowUserClosing){__windowCanClose=!!canClose;return;}
     __windowUserClosing=false;
     if(!canClose)return;
