@@ -43,3 +43,9 @@ Host 为全部视频的混合画布设置 64 MiB 存活 backing 总预算，独�
 原生请求 bitmap point filtering，但[最终 presenter](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/krmovie/CVMRCustomAllocatorPresenter9.cpp#L664)优先线性缩放整张已合成视频。独立 Web Canvas 的分数坐标、缩放滤波、色彩转换和 alpha 舍入尚未与 VMR9 逐像素标定；这里保留可解释的 normalized geometry 和核心快照行为，不声称所有 VMR9 屏幕像素等价。原版设备重建后的 bitmap 保留行为也未取得实测证据。
 
 既有 Layer.left/top 仍接受超出 int32 的 JS 安全整数，目标 VideoOverlay 方法仍通过其 `__videoId` 注册值查找对象；本次加强的是来源 Layer 的 native identity。全部 Layer 大整数转换和 Video 方法接收者绑定的统一校准属于后续范围，本阶段不能据此宣称这些既有接口已完全等价。
+
+## 首轮类型检查记录
+
+[35004938171](https://github.com/fenghengzhi/krkr2-web/actions/runs/35004938171)（`46a7591`）和 [35005314239](https://github.com/fenghengzhi/krkr2-web/actions/runs/35005314239)（`5e2cd67`）都在 Worker 类型检查处失败：新的 DOM 混合画布模块被 Worker 的 backends 扫描纳入，因而找不到 HTMLCanvasElement／document。后者只同步了 058 的模态测试适配器修订，没有解决这一独立边界；两轮均未进入用例执行，不计任何测试通过。
+
+后续将 Worker 配置中只排除 video/browser/host.ts 改为排除其完整 DOM 宿主目录。主线程类型检查仍通过 createPlayer／WebVideoHost 的实际依赖检查其中两个模块；没有给 Worker 或 engine 加入 DOM 类型，也没有关闭类型检查。两轮原始构建日志与未执行状态独立保留，后续结果另记。
