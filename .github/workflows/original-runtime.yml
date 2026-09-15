@@ -8,13 +8,14 @@ permissions:
 
 jobs:
   original:
-    name: Original SDK / ${{ matrix.os }}
+    name: Original SDK / ${{ matrix.os }} / ${{ matrix.scenario }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
+        scenario: [modal-close, modal-accepted-reclose, modal-hidden-timer, modal-parent-child]
     defaults:
       run:
         shell: pwsh
@@ -25,6 +26,7 @@ jobs:
       - name: Observe original modal close without external input
         env:
           NATIVE_OS: ${{ matrix.os }}
+          NATIVE_SCENARIO: ${{ matrix.scenario }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
@@ -34,7 +36,7 @@ jobs:
           New-Item -ItemType Directory -Force $output | Out-Null
           $status = [ordered]@{
             schema = 1; runId = $env:GITHUB_RUN_ID; attempt = $env:GITHUB_RUN_ATTEMPT
-            commit = $env:GITHUB_SHA; runner = $env:NATIVE_OS
+            commit = $env:GITHUB_SHA; runner = $env:NATIVE_OS; scenario = $env:NATIVE_SCENARIO
             state = 'not-run'; stage = 'download'; scope = 'Original SDK observations, not a Web runtime test'
             globalInputUsed = $false; pluginsLoadedByFixture = $false
             processDeadlineMs = 30000; timedOut = $false; exitCode = $null; error = $null
@@ -66,13 +68,19 @@ jobs:
               bytes = (Get-Item $engine).Length; sha256 = (Get-FileHash $engine -Algorithm SHA256).Hash.ToLowerInvariant()
               fileVersion = (Get-Item $engine).VersionInfo.FileVersion; productVersion = (Get-Item $engine).VersionInfo.ProductVersion
             }
-            $script = Get-Content tests/fixtures/native-reference/modal-close.tjs -Raw -Encoding utf8
+            $fixture = Join-Path 'tests/fixtures/native-reference' ($env:NATIVE_SCENARIO + '.tjs')
+            $script = Get-Content $fixture -Raw -Encoding utf8
             $startup = Join-Path $work 'startup.tjs'
             [IO.File]::WriteAllText($startup, $script, [Text.UnicodeEncoding]::new($false, $true))
             Copy-Item $startup (Join-Path $output 'startup.tjs')
             $status.scriptSha256 = (Get-FileHash $startup -Algorithm SHA256).Hash.ToLowerInvariant()
             $status.stage = 'execution'
-            $process = Start-Process -FilePath $engine -WorkingDirectory $work -PassThru `
+            # The SDK's Startup.html requires an explicit project folder (or
+            # data/content-data). The executable's working directory alone is
+            # not a project-selection rule. Keep the exact arguments as evidence.
+            $arguments = '"' + $work + '" -forcelog=yes'
+            $status.arguments = $arguments
+            $process = Start-Process -FilePath $engine -WorkingDirectory $work -ArgumentList $arguments -PassThru `
               -RedirectStandardOutput (Join-Path $output 'stdout.log') `
               -RedirectStandardError (Join-Path $output 'stderr.log')
             $status.processId = $process.Id
@@ -116,7 +124,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: original-runtime-${{ matrix.os }}-${{ github.run_attempt }}
+          name: original-runtime-${{ matrix.os }}-${{ matrix.scenario }}-${{ github.run_attempt }}
           path: out/verification/original-runtime
           if-no-files-found: error
           retention-days: 30

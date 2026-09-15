@@ -97,13 +97,13 @@ export function mountApp(root: HTMLDivElement): void {
   const updateMenus = () => {
     for (const [id, menus] of gameMenus) {
       const view = windowViews.get(id)?.view
+      menus.modal(fontSelecting || !!view?.blocked)
       menus.state(
         snapshot?.state === 'running' && snapshot.activity.state === 'visible' && !!view?.visible,
         view?.width,
         view?.height,
         snapshot?.eventDisabled,
       )
-      menus.modal(fontSelecting)
     }
   }
   let systemFonts: FontDescriptor[] = []
@@ -327,8 +327,8 @@ export function mountApp(root: HTMLDivElement): void {
             { active: () => instance.isWindowActive(surface.windowId, surface.surfaceEpoch) },
           )
           gameMenus.set(surface.windowId, menus)
-          menus.update(menuViews.get(surface.windowId) ?? {})
           updateMenus()
+          menus.update(menuViews.get(surface.windowId) ?? {})
         },
         onSurfaceDetach(surface) {
           gameMenus.get(surface.windowId)?.dispose()

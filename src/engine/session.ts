@@ -32,6 +32,7 @@ import { systemEventsBridge } from './tvp/system.ts'
 import { checkpointBridge } from './tvp/checkpoints.ts'
 import { ModalLoop } from './scheduler/modal-loop.ts'
 import { WindowModals } from './scene/window-modal.ts'
+import { MenuModals } from './scene/menu-modal.ts'
 import { modalBridge } from './tvp/modal.ts'
 import type {
   CheckpointCallbacks,
@@ -232,6 +233,7 @@ export class EngineSession {
   private systemEvents?: SystemEvents
   private modalLoop?: ModalLoop
   private windowModals?: WindowModals
+  private menuModals?: MenuModals
   private windowInputGeneration = 0
   private modalWakeup?: () => void
   private detachPendingEvents?: () => void
@@ -343,7 +345,7 @@ export class EngineSession {
       this.cancelEventReceipts(new ExecutionCancelled())
       for (const cleanup of [
         () => this.modalLoop?.dispose(),
-        () => this.menus.dismiss(),
+        () => this.menus.dismiss(undefined, undefined, 'unavailable'),
         () => this.fontSelection.cancel(),
         () => this.fontCatalog.clear(),
         () => this.cancelRedraw?.(),
@@ -439,7 +441,10 @@ export class EngineSession {
       this.modalLoop = new ModalLoop(this.runtime, this.control, {
         hasWork: () => this.hasModalWork(),
         dispatch: () => this.beginModalDispatch(),
-        beforeWait: (token) => this.windowModals?.beforeWait(token),
+        beforeWait: (token) => {
+          this.windowModals?.beforeWait(token)
+          this.menuModals?.beforeWait(token)
+        },
         changed: () => {
           this.present()
           this.notify()
@@ -569,6 +574,7 @@ export class EngineSession {
         },
         async (window) => {
           this.windowModals?.invalidate(window.id)
+          this.menus.dismiss(window.id, undefined, 'unavailable')
           this.systemEvents!.cancelSource(window)
           window.resizePending = false
           window.inputActive = false
@@ -603,8 +609,10 @@ export class EngineSession {
           // Clear queued input without invalidating the currently executing
           // input generator or its suspended caller's continuation.
           this.windowInputGeneration++
-          for (const existing of this.windows!.registered())
+          for (const existing of this.windows!.registered()) {
             this.systemEvents!.cancelSource(existing)
+            if (existing !== window) this.menus.dismiss(existing.id, undefined, 'unavailable')
+          }
           this.inputControllers.releaseCaptures()
           window.state.set('visible', 1)
           this.dirty = true
@@ -617,7 +625,7 @@ export class EngineSession {
             window.state.set('visible', 0)
             window.inputActive = false
             this.inputControllers.get(window.id)?.resetTransient()
-            this.menus.dismiss(window.id)
+            this.menus.dismiss(window.id, undefined, 'unavailable')
           }
           if (this.windowId === window.id) this.windows!.activate(0)
           this.syncActiveWindow()
@@ -641,6 +649,9 @@ export class EngineSession {
       this.menuItems = new MenuService(this.runtime, this.menus, this.windows, (item) => {
         this.systemEvents?.cancelSource(item)
       })
+      this.menuModals = new MenuModals(this.menus, this.modalLoop, (view) =>
+        this.queueMenuNotification(view),
+      )
       this.layerObjects = new LayerService(
         this.runtime,
         this.layers,
@@ -1110,7 +1121,7 @@ export class EngineSession {
       this.physicalKeys.clear()
       for (const window of this.windows?.registered() ?? []) window.inputActive = false
       this.inputControllers.resetTransient()
-      this.menus.dismiss()
+      this.menus.dismiss(undefined, undefined, 'unavailable')
       // Commit only materialized overlay writes. Never reenter a suspended VM
       // to flush native streams from a page lifecycle callback.
       void this.flushFiles(false)
@@ -1146,7 +1157,7 @@ export class EngineSession {
       this.physicalKeys.clear()
       for (const window of this.windows?.registered() ?? []) window.inputActive = false
       this.inputControllers.resetTransient()
-      this.menus.dismiss()
+      this.menus.dismiss(undefined, undefined, 'unavailable')
       this.presentMenus()
       this.control.pause()
       this.events?.pause(activityPaused(this.activity))
@@ -1929,6 +1940,7 @@ export class EngineSession {
     const window = this.registeredWindow(windowId)
     if (
       !window ||
+      (!onNotEntered && !window.state.visible) ||
       this.windowModals?.blocked(windowId) ||
       !['running', 'paused'].includes(this.state)
     ) {
@@ -1951,6 +1963,7 @@ export class EngineSession {
         priority: 1,
         valid: () =>
           this.registeredWindow(windowId) === window &&
+          window.state.visible &&
           !this.windowModals?.blocked(windowId) &&
           !this.systemEvents!.disabled,
         onSettled: () => {
@@ -2083,6 +2096,55 @@ export class EngineSession {
   }
   async menuClick(id: number, popup?: MenuPopupIdentity): Promise<void> {
     await this.acceptMenuClick(id, popup).completion
+  }
+  private queueMenuNotification(view: number): void {
+    if (this.control.cancelled || this.systemEvents!.disabled) return
+    const item = this.menuItems!.byView(view)
+    if (!item) return
+    let lease: ScriptObject | undefined
+    this.observeAdmission(
+      this.acceptEvent(
+        () => {
+          lease = this.runtime!.upgrade(item.owner)
+          return lease
+            ? { kind: 'invoke', callback: lease, member: 'onClick', args: [] }
+            : { kind: 'value', value: undefined }
+        },
+        {
+          valid: () => {
+            // Native OnClick follows the current registration ancestry. This is
+            // an already selected command, not a new DOM hit or shortcut: later
+            // visibility/caption/child changes do not cancel it on their own.
+            let current = item
+            while (!current.window && current.parent) current = current.parent
+            const window = current.window
+            return (
+              !item.finished &&
+              !item.closing &&
+              this.menuItems!.byView(view) === item &&
+              this.menus.canNotify(view) &&
+              !!window &&
+              this.registeredWindow(window.id) === window &&
+              !window.finished &&
+              !window.closing &&
+              window.state.visible &&
+              !this.windowModals?.blocked(window.id) &&
+              this.activity.state === 'visible' &&
+              this.state === 'running' &&
+              !this.systemEvents!.disabled
+            )
+          },
+          priority: 1,
+          discardable: true,
+          source: item,
+          onSettled: () => {
+            const owned = lease
+            lease = undefined
+            if (owned) this.runtime!.release(owned)
+          },
+        },
+      ),
+    )
   }
   acceptMenuClick(id: number, popup?: MenuPopupIdentity): SessionAdmission {
     if (this.fontSelection.active) return ignoredAdmission()
@@ -2792,18 +2854,6 @@ export class EngineSession {
           this.menuItems!.index(args[0], args[1] === undefined ? undefined : number(1)),
         )
         break
-      case 'Menu.target': {
-        const item = this.menuItems!.byView(number(0))
-        value =
-          item &&
-          !item.closing &&
-          !item.finished &&
-          this.menuItems!.windowByView(item.view)?.state.visible &&
-          this.menus.selectable(item.view)
-            ? item.owner
-            : null
-        break
-      }
       case 'Menu.action':
         if (args[0] === null) break
         if (!isScriptObject(args[0]) || !isScriptObject(args[1]))
@@ -2856,12 +2906,18 @@ export class EngineSession {
           value = 0n
           break
         }
-        const selected = this.menus.openPopup(item.view, number(1), number(2), number(3))
-        this.presentMenus()
-        value = BigInt(await selected)
-        this.presentMenus()
-        break
+        if (!isScriptObject(args[4])) throw new Error('Popup request must be an object')
+        return this.menuModals!.show(
+          item,
+          this.runtime!.objectIdentity(args[4]),
+          number(1) >>> 0,
+          number(2) | 0,
+          number(3) | 0,
+        )
       }
+      case 'Menu.modalAbort':
+        if (isScriptObject(args[0])) this.menuModals?.abort(this.runtime!.objectIdentity(args[0]))
+        break
       case 'Events.get': {
         const source = this.events!.get(number(0)),
           property = text(1)
@@ -3000,7 +3056,7 @@ export class EngineSession {
               if (!this.control.cancelled) this.fail(error)
             })
           else {
-            this.menus.dismiss(window.id)
+            this.menus.dismiss(window.id, undefined, 'unavailable')
             void this.input({ type: 'deactivate', windowId: window.id }, false).catch(() => {})
             if (!this.windows!.active) {
               const next = this.windows!.registered()

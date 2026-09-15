@@ -7,7 +7,8 @@ export interface WindowModalActions {
   enter(window: WindowRecord): void
   /** Hide a surviving Window and restore a still-eligible previous Window. */
   leave(window: WindowRecord, previousWindowId: number): void
-  /** Enqueue onCloseQuery through the normal, weak Window event path. */
+  /** Enqueue onCloseQuery through the normal, weak Window event path. Throw
+   * only before admission; onNotEntered reports admitted work being dropped. */
   query(window: WindowRecord, onNotEntered: () => void): void
 }
 
@@ -190,24 +191,31 @@ export class WindowModals {
     record.closeRequested = false
     record.queryPending = true
     const generation = ++record.queryGeneration
+    let discarded = false
     const onNotEntered = () => {
-      if (
-        this.tokens.get(record.window.id) !== record ||
-        record.aborted ||
-        !record.queryPending ||
-        record.queryGeneration !== generation
-      )
-        return
-      record.queryPending = false
-      record.closeRequested = true
-      this.loop.notify()
+      // FormCloseQuery sets Closing when it posts the query. Both a hidden
+      // Window's delivery gate and ClearAllWindowInputEvents may discard that
+      // input without clearing Closing. Only an explicit base answer changes
+      // the pending state, even after a child modal returns or visibility changes.
+      discarded = true
     }
     try {
       this.actions.query(record.window, onNotEntered)
     } catch (error) {
-      // Synchronous admission failure did not create a pending query. Preserve
-      // the request for the caller's retry while keeping any reentrant answer.
-      onNotEntered()
+      // An adapter may throw only before it admits work. Keep a synchronous
+      // drop distinct from admission failure, and do not undo a reentrant
+      // answer, a newer query generation, or a replacement modal invocation.
+      if (
+        !discarded &&
+        this.tokens.get(record.window.id) === record &&
+        !record.aborted &&
+        record.queryPending &&
+        record.queryGeneration === generation
+      ) {
+        record.queryPending = false
+        record.closeRequested = true
+        this.loop.notify()
+      }
       throw error
     }
   }
