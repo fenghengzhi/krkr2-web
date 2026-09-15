@@ -1,16 +1,31 @@
 import { LayerTree } from '../scene/layers.ts'
 import type { WindowView } from '../scene/window.ts'
 import { shiftButtons, type InputPacket, type InputView } from '../ports/input.ts'
+import type { ScriptObject, ScriptValue } from '../script/runtime.ts'
 export interface LayerRef {
   layer: number
 }
 export type InputValue = string | number | boolean | null | undefined | LayerRef
 export interface InputCall {
+  kind?: 'call'
   target: number
   method: string
   args: InputValue[]
 }
-export type InputOperation = Generator<InputCall, InputValue, unknown>
+export interface InputOwnershipStep {
+  kind: 'ownership'
+  key: string
+  layer: number
+}
+export interface InputInvocation {
+  kind: 'invoke'
+  callback: ScriptObject
+  args: ScriptValue[]
+  /** Cleanup helpers must still run while the outer operation is unwinding. */
+  unwind?: boolean
+}
+export type InputStep = InputCall | InputOwnershipStep | InputInvocation
+export type InputOperation = Generator<InputStep, InputValue, unknown>
 const ref = (layer: number): LayerRef => ({ layer })
 export class InputController {
   epoch = 0
@@ -32,11 +47,60 @@ export class InputController {
   private releasedTouches = new Set<number>()
   private enabledDepth = 0
   private enabledBefore = new Map<number, boolean>()
+  // Numeric bookkeeping never owns a script object. The corresponding values
+  // live in the Input pump's private Dictionary and change only at VM yields.
+  private owners = new Map<string, number>()
+  private pendingOwnership: InputOwnershipStep[] = []
+  private detaching = new Set<number>()
   constructor(
     readonly layers: LayerTree,
     private readonly window: () => WindowView,
     private readonly windowId?: () => number,
   ) {}
+  private manager(id: number): number {
+    return this.layers.has(id) ? this.layers.get(id).managerId : 0
+  }
+  private ownerManager(role: string, id: number): number {
+    for (const [key, owner] of this.owners)
+      if (owner === id && key.endsWith(`:${role}`)) return Number(key.split(':')[0])
+    return this.manager(id)
+  }
+  private ownership(role: string, id: number, manager: number): InputOwnershipStep {
+    const key = `${manager}:${role}`
+    if (id) this.owners.set(key, id)
+    else this.owners.delete(key)
+    return { kind: 'ownership', key, layer: id }
+  }
+  private *own(role: string, id: number, manager: number): InputOperation {
+    yield this.ownership(role, id, manager)
+    return undefined
+  }
+  private *dropOwner(role: string, id?: number): InputOperation {
+    for (const [key, owner] of [...this.owners]) {
+      if (key.endsWith(`:${role}`) && (id === undefined || owner === id)) {
+        this.owners.delete(key)
+        yield { kind: 'ownership', key, layer: 0 }
+      }
+    }
+    return undefined
+  }
+  private releaseOwners(role: string, id?: number): void {
+    for (const [key, owner] of this.owners) {
+      if (key.endsWith(`:${role}`) && (id === undefined || owner === id)) {
+        this.owners.delete(key)
+        this.pendingOwnership.push({ kind: 'ownership', key, layer: 0 })
+      }
+    }
+  }
+  takeOwnership(): InputOwnershipStep | undefined {
+    return this.pendingOwnership.shift()
+  }
+  get ownershipPending(): boolean {
+    return this.pendingOwnership.length !== 0
+  }
+  *synchronize(): InputOperation {
+    return undefined
+  }
   root(): number {
     return (
       this.layers
@@ -54,7 +118,7 @@ export class InputController {
   visible(id: number): boolean {
     if (!this.attached(id)) return false
     for (let item = this.layers.get(id); ; item = this.layers.get(item.parent)) {
-      if (!item.visible) return false
+      if (!item.visible || this.detaching.has(item.id)) return false
       if (!item.parent) return true
     }
   }
@@ -120,24 +184,39 @@ export class InputController {
     return ref(found)
   }
   *focus(id: number, forward = true): InputOperation {
+    const epoch = this.epoch
     if (id && !this.focusable(id)) return false
     if (id) {
       const source = id
       this.choice.set(source, id)
       yield { target: source, method: 'onBeforeFocus', args: [ref(id), ref(this.focused), forward] }
+      if (epoch !== this.epoch) return false
       id = this.choice.get(source) ?? 0
     }
     if ((id && !this.focusable(id)) || id === this.focused) return false
     if (this.focusLock) throw new Error('Cannot change focus during onFocus or onBlur')
     this.focusLock = true
-    const previous = this.focused
+    const previous = this.focused,
+      previousManager = this.ownerManager('focus', previous),
+      manager = this.manager(id) || previousManager
     this.focused = id
     try {
       if (this.layers.has(previous)) yield { target: previous, method: 'onBlur', args: [ref(id)] }
+      if (epoch !== this.epoch) return false
       if (this.layers.has(this.focused))
         yield { target: this.focused, method: 'onFocus', args: [ref(previous), forward] }
     } finally {
-      this.focusLock = false
+      try {
+        // Native SetFocusTo retains the new focus and releases the old focus
+        // after both callbacks, including the exceptional exit.
+        if (epoch === this.epoch) {
+          yield* this.own('focus', this.focused, manager)
+          if (previousManager && previousManager !== manager)
+            yield* this.own('focus', 0, previousManager)
+        }
+      } finally {
+        this.focusLock = false
+      }
     }
     return true
   }
@@ -177,7 +256,10 @@ export class InputController {
       if (!this.visible(id) || !this.enabled(id, false))
         throw new Error('Cannot set mode to a disabled or hidden layer tree')
       yield* this.focus(this.first(id), true)
-      if (this.attached(id)) this.modal.push(id)
+      if (this.attached(id)) {
+        yield* this.own(`modal:${id}`, id, this.manager(id))
+        this.modal.push(id)
+      }
       yield* this.recheckPointer()
     } finally {
       yield* this.notifyEnabled()
@@ -189,6 +271,8 @@ export class InputController {
     try {
       for (const item of [...this.modal])
         if (tree ? this.layers.contains(id, item) : item === id) {
+          // The modal strong reference is dropped before focus callbacks.
+          yield* this.dropOwner(`modal:${item}`, item)
           const next = ((yield* this.search(id, true)) as LayerRef).layer
           yield* this.focus(next, true)
           const index = this.modal.indexOf(item)
@@ -206,7 +290,8 @@ export class InputController {
       if (afterAction) yield* afterAction()
       for (const id of this.choice.keys()) if (!this.layers.has(id)) this.choice.delete(id)
       for (const id of this.hitChoice.keys()) if (!this.layers.has(id)) this.hitChoice.delete(id)
-      this.modal = this.modal.filter((id) => this.visible(id) && this.enabled(id, false))
+      for (const id of [...this.modal])
+        if (!this.visible(id) || !this.enabled(id, false)) yield* this.removeMode(id)
       if (this.focused && !this.focusable(this.focused)) {
         const next = ((yield* this.search(this.focused, true)) as LayerRef).layer
         yield* this.focus(next, true)
@@ -214,20 +299,68 @@ export class InputController {
       if (this.capture && (!this.visible(this.capture) || !this.enabled(this.capture)))
         this.release()
       for (const [id, layer] of this.touchCapture)
-        if (!this.visible(layer) || !this.enabled(layer)) this.touchCapture.delete(id)
+        if (!this.visible(layer) || !this.enabled(layer)) this.release(id)
       yield* this.recheckPointer()
     } finally {
       yield* this.notifyEnabled()
     }
     return undefined
   }
+  private *leaveHover(root?: number): InputOperation {
+    const previous = this.hover
+    if (!previous || (root !== undefined && !this.layers.contains(root, previous))) return
+    this.hover = 0
+    try {
+      if (this.layers.has(previous)) yield { target: previous, method: 'onMouseLeave', args: [] }
+    } finally {
+      yield* this.dropOwner('hover', previous)
+    }
+    return undefined
+  }
+  /** Run manager cleanup while the old ancestry is still available. Explicit
+   * native invalidation differs from ordinary Part: non-primary SeverChild
+   * blurs the tree but does not release mouse capture in the KRKR2 source. */
+  *detach(id: number, action: () => void, nativeInvalidation = false): InputOperation {
+    if (!this.layers.has(id)) {
+      action()
+      return undefined
+    }
+    const primary = this.layers.get(id).primary,
+      affectedFocus = this.layers.contains(id, this.focused),
+      affectedCapture = this.layers.contains(id, this.capture)
+    this.detaching.add(id)
+    try {
+      if (primary) {
+        if (affectedFocus) yield* this.focus(0)
+        if (affectedCapture) this.release()
+        yield* this.leaveHover(id)
+        yield* this.removeMode(id, true)
+      } else {
+        yield* this.removeMode(id, true)
+        yield* this.leaveHover(id)
+        if (this.layers.contains(id, this.focused)) {
+          const next = ((yield* this.search(id, true)) as LayerRef).layer
+          yield* this.focus(next, true)
+        }
+        if (!nativeInvalidation && affectedCapture) this.release()
+      }
+      for (const [touch, layer] of this.touchCapture)
+        if (this.layers.contains(id, layer)) this.release(touch)
+      action()
+    } finally {
+      this.detaching.delete(id)
+    }
+    return undefined
+  }
   release(touch?: number): void {
     if (touch !== undefined) {
       this.releasedTouches.add(touch)
+      this.releaseOwners(`touch:${touch}`)
       this.touchCapture.delete(touch)
     } else {
       this.released = true
       this.capture = 0
+      this.releaseOwners('capture')
     }
   }
   private primary(x = this.point.x, y = this.point.y) {
@@ -249,6 +382,8 @@ export class InputController {
     try {
       for (const candidate of this.layers.hitCandidates(x, y, root, excludeSelf)) {
         const { id } = candidate
+        if (!this.layers.has(id)) continue
+        if ([...this.detaching].some((ancestor) => this.layers.contains(ancestor, id))) continue
         // A native pointer packet searches only the displayed window. An
         // explicit Layer.getLayerAt still searches the requested subtree.
         if (root === undefined && this.windowId && this.layers.get(id).windowId !== this.windowId())
@@ -295,7 +430,6 @@ export class InputController {
       let target = yield* this.target(p.x, p.y)
       if (this.hover !== target) {
         const previous = this.hover
-        this.hover = 0
         if (this.layers.has(previous)) yield { target: previous, method: 'onMouseLeave', args: [] }
         target = yield* this.target(p.x, p.y)
         if (target) {
@@ -307,7 +441,14 @@ export class InputController {
             if (target) yield { target, method: 'onMouseEnter', args: [] }
           }
         }
-        this.hover = this.attached(target) ? target : 0
+        // Keep the previous hover owned across leave/enter and hit rechecks.
+        // Clear it before Release so finalizers observe an empty old slot.
+        this.hover = 0
+        yield* this.dropOwner('hover', previous)
+        if (this.attached(target)) {
+          this.hover = target
+          yield* this.own('hover', target, this.manager(target))
+        }
       }
       if (this.hover && changed)
         yield {
@@ -364,11 +505,13 @@ export class InputController {
   }
   private clearTransient(): void {
     this.release()
+    for (const id of this.touchCapture.keys()) this.releaseOwners(`touch:${id}`)
     this.touchCapture.clear()
     this.releasedTouches.clear()
     this.keys.clear()
     this.shift = 0
     this.hover = 0
+    this.releaseOwners('hover')
     this.point = this.mouseAt = { x: -1, y: -1 }
     this.hitChoice.clear()
   }
@@ -388,7 +531,11 @@ export class InputController {
       return next.value
     } finally {
       let next = operation.return(undefined)
-      for (let guard = 0; !next.done && guard < 4096; guard++) next = operation.next()
+      for (let guard = 0; !next.done && guard < 4096; guard++) {
+        if (next.value.kind === 'ownership' || (next.value.kind === 'invoke' && next.value.unwind))
+          yield next.value
+        next = operation.next()
+      }
     }
   }
   private *dispatchPacket(packet: InputPacket): InputOperation {
@@ -398,10 +545,9 @@ export class InputController {
     }
     if (packet.type === 'cancel' || packet.type === 'deactivate') {
       this.release()
+      for (const id of this.touchCapture.keys()) this.releaseOwners(`touch:${id}`)
       this.touchCapture.clear()
-      if (this.layers.has(this.hover))
-        yield { target: this.hover, method: 'onMouseLeave', args: [] }
-      this.hover = 0
+      yield* this.leaveHover()
       if (packet.type === 'deactivate') yield { target: 0, method: 'onDeactivate', args: [] }
       return
     }
@@ -465,6 +611,7 @@ export class InputController {
       const p = this.primary(packet.x, packet.y),
         target = this.touchCapture.get(packet.id) ?? (yield* this.hit(p.x, p.y))
       if (packet.type === 'touchDown') {
+        yield* this.dropOwner(`touch:${packet.id}`)
         this.touchCapture.delete(packet.id)
         this.releasedTouches.delete(packet.id)
       }
@@ -480,11 +627,16 @@ export class InputController {
           packet.type === 'touchDown' &&
           !this.releasedTouches.has(packet.id) &&
           this.attached(target)
-        )
+        ) {
+          // Touch capture is a Web extension; it uses the same explicit lease
+          // mechanism without claiming a counterpart in KRKR2's mouse manager.
+          yield* this.own(`touch:${packet.id}`, target, this.manager(target))
           this.touchCapture.set(packet.id, target)
+        }
       }
       if (packet.type === 'touchUp') {
         this.touchCapture.delete(packet.id)
+        yield* this.dropOwner(`touch:${packet.id}`)
         this.releasedTouches.delete(packet.id)
       }
       return
@@ -512,7 +664,18 @@ export class InputController {
           method: 'onMouseDown',
           args: [...this.local(target, p.x, p.y), packet.button, packet.shift],
         }
-        if (!this.released && this.visible(target) && this.enabled(target)) this.capture = target
+        if (
+          !this.released &&
+          this.visible(target) &&
+          this.enabled(target) &&
+          this.capture !== target
+        ) {
+          this.release()
+          // release() queues an explicit VM release. InputService delivers it
+          // before this acquisition, so a finalizer cannot be postponed past it.
+          this.capture = target
+          yield* this.own('capture', target, this.manager(target))
+        }
       } else this.release()
       return
     }
@@ -564,11 +727,28 @@ export class InputController {
     }
   }
   clear(): void {
+    // A different displayed manager must not resume old packet/focus work.
+    // Its initial cursor location and focus lock are independent as well.
+    this.epoch++
+    for (const key of this.owners.keys())
+      this.pendingOwnership.push({ kind: 'ownership', key, layer: 0 })
+    this.owners.clear()
     this.modal = []
     this.capture = this.hover = this.focused = 0
+    this.focusLock = false
+    this.released = true
+    this.point = this.mouseAt = { x: -1, y: -1 }
+    this.shift = 0
     this.choice.clear()
     this.hitChoice.clear()
     this.touchCapture.clear()
+    this.releasedTouches.clear()
     this.keys.clear()
+  }
+  /** Terminal shutdown only: no script execution or finalizer ordering claim. */
+  dispose(): void {
+    this.clear()
+    this.pendingOwnership = []
+    this.detaching.clear()
   }
 }

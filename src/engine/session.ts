@@ -20,6 +20,7 @@ import { StorageResolver, normalizePath } from './storage/resolver.ts'
 import { ImageLoader } from './storage/images.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree } from './scene/layers.ts'
+import { LayerService } from './scene/layer-objects.ts'
 import type { DecodedImage, GraphicsDecoder, Renderer, RendererStatus } from './ports/graphics.ts'
 import type { Inflater, Resource } from './ports/storage.ts'
 import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts'
@@ -40,6 +41,8 @@ import { WindowState, type WindowView } from './scene/window.ts'
 import { WindowService, type WindowRecord } from './scene/windows.ts'
 import { windowClass } from './tvp/window.ts'
 import { layerClass } from './tvp/layer.ts'
+import { fontClass } from './tvp/font.ts'
+import { transitionBridge } from './tvp/transitions.ts'
 import { rectClass } from './tvp/rect.ts'
 import { fontSpec } from './graphics/font.ts'
 import { FontService } from './graphics/fonts.ts'
@@ -183,7 +186,7 @@ export class EngineSession {
   private transitions?: SceneTransitions
   private readonly composer = new SceneComposer(this.layers, (id) => this.transitions?.frame(id))
   private preparingFrame = false
-  private readonly callbacks = new Map<number, ScriptObject>()
+  private layerObjects?: LayerService
   private runtime?: ScriptRuntime
   private systemEvents?: SystemEvents
   private eventYieldAt = 0
@@ -327,8 +330,9 @@ export class EngineSession {
       this.inputs = new InputService(
         this.inputController,
         this.runtime,
-        (id) => this.callbacks.get(id),
+        (id) => this.layerObjects?.owner(id),
         () => this.windows?.active?.owner,
+        (id) => this.layerObjects?.eventOwner(id),
       )
       this.transitions = new SceneTransitions(
         this.layers,
@@ -349,6 +353,8 @@ export class EngineSession {
         (error) => {
           if (!this.control.cancelled) this.fail(error)
         },
+        (id) => this.layerObjects?.owner(id),
+        (id) => this.layerObjects?.isClosing(id) ?? true,
       )
       this.sounds = new SoundService(
         this.runtime,
@@ -449,6 +455,20 @@ export class EngineSession {
       this.menuItems = new MenuService(this.runtime, this.menus, this.windows, (item) => {
         this.systemEvents?.cancelSource(item)
       })
+      this.layerObjects = new LayerService(
+        this.runtime,
+        this.layers,
+        this.windows,
+        (layer) => {
+          this.systemEvents?.cancelSource(layer)
+          this.dirty = true
+        },
+        (layer) => {
+          this.systemEvents?.cancelSource(layer)
+          this.transitions?.drop(layer.id)
+          this.dirty = true
+        },
+      )
       this.discard(await this.runtime.execute(tvpConstants, 'krkr2-web/constants.tjs'))
       this.discard(await this.runtime.execute(debugBridge, 'krkr2-web/debug.tjs'))
       this.discard(await this.runtime.execute(bootstrap, 'krkr2-web/bootstrap.tjs'))
@@ -458,6 +478,8 @@ export class EngineSession {
       this.discard(await this.runtime.execute(menuClass, 'krkr2-web/menus.tjs'))
       this.discard(await this.runtime.execute(windowClass, 'krkr2-web/window.tjs'))
       this.discard(await this.runtime.execute(inputBridge, 'krkr2-web/input.tjs'))
+      this.discard(await this.runtime.execute(transitionBridge, 'krkr2-web/transitions.tjs'))
+      this.discard(await this.runtime.execute(fontClass, 'krkr2-web/font.tjs'))
       this.discard(await this.runtime.execute(layerClass, 'krkr2-web/layer.tjs'))
       this.discard(await this.runtime.execute(rectClass, 'krkr2-web/rect.tjs'))
       this.discard(await this.runtime.execute(soundClasses, 'krkr2-web/sound.tjs'))
@@ -499,6 +521,7 @@ export class EngineSession {
           display = 'undefined'
         try {
           value = await operation()
+          await this.inputs?.synchronize()
           if (this.dirty && !this.systemEvents?.disabled) {
             const reply = this.inputs!.start(this.prepareFrame())
             if (reply.kind === 'invoke')
@@ -523,6 +546,7 @@ export class EngineSession {
             this.discard(value)
             if (!this.control.cancelled && this.runtime?.inspect().pendingHandles)
               await this.runtime.collect()
+            if (!this.control.cancelled) await this.inputs?.synchronize()
           } catch (error) {
             closingError = error
             closingFailed = true
@@ -670,23 +694,24 @@ export class EngineSession {
   private *prepareFrame(source = this.inputController.root()): InputOperation {
     if (this.preparingFrame) return
     this.preparingFrame = true
-    try {
-      for (const id of this.inputController.order(source)) {
-        if (!this.layers.has(id) || !this.layers.get(id).callOnPaint) continue
-        let visible = true,
-          node = this.layers.get(id)
-        while (node.id !== source && node.parent) {
-          if (!node.visible) {
-            visible = false
-            break
-          }
-          node = this.layers.get(node.parent)
-        }
-        if (!visible) continue
-        this.layers.set(id, 'callOnPaint', 0)
+    const layers = this.layers
+    function* visit(id: number, paint: boolean, seen = new Set<number>()): InputOperation {
+      if (!layers.has(id) || seen.has(id)) return
+      seen.add(id)
+      if (paint && layers.get(id).callOnPaint) {
+        layers.set(id, 'callOnPaint', 0)
         yield { target: id, method: 'onPaint', args: [] }
       }
+      if (!layers.has(id)) return
+      for (const child of [...layers.get(id).children]) yield* visit(child, paint, seen)
+      // Native completion traversals invalidate even an empty children snapshot
+      // after visiting it. User edits remain visible until such a traversal.
+      if (layers.has(id)) layers.invalidateChildren(id)
+    }
+    try {
+      yield* visit(source, true)
       if (this.transitions?.active) yield* this.transitions.advance()
+      yield* visit(source, false)
     } finally {
       this.preparingFrame = false
     }
@@ -1030,6 +1055,9 @@ export class EngineSession {
     pendingVideoCloses: number
     windowSources: number
     menuSources: number
+    layerSources: number
+    fontSources: number
+    closingLayers: number
     closingWindows: number
     dependents: number
     pendingInvalidations: number
@@ -1046,6 +1074,9 @@ export class EngineSession {
       pendingVideoCloses: this.videos?.pendingCloses ?? 0,
       windowSources: this.windows?.count ?? 0,
       menuSources: this.menuItems?.count ?? 0,
+      layerSources: this.layerObjects?.count ?? 0,
+      fontSources: this.layerObjects?.fontCount ?? 0,
+      closingLayers: this.layerObjects?.closing ?? 0,
       closingWindows: this.windows?.closing ?? 0,
       dependents: runtime?.dependents ?? 0,
       pendingInvalidations: runtime?.pendingInvalidations ?? 0,
@@ -1149,7 +1180,7 @@ export class EngineSession {
       await attempt(() => this.videos?.dispose())
       await attempt(() => this.sounds?.dispose())
       await attempt(() => this.inputs?.dispose())
-      this.callbacks.clear()
+      await attempt(() => this.layerObjects?.dispose())
       await attempt(() => this.kag.clear())
       await attempt(() => this.windows?.dispose())
       await attempt(() => this.menuItems?.dispose())
@@ -1616,6 +1647,9 @@ export class EngineSession {
       case 'Window.finish':
         this.windows!.finish(number(0))
         break
+      case 'Window.detachInput':
+        if (this.windowId === number(0)) this.inputController.clear()
+        return this.inputs!.start(this.inputController.synchronize())
       case 'Window.identity':
         if (args[0] === null) value = 'null'
         else {
@@ -1629,7 +1663,7 @@ export class EngineSession {
         const id = this.layers
           .ids()
           .find((id) => this.layers.get(id).primary && this.layers.get(id).windowId === window.id)
-        value = id === undefined || window.finished ? null : (this.callbacks.get(id) ?? null)
+        value = id === undefined || window.finished ? null : (this.layerObjects!.owner(id) ?? null)
         break
       }
       case 'Window.resize': {
@@ -1684,32 +1718,68 @@ export class EngineSession {
         this.dirty = true
         break
       case 'Layer.create': {
-        const window = this.windows!.get(number(1))
-        if (window.finished) throw new Error('Cannot create a Layer on a closed Window')
-        value = BigInt(this.layers.create(number(0), window.id))
+        if (!isScriptObject(args[0]) || !isScriptObject(args[3]))
+          throw new Error('Expected Layer instance and native state')
+        value = BigInt(this.layerObjects!.create(args[0], args[1], args[2], args[3]))
         this.dirty = true
         break
       }
-      case 'Layer.bind': {
+      case 'Layer.bindLifetime':
+        if (!isScriptObject(args[0])) throw new Error('Expected Layer cleanup')
+        this.layerObjects!.bind(args[0])
+        break
+      case 'Layer.invalidate':
+        if (!isScriptObject(args[1])) throw new Error('Expected native Layer owner')
+        return this.layerObjects!.invalidate(number(0), args[1])
+      case 'Layer.stopTransitions':
+        return this.inputs!.start(this.transitions!.invalidate(number(0)))
+      case 'Layer.detach': {
         const id = number(0)
-        this.layers.get(id)
-        const callback = args[1]
-        if (!isScriptObject(callback)) throw new Error('Layer callback must be a TJS object')
-        const retained = context.retain(callback)
-        const previous = this.callbacks.get(id)
-        if (previous) context.release(previous)
-        this.callbacks.set(id, retained)
-        break
+        this.layerObjects!.detachManager(id)
+        return this.inputs!.detach(id, () => this.layers.detach(id), true)
       }
-      case 'Layer.relations': {
+      case 'Layer.releaseImage': {
         const layer = this.layers.get(number(0))
-        value = scriptRecord({
-          parent: this.callbacks.get(layer.parent) ?? null,
-          children: scriptList(layer.children.map((id) => this.callbacks.get(id) ?? null)),
-          primary: layer.primary ? 1n : 0n,
-        })
+        layer.bitmap = undefined
+        layer.revision++
+        this.dirty = true
         break
       }
+      case 'Layer.finish':
+        this.layerObjects!.finish(number(0))
+        break
+      case 'Layer.abort':
+        this.layerObjects!.abort(number(0))
+        break
+      case 'Layer.state':
+        value = this.layerObjects!.get(number(0)).state
+        break
+      case 'Layer.relation':
+        value = this.layerObjects!.relation(number(0), text(1))
+        break
+      case 'Layer.childrenRevision':
+        value = BigInt(this.layers.get(number(0)).childrenRevision)
+        break
+      case 'Layer.action':
+        if (!isScriptObject(args[0]) || !isScriptObject(args[1]))
+          throw new Error('Expected Layer action owner and event')
+        return {
+          kind: 'invoke',
+          callback: args[0],
+          member: 'action',
+          args: [args[1]],
+          ignoreStatus: true,
+        }
+      case 'Font.bind':
+        if (!isScriptObject(args[0])) throw new Error('Expected Font instance')
+        this.layerObjects!.bindFont(args[0], args[1])
+        break
+      case 'Font.state':
+        value = this.layerObjects!.fontState(args[0])
+        break
+      case 'Font.invalidate':
+        this.layerObjects!.finishFont(number(0))
+        break
       case 'Layer.get': {
         if (text(1) === 'cursorX' || text(1) === 'cursorY') {
           const zoom = this.window.zoomNumer / this.window.zoomDenom,
@@ -2088,13 +2158,16 @@ export class EngineSession {
         break
       }
       case 'Layer.children':
-        value = scriptList(this.layers.get(number(0)).children.map(BigInt))
+        value = this.layerObjects!.children(number(0))
         break
-      case 'Layer.parent':
-        return this.inputs!.change(() => {
-          this.layers.reparent(number(0), number(1))
+      case 'Layer.parent': {
+        const id = number(0),
+          parent = this.layerObjects!.parent(id, args[1])
+        return this.inputs!.detach(id, () => {
+          this.layers.reparent(id, parent)
           this.dirty = true
         })
+      }
       case 'Layer.parentCheck':
         this.layers.validateParent(number(0), number(1))
         break
@@ -2119,17 +2192,6 @@ export class EngineSession {
         this.layers.get(number(0))
         this.dirty = true
         break
-      case 'Layer.destroy': {
-        const id = number(0)
-        this.transitions?.drop(id)
-        return this.inputs!.change(() => {
-          const callback = this.callbacks.get(id)
-          if (callback) context.release(callback)
-          this.callbacks.delete(id)
-          this.layers.destroy(id)
-          this.dirty = true
-        })
-      }
       case 'Plugins.link':
         throw new Error(`Plugin is not implemented: ${text(0)}`)
       default:

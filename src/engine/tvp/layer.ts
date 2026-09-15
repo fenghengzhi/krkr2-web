@@ -1,64 +1,39 @@
 export const layerClass = String.raw`
-class __KrkrFont {
-  var __data;
-  function __KrkrFont() { __data=%[height:18,face:"sans-serif",bold:false,italic:false,underline:false,strikeout:false,angle:0,faceIsFileName:false]; }
-  function mapPrerenderedFont(storage) { __host("Font.map",__data,string(storage)); }
-  function unmapPrerenderedFont() { __host("Font.unmap",__data); }
-  function getTextWidth(text) { return __host("Font.measure",string(text),__data).width; }
-  function getTextHeight(text) { return __host("Font.measure",string(text),__data).height; }
-  function getGlyphDrawRect(args*) { if(args.count<1)throw new Exception("Missing text for getGlyphDrawRect");var r=__host("Font.bounds",string(args[0]),__data);return new Rect(r.left,r.top,r.right,r.bottom); }
-  function getEscWidthX(text) { return getTextWidth(text)*Math.cos(angle*Math.PI/1800); }
-  function getEscWidthY(text) { return -getTextWidth(text)*Math.sin(angle*Math.PI/1800); }
-  function getEscHeightX(text) { return getTextHeight(text)*Math.sin(angle*Math.PI/1800); }
-  function getEscHeightY(text) { return getTextHeight(text)*Math.cos(angle*Math.PI/1800); }
-  function getList(args*) { if(args.count<1)throw new Exception("Missing flags for getList");return __host("Font.list",int(args[0])&0xffffffff,__data); }
-  function doUserSelect(args*) {
-    if(args.count<4)throw new Exception("Missing font selection arguments");
-    var selected=__host("Font.select",int(args[0])&0xffffffff,string(args[1]),string(args[2]),string(args[3]),__data);
-    if(selected===null)return false;
-    __data.face=selected;__data.faceIsFileName=false;return true;
+function __krkrLayerInvalidate(owner,id,state) {
+  try {
+    __host("Layer.stopTransitions",id);
+    __host("Layer.detach",id);
+    if(state.font!==null)invalidate state.font;
+    state.font=null;
+    __host("Layer.releaseImage",id);
+    state.actionOwner=null;
+    state.cache=null;
+    state.clear=null;
+  } catch(error) {
+    __host("Layer.abort",id);
+    throw error;
   }
-  ${['height', 'face', 'bold', 'italic', 'underline', 'strikeout', 'angle', 'faceIsFileName']
-    .map(
-      (name) => `property ${name} {
-    getter() { return __data.${name}; }
-    setter(value) { __data.${name}=${name === 'face' ? 'string(value)' : name === 'height' ? 'Math.abs(int(value))' : name === 'angle' ? '((int(value)%3600)+3600)%3600' : 'int(!!value)'}; }
-  }`,
-    )
-    .join('\n')}
+  __host("Layer.finish",id);
 }
+__host("Layer.bindLifetime",__krkrLayerInvalidate);
 class Layer {
-  var __id, __layerWindow, __parent, __children, __font;
+  var __id;
   function Layer(window,parent) {
-    __layerWindow=window;__parent=parent;__children=[];__font=new __KrkrFont();
-    if(parent!==null && parent.__layerWindow!==window) throw new Exception("Parent belongs to another window");
-    __id=__host("Layer.create",parent!==null?parent.__id:0,window.__windowId);
-    if(parent!==null)parent.__children.add(this);
-    __host("Layer.bind",__id,this);
+    var state=%[actionOwner:window,font:null,cache:null,clear:null,cacheRevision:-1,
+      fontData:%[height:18,face:"sans-serif",bold:false,italic:false,underline:false,strikeout:false,angle:0,faceIsFileName:false]];
+    __id=__host("Layer.create",this,window,parent,state);
   }
-  function finalize() {
-    if(__id===void)return;
-    if(__parent!==null)__parent.__children.remove(this);
-    for(var i=0;i<__children.count;i++)__children[i].__parent=null;
-    __children.clear();
-    __host("Layer.destroy",__id);
-    invalidate __font;
-    __layerWindow=null;__parent=null;
-  }
-  function __findLayer(id) {
-    if(__id==id)return this;
-    for(var i=0;i<__children.count;i++){var found=__children[i].__findLayer(id);if(found!==null)return found;}
-    return null;
-  }
-  function __syncTree(){var tree=__host("Layer.relations",__id);__parent=tree.parent;__children=tree.children;}
+  function finalize() {}
+  function __syncTree() {}
+  property __fontData {getter(){return __host("Layer.state",__id).fontData;}}
   function __transitionTick(token){var clock=__host("Transition.callback",token);if(clock!==void)__host("Transition.tick",token,clock());}
   function beginTransition(name,withchildren=true,transsrc=null,options=%[]){
     if(transsrc===null)throw new Exception("Transition source is required");
-    __host("Transition.begin",__id,string(name),int(withchildren),transsrc.__id,options.time,options.vague,options.rule,options.from,options.stay,int(options.selfupdate),options.callback);
+    __host("Transition.begin",__id,string(name),int(withchildren),transsrc.__id,options.time,options.vague,options.rule,options.from,options.stay,int(options.selfupdate),options.callback,%[destination:this,source:transsrc,callback:options.callback]);
   }
   function stopTransition(){__host("Transition.stop",__id);}
   function onClick(x,y) {
-    if(typeof __layerWindow.action!="undefined")__layerWindow.action(%[type:"onClick",target:this,x:x,y:y]);
+    return __inputAction("onClick",%[x:x,y:y]);
   }
   function onPaint() {}
   function onHitTest(x,y,hit){__inputAction("onHitTest",%[x:x,y:y,hit:hit]);__host("Input.hitChoice",__id,int(hit));}
@@ -69,7 +44,7 @@ class Layer {
   function removeMode(){__host("Input.mode",__id,0);}
   function releaseCapture(){__host("Input.release",__id);}
   function releaseTouchCapture(id){__host("Input.release",__id,int(id));}
-  function __inputAction(type,event){event.type=type;event.target=this;if(typeof __layerWindow.action!="undefined")__layerWindow.action(event);}
+  function __inputAction(type,event){event.type=type;event.target=this;return __host("Layer.action",__host("Layer.state",__id).actionOwner,event);}
   ${[
     ['onMouseDown', 'x,y,button,shift'],
     ['onMouseUp', 'x,y,button,shift'],
@@ -146,11 +121,11 @@ class Layer {
     __host("Layer.affine",__id,source.__id,int(left),int(top),int(width),int(height),int(!!matrix),real(a),real(b),real(c),real(d),real(tx),real(ty),int(type),omOpaque,int(opacity),0,1);
   }
   function saveLayerImage(name,type="bmp"){__host("Layer.saveImage",__id,string(name),string(type));}
-  function assignImages(source) { __host("Layer.assignImages",__id,source.__id); (Dictionary.assign incontextof __font.__data)(source.__font.__data); }
+  function assignImages(source) { __host("Layer.assignImages",__id,source.__id); (Dictionary.assign incontextof __fontData)(source.__fontData); }
   function loadImages(name,key=clNone) { return __host("Layer.image",__id,string(name),int(key)); }
   function loadProvinceImage(name) { __host("Layer.provinceImage",__id,string(name)); }
   function drawText(x,y,text,color=0xffffff,opa=255,aa=true,shadowlevel=0,shadowcolor=0,shadowwidth=0,shadowofsx=0,shadowofsy=0) {
-    __host("Layer.text",__id,int(x),int(y),string(text),int(color),__font.__data,int(opa),int(aa),int(shadowlevel),int(shadowcolor),int(shadowwidth),int(shadowofsx),int(shadowofsy));
+    __host("Layer.text",__id,int(x),int(y),string(text),int(color),__fontData,int(opa),int(aa),int(shadowlevel),int(shadowcolor),int(shadowwidth),int(shadowofsx),int(shadowofsy));
   }
   function adjustGamma(args*) {
     if(args.count==0)return;
@@ -175,21 +150,30 @@ class Layer {
   function set${plane}Pixel(x,y,value){__host("Layer.pixelSet",__id,int(x),int(y),"${plane.toLowerCase()}",int(value));}`,
     )
     .join('\n')}
-  property window { getter(){return __layerWindow;} }
-  property font { getter(){return __font;} }
+  property window { getter(){return __host("Layer.relation",__id,"window");} }
+  property font { getter(){
+    var state=__host("Layer.state",__id);
+    if(state.font===null)state.font=new Font(this);
+    return state.font;
+  } }
   property parent {
-    getter(){return __parent;}
-    setter(value){
-      if(value!==null&&value.__layerWindow!==__layerWindow)throw new Exception("Parent belongs to another window");
-      __host("Layer.parentCheck",__id,value!==null?value.__id:0);
-      if(__parent!==null)__parent.__children.remove(this);
-      __parent=value;if(value!==null)value.__children.add(this);
-      __host("Layer.parent",__id,value!==null?value.__id:0);
+    getter(){return __host("Layer.relation",__id,"parent");}
+    setter(value){__host("Layer.parent",__id,value);}
+  }
+  property children { getter(){
+    var state=__host("Layer.state",__id);
+    if(state.cache===null){state.cache=[];state.clear=Array.clear incontextof null;}
+    var revision=__host("Layer.childrenRevision",__id);
+    if(state.cacheRevision!==revision){
+      (state.clear incontextof state.cache)();
+      if(isvalid state.cache){
+        var items=__host("Layer.children",__id);
+        for(var i=0;i<items.count;i++)state.cache[i]=items[i];
+      }
+      state.cacheRevision=__host("Layer.childrenRevision",__id);
     }
-  }
-  property children {
-    getter(){var ids=__host("Layer.children",__id),result=[];for(var i=0;i<ids.count;i++)result.add(__findLayer(ids[i]));return result;}
-  }
+    return state.cache;
+  } }
   ${[
     'left',
     'top',

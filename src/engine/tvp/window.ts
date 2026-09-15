@@ -2,6 +2,7 @@ export const windowClass = String.raw`
 function __krkrWindowInvalidate(window,id) {
   try {
     window.__windowClosing=true;
+    __host("Window.detachInput",id);
     var objects=window.__windowObjects;
     if(objects!==void) {
       for(var i=0;i<objects.count;i++) {
@@ -21,6 +22,7 @@ class Window {
   function Window() {
     __windowObjects=[];__windowKeys=[];
     __windowId=__host("Window.create",this,__krkrWindowInvalidate);
+    __host("Input.synchronize");
   }
   function finalize() {}
   function add(object) {

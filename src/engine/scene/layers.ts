@@ -4,6 +4,8 @@ import { imageTypes, autoFace, neutralColor } from '../graphics/blend.ts'
 
 export interface LayerState {
   windowId: number
+  managerId: number
+  childrenRevision: number
   id: number
   parent: number
   primary: boolean
@@ -60,6 +62,18 @@ export class LayerTree {
     if (first === second) return
     const a = this.get(first),
       b = this.get(second)
+    // Native Join retains each Layer's manager and rejects crossing a primary
+    // tree. Two primary roots can exchange complete subtrees without a Join.
+    // Reject the other cross-manager cases before mutating either hierarchy.
+    if (
+      a.managerId !== b.managerId &&
+      (!a.primary ||
+        !b.primary ||
+        a.parent !== 0 ||
+        b.parent !== 0 ||
+        (!withChildren && (a.children.length !== 0 || b.children.length !== 0)))
+    )
+      throw new Error('Cannot exchange Layers across primary managers')
     const old = new Map(
       this.ids().map((id) => {
         const layer = this.get(id)
@@ -117,6 +131,14 @@ export class LayerTree {
     ;[a.top, b.top] = [b.top, a.top]
     ;[a.visible, b.visible] = [b.visible, a.visible]
     ;[a.absolute, b.absolute] = [b.absolute, a.absolute]
+    for (const layer of this.layers.values()) {
+      const previous = old.get(layer.id)!.children
+      if (
+        layer.children.length !== previous.length ||
+        layer.children.some((child, index) => child !== previous[index])
+      )
+        layer.childrenRevision++
+    }
   }
   create(parent: number, windowId = 0): number {
     if (parent) this.get(parent)
@@ -125,6 +147,8 @@ export class LayerTree {
     const id = this.nextId++,
       layer: LayerState = {
         windowId: parent ? this.get(parent).windowId : windowId,
+        managerId: parent ? this.get(parent).managerId : id,
+        childrenRevision: 0,
         id,
         parent,
         primary: !parent,
@@ -165,6 +189,7 @@ export class LayerTree {
     if (parent) {
       const owner = this.get(parent)
       owner.children.push(id)
+      owner.childrenRevision++
       layer.absolute = owner.children.length - 1
     }
     return id
@@ -374,6 +399,8 @@ export class LayerTree {
   validateParent(id: number, parent: number): void {
     const layer = this.get(id)
     if (layer.primary) throw new Error('The primary layer cannot be reparented')
+    if (parent && this.get(parent).managerId !== layer.managerId)
+      throw new Error('Cannot move a Layer under another primary layer')
     for (
       let item = parent ? this.get(parent) : undefined, depth = 0;
       item;
@@ -389,11 +416,13 @@ export class LayerTree {
     if (layer.parent) {
       const children = this.get(layer.parent).children
       children.splice(children.indexOf(id), 1)
+      this.get(layer.parent).childrenRevision++
     }
     layer.parent = parent
     if (parent) {
       const owner = this.get(parent)
       owner.children.push(id)
+      owner.childrenRevision++
       layer.absolute = owner.children.length - 1
     }
   }
@@ -401,6 +430,7 @@ export class LayerTree {
     const layer = this.get(id)
     if (!layer.parent) throw new Error('This layer has no siblings')
     const parent = this.get(layer.parent)
+    const previous = [...parent.children]
     this.set(parent.id, 'absoluteOrderMode', Number(absolute))
     const children = parent.children
     children.splice(children.indexOf(id), 1)
@@ -409,6 +439,7 @@ export class LayerTree {
       const at = children.findIndex((id) => this.get(id).absolute >= index)
       children.splice(at < 0 ? children.length : at, 0, id)
     } else children.splice(Math.max(0, Math.min(children.length, index)), 0, id)
+    if (children.some((child, at) => child !== previous[at])) parent.childrenRevision++
   }
   move(id: number, other: number, before: boolean): void {
     const layer = this.get(id),
@@ -561,13 +592,26 @@ export class LayerTree {
       return getDisabled || this.property(hit.id, 'nodeEnabled') ? hit : undefined
   }
   destroy(id: number): void {
+    this.detach(id)
+    this.layers.delete(id)
+  }
+  /** Detach raw tree edges while keeping image/font data available to the
+   * remaining native invalidation callbacks. Children remain valid. */
+  detach(id: number): void {
     const layer = this.get(id)
     if (layer.parent) {
       const children = this.get(layer.parent).children
       children.splice(children.indexOf(id), 1)
+      this.get(layer.parent).childrenRevision++
     }
     for (const child of layer.children) this.get(child).parent = 0
-    this.layers.delete(id)
+    layer.parent = 0
+    layer.primary = false
+    layer.children = []
+    layer.childrenRevision++
+  }
+  invalidateChildren(id: number): void {
+    this.get(id).childrenRevision++
   }
   inspect(): { layers: number; bitmapBytes: number } {
     let bitmapBytes = 0
