@@ -173,14 +173,32 @@ async function capture(testInfo: TestInfo, label: string, canvas: Locator) {
 }
 
 async function clickLogical(canvas: Locator, x: number, y: number) {
+  await canvas.scrollIntoViewIfNeeded()
   const bounds = await canvas.boundingBox()
   expect(bounds).not.toBeNull()
   const size = await canvas.evaluate((element) => {
     const canvas = element as HTMLCanvasElement
     return { width: canvas.width, height: canvas.height }
   })
+  // Legacy MouseEvent client coordinates can quantize to integer viewport
+  // pixels. A fractional canvas top made logical y=15.5 arrive as y=14.8125
+  // in hosted Chromium. Choose an integer viewport point inside the intended
+  // logical pixel instead of accepting a neighboring pixel in the oracle.
+  const offset = (origin: number, extent: number, logicalSize: number, value: number) => {
+    const scale = extent / logicalSize,
+      first = Math.ceil(origin + Math.floor(value) * scale),
+      last = Math.ceil(origin + (Math.floor(value) + 1) * scale) - 1
+    expect(
+      last,
+      'the target logical pixel has a representable viewport point',
+    ).toBeGreaterThanOrEqual(first)
+    return Math.max(first, Math.min(last, Math.round(origin + value * scale))) - origin
+  }
   await canvas.click({
-    position: { x: (bounds!.width * x) / size.width, y: (bounds!.height * y) / size.height },
+    position: {
+      x: offset(bounds!.x, bounds!.width, size.width, x),
+      y: offset(bounds!.y, bounds!.height, size.height, y),
+    },
   })
 }
 
@@ -314,6 +332,10 @@ for (const backend of ['asyncify', 'jspi']) {
           height = Math.round(80 + (16 * 80) / canvasBox!.height)
         await page.mouse.move(x, y)
         await page.mouse.down()
+        // Moving focus between controls in this Window must not be mistaken
+        // for the browser page losing focus while its resize grip owns capture.
+        await b.locator('.game-window-close').focus()
+        await expect(b).toHaveClass(/game-window-dragging/)
         await page.mouse.move(x + 24, y + 16, { steps: 3 })
         await page.mouse.up()
         await expect(b).not.toHaveClass(/game-window-dragging/)

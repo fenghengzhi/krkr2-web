@@ -53,7 +53,6 @@ export function createPlayer(
   const surfaceChannel = new MessageChannel()
   const windows = new Map<number, WindowPresentation>()
   const inputViews = new Map<number, InputView>()
-  const attachedWindows = new Set<number>()
   const retiredWindows = new Set<number>()
   let identity = ''
   let stopping: Promise<void> | undefined
@@ -62,17 +61,12 @@ export function createPlayer(
   let activity = initialActivity()
   let workerPaused = true
   let fontSelecting = false
-  let activeWindow = 0
-  let focusRequest: { windowId: number; epoch?: number } | undefined
+  let focusRequest: { windowId: number; epoch?: number; revision: number } | undefined
   const syncInput = () => {
     const suspended = workerPaused || fontSelecting || activity.state !== 'visible'
     input?.setSuspended(suspended)
-    if (
-      !suspended &&
-      focusRequest &&
-      focusRequest.windowId === activeWindow &&
-      input?.focus(focusRequest.windowId, focusRequest.epoch)
-    )
+    if (focusRequest && focusRequest.revision !== input?.focusRevision) focusRequest = undefined
+    if (!suspended && focusRequest && input?.focus(focusRequest.windowId, focusRequest.epoch))
       focusRequest = undefined
   }
   const onError = (error: unknown) => {
@@ -95,20 +89,12 @@ export function createPlayer(
     retiredWindows.add(windowId)
     windows.delete(windowId)
     inputViews.delete(windowId)
-    attachedWindows.delete(windowId)
-    if (activeWindow === windowId) activeWindow = 0
     if (focusRequest?.windowId === windowId) focusRequest = undefined
     // Retirement is independent of whether a presentation or canvas ever
     // arrived. Tombstone before cleanup so late messages cannot recreate it.
     updateParts([() => surfaces?.retireWindow(windowId), () => video.removeWindow(windowId)])
   }
   const updateWindows = (presentations: WindowPresentation[]) => {
-    const nextActive =
-      presentations.find((window) => window.active && !retiredWindows.has(window.id))?.id ?? 0
-    if (nextActive !== activeWindow) {
-      activeWindow = nextActive
-      focusRequest = nextActive ? { windowId: nextActive } : undefined
-    }
     const removed = new Set(windows.keys())
     for (const window of presentations) {
       if (retiredWindows.has(window.id)) continue
@@ -133,6 +119,8 @@ export function createPlayer(
       fontSelecting = !!event.request
     }
     if (event.type === 'window-closed') retireWindow(event.windowId)
+    if (event.type === 'window-activate' && !retiredWindows.has(event.windowId))
+      focusRequest = { windowId: event.windowId, revision: input!.focusRevision }
     if (event.type === 'windows') updateWindows(event.windows)
     if (event.type === 'window-input' && !retiredWindows.has(event.windowId)) {
       inputViews.set(event.windowId, event.input)
@@ -143,8 +131,9 @@ export function createPlayer(
       workerPaused = event.snapshot.state !== 'running'
     }
     onEvent(event)
-    // App dialogs and active-window/menu state update before a native activation
-    // moves DOM focus. Repeated snapshots never create a fresh focus request.
+    // Roster snapshots describe completed script work; they never command DOM
+    // focus. Only explicit native activation can request a move, and later user
+    // focus supersedes a request still waiting for its surface or dialog.
     syncInput()
   })
   input = new BrowserInputCoordinator(
@@ -152,6 +141,23 @@ export function createPlayer(
     (keys) => session.keyState(keys),
     (x, y, windowId) => session.pointerState(x, y, windowId),
     onError,
+    {
+      isTransientFocus: (target) => {
+        if (!(target instanceof Element)) return false
+        const popup = target.closest<HTMLElement>(
+          '.game-menu-overlay[data-window-id][data-request-id]',
+        )
+        if (!popup) return false
+        const windowId = Number(popup.dataset.windowId),
+          requestId = Number(popup.dataset.requestId)
+        return (
+          Number.isSafeInteger(requestId) &&
+          requestId > 0 &&
+          (windows.has(windowId) || !!surfaces?.get(windowId)) &&
+          !retiredWindows.has(windowId)
+        )
+      },
+    },
   )
   syncInput()
   surfaces = new BrowserWindowSurfaces(surfaceChannel.port1, session.generation, options.windows, {
@@ -164,16 +170,12 @@ export function createPlayer(
       const window = windows.get(windowId),
         state = inputViews.get(windowId)
       if (window) options.windows.update(windowId, window.view, window.active, surfaceEpoch)
-      input!.attach(windowId, surfaceEpoch, canvas)
+      input!.attach(windowId, surfaceEpoch, canvas, surface.element)
       if (window) input!.setWindow(windowId, window.view)
       if (state) input!.setInput(windowId, state)
       video.attachWindow(windowId, surfaceEpoch, canvas, surface.videoPlane)
       if (window) video.setWindow(window.view, windowId)
       options.onSurfaceAttach?.(surface, identity)
-      if (!attachedWindows.has(windowId)) {
-        attachedWindows.add(windowId)
-        if (activeWindow === windowId) focusRequest = { windowId, epoch: surfaceEpoch }
-      }
       syncInput()
     },
     onDetach: (_canvas, identity) => {
@@ -184,13 +186,9 @@ export function createPlayer(
         focusRequest?.windowId === windowId &&
         (focusRequest.epoch === undefined || focusRequest.epoch === surfaceEpoch)
       )
-        focusRequest = windows.has(windowId) ? { windowId } : undefined
-      if (
-        surface?.content.contains(document.activeElement) &&
-        activeWindow === windowId &&
-        windows.has(windowId)
-      )
-        focusRequest = { windowId }
+        focusRequest = windows.has(windowId) ? { ...focusRequest, epoch: undefined } : undefined
+      if (surface?.content.contains(document.activeElement) && windows.has(windowId))
+        focusRequest = { windowId, revision: input!.focusRevision }
       for (const action of [
         () => input!.detach(windowId, surfaceEpoch),
         () => video.detachWindow(windowId, surfaceEpoch),
@@ -221,6 +219,9 @@ export function createPlayer(
     syncInput()
   }, pauseWhenHidden)
   return {
+    isWindowActive(windowId: number, epoch?: number): boolean {
+      return !retiredWindows.has(windowId) && input!.isActive(windowId, epoch)
+    },
     focusWindow(windowId: number, epoch?: number): boolean {
       if (retiredWindows.has(windowId)) return false
       const focused = input!.focus(windowId, epoch)
@@ -293,7 +294,6 @@ export function createPlayer(
           }
           windows.clear()
           inputViews.clear()
-          attachedWindows.clear()
           retiredWindows.clear()
           focusRequest = undefined
         }

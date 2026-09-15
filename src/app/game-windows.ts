@@ -180,6 +180,7 @@ export function createGameWindows(
     // These describe the sole surface for existing single-window consumers;
     // each floating window remains responsible for its own appearance.
     const sole = windows.size === 1 ? windows.values().next().value : undefined
+    if (sole?.primary) sole.gesture?.()
     stage.classList.toggle('window-sunken', !!sole?.view.innerSunken)
     if (sole) stage.dataset.border = String(sole.view.borderStyle)
     else delete stage.dataset.border
@@ -229,6 +230,9 @@ export function createGameWindows(
       !surface.view.visible ||
       event.button !== 0 ||
       fullscreen === surface ||
+      // Responsive embedded playback has a fixed page origin. Script position
+      // remains intact and becomes the DOM position only in floating mode.
+      (windows.size === 1 && surface.primary) ||
       surface.view.borderStyle === 0 ||
       (resizing && ![2, 5].includes(surface.view.borderStyle))
     )
@@ -310,7 +314,12 @@ export function createGameWindows(
       },
       options,
     )
-    browser.addEventListener('blur', () => finish(false), options)
+    // Only losing the browser window cancels a captured gesture. Capturing
+    // descendant blur would also cancel it when a menu or textarea loses focus.
+    browser.addEventListener('blur', () => finish(false), {
+      signal: gestureAbort.signal,
+      capture: false,
+    })
     target.addEventListener('lostpointercapture', () => finish(false), options)
     try {
       target.setPointerCapture(pointer)

@@ -102,7 +102,7 @@ export interface BrowserInputHooks {
   modifiers(shift: number, pointer: boolean): void
   key(key: number, down: boolean): void
   activate(): boolean
-  deactivate(pageBlur: boolean): void
+  deactivate(pageBlur: boolean, nextTarget: EventTarget | null): void
   keyboard(): boolean
   mouse(type: 'down' | 'move' | 'up', buttons: number): boolean
 }
@@ -157,7 +157,11 @@ export class BrowserInput {
     const options = { signal: this.abort.signal }
     canvas.addEventListener('focus', () => this.focus(), options)
     this.text.addEventListener('focus', () => this.activate(), options)
-    this.text.addEventListener('blur', () => this.deactivate(), options)
+    this.text.addEventListener(
+      'blur',
+      (event) => this.deactivate(false, event.relatedTarget),
+      options,
+    )
     window.addEventListener('blur', () => this.deactivate(true), options)
     canvas.addEventListener('mousedown', (event) => this.mouse(event, 'down'), options)
     window.addEventListener(
@@ -495,14 +499,24 @@ export class BrowserInput {
   }
   private activate(): void {
     if (this.suspended || this.disposed || this.active) return
-    if (this.shared && !this.shared.activate()) return
+    if (this.shared) {
+      this.active = this.shared.activate()
+      return
+    }
     this.active = true
     this.push({ type: 'activate' })
   }
-  private deactivate(pageBlur = false): void {
-    this.shared?.deactivate(pageBlur)
-    if (!this.active && !this.mouseButtons && !this.touches.size && !this.captured.size) return
-    this.active = false
+  ownsFocus(target: EventTarget | null): boolean {
+    return target === this.canvas || target === this.text
+  }
+  /** Coordinator-driven Window focus can move between DOM controls without
+   * focusing this textarea. Keep its private activation guard in agreement. */
+  setWindowActive(active: boolean): void {
+    if (this.disposed) return
+    this.active = active
+    if (!active) this.clearTransient()
+  }
+  private clearTransient(): void {
     this.mouseButtons = 0
     this.clicks.clear()
     this.touches.clear()
@@ -514,6 +528,20 @@ export class BrowserInput {
     this.text.value = ''
     clearTimeout(this.composeTimer)
     this.keys()
+  }
+  private deactivate(pageBlur = false, nextTarget: EventTarget | null = null): void {
+    const captured = !!(this.mouseButtons || this.touches.size || this.captured.size)
+    if (this.shared) {
+      this.clearTransient()
+      this.shared.deactivate(pageBlur, nextTarget)
+      // Moving into this Window's menu can release pointer ownership without
+      // falsely reporting that the native Window itself deactivated.
+      if (captured && this.shared.keyboard()) this.push({ type: 'cancel' })
+      return
+    }
+    if (!this.active && !captured) return
+    this.active = false
+    this.clearTransient()
     this.push({ type: 'deactivate' })
   }
   private push(packet: InputPacket): void {

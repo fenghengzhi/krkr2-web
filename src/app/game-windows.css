@@ -30,6 +30,10 @@
 }
 .game-desktop .game-window-embedded {
   position: relative;
+  /* Embedded playback is anchored in the page, not in the native desktop.
+     Keep script left/top for floating windows without clipping a sole canvas. */
+  left: 0;
+  top: 0;
   box-sizing: border-box;
   width: 100%;
   border-radius: 0;
@@ -53,6 +57,9 @@
 .game-window-active > .game-window-header {
   background: #26384c;
   color: #eef4fc;
+}
+.game-window-embedded > .game-window-header {
+  cursor: default;
 }
 .game-window-title {
   flex: 1;
@@ -159,9 +166,6 @@
 }
 .game-window[data-border='0'] > .game-window-header {
   display: none;
-}
-.game-window[data-border='3'] > .game-window-header {
-  cursor: move;
 }
 .game-window[data-border='4'] > .game-window-header,
 .game-window[data-border='5'] > .game-window-header {

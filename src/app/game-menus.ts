@@ -6,6 +6,17 @@ const caption = (text: string) =>
     .replace(/\(&[^)]\)/g, '')
     .replace(/&&|&/g, (marker) => (marker === '&&' ? '&' : ''))
 const shortcut = (item: MenuView) => item.shortcut || item.caption.split('\t')[1] || ''
+// A snapshot can replace a popup with one from another Window before its old
+// component renders. Preserve the external focus target across that handoff.
+const popupFocusOrigins = new WeakMap<HTMLElement, HTMLElement | null>()
+const popupFocusOrigin = (element: Element | null): HTMLElement | null => {
+  if (!(element instanceof HTMLElement)) return null
+  for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+    const previous = popupFocusOrigins.get(ancestor)
+    if (previous !== undefined) return previous
+  }
+  return element
+}
 
 export function createGameMenus(
   container: HTMLElement,
@@ -23,6 +34,18 @@ export function createGameMenus(
   let popupRequest: number | undefined
   let modal = false
   let disposed = false
+  const removePopup = (restoreFocus = true) => {
+    const previous = overlay && popupFocusOrigins.get(overlay),
+      restore = restoreFocus && overlay?.contains(document.activeElement)
+    if (overlay) {
+      popupFocusOrigins.delete(overlay)
+      overlay.remove()
+    }
+    overlay = undefined
+    popupPanel = undefined
+    popupRequest = undefined
+    if (restore && previous?.isConnected) previous.focus({ preventScroll: true })
+  }
   const select = (id: number) => {
     if (disposed || modal || !running || document.hidden || (eventDisabled && !current.popup))
       return
@@ -104,6 +127,8 @@ export function createGameMenus(
   const find = (item: MenuView | undefined, id: number): MenuView | undefined =>
     item?.id === id ? item : item?.children.map((child) => find(child, id)).find(Boolean)
   const bar = groupElement()
+  const windowId = canvas()?.dataset.windowId
+  if (windowId !== undefined) container.dataset.windowId = windowId
   container.replaceChildren(bar)
   const render = () => {
     if (disposed) return
@@ -115,9 +140,13 @@ export function createGameMenus(
     if (popup && menu) {
       const fresh = !overlay || popupRequest !== popup.requestId
       if (fresh) {
-        overlay?.remove()
+        const previous = popupFocusOrigin(document.activeElement)
+        removePopup(false)
         overlay = document.createElement('div')
+        popupFocusOrigins.set(overlay, previous)
         overlay.className = 'game-menu-overlay'
+        overlay.dataset.windowId = String(popup.windowId)
+        overlay.dataset.requestId = String(popup.requestId)
         overlay.addEventListener('click', (event) => {
           if (!disposed && event.target === overlay) dismiss(popup)
         })
@@ -136,10 +165,7 @@ export function createGameMenus(
       panel.style.transform = `translate(${popup.flags & 8 ? '-100%' : popup.flags & 4 ? '-50%' : '0'},${popup.flags & 32 ? '-100%' : popup.flags & 16 ? '-50%' : '0'})`
       if (fresh) panel.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
     } else {
-      overlay?.remove()
-      overlay = undefined
-      popupPanel = undefined
-      popupRequest = undefined
+      removePopup()
     }
   }
   const keydown = (event: KeyboardEvent) => {
@@ -199,12 +225,9 @@ export function createGameMenus(
       if (disposed) return
       disposed = true
       window.removeEventListener('keydown', keydown, { capture: true })
-      overlay?.remove()
-      overlay = undefined
-      popupPanel = undefined
-      popupRequest = undefined
       container.replaceChildren()
       container.hidden = true
+      removePopup()
       const popup = current.popup
       current = {}
       if (popup) dismiss(popup)

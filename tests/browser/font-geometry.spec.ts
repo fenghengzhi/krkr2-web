@@ -98,30 +98,34 @@ Debug.message("glyph-ready");
     })
     await canvas.scrollIntoViewIfNeeded()
     await canvas.evaluate((element) => {
-      const rect = element.getBoundingClientRect()
-      element.style.translate = `${Math.ceil(rect.left) - rect.left}px ${Math.ceil(rect.top) - rect.top}px`
+      const rect = element.getBoundingClientRect(),
+        window = element.closest('.game-window') as HTMLElement | null
+      if (!window) throw new Error('Missing game Window surface')
+      // Move the containing Window as one unit. Moving the canvas inside its
+      // overflow:hidden content makes Firefox scroll it back during screenshot,
+      // adding a cropped row that is not part of the 64-pixel image.
+      window.style.translate = `${Math.ceil(rect.left) - rect.left}px ${Math.ceil(rect.top) - rect.top}px`
       element.style.imageRendering = 'pixelated'
     })
-    const shot = await canvas.screenshot()
-    const pixel = await page.evaluate(
+    const shot = await canvas.screenshot({ scale: 'css' })
+    await test.info().attach('font-geometry-canvas', { body: shot, contentType: 'image/png' })
+    const sampled = await page.evaluate(
       async (url) => {
         const image = await createImageBitmap(await (await fetch(url)).blob()),
           surface = new OffscreenCanvas(image.width, image.height),
           ctx = surface.getContext('2d')!
         ctx.drawImage(image, 0, 0)
         image.close()
-        return [
-          ...ctx.getImageData(
-            Math.floor((50.5 * surface.width) / 128),
-            Math.floor((32.5 * surface.height) / 64),
-            1,
-            1,
-          ).data,
-        ]
+        return {
+          width: surface.width,
+          height: surface.height,
+          pixel: [...ctx.getImageData(50, 32, 1, 1).data],
+        }
       },
       'data:image/png;base64,' + shot.toString('base64'),
     )
-    expect(pixel).toEqual([18, 52, 86, 255])
+    expect([sampled.width, sampled.height]).toEqual([128, 64])
+    expect(sampled.pixel).toEqual([18, 52, 86, 255])
     await evaluate(
       page,
       '(function(){a.font.angle=2700;return describeRect(a.font.getGlyphDrawRect("AV"));})()',

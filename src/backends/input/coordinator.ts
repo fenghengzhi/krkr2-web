@@ -6,11 +6,18 @@ interface SurfaceInput {
   readonly id: number
   readonly epoch: number
   readonly input: BrowserInput
+  readonly focusRoot?: HTMLElement
   visible: boolean
+  focusable: boolean
 }
 interface QueuedInput {
   readonly surface: SurfaceInput
   readonly packet: InputPacket
+}
+
+export interface BrowserInputCoordinatorOptions {
+  /** Temporary page controls such as owned menu popups preserve Window focus. */
+  isTransientFocus?(target: EventTarget | null): boolean
 }
 
 /** One DOM-order queue and physical keyboard for all surfaces in a Session. */
@@ -28,13 +35,24 @@ export class BrowserInputCoordinator {
   private suspended = false
   private closed = false
   private generation = 0
+  private focusVersion = 0
 
   constructor(
     private readonly send: (packet: InputPacket) => Promise<void>,
     private readonly sendKeys: (keys: number[]) => Promise<void>,
     private readonly sendPointer: (x: number, y: number, windowId: number) => Promise<void> | void,
     private readonly error: (error: unknown) => void,
+    private readonly options: BrowserInputCoordinatorOptions = {},
   ) {
+    document.addEventListener(
+      'focusin',
+      (event) => {
+        if (this.closed) return
+        this.focusVersion++
+        this.observeFocus(event.target)
+      },
+      { signal: this.abort.signal, capture: true },
+    )
     // A key may be released over a menu or another page control after canvas blur.
     // This observer only releases previously observed physical keys; script events
     // still originate from the active surface's textarea/canvas.
@@ -62,10 +80,28 @@ export class BrowserInputCoordinator {
       },
       { signal: this.abort.signal, capture: true },
     )
-    window.addEventListener('blur', () => this.clearPhysical(), { signal: this.abort.signal })
+    window.addEventListener(
+      'blur',
+      () => {
+        if (this.closed) return
+        this.focusVersion++
+        this.setActive(undefined)
+        this.clearPhysical()
+      },
+      { signal: this.abort.signal },
+    )
   }
 
-  attach(windowId: number, epoch: number, canvas: HTMLCanvasElement): void {
+  get focusRevision(): number {
+    return this.focusVersion
+  }
+
+  attach(
+    windowId: number,
+    epoch: number,
+    canvas: HTMLCanvasElement,
+    focusRoot?: HTMLElement,
+  ): void {
     if (this.closed) return
     if (
       !Number.isSafeInteger(windowId) ||
@@ -119,16 +155,17 @@ export class BrowserInputCoordinator {
         this.keys()
       },
       activate: () => {
-        if (!current()) return false
-        if (this.active && this.active !== surface)
-          this.enqueue(this.active, { type: 'deactivate' })
-        this.active = surface
+        if (!current() || !surface.focusable) return false
+        this.setActive(surface)
         return true
       },
-      deactivate: (pageBlur) => {
-        if (this.active === surface) this.active = undefined
+      deactivate: (pageBlur, nextTarget) => {
         if (this.mouseOwner === surface) this.mouseOwner = undefined
-        if (pageBlur) this.clearPhysical()
+        if (this.active !== surface) return
+        if (pageBlur) {
+          this.setActive(undefined)
+          this.clearPhysical()
+        } else this.observeFocus(nextTarget)
       },
       keyboard: () => current() && this.active === surface,
       mouse: (type, buttons) => {
@@ -146,7 +183,14 @@ export class BrowserInputCoordinator {
       this.error,
       hooks,
     )
-    surface = { id: windowId, epoch, input, visible: this.views.get(windowId)?.visible ?? true }
+    surface = {
+      id: windowId,
+      epoch,
+      input,
+      focusRoot,
+      visible: this.views.get(windowId)?.visible ?? true,
+      focusable: this.views.get(windowId)?.focusable ?? true,
+    }
     this.surfaces.set(windowId, surface)
     const view = this.views.get(windowId),
       state = this.inputs.get(windowId)
@@ -169,10 +213,34 @@ export class BrowserInputCoordinator {
       this.closed ||
       this.suspended ||
       !surface?.visible ||
+      !surface.focusable ||
       (epoch !== undefined && surface.epoch !== epoch)
     )
       return false
+    if (
+      document.activeElement &&
+      surface.focusRoot?.contains(document.activeElement) &&
+      !surface.input.ownsFocus(document.activeElement)
+    ) {
+      this.setActive(surface)
+      return true
+    }
     return surface.input.focus()
+  }
+
+  /** DOM activation is authoritative for immediate browser shortcuts; an
+   * earlier script callback may still be delaying the Worker's roster reply. */
+  isActive(windowId: number, epoch?: number): boolean {
+    const surface = this.active
+    return !!(
+      surface &&
+      this.current(surface) &&
+      !this.suspended &&
+      surface.visible &&
+      surface.focusable &&
+      surface.id === windowId &&
+      (epoch === undefined || surface.epoch === epoch)
+    )
   }
 
   setWindow(windowId: number, view: WindowView): void {
@@ -181,13 +249,14 @@ export class BrowserInputCoordinator {
     const surface = this.surfaces.get(windowId)
     if (!surface) return
     surface.input.setWindow(view)
+    surface.focusable = view.focusable
+    if (!view.focusable && this.active === surface) this.setActive(undefined)
     if (surface.visible !== view.visible) {
       surface.visible = view.visible
       if (!view.visible) {
         this.queue = this.queue.filter((entry) => entry.surface !== surface)
         if (this.active === surface) {
-          this.active = undefined
-          this.enqueue(surface, { type: 'deactivate' })
+          this.setActive(undefined)
         }
         if (this.mouseOwner === surface) this.mouseOwner = undefined
       }
@@ -217,6 +286,34 @@ export class BrowserInputCoordinator {
 
   private current(surface: SurfaceInput): boolean {
     return !this.closed && this.surfaces.get(surface.id) === surface
+  }
+
+  private observeFocus(target: EventTarget | null): void {
+    if (this.closed || this.suspended) return
+    if (this.options.isTransientFocus?.(target)) return
+    const surface = [...this.surfaces.values()].find(
+      (surface) =>
+        surface.visible &&
+        surface.focusable &&
+        (surface.input.ownsFocus(target) ||
+          (!!target && surface.focusRoot?.contains(target as Node))),
+    )
+    this.setActive(surface)
+  }
+
+  private setActive(surface: SurfaceInput | undefined): void {
+    const previous = this.active
+    if (surface === previous) return
+    this.active = surface
+    if (previous) {
+      if (this.mouseOwner === previous) this.mouseOwner = undefined
+      previous.input.setWindowActive(false)
+      this.enqueue(previous, { type: 'deactivate' })
+    }
+    if (surface) {
+      surface.input.setWindowActive(true)
+      this.enqueue(surface, { type: 'activate' })
+    }
   }
 
   private remove(surface: SurfaceInput): void {

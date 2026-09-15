@@ -18,6 +18,8 @@ b.menu.add(toolsB);toolsB.add(itemB);itemB.shortcut="Shift+F6";
 itemB.onClick=function(){global.countB++;global.itemB.checked=true;Debug.message("menu-B="+global.countB);};
 var openB=new MenuItem(b,"Popup B");b.menu.add(openB);
 openB.onClick=function(){global.toolsB.popup(0,20,20);global.popupsB++;Debug.message("popup-B-closed="+global.popupsB);};
+var crossPopup=new MenuItem(a,"Open B from A");toolsA.add(crossPopup);crossPopup.shortcut="Shift+F7";
+crossPopup.onClick=function(){global.toolsB.popup(0,20,20);Debug.message("inactive-popup-B-closed");};
 Debug.message("multiwindow-menus-ready");
 `
 
@@ -172,6 +174,13 @@ for (const backend of ['asyncify', 'jspi']) {
         const popup = page.locator('.game-menu-popup')
         await expect(popup).toHaveCount(1)
         await expect(popup).toHaveAttribute('aria-label', 'Tools A')
+        const overlay = page.locator('.game-menu-overlay')
+        await expect(overlay).toHaveAttribute(
+          'data-window-id',
+          (await a.getAttribute('data-window-id'))!,
+        )
+        const firstRequest = await overlay.getAttribute('data-request-id')
+        expect(firstRequest).toMatch(/^[1-9]\d*$/)
         const oldButton = await popup
           .getByRole('button', { name: 'Count A', exact: false })
           .elementHandle()
@@ -182,6 +191,11 @@ for (const backend of ['asyncify', 'jspi']) {
         await evaluate(page, 'countA+","+countB+","+popupsA+","+popupsB', '1,0,1,0')
         await b.getByRole('button', { name: 'Popup B', exact: true }).click()
         await expect(popup).toHaveAttribute('aria-label', 'Tools B')
+        await expect(overlay).toHaveAttribute(
+          'data-window-id',
+          (await b.getAttribute('data-window-id'))!,
+        )
+        expect(await overlay.getAttribute('data-request-id')).not.toBe(firstRequest)
         const beforeStale = await requests(page)
         expect(beforeStale).toContain('menuClick')
         expect(await oldButton!.evaluate((button) => button.isConnected)).toBe(false)
@@ -199,20 +213,36 @@ for (const backend of ['asyncify', 'jspi']) {
         await expect(popup).toHaveCount(0)
         await expect(page.getByText('popup-A-closed=2', { exact: true })).toBeVisible()
         await evaluate(page, 'countA+","+countB+","+popupsA+","+popupsB', '1,1,2,1')
+        // Console evaluation focuses an app control and legitimately deactivates
+        // the game. Re-enter A, then open B's popup through A's real shortcut.
+        await a.locator('canvas[data-window-id]').click()
         await expect(a).toHaveAttribute('data-active', 'true')
-        await page
-          .locator('#expression')
-          .fill('toolsB.popup(0,20,20),Debug.message("inactive-popup-B-closed")')
-        // This evaluation intentionally remains suspended until its owner's
-        // popup receives Escape. No second script evaluation enters the VM.
-        await page.locator('#evaluate').click()
+        await expect(b).toHaveAttribute('data-active', 'false')
+        // This callback stays suspended until the owning popup receives Escape.
+        // No console focus or second script evaluation changes the active Window.
+        await page.keyboard.press('Shift+F7')
         await expect(popup).toHaveAttribute('aria-label', 'Tools B')
         await expect(a).toHaveAttribute('data-active', 'true')
         await expect(b).toHaveAttribute('data-active', 'false')
         await page.keyboard.press('Escape')
         await expect(popup).toHaveCount(0)
         await expect(page.getByText('inactive-popup-B-closed', { exact: true })).toBeVisible()
-        await evaluate(page, 'countA+","+countB', '1,1')
+        await expect(a.locator('.game-text-input')).toBeFocused()
+        // The popup owner is B, but focus must return to the actual prior input A.
+        await page.keyboard.press('Shift+F6')
+        await expect(page.getByText('menu-A=2', { exact: true })).toBeVisible()
+        await evaluate(page, 'countA+","+countB', '2,1')
+
+        // If the user moves focus to the console while the popup is open,
+        // Escape must not take it back to the old game input.
+        await a.locator('canvas[data-window-id]').click()
+        await page.keyboard.press('Shift+F7')
+        await expect(popup).toHaveAttribute('aria-label', 'Tools B')
+        await page.locator('#expression').focus()
+        await page.keyboard.press('Escape')
+        await expect(popup).toHaveCount(0)
+        await expect(page.locator('#expression')).toBeFocused()
+        await evaluate(page, 'countA+","+countB', '2,1')
       } finally {
         await stop((await page.locator('.game-menu-popup').count()) > 0)
       }

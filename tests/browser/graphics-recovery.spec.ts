@@ -7,6 +7,7 @@ import {
   loseGpu,
   restoreGpu,
   canvasSamples,
+  releaseGpuStartupGate,
 } from '../helpers/gpu-browser.ts'
 import { readFile, mkdir } from 'node:fs/promises'
 
@@ -39,21 +40,60 @@ async function load(page: Page, backend: string) {
 for (const backend of ['asyncify', 'jspi']) {
   test(`${backend}: a context lost during construction resumes the pending original startup`, async ({
     page,
-  }) => {
-    await injectGpu(page, false, true)
+  }, testInfo) => {
+    const gate = '/* gpu-startup-read-gate */\nglobal.gpuStartupGateRuns++;'
+    const startup =
+      String.raw`
+if(typeof global.gpuStartupRuns=="undefined")global.gpuStartupRuns=0;
+global.gpuStartupRuns++;
+var gpuStartupGateRuns=0,gpuStartupEvents=0;
+var gpuStartupTrigger=new AsyncTrigger(function(){global.gpuStartupEvents++;Debug.message("gpu-startup-event="+global.gpuStartupEvents);},"");
+gpuStartupTrigger.trigger();Debug.message("gpu-startup-begin="+global.gpuStartupRuns);
+` +
+      source.replace(
+        'Debug.message("gpu-ready");',
+        'Scripts.execStorage("gpu-startup-gate.tjs");Debug.message("gpu-ready");',
+      )
+    // Dynamic surface attachment can follow startup completion. Hold its first
+    // request until startup awaits this actual resource read, so getContext's
+    // construction fault is guaranteed to interrupt the original invocation.
+    await injectGpu(page, false, true, gate)
     await page.goto(`/?backend=${backend}`)
-    await page
-      .locator('#files')
-      .setInputFiles({ name: 'startup.tjs', mimeType: 'text/plain', buffer: Buffer.from(source) })
+    await page.locator('#files').setInputFiles([
+      { name: 'startup.tjs', mimeType: 'text/plain', buffer: Buffer.from(startup) },
+      { name: 'gpu-startup-gate.tjs', mimeType: 'text/plain', buffer: Buffer.from(gate) },
+    ])
     await expect(page.locator('#status')).toHaveText('等待画面恢复')
     const worker = await gpuWorker(page)
     await expect.poll(async () => (await gpuStats(worker)).lost).toBe(1)
+    expect((await gpuStats(worker)).startupGateReads).toBe(1)
+    expect((await gpuStats(worker)).startupGateReturns).toBe(0)
+    await releaseGpuStartupGate(worker)
+    const suspended = await gpuStats(worker)
+    expect(suspended.isLost).toBe(true)
+    expect(suspended.restored).toBe(0)
+    expect(suspended.startupGateReturns).toBe(1)
+    await expect(page.locator('#status')).toHaveText('等待画面恢复')
+    await expect(page.locator('#evaluate')).toBeDisabled()
     await expect(page.locator('#logs')).not.toContainText('gpu-ready')
+    await expect(page.locator('#logs')).not.toContainText('gpu-startup-event=')
+    await testInfo.attach('startup-read-returned-while-context-lost', {
+      body: JSON.stringify(suspended),
+      contentType: 'application/json',
+    })
     await restoreGpu(worker)
     await expect(page.locator('#logs')).toContainText('gpu-ready')
+    await expect(page.locator('#logs')).toContainText('gpu-startup-event=1')
     await expect(page.locator('#status')).toHaveText('运行中')
+    expect(await gpuWorker(page)).toBe(worker)
+    await expect(page.locator('#logs p').filter({ hasText: 'gpu-startup-begin=' })).toHaveCount(1)
+    await expect(page.locator('#logs p').filter({ hasText: 'gpu-ready' })).toHaveCount(1)
     expect(await canvasSamples(page)).toEqual(colors)
-    await evaluate(page, 'clicks', '0')
+    await evaluate(
+      page,
+      '[gpuStartupRuns,gpuStartupGateRuns,gpuStartupEvents,clicks].join(",")',
+      '1,1,1,0',
+    )
     await page.locator('#stop').click()
   })
 

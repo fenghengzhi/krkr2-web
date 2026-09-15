@@ -318,7 +318,7 @@ export function mountApp(root: HTMLDivElement): void {
               if (current !== generation || instance.session.isDisposed) return
               void instance.session.menuDismiss(popup).catch(report)
             },
-            { active: () => !!windowViews.get(surface.windowId)?.active },
+            { active: () => instance.isWindowActive(surface.windowId, surface.surfaceEpoch) },
           )
           gameMenus.set(surface.windowId, menus)
           menus.update(menuViews.get(surface.windowId) ?? {})

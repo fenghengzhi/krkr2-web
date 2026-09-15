@@ -123,6 +123,7 @@ export type EngineEvent =
   | { type: 'window'; window: WindowView }
   | { type: 'windows'; windows: WindowPresentation[] }
   | { type: 'window-closed'; windowId: number }
+  | { type: 'window-activate'; windowId: number }
   | { type: 'window-input'; windowId: number; input: InputView }
   | { type: 'input'; input: InputView }
   | { type: 'font-selection'; request: FontSelectionRequest | null }
@@ -1157,6 +1158,9 @@ export class EngineSession {
     this.windows!.activate(windowId)
     this.syncActiveWindow()
     const activated = this.input({ type: 'activate', windowId }, false)
+    // A focus command is distinct from the state echoed after browser input.
+    // Treating every roster update as a command creates an activation loop.
+    this.deps.event({ type: 'window-activate', windowId })
     this.present()
     return Promise.all([deactivated, activated]).then(() => undefined)
   }

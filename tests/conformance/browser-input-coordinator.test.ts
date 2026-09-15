@@ -12,14 +12,14 @@ function dom() {
   )
   const page = new EventTarget(),
     textareas: Element[] = [],
-    document = {
+    document = Object.assign(new EventTarget(), {
       activeElement: undefined as Element | undefined,
       createElement: () => {
         const element = new Element()
         textareas.push(element)
         return element
       },
-    }
+    })
   class Element extends EventTarget {
     style: Record<string, string> = {}
     value = ''
@@ -29,14 +29,31 @@ function dom() {
     clientHeight = 600
     removed = false
     captures = new Set<number>()
-    parentElement = { append: (_element: Element) => {} }
+    children: Element[] = []
+    parentElement?: Element
+    append(...elements: Element[]): void {
+      for (const element of elements) {
+        this.children.push(element)
+        element.parentElement = this
+      }
+    }
+    contains(target: unknown): boolean {
+      return this === target || this.children.some((child) => child.contains(target))
+    }
     setAttribute(_name: string, _value: string): void {}
     focus(): void {
       if (document.activeElement === this) return
       const previous = document.activeElement
       document.activeElement = this
-      previous?.dispatchEvent(new Event('blur'))
+      const blur = new Event('blur')
+      Object.assign(blur, { relatedTarget: this })
+      previous?.dispatchEvent(blur)
       this.dispatchEvent(new Event('focus'))
+      if (document.activeElement === this) {
+        const focus = new Event('focusin')
+        Object.defineProperty(focus, 'target', { value: this })
+        document.dispatchEvent(focus)
+      }
     }
     remove(): void {
       this.removed = true
@@ -73,6 +90,7 @@ function dom() {
     canvas: () => new Element(),
     textareas,
     page,
+    document,
     dispatch,
     key: (target: EventTarget, key: string, down = true) =>
       dispatch(target, down ? 'keydown' : 'keyup', {
@@ -121,7 +139,11 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
-function fixture(send?: (packet: InputPacket) => Promise<void>) {
+function fixture(
+  send?: (packet: InputPacket) => Promise<void>,
+  scope = false,
+  transient?: (target: EventTarget | null) => boolean,
+) {
   const env = dom(),
     packets: InputPacket[] = [],
     keys: number[][] = [],
@@ -139,11 +161,26 @@ function fixture(send?: (packet: InputPacket) => Promise<void>) {
         pointers.push([x, y, id])
       },
       (error) => errors.push(error),
+      { isTransientFocus: transient },
     ),
     a = env.canvas(),
-    b = env.canvas()
-  coordinator.attach(101, 1, a as unknown as HTMLCanvasElement)
-  coordinator.attach(202, 1, b as unknown as HTMLCanvasElement)
+    b = env.canvas(),
+    rootA = env.canvas(),
+    rootB = env.canvas()
+  rootA.append(a)
+  rootB.append(b)
+  coordinator.attach(
+    101,
+    1,
+    a as unknown as HTMLCanvasElement,
+    scope ? (rootA as unknown as HTMLElement) : undefined,
+  )
+  coordinator.attach(
+    202,
+    1,
+    b as unknown as HTMLCanvasElement,
+    scope ? (rootB as unknown as HTMLElement) : undefined,
+  )
   return {
     ...env,
     coordinator,
@@ -153,6 +190,8 @@ function fixture(send?: (packet: InputPacket) => Promise<void>) {
     errors,
     a,
     b,
+    rootA,
+    rootB,
     close: () => {
       coordinator.close()
       env.restore()
@@ -437,6 +476,161 @@ test('host focus rejects hidden, nonfocusable, paused, stale and removed surface
     await settle()
     assert.deepEqual(f.errors, [])
   } finally {
+    f.close()
+  }
+})
+
+test('shortcut activity follows DOM focus immediately while the first Worker activation is pending', async () => {
+  const waiting = deferred(),
+    f = fixture(async (packet) => {
+      if (packet.type === 'activate' && packet.windowId === 101) await waiting.promise
+    })
+  try {
+    assert.equal(f.coordinator.isActive(101), false)
+    f.coordinator.focus(101, 1)
+    assert.equal(f.coordinator.isActive(101, 1), true)
+    assert.equal(f.coordinator.isActive(101, 2), false)
+    f.coordinator.focus(202, 1)
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.equal(f.coordinator.isActive(202, 1), true)
+    assert.deepEqual(
+      f.packets.map((packet) => [packet.windowId, packet.type]),
+      [[101, 'activate']],
+    )
+    f.coordinator.setSuspended(true)
+    assert.equal(f.coordinator.isActive(202), false)
+    f.coordinator.setSuspended(false)
+    assert.equal(f.coordinator.isActive(202), true)
+    const b = new WindowState()
+    f.coordinator.setWindow(202, b.view())
+    assert.equal(f.coordinator.isActive(202), false)
+    b.visible = true
+    f.coordinator.setWindow(202, b.view())
+    assert.equal(f.coordinator.isActive(202), true)
+    f.coordinator.detach(202, 1)
+    assert.equal(f.coordinator.isActive(202), false)
+    waiting.resolve()
+    await settle()
+    assert.deepEqual(f.errors, [])
+  } finally {
+    waiting.resolve()
+    f.close()
+  }
+})
+
+test('menus share their Window focus while transient popup focus preserves the prior Window', async () => {
+  const transient = new Set<EventTarget>(),
+    f = fixture(undefined, true, (target) => !!target && transient.has(target)),
+    menuA = f.canvas(),
+    menuB = f.canvas(),
+    popup = f.canvas(),
+    consoleInput = f.canvas()
+  f.rootA.append(menuA)
+  f.rootB.append(menuB)
+  transient.add(popup)
+  try {
+    f.coordinator.focus(101)
+    f.key(f.textareas[0]!, 'a')
+    menuA.focus()
+    assert.equal(f.coordinator.isActive(101), true)
+    assert.equal(f.coordinator.focus(101), true)
+    assert.equal(f.document.activeElement, menuA, 'host activation must not steal menu focus')
+    menuB.focus()
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.equal(f.coordinator.isActive(202), true)
+    assert.equal(f.coordinator.focus(202), true)
+    assert.equal(f.document.activeElement, menuB)
+    popup.focus()
+    assert.equal(
+      f.coordinator.isActive(202),
+      true,
+      'popup ownership does not activate another Window',
+    )
+    assert.equal(f.coordinator.isActive(101), false)
+    consoleInput.focus()
+    assert.equal(f.coordinator.isActive(202), false)
+    popup.focus()
+    assert.equal(f.coordinator.isActive(101), false)
+    assert.equal(f.coordinator.isActive(202), false, 'a popup cannot invent previous Window focus')
+    // A's textarea lost focus before B activated through its menu. Returning to
+    // A must not be swallowed by BrowserInput's private active guard.
+    assert.equal(f.coordinator.focus(101), true)
+    assert.equal(f.document.activeElement, f.textareas[0])
+    assert.deepEqual(f.keys.at(-1), [65])
+    await settle()
+    assert.deepEqual(
+      f.packets
+        .filter((packet) => packet.type === 'activate' || packet.type === 'deactivate')
+        .map((packet) => [packet.windowId, packet.type]),
+      [
+        [101, 'activate'],
+        [101, 'deactivate'],
+        [202, 'activate'],
+        [202, 'deactivate'],
+        [101, 'activate'],
+      ],
+    )
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('same-window menu focus releases pointer capture without Window deactivation', async () => {
+  const f = fixture(undefined, true),
+    menu = f.canvas()
+  f.rootA.append(menu)
+  try {
+    f.dispatch(f.a, 'pointerdown', { pointerType: 'mouse', pointerId: 7 })
+    f.mouse(f.a, 'mousedown', 1, 10)
+    menu.focus()
+    assert.equal(f.a.captures.has(7), false)
+    assert.equal(f.coordinator.isActive(101), true)
+    await settle()
+    assert.equal(f.packets.filter((packet) => packet.type === 'deactivate').length, 0)
+    assert.equal(
+      f.packets.filter((packet) => packet.type === 'cancel' && packet.windowId === 101).length,
+      1,
+    )
+    assert.deepEqual(f.keys.at(-1), [1])
+    f.dispatch(f.page, 'mouseup', { buttons: 0 })
+    assert.deepEqual(f.keys.at(-1), [])
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('focus revision observes external controls during pending input and suspension', async () => {
+  const waiting = deferred(),
+    f = fixture(async () => waiting.promise),
+    consoleInput = f.canvas()
+  try {
+    const initial = f.coordinator.focusRevision
+    f.coordinator.focus(101)
+    const game = f.coordinator.focusRevision
+    assert.ok(game > initial)
+    f.coordinator.focus(101)
+    assert.equal(f.coordinator.focusRevision, game)
+    consoleInput.focus()
+    const external = f.coordinator.focusRevision
+    assert.ok(external > game)
+    assert.equal(f.coordinator.isActive(101), false)
+    f.coordinator.setSuspended(true)
+    f.a.focus()
+    assert.ok(f.coordinator.focusRevision > external)
+    const suspended = f.coordinator.focusRevision
+    f.dispatch(f.page, 'blur')
+    assert.ok(f.coordinator.focusRevision > suspended)
+    f.coordinator.close()
+    const closed = f.coordinator.focusRevision
+    consoleInput.focus()
+    assert.equal(f.coordinator.focusRevision, closed)
+    waiting.resolve()
+    await settle()
+    assert.deepEqual(f.errors, [])
+  } finally {
+    waiting.resolve()
     f.close()
   }
 })
