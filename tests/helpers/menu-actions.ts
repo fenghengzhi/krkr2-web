@@ -22,9 +22,11 @@ function menuActionChecks(){
   demand(bound.onClick()===73,"action owner bound context");
   invalidate bound;
 
-  var failing=new MenuItem(%[action:function(event){throw new Exception("menu-action-thrown");}],"failure"),caught="";
+  global.menuThrowVisits=0;
+  var failing=new MenuItem(%[action:function(event){global.menuThrowVisits++;throw new Exception("menu-action-thrown");}],"failure"),caught="";
   try{failing.onClick();}catch(error){caught=error.message;}
-  demand(caught.indexOf("menu-action-thrown")>=0,"thrown action exception was swallowed");
+  demand(caught.indexOf("menu-action-thrown")>=0,"action exception mismatch: caught="+caught+", visits="+menuThrowVisits);
+  delete global.menuThrowVisits;
   invalidate failing;
   return "result,event,missing,null,bound,exception";
 }
