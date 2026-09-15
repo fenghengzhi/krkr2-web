@@ -38,8 +38,8 @@ class Layer {
   function onPaint() { __inputAction("onPaint",%[]); }
   function onHitTest(x,y,hit){__inputAction("onHitTest",%[x:x,y:y,hit:hit]);__host("Input.hitChoice",__id,int(hit));}
   function focus(direction=true){__host("Input.focus",__id,int(direction));}
-  function focusNext(){return __host("Input.moveFocus",1);}
-  function focusPrev(){return __host("Input.moveFocus",0);}
+  function focusNext(){return __host("Input.moveFocus",1,__id);}
+  function focusPrev(){return __host("Input.moveFocus",0,__id);}
   function setMode(){__host("Input.mode",__id,1);}
   function removeMode(){__host("Input.mode",__id,0);}
   function releaseCapture(){__host("Input.release",__id);}

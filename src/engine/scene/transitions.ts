@@ -34,7 +34,7 @@ export class SceneTransitions {
   private closing = new Set<number>()
   constructor(
     private readonly layers: LayerTree,
-    private readonly input: InputController,
+    private readonly input: InputController | ((id: number) => InputController),
     private readonly objects: HostContext,
     private readonly start: (operation: InputOperation) => HostReply,
     private readonly now: () => number,
@@ -191,7 +191,8 @@ export class SceneTransitions {
     try {
       if (!this.layers.has(id) || !this.layers.has(state.source)) return
       const layers = this.layers
-      yield* this.input.change(() => layers.exchange(id, state.source, state.children))
+      const input = typeof this.input === 'function' ? this.input(id) : this.input
+      yield* input.change(() => layers.exchange(id, state.source, state.children))
       const complete = !this.shuttingDown(id) && !this.shuttingDown(state.source)
       if (state.owned && this.bridge)
         yield {

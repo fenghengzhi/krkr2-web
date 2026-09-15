@@ -4,7 +4,8 @@ import type { InputPacket } from '../engine/ports/input.ts'
 import type { ActivityState } from '../engine/ports/activity.ts'
 import type { FontDescriptor, FontPreview } from '../engine/ports/fonts.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
-export const PROTOCOL_VERSION = 9
+import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
+export const PROTOCOL_VERSION = 10
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -20,7 +21,7 @@ export interface InitializeRequest {
   systemFonts: FontDescriptor[]
   version: number
   generation: number
-  canvas: OffscreenCanvas
+  surfaces: MessagePort
   events: MessagePort
   manifestUrl: string
   backend: BackendPreference
@@ -43,12 +44,16 @@ export interface SessionApi {
   setActivity(activity: ActivityState): Promise<SessionSnapshot>
   click(x: number, y: number): Promise<void>
   pointerMove(x: number, y: number): Promise<void>
-  pointerState(x: number, y: number): Promise<void>
+  pointerState(x: number, y: number, windowId?: number): Promise<void>
   input(packet: InputPacket): Promise<void>
   keyState(keys: number[]): Promise<void>
-  exitFullScreen(): Promise<void>
-  menuClick(id: number): Promise<void>
-  menuDismiss(): Promise<void>
+  exitFullScreen(windowId?: number): Promise<void>
+  activateWindow(windowId: number): Promise<void>
+  closeWindow(windowId: number): Promise<void>
+  moveWindow(windowId: number, left: number, top: number): Promise<void>
+  resizeWindow(windowId: number, width: number, height: number): Promise<void>
+  menuClick(id: number, popup?: MenuPopupIdentity): Promise<void>
+  menuDismiss(popup?: MenuPopupIdentity): Promise<void>
   setSystemFonts(fonts: FontDescriptor[]): Promise<void>
   setDebugVisibility(panel: DebugPanel, visible: boolean): Promise<SessionSnapshot>
   selectFont(id: number, face: string | null): Promise<void>

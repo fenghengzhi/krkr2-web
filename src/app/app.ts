@@ -5,6 +5,9 @@ import type { BackendPreference, GameInput } from '../protocol/session.ts'
 import type { SessionSnapshot } from '../engine/session.ts'
 import type { DebugPanel, DebugVisibility } from '../engine/diagnostics/panels.ts'
 import { createGameMenus } from './game-menus.ts'
+import { createGameWindows, type GameWindows } from './game-windows.ts'
+import type { WindowPresentation } from '../engine/scene/window.ts'
+import type { MenuSnapshot } from '../engine/scene/menus.ts'
 import { createGameFonts } from './game-fonts.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import { createGameLibrary } from './game-library.ts'
@@ -26,7 +29,6 @@ export function mountApp(root: HTMLDivElement): void {
       <div class="workspace">
         <section class="stage-panel" aria-label="游戏画面">
           <div class="stage-bar"><span id="game-title">尚未载入游戏</span><span id="status" role="status">待机</span></div>
-          <nav id="game-menus" aria-label="游戏菜单" hidden></nav>
           <div class="stage" id="stage"><div class="empty"><div class="empty-glyph">✦</div><h2>一个新的开场</h2><p>运行示例，或选择包含 startup.tjs 的文件集合。</p><button class="primary" id="demo">运行示例 <span>↗</span></button></div></div>
           <div class="debug-access" aria-label="调试面板"><button id="toggle-console" aria-controls="debug-console" aria-expanded="true">运行记录</button><button id="toggle-controller" aria-controls="debug-controller" aria-expanded="true">调试控制</button></div>
           <div class="transport" id="debug-controller"><span id="runtime-info">准备好后，点击画面与脚本交互</span><div><button id="retry-graphics" hidden>重试显示</button><button id="pause" disabled>暂停</button><button id="restart" disabled>重新开始</button><button id="stop" disabled>停止</button></div></div>
@@ -81,16 +83,29 @@ export function mountApp(root: HTMLDivElement): void {
   })
   const report = (error: unknown) =>
     log(error instanceof Error ? error.message : String(error), true)
-  const gameMenus = createGameMenus(
-    el('game-menus'),
-    () => root.querySelector('canvas'),
-    (id) => {
-      void player?.session.menuClick(id).catch(report)
-    },
-    () => {
-      void player?.session.menuDismiss().catch(report)
-    },
-  )
+  const menuViews = new Map<number, MenuSnapshot>()
+  const windowViews = new Map<number, WindowPresentation>()
+  const gameMenus = new Map<number, ReturnType<typeof createGameMenus>>()
+  let fontSelecting = false
+  const clearMenus = () => {
+    for (const menus of gameMenus.values()) menus.dispose()
+    gameMenus.clear()
+    menuViews.clear()
+    windowViews.clear()
+    fontSelecting = false
+  }
+  const updateMenus = () => {
+    for (const [id, menus] of gameMenus) {
+      const view = windowViews.get(id)?.view
+      menus.state(
+        snapshot?.state === 'running' && snapshot.activity.state === 'visible' && !!view?.visible,
+        view?.width,
+        view?.height,
+        snapshot?.eventDisabled,
+      )
+      menus.modal(fontSelecting)
+    }
+  }
   let systemFonts: FontDescriptor[] = []
   const gameFonts = createGameFonts({
     choose: (id, face) => player?.session.selectFont(id, face),
@@ -145,14 +160,7 @@ export function mountApp(root: HTMLDivElement): void {
     el<HTMLButtonElement>('retry-graphics').hidden = graphics !== 'failed'
     el<HTMLButtonElement>('retry-graphics').disabled =
       !snapshot || ['failed', 'stopping', 'stopped'].includes(snapshot.state)
-    if (!snapshot || ['stopping', 'stopped', 'failed'].includes(snapshot.state))
-      el('stage').classList.remove('window-fullscreen')
-    gameMenus.state(
-      snapshot?.state === 'running' && snapshot.activity.state === 'visible',
-      snapshot?.width,
-      snapshot?.height,
-      snapshot?.eventDisabled,
-    )
+    updateMenus()
     el<HTMLButtonElement>('pause').disabled =
       !snapshot || !['running', 'paused'].includes(snapshot.state)
     setText(
@@ -174,8 +182,6 @@ export function mountApp(root: HTMLDivElement): void {
       el('game-title').textContent = snapshot.title
       el('runtime-info').textContent =
         `${snapshot.backend.toUpperCase()} · ${snapshot.resources} 个资源 · ${snapshot.layers} 个图层 · ${(snapshot.memoryBytes / 1048576).toFixed(1)} MB VM`
-      const canvas = root.querySelector('canvas')
-      if (canvas) canvas.style.aspectRatio = `${snapshot.width} / ${snapshot.height}`
     }
   }
   const setDebugVisibility = async (panel: DebugPanel, visible: boolean) => {
@@ -207,14 +213,14 @@ export function mountApp(root: HTMLDivElement): void {
         generation++
         player = undefined
         snapshot = undefined
-        gameMenus.update({})
-        gameMenus.modal(false)
+        clearMenus()
         gameFonts.close()
       } catch (error) {
         if (previous?.session.isDisposed) {
           generation++
           player = undefined
           snapshot = undefined
+          clearMenus()
         } else if (previous) acceptSnapshot(await previous.session.inspect())
         throw error
       } finally {
@@ -236,35 +242,40 @@ export function mountApp(root: HTMLDivElement): void {
     canvas.height = 600
     canvas.setAttribute('aria-label', '游戏画布')
     el('stage').replaceChildren(canvas)
-    const leaveFullscreen = document.createElement('button')
-    leaveFullscreen.className = 'leave-fullscreen'
-    leaveFullscreen.textContent = '退出全屏'
-    leaveFullscreen.hidden = true
-    leaveFullscreen.addEventListener('click', () => {
-      void player?.session.exitFullScreen().catch(report)
+    const windows: GameWindows = createGameWindows(el('stage'), canvas, (action) => {
+      if (current !== generation || !windows.get(action.windowId, action.surfaceEpoch)) return
+      if (action.type === 'activate') instance.focusWindow(action.windowId, action.surfaceEpoch)
+      else {
+        const session = instance.session
+        const operation =
+          action.type === 'close'
+            ? session.closeWindow(action.windowId)
+            : action.type === 'move'
+              ? session.moveWindow(action.windowId, action.left, action.top)
+              : action.type === 'resize'
+                ? session.resizeWindow(action.windowId, action.width, action.height)
+                : session.exitFullScreen(action.windowId)
+        void operation.catch(report)
+      }
     })
-    el('stage').append(leaveFullscreen)
-    const instance = createPlayer(
+    const instance: ReturnType<typeof createPlayer> = createPlayer(
       canvas,
       (event) => {
         if (current !== generation) return
         if (event.type === 'log') log(event.text, event.level === 'error')
         else if (event.type === 'font-selection') {
           gameFonts.update(event.request)
-          gameMenus.modal(!!event.request)
-        } else if (event.type === 'menus') gameMenus.update(event.menus)
-        else if (event.type === 'window') {
-          const view = event.window,
-            stage = el('stage')
-          stage.dataset.border = String(view.borderStyle)
-          stage.classList.toggle('window-sunken', view.innerSunken)
-          stage.classList.toggle('window-fullscreen', view.fullScreen)
-          stage.style.overflow = view.showScrollBars ? 'auto' : 'hidden'
-          canvas.tabIndex = view.focusable ? 0 : -1
-          canvas.style.visibility = view.visible ? 'visible' : 'hidden'
-          leaveFullscreen.hidden = !view.fullScreen
-          el('game-menus').style.display = view.visible ? '' : 'none'
-        } else if (event.type !== 'input') {
+          fontSelecting = !!event.request
+          updateMenus()
+        } else if (event.type === 'window-menus') {
+          menuViews.clear()
+          for (const { windowId, menus } of event.windows) menuViews.set(windowId, menus)
+          for (const [id, menus] of gameMenus) menus.update(menuViews.get(id) ?? {})
+        } else if (event.type === 'windows') {
+          windowViews.clear()
+          for (const window of event.windows) windowViews.set(window.id, window)
+          updateMenus()
+        } else if (event.type === 'state') {
           acceptSnapshot(event.snapshot)
           update()
         }
@@ -291,6 +302,31 @@ export function mountApp(root: HTMLDivElement): void {
         meter.dataset.frames = String(audio.frames)
       },
       el<HTMLInputElement>('pause-background').checked,
+      {
+        windows,
+        onSurfaceAttach(surface) {
+          if (current !== generation) return
+          if (!el('stage').querySelector('#game-menus')) surface.menu.id = 'game-menus'
+          const menus = createGameMenus(
+            surface.menu,
+            () => windows.get(surface.windowId, surface.surfaceEpoch)?.canvas ?? null,
+            (id, popup) => {
+              void instance.session.menuClick(id, popup).catch(report)
+            },
+            (popup) => {
+              void instance.session.menuDismiss(popup).catch(report)
+            },
+            { active: () => !!windowViews.get(surface.windowId)?.active },
+          )
+          gameMenus.set(surface.windowId, menus)
+          menus.update(menuViews.get(surface.windowId) ?? {})
+          updateMenus()
+        },
+        onSurfaceDetach(surface) {
+          gameMenus.get(surface.windowId)?.dispose()
+          gameMenus.delete(surface.windowId)
+        },
+      },
     )
     player = instance
     void instance.session.setSystemFonts(systemFonts).catch(report)
@@ -366,10 +402,6 @@ export function mountApp(root: HTMLDivElement): void {
         throw new Error('Wait for loading or library import to finish before reloading')
       await stop()
     },
-  })
-  window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && el('stage').classList.contains('window-fullscreen'))
-      void player?.session.exitFullScreen().catch(report)
   })
   el('demo').addEventListener('click', () => {
     void demoFiles().then(launch).catch(report)

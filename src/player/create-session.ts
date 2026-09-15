@@ -5,7 +5,7 @@ import type {
   WasmManifest,
   WasmVariant,
 } from '../backends/script/tjs-wasm/module.ts'
-import { WebGLRenderer } from '../backends/render/webgl2/renderer.ts'
+import { WorkerWindowSurfaces } from '../workers/window-surfaces.ts'
 import { BrowserGraphics } from '../backends/text/browser/graphics.ts'
 import { readScript, readText, writeText } from '../backends/files/text-codecs.ts'
 import { inflateImage, deflateImage } from '../backends/files/blob-source.ts'
@@ -24,7 +24,7 @@ export function createSession(request: InitializeRequest): EngineSession {
     activity: request.activity,
     arguments: new Map(request.debugMode ? [['-debug', 'yes']] : []),
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
-    renderer: new WebGLRenderer(request.canvas),
+    renderer: new WorkerWindowSurfaces(request.surfaces, request.generation),
     graphics: new BrowserGraphics(() =>
       loadFontKernel(new URL('../' + fontManifestFile, request.manifestUrl).href, session.control),
     ),

@@ -1,4 +1,4 @@
-export type InputPacket =
+export type InputPacket = { windowId?: number } & (
   | {
       type: 'move' | 'down' | 'up'
       x: number
@@ -19,6 +19,7 @@ export type InputPacket =
       height: number
       id: number
     }
+)
 export interface InputView {
   cursor: number
   hint: string

@@ -75,7 +75,7 @@ export class MenuService {
       this.records.set(id, item)
       if (window) {
         window.menu = view
-        if (this.windows.active === window) this.tree.setRoot(view)
+        this.tree.setRoot(view, window.id)
       } else this.views.set(view, item)
       return id
     } catch (error) {
@@ -99,6 +99,11 @@ export class MenuService {
   }
   byView(id: number): MenuRecord | undefined {
     return this.views.get(id)
+  }
+  windowByView(id: number): WindowRecord | undefined {
+    const windowId = this.tree.windowId(id)
+    if (windowId === undefined) return
+    return this.windows.registered().find((window) => window.id === windowId)
   }
   state(value: ScriptValue): ScriptWeakObject {
     return this.get(value).state

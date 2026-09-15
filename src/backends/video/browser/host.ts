@@ -16,6 +16,7 @@ import type { WebAudioHost } from '../../audio/web/host.ts'
 interface Movie {
   id: number
   epoch: number
+  windowId: number
   element: HTMLVideoElement
   container: HTMLDivElement
   url: string
@@ -32,6 +33,18 @@ interface Movie {
   abort: AbortController
   audio: ReturnType<WebAudioHost['connectMedia']>
   surface?: OffscreenCanvas
+}
+interface VideoWindow {
+  epoch: number
+  view?: WindowView
+  surface?: VideoSurface
+}
+interface VideoSurface {
+  canvas: HTMLCanvasElement
+  plane: HTMLElement
+  ownedPlane: boolean
+  activation: HTMLButtonElement
+  observer: ResizeObserver
 }
 export class WebVideoHost {
   private readonly timeouts = new PausableTimeouts()
@@ -59,39 +72,23 @@ export class WebVideoHost {
       } else if (movie.status === 'play') this.play(movie)
   }
   private nextEvent = 1
-  private plane: HTMLDivElement
-  private activation: HTMLButtonElement
-  private view?: WindowView
-  private observer: ResizeObserver
+  private readonly windows = new Map<number, VideoWindow>()
+  private readonly retiredWindows = new Set<number>()
+  private parking?: HTMLDivElement
+  private readonly port: MessagePort
+  private readonly audio: WebAudioHost
+  constructor(port: MessagePort, audio: WebAudioHost)
+  constructor(port: MessagePort, canvas: HTMLCanvasElement, audio: WebAudioHost)
   constructor(
-    private readonly port: MessagePort,
-    private readonly canvas: HTMLCanvasElement,
-    private readonly audio: WebAudioHost,
+    port: MessagePort,
+    canvasOrAudio: HTMLCanvasElement | WebAudioHost,
+    audio?: WebAudioHost,
   ) {
-    this.plane = document.createElement('div')
-    this.plane.className = 'video-plane'
-    Object.assign(this.plane.style, {
-      position: 'absolute',
-      overflow: 'hidden',
-      pointerEvents: 'none',
-      zIndex: '2',
-    })
-    this.activation = document.createElement('button')
-    this.activation.textContent = '播放视频'
-    this.activation.hidden = true
-    Object.assign(this.activation.style, {
-      position: 'absolute',
-      left: '50%',
-      top: '50%',
-      transform: 'translate(-50%,-50%)',
-      pointerEvents: 'auto',
-      zIndex: '20',
-    })
-    this.activation.onclick = () => this.activate()
-    this.plane.append(this.activation)
-    canvas.parentElement?.append(this.plane)
-    this.observer = new ResizeObserver(() => this.layout())
-    this.observer.observe(canvas)
+    this.port = port
+    this.audio = audio ?? (canvasOrAudio as WebAudioHost)
+    // The legacy standalone host has one unnamed window. Session opens always
+    // carry the native Window identity and use explicit surface attachment.
+    if (audio) this.attachWindow(0, 0, canvasOrAudio as HTMLCanvasElement)
     port.onmessage = (event: MessageEvent<VideoRequest | VideoMessage>) => {
       const message = event.data
       if ('type' in message) {
@@ -123,57 +120,228 @@ export class WebVideoHost {
         })
     }
   }
-  setWindow(view: WindowView): void {
-    this.view = view
-    this.layout()
-  }
-  private layout(): void {
-    const width = this.canvas.clientWidth,
-      height = this.canvas.clientHeight,
-      view = this.view
-    Object.assign(this.plane.style, {
-      left: `${this.canvas.offsetLeft}px`,
-      top: `${this.canvas.offsetTop}px`,
-      width: `${width}px`,
-      height: `${height}px`,
-      visibility: view?.visible === false ? 'hidden' : 'visible',
-    })
-    const sx = width / (view?.width ?? 800),
-      sy = height / (view?.height ?? 600),
-      zoom = (view?.zoomNumer ?? 1) / (view?.zoomDenom ?? 1)
-    for (const movie of this.movies.values()) {
-      const s = movie.settings,
-        layer = s.mode === 1
-      Object.assign(movie.container.style, {
-        position: 'absolute',
-        left: `${(s.left * zoom + (view?.layerLeft ?? 0)) * sx}px`,
-        top: `${(s.top * zoom + (view?.layerTop ?? 0)) * sy}px`,
-        width: `${s.width * zoom * sx}px`,
-        height: `${s.height * zoom * sy}px`,
-        visibility: layer || !s.visible ? 'hidden' : 'visible',
-        overflow: 'hidden',
-        backgroundColor: `#${(s.mixingMovieBGColor & 0xffffff).toString(16).padStart(6, '0')}`,
-      })
-      Object.assign(movie.element.style, {
-        display: 'block',
-        width: '100%',
-        height: '100%',
-        objectFit: 'fill',
-        opacity: String(s.mode === 2 ? s.mixingMovieAlpha : 1),
-      })
+  private window(id: number): VideoWindow {
+    let window = this.windows.get(id)
+    if (!window) {
+      window = { epoch: -1 }
+      this.windows.set(id, window)
     }
-    this.activation.hidden = ![...this.movies.values()].some(
-      (movie) => movie.blocked && movie.status === 'play',
-    )
+    return window
   }
-  activate(): void {
+  setWindow(view: WindowView, id = 0): void {
+    if (this.closed || this.retiredWindows.has(id)) return
+    this.window(id).view = view
+    this.layout(id)
+  }
+  attachWindow(id: number, epoch: number, canvas: HTMLCanvasElement, plane?: HTMLElement): void {
+    if (this.closed || this.retiredWindows.has(id)) return
+    const window = this.window(id)
+    if (epoch <= window.epoch) return
+    // Epochs are consumed even if DOM acquisition fails. A retry must acquire a
+    // new surface, and an old ResizeObserver cannot move movies back to it.
+    this.releaseSurface(id, window)
+    window.epoch = epoch
+    const target = plane ?? document.createElement('div'),
+      activation = document.createElement('button')
+    const observer = new ResizeObserver(() => {
+      if (this.windows.get(id) === window && window.surface === surface) this.layout(id)
+    })
+    const surface: VideoSurface = {
+      canvas,
+      plane: target,
+      ownedPlane: !plane,
+      activation,
+      observer,
+    }
+    try {
+      target.classList.add('video-plane')
+      target.dataset.windowId = String(id)
+      target.dataset.surfaceEpoch = String(epoch)
+      Object.assign(target.style, {
+        position: 'absolute',
+        overflow: 'hidden',
+        pointerEvents: 'none',
+        zIndex: '2',
+      })
+      activation.textContent = '播放视频'
+      activation.hidden = true
+      Object.assign(activation.style, {
+        position: 'absolute',
+        left: '50%',
+        top: '50%',
+        transform: 'translate(-50%,-50%)',
+        pointerEvents: 'auto',
+        zIndex: '20',
+      })
+      activation.onclick = () => {
+        if (window.surface === surface) this.activate(id)
+      }
+      target.append(activation)
+      if (!plane) canvas.parentElement?.append(target)
+      window.surface = surface
+      observer.observe(canvas)
+      for (const movie of this.movies.values())
+        if (movie.windowId === id) target.insertBefore(movie.container, activation)
+      this.layout(id)
+      this.trimParking()
+    } catch (error) {
+      // Every acquired observer and node is released, but the acquisition error
+      // stays primary if cleanup also fails.
+      window.surface = surface
+      try {
+        this.releaseSurface(id, window)
+      } catch {}
+      throw error
+    }
+  }
+  detachWindow(id: number, epoch: number): void {
+    if (this.closed || this.retiredWindows.has(id)) return
+    const window = this.window(id)
+    if (epoch < window.epoch) return
+    // A detach can beat its asynchronous attach. Consume that epoch even when
+    // no DOM was acquired, so the late attachment cannot resurrect it.
+    window.epoch = epoch
+    this.releaseSurface(id, window)
+  }
+  /** Retire a native Window, as opposed to replacing its graphics surface. */
+  removeWindow(id: number): void {
+    if (this.retiredWindows.has(id)) return
+    this.retiredWindows.add(id)
+    const window = this.windows.get(id)
+    let primary: unknown,
+      failed = false
+    const attempt = (action: () => void) => {
+      try {
+        action()
+      } catch (error) {
+        if (!failed) primary = error
+        failed = true
+      }
+    }
+    for (const movie of this.movies.values())
+      if (movie.windowId === id) attempt(() => this.remove(movie.id))
+    if (window) attempt(() => this.releaseSurface(id, window))
+    this.windows.delete(id)
+    attempt(() => this.trimParking())
+    if (failed) throw primary
+  }
+  private park(movie: Movie): void {
+    if (!this.parking) {
+      const parking = document.createElement('div')
+      parking.className = 'video-parking'
+      parking.inert = true
+      parking.setAttribute('aria-hidden', 'true')
+      Object.assign(parking.style, {
+        position: 'fixed',
+        left: '0',
+        top: '0',
+        width: '1px',
+        height: '1px',
+        overflow: 'hidden',
+        pointerEvents: 'none',
+        opacity: '0',
+      })
+      document.body.append(parking)
+      this.parking = parking
+    }
+    movie.container.style.visibility = 'hidden'
+    this.parking.append(movie.container)
+  }
+  private trimParking(): void {
+    if (this.parking && !this.parking.childElementCount) {
+      this.parking.remove()
+      this.parking = undefined
+    }
+  }
+  private releaseSurface(id: number, window: VideoWindow): void {
+    const surface = window.surface
+    if (!surface) return
+    window.surface = undefined
+    let primary: unknown,
+      failed = false
+    const attempt = (action: () => void) => {
+      try {
+        action()
+      } catch (error) {
+        if (!failed) primary = error
+        failed = true
+      }
+    }
+    attempt(() => surface.observer.disconnect())
+    // Keep decoded media, its clock and audio graph during graphics recovery.
+    // Connected hidden parking also lets a pre-attachment open decode frame 0.
+    for (const movie of this.movies.values())
+      if (movie.windowId === id) attempt(() => this.park(movie))
+    attempt(() => {
+      surface.activation.onclick = null
+      surface.activation.remove()
+    })
+    attempt(() => {
+      if (surface.ownedPlane) surface.plane.remove()
+      else surface.plane.classList.remove('video-plane')
+    })
+    if (failed) throw primary
+  }
+  private layout(id?: number): void {
+    for (const [windowId, window] of this.windows) {
+      if (id !== undefined && windowId !== id) continue
+      const surface = window.surface
+      if (!surface) continue
+      const { canvas, plane, activation } = surface,
+        width = canvas.clientWidth,
+        height = canvas.clientHeight,
+        view = window.view
+      Object.assign(plane.style, {
+        left: `${canvas.offsetLeft}px`,
+        top: `${canvas.offsetTop}px`,
+        width: `${width}px`,
+        height: `${height}px`,
+        visibility: view?.visible === false ? 'hidden' : 'visible',
+      })
+      const sx = width / (view?.width ?? 800),
+        sy = height / (view?.height ?? 600),
+        zoom = (view?.zoomNumer ?? 1) / (view?.zoomDenom ?? 1)
+      let blocked = false
+      for (const movie of this.movies.values()) {
+        if (movie.windowId !== windowId) continue
+        const s = movie.settings,
+          layer = s.mode === 1
+        Object.assign(movie.container.style, {
+          position: 'absolute',
+          left: `${(s.left * zoom + (view?.layerLeft ?? 0)) * sx}px`,
+          top: `${(s.top * zoom + (view?.layerTop ?? 0)) * sy}px`,
+          width: `${s.width * zoom * sx}px`,
+          height: `${s.height * zoom * sy}px`,
+          visibility: layer || !s.visible || view?.visible === false ? 'hidden' : 'visible',
+          overflow: 'hidden',
+          backgroundColor: `#${(s.mixingMovieBGColor & 0xffffff).toString(16).padStart(6, '0')}`,
+        })
+        Object.assign(movie.element.style, {
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          objectFit: 'fill',
+          opacity: String(s.mode === 2 ? s.mixingMovieAlpha : 1),
+        })
+        blocked ||= movie.blocked && movie.status === 'play'
+      }
+      activation.hidden = !blocked || view?.visible === false
+    }
+  }
+  activate(windowId?: number): void {
     this.audio.activate()
-    for (const movie of this.movies.values()) if (movie.status === 'play') this.play(movie)
+    for (const movie of this.movies.values())
+      if (movie.status === 'play' && (windowId === undefined || movie.windowId === windowId))
+        this.play(movie)
   }
   private get(id: number): Movie {
     const movie = this.movies.get(id)
     if (!movie || movie.disposed) throw new Error('Video is closed')
     return movie
+  }
+  private current(movie: Movie, epoch = movie.epoch): void {
+    if (movie.disposed || this.movies.get(movie.id) !== movie || movie.epoch !== epoch)
+      throw new Error('Video operation was closed or superseded')
   }
   private snapshot(movie: Movie, time = movie.element.currentTime * 1000): VideoSnapshot {
     const duration = Number.isFinite(movie.element.duration) ? movie.element.duration * 1000 : 0,
@@ -300,7 +468,9 @@ export class WebVideoHost {
             })
             this.play(movie)
           },
-          (error) => this.fail(error),
+          (error) => {
+            if (!movie.disposed) this.fail(error)
+          },
         )
         return true
       }
@@ -459,6 +629,13 @@ export class WebVideoHost {
     this.layout()
   }
   private async open(command: Extract<VideoCommand, { op: 'open' }>): Promise<VideoResult> {
+    const windowId = command.windowId ?? 0
+    if (this.retiredWindows.has(windowId)) throw new Error('Video Window is closed')
+    if (!Number.isSafeInteger(windowId) || windowId < 0)
+      throw new Error('Invalid video Window identity')
+    this.window(windowId)
+    const previous = this.movies.get(command.id)
+    if (previous && command.epoch < previous.epoch) throw new Error('Video open was superseded')
     this.remove(command.id)
     if (command.settings.mode === 3)
       throw new Error('Media Foundation video mode is unavailable on the Web')
@@ -473,6 +650,7 @@ export class WebVideoHost {
     element.preload = 'auto'
     element.controls = false
     element.dataset.videoId = String(command.id)
+    element.dataset.windowId = String(windowId)
     const extension = command.name.split('?')[0]!.split('.').pop()?.toLowerCase(),
       mime =
         extension === 'webm'
@@ -493,6 +671,7 @@ export class WebVideoHost {
       const movie: Movie = (owned = {
         id: command.id,
         epoch: command.epoch,
+        windowId,
         element,
         container,
         url,
@@ -508,8 +687,10 @@ export class WebVideoHost {
         audio,
       })
       this.movies.set(movie.id, movie)
-      this.plane.insertBefore(container, this.activation)
-      this.layout()
+      const surface = this.windows.get(windowId)?.surface
+      if (surface) surface.plane.insertBefore(container, surface.activation)
+      else this.park(movie)
+      this.layout(windowId)
       element.ontimeupdate = () => {
         try {
           this.advanceClock(movie)
@@ -523,6 +704,7 @@ export class WebVideoHost {
         if (movie.settings.loop)
           void this.seek(movie, 0).then(
             () => {
+              if (movie.disposed || this.movies.get(movie.id) !== movie) return
               this.emit({
                 type: 'period',
                 id: movie.id,
@@ -532,7 +714,9 @@ export class WebVideoHost {
               })
               this.play(movie)
             },
-            (error) => this.fail(error),
+            (error) => {
+              if (!movie.disposed) this.fail(error)
+            },
           )
         else {
           movie.status = 'stop'
@@ -637,11 +821,14 @@ export class WebVideoHost {
     }
     if (command.op === 'open') return this.open(command)
     if (command.op === 'close') {
+      const movie = this.movies.get(command.id)
+      if (movie && command.epoch < movie.epoch) return { events: [] }
       this.remove(command.id)
       return { events: [] }
     }
     const movie = this.get(command.id),
       events: VideoEvent[] = []
+    if (command.epoch < movie.epoch) throw new Error('Video operation was superseded')
     movie.epoch = command.epoch
     if (command.op === 'set') this.settings(movie, command.settings)
     else if (command.op === 'seek' || command.op === 'rewind') {
@@ -652,6 +839,7 @@ export class WebVideoHost {
             : command.position!
           : 0
       await this.seek(movie, time)
+      this.current(movie, command.epoch)
       events.push(this.frame(movie))
     } else if (command.op === 'prepare') {
       if (movie.settings.mode === 1) {
@@ -659,6 +847,7 @@ export class WebVideoHost {
         this.cancelFrame(movie)
         movie.status = 'pause'
         await this.seek(movie, 0)
+        this.current(movie, command.epoch)
         events.push(this.frame(movie), {
           type: 'period',
           id: movie.id,
@@ -669,6 +858,7 @@ export class WebVideoHost {
       }
     } else if (command.op === 'play') {
       if (movie.element.ended) await this.seek(movie, 0)
+      this.current(movie, command.epoch)
       movie.status = 'play'
       this.play(movie)
     } else if (command.op === 'stop' || command.op === 'pause') {
@@ -678,6 +868,7 @@ export class WebVideoHost {
       this.cancelFrame(movie)
       this.layout()
     }
+    this.current(movie, command.epoch)
     return { snapshot: this.snapshot(movie), events }
   }
   private remove(id: number): void {
@@ -728,6 +919,7 @@ export class WebVideoHost {
     attempt(() => movie.element.removeAttribute('src'))
     attempt(() => movie.element.load())
     attempt(() => movie.container.remove())
+    attempt(() => this.trimParking())
     attempt(() => {
       if (movie.surface) {
         movie.surface.width = 1
@@ -755,8 +947,10 @@ export class WebVideoHost {
         }
       }
       for (const id of this.movies.keys()) attempt(() => this.remove(id))
-      attempt(() => this.observer.disconnect())
-      attempt(() => this.plane.remove())
+      for (const [id, window] of this.windows) attempt(() => this.releaseSurface(id, window))
+      this.windows.clear()
+      this.retiredWindows.clear()
+      attempt(() => this.trimParking())
       if (failed) throw primary
     })
     return this.closing

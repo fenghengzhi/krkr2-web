@@ -15,6 +15,18 @@ export interface WindowView {
   zoomNumer: number
   zoomDenom: number
   mouseCursorState: number
+  stayOnTop?: boolean
+  minWidth?: number
+  minHeight?: number
+  maxWidth?: number
+  maxHeight?: number
+}
+
+export interface WindowPresentation {
+  id: number
+  view: WindowView
+  active: boolean
+  main: boolean
 }
 
 /** Logical window coordinates are independent of the page's responsive scale. */
@@ -114,6 +126,11 @@ export class WindowState implements WindowView {
       zoomNumer,
       zoomDenom,
       mouseCursorState,
+      stayOnTop,
+      minWidth,
+      minHeight,
+      maxWidth,
+      maxHeight,
     } = this
     return {
       width,
@@ -132,6 +149,11 @@ export class WindowState implements WindowView {
       zoomNumer,
       zoomDenom,
       mouseCursorState,
+      stayOnTop,
+      minWidth,
+      minHeight,
+      maxWidth,
+      maxHeight,
     }
   }
 }

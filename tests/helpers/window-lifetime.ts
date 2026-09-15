@@ -43,6 +43,9 @@ export async function windowFixture(
       )
       await session.evaluate('Scripts.execStorage("savedata/window-owned.cjs")')
     } else await session.evaluate('Scripts.execStorage("window-owned.tjs")')
+    // These fixtures deliberately inspect native cleanup after the main Window
+    // dies. Default application termination has its own multiwindow coverage.
+    await execute('System.exitOnWindowClose=false;')
     await execute(
       'var warm=new LifetimeWindow();warm.caption;invalidate warm;delete global.warm;finalized=0;',
     )

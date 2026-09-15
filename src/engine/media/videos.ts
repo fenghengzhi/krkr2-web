@@ -331,6 +331,7 @@ export class VideoService {
       await apply({
         op: 'open',
         ...identity(),
+        windowId: video.windowId,
         name,
         bytes: await this.read(name.split('?')[0]!),
         settings: videoSettings(video.snapshot),

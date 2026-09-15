@@ -36,7 +36,7 @@ for (const binary of [false, true]) {
     }
   })
 
-  test(`${mode}: mainWindow is read-only on the class, derived class and instance without weakening the active-window guard`, async () => {
+  test(`${mode}: mainWindow stays read-only on the class, derived class and instances while a second Window is registered`, async () => {
     const f = await windowFixture(binary)
     try {
       await f.execute(`
@@ -44,17 +44,22 @@ makeWindow();var rejected=0;
 try{global.Window.mainWindow=null;}catch(error){rejected++;}
 try{LifetimeWindow.mainWindow=null;}catch(error){rejected++;}
 try{win.mainWindow=null;}catch(error){rejected++;}
-try{var second=new global.Window();}catch(error){caught=error.message;}
+var second=new global.Window();second.visible=true;
 `)
       assert.equal(
         await f.session.evaluate(
-          'rejected+","+(global.Window.mainWindow===win)+","+(LifetimeWindow.mainWindow===win)+","+(win.mainWindow===win)',
+          'rejected+","+(global.Window.mainWindow===win)+","+(LifetimeWindow.mainWindow===win)+","+(win.mainWindow===win)+","+(second.mainWindow===win)+","+(second!==win)',
         ),
-        '3,1,1,1',
+        '3,1,1,1,1,1',
       )
-      assert.match(await f.session.evaluate('caught'), /Multiple active Window/)
-      assert.equal(f.session.inspectOwnership().windowSources, 1)
+      assert.equal(f.session.inspectOwnership().windowSources, 2)
       await f.execute('delete global.win;')
+      assert.equal(
+        await f.session.evaluate('(global.Window.mainWindow===null)+","+(isvalid second)'),
+        '1,1',
+      )
+      assert.equal(f.session.inspectOwnership().windowSources, 1)
+      await f.execute('delete global.second;')
       await f.restored()
     } finally {
       await f.session.stop()

@@ -15,7 +15,21 @@ interface MenuNode extends Omit<MenuView, 'children'> {
 }
 export interface MenuSnapshot {
   root?: MenuView
-  popup?: { id: number; x: number; y: number; flags: number }
+  popup?: MenuPopup
+}
+export interface MenuPopupIdentity {
+  windowId: number
+  requestId: number
+}
+export interface MenuPopup extends MenuPopupIdentity {
+  id: number
+  x: number
+  y: number
+  flags: number
+}
+export interface WindowMenus {
+  windowId: number
+  menus: MenuSnapshot
 }
 
 export class MenuTree {
@@ -24,8 +38,9 @@ export class MenuTree {
   }
   private nodes = new Map<number, MenuNode>()
   private nextId = 1
-  private root = 0
-  private popup?: { id: number; x: number; y: number; flags: number; resolve(value: number): void }
+  private roots = new Map<number, number>()
+  private nextPopup = 1
+  private popup?: MenuPopup & { resolve(value: number): void }
   revision = 0
   create(caption: string): number {
     if (this.nodes.size >= 4096) throw new Error('Menu item budget exceeded')
@@ -50,15 +65,34 @@ export class MenuTree {
     if (!item) throw new Error('MenuItem has been invalidated')
     return item
   }
-  setRoot(id: number): void {
-    this.get(id)
-    this.root = id
+  setRoot(id: number, windowId = 0): void {
+    if (this.get(id).parent) throw new Error('The window menu cannot have a parent')
+    for (const [owner, root] of this.roots)
+      if (root === id && owner !== windowId) throw new Error('The menu belongs to another Window')
+    if (this.roots.get(windowId) === id) return
+    this.dismiss(windowId)
+    this.roots.set(windowId, id)
     this.revision++
   }
-  hideRoot(): void {
-    this.dismiss()
-    this.root = 0
-    this.revision++
+  hideRoot(windowId = 0): void {
+    this.dismiss(windowId)
+    if (this.roots.delete(windowId)) this.revision++
+  }
+  /** Display ancestry, rather than the script action owner, determines routing. */
+  windowId(id: number): number | undefined {
+    let item = this.nodes.get(id)
+    if (!item) return
+    while (item.parent) item = this.get(item.parent)
+    for (const [windowId, root] of this.roots) if (item.id === root) return windowId
+  }
+  private forgetRoot(id: number): void {
+    for (const [windowId, root] of this.roots) if (root === id) this.hideRoot(windowId)
+  }
+  private contains(parentId: number, id: number): boolean {
+    for (let item = this.get(id); ; item = this.get(item.parent)) {
+      if (item.id === parentId) return true
+      if (!item.parent) return false
+    }
   }
   set(id: number, property: string, value: string | number): void {
     const item = this.get(id)
@@ -86,7 +120,7 @@ export class MenuTree {
       parent = this.get(parentId)
     if (!Number.isInteger(index) || index < 0 || index > parent.children.length)
       throw new Error('Invalid menu insertion index')
-    if (id === this.root) throw new Error('Cannot reparent the window menu')
+    if ([...this.roots.values()].includes(id)) throw new Error('Cannot reparent the window menu')
     let depth = 0
     for (
       let ancestor: MenuNode | undefined = parent;
@@ -112,6 +146,7 @@ export class MenuTree {
       item = this.get(id)
     const index = parent.children.indexOf(id)
     if (index < 0) throw new Error('MenuItem is not a child of this parent')
+    if (this.popup && this.contains(id, this.popup.id)) this.dismiss()
     parent.children.splice(index, 1)
     item.parent = 0
     this.revision++
@@ -122,26 +157,18 @@ export class MenuTree {
     for (const child of [...item.children]) this.destroy(child)
     if (this.popup?.id === id) this.dismiss()
     this.nodes.delete(id)
-    if (this.root === id) this.root = 0
+    this.forgetRoot(id)
     this.revision++
   }
   /** Release one platform node. Script-owned descendants have independent
    * lifetimes and are detached until their own native invalidation runs. */
   detach(id: number): void {
     const item = this.get(id)
-    if (this.popup) {
-      for (let node = this.get(this.popup.id); ; node = this.get(node.parent)) {
-        if (node.id === id) {
-          this.dismiss()
-          break
-        }
-        if (!node.parent) break
-      }
-    }
+    if (this.popup && this.contains(id, this.popup.id)) this.dismiss()
     if (item.parent) this.remove(item.parent, id)
     for (const child of item.children) this.get(child).parent = 0
     this.nodes.delete(id)
-    if (this.root === id) this.root = 0
+    this.forgetRoot(id)
     this.revision++
   }
   selectable(id: number): boolean {
@@ -149,21 +176,25 @@ export class MenuTree {
     if (!item || item.caption === '-' || item.children.length) return false
     for (let current = item; ; current = this.get(current.parent)) {
       if (!current.visible || !current.enabled) return false
-      if (!current.parent) return current.id === this.root
+      if (!current.parent) return this.windowId(current.id) !== undefined
     }
   }
   openPopup(id: number, flags: number, x: number, y: number): Promise<number> {
     this.dismiss()
-    let item = this.get(id)
-    if (id === this.root || !item.visible) throw new Error('This menu cannot be shown as a popup')
-    while (item.parent) item = this.get(item.parent)
-    if (item.id !== this.root) throw new Error('Popup menus must be attached to Window.menu')
+    const item = this.get(id),
+      windowId = this.windowId(id)
+    if ([...this.roots.values()].includes(id) || !item.visible)
+      throw new Error('This menu cannot be shown as a popup')
+    if (windowId === undefined) throw new Error('Popup menus must be attached to Window.menu')
+    const requestId = this.nextPopup++
     this.revision++
     return new Promise((resolve) => {
-      this.popup = { id, flags, x, y, resolve }
+      this.popup = { id, flags, x, y, windowId, requestId, resolve }
     })
   }
-  choose(id: number): boolean {
+  choose(id: number, windowId?: number, requestId?: number): boolean {
+    if (windowId !== undefined && this.windowId(id) !== windowId) return false
+    if (requestId !== undefined && this.popup?.requestId !== requestId) return false
     if (!this.selectable(id)) return false
     if (!this.popup) return true
     let item = this.get(id)
@@ -178,33 +209,44 @@ export class MenuTree {
   get hasPopup(): boolean {
     return !!this.popup
   }
-  dismiss(): void {
+  dismiss(windowId?: number, requestId?: number): void {
     const popup = this.popup
+    if (windowId !== undefined && popup?.windowId !== windowId) return
+    if (requestId !== undefined && popup?.requestId !== requestId) return
     this.popup = undefined
     if (popup) {
       this.revision++
       popup.resolve(0)
     }
   }
-  snapshot(): MenuSnapshot {
+  snapshot(windowId = 0): MenuSnapshot {
     const visit = (id: number): MenuView => {
       const { parent: _parent, group: _group, children, ...item } = this.get(id)
       return { ...item, children: children.map(visit) }
     }
+    const root = this.roots.get(windowId)
     return {
-      root: this.root ? visit(this.root) : undefined,
-      popup: this.popup && {
-        id: this.popup.id,
-        x: this.popup.x,
-        y: this.popup.y,
-        flags: this.popup.flags,
-      },
+      root: root ? visit(root) : undefined,
+      popup:
+        this.popup?.windowId === windowId
+          ? {
+              id: this.popup.id,
+              windowId: this.popup.windowId,
+              requestId: this.popup.requestId,
+              x: this.popup.x,
+              y: this.popup.y,
+              flags: this.popup.flags,
+            }
+          : undefined,
     }
+  }
+  snapshots(): WindowMenus[] {
+    return [...this.roots.keys()].map((windowId) => ({ windowId, menus: this.snapshot(windowId) }))
   }
   clear(): void {
     this.dismiss()
     this.nodes.clear()
-    this.root = 0
+    this.roots.clear()
     this.revision++
   }
 }

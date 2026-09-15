@@ -1,0 +1,214 @@
+.stage.game-desktop {
+  display: block;
+  overflow: auto;
+  isolation: isolate;
+  min-width: 0;
+}
+/* Single-window stage markers are compatibility metadata. The owned surface
+   supplies the actual border and inset; do not decorate the desktop twice. */
+.stage.game-desktop.window-sunken {
+  box-shadow: none;
+}
+.stage.game-desktop[data-border] {
+  outline: none;
+}
+.game-desktop .game-window {
+  position: absolute;
+  box-sizing: content-box;
+  left: var(--game-window-left);
+  top: var(--game-window-top);
+  width: var(--game-window-width);
+  min-width: 0;
+  border: 1px solid #3c4a60;
+  border-radius: 5px;
+  background: #101722;
+  box-shadow: 0 8px 28px #0006;
+}
+.game-desktop .game-window[hidden],
+.game-window [hidden] {
+  display: none !important;
+}
+.game-desktop .game-window-embedded {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+.game-window-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 30px;
+  padding-left: 10px;
+  border-radius: 4px 4px 0 0;
+  background: #1a2331;
+  border-bottom: 1px solid #334154;
+  color: #b5c0d0;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.game-window-active > .game-window-header {
+  background: #26384c;
+  color: #eef4fc;
+}
+.game-window-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.game-window-header button {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.game-window-header .game-window-close {
+  width: 30px;
+  font-size: 20px;
+  line-height: 20px;
+}
+.game-window-header .game-window-leave-fullscreen {
+  position: static;
+  inset: auto;
+  z-index: auto;
+}
+.game-window-close:hover {
+  background: #883b47;
+}
+.game-window-menu {
+  position: relative;
+  z-index: 4;
+  min-width: 0;
+  padding: 4px 8px;
+  background: #191c24;
+  border-bottom: 1px solid #30333c;
+}
+.game-window-menu > .game-menu-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.game-window-body,
+.game-window-content {
+  position: relative;
+  min-width: 0;
+}
+.game-window-content {
+  width: 100%;
+  line-height: 0;
+}
+.stage.game-desktop .game-window-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  object-fit: fill;
+  outline-offset: -2px;
+}
+.game-window-video-plane {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+.game-window-video-plane > * {
+  line-height: normal;
+}
+.game-window-sunken > .game-window-body {
+  box-shadow: inset 0 0 0 2px #0009;
+}
+.game-window-sunken > .game-window-body::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  box-shadow: inset 0 0 0 2px #0009;
+}
+.game-window-resize {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 5;
+  background: linear-gradient(
+    135deg,
+    transparent 56%,
+    #8e9db466 57%,
+    #8e9db466 65%,
+    transparent 66%
+  );
+}
+.game-desktop .game-window[data-border='0'] {
+  border: none;
+  border-radius: 0;
+}
+.game-window[data-border='0'] > .game-window-header {
+  display: none;
+}
+.game-window[data-border='3'] > .game-window-header {
+  cursor: move;
+}
+.game-window[data-border='4'] > .game-window-header,
+.game-window[data-border='5'] > .game-window-header {
+  height: 24px;
+}
+.game-window[data-border='4'] > .game-window-header button,
+.game-window[data-border='5'] > .game-window-header button {
+  height: 22px;
+}
+.game-window-dragging,
+.game-window-dragging * {
+  user-select: none;
+}
+.stage.game-desktop.game-desktop-fullscreen {
+  z-index: 50;
+  overflow: visible;
+}
+.game-desktop .game-window.game-window-fullscreen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  background: #000;
+}
+.game-window.game-window-fullscreen > .game-window-header {
+  display: flex;
+  flex: 0 0 auto;
+  cursor: default;
+}
+.game-window-fullscreen > .game-window-menu {
+  flex: 0 0 auto;
+}
+.game-window-fullscreen > .game-window-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+.game-window-fullscreen .game-window-content {
+  flex: 0 0 auto;
+}

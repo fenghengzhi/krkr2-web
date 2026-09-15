@@ -48,5 +48,11 @@ property __graphicCacheLimit {
 }
 System.graphicCacheLimit = &__graphicCacheLimit;
 delete global.__graphicCacheLimit;
+property __exitOnWindowClose {
+  getter() { return __host("System.exitOnWindowClose"); }
+  setter(value) { __host("System.exitOnWindowClose", int(!!value)); }
+}
+System.exitOnWindowClose = &__exitOnWindowClose;
+delete global.__exitOnWindowClose;
 var Plugins = %[ link: function(name) { __host("Plugins.link", name); } ];
 `

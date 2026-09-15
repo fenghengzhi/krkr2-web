@@ -32,8 +32,9 @@ export async function layerFixture(
       await session.evaluate('Scripts.execStorage("savedata/layer-lifetime.cjs")')
     } else await session.evaluate('Scripts.execStorage("layer-lifetime.tjs")')
     // Warm lazy native Array, Font and Exception classes before measuring owners.
+    // The fixture continues inspecting ownership after its main Windows die.
     await execute(
-      'Debug.getLastLog();var warmWindow=new LifetimeLayerWindow(),warm=new LifetimeLayer(warmWindow);' +
+      'System.exitOnWindowClose=false;Debug.getLastLog();var warmWindow=new LifetimeLayerWindow(),warm=new LifetimeLayer(warmWindow);' +
         'warm.children;warm.font.height;invalidate warm;delete global.warm;' +
         'delete global.warmWindow;try{throw new Exception("warm layer");}catch(e){}' +
         'layerDeaths=0;layerWindowDeaths=0;',

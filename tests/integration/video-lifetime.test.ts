@@ -168,7 +168,7 @@ for (const binary of [false, true]) {
     const f = await videoFixture(binary, 'function counted(status){calls++;}')
     try {
       await f.execute(
-        'makeMovie();movie.open("movie.mp4");movie.play();movie.onStatusChanged=counted;invalidate win;',
+        'makeMovie();movie.open("movie.mp4");movie.play();movie.onStatusChanged=counted;System.exitOnWindowClose=false;invalidate win;',
       )
       assert.equal(f.video.movies.size, 0)
       assert.equal(f.session.inspectOwnership().videoSources, 1)

@@ -16,13 +16,15 @@ export interface WindowRecord {
   finished: boolean
   resizePending: boolean
   menu: number
+  inputActive?: boolean
 }
 
-/** Native window lifetime is separate from the currently displayed window. */
+/** Registration, main-window identity and input activation have separate lifetimes. */
 export class WindowService {
   private next = 1
   private records = new Map<number, WindowRecord>()
   private current?: WindowRecord
+  private primary?: WindowRecord
   private disposed = false
   constructor(
     private readonly objects: ScriptRuntime,
@@ -33,10 +35,26 @@ export class WindowService {
   get active(): WindowRecord | undefined {
     return this.current
   }
+  get mainId(): number {
+    return this.primary?.id ?? 0
+  }
+  registered(): WindowRecord[] {
+    return [...this.records.values()].filter((window) => !window.closing && !window.finished)
+  }
+  activate(id: number): WindowRecord | undefined {
+    const previous = this.current
+    if (id === 0) this.current = undefined
+    else {
+      const window = this.get(id)
+      if (window.closing || window.finished) throw new Error('Window has been invalidated')
+      this.current = window
+    }
+    return previous
+  }
   /** Class-level query: registration is weak and independent of visibility.
    * Native invalidation unregisters before any asynchronous resource cleanup. */
   get main(): ScriptWeakObject | null {
-    const window = this.current
+    const window = this.primary
     return window && !window.closing && !window.finished ? window.owner : null
   }
   get count(): number {
@@ -52,9 +70,10 @@ export class WindowService {
   }
   create(owner: ScriptObject, cleanup: ScriptObject, context: HostContext): WindowRecord {
     if (this.disposed) throw new Error('Window service is disposed')
-    if (this.current) throw new Error('Multiple active Window instances are not yet supported')
     const id = this.next++,
-      retained = context.retain(cleanup)
+      retained = context.retain(cleanup),
+      previous = this.current,
+      first = !this.primary && this.registered().length === 0
     let weak: ScriptWeakObject | undefined
     try {
       weak = this.objects.observe(owner, () => this.retire(id))
@@ -70,12 +89,23 @@ export class WindowService {
       }
       this.objects.registerNativeLifetime(owner, 'Window.invalidate', id)
       this.records.set(id, window)
-      this.current = window
+      if (first) this.primary = window
+      if (!this.current) this.current = window
       this.created(window)
       return window
     } catch (error) {
       this.records.delete(id)
-      if (this.current?.id === id) this.current = undefined
+      if (this.current?.id === id)
+        this.current =
+          previous &&
+          this.records.get(previous.id) === previous &&
+          !previous.closing &&
+          !previous.finished
+            ? previous
+            : this.registered()
+                .reverse()
+                .find((candidate) => candidate.state.visible && candidate.state.focusable)
+      if (this.primary?.id === id) this.primary = undefined
       if (weak) this.objects.unobserve(weak)
       context.release(retained)
       throw error
@@ -85,7 +115,7 @@ export class WindowService {
     const window = this.records.get(id)
     if (!window || window.finished) return { kind: 'value', value: undefined }
     window.closing = true
-    if (this.current === window) this.current = undefined
+    this.unregister(window)
     await this.beginning(window)
     return { kind: 'invoke', callback: window.cleanup, args: [owner, BigInt(id)] }
   }
@@ -95,9 +125,16 @@ export class WindowService {
     window.finished = true
     window.closing = true
     window.resizePending = false
-    if (this.current === window) this.current = undefined
+    this.unregister(window)
     window.state.set('visible', 0)
     this.finished(window)
+  }
+  private unregister(window: WindowRecord): void {
+    if (this.primary === window) this.primary = undefined
+    if (this.current === window)
+      this.current = this.registered()
+        .reverse()
+        .find((candidate) => candidate.state.visible && candidate.state.focusable)
   }
   private retire(id: number): void {
     const window = this.records.get(id)

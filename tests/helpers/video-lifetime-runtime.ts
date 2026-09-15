@@ -269,7 +269,8 @@ export async function exerciseVideoLifetime(
     active = 'window-disconnect'
     await execute('calls=0;finalized=0;makeMovie();movie.onStatusChanged=replacement;')
     const windowOwned = owned()
-    await execute('invalidate win;')
+    // Inspect the disconnected video's native state after its main Window dies.
+    await execute('System.exitOnWindowClose=false;invalidate win;')
     const disconnected = state()
     check(
       disconnected.movies === 0 &&

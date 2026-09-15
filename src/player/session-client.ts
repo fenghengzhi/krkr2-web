@@ -4,6 +4,7 @@ import type { SaveFile } from '../engine/ports/saves.ts'
 import type { InputPacket } from '../engine/ports/input.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
+import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import { wasmManifestFile } from './build-info.ts'
 import { initialActivity, type ActivityState } from '../engine/ports/activity.ts'
 import {
@@ -17,7 +18,7 @@ import {
 let nextGeneration = 1
 export class SessionClient {
   private readonly rpc: RpcClient
-  private readonly generation = nextGeneration++
+  readonly generation = nextGeneration++
   private readonly channel = new MessageChannel()
   private lastSequence = 0
   private disposed = false
@@ -54,18 +55,17 @@ export class SessionClient {
     return this.rpc.call(method, args) as ReturnType<SessionApi[K]>
   }
   async initialize(
-    canvas: HTMLCanvasElement,
+    surfaces: MessagePort,
     backend: BackendPreference,
     gameId: string,
     audio: MessagePort,
     video: MessagePort,
     debugMode = false,
   ) {
-    const offscreen = canvas.transferControlToOffscreen()
     const request = {
       version: PROTOCOL_VERSION,
       generation: this.generation,
-      canvas: offscreen,
+      surfaces,
       events: this.channel.port2,
       manifestUrl: new URL(wasmManifestFile, document.baseURI).href,
       backend,
@@ -78,7 +78,7 @@ export class SessionClient {
     }
     const snapshot = await this.call(
       'initialize',
-      transfer(request, [offscreen, this.channel.port2, audio, video]),
+      transfer(request, [surfaces, this.channel.port2, audio, video]),
     )
     this.initialized = true
     if (this.systemFonts !== request.systemFonts)
@@ -119,9 +119,9 @@ export class SessionClient {
   pointerMove(x: number, y: number) {
     return this.call('pointerMove', x, y)
   }
-  pointerState(x: number, y: number) {
+  pointerState(x: number, y: number, windowId?: number) {
     if (!this.initialized) return Promise.resolve()
-    return this.call('pointerState', x, y)
+    return this.call('pointerState', x, y, windowId)
   }
   input(packet: InputPacket) {
     if (!this.initialized) return Promise.resolve()
@@ -131,14 +131,26 @@ export class SessionClient {
     if (!this.initialized) return Promise.resolve()
     return this.call('keyState', keys)
   }
-  exitFullScreen() {
-    return this.call('exitFullScreen')
+  exitFullScreen(windowId?: number) {
+    return this.call('exitFullScreen', windowId)
   }
-  menuClick(id: number) {
-    return this.call('menuClick', id)
+  activateWindow(windowId: number) {
+    return this.call('activateWindow', windowId)
   }
-  menuDismiss() {
-    return this.call('menuDismiss')
+  closeWindow(windowId: number) {
+    return this.call('closeWindow', windowId)
+  }
+  moveWindow(windowId: number, left: number, top: number) {
+    return this.call('moveWindow', windowId, left, top)
+  }
+  resizeWindow(windowId: number, width: number, height: number) {
+    return this.call('resizeWindow', windowId, width, height)
+  }
+  menuClick(id: number, popup?: MenuPopupIdentity) {
+    return this.call('menuClick', id, popup)
+  }
+  menuDismiss(popup?: MenuPopupIdentity) {
+    return this.call('menuDismiss', popup)
   }
   setDebugVisibility(panel: DebugPanel, visible: boolean) {
     return this.call('setDebugVisibility', panel, visible)

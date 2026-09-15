@@ -35,9 +35,14 @@ import { MemoryAppLocks, type AppLocks } from './ports/system.ts'
 import { KagService } from './kag/service.ts'
 import { kagClass } from './tvp/kag.ts'
 import { menuClass } from './tvp/menus.ts'
-import { MenuTree, type MenuSnapshot } from './scene/menus.ts'
+import {
+  MenuTree,
+  type MenuPopupIdentity,
+  type MenuSnapshot,
+  type WindowMenus,
+} from './scene/menus.ts'
 import { MenuService } from './scene/menu-items.ts'
-import { WindowState, type WindowView } from './scene/window.ts'
+import { WindowState, type WindowView, type WindowPresentation } from './scene/window.ts'
 import { WindowService, type WindowRecord } from './scene/windows.ts'
 import { windowClass } from './tvp/window.ts'
 import { layerClass } from './tvp/layer.ts'
@@ -58,7 +63,7 @@ import { soundClasses } from './tvp/sound.ts'
 import type { VideoBackend } from './ports/video.ts'
 import { VideoService } from './media/videos.ts'
 import { videoClass } from './tvp/video.ts'
-import { InputController } from './input/controller.ts'
+import { InputControllers } from './input/controllers.ts'
 import { InputService } from './input/service.ts'
 import { inputBridge } from './tvp/input.ts'
 import type { InputPacket, InputView } from './ports/input.ts'
@@ -83,6 +88,9 @@ import {
 export type SessionState =
   'initializing' | 'ready' | 'running' | 'paused' | 'stopping' | 'stopped' | 'failed'
 export interface SessionSnapshot {
+  windows?: WindowPresentation[]
+  activeWindow?: number
+  mainWindow?: number
   debug: DebugVisibility
   eventDisabled: boolean
   revision: number
@@ -111,7 +119,10 @@ export interface SessionSnapshot {
 export type EngineEvent =
   | { type: 'state'; snapshot: SessionSnapshot }
   | { type: 'menus'; menus: MenuSnapshot }
+  | { type: 'window-menus'; windows: WindowMenus[] }
   | { type: 'window'; window: WindowView }
+  | { type: 'windows'; windows: WindowPresentation[] }
+  | { type: 'window-input'; windowId: number; input: InputView }
   | { type: 'input'; input: InputView }
   | { type: 'font-selection'; request: FontSelectionRequest | null }
   | { type: 'log'; level: 'info' | 'error'; text: string }
@@ -175,14 +186,16 @@ export class EngineSession {
   private readonly kag: KagService
   private readonly menus = new MenuTree()
   private menuRevision = -1
+  private menuWindowsView = ''
   private readonly layers = new LayerTree()
-  private readonly inputController = new InputController(
-    this.layers,
-    () => this.window,
-    () => this.windowId,
-  )
+  private readonly inputControllers = new InputControllers(this.layers, () => this.windowId)
+  private get inputController() {
+    return this.inputControllers.active
+  }
   private inputs?: InputService
   private inputView = ''
+  private readonly windowInputViews = new Map<number, string>()
+  private windowsView = ''
   private transitions?: SceneTransitions
   private readonly composer = new SceneComposer(this.layers, (id) => this.transitions?.frame(id))
   private preparingFrame = false
@@ -223,11 +236,15 @@ export class EngineSession {
   private windowRevision = -1
   private postedInputPending = 0
   private pointer = { x: 0, y: 0 }
+  private readonly windowPointers = new Map<number, { x: number; y: number }>()
+  private physicalKeys = new Set<number>()
   private readonly fonts: FontService
   private dirty = true
   private stopPromise?: Promise<void>
   private disposalPromise?: Promise<void>
   private exitRequested = false
+  private exitOnWindowClose = true
+  private exitAfterOperation = false
   constructor(private readonly deps: SessionDependencies) {
     this.fonts = new FontService(
       (name) => this.resolveResource(name),
@@ -340,15 +357,22 @@ export class EngineSession {
         },
       )
       this.inputs = new InputService(
-        this.inputController,
+        this.inputControllers,
         this.runtime,
         (id) => this.layerObjects?.owner(id),
-        () => this.windows?.active?.owner,
+        (id) => {
+          if (!id) return undefined
+          try {
+            return this.windows?.get(id).owner
+          } catch {
+            return undefined
+          }
+        },
         (id) => this.layerObjects?.eventOwner(id),
       )
       this.transitions = new SceneTransitions(
         this.layers,
-        this.inputController,
+        (id) => this.inputControllers.forLayer(id),
         this.runtime,
         (operation) => this.inputs!.start(operation),
         this.deps.now,
@@ -440,16 +464,29 @@ export class EngineSession {
       this.windows = new WindowService(
         this.runtime,
         (window) => {
-          this.inputController.clear()
-          this.menus.hideRoot()
-          this.window = window.state
-          this.windowId = window.id
-          this.windowRevision = -1
-          this.dirty = true
+          this.inputControllers.create(window.id, () => window.state).keys = new Set(
+            this.physicalKeys,
+          )
+          try {
+            this.deps.renderer.openWindow?.(window.id)
+            this.inputControllers.releaseCaptures()
+            this.syncActiveWindow()
+            this.dirty = true
+          } catch (error) {
+            this.inputControllers.remove(window.id)
+            this.deps.renderer.closeWindow?.(window.id)
+            throw error
+          }
         },
         async (window) => {
           this.systemEvents!.cancelSource(window)
           window.resizePending = false
+          window.inputActive = false
+          this.syncActiveWindow()
+          if (this.windows?.active)
+            void this.activateWindow(this.windows.active.id).catch((error) => {
+              if (!this.control.cancelled) this.fail(error)
+            })
           this.videos?.disconnectWindow(window.id)
           await this.videos?.flushCloses()
         },
@@ -457,10 +494,11 @@ export class EngineSession {
           this.systemEvents?.cancelSource(window)
           this.videos?.disconnectWindow(window.id)
           this.menuItems?.disconnectWindow(window)
-          if (this.windowId === window.id) {
-            this.windowId = 0
-            this.inputController.clear()
-          }
+          this.inputControllers.remove(window.id)
+          this.windowPointers.delete(window.id)
+          this.windowInputViews.delete(window.id)
+          this.deps.renderer.closeWindow?.(window.id)
+          this.syncActiveWindow()
           this.dirty = true
         },
       )
@@ -632,8 +670,21 @@ export class EngineSession {
           this.fail(error, recorded, false)
         }
         throw error
+      } finally {
+        if (this.exitAfterOperation) {
+          this.exitAfterOperation = false
+          this.requestExit()
+        }
       }
     }, priority)
+  }
+  private requestExit(): void {
+    this.exitRequested = true
+    // Native main-window closure posts termination after the current VM entry.
+    // Do not await the queue which this entry itself is still occupying.
+    void this.stop().catch((error) => {
+      this.deps.event({ type: 'log', level: 'error', text: String(error) })
+    })
   }
   private log(text: string, level: 'info' | 'error' = 'info'): void {
     const entry = this.diagnostics.capture(text, level)
@@ -733,7 +784,7 @@ export class EngineSession {
       if (
         !this.layers.has(id) ||
         !this.layers.get(id).callOnPaint ||
-        !this.inputController.attached(id) ||
+        !this.inputControllers.forLayer(id).attached(id) ||
         this.layerObjects?.isClosing(id)
       ) {
         this.redrawRequests.delete(id)
@@ -805,7 +856,7 @@ export class EngineSession {
       Math.max(0, deadline - this.deps.now()),
     )
   }
-  private *prepareFrame(source = this.inputController.root()): InputOperation {
+  private *prepareFrame(source?: number): InputOperation {
     if (this.preparingFrame) return
     this.preparingFrame = true
     const layers = this.layers,
@@ -836,9 +887,13 @@ export class EngineSession {
       if (layers.has(id)) layers.invalidateChildren(id)
     }
     try {
-      yield* visit(source, true)
+      const roots =
+        source === undefined
+          ? this.inputControllers.values().map((controller) => controller.root())
+          : [source]
+      for (const root of roots) yield* visit(root, true)
       if (this.transitions?.active) yield* this.transitions.advance()
-      yield* visit(source, false)
+      for (const root of roots) yield* visit(root, false)
     } finally {
       this.preparingFrame = false
     }
@@ -867,7 +922,8 @@ export class EngineSession {
     if (activityPaused(activity) && !activityPaused(previous) && this.state === 'paused')
       this.events?.pause(true)
     if (previous.state === 'visible' && activity.state !== 'visible') {
-      this.inputController.resetTransient()
+      this.physicalKeys.clear()
+      this.inputControllers.resetTransient()
       this.menus.dismiss()
       // Commit only materialized overlay writes. Never reenter a suspended VM
       // to flush native streams from a page lifecycle callback.
@@ -895,10 +951,14 @@ export class EngineSession {
   private applyPause(): void {
     if (!['running', 'paused'].includes(this.state)) return
     const paused =
-      this.userPaused || this.graphicsStatus.state !== 'ready' || activityPaused(this.activity)
+      this.userPaused ||
+      (this.graphicsStatus.state !== 'ready' &&
+        !(this.graphicsStatus.state === 'restoring' && this.graphicsStatus.pending === true)) ||
+      activityPaused(this.activity)
     if (paused === (this.state === 'paused')) return
     if (paused) {
-      this.inputController.resetTransient()
+      this.physicalKeys.clear()
+      this.inputControllers.resetTransient()
       this.menus.dismiss()
       this.presentMenus()
       this.control.pause()
@@ -933,19 +993,49 @@ export class EngineSession {
   pointerMove(x: number, y: number): Promise<void> {
     return this.input({ type: 'move', x, y, shift: 0, button: 0, clicks: 0 })
   }
-  pointerState(x: number, y: number): void {
+  private registeredWindow(id: number): WindowRecord | undefined {
+    try {
+      const window = this.windows?.get(id)
+      return window && !window.closing && !window.finished ? window : undefined
+    } catch {
+      return undefined
+    }
+  }
+  private syncActiveWindow(): void {
+    const active = this.windows?.active
+    if (this.windowId !== (active?.id ?? 0)) this.windowRevision = -1
+    this.windowId = active?.id ?? 0
+    if (active) {
+      this.window = active.state
+      this.pointer = this.windowPointers.get(active.id) ?? { x: 0, y: 0 }
+    }
+  }
+  private windowPresentations(): WindowPresentation[] {
+    return (this.windows?.registered() ?? []).map((window) => ({
+      id: window.id,
+      view: window.state.view(),
+      main: this.windows?.mainId === window.id,
+      active: this.windowId === window.id,
+    }))
+  }
+  pointerState(x: number, y: number, windowId = this.windowId): void {
     if (
       [x, y].some((value) => !Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER)
     )
       throw new Error('Invalid physical cursor coordinates')
     if (this.activity.state !== 'visible' || this.state !== 'running') return
-    this.pointer = { x, y }
-    if (this.window.mouseCursorState === 1) this.window.set('mouseCursorState', 0)
+    const window = this.registeredWindow(windowId)
+    if (!window) return
+    this.windowPointers.set(windowId, { x, y })
+    if (windowId === this.windowId) this.pointer = { x, y }
+    if (window.state.mouseCursorState === 1) window.state.set('mouseCursorState', 0)
   }
   keyState(keys: number[]): void {
     if (keys.length > 256 || keys.some((key) => !Number.isInteger(key) || key < 0 || key > 65535))
       throw new Error('Invalid keyboard state')
-    this.inputController.keys = new Set(this.activity.state === 'visible' ? keys : [])
+    this.physicalKeys = new Set(this.activity.state === 'visible' ? keys : [])
+    for (const controller of this.inputControllers.values())
+      controller.keys = new Set(this.physicalKeys)
   }
   input(packet: InputPacket, observe = true): Promise<void> {
     if (this.fontSelection.active && packet.type !== 'cancel' && packet.type !== 'deactivate')
@@ -959,25 +1049,63 @@ export class EngineSession {
     if (packet.type === 'text' && packet.text.length > 65536)
       return Promise.reject(new Error('Input text budget exceeded'))
     if (this.activity.state !== 'visible') return Promise.resolve()
+    const windowId = packet.windowId ?? this.windowId,
+      window = this.registeredWindow(windowId),
+      controller = this.inputControllers.get(windowId)
+    if (!window || !controller) return Promise.resolve()
+    packet = { ...packet, windowId }
+    if (
+      packet.type === 'activate' &&
+      (!window.state.visible || !window.state.focusable || this.state !== 'running')
+    )
+      return Promise.resolve()
+    if (
+      packet.type === 'activate' &&
+      window.state.visible &&
+      window.state.focusable &&
+      this.state === 'running'
+    ) {
+      if (window.inputActive && this.windowId === windowId) return Promise.resolve()
+      window.inputActive = true
+      this.windows!.activate(windowId)
+      this.syncActiveWindow()
+    } else if (packet.type === 'deactivate') {
+      const wasActive = window.inputActive
+      window.inputActive = false
+      if (this.windowId === windowId) {
+        this.windows!.activate(0)
+        this.syncActiveWindow()
+      }
+      if (!wasActive && this.state === 'running') return Promise.resolve()
+    }
     if (this.state !== 'running' && (packet.type === 'cancel' || packet.type === 'deactivate'))
-      this.inputController.resetTransient()
+      controller.resetTransient()
     if (observe) {
-      this.inputController.observe(packet)
+      // A logical Window losing focus releases its local roles, not the
+      // physical keys held elsewhere in the page. Restore the shared snapshot
+      // before applying the next packet's key/shift changes.
+      if (packet.type !== 'cancel' && packet.type !== 'deactivate')
+        controller.keys = new Set(this.physicalKeys)
+      controller.observe(packet)
+      if (packet.type !== 'cancel' && packet.type !== 'deactivate') {
+        this.physicalKeys = new Set(controller.keys)
+        for (const other of this.inputControllers.values())
+          if (other !== controller) other.keys = new Set(this.physicalKeys)
+      }
       if (
         packet.type === 'down' ||
         packet.type === 'move' ||
         packet.type === 'up' ||
         packet.type === 'wheel'
       )
-        this.pointerState(packet.x, packet.y)
+        this.pointerState(packet.x, packet.y, windowId)
     }
     if (this.state !== 'running') return Promise.resolve()
-    const epoch = this.inputController.epoch,
-      window = this.windows?.active
+    const epoch = controller.epoch
     return this.systemEvents!.post(() => this.inputs!.packet(packet), {
       valid: () =>
-        this.windows?.active === window &&
-        epoch === this.inputController.epoch &&
+        this.registeredWindow(windowId) === window &&
+        epoch === controller.epoch &&
         this.state === 'running' &&
         this.activity.state === 'visible',
       priority: 1,
@@ -986,16 +1114,18 @@ export class EngineSession {
     }).then(() => this.queue.drain())
   }
   private postInput(packet: InputPacket, window: WindowRecord): void {
-    if (this.windows?.active !== window) return
+    const controller = this.inputControllers.get(window.id)
+    if (this.registeredWindow(window.id) !== window || !controller) return
     if (this.postedInputPending >= 256) throw new Error('Posted input queue budget exceeded')
-    const epoch = this.inputController.epoch
+    const epoch = controller.epoch
+    packet = { ...packet, windowId: window.id }
     this.postedInputPending++
     // Queue a VM call, never reenter the active TJS host import. A destroyed
     // window cannot deliver its pending input to a newly created window.
     void this.systemEvents!.post(() => this.inputs!.packet(packet), {
       valid: () =>
-        this.windows?.active === window &&
-        epoch === this.inputController.epoch &&
+        this.registeredWindow(window.id) === window &&
+        epoch === controller.epoch &&
         this.activity.state === 'visible',
       priority: 1,
       source: window,
@@ -1005,11 +1135,80 @@ export class EngineSession {
       })
       .finally(() => this.postedInputPending--)
   }
-  exitFullScreen(): void {
-    this.window.set('fullScreen', 0)
+  exitFullScreen(windowId = this.windowId): void {
+    this.registeredWindow(windowId)?.state.set('fullScreen', 0)
     this.present()
   }
+  activateWindow(windowId: number): Promise<void> {
+    const window = this.registeredWindow(windowId)
+    if (!window || !window.state.visible || !window.state.focusable) return Promise.resolve()
+    const previous = this.windows?.active
+    // Enqueue both notifications now, in observed order. Waiting for the old
+    // callback before selecting the target lets an older request steal focus
+    // back from a newer Window while that callback is suspended.
+    const deactivated =
+      previous && previous !== window
+        ? this.input({ type: 'deactivate', windowId: previous.id }, false)
+        : Promise.resolve()
+    this.windows!.activate(windowId)
+    this.syncActiveWindow()
+    const activated = this.input({ type: 'activate', windowId }, false)
+    this.present()
+    return Promise.all([deactivated, activated]).then(() => undefined)
+  }
+  moveWindow(windowId: number, left: number, top: number): void {
+    const window = this.registeredWindow(windowId)
+    if (!window) return
+    window.state.set('left', left)
+    window.state.set('top', top)
+    this.present()
+  }
+  resizeWindow(windowId: number, width: number, height: number): void {
+    const window = this.registeredWindow(windowId)
+    if (!window) return
+    window.state.resize(width, height)
+    this.queueResize(window)
+    this.dirty = true
+    this.present()
+  }
+  closeWindow(windowId: number): Promise<void> {
+    const window = this.registeredWindow(windowId)
+    if (!window || this.state !== 'running') return Promise.resolve()
+    let lease: ScriptObject | undefined
+    return this.systemEvents!.post(
+      () => {
+        lease = this.runtime!.upgrade(window.owner)
+        return lease
+          ? { kind: 'invoke', callback: lease, member: '__windowUserClose', args: [] }
+          : { kind: 'value', value: undefined }
+      },
+      {
+        source: window,
+        priority: 1,
+        valid: () => this.registeredWindow(windowId) === window && !this.systemEvents!.disabled,
+      },
+    )
+      .finally(() => {
+        if (lease) this.runtime?.release(lease)
+      })
+      .then(() => this.queue.drain())
+  }
   present(): void {
+    for (const window of this.windows?.registered() ?? []) {
+      const input = this.inputControllers.get(window.id)?.view()
+      if (!input) continue
+      const serialized = JSON.stringify(input)
+      if (this.windowInputViews.get(window.id) !== serialized) {
+        this.windowInputViews.set(window.id, serialized)
+        this.deps.event({ type: 'window-input', windowId: window.id, input })
+      }
+    }
+    const windows = this.windowPresentations(),
+      windowViews = JSON.stringify(windows)
+    if (this.windowsView !== windowViews) {
+      this.windowsView = windowViews
+      this.deps.event({ type: 'windows', windows })
+    }
     const input = this.inputController.view(),
       serialized = JSON.stringify(input)
     if (serialized !== this.inputView) {
@@ -1025,29 +1224,38 @@ export class EngineSession {
       !this.dirty ||
       this.state === 'stopped' ||
       this.state === 'stopping' ||
-      this.graphicsStatus.state === 'lost' ||
-      this.graphicsStatus.state === 'failed' ||
+      (!this.deps.renderer.openWindow &&
+        (this.graphicsStatus.state === 'lost' || this.graphicsStatus.state === 'failed')) ||
       (this.activity.state !== 'visible' && this.graphicsStatus.state !== 'restoring')
     )
       return
-    const presented = this.deps.renderer.present(
-      this.window.visible
-        ? this.composer.frame(
-            this.width,
-            this.height,
-            this.window.layerLeft,
-            this.window.layerTop,
-            this.window.zoomNumer / this.window.zoomDenom,
-            this.windowId,
-          )
-        : [],
-      this.width,
-      this.height,
-    )
-    if (presented !== false) this.dirty = false
+    const targets = this.windows?.registered() ?? []
+    if (!targets.length && !this.deps.renderer.openWindow)
+      this.deps.renderer.present([], this.width, this.height)
+    let complete = true
+    for (const target of targets) {
+      const window = target.state
+      const presented = this.deps.renderer.present(
+        window.visible
+          ? this.composer.frame(
+              window.width,
+              window.height,
+              window.layerLeft,
+              window.layerTop,
+              window.zoomNumer / window.zoomDenom,
+              target.id,
+            )
+          : [],
+        window.width,
+        window.height,
+        target.id,
+      )
+      if (presented === false) complete = false
+    }
+    if (complete) this.dirty = false
   }
   private queueResize(window: WindowRecord): void {
-    if (window.resizePending || this.windows?.active !== window) return
+    if (window.resizePending || this.registeredWindow(window.id) !== window) return
     window.resizePending = true
     let lease: ScriptObject | undefined
     void this.systemEvents!.post(
@@ -1060,7 +1268,7 @@ export class EngineSession {
       {
         priority: 1,
         source: window,
-        valid: () => this.windows?.active === window && !this.systemEvents!.disabled,
+        valid: () => this.registeredWindow(window.id) === window && !this.systemEvents!.disabled,
         onTaken: () => {
           window.resizePending = false
         },
@@ -1074,43 +1282,56 @@ export class EngineSession {
       })
   }
   private presentMenus(): void {
-    if (this.menuRevision === this.menus.revision) return
+    const registered = this.windows?.registered() ?? [],
+      membership = `${this.windowId}:${registered.map((window) => window.id).join(',')}`
+    if (this.menuRevision === this.menus.revision && this.menuWindowsView === membership) return
     this.menuRevision = this.menus.revision
-    this.deps.event({ type: 'menus', menus: this.menus.snapshot() })
+    this.menuWindowsView = membership
+    this.deps.event({
+      type: 'window-menus',
+      windows: registered.map((window) => ({
+        windowId: window.id,
+        menus: this.menus.snapshot(window.id),
+      })),
+    })
+    // Keep the legacy event last for existing single-window consumers.
+    this.deps.event({ type: 'menus', menus: this.menus.snapshot(this.windowId) })
   }
-  menuClick(id: number): Promise<void> {
+  menuClick(id: number, popup?: MenuPopupIdentity): Promise<void> {
     if (this.fontSelection.active) return Promise.resolve()
-    if (this.state !== 'running' || !this.window.visible || this.activity.state !== 'visible')
+    if (this.state !== 'running' || this.activity.state !== 'visible') return Promise.resolve()
+    const item = this.menuItems?.byView(id),
+      window = this.menuItems?.windowByView(id),
+      controller = window && this.inputControllers.get(window.id)
+    if (!item || item.closing || item.finished || !window?.state.visible || !controller)
       return Promise.resolve()
+    if (popup && popup.windowId !== window.id) return Promise.resolve()
     if (this.systemEvents!.disabled && !this.menus.hasPopup) return Promise.resolve()
-    if (!this.menus.choose(id)) {
+    if (!this.menus.choose(id, window.id, popup?.requestId)) {
       this.presentMenus()
       return Promise.resolve()
     }
-    const epoch = this.inputController.epoch,
-      window = this.windows?.active,
-      item = this.menuItems?.byView(id)
+    const epoch = controller.epoch
     let lease: ScriptObject | undefined
     return this.systemEvents!.post(
       () => {
-        lease = item && this.runtime!.upgrade(item.owner)
+        lease = this.runtime!.upgrade(item.owner)
         return lease
           ? { kind: 'invoke', callback: lease, member: 'onClick', args: [] }
           : { kind: 'value', value: undefined }
       },
       {
         valid: () =>
-          epoch === this.inputController.epoch &&
+          epoch === controller.epoch &&
+          this.inputControllers.get(window.id) === controller &&
           this.activity.state === 'visible' &&
           this.state === 'running' &&
           !this.systemEvents!.disabled &&
-          this.window.visible &&
+          window.state.visible &&
           this.menus.selectable(id) &&
-          !!item &&
           !item.finished &&
           !item.closing &&
-          !!window?.menu &&
-          this.windows?.active === window,
+          this.menuItems?.windowByView(id) === window,
         priority: 1,
         discardable: true,
         source: item,
@@ -1121,8 +1342,8 @@ export class EngineSession {
       })
       .then(() => this.queue.drain())
   }
-  menuDismiss(): void {
-    this.menus.dismiss()
+  menuDismiss(popup?: MenuPopupIdentity): void {
+    this.menus.dismiss(popup?.windowId, popup?.requestId)
     this.presentMenus()
   }
   setSystemFonts(fonts: FontDescriptor[]): void {
@@ -1218,6 +1439,9 @@ export class EngineSession {
   snapshot(): SessionSnapshot {
     const runtime = this.runtime?.inspect()
     return {
+      windows: this.windowPresentations(),
+      activeWindow: this.windowId,
+      mainWindow: this.windows?.mainId ?? 0,
       debug: this.debugPanels.snapshot(),
       eventDisabled: this.systemEvents?.disabled ?? false,
       revision: this.snapshotRevision,
@@ -1413,6 +1637,8 @@ export class EngineSession {
       return this.debug!.host(operation, args)
     if (operation.startsWith('KAG.'))
       return { kind: 'value', value: await this.kag.host(operation, args, context) }
+    if (operation === 'Input.get' && args[1] === 'keyState')
+      return { kind: 'value', value: this.physicalKeys.has(Number(args[0])) ? 1n : 0n }
     if (operation.startsWith('Input.')) return this.inputs!.host(operation, args, context)
     if (operation.startsWith('Transition.')) return this.transitions!.host(operation, args)
     if (operation.startsWith('Sound.'))
@@ -1525,12 +1751,11 @@ export class EngineSession {
         value = BigInt(await this.appLocks.acquire(text(0)))
         break
       case 'System.exit':
-        this.exitRequested = true
-        // stop drains this operation after native execution unwinds. Awaiting it
-        // inside a host import would deadlock the VM against its own queue.
-        void this.stop().catch((error) => {
-          this.deps.event({ type: 'log', level: 'error', text: String(error) })
-        })
+        this.requestExit()
+        break
+      case 'System.exitOnWindowClose':
+        if (args.length) this.exitOnWindowClose = !!number(0)
+        value = this.exitOnWindowClose ? 1n : 0n
         break
       case 'Scripts.class':
         return { kind: 'value', value: { type: 'native-class', name: 'Scripts' } }
@@ -1685,7 +1910,14 @@ export class EngineSession {
         break
       case 'Menu.target': {
         const item = this.menuItems!.byView(number(0))
-        value = item && !item.closing && this.menus.selectable(item.view) ? item.owner : null
+        value =
+          item &&
+          !item.closing &&
+          !item.finished &&
+          this.menuItems!.windowByView(item.view)?.state.visible &&
+          this.menus.selectable(item.view)
+            ? item.owner
+            : null
         break
       }
       case 'Menu.action':
@@ -1729,16 +1961,18 @@ export class EngineSession {
         value = this.menuItems!.remove(args[0], args[1])
         break
       case 'Menu.popup': {
-        if (this.activity.state !== 'visible' || !this.window.visible) {
+        const item = this.menuItems!.get(args[0]),
+          window = this.menuItems!.windowByView(item.view)
+        if (
+          this.activity.state !== 'visible' ||
+          item.closing ||
+          (window && !window.state.visible) ||
+          (!window && this.menus.windowId(item.view) !== undefined)
+        ) {
           value = 0n
           break
         }
-        const selected = this.menus.openPopup(
-          this.menuItems!.get(args[0]).view,
-          number(1),
-          number(2),
-          number(3),
-        )
+        const selected = this.menus.openPopup(item.view, number(1), number(2), number(3))
         this.presentMenus()
         value = BigInt(await selected)
         this.presentMenus()
@@ -1774,15 +2008,27 @@ export class EngineSession {
       case 'Window.main':
         value = this.windows!.main
         break
+      case 'Window.isMain':
+        value = this.windows!.mainId === number(0) ? 1n : 0n
+        break
+      case 'Window.activate':
+        void this.activateWindow(number(0)).catch((error) => {
+          if (!this.control.cancelled) this.fail(error)
+        })
+        break
       case 'Window.invalidate':
         if (!isScriptObject(args[1])) throw new Error('Expected native Window owner')
+        if (this.exitOnWindowClose && this.windows!.mainId === number(0))
+          this.exitAfterOperation = true
         return this.windows!.invalidate(number(0), args[1])
       case 'Window.finish':
         this.windows!.finish(number(0))
         break
-      case 'Window.detachInput':
-        if (this.windowId === number(0)) this.inputController.clear()
-        return this.inputs!.start(this.inputController.synchronize())
+      case 'Window.detachInput': {
+        const controller = this.inputControllers.get(number(0))
+        controller?.clear()
+        return this.inputs!.start(this.inputControllers.synchronize(), controller)
+      }
       case 'Window.identity':
         if (args[0] === null) value = 'null'
         else {
@@ -1832,10 +2078,33 @@ export class EngineSession {
       }
       case 'Window.set': {
         const window = this.windows!.get(number(0)),
-          before = [window.state.width, window.state.height]
+          before = [window.state.width, window.state.height],
+          property = text(1)
         window.state.set(text(1), typeof args[2] === 'string' ? text(2) : number(2))
         if (before[0] !== window.state.width || before[1] !== window.state.height)
           this.queueResize(window)
+        if (property === 'fullScreen' && window.state.fullScreen)
+          for (const other of this.windows!.registered())
+            if (other !== window && other.state.fullScreen) other.state.set('fullScreen', 0)
+        if (property === 'visible' || property === 'focusable') {
+          if (window.state.visible && window.state.focusable)
+            void this.activateWindow(window.id).catch((error) => {
+              if (!this.control.cancelled) this.fail(error)
+            })
+          else {
+            this.menus.dismiss(window.id)
+            void this.input({ type: 'deactivate', windowId: window.id }, false).catch(() => {})
+            if (!this.windows!.active) {
+              const next = this.windows!.registered()
+                .reverse()
+                .find((candidate) => candidate.state.visible && candidate.state.focusable)
+              if (next)
+                void this.activateWindow(next.id).catch((error) => {
+                  if (!this.control.cancelled) this.fail(error)
+                })
+            }
+          }
+        }
         this.dirty = true
         break
       }
@@ -1918,11 +2187,14 @@ export class EngineSession {
         break
       case 'Layer.get': {
         if (text(1) === 'cursorX' || text(1) === 'cursorY') {
-          const zoom = this.window.zoomNumer / this.window.zoomDenom,
+          const windowId = this.layers.get(number(0)).windowId,
+            window = this.registeredWindow(windowId)?.state ?? this.window,
+            pointer = this.windowPointers.get(windowId) ?? { x: 0, y: 0 },
+            zoom = window.zoomNumer / window.zoomDenom,
             p = this.layers.localPoint(
               number(0),
-              (this.pointer.x - this.window.layerLeft) / zoom,
-              (this.pointer.y - this.window.layerTop) / zoom,
+              (pointer.x - window.layerLeft) / zoom,
+              (pointer.y - window.layerTop) / zoom,
             )
           value = BigInt(Math.floor(text(1) === 'cursorX' ? p.x : p.y))
           break
@@ -1943,14 +2215,17 @@ export class EngineSession {
           )
           break
         }
-        return this.inputs!.change(() => {
-          this.layers.set(number(0), text(1), typeof args[2] === 'string' ? text(2) : number(2))
-          if (text(1) === 'callOnPaint' && !this.preparingFrame) {
-            this.paintedLayers.delete(number(0))
-            this.deferredPaint.delete(number(0))
-          }
-          this.dirty = true
-        })
+        return this.inputs!.change(
+          () => {
+            this.layers.set(number(0), text(1), typeof args[2] === 'string' ? text(2) : number(2))
+            if (text(1) === 'callOnPaint' && !this.preparingFrame) {
+              this.paintedLayers.delete(number(0))
+              this.deferredPaint.delete(number(0))
+            }
+            this.dirty = true
+          },
+          this.inputControllers.forLayer(number(0)),
+        )
       case 'Layer.resize':
         this.layers.resize(number(0), number(1), number(2))
         this.dirty = true
@@ -2082,7 +2357,7 @@ export class EngineSession {
         const spec = fontSpec(data)
         await this.fontCatalog.prepare(spec)
         this.control.check()
-        this.inputController.resetTransient()
+        this.inputControllers.resetTransient()
         value = await this.fontSelection.open(number(0), text(1), text(2), text(3), spec)
         break
       }
@@ -2385,7 +2660,7 @@ export class EngineSession {
           this.paintedLayers.delete(id)
           this.deferredPaint.delete(id)
         }
-        if (this.layers.update(id, region) && this.inputController.attached(id)) {
+        if (this.layers.update(id, region) && this.inputControllers.forLayer(id).attached(id)) {
           if (this.preparingFrame && this.paintedLayers.has(id) && !this.deferredPaint.has(id))
             this.deferredPaint.set(id, { generation: ++this.redrawGeneration })
           this.redrawRequests.add(id)

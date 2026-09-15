@@ -17,7 +17,12 @@ async function launch(page: Page, backend: string, binary: boolean, source: stri
     {
       name: 'browser-main-window.tjs',
       mimeType: 'text/plain',
-      buffer: Buffer.from(source + '\nDebug.message("browser-main-window-ready");'),
+      // Lifetime queries intentionally continue after main-window destruction.
+      buffer: Buffer.from(
+        'System.exitOnWindowClose=false;\n' +
+          source +
+          '\nDebug.message("browser-main-window-ready");',
+      ),
     },
   ])
   await expect(page.getByText('browser-main-window-ready', { exact: true })).toBeVisible()
@@ -43,7 +48,7 @@ for (const backend of ['asyncify', 'jspi']) {
         backend,
         binary,
         String.raw`
-var initiallyNull=(global.Window.mainWindow===null),deaths=0,readonlyRejected=false,secondRejected=false;
+var initiallyNull=(global.Window.mainWindow===null),deaths=0,readonlyRejected=false,second=null;
 class BrowserMainWindow extends Window {
   function BrowserMainWindow(){super.Window();}
   function finalize(){deaths++;}
@@ -51,11 +56,12 @@ class BrowserMainWindow extends Window {
 var win=new BrowserMainWindow();win.caption="main-identity";win.visible=true;
 function checkGuards(){
   try{global.Window.mainWindow=null;}catch(error){readonlyRejected=true;}
-  try{var second=new global.Window();}catch(error){secondRejected=true;}
+  second=new global.Window();second.caption="secondary-identity";second.visible=true;
   return 0;
 }
 function hideMain(){win.visible=false;return 0;}
 function dropMain(){delete global.win;return 0;}
+function dropSecond(){delete global.second;return 0;}
 `,
       )
       try {
@@ -63,13 +69,15 @@ function dropMain(){delete global.win;return 0;}
         await evaluate(page, 'checkGuards()', '0')
         await evaluate(
           page,
-          'readonlyRejected+","+secondRejected+","+(global.Window.mainWindow===win)+","+global.Window.mainWindow.caption',
+          'readonlyRejected+","+(second!==win)+","+(second.mainWindow===win)+","+global.Window.mainWindow.caption',
           '1,1,1,main-identity',
         )
         await evaluate(page, 'hideMain()', '0')
         await evaluate(page, '(global.Window.mainWindow===win)+","+win.visible', '1,0')
         await evaluate(page, 'dropMain()', '0')
         await evaluate(page, '(global.Window.mainWindow===null)+","+deaths', '1,1')
+        await evaluate(page, '(isvalid second)+","+second.caption', '1,secondary-identity')
+        await evaluate(page, 'dropSecond()', '0')
       } finally {
         await stop()
       }

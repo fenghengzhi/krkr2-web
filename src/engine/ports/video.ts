@@ -43,6 +43,8 @@ export interface VideoSnapshot extends VideoSettings {
 export type VideoCommand =
   | {
       op: 'open'
+      /** Native Window identity; omitted only by legacy standalone hosts. */
+      windowId?: number
       id: number
       epoch: number
       bytes: Uint8Array

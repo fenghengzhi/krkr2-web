@@ -179,7 +179,7 @@ class RemovingMenu extends MenuItem {
         finish('invalidate item;delete global.item;')
         await Promise.all([reading, click])
         assert.equal(await f.session.evaluate('clicks'), '1')
-        await f.execute('invalidate win;delete global.win;')
+        await f.execute('System.exitOnWindowClose=false;invalidate win;delete global.win;')
         await f.restored()
       } finally {
         finish('0;')
@@ -234,7 +234,7 @@ class SuspendingMenu extends OwnedMenu {
           f.logs.join('\n'),
         )
         assert.equal(f.session.inspectOwnership().menuSources, before - 1)
-        await f.execute('invalidate win;delete global.win;')
+        await f.execute('System.exitOnWindowClose=false;invalidate win;delete global.win;')
         await f.restored()
       } finally {
         finish('0;')

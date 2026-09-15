@@ -73,6 +73,8 @@ function menuLifetimeChecks(){
   invalidate alias;
   demand(isvalid root && !(isvalid leaf),"root wrapper invalidation");
   root.caption="still attached";
+  // Continue the menu ownership checks after closing the main Window.
+  System.exitOnWindowClose=false;
   invalidate window;
   checks.add("window roots");
 

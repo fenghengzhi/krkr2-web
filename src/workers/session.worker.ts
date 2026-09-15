@@ -159,8 +159,8 @@ const api: SessionApi = {
   async pointerMove(x, y) {
     await active().pointerMove(x, y)
   },
-  async pointerState(x, y) {
-    active().pointerState(x, y)
+  async pointerState(x, y, windowId) {
+    active().pointerState(x, y, windowId)
   },
   async input(packet) {
     if (pendingClicks >= 64) throw new Error('Input queue is full')
@@ -174,14 +174,26 @@ const api: SessionApi = {
   async keyState(keys) {
     active().keyState(keys)
   },
-  async exitFullScreen() {
-    active().exitFullScreen()
+  async exitFullScreen(windowId) {
+    active().exitFullScreen(windowId)
   },
-  async menuClick(id) {
-    await active().menuClick(id)
+  async activateWindow(windowId) {
+    await active().activateWindow(windowId)
   },
-  async menuDismiss() {
-    active().menuDismiss()
+  async closeWindow(windowId) {
+    await active().closeWindow(windowId)
+  },
+  async moveWindow(windowId, left, top) {
+    active().moveWindow(windowId, left, top)
+  },
+  async resizeWindow(windowId, width, height) {
+    active().resizeWindow(windowId, width, height)
+  },
+  async menuClick(id, popup) {
+    await active().menuClick(id, popup)
+  },
+  async menuDismiss(popup) {
+    active().menuDismiss(popup)
   },
   async setDebugVisibility(panel, visible) {
     active().setDebugVisibility(panel, visible)

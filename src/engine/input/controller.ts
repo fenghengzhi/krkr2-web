@@ -29,6 +29,8 @@ export type InputOperation = Generator<InputStep, InputValue, unknown>
 const ref = (layer: number): LayerRef => ({ layer })
 export class InputController {
   epoch = 0
+  /** Focus/modal leases survive a transient packet reset, but never a manager clear. */
+  ownershipEpoch = 0
   focused = 0
   modal: number[] = []
   capture = 0
@@ -59,6 +61,9 @@ export class InputController {
     private readonly window: () => WindowView,
     private readonly windowId?: () => number,
   ) {}
+  get sourceWindowId(): number {
+    return this.windowId?.() ?? 0
+  }
   private manager(id: number): number {
     return this.layers.has(id) ? this.layers.get(id).managerId : 0
   }
@@ -185,8 +190,13 @@ export class InputController {
     }
     return ref(found)
   }
-  *focus(id: number, forward = true): InputOperation {
-    const epoch = this.epoch
+  *focus(
+    id: number,
+    forward = true,
+    epoch = this.epoch,
+    ownershipEpoch = this.ownershipEpoch,
+  ): InputOperation {
+    if (epoch !== this.epoch) return false
     if (id && !this.focusable(id)) return false
     if (id) {
       const source = id
@@ -211,7 +221,7 @@ export class InputController {
       try {
         // Native SetFocusTo retains the new focus and releases the old focus
         // after both callbacks, including the exceptional exit.
-        if (epoch === this.epoch) {
+        if (ownershipEpoch === this.ownershipEpoch) {
           yield* this.own('focus', this.focused, manager)
           if (previousManager && previousManager !== manager)
             yield* this.own('focus', 0, previousManager)
@@ -306,14 +316,18 @@ export class InputController {
   }
   *removeMode(id: number, tree = false): InputOperation {
     if (!this.modal.some((item) => (tree ? this.layers.contains(id, item) : item === id))) return
+    const ownershipEpoch = this.ownershipEpoch
     this.saveEnabled(true)
     try {
       for (const item of [...this.modal])
         if (tree ? this.layers.contains(id, item) : item === id) {
           // The modal strong reference is dropped before focus callbacks.
           yield* this.dropOwner(`modal:${item}`, item)
+          if (ownershipEpoch !== this.ownershipEpoch) return undefined
           const next = ((yield* this.search(id, true)) as LayerRef).layer
+          if (ownershipEpoch !== this.ownershipEpoch) return undefined
           yield* this.focus(next, true)
+          if (ownershipEpoch !== this.ownershipEpoch) return undefined
           const index = this.modal.indexOf(item)
           if (index >= 0) this.modal.splice(index, 1)
         }
@@ -323,17 +337,24 @@ export class InputController {
     }
   }
   *change(action: () => void, afterAction?: () => InputOperation): InputOperation {
+    const ownershipEpoch = this.ownershipEpoch
     this.saveEnabled()
     try {
       action()
       if (afterAction) yield* afterAction()
+      if (ownershipEpoch !== this.ownershipEpoch) return undefined
       for (const id of this.choice.keys()) if (!this.layers.has(id)) this.choice.delete(id)
       for (const id of this.hitChoice.keys()) if (!this.layers.has(id)) this.hitChoice.delete(id)
       for (const id of [...this.modal])
-        if (!this.visible(id) || !this.enabled(id, false)) yield* this.removeMode(id)
+        if (!this.visible(id) || !this.enabled(id, false)) {
+          yield* this.removeMode(id)
+          if (ownershipEpoch !== this.ownershipEpoch) return undefined
+        }
       if (this.focused && !this.focusable(this.focused)) {
         const next = ((yield* this.search(this.focused, true)) as LayerRef).layer
+        if (ownershipEpoch !== this.ownershipEpoch) return undefined
         yield* this.focus(next, true)
+        if (ownershipEpoch !== this.ownershipEpoch) return undefined
       }
       if (this.capture && (!this.visible(this.capture) || !this.enabled(this.capture)))
         this.release()
@@ -417,6 +438,7 @@ export class InputController {
     excludeSelf = false,
     getDisabled = false,
   ): Generator<InputCall, number, unknown> {
+    const epoch = this.epoch
     this.hitDepth++
     try {
       for (const candidate of this.layers.hitCandidates(x, y, root, excludeSelf)) {
@@ -433,6 +455,7 @@ export class InputController {
           method: 'onHitTest',
           args: [Math.floor(candidate.x), Math.floor(candidate.y), true],
         }
+        if (epoch !== this.epoch) return 0
         if (!this.layers.has(id) || !this.hitChoice.get(id)) continue
         return getDisabled || this.enabled(id) ? id : 0
       }
@@ -459,6 +482,7 @@ export class InputController {
     return this.capture && this.attached(this.capture) ? this.capture : yield* this.hit(x, y)
   }
   private *mouseMove(x: number, y: number, shift: number, force = false): InputOperation {
+    const epoch = this.epoch
     this.mouseDepth++
     try {
       const changed = force || x !== this.mouseAt.x || y !== this.mouseAt.y
@@ -467,23 +491,31 @@ export class InputController {
       this.shift = shift
       const p = this.primary()
       let target = yield* this.target(p.x, p.y)
+      if (epoch !== this.epoch) return undefined
       if (this.hover !== target) {
         const previous = this.hover
         if (this.layers.has(previous)) yield { target: previous, method: 'onMouseLeave', args: [] }
+        if (epoch !== this.epoch) return undefined
         target = yield* this.target(p.x, p.y)
+        if (epoch !== this.epoch) return undefined
         if (target) {
           yield { target, method: 'onMouseEnter', args: [] }
+          if (epoch !== this.epoch) return undefined
           const next = yield* this.target(p.x, p.y)
+          if (epoch !== this.epoch) return undefined
           if (target !== next) {
             if (this.layers.has(target)) yield { target, method: 'onMouseLeave', args: [] }
+            if (epoch !== this.epoch) return undefined
             target = next
             if (target) yield { target, method: 'onMouseEnter', args: [] }
+            if (epoch !== this.epoch) return undefined
           }
         }
         // Keep the previous hover owned across leave/enter and hit rechecks.
         // Clear it before Release so finalizers observe an empty old slot.
         this.hover = 0
         yield* this.dropOwner('hover', previous)
+        if (epoch !== this.epoch) return undefined
         if (this.attached(target)) {
           this.hover = target
           yield* this.own('hover', target, this.manager(target))
@@ -554,9 +586,9 @@ export class InputController {
     this.point = this.mouseAt = { x: -1, y: -1 }
     this.hitChoice.clear()
   }
-  *packet(packet: InputPacket): InputOperation {
-    const epoch = this.epoch,
-      operation = this.dispatchPacket(packet)
+  *packet(packet: InputPacket, epoch = this.epoch): InputOperation {
+    if (epoch !== this.epoch) return undefined
+    const operation = this.dispatchPacket(packet)
     try {
       let next = operation.next()
       while (!next.done) {
@@ -769,6 +801,7 @@ export class InputController {
     // A different displayed manager must not resume old packet/focus work.
     // Its initial cursor location and focus lock are independent as well.
     this.epoch++
+    this.ownershipEpoch++
     for (const key of this.owners.keys())
       this.pendingOwnership.push({ kind: 'ownership', key, layer: 0 })
     this.owners.clear()

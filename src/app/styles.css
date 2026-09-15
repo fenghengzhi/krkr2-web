@@ -406,7 +406,7 @@ footer {
     min-height: 535px;
   }
 }
-#game-menus {
+.game-window-menu {
   padding: 4px 12px;
   border-bottom: 1px solid #30333c;
   background: #191c24;
@@ -421,7 +421,7 @@ footer {
 .stage[data-border='3'] {
   outline: 1px solid #535b6d;
 }
-.stage.window-fullscreen {
+.stage.window-fullscreen:not(.game-desktop) {
   position: fixed;
   inset: 0;
   z-index: 50;
@@ -432,19 +432,19 @@ footer {
   border-radius: 0;
   background: #000;
 }
-.stage.window-fullscreen canvas {
+.stage.window-fullscreen:not(.game-desktop) canvas {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
 }
-.leave-fullscreen {
+.leave-fullscreen:not(.game-window-leave-fullscreen) {
   position: absolute;
   right: 20px;
   top: 20px;
   z-index: 51;
   background: #171c2ae0;
 }
-#game-menus > .game-menu-group {
+.game-window-menu > .game-menu-group {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;

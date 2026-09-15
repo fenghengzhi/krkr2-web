@@ -122,8 +122,10 @@ export async function exerciseWindowLifetime(
       )
       await session.evaluate('Scripts.execStorage("savedata/window-owned.cjs")')
     } else await session.evaluate('Scripts.execStorage("window-owned.tjs")')
+    // These ownership checks intentionally retire the main Window and continue
+    // querying the same VM, beginning with the warmup Window.
     await execute(
-      'var warm=new LifetimeWindow();warm.caption;invalidate warm;delete global.warm;finalized=0;',
+      'System.exitOnWindowClose=false;var warm=new LifetimeWindow();warm.caption;invalidate warm;delete global.warm;finalized=0;',
     )
     baseline = state()
 

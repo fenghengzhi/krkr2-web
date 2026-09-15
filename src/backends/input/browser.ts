@@ -95,6 +95,17 @@ export function shiftState(
     (event.buttons & 16 ? 512 : 0)
   )
 }
+/** Shared page input is scheduled at DOM observation time, before any VM await. */
+export interface BrowserInputHooks {
+  enqueue(packet: InputPacket): void
+  pointer(x: number, y: number): void
+  modifiers(shift: number, pointer: boolean): void
+  key(key: number, down: boolean): void
+  activate(): boolean
+  deactivate(pageBlur: boolean): void
+  keyboard(): boolean
+  mouse(type: 'down' | 'move' | 'up', buttons: number): boolean
+}
 export class BrowserInput {
   private readonly abort = new AbortController()
   private readonly text: HTMLTextAreaElement
@@ -121,6 +132,7 @@ export class BrowserInput {
     private readonly sendKeys: (keys: number[]) => Promise<void>,
     private readonly sendPointer: (x: number, y: number) => Promise<void>,
     private readonly error: (error: unknown) => void,
+    private readonly shared?: BrowserInputHooks,
   ) {
     this.text = document.createElement('textarea')
     this.text.setAttribute('aria-label', '游戏文字输入')
@@ -143,19 +155,9 @@ export class BrowserInput {
     canvas.style.touchAction = 'none'
     const options = { signal: this.abort.signal }
     canvas.addEventListener('focus', () => this.focus(), options)
-    this.text.addEventListener(
-      'focus',
-      () => {
-        if (this.suspended) return
-        if (!this.active) {
-          this.active = true
-          this.push({ type: 'activate' })
-        }
-      },
-      options,
-    )
+    this.text.addEventListener('focus', () => this.activate(), options)
     this.text.addEventListener('blur', () => this.deactivate(), options)
-    window.addEventListener('blur', () => this.deactivate(), options)
+    window.addEventListener('blur', () => this.deactivate(true), options)
     canvas.addEventListener('mousedown', (event) => this.mouse(event, 'down'), options)
     window.addEventListener(
       'mousemove',
@@ -180,8 +182,11 @@ export class BrowserInput {
           event.detail === 0 &&
           !(event instanceof PointerEvent && event.pointerType === 'touch')
         ) {
+          if (this.shared && !this.shared.mouse('down', 1)) return
+          this.focus()
           const p = this.point(event.clientX, event.clientY)
           this.push({ type: 'down', ...p, shift: 8, button: 0, clicks: 1 })
+          this.shared?.mouse('up', 0)
           this.push({ type: 'up', ...p, shift: 0, button: 0, clicks: 1 })
         }
       },
@@ -209,7 +214,7 @@ export class BrowserInput {
     this.text.addEventListener(
       'compositionstart',
       () => {
-        if (this.suspended) return
+        if (!this.keyboard()) return
         this.composing = true
         this.composed = ''
       },
@@ -218,7 +223,7 @@ export class BrowserInput {
     this.text.addEventListener(
       'compositionend',
       (event) => {
-        const commit = !this.suspended && this.composing
+        const commit = this.keyboard() && this.composing
         this.composing = false
         this.composed = event.data
         this.text.value = ''
@@ -233,6 +238,10 @@ export class BrowserInput {
     this.text.addEventListener(
       'input',
       (event) => {
+        if (!this.keyboard()) {
+          this.text.value = ''
+          return
+        }
         if (this.composing || (event as InputEvent).isComposing) return
         const value = this.text.value
         this.text.value = ''
@@ -266,17 +275,9 @@ export class BrowserInput {
       this.clicks.clear()
       this.touches.clear()
       this.pressed.clear()
-      for (const id of this.captured) {
-        try {
-          if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id)
-        } catch {}
-      }
-      this.captured.clear()
+      this.releasePointerCaptures()
       this.keys()
-    } else if (document.activeElement === this.text) {
-      this.active = true
-      this.push({ type: 'activate' })
-    }
+    } else if (document.activeElement === this.text) this.activate()
   }
   private appearance(): void {
     this.canvas.style.cursor = this.view?.mouseCursorState
@@ -296,16 +297,40 @@ export class BrowserInput {
       y: ((y - bounds.top) * (this.view?.height ?? 600)) / bounds.height,
     }
   }
-  private focus(): void {
-    if (this.view?.focusable !== false && !this.disposed && !this.suspended)
-      this.text.focus({ preventScroll: true })
+  focus(): boolean {
+    if (
+      this.view?.focusable === false ||
+      this.view?.visible === false ||
+      this.disposed ||
+      this.suspended
+    )
+      return false
+    // Focusing the canvas first would blur its already focused textarea, losing
+    // capture and composition and queuing a false deactivate/activate pair.
+    if (document.activeElement !== this.text) this.text.focus({ preventScroll: true })
+    if (document.activeElement !== this.text) return false
+    this.activate()
+    return this.active
+  }
+  private releasePointerCaptures(): void {
+    for (const id of this.captured) {
+      try {
+        if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id)
+      } catch {}
+    }
+    this.captured.clear()
   }
   private keys(): void {
+    if (this.shared) return
     void this.sendKeys([...this.pressed]).catch((error) => {
       if (!this.disposed) this.error(error)
     })
   }
-  private modifiers(shift: number): void {
+  private modifiers(shift: number, pointer = true): void {
+    if (this.shared) {
+      this.shared.modifiers(shift, pointer)
+      return
+    }
     for (const [key, mask] of [
       [16, 1],
       [18, 2],
@@ -321,6 +346,7 @@ export class BrowserInput {
   }
   private mouse(event: MouseEvent, type: 'down' | 'move' | 'up'): void {
     if (this.suspended || this.disposed) return
+    if (this.shared && !this.shared.mouse(type, event.buttons)) return
     const button = [0, 2, 1, 3, 4][event.button] ?? 0,
       p = this.point(event.clientX, event.clientY)
     if (type === 'down') {
@@ -352,6 +378,8 @@ export class BrowserInput {
       if (event.type === 'pointerdown') this.canvas.setPointerCapture(event.pointerId)
       if (event.type === 'pointercancel') {
         this.mouseButtons = 0
+        this.shared?.mouse('up', 0)
+        this.modifiers(shiftState(event))
         this.push({ type: 'cancel' })
       }
       return
@@ -402,7 +430,7 @@ export class BrowserInput {
     }
   }
   private key(event: KeyboardEvent, down: boolean): void {
-    if (this.suspended || this.disposed) return
+    if (!this.keyboard()) return
     if (this.composing || event.isComposing || event.keyCode === 229) return
     const key = virtualKey(event),
       shift = shiftState(
@@ -417,7 +445,8 @@ export class BrowserInput {
       )
     if (down) this.pressed.add(key)
     else this.pressed.delete(key)
-    this.modifiers(shift)
+    this.shared?.key(key, down)
+    this.modifiers(shift, false)
     if (event.defaultPrevented) return
     this.push({ type: down ? 'keyDown' : 'keyUp', key, shift })
     const controls: Record<string, string> = { Enter: '\r', Escape: '\u001b', Backspace: '\b' }
@@ -440,14 +469,29 @@ export class BrowserInput {
     )
       event.preventDefault()
   }
-  private deactivate(): void {
-    if (!this.active && !this.mouseButtons && !this.touches.size) return
+  private keyboard(): boolean {
+    return !this.suspended && !this.disposed && (this.shared?.keyboard() ?? true)
+  }
+  private activate(): void {
+    if (this.suspended || this.disposed || this.active) return
+    if (this.shared && !this.shared.activate()) return
+    this.active = true
+    this.push({ type: 'activate' })
+  }
+  private deactivate(pageBlur = false): void {
+    this.shared?.deactivate(pageBlur)
+    if (!this.active && !this.mouseButtons && !this.touches.size && !this.captured.size) return
     this.active = false
     this.mouseButtons = 0
     this.clicks.clear()
     this.touches.clear()
+    this.releasePointerCaptures()
     this.mouseTouch = undefined
     this.pressed.clear()
+    this.composing = false
+    this.composed = ''
+    this.text.value = ''
+    clearTimeout(this.composeTimer)
     this.keys()
     this.push({ type: 'deactivate' })
   }
@@ -459,11 +503,18 @@ export class BrowserInput {
       packet.type === 'up' ||
       packet.type === 'wheel'
     ) {
-      const epoch = this.epoch
-      // Physical observation must bypass a packet waiting on TJS/event delivery.
-      void this.sendPointer(packet.x, packet.y).catch((error) => {
-        if (!this.disposed && epoch === this.epoch) this.error(error)
-      })
+      if (this.shared) this.shared.pointer(packet.x, packet.y)
+      else {
+        const epoch = this.epoch
+        // Physical observation must bypass a packet waiting on TJS/event delivery.
+        void this.sendPointer(packet.x, packet.y).catch((error) => {
+          if (!this.disposed && epoch === this.epoch) this.error(error)
+        })
+      }
+    }
+    if (this.shared) {
+      this.shared.enqueue(packet)
+      return
     }
     const last = this.queue.at(-1)
     if (

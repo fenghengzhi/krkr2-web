@@ -44,10 +44,20 @@ class Window {
   property primaryLayer { getter() { return __host("Window.primary",__windowId); } }
   function __windowDispatch(name,args) { return this[name](args*); }
   function close() {
+    var window=this;
     __windowCanClose=false;
     onCloseQuery(true);
-    if(__windowCanClose) { var exit=global.System.exit incontextof global; invalidate this; exit(); }
+    if((isvalid window) && window.__windowCanClose) invalidate window;
   }
+  function __windowUserClose() {
+    var window=this;
+    __windowCanClose=false;
+    onCloseQuery(true);
+    if(!(isvalid window) || !window.__windowCanClose)return;
+    if(__host("Window.isMain",__windowId)) invalidate window;
+    else window.visible=false;
+  }
+  function bringToFront() { __host("Window.activate",__windowId); }
   function onCloseQuery(canClose) { __windowCanClose=!!canClose; }
   function setInnerSize(width,height) { __host("Window.resize",__windowId,int(width),int(height)); }
   function setSize(width,height) { setInnerSize(width,height); }
@@ -95,8 +105,8 @@ class Window {
         }]);}`,
     )
     .join('\n')}
-  property focusedLayer {getter(){return __host("Input.get",0,"focusedLayer");}setter(layer){__host("Input.focus",layer===null?0:layer.__id,1);}}
-  property currentModalLayer {getter(){return __host("Input.get",0,"currentModalLayer");}}
+  property focusedLayer {getter(){return __host("Input.get",0,"focusedLayer",__windowId);}setter(layer){__host("Input.focus",layer===null?0:layer.__id,1,__windowId);}}
+  property currentModalLayer {getter(){return __host("Input.get",0,"currentModalLayer",__windowId);}}
   // TJS class properties are callable on the class and inherited by instances.
   // This query deliberately does not depend on an instance or __windowId.
   property mainWindow { getter() { return __host("Window.main"); } }

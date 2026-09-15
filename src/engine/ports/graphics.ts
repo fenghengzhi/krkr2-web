@@ -26,8 +26,12 @@ export interface FrameLayer extends Rect {
   type: number
 }
 export interface Renderer {
+  /** Registers a Window surface before its first frame, when surfaces are dynamic. */
+  openWindow?(windowId: number): void
+  /** Retires a Window surface and its resources. */
+  closeWindow?(windowId: number): void
   /** false means the frame was not presented and must remain dirty. */
-  present(layers: FrameLayer[], width: number, height: number): void | boolean
+  present(layers: FrameLayer[], width: number, height: number, windowId?: number): void | boolean
   /** Delivers the current status immediately, then any changes. */
   subscribe?(listener: (status: RendererStatus) => void): () => void
   retry?(): void
@@ -37,6 +41,13 @@ export interface RendererStatus {
   state: 'ready' | 'lost' | 'restoring' | 'failed'
   generation: number
   message?: string
+  /**
+   * Initial surface attachment, before its first successful presentation and
+   * without a graphics failure. Only meaningful with state='restoring'. This
+   * keeps the Window dirty without pausing script execution or shared media.
+   * Recovery after a loss/failure must never use this exemption.
+   */
+  pending?: boolean
 }
 export interface GraphicsDecoder {
   decode(bytes: Uint8Array): Promise<DecodedImage>

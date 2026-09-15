@@ -1,4 +1,4 @@
-import type { MenuSnapshot, MenuView } from '../engine/scene/menus.ts'
+import type { MenuPopupIdentity, MenuSnapshot, MenuView } from '../engine/scene/menus.ts'
 
 const caption = (text: string) =>
   text
@@ -10,8 +10,9 @@ const shortcut = (item: MenuView) => item.shortcut || item.caption.split('\t')[1
 export function createGameMenus(
   container: HTMLElement,
   canvas: () => HTMLCanvasElement | null,
-  choose: (id: number) => void,
-  dismiss: () => void,
+  choose: (id: number, popup?: MenuPopupIdentity) => void,
+  dismiss: (popup?: MenuPopupIdentity) => void,
+  options: { active?: () => boolean } = {},
 ) {
   let current: MenuSnapshot = {},
     running = false,
@@ -19,12 +20,14 @@ export function createGameMenus(
     dimensions = { width: 800, height: 600 }
   let overlay: HTMLDivElement | undefined
   let popupPanel: HTMLElement | undefined
-  let popupId: number | undefined
+  let popupRequest: number | undefined
   let modal = false
+  let disposed = false
   const select = (id: number) => {
-    if (modal || !running || document.hidden || (eventDisabled && !current.popup)) return
+    if (disposed || modal || !running || document.hidden || (eventDisabled && !current.popup))
+      return
     for (const details of container.querySelectorAll('details')) details.open = false
-    choose(id)
+    choose(id, current.popup)
   }
   // A snapshot can arrive while a menu is open or a pointer is held down.
   // Keep each item's DOM node so updates preserve focus and pending clicks.
@@ -61,7 +64,11 @@ export function createGameMenus(
         } else if (kind === 'BUTTON') {
           ;(node as HTMLButtonElement).type = 'button'
           node.append(document.createElement('span'), document.createElement('kbd'))
-          node.addEventListener('click', () => select(item.id))
+          node.addEventListener('click', (event) => {
+            // Removed popup panels and retired windows may still have queued
+            // browser events or external element references.
+            if ((event.currentTarget as HTMLElement).isConnected) select(item.id)
+          })
         }
       }
       if (kind === 'DETAILS') {
@@ -99,21 +106,22 @@ export function createGameMenus(
   const bar = groupElement()
   container.replaceChildren(bar)
   const render = () => {
+    if (disposed) return
     const visible = current.root?.visible && current.root.children.some((item) => item.visible)
     container.hidden = !visible
     build(bar, visible ? current.root!.children : [], current.root?.enabled)
     const popup = current.popup,
       menu = popup && find(current.root, popup.id)
     if (popup && menu) {
-      const fresh = !overlay || popupId !== popup.id
+      const fresh = !overlay || popupRequest !== popup.requestId
       if (fresh) {
         overlay?.remove()
         overlay = document.createElement('div')
         overlay.className = 'game-menu-overlay'
         overlay.addEventListener('click', (event) => {
-          if (event.target === overlay) dismiss()
+          if (!disposed && event.target === overlay) dismiss(popup)
         })
-        popupId = popup.id
+        popupRequest = popup.requestId
         popupPanel = groupElement()
         popupPanel.classList.add('game-menu-popup')
         overlay.append(popupPanel)
@@ -131,21 +139,25 @@ export function createGameMenus(
       overlay?.remove()
       overlay = undefined
       popupPanel = undefined
-      popupId = undefined
+      popupRequest = undefined
     }
   }
   const keydown = (event: KeyboardEvent) => {
-    if (modal) return
+    if (disposed || modal) return
     if (event.isComposing || event.keyCode === 229) return
     if (event.key === 'Escape') {
+      // A script can show a popup on a window which did not own keyboard
+      // activation. Its blocking request must still accept cancellation.
+      if (!current.popup && options.active?.() === false) return
       for (const details of container.querySelectorAll('details')) details.open = false
       if (current.popup) {
         event.preventDefault()
-        dismiss()
+        dismiss(current.popup)
       }
       return
     }
     if (
+      options.active?.() === false ||
       !running ||
       document.hidden ||
       eventDisabled ||
@@ -183,17 +195,34 @@ export function createGameMenus(
   }
   window.addEventListener('keydown', keydown, { capture: true })
   return {
+    dispose() {
+      if (disposed) return
+      disposed = true
+      window.removeEventListener('keydown', keydown, { capture: true })
+      overlay?.remove()
+      overlay = undefined
+      popupPanel = undefined
+      popupRequest = undefined
+      container.replaceChildren()
+      container.hidden = true
+      const popup = current.popup
+      current = {}
+      if (popup) dismiss(popup)
+    },
     modal(active: boolean) {
+      if (disposed) return
       if (modal !== active) {
         modal = active
         render()
       }
     },
     update(menus: MenuSnapshot) {
+      if (disposed) return
       current = menus
       render()
     },
     state(active: boolean, width = 800, height = 600, disabled = false) {
+      if (disposed) return
       const changed = running !== active || eventDisabled !== disabled
       running = active
       eventDisabled = disabled
