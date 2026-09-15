@@ -239,12 +239,17 @@ export function createGameClipboard(
     try {
       // Do not await a Worker round trip or another permission API here. The
       // platform call must start synchronously in this actual click handler.
-      work =
-        view.request.op === 'has-text'
-          ? adapter.hasText().then((hasText) => ({ op: 'has-text', hasText }))
-          : view.request.op === 'read-text'
-            ? adapter.readText().then((content) => ({ op: 'read-text', content }))
-            : adapter.writeText(view.request.text).then(() => ({ op: 'write-text' }))
+      switch (view.request.op) {
+        case 'has-text':
+          work = adapter.hasText().then((hasText) => ({ op: 'has-text', hasText }))
+          break
+        case 'read-text':
+          work = adapter.readText().then((content) => ({ op: 'read-text', content }))
+          break
+        case 'write-text':
+          work = adapter.writeText(view.request.text).then(() => ({ op: 'write-text' }))
+          break
+      }
     } catch (reason) {
       fail(view, reason)
       return
