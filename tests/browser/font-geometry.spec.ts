@@ -59,7 +59,8 @@ for (const backend of ['asyncify', 'jspi'])
         name: 'startup.tjs',
         mimeType: 'text/plain',
         buffer: Buffer.from(`
-var w=new Window();w.visible=true;w.setInnerSize(128,64);var a=new Layer(w,null);a.setSize(128,64);a.type=ltAlpha;
+// Select transparent expansion fill before growing the primary layer image.
+var w=new Window();w.visible=true;w.setInnerSize(128,64);var a=new Layer(w,null);a.type=ltAlpha;a.setSize(128,64);
 a.font.height=20;a.font.face="narrow.ttf";a.font.faceIsFileName=true;
 function describeRect(r){return [r.left,r.top,r.right,r.bottom].join(",");}
 var measured=a.font.getGlyphDrawRect("AV");

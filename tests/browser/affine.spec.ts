@@ -19,6 +19,9 @@ var colors=[0xffff0000,0xff00ff00,0xff0000ff,0xff00ffff,0xffff00ff,0xffffff00];
 for(var y=0;y<2;y++)for(var x=0;x<3;x++)source.fillRect(x,y,1,1,colors[y*3+x]);
 root.affineCopy(source,0,0,3,2,true,0,1,-1,0,4,1);
 source.type=ltAdditive;root.operateAffine(source,0,0,3,2,true,1,0,1,1,8,1);
+// This fixture tests a transparent-white clear in the saved mask plane. A
+// primary's native default is opaque white; choose the intended clear value.
+root.neutralColor=0x00ffffff;
 root.setClip(14,0,6,6);root.affineCopy(source,0,0,3,2,false,14.5,0.5,17.5,0.5,14.5,2.5,stNearest,true);
 root.saveLayerImage("savedata/affine.bmp");saved.loadImages("savedata/affine.bmp");
 Debug.message("affine-ready:"+string(saved.getMaskPixel(14,0)==0 && saved.getMaskPixel(15,1)==255 && saved.getMainPixel(4,1)==0xff0000));
