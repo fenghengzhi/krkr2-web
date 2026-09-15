@@ -4,15 +4,15 @@ class Font {
   function Font(layer) { __host("Font.bind",this,layer); }
   function finalize() {}
   property __data { getter(){return __host("Font.state",this).fontData;} }
-  function mapPrerenderedFont(storage) { __host("Font.map",__data,string(storage)); }
+  function mapPrerenderedFont(args*) { if(args.count<1)throw new global.Exception("Missing storage for mapPrerenderedFont");__host("Font.map",__data,string(args[0])); }
   function unmapPrerenderedFont() { __host("Font.unmap",__data); }
-  function getTextWidth(text) { return __host("Font.measure",string(text),__data).width; }
-  function getTextHeight(text) { return __host("Font.measure",string(text),__data).height; }
+  function getTextWidth(args*) { if(args.count<1)throw new global.Exception("Missing text for getTextWidth");return __host("Font.measure",string(args[0]),__data,this).width; }
+  function getTextHeight(args*) { if(args.count<1)throw new global.Exception("Missing text for getTextHeight");return __host("Font.measure",string(args[0]),__data,this).height; }
   function getGlyphDrawRect(args*) { if(args.count<1)throw new Exception("Missing text for getGlyphDrawRect");var r=__host("Font.bounds",string(args[0]),__data);return new Rect(r.left,r.top,r.right,r.bottom); }
-  function getEscWidthX(text) { return getTextWidth(text)*Math.cos(angle*Math.PI/1800); }
-  function getEscWidthY(text) { return -getTextWidth(text)*Math.sin(angle*Math.PI/1800); }
-  function getEscHeightX(text) { return getTextHeight(text)*Math.sin(angle*Math.PI/1800); }
-  function getEscHeightY(text) { return getTextHeight(text)*Math.cos(angle*Math.PI/1800); }
+  function getEscWidthX(args*) { if(args.count<1)throw new global.Exception("Missing text for getEscWidthX");return getTextWidth(args[0])*Math.cos(angle*Math.PI/1800); }
+  function getEscWidthY(args*) { if(args.count<1)throw new global.Exception("Missing text for getEscWidthY");return -getTextWidth(args[0])*Math.sin(angle*Math.PI/1800); }
+  function getEscHeightX(args*) { if(args.count<1)throw new global.Exception("Missing text for getEscHeightX");return getTextHeight(args[0])*Math.sin(angle*Math.PI/1800); }
+  function getEscHeightY(args*) { if(args.count<1)throw new global.Exception("Missing text for getEscHeightY");return getTextHeight(args[0])*Math.cos(angle*Math.PI/1800); }
   function getList(args*) { if(args.count<1)throw new Exception("Missing flags for getList");return __host("Font.list",int(args[0])&0xffffffff,__data); }
   function doUserSelect(args*) {
     if(args.count<4)throw new Exception("Missing font selection arguments");

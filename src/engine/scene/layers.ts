@@ -1,5 +1,5 @@
 import type { Pixels, Rect } from '../ports/graphics.ts'
-import { Bitmap, dimension, intersect } from '../graphics/bitmap.ts'
+import { Bitmap, dimension, intersect, textOpacity } from '../graphics/bitmap.ts'
 import { imageTypes, autoFace, neutralColor } from '../graphics/blend.ts'
 
 export interface LayerState {
@@ -562,13 +562,25 @@ export class LayerTree {
     if (bitmap.fill(rect, color, face, layer.holdAlpha)) layer.imageModified = true
     return true
   }
-  composite(id: number, image: Pixels, left: number, top: number, opacity = 255): void {
+  textOpacity(id: number, opacity: number): number {
+    // Check before FontService can resolve a file or ask the glyph backend.
+    this.bitmap(id)
+    return textOpacity(this.face(id), opacity)
+  }
+  composite(id: number, image: Pixels, left: number, top: number, opacity = 255): boolean {
     const layer = this.get(id),
       bitmap = this.bitmap(id),
       face = this.face(id)
-    if (face === 3 && !bitmap.province) this.budget(bitmap.width * bitmap.height)
-    bitmap.composite(image, Math.trunc(left), Math.trunc(top), face, opacity, layer.holdAlpha)
-    layer.imageModified = true
+    const drawn = bitmap.composite(
+      image,
+      Math.trunc(left),
+      Math.trunc(top),
+      face,
+      opacity,
+      layer.holdAlpha,
+    )
+    if (drawn) layer.imageModified = true
+    return drawn
   }
   color(id: number, rect: Rect, color: number, opacity: number): void {
     const bitmap = this.bitmap(id),

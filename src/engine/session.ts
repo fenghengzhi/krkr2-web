@@ -2556,8 +2556,8 @@ export class EngineSession {
         throw new Error(`${operation}: expected a finite numeric argument at ${i}`)
       return Number(value)
     }
-    // Clip entry points narrow TJS integers to native tjs_int before using
-    // them as coordinates. Preserve the low bits before Number conversion.
+    // Clip and text entry points narrow TJS integers to native tjs_int.
+    // Preserve the low bits before Number conversion.
     const clipInteger = (i: number) => {
       const value = args[i]
       return typeof value === 'bigint' ? Number(BigInt.asIntN(32, value)) : number(i) | 0
@@ -3177,38 +3177,41 @@ export class EngineSession {
         break
       }
       case 'Layer.text': {
+        const id = number(0),
+          opacity = this.layers.textOpacity(id, clipInteger(6))
+        if (!opacity) break
         if (!isScriptObject(args[5])) throw new Error('Expected font data')
         const data = context.snapshot(args[5])
         if (data.type !== 'dictionary') throw new Error('Expected font dictionary')
         const font = fontSpec(data),
-          draws = await this.fonts.draw(text(3), font, number(4), {
+          draws = await this.fonts.draw(text(3), font, clipInteger(4) >>> 0, {
             antialiased: !!number(7),
-            shadowLevel: number(8),
-            shadowColor: number(9),
-            shadowWidth: number(10),
-            shadowX: number(11),
-            shadowY: number(12),
+            shadowLevel: clipInteger(8),
+            shadowColor: clipInteger(9) >>> 0,
+            shadowWidth: clipInteger(10),
+            shadowX: clipInteger(11),
+            shadowY: clipInteger(12),
           })
         const session = this,
-          id = number(0),
-          left = number(1),
-          top = number(2),
-          opacity = number(6)
+          left = clipInteger(1),
+          top = clipInteger(2)
         await this.finishGraphics(
           (function* () {
             for (const { pixels, x, y } of draws) {
-              session.layers.composite(
-                id,
-                pixels,
-                left + x + (pixels.left ?? 0),
-                top + y + (pixels.top ?? 0),
-                opacity,
+              if (
+                session.layers.composite(
+                  id,
+                  pixels,
+                  left + x + (pixels.left ?? 0),
+                  top + y + (pixels.top ?? 0),
+                  opacity,
+                )
               )
+                session.dirty = true
               yield
             }
           })(),
         )
-        this.dirty = true
         break
       }
       case 'Layer.gamma': {
@@ -3226,6 +3229,7 @@ export class EngineSession {
         break
       }
       case 'Font.measure': {
+        this.layerObjects!.fontState(args[2], true)
         if (!isScriptObject(args[1])) throw new Error('Expected font data')
         const data = context.snapshot(args[1])
         if (data.type !== 'dictionary') throw new Error('Expected font dictionary')
