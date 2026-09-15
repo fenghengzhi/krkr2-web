@@ -70,4 +70,18 @@ EngineSession 增加同步的 `acceptInput`、`acceptActivateWindow`、`acceptCl
 
 新增 18 项源码／字节码 Session 检查，覆盖挂起期间接收后续事件、FIFO、执行尾部、忽略／拒绝、回调期间与排队期间的不同引用规则，以及 Stop 清理；新增 6 个浏览器模板，分别检查真实 HTTP 读取未完成时鼠标／键盘包已接收，放行后的顺序，以及回调异常后 VM 保留。全部尚待 Actions；这些用例不证明模态泵、视频 ACK 或帧提交屏障已经接通。
 
-接收修订之前的[完整回归 34946408644](https://github.com/fenghengzhi/krkr2-web/actions/runs/34946408644)在 `9cb5e92` 已完成 Node 作业，实际 **1,378／1,378** 通过，零失败、取消、跳过或未报告；包含新增结算 17 项、scope 34 项及嵌套调度 10 项。记录时浏览器尚未全部完成，因此只计 Node 证据；该提交不含本节的接收接口及 18／6 项新测试。原始产物与逐项摘要在该 run 的 early-node 目录保留。
+接收修订之前的[第二次完整回归 34946408644](https://github.com/fenghengzhi/krkr2-web/actions/runs/34946408644)在 `9cb5e92` 最终失败：Node **1,378／1,378**、直接运行时 **6／6** 通过；浏览器 **1,040／1,041** 通过，无跳过、flaky 或未运行案例。14 作业中 WebKit 常规及汇总作业失败，其余 12 成功。Node 包含新增结算 17 项、scope 34 项及嵌套调度 10 项，不含本节接收接口及 18／6 项新测试。
+
+唯一失败为原有 `image-writing.spec.ts` 的 Asyncify 保存／重载场景，等待首次 `saved-ready:0:1` 超时；尚未进入编码与像素断言。trace 在上传完成约 220ms 后记录 WebGL context loss，页面等待恢复，Window1 仍隐藏，图层与存档均为零。同期游戏库存储的 unknown transient 错误不能作为 OOM 证明；没有 Page crashed、pageerror 或失败网络记录，根因未知。完整产物、run.json、WebKit 作业日志和逐项摘要独立归档，不能与旧 JSPI TLG5 Stop 场景混为同一次故障。
+
+## 第三次 Windows 参考结果
+
+[34947283449](https://github.com/fenghengzhi/krkr2-web/actions/runs/34947283449)，提交 `c9a57d8`：两平台编译成功，每平台 **16 项全部完成观察，14 通过、2 断言失败**，零超时或不可执行。所有选择均通过一次 Down 建立真实高亮，再经 Enter 返回。失败仅在 flags=0x80／0x81 的选择场景：NoNotify 且无 ReturnCmd 时仍收到一条正确命令的 WM_COMMAND，顺序均在 TrackPopupMenuEx 返回之后。此前“任一 N/R 位都会抑制命令”的 N-only 部分只是文档推断，已被本次观察反驳，不能继续作为确定实现合同。
+
+本轮所有 ReturnCmd 组合选择返回 16913、取消返回 0，且无 WM_COMMAND；无 ReturnCmd 的选择与取消均返回 1，选择各有一条命令，取消无命令。原始 flags 原样传入 USER32，消息处理器只记录，没有补发命令。此结果不证明硬件输入、鼠标选择、旧 VCL 或真正递归；官方说明与该键盘观察的差异仍待进一步对照。整体失败及原始断言保留，未通过修改预期追认本轮成功。完整产物、run.json 和 workflow.log 保存在独立归档。
+
+## 接收确认的首轮回归
+
+[34947632067](https://github.com/fenghengzhi/krkr2-web/actions/runs/34947632067)，提交 `18b1c71`：Node **1,396／1,396** 通过，包含 18 项新接收检查；浏览器 **1,053／1,059** 通过，直接运行时 **6／6** 通过。Chromium／Firefox 常规各 312 项全通过；WebKit 原 306 项全部通过，新增 6 项均在启动夹具等待第一次鼠标回调时失败，未进入 ACK 断言。
+
+六份 trace 的实际 mouseMove／mouseDown 坐标都是 `(485,-1353.3125)`，视口为 `1280×720`。WebKit 的 canvas.focus 没有将画布滚回视口，后续原始指针操作未命中游戏；没有 context loss 或 Page crashed 记录。这是夹具的操作前置问题，不能归为旧 GPU 失败。修订在真实 mouseDown 前显式滚动画布并检查完整可见；保留 HTTP 读取门闩、实际输入 ACK、回调顺序及异常处理断言，不添加再次点击或改变产品焦点规则。完整失败产物与逐项摘要独立保留，修订尚待新 Actions。

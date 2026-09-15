@@ -118,6 +118,10 @@ global.w.onMouseUp=function(x,y,button,shift){
     const canvas = page.locator('canvas[data-window-id]')
     await expect(canvas).toHaveJSProperty('width', 160)
     await canvas.focus()
+    // Focusing a canvas does not scroll it into view in WebKit. The subsequent
+    // raw pointer actions must target the visible game rather than old page coordinates.
+    await canvas.scrollIntoViewIfNeeded()
+    await expect(canvas).toBeInViewport({ ratio: 1 })
     const bounds = (await canvas.boundingBox())!
     await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
     armed = true
