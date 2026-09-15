@@ -54,6 +54,8 @@ interface Round {
   ownsContinuous: boolean
   emptyContinuous: boolean
   checkExclusive: boolean
+  windowUpdateAllowed: boolean
+  exhausted: boolean
   group: number
   continuous: number
   tick: number
@@ -101,8 +103,8 @@ export class SystemEvents {
   }
 
   /** Return a continuation for the existing TJS pump; never enter the VM from JavaScript. */
-  beginNested(): HostReply {
-    return this.hasDispatchableWork() ? this.begin() : empty()
+  beginNested(options: { windowUpdate?: boolean } = {}): HostReply {
+    return options.windowUpdate || this.hasDispatchableWork() ? this.begin() : empty()
   }
 
   /** Synchronous host-only wakeups. Callers recheck readiness after subscribing. */
@@ -289,6 +291,8 @@ export class SystemEvents {
       checkExclusive: false,
       ownsContinuous: false,
       emptyContinuous: false,
+      windowUpdateAllowed: false,
+      exhausted: false,
       group: 0,
       continuous: -1,
       tick: 0,
@@ -322,6 +326,11 @@ export class SystemEvents {
         // native dispatcher checks a newly posted exclusive event.
         if ((round.group === 0 || round.group === 2) && this.exclusivePosted) return
         round.group++
+        if (round.group === 3) {
+          // Native TVP enters idle/continuous/window updates through one gate.
+          // Exclusive events posted inside that tail do not revoke its paint.
+          round.windowUpdateAllowed = !this.disabled && !this.paused
+        }
         continue
       }
       const job = this.jobs.splice(index, 1)[0]!
@@ -334,6 +343,7 @@ export class SystemEvents {
         valid = job.valid()
       } catch (error) {
         round.current = undefined
+        round.windowUpdateAllowed = false
         this.settle(job, { kind: 'aborted', error })
         throw error
       }
@@ -402,13 +412,29 @@ export class SystemEvents {
       this.kick()
       return empty()
     }
+    if (operation === 'System.eventWindowUpdate' && this.disposed)
+      return { kind: 'value', value: 0n }
     const token = Number(args[0]),
       round = this.rounds.get(token)
     if (!Number.isSafeInteger(token) || !round) throw new Error('System event round has ended')
+    if (operation === 'System.eventWindowUpdate')
+      return {
+        kind: 'value',
+        value:
+          !this.disabled &&
+          !this.paused &&
+          round.windowUpdateAllowed &&
+          round.exhausted &&
+          !round.current
+            ? 1n
+            : 0n,
+      }
     if (operation === 'System.eventNext') {
       if (round.current) throw new Error('Previous event has not completed')
+      round.exhausted = false
       try {
         round.current = this.take(round, token)
+        round.exhausted = !round.current
         return { kind: 'value', value: round.current ? 1n : 0n }
       } finally {
         this.notifyPending()
@@ -442,6 +468,7 @@ export class SystemEvents {
     if (operation === 'System.eventFailed') {
       const job = round.current
       round.current = undefined
+      if (job) round.windowUpdateAllowed = false
       if (round.ownsContinuous) {
         round.ownsContinuous = false
         this.continuousProcessing = false

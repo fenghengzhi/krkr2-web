@@ -146,6 +146,8 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
     weakOwners: number
     scriptObjects: number
     pendingHandles: number
+    /** Native finalizer/dependent release is still on the current VM stack. */
+    drainingReleased: boolean
     dependents: number
     pendingInvalidations: number
   }

@@ -4,7 +4,7 @@ import { debugBridge } from './tvp/debug.ts'
 import { DebugLog } from './diagnostics/log.ts'
 import { DebugPanels, type DebugPanel, type DebugVisibility } from './diagnostics/panels.ts'
 import { DebugService } from './diagnostics/service.ts'
-import { ExecutionControl, SerialQueue } from './scheduler/control.ts'
+import { ExecutionCancelled, ExecutionControl, SerialQueue } from './scheduler/control.ts'
 import {
   isScriptObject,
   scriptList,
@@ -27,8 +27,16 @@ import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts
 import { SaveOverlay } from './storage/save-overlay.ts'
 import { modeOffset } from '../formats/text/stream.ts'
 import { ScriptEvents } from './scheduler/events.ts'
-import { SystemEvents, type EventOptions } from './scheduler/system-events.ts'
+import { SystemEvents, type EventOptions, type EventOutcome } from './scheduler/system-events.ts'
 import { systemEventsBridge } from './tvp/system.ts'
+import { checkpointBridge } from './tvp/checkpoints.ts'
+import { ModalLoop } from './scheduler/modal-loop.ts'
+import { modalBridge } from './tvp/modal.ts'
+import type {
+  CheckpointCallbacks,
+  SessionCheckpoint,
+  SessionEventReceipt,
+} from './scheduler/session-checkpoints.ts'
 import { eventClasses } from './tvp/events.ts'
 import { tvpConstants } from './tvp/constants.ts'
 import { MemoryAppLocks, type AppLocks } from './ports/system.ts'
@@ -210,7 +218,7 @@ export class EngineSession {
   private transitions?: SceneTransitions
   private readonly composer = new SceneComposer(this.layers, (id) => this.transitions?.frame(id))
   private preparingFrame = false
-  private readonly paintedLayers = new Set<number>()
+  private paintedLayers = new Set<number>()
   private readonly redrawRequests = new Set<number>()
   private readonly deferredPaint = new Map<number, { generation: number; deadline?: number }>()
   private cancelRedraw?: () => void
@@ -220,6 +228,27 @@ export class EngineSession {
   private layerObjects?: LayerService
   private runtime?: ScriptRuntime
   private systemEvents?: SystemEvents
+  private modalLoop?: ModalLoop
+  private modalWakeup?: () => void
+  private detachPendingEvents?: () => void
+  private checkpointCallbacks?: CheckpointCallbacks
+  private nextReceipt = 1
+  private nextCheckpoint = 1
+  private readonly eventReceipts = new Map<number, SessionEventReceipt>()
+  private readonly settledRounds = new Map<number, Set<number>>()
+  private readonly outsideReceipts = new Set<number>()
+  private readonly outerRecoveryReceipts = new Set<number>()
+  private readonly abortedReceiptRounds = new Map<number, Error>()
+  private readonly checkpoints = new Map<number, SessionCheckpoint>()
+  private readonly windowPresentationsCompleted = new Map<number, number>()
+  private readonly videoFrameChanges = new Map<number, number>()
+  private videoFrameChange = 0
+  private executing = false
+  private checkpointQueued = false
+  private frameRequested = false
+  private readonly frameWaiters = new Set<{ resolve(): void; reject(error: unknown): void }>()
+  private frameWorkVersion = 1
+  private attemptedFrameVersion = 0
   private eventYieldAt = 0
   private readonly systemArguments: Map<string, string>
   private events?: ScriptEvents
@@ -249,12 +278,24 @@ export class EngineSession {
   private readonly windowPointers = new Map<number, { x: number; y: number }>()
   private physicalKeys = new Set<number>()
   private readonly fonts: FontService
-  private dirty = true
+  private sceneDirty = true
+  private get dirty(): boolean {
+    return this.sceneDirty
+  }
+  private set dirty(value: boolean) {
+    this.sceneDirty = value
+    if (value) {
+      this.frameWorkVersion++
+      this.modalWakeup?.()
+    }
+  }
   private stopPromise?: Promise<void>
   private disposalPromise?: Promise<void>
   private exitRequested = false
   private exitOnWindowClose = true
   private exitAfterOperation = false
+  private readonly cancellationErrors: unknown[] = []
+  private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
     this.fonts = new FontService(
       (name) => this.resolveResource(name),
@@ -292,25 +333,48 @@ export class EngineSession {
         this.deps.readText(await this.readResource(name), '', this.textEncoding.codec),
       (text) => this.log(text),
     )
-    this.control.onCancel(() => this.menus.dismiss())
     this.control.onCancel(() => {
-      this.fontSelection.cancel()
-      this.fontCatalog.clear()
-    })
-    this.control.onCancel(() => {
-      this.cancelRedraw?.()
+      // Revoke tickets and wake modal waits before any device/user cleanup
+      // can throw. Preserve those failures for the terminal stop result.
+      this.cancelEventReceipts(new ExecutionCancelled())
+      for (const cleanup of [
+        () => this.modalLoop?.dispose(),
+        () => this.menus.dismiss(),
+        () => this.fontSelection.cancel(),
+        () => this.fontCatalog.clear(),
+        () => this.cancelRedraw?.(),
+        () => this.detachRenderer?.(),
+        () => this.transitions?.dispose(),
+        () => this.composer.clear(),
+        () => this.images.dispose(),
+        () => this.fonts.dispose(),
+        () => deps.graphics.dispose?.(),
+      ]) {
+        try {
+          cleanup()
+        } catch (error) {
+          this.cancellationErrors.push(error)
+        }
+      }
       this.cancelRedraw = undefined
       this.redrawWakeAt = undefined
       this.redrawRequests.clear()
       this.deferredPaint.clear()
-      this.detachRenderer?.()
-      this.transitions?.dispose()
-      this.composer.clear()
-      this.images.dispose()
-      this.fonts.dispose()
-      deps.graphics.dispose?.()
-      void this.sounds?.pause(true).catch(() => {})
-      void this.videos?.cancel().catch(() => {})
+      for (const cancel of [() => this.sounds?.pause(true), () => this.videos?.cancel()]) {
+        try {
+          const work = cancel()
+          if (work) {
+            const tracked = work
+              .catch((error) => {
+                this.cancellationErrors.push(error)
+              })
+              .finally(() => this.cancellationWork.delete(tracked))
+            this.cancellationWork.add(tracked)
+          }
+        } catch (error) {
+          this.cancellationErrors.push(error)
+        }
+      }
     })
     this.detachRenderer = deps.renderer.subscribe?.((status) => {
       if (this.control.cancelled) return
@@ -318,6 +382,7 @@ export class EngineSession {
       this.dirty = true
       this.applyPause()
       this.notify()
+      this.modalWakeup?.()
       if (status.state === 'failed')
         this.deps.event({
           type: 'log',
@@ -366,6 +431,16 @@ export class EngineSession {
           }
         },
       )
+      this.modalLoop = new ModalLoop(this.runtime, this.control, {
+        hasWork: () => this.hasModalWork(),
+        dispatch: () => this.beginModalDispatch(),
+        changed: () => {
+          this.present()
+          this.notify()
+        },
+      })
+      this.setModalWakeup(() => this.modalLoop?.notify())
+      this.detachPendingEvents = this.systemEvents.subscribePending(() => this.modalWakeup?.())
       this.inputs = new InputService(
         this.inputControllers,
         this.runtime,
@@ -387,11 +462,7 @@ export class EngineSession {
         (operation) => this.inputs!.start(operation),
         this.deps.now,
         this.deps.schedule,
-        () =>
-          this.execute(async () => {
-            this.dirty = true
-            return undefined
-          }).then(() => undefined),
+        () => this.requestFrameCheckpoint(),
         () => {
           this.dirty = true
         },
@@ -442,11 +513,11 @@ export class EngineSession {
           if (!this.layers.has(id)) return
           this.layers.image(id, pixels)
           this.layers.resize(id, pixels.width, pixels.height)
+          this.videoFrameChanges.set(this.layers.get(id).windowId, ++this.videoFrameChange)
           this.dirty = true
         },
-        (callback, member, args, valid, before, immediate, source) => {
-          if (valid()) before()
-          return this.systemEvents!.post(
+        (callback, member, args, valid, before, immediate, source, release) => {
+          return this.acceptEvent(
             () =>
               member
                 ? { kind: 'invoke', callback, member, args }
@@ -456,20 +527,22 @@ export class EngineSession {
               discardable: immediate,
               source,
             },
-          )
+            {
+              release,
+              before: () => {
+                const beforeFrame = this.videoFrameChange
+                if (valid()) before()
+                return [...this.videoFrameChanges]
+                  .filter(([, revision]) => revision > beforeFrame)
+                  .map(([id]) => id)
+              },
+            },
+          ).completion
         },
         (error) => {
           if (!this.control.cancelled) this.fail(error)
         },
         (source) => this.systemEvents!.cancelSource(source),
-        () => {
-          if (!this.control.cancelled && this.runtime?.inspect().pendingHandles)
-            return this.execute(async () => {
-              await this.runtime!.collect()
-              return undefined
-            }).then(() => undefined)
-          return this.queue.drain()
-        },
       )
       this.windows = new WindowService(
         this.runtime,
@@ -510,6 +583,8 @@ export class EngineSession {
           this.inputControllers.remove(window.id)
           this.windowPointers.delete(window.id)
           this.windowInputViews.delete(window.id)
+          this.windowPresentationsCompleted.delete(window.id)
+          this.videoFrameChanges.delete(window.id)
           this.deps.renderer.closeWindow?.(window.id)
           this.syncActiveWindow()
           this.dirty = true
@@ -545,6 +620,8 @@ export class EngineSession {
       this.discard(await this.runtime.execute(menuClass, 'krkr2-web/menus.tjs'))
       this.discard(await this.runtime.execute(windowClass, 'krkr2-web/window.tjs'))
       this.discard(await this.runtime.execute(inputBridge, 'krkr2-web/input.tjs'))
+      this.discard(await this.runtime.execute(checkpointBridge, 'krkr2-web/checkpoints.tjs'))
+      this.discard(await this.runtime.execute(modalBridge, 'krkr2-web/modal.tjs'))
       this.discard(await this.runtime.execute(transitionBridge, 'krkr2-web/transitions.tjs'))
       this.discard(await this.runtime.execute(fontClass, 'krkr2-web/font.tjs'))
       this.discard(await this.runtime.execute(layerClass, 'krkr2-web/layer.tjs'))
@@ -581,6 +658,7 @@ export class EngineSession {
     return this.queue.enqueue(async () => {
       await this.control.wait()
       this.control.check()
+      this.executing = true
       this.paintedLayers.clear()
       let failed = false,
         recorded = false
@@ -589,6 +667,7 @@ export class EngineSession {
           display = 'undefined'
         try {
           value = await operation()
+          await this.outerNativeCheckpoint()
           await this.inputs?.synchronize()
           if (
             this.hasPendingRedraw() &&
@@ -620,6 +699,7 @@ export class EngineSession {
             if (!this.control.cancelled && this.runtime?.inspect().pendingHandles)
               await this.runtime.collect()
             if (!this.control.cancelled) await this.inputs?.synchronize()
+            if (!this.control.cancelled) await this.outerNativeCheckpoint()
           } catch (error) {
             closingError = error
             closingFailed = true
@@ -647,28 +727,25 @@ export class EngineSession {
             this.log('Deferred cleanup failed: ' + String(closingError), 'error')
           }
         }
+        this.attemptedFrameVersion = this.frameWorkVersion
         this.present()
         this.notify()
         // A request made before an asynchronous callback yields starts its
         // delay only after this execution completes. Other Layers keep their
         // earlier deadlines, even when this execution painted another Layer.
-        this.hasPendingRedraw()
-        for (const id of this.redrawRequests) {
-          let deferred = this.deferredPaint.get(id)
-          // A later node can request an earlier node that had no paint flag
-          // when visited. It also needs a next frame after this traversal.
-          if (!deferred && !this.systemEvents?.disabled) {
-            deferred = { generation: ++this.redrawGeneration }
-            this.deferredPaint.set(id, deferred)
-          }
-          if (deferred) deferred.deadline ??= this.deps.now() + 16
+        this.finishFrameDeadlines()
+        if (!this.preparingFrame) {
+          for (const receipt of this.eventReceipts.values())
+            if (receipt.nativeDone && receipt.epilogueDone) receipt.tailDone = true
+          this.completeFrameWaiters()
+          this.completeReadyReceipts()
         }
-        this.armRedraw()
         return display
       } catch (error) {
         if (this.exitRequested && error instanceof Error && error.message === 'Execution cancelled')
           return 'undefined'
         if (!this.control.cancelled) {
+          this.cancelEventReceipts(error)
           if (!recorded) {
             await this.recordScriptFailure(error)
             recorded = true
@@ -684,10 +761,12 @@ export class EngineSession {
         }
         throw error
       } finally {
+        this.executing = false
         if (this.exitAfterOperation) {
           this.exitAfterOperation = false
           this.requestExit()
         }
+        if (this.hasOutsideReceipts() && !this.control.cancelled) this.requestReceiptCheckpoint()
       }
     }, priority)
   }
@@ -698,6 +777,39 @@ export class EngineSession {
     void this.stop().catch((error) => {
       this.deps.event({ type: 'log', level: 'error', text: String(error) })
     })
+  }
+  /** This method is only called after an exported VM operation has returned.
+   * Unlike a child host call, that return proves even an enclosing native drain
+   * has unwound. Never use it from Modal.dispatch or a Checkpoint host handler. */
+  private async outerNativeCheckpoint(): Promise<void> {
+    if (this.control.cancelled || !this.runtime) return
+    // An eventNext native drain may fail after detaching invalid jobs but
+    // before their first continuation. If no later event checkpoint consumed
+    // them, this exported return provides the final native-unwind fallback.
+    for (const id of this.outerRecoveryReceipts) {
+      const receipt = this.eventReceipts.get(id)
+      if (receipt) this.releaseReceipt(receipt)
+    }
+    if (this.outerRecoveryReceipts.size && this.nativeReleasesPending())
+      await this.runtime.collect()
+    if (!this.nativeReleasesPending()) {
+      for (const checkpoint of [...this.checkpoints.values()].reverse()) {
+        this.restoreCheckpointPaint(checkpoint)
+        for (const id of checkpoint.receipts) {
+          const receipt = this.eventReceipts.get(id)
+          if (receipt?.checkpoint === checkpoint.id) this.markReceiptNativeDone(receipt)
+        }
+        this.checkpoints.delete(checkpoint.id)
+      }
+      for (const id of this.outerRecoveryReceipts) {
+        const receipt = this.eventReceipts.get(id)
+        if (receipt) this.markReceiptNativeDone(receipt)
+      }
+      this.outerRecoveryReceipts.clear()
+      this.abortedReceiptRounds.clear()
+    }
+    const reply = this.beginCheckpoint(undefined)
+    if (reply.kind === 'invoke') this.discard(await this.runtime.invoke(reply.callback, reply.args))
   }
   private log(text: string, level: 'info' | 'error' = 'info'): void {
     const entry = this.diagnostics.capture(text, level)
@@ -849,6 +961,12 @@ export class EngineSession {
           this.armRedraw()
           return
         }
+        if (this.modalLoop?.depth) {
+          this.frameRequested = true
+          this.dirty = true
+          this.modalWakeup?.()
+          return
+        }
         this.redrawQueued = true
         void this.execute(async () => {
           // Recheck when the VM actually takes this task: it can have waited
@@ -980,11 +1098,13 @@ export class EngineSession {
       this.events?.pause(activityPaused(this.activity))
       this.systemEvents?.pause()
       this.transitions?.pause()
+      this.modalLoop?.setPaused(true)
     } else {
       this.control.resume()
       this.events?.resume()
       this.systemEvents?.resume()
       this.transitions?.resume()
+      this.modalLoop?.setPaused(false)
     }
     void this.sounds?.pause(paused).catch((error) => {
       if (!this.control.cancelled) this.fail(error)
@@ -1053,35 +1173,503 @@ export class EngineSession {
   async input(packet: InputPacket, observe = true): Promise<void> {
     await this.acceptInput(packet, observe).completion
   }
-  private acceptEvent(prepare: () => HostReply, options: EventOptions): SessionAdmission {
-    let releaseError: unknown,
-      releaseFailed = false
-    const admission = this.systemEvents!.enqueue(prepare, {
-      ...options,
-      onSettled: (outcome, round) => {
-        // The scheduler isolates bookkeeping observers. Keep actual resource
-        // cleanup failures in this operation's public completion contract.
-        try {
-          options.onSettled?.(outcome, round)
-        } catch (error) {
-          releaseError = error
-          releaseFailed = true
-        }
-      },
-    })
-    return {
-      status: admission.status === 'accepted' ? 'accepted' : 'ignored',
-      completion: admission.completion.then(
-        async () => {
-          await this.queue.drain()
-          if (releaseFailed) throw releaseError
-        },
-        (error) => {
-          if (releaseFailed) this.reportFlushFailure(releaseError)
-          throw error
-        },
-      ),
+  private acceptEvent(
+    prepare: () => HostReply,
+    options: EventOptions,
+    delivery?: { release(): void; before(): readonly number[] },
+  ): SessionAdmission {
+    if (!delivery && this.eventReceipts.size >= 65536)
+      throw new Error('Event receipt budget exceeded')
+    let resolve!: () => void, reject!: (error: unknown) => void
+    const completion = new Promise<void>((yes, no) => {
+        resolve = yes
+        reject = no
+      }),
+      receipt: SessionEventReceipt = {
+        id: this.nextReceipt++,
+        completion,
+        resolve,
+        reject,
+        epilogueDone: false,
+        nativeDone: false,
+        tailDone: false,
+        terminal: false,
+        failed: false,
+        frameWindows: [],
+        frameAfter: new Map(),
+      }
+    // Construct the record and transfer its cleanup before enqueue: a disabled
+    // discard settles synchronously, before admission has returned to us.
+    this.eventReceipts.set(receipt.id, receipt)
+    receipt.deferredSettlement = () => {
+      try {
+        options.onSettled?.(
+          receipt.outcome ?? { kind: 'disposed', error: new ExecutionCancelled() },
+          receipt.round,
+        )
+      } catch (error) {
+        this.receiptCleanupFailure(receipt, error)
+      }
+      try {
+        delivery?.release()
+      } catch (error) {
+        this.receiptCleanupFailure(receipt, error)
+      }
     }
+    const settled = (outcome: EventOutcome, round?: number) => {
+      if (receipt.terminal || receipt.outcome) return
+      receipt.outcome = outcome
+      receipt.round = round
+      receipt.epilogueDone = outcome.kind !== 'failed'
+      if (outcome.kind === 'aborted' || outcome.kind === 'disposed')
+        this.receiptFailure(receipt, outcome.error)
+      if (outcome.kind !== 'delivered' && outcome.kind !== 'failed') {
+        receipt.frameWindows = []
+        receipt.frameAfter.clear()
+      }
+      if (round === undefined) this.outsideReceipts.add(receipt.id)
+      else {
+        let pending = this.settledRounds.get(round)
+        if (!pending) this.settledRounds.set(round, (pending = new Set()))
+        pending.add(receipt.id)
+        const aborted = this.abortedReceiptRounds.get(round)
+        if (aborted) {
+          receipt.epilogueDone = true
+          this.receiptFailure(receipt, aborted)
+          this.outerRecoveryReceipts.add(receipt.id)
+        }
+      }
+      // A normal event already has its own TJS round. Its lease ends at the
+      // original settlement point. A never-entered video owns a lease too;
+      // bind its cleanup to a new continuation before releasing that lease.
+      if (round !== undefined || !delivery) this.releaseReceipt(receipt)
+      if (this.control.cancelled) this.finishReceipt(receipt, new ExecutionCancelled())
+      else if (round === undefined) this.requestReceiptCheckpoint()
+      this.modalWakeup?.()
+    }
+    try {
+      // A video already owns its callback. Even preparation or budget failure
+      // must transfer that lease into a native-fenced failed receipt.
+      if (this.eventReceipts.size > 65536) throw new Error('Event receipt budget exceeded')
+      receipt.frameWindows = (delivery?.before() ?? []).flatMap((id) => {
+        const window = this.registeredWindow(id)
+        return window ? [window] : []
+      })
+      const admission = this.systemEvents!.enqueue(prepare, { ...options, onSettled: settled })
+      // Body rejection is owned by the receipt. It is not the native/frame
+      // boundary and must not escape as an unobserved second Promise.
+      void admission.completion.catch(() => {})
+      return { status: admission.status === 'accepted' ? 'accepted' : 'ignored', completion }
+    } catch (error) {
+      if (!delivery) {
+        this.eventReceipts.delete(receipt.id)
+        receipt.terminal = true
+        this.releaseReceipt(receipt)
+        receipt.resolve() // No completion was handed to this rejected caller.
+        throw error
+      }
+      // Video transport still waits for the rejected admission's owned lease
+      // to cross a native boundary before its listener can acknowledge it.
+      settled({ kind: 'aborted', error })
+      return { status: 'ignored', completion }
+    }
+  }
+  private receiptFailure(receipt: SessionEventReceipt, error: unknown): void {
+    if (!receipt.failed) {
+      receipt.failed = true
+      receipt.error = error
+    }
+  }
+  private receiptCleanupFailure(receipt: SessionEventReceipt, error: unknown): void {
+    this.receiptFailure(receipt, error)
+    if (this.control.cancelled) this.cancellationErrors.push(error)
+  }
+  private releaseReceipt(receipt: SessionEventReceipt): void {
+    const release = receipt.deferredSettlement
+    receipt.deferredSettlement = undefined
+    try {
+      release?.()
+    } catch (error) {
+      this.receiptCleanupFailure(receipt, error)
+    }
+  }
+  private finishReceipt(receipt: SessionEventReceipt, cancelled?: unknown): void {
+    if (receipt.terminal) return
+    receipt.terminal = true
+    this.eventReceipts.delete(receipt.id)
+    this.outsideReceipts.delete(receipt.id)
+    this.outerRecoveryReceipts.delete(receipt.id)
+    if (receipt.round !== undefined) {
+      const pending = this.settledRounds.get(receipt.round)
+      pending?.delete(receipt.id)
+      if (!pending?.size) this.settledRounds.delete(receipt.round)
+    }
+    this.releaseReceipt(receipt)
+    if (receipt.failed) receipt.reject(receipt.error)
+    else if (cancelled !== undefined) receipt.reject(cancelled)
+    else receipt.resolve()
+  }
+  private cancelEventReceipts(error: unknown): void {
+    for (const receipt of [...this.eventReceipts.values()]) this.finishReceipt(receipt, error)
+    for (const checkpoint of this.checkpoints.values()) this.restoreCheckpointPaint(checkpoint)
+    this.checkpoints.clear()
+    this.settledRounds.clear()
+    this.outsideReceipts.clear()
+    this.outerRecoveryReceipts.clear()
+    this.abortedReceiptRounds.clear()
+    for (const waiter of this.frameWaiters) waiter.reject(error)
+    this.frameWaiters.clear()
+    this.frameRequested = false
+  }
+  private nativeReleasesPending(): boolean {
+    if (!this.runtime || this.control.cancelled) return false
+    const native = this.runtime.inspect()
+    return native.drainingReleased || native.pendingHandles > 0 || native.pendingInvalidations > 0
+  }
+  private completeReadyReceipts(): void {
+    for (const receipt of [...this.eventReceipts.values()]) {
+      if (!receipt.nativeDone || !receipt.tailDone || !receipt.epilogueDone) continue
+      const presented = receipt.frameWindows.every(
+        (window) =>
+          this.registeredWindow(window.id) !== window ||
+          (this.windowPresentationsCompleted.get(window.id) ?? 0) >=
+            (receipt.frameAfter.get(window.id) ?? Infinity),
+      )
+      if (receipt.failed || presented) this.finishReceipt(receipt)
+    }
+  }
+  private markReceiptNativeDone(receipt: SessionEventReceipt): void {
+    if (receipt.nativeDone) return
+    receipt.nativeDone = true
+    receipt.checkpoint = undefined
+    this.outerRecoveryReceipts.delete(receipt.id)
+    // A present before this event's callback/native cleanup is not its frame
+    // evidence. Require a later successful submission to each affected Window.
+    for (const window of receipt.frameWindows)
+      receipt.frameAfter.set(window.id, (this.windowPresentationsCompleted.get(window.id) ?? 0) + 1)
+    if (receipt.frameWindows.some((window) => this.registeredWindow(window.id) === window))
+      this.dirty = true
+  }
+  private beginCheckpoint(round?: number, tail = false, paint = false, force = false): HostReply {
+    if (!this.checkpointCallbacks || this.control.cancelled)
+      return { kind: 'value', value: undefined }
+    const ids = [...this.eventReceipts.values()]
+      .filter(
+        (receipt) =>
+          receipt.outcome &&
+          receipt.epilogueDone &&
+          !receipt.nativeDone &&
+          receipt.checkpoint === undefined &&
+          (receipt.round === undefined ||
+            receipt.round === round ||
+            this.outerRecoveryReceipts.has(receipt.id)),
+      )
+      .map((receipt) => receipt.id)
+    if (!tail && !force && !ids.length) return { kind: 'value', value: undefined }
+    if (this.checkpoints.size >= 256) throw new Error('Native checkpoint budget exceeded')
+    const checkpoint: SessionCheckpoint = {
+      id: this.nextCheckpoint++,
+      receipts: ids,
+      tailReceipts: tail
+        ? [...this.eventReceipts.values()]
+            .filter((receipt) => receipt.nativeDone && receipt.epilogueDone && !receipt.tailDone)
+            .map((receipt) => receipt.id)
+        : [],
+      tail,
+      paint: paint && this.activity.state === 'visible',
+      phase: 'issued',
+      paintBlocked: false,
+      paintStarted: false,
+      frameRan: false,
+    }
+    this.checkpoints.set(checkpoint.id, checkpoint)
+    for (const id of ids) {
+      const receipt = this.eventReceipts.get(id)!
+      receipt.checkpoint = checkpoint.id
+      this.releaseReceipt(receipt)
+    }
+    return {
+      kind: 'invoke',
+      callback: this.checkpointCallbacks.pump,
+      args: [BigInt(checkpoint.id)],
+    }
+  }
+  private restoreCheckpointPaint(checkpoint: SessionCheckpoint): void {
+    if (!checkpoint.savedPainted) return
+    this.paintedLayers = checkpoint.savedPainted
+    checkpoint.savedPainted = undefined
+  }
+  private parkCheckpoint(checkpoint: SessionCheckpoint): void {
+    this.restoreCheckpointPaint(checkpoint)
+    checkpoint.phase = 'parked'
+    for (const id of checkpoint.receipts) {
+      const receipt = this.eventReceipts.get(id)
+      if (receipt?.checkpoint !== checkpoint.id) continue
+      receipt.checkpoint = undefined
+      this.outerRecoveryReceipts.add(id)
+    }
+    this.checkpoints.delete(checkpoint.id)
+    // Do not make an ancestor drain/onPaint into runnable modal work. Only a
+    // later native continuation with an inactive drain (or actual exported
+    // return) may discharge this fence. Empty blocked checkpoints own nothing
+    // and must not accumulate while a finalizer runs a long modal loop.
+  }
+  private failCheckpoint(checkpoint: SessionCheckpoint, error: unknown): void {
+    for (const id of [...checkpoint.receipts, ...checkpoint.tailReceipts]) {
+      const receipt = this.eventReceipts.get(id)
+      if (receipt) this.receiptFailure(receipt, error)
+    }
+    this.parkCheckpoint(checkpoint)
+  }
+  private async checkpointHost(
+    operation: string,
+    args: ScriptValue[],
+    context: HostContext,
+  ): Promise<HostReply> {
+    const empty: HostReply = { kind: 'value', value: undefined }
+    if (operation === 'Checkpoint.bind') {
+      if (
+        this.checkpointCallbacks ||
+        args.length !== 3 ||
+        args.some((value) => !isScriptObject(value))
+      )
+        throw new Error('Checkpoint callbacks must be bound once')
+      const retained: ScriptObject[] = []
+      try {
+        for (const value of args) retained.push(context.retain(value as ScriptObject))
+        this.checkpointCallbacks = {
+          pump: retained[0]!,
+          publish: retained[1]!,
+          commit: retained[2]!,
+        }
+      } catch (error) {
+        for (const value of retained) context.release(value)
+        throw error
+      }
+      return empty
+    }
+    const id = Number(args[0]),
+      checkpoint = this.checkpoints.get(id)
+    if (!Number.isSafeInteger(id) || id <= 0 || !checkpoint) {
+      if (operation === 'Checkpoint.abort' || this.control.cancelled) return empty
+      throw new Error('Native checkpoint has ended')
+    }
+    if (operation === 'Checkpoint.abort') {
+      this.failCheckpoint(checkpoint, new Error(String(args[1] ?? 'Native checkpoint failed')))
+      return empty
+    }
+    if (operation === 'Checkpoint.enter') {
+      if (checkpoint.phase !== 'issued') throw new Error('Native checkpoint entered twice')
+      checkpoint.phase = 'entered'
+      if (this.nativeReleasesPending()) {
+        this.parkCheckpoint(checkpoint)
+        return { kind: 'value', value: 0n }
+      }
+      return { kind: 'value', value: 1n }
+    }
+    if (operation === 'Checkpoint.ownership')
+      return this.inputs!.start(this.inputControllers.synchronize())
+    if (operation === 'Checkpoint.paint') {
+      if (!checkpoint.tail) return empty
+      if (this.preparingFrame) {
+        checkpoint.paintBlocked = true
+        return empty
+      }
+      if (!checkpoint.paint || this.systemEvents?.disabled || this.activity.state !== 'visible')
+        return empty
+      this.consumeReadyFrame()
+      if (
+        this.hasPendingRedraw() &&
+        [...this.redrawRequests].some((layer) => !this.deferredPaint.has(layer))
+      )
+        this.dirty = true
+      if (!this.dirty) return empty
+      checkpoint.savedPainted = this.paintedLayers
+      this.paintedLayers = new Set()
+      checkpoint.paintStarted = true
+      return this.inputs!.start(this.prepareFrame())
+    }
+    if (operation === 'Checkpoint.afterPaint') {
+      if (checkpoint.paintStarted) checkpoint.frameRan = true
+      this.restoreCheckpointPaint(checkpoint)
+      return empty
+    }
+    if (operation === 'Checkpoint.cleanup') {
+      try {
+        await this.flushCheckpointCleanup(checkpoint.tail && !checkpoint.paintBlocked)
+      } catch (error) {
+        this.failCheckpoint(checkpoint, error)
+        throw error
+      }
+      return empty
+    }
+    if (operation === 'Checkpoint.fence') {
+      const publish = Number(args[1]) === 1
+      if (
+        (publish && checkpoint.phase !== 'entered') ||
+        (!publish && checkpoint.phase !== 'publishing')
+      )
+        throw new Error('Invalid native checkpoint continuation')
+      checkpoint.phase = publish ? 'publishing' : 'committing'
+      return {
+        kind: 'invoke',
+        callback: publish ? this.checkpointCallbacks!.publish : this.checkpointCallbacks!.commit,
+        args: [BigInt(id)],
+      }
+    }
+    if (operation === 'Checkpoint.publish') {
+      if (checkpoint.phase !== 'publishing') throw new Error('Invalid checkpoint publication')
+      if (this.nativeReleasesPending()) {
+        this.parkCheckpoint(checkpoint)
+        return { kind: 'value', value: 0n }
+      }
+      // The previous native release may itself have retired media. Backend
+      // closes are host work; never await a receipt or SerialQueue from here.
+      try {
+        await this.flushCheckpointCleanup(checkpoint.tail && !checkpoint.paintBlocked)
+      } catch (error) {
+        this.failCheckpoint(checkpoint, error)
+        throw error
+      }
+      if (checkpoint.tail && !checkpoint.paintBlocked) {
+        this.attemptedFrameVersion = this.frameWorkVersion
+        this.present()
+        this.notify()
+        this.finishFrameDeadlines()
+      }
+      return { kind: 'value', value: 1n }
+    }
+    if (operation === 'Checkpoint.commit') {
+      if (checkpoint.phase !== 'committing') throw new Error('Invalid checkpoint commit')
+      if (checkpoint.paintStarted && !checkpoint.frameRan)
+        throw new Error('Window update has not completed')
+      if (this.nativeReleasesPending()) {
+        this.parkCheckpoint(checkpoint)
+        return empty
+      }
+      for (const receiptId of checkpoint.receipts) {
+        const receipt = this.eventReceipts.get(receiptId)
+        if (receipt?.checkpoint === id) this.markReceiptNativeDone(receipt)
+      }
+      if (checkpoint.tail && !checkpoint.paintBlocked) {
+        for (const receiptId of [...checkpoint.tailReceipts, ...checkpoint.receipts]) {
+          const receipt = this.eventReceipts.get(receiptId)
+          if (receipt?.nativeDone) receipt.tailDone = true
+        }
+        this.completeFrameWaiters()
+      }
+      this.checkpoints.delete(id)
+      this.completeReadyReceipts()
+      if (checkpoint.tail && this.exitAfterOperation && (this.modalLoop?.depth ?? 0) > 0) {
+        this.exitAfterOperation = false
+        this.requestExit()
+      }
+      return empty
+    }
+    throw new Error(`Unknown checkpoint operation: ${operation}`)
+  }
+  private async flushCheckpointCleanup(files: boolean): Promise<void> {
+    let failed = false,
+      primary: unknown
+    for (const action of [
+      () => this.videos?.flushCloses(),
+      () => this.sounds?.flushCloses(),
+      ...(files ? [() => this.flushFiles()] : []),
+    ]) {
+      try {
+        await action()
+      } catch (error) {
+        if (!failed) {
+          failed = true
+          primary = error
+        } else this.reportFlushFailure(error)
+      }
+    }
+    if (failed) throw primary
+  }
+  /** ModalLoop uses these three hooks; all script remains in its HostReply stack. */
+  setModalWakeup(wake?: () => void): void {
+    this.modalWakeup = wake
+  }
+  hasModalWork(): boolean {
+    if (this.control.cancelled || this.control.paused) return false
+    return (
+      !!this.systemEvents?.hasDispatchableWork() ||
+      (!this.nativeReleasesPending() && (this.hasOutsideReceipts() || this.hasPendingFrameWork()))
+    )
+  }
+  beginModalDispatch(): HostReply {
+    if (!this.hasModalWork()) return { kind: 'value', value: undefined }
+    if (this.hasOutsideReceipts() && !this.nativeReleasesPending())
+      return this.beginCheckpoint(undefined)
+    if (this.systemEvents?.disabled) return this.beginCheckpoint(undefined, true, false)
+    return this.systemEvents!.beginNested({ windowUpdate: this.hasPendingFrameWork() })
+  }
+  private hasOutsideReceipts(): boolean {
+    return [...this.outsideReceipts, ...this.outerRecoveryReceipts].some((id) => {
+      const receipt = this.eventReceipts.get(id)
+      return !!receipt && !receipt.nativeDone && receipt.checkpoint === undefined
+    })
+  }
+  private hasPendingFrameWork(): boolean {
+    if (this.preparingFrame) return false
+    // Hidden, unpaused sessions still owe an explicit skipped window-update
+    // tail to completed admissions. Dirty pixels alone cannot keep a hidden
+    // modal loop awake; the tail obligation disappears once committed.
+    if ([...this.eventReceipts.values()].some((receipt) => receipt.nativeDone && !receipt.tailDone))
+      return true
+    return (
+      this.activity.state === 'visible' &&
+      (this.frameRequested || (this.dirty && this.frameWorkVersion !== this.attemptedFrameVersion))
+    )
+  }
+  private requestReceiptCheckpoint(): void {
+    this.modalWakeup?.()
+    if (this.executing || this.checkpointQueued || this.control.cancelled) return
+    this.checkpointQueued = true
+    void this.execute(async () => {
+      const reply = this.beginCheckpoint(undefined)
+      return reply.kind === 'invoke' ? this.runtime!.invoke(reply.callback, reply.args) : undefined
+    }, 2)
+      .catch((error) => {
+        if (!this.control.cancelled) this.fail(error)
+      })
+      .finally(() => {
+        this.checkpointQueued = false
+        if (this.hasOutsideReceipts() && !this.control.cancelled) this.requestReceiptCheckpoint()
+      })
+  }
+  private requestFrameCheckpoint(): Promise<void> {
+    this.frameRequested = true
+    this.dirty = true
+    const completion = new Promise<void>((resolve, reject) =>
+      this.frameWaiters.add({ resolve, reject }),
+    )
+    this.requestReceiptCheckpoint()
+    return completion
+  }
+  private consumeReadyFrame(): void {
+    if (this.systemEvents?.disabled || this.activity.state !== 'visible') return
+    const now = this.deps.now()
+    for (const [id, deferred] of this.deferredPaint)
+      if (deferred.deadline !== undefined && deferred.deadline <= now) this.deferredPaint.delete(id)
+  }
+  private finishFrameDeadlines(): void {
+    this.hasPendingRedraw()
+    for (const id of this.redrawRequests) {
+      let deferred = this.deferredPaint.get(id)
+      if (!deferred && !this.systemEvents?.disabled) {
+        deferred = { generation: ++this.redrawGeneration }
+        this.deferredPaint.set(id, deferred)
+      }
+      if (deferred) deferred.deadline ??= this.deps.now() + 16
+    }
+    this.armRedraw()
+  }
+  private completeFrameWaiters(): void {
+    this.frameRequested = false
+    for (const waiter of this.frameWaiters) waiter.resolve()
+    this.frameWaiters.clear()
   }
   acceptInput(packet: InputPacket, observe = true): SessionAdmission {
     if (this.fontSelection.active && packet.type !== 'cancel' && packet.type !== 'deactivate')
@@ -1295,6 +1883,7 @@ export class EngineSession {
     }
     if (
       !this.dirty ||
+      this.preparingFrame ||
       this.state === 'stopped' ||
       this.state === 'stopping' ||
       (!this.deps.renderer.openWindow &&
@@ -1324,8 +1913,14 @@ export class EngineSession {
         target.id,
       )
       if (presented === false) complete = false
+      else if (window.visible && this.registeredWindow(target.id) === target)
+        this.windowPresentationsCompleted.set(
+          target.id,
+          (this.windowPresentationsCompleted.get(target.id) ?? 0) + 1,
+        )
     }
     if (complete) this.dirty = false
+    this.completeReadyReceipts()
   }
   private queueResize(window: WindowRecord): void {
     if (window.resizePending || this.registeredWindow(window.id) !== window) return
@@ -1476,6 +2071,10 @@ export class EngineSession {
     }
   }
   inspectOwnership(): {
+    eventReceipts: number
+    eventCheckpoints: number
+    modalScopes: number
+    modalWaits: number
     eventSources: number
     soundSources: number
     pendingSoundCloses: number
@@ -1495,6 +2094,10 @@ export class EngineSession {
   } {
     const runtime = this.runtime?.inspect()
     return {
+      eventReceipts: this.eventReceipts.size,
+      eventCheckpoints: this.checkpoints.size,
+      modalScopes: this.modalLoop?.depth ?? 0,
+      modalWaits: this.modalLoop?.pendingWaits ?? 0,
       eventSources: this.events?.count ?? 0,
       soundSources: this.sounds?.count ?? 0,
       pendingSoundCloses: this.sounds?.pendingCloses ?? 0,
@@ -1608,6 +2211,37 @@ export class EngineSession {
       // cleanup. Once here, one media failure must not retain the VM or other
       // resources. Cache the outcome so a retry never disposes a device twice.
       await attempt(() => this.appLocks.close())
+      await attempt(async () => {
+        while (this.cancellationWork.size) await Promise.all([...this.cancellationWork])
+        if (this.cancellationErrors.length) {
+          const errors = this.cancellationErrors.splice(0)
+          if (errors.length === 1) throw errors[0]
+          throw new AggregateError(errors, 'Session cancellation cleanup failed')
+        }
+      })
+      await attempt(() => this.modalLoop?.dispose())
+      await attempt(() => {
+        this.detachPendingEvents?.()
+        this.detachPendingEvents = undefined
+        this.setModalWakeup(undefined)
+        const callbacks = this.checkpointCallbacks
+        this.checkpointCallbacks = undefined
+        if (callbacks) {
+          let failed = false,
+            first: unknown
+          for (const callback of [callbacks.pump, callbacks.publish, callbacks.commit]) {
+            try {
+              this.runtime?.release(callback)
+            } catch (error) {
+              if (!failed) {
+                failed = true
+                first = error
+              }
+            }
+          }
+          if (failed) throw first
+        }
+      })
       await attempt(() => this.videos?.dispose())
       await attempt(() => this.sounds?.dispose())
       await attempt(() => this.inputs?.dispose())
@@ -1706,6 +2340,46 @@ export class EngineSession {
     args: ScriptValue[],
     context: HostContext,
   ): Promise<HostReply> {
+    if (operation.startsWith('Checkpoint.')) return this.checkpointHost(operation, args, context)
+    if (operation.startsWith('Modal.')) {
+      if (!this.modalLoop) throw new Error('Modal dispatcher is unavailable')
+      return this.modalLoop.host(operation, args)
+    }
+    if (
+      operation === 'Session.eventCheckpoint' ||
+      operation === 'Session.windowUpdateCheckpoint' ||
+      operation === 'Session.abortRoundReceipts'
+    ) {
+      const round = Number(args[0])
+      if (!Number.isSafeInteger(round) || round <= 0)
+        throw new Error('Invalid event checkpoint round')
+      if (operation === 'Session.abortRoundReceipts') {
+        const error = new Error(String(args[1] ?? 'System event round aborted'))
+        this.abortedReceiptRounds.set(round, error)
+        // Native release can throw before a continuation is entered. The
+        // enclosing execute failure/stop still owns these detached receipts.
+        for (const id of this.settledRounds.get(round) ?? []) {
+          const receipt = this.eventReceipts.get(id)
+          if (receipt) {
+            receipt.epilogueDone = true
+            this.receiptFailure(receipt, error)
+            this.outerRecoveryReceipts.add(id)
+          }
+        }
+        return { kind: 'value', value: undefined }
+      }
+      if (operation === 'Session.eventCheckpoint' && Number(args[1]))
+        for (const id of this.settledRounds.get(round) ?? []) {
+          const receipt = this.eventReceipts.get(id)
+          if (receipt) receipt.epilogueDone = true
+        }
+      return this.beginCheckpoint(
+        round,
+        operation === 'Session.windowUpdateCheckpoint',
+        operation === 'Session.windowUpdateCheckpoint' && !!Number(args[1]),
+        true,
+      )
+    }
     if (
       operation.startsWith('Debug.') &&
       !operation.startsWith('Debug.panel') &&
@@ -1735,6 +2409,7 @@ export class EngineSession {
         'System.eventFailed',
         'System.eventInvalid',
         'System.eventEnd',
+        'System.eventWindowUpdate',
       ].includes(operation)
     ) {
       if (operation === 'System.eventNext' && this.deps.now() >= this.eventYieldAt) {

@@ -1,5 +1,7 @@
 # 052 — 合作式模态循环的 scope 基础
 
+当前工作分支已接入浏览器接收确认；逐事件 native checkpoint、视频完成票据和 ModalLoop 也已写入，尚待本片 Actions。Window.showModal／Menu.popup 的模态业务仍未接通。下面保留各步骤当时的状态和失败记录，新接线详见文末，不以基础组件通过代替完整模态功能。
+
 本阶段先实现独立的 `src/engine/scheduler/modal-scopes.ts`。它管理 host 侧身份、栈和等待生命周期，尚未接入 Session、SystemEvents、ExecutionControl、TJS pump 或 DOM。`Window.showModal` 与 `Menu.popup` 的完整嵌套事件循环仍未实现，不能以此组件的测试代替实际 VM/浏览器验证。总体边界见[多窗口规划](048-multiwindow-plan.md)。
 
 每个 scope 只保存种类、数字 owner/window 身份、父 token、原始类型结果和可选同步 host 清理回调；不导入 ScriptRuntime，也不保存或保留 ScriptObject。token 在单个组件实例内单调递增，不随 owner ID 重用；会话之间的消息仍需由 Session generation 隔离。返回的身份和终态对象冻结，外部调用不能修改内部记录。默认最多 16 层，可配置为 1–64 层；这是 host 资源预算，不声明原生引擎具有相同限制。
@@ -85,3 +87,19 @@ EngineSession 增加同步的 `acceptInput`、`acceptActivateWindow`、`acceptCl
 [34947632067](https://github.com/fenghengzhi/krkr2-web/actions/runs/34947632067)，提交 `18b1c71`：Node **1,396／1,396** 通过，包含 18 项新接收检查；浏览器 **1,053／1,059** 通过，直接运行时 **6／6** 通过。Chromium／Firefox 常规各 312 项全通过；WebKit 原 306 项全部通过，新增 6 项均在启动夹具等待第一次鼠标回调时失败，未进入 ACK 断言。
 
 六份 trace 的实际 mouseMove／mouseDown 坐标都是 `(485,-1353.3125)`，视口为 `1280×720`。WebKit 的 canvas.focus 没有将画布滚回视口，后续原始指针操作未命中游戏；没有 context loss 或 Page crashed 记录。这是夹具的操作前置问题，不能归为旧 GPU 失败。修订在真实 mouseDown 前显式滚动画布并检查完整可见；保留 HTTP 读取门闩、实际输入 ACK、回调顺序及异常处理断言，不添加再次点击或改变产品焦点规则。完整失败产物与逐项摘要独立保留，修订尚待新 Actions。
+
+## 接收确认的第二轮回归
+
+[34950107231](https://github.com/fenghengzhi/krkr2-web/actions/runs/34950107231)，提交 `07292d5`：**1,396／1,396 Node、1,059／1,059 浏览器、6／6 直接运行时**全部通过，14个作业均成功，无失败、取消、跳过或 flaky。新增18项Node及6模板×3浏览器的18项均实际通过；12份读取门闩附件确认输入接收时storagePending仍为true。完整310文件／14 artifacts、run.json、逐项摘要与哈希独立保留。该提交不含下面的检查点／ModalLoop／原生drain能力，不能作为后者的验证。
+
+## 逐事件原生检查点与模态驱动接线
+
+Session 的接收票据现在分别记录事件体结算、错误处理结束、自己的 native continuation 完成以及轮次尾部处理。取队时连续跳过的失效事件用 round→集合归账；Stop、执行异常和 continuation 进入前的失败也能找到这些已脱离事件队列的票据。关闭／菜单的临时引用按原结算点释放，提前持有的视频引用在未取队取消时由专属清理检查点接管。
+
+TJS SystemEventPump 在每事件之后只推进输入所有权、原生释放和必要关闭清理，**不在每事件之间绘制**。[原版 EventIntf.cpp](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/base/EventIntf.cpp)在 exclusive／input／normal 之后，才经一次尾部许可进入 idle／continuous／window update。新增只读尾部许可与正常耗尽标记，只有合法轮次尾部执行合并绘制；只有帧工作时可进入等价空轮。普通输入票据保留尾部执行或明确跳过的完成边界，视频还要等待相关存活窗口在自身 native 完成之后的成功呈现。renderer=false、隐藏空帧和父 onPaint 尚未返回均不能冒充该视频帧完成。
+
+CheckpointPump、发布与提交通过各自的 HostReply.invoke 在同一个原生调用栈中串联；不开放 busy 重入，也不从模态 host 调用顶层 collect／invoke。祖先释放或 onPaint 尚在栈内时，票据保留但返回驱动循环，让其他可执行事件继续。到期重绘和转场用明确帧工作唤醒，不从 SerialQueue 抽取任意闭包。ModalLoop 只等待与选取工作，已接入 Session 的暂停、恢复、取消和原生回调绑定；具体窗口显示、关闭及菜单 flags 仍属下一步。
+
+新增只读 `krkr_release_draining` 导出及 `runtime.inspect().drainingReleased`。原生释放会先将当前对象从待释放集合移出，再执行可挂起的析构；因此 pendingHandles=0 不代表整个 drain 已完成。新字段直接读取该活动状态。ABI 5 的既有调用形状不变，manifest 新增 `nativeReleaseState:1`；新页面检查该能力，运行时在创建 VM 前检查真实导出，缺少支持的旧内核明确拒绝，不能以默认 false 掩盖缺失。
+
+本片新增 17 项 ModalLoop 生命周期、8 项事件尾部、24 项真实 Session、14 项视频完成边界以及 7 项原生释放状态／缺能力拒绝检查，共预期 70 项 Node；其中原生状态覆盖源码／字节码的正常、析构抛错和取消。额外包含隐藏但未暂停时的普通票据尾部与非模态主窗口关闭后继续执行语句；所有这些检查均尚未执行，不能计为通过。新增接口也尚未在真正 Window.showModal／Menu.popup 嵌套场景下验收，后续仍需实际浏览器双后端验证。

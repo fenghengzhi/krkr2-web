@@ -54,6 +54,7 @@ export interface WasmManifest {
     dependentRevocation?: number
     nativeLifetimeHooks?: number
     windowObjectLifetime?: number
+    nativeReleaseState?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string
