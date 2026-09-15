@@ -27,3 +27,9 @@ Window 输入阻塞按模态栈从顶向下决定：System 对话框阻塞游戏
 新增纯状态机、真实 TJS 源码／字节码及三浏览器 Asyncify／JSPI 用例，分别检查请求与 LIFO 生命周期、参数和返回值、Timer 重入、嵌套 Window／对话框、实际文字编辑与停止。所有可执行验证只在 GitHub-hosted Actions 进行；结果完成后按精确提交与构建记录。
 
 本阶段不实现 Clipboard、Pad、整个 System 原生类身份、任意操作系统命令或插件。原生对话框 owner、ANSI、VCL 焦点及全部消息细节有平台差异。完整非插件目标仍在推进，不能凭这两项 API 宣称完成。
+
+## 初次提交后的焦点顺序复审
+
+初次提交 `62514dd04026458781cb66fa2a48bfe29b1cfe3a` 已进入 [Actions 35001901909](https://github.com/fenghengzhi/krkr2-web/actions/runs/35001901909)，尚未完成。静态复审发现另一处独立边界：若先给 Window 应用 inert，再打开原生 dialog，浏览器可能已把原焦点移走，组件无法保存真实来源。后续修订明确区分 ModalLoop 的打开和退出发布：打开时先呈现 System 对话框，再发布 Window 阻塞；退出时先恢复 Window 可交互性，再让对话框按身份及焦点版本有条件地恢复。真实 Worker 的 inform 用例在手动 focus 或控制台操作之前检查焦点是否已回到游戏窗口。
+
+这项修订尚待后续完整 Actions，不能把首轮未完成或任何后续通过追记为初次提交已通过。预期新增 28 项纯状态机、22 项真实 TJS、42 项浏览器组件与 48 项真实 Worker 检查；实际数量和结果以完整产物为准。

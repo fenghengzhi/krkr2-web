@@ -449,9 +449,12 @@ export class EngineSession {
           this.menuModals?.beforeWait(token)
           this.systemDialogs?.beforeWait(token)
         },
-        changed: () => {
+        changed: (phase) => {
+          // Opening the native dialog captures the old DOM focus before the
+          // Window roster applies inert. Unwinding restores eligibility first.
+          if (phase === 'open') this.systemDialogs?.present()
           this.present()
-          this.systemDialogs?.present()
+          if (phase === 'release') this.systemDialogs?.present()
           this.notify()
         },
       })

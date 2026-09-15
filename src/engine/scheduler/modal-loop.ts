@@ -22,7 +22,7 @@ export interface ModalLoopDependencies {
   /** Prepare the current scope's close query/result without taking an event or entering the VM. */
   beforeWait?(token: number): void
   /** Host presentation/state bookkeeping only. */
-  changed(): void
+  changed(phase: 'open' | 'release'): void
 }
 
 const empty = (): HostReply => ({ kind: 'value', value: undefined })
@@ -95,7 +95,7 @@ export class ModalLoop {
           errors.push(error)
         }
         try {
-          this.deps.changed()
+          this.deps.changed('release')
         } catch (error) {
           errors.push(error)
         }
@@ -104,7 +104,7 @@ export class ModalLoop {
       },
     })
     try {
-      this.deps.changed()
+      this.deps.changed('open')
     } catch (error) {
       // Failure to publish a newly blocked scope must not leave an invisible
       // modal frame behind. Preserve both errors if cleanup also fails.
