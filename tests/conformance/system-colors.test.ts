@@ -90,7 +90,9 @@ test('invalid system color configuration is rejected by the session constructor 
             runtimeCreated = true
             throw new Error('Invalid palette reached runtime creation')
           },
-        } as SessionDependencies),
+          // This negative fixture intentionally omits the acquisition backends:
+          // invalid palettes must be rejected before any of them are consulted.
+        } as unknown as SessionDependencies),
       /System colors? /,
       name,
     )
