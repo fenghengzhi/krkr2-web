@@ -124,7 +124,7 @@ async function launch(page: Page) {
 
 const request = (
   id: number,
-  kind: SystemDialogRequest['kind'] = 'input-string',
+  kind: 'inform' | 'input-string' = 'input-string',
 ): SystemDialogRequest => ({
   id,
   kind,

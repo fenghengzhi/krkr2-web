@@ -40,6 +40,7 @@ import type { DecodedImage, GraphicsDecoder, Renderer, RendererStatus } from './
 import type { Inflater, Resource } from './ports/storage.ts'
 import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts'
 import { SaveOverlay } from './storage/save-overlay.ts'
+import { StorageSelector, normalizeSelectorPath } from './storage/selector.ts'
 import { modeOffset } from '../formats/text/stream.ts'
 import { ScriptEvents } from './scheduler/events.ts'
 import { SystemEvents, type EventOptions, type EventOutcome } from './scheduler/system-events.ts'
@@ -747,9 +748,14 @@ export class EngineSession {
       )
       this.systemDialogs = new SystemDialogs(this.modalLoop, {
         changed: (snapshot) => this.deps.event({ type: 'system-dialog', ...snapshot }),
-        enter: () => {
-          this.windowInputGeneration++
-          for (const window of this.windows!.registered()) this.systemEvents!.cancelSource(window)
+        enter: (_id, kind) => {
+          // The original file picker does not clear the game's Window event
+          // queue. Block input through the shared modal scope without silently
+          // applying System.inform's separate event cleanup policy.
+          if (kind !== 'storage-selector') {
+            this.windowInputGeneration++
+            for (const window of this.windows!.registered()) this.systemEvents!.cancelSource(window)
+          }
           this.inputControllers.releaseCaptures()
           this.physicalKeys.clear()
           this.menus.dismiss(undefined, undefined, 'unavailable')
@@ -3266,6 +3272,51 @@ export class EngineSession {
             properties: [],
           },
         }
+      case 'Storages.selectFilePath':
+        value = normalizeSelectorPath(text(0))
+        break
+      case 'Storages.selectFile': {
+        this.materializeLogs()
+        const selector = new StorageSelector(
+          this.storage,
+          this.saves,
+          this.systemEnvironment.dataPath,
+        ).prepare(args.slice(1))
+        return this.systemDialogs!.showStorageSelector(
+          number(0),
+          selector.caption,
+          selector.presentation,
+          selector.choose,
+        )
+      }
+      case 'Storages.selectFileAbort':
+        try {
+          this.systemDialogs?.abortStorageSelector(number(0))
+        } catch (error) {
+          // Native preserves the original exception when continuation entry
+          // and cleanup both fail. Record cleanup here, without entering TJS,
+          // so it is neither lost nor deferred to an unrelated later call.
+          const describe = (value: unknown): string =>
+            value instanceof AggregateError
+              ? `${value.message}: ${value.errors.map(describe).join('; ')}`
+              : value instanceof Error
+                ? value.message
+                : String(value)
+          try {
+            this.deps.event({
+              type: 'log',
+              level: 'error',
+              text: `文件选择器清理失败：${describe(error)}；原始调用异常优先保留。`,
+            })
+          } catch (reportingError) {
+            throw new AggregateError(
+              [error, reportingError],
+              'Storage selector cleanup reporting failed',
+            )
+          }
+          throw error
+        }
+        break
       case 'Storages.getFullPath':
         value = getFullStoragePath(text(0))
         break

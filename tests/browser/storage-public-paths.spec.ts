@@ -424,8 +424,8 @@ for (const backend of ['asyncify', 'jspi'] as const) {
           throw new Error('Storage loader intervention requires the exact hosted manifest')
         const original = JSON.parse(bytes.toString('utf8')) as WasmManifest,
           served = structuredClone(original)
-        if (served.capabilities?.nativeStorages !== 1)
-          throw new Error('The hosted build must provide nativeStorages=1')
+        if (served.capabilities?.nativeStorages !== 2)
+          throw new Error('The hosted build must provide nativeStorages=2')
         delete served.capabilities.nativeStorages
         intercepted.push({ original, served })
         await route.fulfill({ response, json: served })
@@ -451,7 +451,7 @@ for (const backend of ['asyncify', 'jspi'] as const) {
       expect(intercepted).toHaveLength(1)
       expect({
         ...intercepted[0].served,
-        capabilities: { ...intercepted[0].served.capabilities, nativeStorages: 1 },
+        capabilities: { ...intercepted[0].served.capabilities, nativeStorages: 2 },
       }).toEqual(intercepted[0].original)
       await info.attach('native-storages-rejected-loader-logs', {
         body: await page.locator('#logs').innerText(),

@@ -73,6 +73,9 @@ jobs:
       - name: Original KAG exceptions and recovery
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/debug-kag.ts out/verification/compatibility 2>&1 | tee out/ci/kag-diagnostics.log
+      - name: Original KAG Save As and Open with persistent virtual files
+        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/storage-selector-kag.ts out/verification/compatibility 2>&1 | tee out/ci/kag-storage-selector.log
       - name: TJS ABI 1 to current release offline update
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/system-abi-pwa.ts out/verification/compatibility out/verification/compatibility-baselines/tjs-abi1 2>&1 | tee out/ci/tjs-abi1.log

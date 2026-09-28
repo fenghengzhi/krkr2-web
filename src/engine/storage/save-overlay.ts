@@ -86,6 +86,10 @@ export class SaveOverlay {
   export(): SaveFile[] {
     return [...this.files].map(([path, bytes]) => ({ path, bytes: bytes.slice() }))
   }
+  /** Directory UIs must not copy the save byte buffers to enumerate names. */
+  list(): { name: string; size: number }[] {
+    return [...this.files].map(([name, bytes]) => ({ name, size: bytes.length }))
+  }
   async import(files: SaveFile[]): Promise<void> {
     // Validate a complete backup before mutating the running overlay.
     const normalized = files.map(({ path, bytes }) => {

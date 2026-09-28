@@ -1,6 +1,7 @@
 import type { SystemDialogRequest } from '../ports/system-dialogs.ts'
 import type { HostReply } from '../script/runtime.ts'
 import type { ModalLoop } from '../scheduler/modal-loop.ts'
+import type { StorageSelectorPresentation } from '../ports/storage-selector.ts'
 
 export interface SystemDialogSnapshot {
   readonly request: SystemDialogRequest | null
@@ -11,7 +12,7 @@ export interface SystemDialogActions {
   /** Host presentation only; this must not execute script. */
   changed(snapshot: SystemDialogSnapshot): void
   /** Host input/focus bookkeeping after the scope opens, before its pump enters. */
-  enter?(id: number): void
+  enter?(id: number, kind: SystemDialogRequest['kind']): void
 }
 
 interface Dialog {
@@ -21,9 +22,12 @@ interface Dialog {
   ready: boolean
   aborted: boolean
   value?: string
+  readonly choose?: (value: string) => string
+  abandoned?: boolean
 }
 
-/** The suspended caller owns its TJS objects; dialog records contain primitives only. */
+/** The suspended caller owns its TJS objects. Records retain only host data and
+ * validation callbacks; they never own a ScriptObject or execute script. */
 export class SystemDialogs {
   private readonly records = new Map<string, Dialog>()
   private next = 1
@@ -32,6 +36,7 @@ export class SystemDialogs {
     pendingIds: Object.freeze([]),
   })
   private publicationFailed = false
+  private releasingAbandoned = false
 
   constructor(
     private readonly loop: ModalLoop,
@@ -44,13 +49,11 @@ export class SystemDialogs {
 
   show(
     identity: string,
-    kind: SystemDialogRequest['kind'],
+    kind: 'inform' | 'input-string',
     caption: string,
     text: string,
     value: string,
   ): HostReply {
-    if (typeof identity !== 'string' || !identity || this.records.has(identity))
-      throw new Error('Invalid system dialog request identity')
     if (
       !['inform', 'input-string'].includes(kind) ||
       typeof caption !== 'string' ||
@@ -58,12 +61,46 @@ export class SystemDialogs {
       typeof value !== 'string'
     )
       throw new Error('Invalid system dialog request')
+    return this.open(identity, (id) => Object.freeze({ id, kind, caption, text, value }))
+  }
+
+  showStorageSelector(
+    identity: number,
+    caption: string,
+    selector: StorageSelectorPresentation,
+    choose: (value: string) => string,
+  ): HostReply {
+    if (!Number.isSafeInteger(identity) || identity <= 0)
+      throw new Error('Invalid native storage selector identity')
+    return this.open(
+      `storage-selector:${identity}`,
+      (id) =>
+        Object.freeze({
+          id,
+          kind: 'storage-selector',
+          caption,
+          text: selector.save ? '选择游戏内的存档位置。' : '选择已载入游戏或浏览器存档中的文件。',
+          value: '',
+          selector,
+        }),
+      choose,
+    )
+  }
+
+  private open(
+    identity: string,
+    request: (id: number) => SystemDialogRequest,
+    choose?: (value: string) => string,
+  ): HostReply {
+    if (typeof identity !== 'string' || !identity || this.records.has(identity))
+      throw new Error('Invalid system dialog request identity')
     if (!Number.isSafeInteger(this.next)) throw new Error('System dialog request IDs exhausted')
     const record: Dialog = {
       identity,
-      request: Object.freeze({ id: this.next++, kind, caption, text, value }),
+      request: request(this.next++),
       ready: false,
       aborted: false,
+      choose,
     }
     this.records.set(identity, record)
     const cleanup = () => {
@@ -79,7 +116,7 @@ export class SystemDialogs {
         cleanup,
       })
       this.assertOpening(record)
-      this.actions.enter?.(record.request.id)
+      this.actions.enter?.(record.request.id, record.request.kind)
       this.assertOpening(record)
       return this.loop.invoke(record.token)
     } catch (error) {
@@ -110,6 +147,7 @@ export class SystemDialogs {
     // A Window/Menu child can be the first scope cleaned up by Stop. Revoke
     // every dialog identity before that child's stack-change publication too.
     if (this.loop.stopped) this.records.clear()
+    this.releaseAbandoned()
     const top = this.loop.activeToken,
       active = [...this.records.values()].find(
         (record) => this.scopeToken(record) === top && top !== undefined,
@@ -162,8 +200,14 @@ export class SystemDialogs {
       token !== this.loop.activeToken
     )
       return false
+    // A selector validates the current namespace before accepting a response.
+    // A failed choice leaves the same modal request available for correction.
+    const selected =
+      value === null
+        ? undefined
+        : (record.choose?.(value) ?? (record.request.kind === 'input-string' ? value : undefined))
     record.ready = true
-    record.value = record.request.kind === 'input-string' && value !== null ? value : undefined
+    record.value = selected
     try {
       this.present()
     } finally {
@@ -194,6 +238,64 @@ export class SystemDialogs {
       this.loop.notify()
     }
     return true
+  }
+
+  /** The native caller can fail before the TJS pump's body/finally is entered.
+   * Its unique call identity, rather than the current top scope, owns cleanup. */
+  abortStorageSelector(identity: number): boolean {
+    if (!Number.isSafeInteger(identity) || identity <= 0)
+      throw new Error('Invalid native storage selector identity')
+    const key = `storage-selector:${identity}`,
+      record = this.records.get(key)
+    if (!record) return false
+    record.abandoned = true
+    const errors: unknown[] = []
+    try {
+      this.abort(key)
+    } catch (error) {
+      errors.push(error)
+    }
+    try {
+      this.releaseAbandoned()
+    } catch (error) {
+      errors.push(error)
+    }
+    try {
+      this.present()
+    } catch (error) {
+      errors.push(error)
+    } finally {
+      this.loop.notify()
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Storage selector cleanup failed')
+    return true
+  }
+
+  private releaseAbandoned(): void {
+    if (this.releasingAbandoned) return
+    this.releasingAbandoned = true
+    const errors: unknown[] = []
+    try {
+      for (;;) {
+        const top = this.loop.activeToken,
+          record = [...this.records.values()].find(
+            (entry) => entry.abandoned && entry.aborted && this.scopeToken(entry) === top,
+          )
+        if (!record || top === undefined || this.loop.isPending(top)) break
+        // A live child must unwind first. Its normal release publication calls
+        // present again, at which point this exact abandoned parent can retire.
+        try {
+          this.loop.release(top)
+        } catch (error) {
+          errors.push(error)
+        }
+      }
+    } finally {
+      this.releasingAbandoned = false
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Abandoned selector cleanup failed')
   }
 
   private scopeToken(record: Dialog): number | undefined {

@@ -1,10 +1,21 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { SystemDialogs, type SystemDialogSnapshot } from '../../src/engine/scene/system-dialogs.ts'
-import type { SystemDialogRequest } from '../../src/engine/ports/system-dialogs.ts'
 import { ModalLoop } from '../../src/engine/scheduler/modal-loop.ts'
 import { ExecutionControl } from '../../src/engine/scheduler/control.ts'
 import type { HostContext, HostReply, ScriptObject } from '../../src/engine/script/runtime.ts'
+import type { StorageSelectorPresentation } from '../../src/engine/ports/storage-selector.ts'
+
+const storagePresentation: StorageSelectorPresentation = {
+  save: false,
+  name: '',
+  initialDirectory: 'game://./',
+  defaultExtension: '',
+  filters: [],
+  filterIndex: 0,
+  entries: [],
+  directories: ['game://./'],
+}
 
 function token(reply: HostReply): number {
   assert.equal(reply.kind, 'invoke')
@@ -84,11 +95,10 @@ async function fixture() {
     host,
     snapshot,
     request,
-    show: (
-      identity: string,
-      kind: SystemDialogRequest['kind'] = 'input-string',
-      value = '初始值',
-    ) => token(dialogs.show(identity, kind, '标题', '提示内容', value)),
+    show: (identity: string, kind: 'inform' | 'input-string' = 'input-string', value = '初始值') =>
+      token(dialogs.show(identity, kind, '标题', '提示内容', value)),
+    selector: (identity: number) =>
+      token(dialogs.showStorageSelector(identity, '文件', storagePresentation, (value) => value)),
     async result(current: number, expected: string | undefined) {
       assert.deepEqual(await host('Modal.wait', current), { kind: 'value', value: 0n })
       assert.deepEqual(await host('Modal.result', current), { kind: 'value', value: expected })
@@ -105,6 +115,127 @@ async function fixture() {
     },
   }
 }
+
+test('native selector entry failure aborts only its identified scope before the first modal wait', async (t) => {
+  const f = await fixture()
+  t.after(() => f.stop())
+  const parent = f.show('unrelated-parent'),
+    parentRequest = f.request()
+  f.selector(71)
+  const selector = f.request()
+  assert.equal(f.loop.depth, 2)
+  assert.equal(f.loop.pendingWaits, 0)
+  assert.equal(f.dialogs.abortStorageSelector(999), false)
+  assert.equal(f.loop.depth, 2)
+  assert.equal(f.dialogs.abortStorageSelector(71), true)
+  assert.equal(f.dialogs.abortStorageSelector(71), false)
+  assert.equal(f.loop.depth, 1)
+  assert.equal(f.dialogs.count, 1)
+  assert.equal(f.loop.activeToken, parent)
+  assert.equal(f.request().id, parentRequest.id)
+  assert.equal(f.dialogs.respond(selector.id, 'late'), false)
+  assert.equal(f.dialogs.respond(parentRequest.id, 'parent survives'), true)
+  await f.result(parent, 'parent survives')
+  await f.host('Modal.end', parent)
+})
+
+test('an abandoned native selector waits for its TJS child to unwind and then releases without its own pump', async (t) => {
+  const f = await fixture()
+  t.after(() => f.stop())
+  const outer = f.show('retained-outer'),
+    outerRequest = f.request()
+  f.selector(72)
+  const parentRequest = f.request(),
+    child = f.show('live-child'),
+    childRequest = f.request()
+  assert.equal(f.dialogs.abortStorageSelector(72), true)
+  assert.equal(f.loop.depth, 3)
+  assert.deepEqual(f.snapshot(), {
+    request: null,
+    pendingIds: [outerRequest.id, parentRequest.id, childRequest.id],
+  })
+  assert.equal(f.dialogs.respond(parentRequest.id, 'late parent'), false)
+  assert.equal(f.dialogs.respond(childRequest.id, 'cancelled child'), false)
+  await f.result(child, undefined)
+  await f.host('Modal.end', child)
+  // No Modal.end call for the selector: the failed native continuation never
+  // entered that pump. Child cleanup retires only its abandoned parent.
+  assert.equal(f.loop.depth, 1)
+  assert.equal(f.dialogs.count, 1)
+  assert.equal(f.loop.activeToken, outer)
+  assert.deepEqual(f.snapshot().pendingIds, [outerRequest.id])
+  assert.equal(f.dialogs.abortStorageSelector(72), false)
+  assert.equal(f.dialogs.respond(outerRequest.id, 'outer survives'), true)
+  await f.result(outer, 'outer survives')
+  await f.host('Modal.end', outer)
+})
+
+test('native selector abort releases a host child in LIFO order and preserves cleanup errors', async (t) => {
+  const f = await fixture()
+  t.after(() => f.stop())
+  const parent = f.selector(73),
+    childFailure = new Error('host child cleanup failed'),
+    publishFailure = new Error('selector cleanup publication failed')
+  let childCleaned = false,
+    failedPublication = false
+  f.loop.openHost({
+    kind: 'pad-save',
+    ownerId: 501,
+    cleanup() {
+      assert.equal(f.loop.activeToken, parent)
+      assert.equal(f.dialogs.count, 1)
+      childCleaned = true
+      throw childFailure
+    },
+  })
+  f.hooks.changed = (snapshot) => {
+    if (!snapshot.pendingIds.length && !failedPublication) {
+      assert.equal(childCleaned, true)
+      failedPublication = true
+      throw publishFailure
+    }
+  }
+  assert.throws(
+    () => f.dialogs.abortStorageSelector(73),
+    (error) => {
+      assert.deepEqual(new Set(failures(error)), new Set([childFailure, publishFailure]))
+      return true
+    },
+  )
+  assert.equal(f.loop.depth, 0)
+  assert.equal(f.loop.pendingWaits, 0)
+  assert.equal(f.dialogs.count, 0)
+  assert.deepEqual(f.snapshot(), { request: null, pendingIds: [] })
+  assert.equal(f.dialogs.abortStorageSelector(73), false)
+})
+
+test('native selector cleanup publication may open another dialog without old abort removing it', async (t) => {
+  const f = await fixture()
+  t.after(() => f.stop())
+  f.selector(74)
+  const retired = f.request(),
+    failure = new Error('cleanup observer failed')
+  let replacement: number | undefined
+  f.hooks.changed = (snapshot) => {
+    if (!snapshot.pendingIds.length && replacement === undefined) {
+      replacement = f.show('new-dialog')
+      throw failure
+    }
+  }
+  assert.throws(
+    () => f.dialogs.abortStorageSelector(74),
+    (error) => failures(error).includes(failure),
+  )
+  assert.ok(replacement)
+  assert.equal(f.loop.activeToken, replacement)
+  assert.equal(f.loop.depth, 1)
+  assert.equal(f.dialogs.count, 1)
+  assert.equal(f.dialogs.respond(retired.id, 'retired'), false)
+  assert.equal(f.dialogs.abortStorageSelector(74), false)
+  assert.equal(f.dialogs.respond(f.request().id, 'new answer'), true)
+  await f.result(replacement, 'new answer')
+  await f.host('Modal.end', replacement)
+})
 
 test('system input confirmation retains Unicode and returns only at its own modal wait', async (t) => {
   const f = await fixture()

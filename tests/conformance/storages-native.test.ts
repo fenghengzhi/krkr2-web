@@ -80,7 +80,7 @@ async function fixture(binary: boolean, source: string) {
 
 test('native Storages capability coexists with native System version 2 and Clipboard support', async () => {
   assert.equal(manifest.abi, 5)
-  assert.equal(manifest.capabilities?.nativeStorages, 1)
+  assert.equal(manifest.capabilities?.nativeStorages, 2)
   assert.equal(manifest.capabilities?.nativeSystem, 2)
   assert.equal(manifest.capabilities?.nativeClipboard, 1)
 })
@@ -88,7 +88,7 @@ test('native Storages capability coexists with native System version 2 and Clipb
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
 
-  test(`Storages has nine native static methods and no constructor or public directory property (${mode})`, async () => {
+  test(`Storages has nine native static path methods and no constructor or public directory property (${mode})`, async () => {
     const { vm, calls } = await fixture(
       binary,
       `
