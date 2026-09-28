@@ -219,3 +219,17 @@ MenuModals 将 popup 接入同一 TJS 栈上的 ModalLoop。MenuTree 保留每�
 这项直接原版证据修正了前文暂沿文档的 N-only 抑制策略：Web 选中命令只在 R 置位时抑制通知，N-only 保留返回后通知。既有纯模型和 source／bytecode flags 用例改为检查普通及 N-only 各通知一次；新增两个浏览器模板通过实际键盘 Enter 检查两种后端的 N-only 路径，共三浏览器 6 项。这个校准仍不证明鼠标／硬件输入、真正原版递归或 VCL 命令编号分配完全相同；Web 不刻意复制本次原版命令值 31。
 
 校准发生在 056 组合分支，预期保持 1,729 项 Node、浏览器增至 1,146 项。先前 `3521247`、`b7bb957` 和 `0a1a948` 的结果继续对应校准前代码，不追认它们已验证新的 NoNotify 行为。新代码仍待后续 GitHub-hosted Actions。
+
+## 后续 Firefox 指针捕获清理失败（36455312915，修复待验证）
+
+后续完整运行 `36455312915`、源提交 `56769cf` 的 Firefox regular 中，既有 `modal blocking cancels an in-flight resize and its later pointerup cannot commit` 用例在设置 blocked 时失败；同次 Chromium 的该用例通过。原始 Firefox trace 记录真实 mouseDown、mouseMove 和已改变的 resize 预览，随后 `call@5607` 执行 `modalWindowHost.update(11, { blocked: true })`，得到 `Element.releasePointerCapture: Invalid pointer id`。此前没有测试端 mouseUp 调用。原始报告、trace、错误上下文与散列审计保存在主工作区 `out/verification/window-pointer-capture/ci-36455312915-firefox-diagnosis.json`；历史失败不更改为通过。
+
+源码表明 apply 在写入 blocked view、设置 DOM inert 之前调用手势取消。finish 已清除 JS 手势状态、监听及 dragging class，但 `hasPointerCapture(pointer)` 为真才进入的 releasePointerCapture 抛错，使后面的 layout 回滚及 apply 的 blocked 更新未执行。capture receiver 固定保存自 pointerdown.currentTarget（移动时是标题栏、缩放时是 resize handle），并没有使用后续事件的 target 重新找 owner。原始 trace 没有记录 pointer ID、got/lostpointercapture 或原始 DOMException.name，不能据此断言已发生自动 lostcapture、错误 owner 或特定浏览器内部时序。
+
+[Pointer Events 3 的 release 算法](https://www.w3.org/TR/2026/REC-pointerevents3-20260630/#releasing-pointer-capture)先检查 active pointer ID，缺失时抛 NotFoundError；hasPointerCapture 查询的是 pending capture target，因此 guard 不保证后续 release 成功。[固定 Firefox 源码](https://github.com/mozilla-firefox/firefox/blob/b478a70dbe9b20189bb57f12c05bc0d6a8f323bd/dom/base/Element.cpp#L388-L405)中 `GetPointerInfo` 失败对应 `ThrowNotFoundError("Invalid pointer id")`，而 HasPointerCapture 查询另一份 pending capture 记录。该固定原文与 SHA-256 已归档在 `out/verification/window-pointer-capture/reference`；它是当前官方实现参考，不冒充本次 runner 的精确 Firefox 源码版本，也不证明 active pointer 消失的具体原因。
+
+修复只在 releasePointerCapture 调用内部接受所属 document realm 的 DOMException NotFoundError，将其视为已失效指针的终态清理，继续原有 rollback/layout 与 blocked 更新。不吞掉其他 API 错误；其他错误先恢复仍存活 surface 的原始布局，再抛回调用者。手势依旧先标记 complete、清除 preview 与监听，所以之后的 pointerup 不能提交旧几何。
+
+既有 move/resize 两个测试继续保留真实鼠标拖动、取消后几何回滚、后续 mouseUp 零提交及新手势可提交的断言；新增最多 96 条、透明转发的实际 pointer/capture 记录，并在 finally 附件中保留失败路径。每个用例依次覆盖正常释放、显式 release NotFoundError、普通 Error 和后续真实成功提交；普通 Error 必须仍被调用者观察到，但已清理的预览不能停留。两种故障仅在真实已捕获手势的 release API 小范围注入，明确记录没有调用 native release，并在真实 mouseUp 前恢复；它们不冒充历史 Firefox 时序的复现。该变更不新增测试用例，不执行额外 CI；修复与增强定义尚待根任务下一批 GitHub-hosted Actions 验证。
+
+这个页面夹具只打包 createGameWindows 与 WindowState，没有创建 Player、Session Worker 或 069 的 BrowserSystemDisplay。它不执行新增显示观察器，因而此次失败没有与其观察器执行路径关联的证据；不能仅因同一批合并就归因给显示几何采样。

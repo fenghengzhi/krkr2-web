@@ -289,60 +289,155 @@ test('modal windows stay above blocked topmost and fullscreen owners and restore
 for (const kind of ['move', 'resize'] as const)
   test(`modal blocking cancels an in-flight ${kind} and its later pointerup cannot commit`, async ({
     page,
-  }) => {
+  }, info) => {
     const errors = await launch(page),
       handle = page.locator(
         `${first} ${kind === 'move' ? '.game-window-title' : '.game-window-resize'}`,
       ),
       original = await page.evaluate(() => window.modalWindowHost.snapshot(11))
-    await handle.scrollIntoViewIfNeeded()
-    const bounds = await handle.boundingBox()
-    if (!bounds) throw new Error('Window gesture handle is missing')
-    const x = bounds.x + bounds.width / 2,
-      y = bounds.y + bounds.height / 2
-    await page.mouse.move(x, y)
-    await page.mouse.down()
-    await page.mouse.move(x + 60, y + 35)
-    await expect(page.locator(first)).toHaveClass(/game-window-dragging/)
-    const preview = await page.evaluate(() => window.modalWindowHost.snapshot(11))
-    if (kind === 'move') {
-      expect(preview.left).not.toBe(original.left)
-      expect(preview.top).not.toBe(original.top)
-    } else expect(preview.width).not.toBe(original.width)
+    await page.evaluate((gesture) => {
+      window.modalWindowCapture = window.modalWindowHost.observePointerCapture(11, gesture)
+    }, kind)
+    try {
+      await handle.scrollIntoViewIfNeeded()
+      const bounds = await handle.boundingBox()
+      if (!bounds) throw new Error('Window gesture handle is missing')
+      const x = bounds.x + bounds.width / 2,
+        y = bounds.y + bounds.height / 2,
+        rolledBack = {
+          dragging: false,
+          left: original.left,
+          top: original.top,
+          width: original.width,
+          aspectRatio: original.aspectRatio,
+        }
+      for (const releaseFailure of [null, 'NotFoundError', 'Error'] as const) {
+        const phase = releaseFailure ? `synthetic-${releaseFailure}` : 'native-cancel'
+        await page.evaluate((value) => {
+          window.modalWindowCapture.phase(value)
+          window.modalWindowHost.update(11, { blocked: false })
+          window.modalWindowHost.clearActions()
+        }, phase)
+        await page.mouse.move(x, y)
+        await page.mouse.down()
+        await page.mouse.move(x + 60, y + 35)
+        await expect(page.locator(first)).toHaveClass(/game-window-dragging/)
+        const preview = await page.evaluate(() => window.modalWindowHost.snapshot(11))
+        if (kind === 'move') {
+          expect(preview.left).not.toBe(original.left)
+          expect(preview.top).not.toBe(original.top)
+        } else expect(preview.width).not.toBe(original.width)
 
-    await page.evaluate(() => window.modalWindowHost.update(11, { blocked: true }))
-    expect(await page.evaluate(() => window.modalWindowHost.snapshot(11))).toMatchObject({
-      dragging: false,
-      left: original.left,
-      top: original.top,
-      width: original.width,
-      aspectRatio: original.aspectRatio,
-    })
-    await page.mouse.move(x + 90, y + 55)
-    await page.mouse.up()
-    expect(
-      await page.evaluate(() =>
+        // Both injected failures start from native capture established by the
+        // real mouse. hasPointerCapture and setPointerCapture never get faked.
+        expect(
+          await page.evaluate(() => window.modalWindowCapture.snapshot().nativeHasCapture),
+        ).toBe(true)
+        const outcome = await page.evaluate((failure) => {
+          window.modalWindowCapture.phase(`before-block-${failure ?? 'native'}`)
+          if (failure) window.modalWindowCapture.injectReleaseFailure(failure)
+          try {
+            window.modalWindowHost.update(11, { blocked: true })
+            return null
+          } catch (error) {
+            return {
+              name:
+                error instanceof Error || error instanceof DOMException ? error.name : typeof error,
+              message:
+                error instanceof Error || error instanceof DOMException
+                  ? error.message
+                  : String(error),
+              isDOMException: error instanceof DOMException,
+            }
+          } finally {
+            // The injected call did not invoke native release. Restore the
+            // native pass-through before the real pointerup releases capture.
+            window.modalWindowCapture.restoreRelease()
+            window.modalWindowCapture.phase(`after-block-${failure ?? 'native'}`)
+          }
+        }, releaseFailure)
+        if (releaseFailure === 'Error')
+          expect(outcome).toEqual({
+            name: 'Error',
+            message: 'Synthetic unexpected releasePointerCapture failure',
+            isDOMException: false,
+          })
+        else expect(outcome).toBeNull()
+        expect(await page.evaluate(() => window.modalWindowHost.snapshot(11))).toMatchObject({
+          ...rolledBack,
+          inert: releaseFailure === 'Error' ? original.inert : true,
+          ariaDisabled: releaseFailure === 'Error' ? original.ariaDisabled : 'true',
+        })
+        await page.mouse.move(x + 90, y + 55)
+        await page.mouse.up()
+        expect(
+          await page.evaluate(() => window.modalWindowCapture.snapshot().nativeHasCapture),
+        ).toBe(false)
+        expect(
+          await page.evaluate(() =>
+            window.modalWindowHost
+              .actions()
+              .filter((action) => ['move', 'resize'].includes(action.type)),
+          ),
+        ).toEqual([])
+        expect(await page.evaluate(() => window.modalWindowHost.snapshot(11))).toMatchObject(
+          rolledBack,
+        )
+      }
+
+      await page.evaluate(() => {
+        window.modalWindowCapture.phase('fresh-gesture')
+        window.modalWindowHost.update(11, { blocked: false })
+        window.modalWindowHost.clearActions()
+      })
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      await page.mouse.move(x + 30, y + 20)
+      await page.mouse.up()
+      const committed = await page.evaluate(() =>
         window.modalWindowHost
           .actions()
           .filter((action) => ['move', 'resize'].includes(action.type)),
-      ),
-    ).toEqual([])
-
-    await page.evaluate(() => {
-      window.modalWindowHost.update(11, { blocked: false })
-      window.modalWindowHost.clearActions()
-    })
-    await page.mouse.move(x, y)
-    await page.mouse.down()
-    await page.mouse.move(x + 30, y + 20)
-    await page.mouse.up()
-    const committed = await page.evaluate(() =>
-      window.modalWindowHost.actions().filter((action) => ['move', 'resize'].includes(action.type)),
-    )
-    expect(committed).toHaveLength(1)
-    expect(committed[0]).toMatchObject({ type: kind, windowId: 11, surfaceEpoch: 1 })
-    expect(await page.evaluate(() => window.modalWindowHost.snapshot(11))).toMatchObject({
-      dragging: false,
-    })
-    expect(errors).toEqual([])
+      )
+      expect(committed).toHaveLength(1)
+      expect(committed[0]).toMatchObject({ type: kind, windowId: 11, surfaceEpoch: 1 })
+      expect(await page.evaluate(() => window.modalWindowHost.snapshot(11))).toMatchObject({
+        dragging: false,
+      })
+      const observation = await page.evaluate(() => window.modalWindowCapture.snapshot()),
+        events = observation.entries.filter((entry) => entry.type === 'event'),
+        injected = observation.entries.filter((entry) => entry.type === 'synthetic-release')
+      expect(observation.dropped).toBe(0)
+      expect(observation.entries.length).toBeLessThanOrEqual(observation.limit)
+      expect(events.filter((entry) => entry.name === 'pointerdown')).toHaveLength(4)
+      expect(events.filter((entry) => entry.name === 'pointerup')).toHaveLength(4)
+      expect(events.every((entry) => entry.isTrusted === true)).toBe(true)
+      expect(injected).toMatchObject([
+        {
+          nativeReleaseInvoked: false,
+          nativeHasCapture: true,
+          error: { name: 'NotFoundError', isDOMException: true },
+        },
+        {
+          nativeReleaseInvoked: false,
+          nativeHasCapture: true,
+          error: { name: 'Error', isDOMException: false },
+        },
+      ])
+      expect(errors).toEqual([])
+    } finally {
+      const evidence = await page
+        .evaluate(() => {
+          const observation = window.modalWindowCapture.snapshot(),
+            surface = window.modalWindowHost.snapshot(11),
+            actions = window.modalWindowHost.actions()
+          window.modalWindowCapture.restore()
+          return { observation, surface, actions }
+        })
+        .catch((error: unknown) => ({ observationReadError: String(error) }))
+      await info.attach(`modal-${kind}-native-pointer-capture`, {
+        contentType: 'application/json',
+        body: JSON.stringify({ kind, errors, ...evidence }, null, 2),
+      })
+    }
   })

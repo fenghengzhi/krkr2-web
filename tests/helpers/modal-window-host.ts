@@ -5,7 +5,208 @@ import {
 } from '../../src/app/game-windows.ts'
 import { WindowState } from '../../src/engine/scene/window.ts'
 
-/** Real page windows and pointer capture; only the Session action sink is observed. */
+function observePointerCapture(target: HTMLElement) {
+  const limit = 96,
+    entries: Record<string, unknown>[] = [],
+    abort = new AbortController(),
+    methods = ['hasPointerCapture', 'setPointerCapture', 'releasePointerCapture'] as const,
+    descriptors = methods.map((name) => Object.getOwnPropertyDescriptor(target, name)),
+    nativeHas = target.hasPointerCapture,
+    nativeSet = target.setPointerCapture,
+    nativeRelease = target.releasePointerCapture,
+    describe = (value: EventTarget | null) =>
+      value instanceof Element
+        ? `${value.tagName.toLowerCase()}${value.id ? `#${value.id}` : ''}${Array.from(value.classList, (name) => `.${name}`).join('')}`
+        : value === window
+          ? 'window'
+          : String(value),
+    errorDetails = (error: unknown) => ({
+      name: error instanceof Error || error instanceof DOMException ? error.name : typeof error,
+      message:
+        error instanceof Error || error instanceof DOMException ? error.message : String(error),
+      isDOMException: error instanceof DOMException,
+    })
+  let phase = 'setup',
+    pointer: number | undefined,
+    dropped = 0
+  const captureState = (
+      pointerId = pointer,
+    ): {
+      nativeHasCapture?: boolean
+      nativeHasCaptureError?: ReturnType<typeof errorDetails>
+    } => {
+      if (pointerId === undefined) return {}
+      try {
+        return { nativeHasCapture: nativeHas.call(target, pointerId) }
+      } catch (error) {
+        return { nativeHasCaptureError: errorDetails(error) }
+      }
+    },
+    record = (entry: Record<string, unknown>) => {
+      if (entries.length === limit) {
+        dropped++
+        return
+      }
+      entries.push({ sequence: entries.length, phase, captureTarget: describe(target), ...entry })
+    },
+    release = function (this: Element, pointerId: number) {
+      try {
+        nativeRelease.call(this, pointerId)
+        record({
+          type: 'call',
+          name: 'releasePointerCapture',
+          pointerId,
+          receiver: describe(this),
+          ...captureState(pointerId),
+        })
+      } catch (error) {
+        record({
+          type: 'call',
+          name: 'releasePointerCapture',
+          pointerId,
+          receiver: describe(this),
+          error: errorDetails(error),
+          ...captureState(pointerId),
+        })
+        throw error
+      }
+    }
+  target.hasPointerCapture = function (pointerId) {
+    try {
+      const result = nativeHas.call(this, pointerId)
+      record({
+        type: 'call',
+        name: 'hasPointerCapture',
+        pointerId,
+        receiver: describe(this),
+        result,
+      })
+      return result
+    } catch (error) {
+      record({
+        type: 'call',
+        name: 'hasPointerCapture',
+        pointerId,
+        receiver: describe(this),
+        error: errorDetails(error),
+      })
+      throw error
+    }
+  }
+  target.setPointerCapture = function (pointerId) {
+    try {
+      nativeSet.call(this, pointerId)
+      record({
+        type: 'call',
+        name: 'setPointerCapture',
+        pointerId,
+        receiver: describe(this),
+        ...captureState(pointerId),
+      })
+    } catch (error) {
+      record({
+        type: 'call',
+        name: 'setPointerCapture',
+        pointerId,
+        receiver: describe(this),
+        error: errorDetails(error),
+        ...captureState(pointerId),
+      })
+      throw error
+    }
+  }
+  target.releasePointerCapture = release
+  for (const name of [
+    'pointerdown',
+    'pointermove',
+    'pointerup',
+    'pointercancel',
+    'gotpointercapture',
+    'lostpointercapture',
+  ])
+    window.addEventListener(
+      name,
+      (event) => {
+        const next = event as PointerEvent
+        if (
+          next.type === 'pointerdown' &&
+          next.target instanceof Node &&
+          target.contains(next.target)
+        )
+          pointer = next.pointerId
+        if (next.pointerId !== pointer) return
+        // The observer's currentTarget is window. The product handler's
+        // currentTarget/capture receiver is the header or resize handle, while a
+        // move's original event.target is the title child inside that header.
+        record({
+          type: 'event',
+          name: next.type,
+          pointerId: next.pointerId,
+          pointerType: next.pointerType,
+          isTrusted: next.isTrusted,
+          buttons: next.buttons,
+          clientX: next.clientX,
+          clientY: next.clientY,
+          eventTarget: describe(next.target),
+          observerCurrentTarget: describe(next.currentTarget),
+          ...captureState(next.pointerId),
+        })
+      },
+      { capture: true, signal: abort.signal },
+    )
+  return {
+    phase(value: string) {
+      phase = value
+      record({ type: 'marker', name: value, pointerId: pointer, ...captureState() })
+    },
+    injectReleaseFailure(name: 'NotFoundError' | 'Error') {
+      // This is explicitly synthetic: the real gesture has native capture,
+      // but this scoped release call throws before invoking the native method.
+      target.releasePointerCapture = function (pointerId) {
+        const error =
+          name === 'NotFoundError'
+            ? new DOMException('Synthetic expired pointer during releasePointerCapture', name)
+            : new Error('Synthetic unexpected releasePointerCapture failure')
+        record({
+          type: 'synthetic-release',
+          name: 'releasePointerCapture',
+          pointerId,
+          receiver: describe(this),
+          nativeReleaseInvoked: false,
+          error: errorDetails(error),
+          ...captureState(pointerId),
+        })
+        throw error
+      }
+    },
+    restoreRelease() {
+      target.releasePointerCapture = release
+      record({
+        type: 'marker',
+        name: 'native-release-restored',
+        pointerId: pointer,
+        ...captureState(),
+      })
+    },
+    snapshot: () => ({
+      limit,
+      dropped,
+      pointerId: pointer,
+      ...captureState(),
+      entries: entries.map((entry) => ({ ...entry })),
+    }),
+    restore() {
+      abort.abort()
+      methods.forEach((name, index) => {
+        const descriptor = descriptors[index]
+        if (descriptor) Object.defineProperty(target, name, descriptor)
+        else Reflect.deleteProperty(target, name)
+      })
+    },
+  }
+}
+
+/** Real page windows and pointer capture; the Session action sink records commands. */
 export function installModalWindowHost() {
   const stage = document.createElement('div'),
     initialCanvas = document.createElement('canvas'),
@@ -65,6 +266,12 @@ export function installModalWindowHost() {
     clearActions: () => {
       actions.length = 0
     },
+    observePointerCapture(windowId: number, kind: 'move' | 'resize') {
+      const target = surface(windowId).element.querySelector<HTMLElement>(
+        kind === 'move' ? '.game-window-header' : '.game-window-resize',
+      )!
+      return observePointerCapture(target)
+    },
     snapshot(windowId: number) {
       const { element, canvas } = surface(windowId),
         close = element.querySelector<HTMLButtonElement>('.game-window-close')!,
@@ -100,5 +307,6 @@ export function installModalWindowHost() {
 declare global {
   interface Window {
     modalWindowHost: ReturnType<typeof installModalWindowHost>
+    modalWindowCapture: ReturnType<typeof observePointerCapture>
   }
 }

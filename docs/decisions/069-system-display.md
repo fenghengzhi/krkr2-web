@@ -62,3 +62,5 @@
 修复将创建过程放入立即调用的函数表达式，使用 `global.sdSecondWindow` 保留后续操作所需的 Window，并把同一用例尚未到达的多语句清理也放入函数表达式。生产代码、全部原有几何期望、真实 DOM 测量、后端与字节码覆盖、用例数量均不变。
 
 原始报告、TAP、trace 和失败状态保留；局部数据审计位于主工作区 `out/verification/system-display/ci-36455312915-chromium-diagnosis.json`。这个修复仅完成静态审查，没有本地执行或单独 Actions 重跑，等待根任务下一批统一验证。
+
+同轮 Firefox 的独立 modal-window-host resize 取消用例另因 releasePointerCapture 的失效指针错误而失败，详见 [052 的后续证据与清理修订](052-modal-scopes.md)。该页面夹具仅创建 GameWindows 与 WindowState，不创建 Player 或 BrowserSystemDisplay，也不执行本切片的显示观察器。旧 trace 没有原始 pointer/capture 生命周期记录，不能把该问题归因于显示观察器或宣称已确认自动丢失 capture；修复按 release API 的 NotFoundError 合同处理并保留独立验证边界。

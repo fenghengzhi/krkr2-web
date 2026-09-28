@@ -280,7 +280,25 @@ export function createGameWindows(
       surface.gesture = undefined
       gestureAbort.abort()
       surface.element.classList.remove('game-window-dragging')
-      if (target.hasPointerCapture(pointer)) target.releasePointerCapture(pointer)
+      try {
+        if (target.hasPointerCapture(pointer)) {
+          try {
+            target.releasePointerCapture(pointer)
+          } catch (error) {
+            // Pending capture ownership does not prove that the browser still
+            // has an active pointer. Only this release's expired-id result is
+            // terminal cleanup; unrelated API errors must remain observable.
+            if (
+              !(error instanceof (browser as Window & typeof globalThis).DOMException) ||
+              error.name !== 'NotFoundError'
+            )
+              throw error
+          }
+        }
+      } catch (error) {
+        if (live(surface)) layout(surface)
+        throw error
+      }
       if (!live(surface)) return
       if (commit && result && interactive(surface)) {
         if (resizing) {
