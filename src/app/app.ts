@@ -368,6 +368,7 @@ export function mountApp(root: HTMLDivElement): void {
       {
         windows,
         pads: createGamePads(el('stage')),
+        desktopElement: el('stage'),
         async onStopRequested() {
           if (current !== generation || player !== instance) return
           try {

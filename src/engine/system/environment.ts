@@ -1,5 +1,6 @@
 import packageInfo from '../../../package.json' with { type: 'json' }
 import { normalizePath } from '../storage/resolver.ts'
+import { SystemDisplay, type SystemDisplayMetrics } from './display.ts'
 
 const packageVersion = packageInfo.version
 if (!/^\d+\.\d+\.\d+$/.test(packageVersion))
@@ -39,6 +40,7 @@ export function normalizeSystemDataPath(input?: string): string {
 
 /** Paths are prefixes in the mounted game's VFS, never host filesystem paths. */
 export class SystemEnvironment {
+  readonly display: SystemDisplay
   readonly exePath = ''
   readonly exeName = 'krkr2-web'
   readonly personalPath = 'savedata/'
@@ -52,7 +54,9 @@ export class SystemEnvironment {
   constructor(
     arguments_: ReadonlyMap<string, string> | undefined,
     private readonly fillRandomBytes?: (bytes: Uint8Array<ArrayBuffer>) => void,
+    display?: SystemDisplayMetrics,
   ) {
+    this.display = new SystemDisplay(display)
     this.dataPath = normalizeSystemDataPath(arguments_?.get('-datapath'))
   }
 

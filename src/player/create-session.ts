@@ -14,6 +14,7 @@ import { WebAppLocks } from '../backends/files/web-app-locks.ts'
 import { fillWebRandomBytes } from '../backends/system/web-crypto.ts'
 import { normalizeSystemDataPath } from '../engine/system/environment.ts'
 import { copySystemColorPalette } from '../engine/graphics/system-colors.ts'
+import { copySystemDisplayMetrics } from '../engine/system/display.ts'
 import { PortAudioBackend } from '../backends/audio/port-backend.ts'
 import { PortVideoBackend } from '../backends/video/port-backend.ts'
 import { PortClipboardBackend } from '../backends/clipboard/port-backend.ts'
@@ -27,12 +28,14 @@ export function createSession(request: InitializeRequest): EngineSession {
   const dataPath = request.dataPath
   normalizeSystemDataPath(dataPath)
   const systemColors = copySystemColorPalette(request.systemColors)
+  const systemDisplay = copySystemDisplayMetrics(request.systemDisplay)
   const arguments_ = new Map<string, string>(request.debugMode ? [['-debug', 'yes']] : [])
   if (dataPath !== undefined) arguments_.set('-datapath', dataPath)
   let sequence = 0
   const session: EngineSession = new EngineSession({
     systemFonts: request.systemFonts,
     systemColors,
+    systemDisplay,
     activity: request.activity,
     arguments: arguments_,
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),

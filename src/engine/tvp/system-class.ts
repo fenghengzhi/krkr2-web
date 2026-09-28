@@ -1,4 +1,5 @@
 import { isScriptObject, type ScriptClass, type ScriptValue } from '../script/runtime.ts'
+import { systemDisplayProperties } from '../system/display.ts'
 
 // The bodies stay in TJS so dialogs keep their existing request/exception stack.
 // Native registration supplies static flags, receiver checks and call policies.
@@ -140,6 +141,7 @@ export const systemReadonlyProperties = [
   'versionInformation',
   'platformName',
   'osName',
+  ...systemDisplayProperties,
 ] as const
 
 export function systemClassValue(delegates: ScriptValue[]): ScriptClass {

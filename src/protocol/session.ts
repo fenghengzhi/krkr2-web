@@ -6,7 +6,8 @@ import type { FontDescriptor, FontPreview } from '../engine/ports/fonts.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import type { PadAck, PadMessage, PadFontData } from './pad.ts'
-export const PROTOCOL_VERSION = 18
+import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
+export const PROTOCOL_VERSION = 19
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -31,6 +32,8 @@ export interface InitializeRequest {
   dataPath?: string
   /** Immutable page/embedding palette, validated again before Worker resources are created. */
   systemColors?: readonly number[]
+  /** Player-local CSS geometry, sampled before its Worker is initialized. */
+  systemDisplay?: SystemDisplayMetrics
   gameId: string
   audio: MessagePort
   video: MessagePort
@@ -69,6 +72,7 @@ export interface SessionApi {
   menuClick(id: number, popup?: MenuPopupIdentity): Promise<InputAdmissionAck>
   menuDismiss(popup?: MenuPopupIdentity): Promise<void>
   setSystemFonts(fonts: FontDescriptor[]): Promise<void>
+  setSystemDisplay(generation: number, update: SystemDisplayUpdate): Promise<void>
   setDebugVisibility(panel: DebugPanel, visible: boolean): Promise<SessionSnapshot>
   selectFont(id: number, face: string | null): Promise<void>
   selectSystemDialog(id: number, value: string | null): Promise<boolean>
