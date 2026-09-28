@@ -582,12 +582,15 @@ public:
 class HostClass final : public tTJSNativeClass {
     static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
     Vm* systemVm;
+    bool storages;
     unsigned systemBindings = 0;
 public:
-    explicit HostClass(const tjs_char* name, Vm* systemVm = nullptr)
-        : tTJSNativeClass(name), systemVm(systemVm) {
+    explicit HostClass(const tjs_char* name, Vm* systemVm = nullptr, bool storages = false)
+        : tTJSNativeClass(name), systemVm(systemVm), storages(storages) {
         SetClassID(TJSRegisterNativeClass(name));
-        RegisterNCM(name, TJSCreateNativeClassConstructor(noOp), name, nitMethod);
+        // The original Storages class only registers an empty finalizer; it
+        // has no named constructor member even though System does.
+        if(!storages) RegisterNCM(name, TJSCreateNativeClassConstructor(noOp), name, nitMethod);
         RegisterNCM(u"finalize", TJSCreateNativeClassMethod(noOp), name, nitMethod);
         if(systemVm) {
             tTJSVariant empty(static_cast<iTJSDispatch2*>(nullptr), static_cast<iTJSDispatch2*>(nullptr));
@@ -602,12 +605,60 @@ public:
         // The System.System constructor itself is a no-op. The original class
         // rejects creation here, before that constructor can be called.
         if(systemVm) TJS_eTJSError(u"Cannot create an instance of System");
+        if(storages) TJS_eTJSError(u"Cannot create an instance of Storages");
         return tTJSNativeClass::CreateNativeInstance();
     }
     bool CanBindSystem(Vm* vm, unsigned bit) const noexcept {
         return systemVm == vm && vm && GetValidity() && !(systemBindings & bit);
     }
     void BoundSystem(unsigned bit) noexcept { systemBindings |= bit; }
+};
+
+struct StorageMethodPolicy {
+    const tjs_char* name;
+    const tjs_char* operation;
+    bool mutates;
+};
+constexpr StorageMethodPolicy storageMethodPolicies[] = {
+    {u"addAutoPath", u"Storages.addAutoPath", true},
+    {u"removeAutoPath", u"Storages.removeAutoPath", true},
+    {u"getFullPath", u"Storages.getFullPath", false},
+    {u"getPlacedPath", u"Storages.getPlacedPath", false},
+    {u"isExistentStorage", u"Storages.exists", false},
+    {u"extractStorageExt", u"Storages.extractStorageExt", false},
+    {u"extractStorageName", u"Storages.extractStorageName", false},
+    {u"extractStoragePath", u"Storages.extractStoragePath", false},
+    {u"chopStorageExt", u"Storages.chopStorageExt", false}
+};
+class StorageMethod final : public tTJSNativeClassMethod {
+    Vm* vm;
+    const StorageMethodPolicy& policy;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    StorageMethod(Vm* vm, const StorageMethodPolicy& policy)
+        : tTJSNativeClassMethod(noOp), vm(vm), policy(policy) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        if(count < 1) return TJS_E_BADPARAMCOUNT;
+        // Even when the caller discards the result, the original nine methods
+        // convert the first argument with TJS's own string conversion. Extra
+        // arguments were evaluated by TJS but are not converted or forwarded.
+        const ttstr path = *args[0];
+        if(!result && !policy.mutates) return TJS_S_OK;
+        tTJSVariant converted(path);
+        tTJSVariant* input = &converted;
+        std::unique_ptr<Reply> reply(dispatch_host(vm, policy.operation,
+            TJS_strlen(policy.operation), 1, &input));
+        if(!reply) TJS_eTJSError(u"Storages host returned no response");
+        // add/remove return void regardless of a host reply's payload, but
+        // host exceptions must still propagate through the normal reply path.
+        resolveReply(vm, *reply, policy.mutates ? nullptr : result);
+        return TJS_S_OK;
+    }
 };
 
 // These delegates retain the existing TJS bodies, including dialog request
@@ -998,12 +1049,15 @@ API int krkr_proxy_bind_owner(Vm* vm, tTJSVariant* value, unsigned handle) {
 }
 API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* className) {
     const bool system = id == 0 && ttstr(prefix) == u"System" && ttstr(className) == u"System";
-    krkr::NativeOwner<HostClass> object(new HostClass(className, system ? vm : nullptr));
+    const bool storages = id == 0 && ttstr(prefix) == u"Storages" && ttstr(className) == u"Storages";
+    krkr::NativeOwner<HostClass> object(new HostClass(className, system ? vm : nullptr, storages));
     if(id == 0 && ttstr(prefix) == u"Clipboard" && ttstr(className) == u"Clipboard") {
         object->RegisterNCM(u"hasFormat", new ClipboardHasFormat(vm), u"Clipboard", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"asText", new ClipboardText(vm), u"Clipboard", nitProperty, TJS_STATICMEMBER);
     }
     if(system) object->RegisterNCM(u"createUUID", new SystemUuid(vm), u"System", nitMethod, TJS_STATICMEMBER);
+    if(storages) for(const auto& policy : storageMethodPolicies)
+        object->RegisterNCM(policy.name, new StorageMethod(vm, policy), u"Storages", nitMethod, TJS_STATICMEMBER);
     *value = tTJSVariant(object.get(), object.get());
 }
 // Private assembly exports: only the fixed System delegates may be installed,

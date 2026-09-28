@@ -1,19 +1,9 @@
 import type { Resource } from '../ports/storage.ts'
 
-export function normalizePath(input: string): string {
-  if (input.includes('\0') || /^[a-z]+:/i.test(input) || /^[\\/]/.test(input))
-    throw new Error(`Invalid resource path: ${input}`)
-  const components: string[] = []
-  for (const component of input.replaceAll('\\', '/').split('/')) {
-    if (!component || component === '.') continue
-    if (component === '..') {
-      if (!components.length) throw new Error('Resource path escapes game root')
-      components.pop()
-    } else components.push(component)
-  }
-  if (!components.length) throw new Error('Empty resource path')
-  return components.join('/')
-}
+import { normalizeResourcePath, parseStoragePath, storageDirectoryPath } from './public-path.ts'
+
+// Kept as the strict relative import/key boundary for existing callers.
+export const normalizePath = normalizeResourcePath
 
 export function normalizeStorageName(input: string, directory = false): string {
   const delimiter = input.indexOf('>')
@@ -44,22 +34,23 @@ export class StorageResolver {
     }
   }
   addAutoPath(path: string): void {
-    const normalized = normalizeStorageName(path.replace(/\/$/, ''), true)
+    const normalized = storageDirectoryPath(path)
     if (!this.autoPaths.includes(normalized)) this.autoPaths.push(normalized)
   }
   removeAutoPath(path: string): void {
-    const normalized = normalizeStorageName(path.replace(/\/$/, ''), true)
+    const normalized = storageDirectoryPath(path)
     this.autoPaths = this.autoPaths.filter((path) => path !== normalized)
   }
   candidates(path: string): string[] {
-    const normalized = normalizeStorageName(path)
+    const normalized = parseStoragePath(path)
+    if (!normalized || /[/>]$/.test(normalized)) return [normalized]
     const basename = normalized.split(/[/>]/).at(-1)!
     return [
       normalized,
       ...this.autoPaths
         .slice()
         .reverse()
-        .map((prefix) => prefix + (prefix.endsWith('>') ? '' : '/') + basename),
+        .map((prefix) => prefix + basename),
     ]
   }
   find(path: string): Resource | undefined {

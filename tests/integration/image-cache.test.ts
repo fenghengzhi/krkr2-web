@@ -21,7 +21,7 @@ test('TJS cache property and preloading share canonical images without creating 
     assert.equal(await session.evaluate('typeof global.__graphicCacheLimit'), 'undefined')
     await exec(
       session,
-      'Storages.addAutoPath("art");System.graphicCacheLimit=4096;var result=System.touchImages(["missing", "broken", "main", "ART/MAIN.PNG", 7, void, "ignored"]);',
+      'Storages.addAutoPath("art/");System.graphicCacheLimit=4096;var result=System.touchImages(["missing", "broken", "main", "ART/MAIN.PNG", 7, void, "ignored"]);',
     )
     assert.equal(await session.evaluate('result===void && System.graphicCacheLimit==4096'), '1')
     const initial = session.snapshot()
@@ -85,7 +85,7 @@ test('saved-image overwrites, imports and companion replacement invalidate cache
   try {
     await exec(
       session,
-      'Storages.addAutoPath("savedata");var w=new Window(),a=new Layer(w,null),b=new Layer(w,a);a.loadImages("main");a.fillRect(0,0,1,1,0xff090000);a.saveLayerImage("savedata/main.bmp","bmp32");',
+      'Storages.addAutoPath("savedata/");var w=new Window(),a=new Layer(w,null),b=new Layer(w,a);a.loadImages("main");a.fillRect(0,0,1,1,0xff090000);a.saveLayerImage("savedata/main.bmp","bmp32");',
     )
     assert.equal(session.snapshot().imageCacheEntries, 0)
     await exec(session, 'b.loadImages("MAIN");')

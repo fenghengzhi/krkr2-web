@@ -83,7 +83,7 @@ for (const backend of ['asyncify', 'jspi']) {
       await expression(
         page,
         '(function(){Storages.addAutoPath("game.data>folder/");return Storages.getPlacedPath("CAFÉ.TXT");})()',
-        'game.data>folder/café.txt',
+        'game://./game.data>folder/café.txt',
       )
       await expect(page.locator('#save-status')).toContainText('1 个存档文件，已保存')
       await page.reload()

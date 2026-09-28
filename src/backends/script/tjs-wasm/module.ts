@@ -58,6 +58,7 @@ export interface WasmManifest {
     nativeClipboard?: number
     /** Version 2 includes the fixed System.toActualColor method binding. */
     nativeSystem?: number
+    nativeStorages?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string
