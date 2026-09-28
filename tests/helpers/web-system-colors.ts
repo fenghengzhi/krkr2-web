@@ -43,9 +43,14 @@ export const expectedSystemColorCssNames = [
 ] as const
 
 /** Read browser-computed CSS colors without importing the production sampler. */
-export async function readPageSystemColors(page: Page, selector: string) {
+export async function readPageSystemColors(
+  page: Page,
+  selector: string,
+  names: readonly (string | null)[] = expectedSystemColorCssNames,
+  canvasColor = 'Canvas',
+) {
   return page.evaluate(
-    ({ selector, names }) => {
+    ({ selector, names, canvasColor }) => {
       const anchor = document.querySelector(selector)
       if (!anchor) throw new Error(`Missing CSS color anchor: ${selector}`)
       const scheme = getComputedStyle(anchor).colorScheme,
@@ -59,24 +64,58 @@ export async function readPageSystemColors(page: Page, selector: string) {
       const context = canvas.getContext('2d')!
       try {
         const css: Record<string, string> = {},
-          palette = names.map((name) => {
-            if (name === null) return 0
-            swatch.style.color = name
-            const color = getComputedStyle(swatch).color
-            css[name] = color
-            context.clearRect(0, 0, 1, 1)
-            context.fillStyle = color
-            context.fillRect(0, 0, 1, 1)
-            const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data
-            if (a !== 255) throw new Error(`Non-opaque CSS system color: ${name}`)
-            return r! * 65536 + g! * 256 + b!
-          })
-        return { scheme, css, palette }
+          rawRgba: Record<string, number[]> = {},
+          resolvedRgb: Record<string, number> = {}
+        for (const name of new Set([canvasColor, ...names])) {
+          if (name === null) continue
+          swatch.style.setProperty('color', name, 'important')
+          const color = getComputedStyle(swatch).color
+          css[name] = color
+          context.clearRect(0, 0, 1, 1)
+          context.fillStyle = color
+          context.fillRect(0, 0, 1, 1)
+          rawRgba[name] = Array.from(context.getImageData(0, 0, 1, 1).data)
+        }
+        // Independent native-canvas oracle for the documented flatten policy.
+        // Raw RGBA is evidence only: reusing its unpremultiplied RGB here would
+        // introduce an extra lossy roundtrip for translucent CSS colors.
+        context.fillStyle = '#ffffff'
+        context.fillRect(0, 0, 1, 1)
+        context.fillStyle = css[canvasColor]!
+        context.fillRect(0, 0, 1, 1)
+        const backdropRgba = Array.from(context.getImageData(0, 0, 1, 1).data),
+          backdropRgb = backdropRgba[0]! * 65536 + backdropRgba[1]! * 256 + backdropRgba[2]!
+        resolvedRgb[canvasColor] = backdropRgb
+        for (const name of Object.keys(css)) {
+          if (name === canvasColor) continue
+          context.fillStyle = `rgb(${backdropRgba.slice(0, 3).join(',')})`
+          context.fillRect(0, 0, 1, 1)
+          context.fillStyle = css[name]!
+          context.fillRect(0, 0, 1, 1)
+          const [r, g, b] = context.getImageData(0, 0, 1, 1).data
+          resolvedRgb[name] = r! * 65536 + g! * 256 + b!
+        }
+        const palette = names.map((name) => (name === null ? 0 : resolvedRgb[name]!))
+        return {
+          scheme,
+          css,
+          rawRgba,
+          resolvedRgb,
+          palette,
+          backdrop: {
+            cssColor: canvasColor,
+            fallbackRgb: 0xffffff,
+            rgba: backdropRgba,
+            rgb: backdropRgb,
+          },
+          policy:
+            'CSS Canvas over explicit Web white; each other CSS color over that opaque RGB Canvas backdrop using native 2D source-over',
+        }
       } finally {
         swatch.remove()
       }
     },
-    { selector, names: expectedSystemColorCssNames },
+    { selector, names, canvasColor },
   )
 }
 
@@ -120,6 +159,7 @@ export async function buildSystemColorsEmbedding() {
             return [
               `export { createPlayer } from ${JSON.stringify(resolve('src/player/create-player.ts'))};`,
               `export { createGameWindows } from ${JSON.stringify(resolve('src/app/game-windows.ts'))};`,
+              `export { sampleCssColorPalette } from ${JSON.stringify(resolve('src/player/system-colors.ts'))};`,
             ].join('\n')
           },
         },
@@ -189,6 +229,61 @@ export async function openSystemColorsEmbedding(
   )
   await page.goto('/system-colors-embedding.html')
   return setup
+}
+
+/** Explicit CSS inputs exercise real compositing without replacing native system colors. */
+export async function exerciseCssColorAlphaSamples(page: Page, entry: string) {
+  const fixtures = [
+    { name: 'translucent-role', canvas: 'rgb(32,64,96)', highlight: 'rgba(224,128,16,0.5)' },
+    {
+      name: 'translucent-canvas-and-role',
+      canvas: 'rgba(64,128,192,0.25)',
+      highlight: 'rgba(200,40,120,0.5)',
+    },
+    { name: 'transparent-canvas-and-role', canvas: 'transparent', highlight: 'rgba(255,0,0,0)' },
+    { name: 'transparent-role', canvas: 'rgb(32,64,96)', highlight: 'transparent' },
+  ]
+  await page.evaluate(() => {
+    const root = document.createElement('div')
+    root.id = 'system-css-alpha-fixture'
+    root.style.colorScheme = 'light'
+    root.append(document.createElement('canvas'))
+    document.body.append(root)
+  })
+  const results = []
+  try {
+    for (const fixture of fixtures) {
+      const colors = expectedSystemColorCssNames.map((name) =>
+        name === 'Canvas' ? fixture.canvas : name === 'Highlight' ? fixture.highlight : name,
+      )
+      const expected = await readPageSystemColors(
+          page,
+          '#system-css-alpha-fixture',
+          colors,
+          fixture.canvas,
+        ),
+        sampled = await page.evaluate(
+          async ({ entry, colors, canvasColor }) => {
+            const { sampleCssColorPalette } = (await import(entry)) as {
+              sampleCssColorPalette: typeof import('../../src/player/system-colors.ts').sampleCssColorPalette
+            }
+            try {
+              const canvas = document.querySelector<HTMLCanvasElement>(
+                '#system-css-alpha-fixture canvas',
+              )!
+              return { palette: sampleCssColorPalette(canvas, colors, canvasColor), error: null }
+            } catch (error) {
+              return { palette: null, error: String(error) }
+            }
+          },
+          { entry, colors, canvasColor: fixture.canvas },
+        )
+      results.push({ fixture, expected, sampled })
+    }
+    return results
+  } finally {
+    await page.locator('#system-css-alpha-fixture').evaluate((element) => element.remove())
+  }
 }
 
 interface ColorEmbedding {

@@ -13,6 +13,7 @@ import {
 } from '../helpers/web-system-core.ts'
 import {
   buildSystemColorsEmbedding,
+  exerciseCssColorAlphaSamples,
   openSystemColorsEmbedding,
   readPageSystemColors,
   rejectInvalidSystemColorPlayers,
@@ -53,6 +54,10 @@ for (const backend of ['asyncify', 'jspi'] as const) {
       })
       const initial = await readPageSystemColors(page, '#stage')
       try {
+        await info.attach('actual-css-system-colors-before-player-start', {
+          contentType: 'application/json',
+          body: JSON.stringify({ variant, initial }, null, 2),
+        })
         await page.locator('#files').setInputFiles(systemFiles(binary, defaultSource))
         await expect(
           page.getByText(`system-colors:default:${initial.palette.join(',')}`, { exact: true }),
@@ -207,6 +212,37 @@ test.describe('public createPlayer system color palettes', () => {
       body: JSON.stringify(rejected, null, 2),
     })
     expect(setup.workers).toEqual([])
+    const alphaSamples = await exerciseCssColorAlphaSamples(page, bundle.entry)
+    await info.attach('explicit-css-alpha-samples-real-canvas-compositing', {
+      contentType: 'application/json',
+      body: JSON.stringify(
+        {
+          scope:
+            'Explicit CSS fixture colors through the production CSS adapter, real computed styles and native Canvas2D; these are not observations of native Highlight or Canvas values.',
+          alphaSamples,
+        },
+        null,
+        2,
+      ),
+    })
+    for (const { fixture, expected, sampled } of alphaSamples) {
+      expect(sampled.error, fixture.name).toBeNull()
+      expect(sampled.palette, fixture.name).toEqual(expected.palette)
+      expect(expected.backdrop.rgba[3], fixture.name).toBe(255)
+      const alpha = expected.rawRgba[fixture.highlight]![3]!
+      if (fixture.name.startsWith('translucent')) {
+        expect(alpha, fixture.name).toBeGreaterThan(0)
+        expect(alpha, fixture.name).toBeLessThan(255)
+      } else {
+        expect(alpha, fixture.name).toBe(0)
+        expect(sampled.palette?.[13], fixture.name).toBe(expected.backdrop.rgb)
+      }
+      if (fixture.name === 'transparent-canvas-and-role') {
+        expect(expected.rawRgba[fixture.canvas]![3]).toBe(0)
+        expect(sampled.palette?.[5]).toBe(0xffffff)
+        expect(sampled.palette?.[13]).toBe(0xffffff)
+      }
+    }
     expect(rejected).toHaveLength(13)
     for (const result of rejected) {
       expect(result.constructed).toBe(false)

@@ -24,6 +24,10 @@
 
 与 064 图像 key、065 系统色合并的会话协议为 **17**，同时承载普通输入代际和系统色快照。新增六项 Node 用例，现有浏览器模板数量不变；未来失败附件会分别保存输入焦点／文字和字体的真实活动控件。按用户要求，本批功能及修复完成后集中运行一次完整检查；尚未执行的候选不算通过。
 
+整合后的 [36443186745](https://github.com/fenghengzhi/krkr2-web/actions/runs/36443186745) 实际 Node 结果为 **2,172 通过、2 失败，共 2,174 项**。两项均为新增 ordinary input generation 场景的 source/bytecode：所有旧代际拒绝、trapper 门控及实际回调顺序断言已通过，最后的活动窗口断言得到 C（3）而非 A（1）。该原始失败继续保留，不能从 Node 结果推断整轮其它工作完成。
+
+静态核对发现夹具在创建 C 和重新显示 C 后，没有恢复所声称的物理来源 A。固定 `WindowFormUnit.cpp:1531` 的可聚焦分支按普通 `Visible` 路径显示窗口，只有不可聚焦分支显式使用 `SWP_NOACTIVATE`；`FindKeyTrapper:1108` 则只转发键消息，不负责激活。当前 Web 的 `Window.set` 也会激活新显示的可聚焦窗口。因此夹具在这两个显示动作完成后显式激活 A 并断言前置状态，再进行原有输入断言；最后仍严格要求活动窗口是 A，没有把 expected 改成 C，也没有修改生产键路由或显示行为。这是源码确认的夹具前置条件修正，并非新增原版 HWND 实测；修订仍待后续合批 Actions 验证。
+
 ## 原版依据
 
 固定官方源码为 `krkrz/krkr2@dec49af97e174d31059c3ccd7efc700ba3c6b788` 的 `kirikiri2/branches/2.32stable/kirikiri2/src/core/`。完整只读审计及 12 份原始源码的 SHA-256 保存于工作区 `out/verification/window-attention/contract.md` 与 `reference/SHA256SUMS`；该目录是验证归档，不是分发依赖。

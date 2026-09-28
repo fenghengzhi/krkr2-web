@@ -6,7 +6,11 @@
 
 与 063／064 整合的首次 [完整回归 36442487130](https://github.com/fenghengzhi/krkr2-web/actions/runs/36442487130) 在 `991c4072e09fd477a844e1a645ce7e017db91705` 完成原生内核编译后，因 `system-colors.test.ts` 的负向测试把故意不完整的依赖对象直接断言为 `SessionDependencies` 而报 TS2352。Node、浏览器和直接运行时实际执行数均为 **0**，不能记为任何功能通过。后续只把这个刻意缺少后端的负向夹具显式经过 `unknown` 转换，保留“无效调色板必须在访问后端前拒绝”的断言；未放宽生产类型。原始构建失败和日志保留，待修正后的整批运行。
 
+第二次组合运行 [36443186745](https://github.com/fenghengzhi/krkr2-web/actions/runs/36443186745) 的 Firefox PWA 原始 `out/ci/results.json` 明确记录 `Browser system color is not opaque: Highlight`，多个游戏因而在建立 Player 时无法启动。初版错误要求每个原始采样的 alpha 都为255；修订改用下述明确的24位合成政策。该轮未记录具体 CSS 字符串/RGBA，不能据此报告某个精确透明度。历史失败及完整原始产物保留，**本修订尚未运行，不能声称已经恢复通过**。
+
 ## 原版证据与解释边界
+
+第二次整合 [36443186745](https://github.com/fenghengzhi/krkr2-web/actions/runs/36443186745) 的构建成功，实际 Node 为 **2,172 通过、2 失败**，直接运行时 **6/6** 通过；浏览器暴露了上述共同初始化问题。为避免继续重复该错误，剩余普通浏览器作业被取消，保留全部已完成与部分报告，不能把此轮计为完整回归成功。复用同一构建的 [兼容检查 36443590538](https://github.com/fenghengzhi/krkr2-web/actions/runs/36443590538) 在取消请求前已经自行失败：原 78 项中 **24 失败、54 未执行、0 通过**，24 项均独立记录相同 Highlight 错误；15 项旧 PWA 的旧版在线／离线启动已完成，失败发生于当前版本启动。后续半透明颜色修复和输入夹具修正尚待与下一批功能一起验证，不覆盖这些历史结果。
 
 固定源码是 `krkrz/krkr2@dec49af97e174d31059c3ccd7efc700ba3c6b788` 的 2.32stable：
 
@@ -36,6 +40,10 @@
 `PlayerOptions.systemColors?: readonly number[]` 可以传入31项 `0xRRGGBB` 数组，对应index0..30，index25必须为0。长度不符、空位、非整数、负数、超过24位或非零index25立即拒绝。`createPlayer` 只读取该选项一次，在建立 MessageChannel、媒体host和Worker之前验证并复制；Worker `createSession` 在构造任何port/surface之前再验证。EngineSession 保存独立只读快照，不持有调用者可修改的数组。不同player/session互不影响。
 
 未传配置时，`createPlayer` 在实际canvas的 `ownerDocument` 中读取其 computed `color-scheme`，临时不可见元素逐个求 CSS 系统色的computed值，再用同document的1×1 canvas转换为RGB。采样元素禁用页面的transition/animation；每个不同关键字只采一次，临时DOM随后移除。生成的31项快照经 SessionClient/InitializeRequest 传入worker；之后页面颜色方案变化不会重算该session。页面支持不足时会报告错误，不把一次失败采样悄悄换成 Windows 色表。
+
+CSS 系统色可以含 alpha，24位调色板使用明确的 Web 合成政策：首先用原生 Canvas2D `source-over` 把实际 CSS `Canvas` 叠在固定白色 `#ffffff` 上，取得不透明 RGB 底色；`Canvas` 对应条目直接使用该结果。其余角色分别在这个 RGB 底色上合成一次，保留透明与半透明输入的视觉贡献。白色只为透明 `Canvas` 提供固定 Web 底色，不代表 Windows 色表或页面实际背景。合成继续使用浏览器默认 sRGB Canvas 的实际栅格化和8位输出，不先丢弃 alpha，也不先把原始RGBA读回再重建透明颜色，以避免额外的预乘/反预乘精度损失。
+
+依据 [CSS Color 4 §15.5](https://www.w3.org/TR/2026/CRD-css-color-4-20260926/#resolving-other-colors)，系统色的 computed/used 值包含颜色及 alpha；[HTML Canvas 合成](https://html.spec.whatwg.org/multipage/canvas.html#compositing) 默认 `source-over`，其 [Porter-Duff 公式](https://www.w3.org/TR/compositing-1/#porterduffcompositingoperators_src_over) 保留背景贡献。这里选择 `Canvas` 与最终白底属于本项目的24位兼容政策，不是这些规范指定的 KRKR/Windows 主题行为。
 
 | 索引                     | CSS 关键字     |
 | ------------------------ | -------------- |
@@ -88,6 +96,6 @@ System和LayerTree共享同一 `SystemColors` 对象，只有以下标量入口�
 
 Node使用真实WASM/EngineSession，分别运行source与 `Scripts.compileStorage` 产出的真实bytecode；共用fixture以原版观测分类给出预期，不调用生产resolver生成“答案”。覆盖大整数窄化、全部公开常量、完整低8索引空间、四种入口使用方式、borrowed/null-bound、实参求值计数、Layer主图/ARGB/字节数据、只读快照与不同session隔离。旧System类/UUID/路径等测试只更新第14方法和能力版本的必要条件，原有断言意图保留。
 
-浏览器定义覆盖实际应用CSS默认路径与单独Vite编译的真实public createPlayer/Worker嵌入入口、31项注入、修改原数组和多player隔离、页面color-scheme变化后快照不变，以及真实字体的前景/阴影颜色分界。source/bytecode和现有运行后端分别执行；生产loader测试保留nativeClipboard要求，新增旧nativeSystem=1拒绝，并用完整cap2内核恢复后真实调用toActualColor。
+浏览器定义覆盖实际应用CSS默认路径与单独Vite编译的真实public createPlayer/Worker嵌入入口、31项注入、修改原数组和多player隔离、页面color-scheme变化后快照不变，以及真实字体的前景/阴影颜色分界。独立期望采样器记录实际 computed CSS、透明画布上的原始RGBA、合成后的RGB与Canvas底色。另一组明确标注的四项CSS输入覆盖半透明角色、半透明Canvas及角色、全透明Canvas及角色、透明角色；这些使用真实样式解析和Canvas2D，却不是原生系统色观测，也不改写Worker/System返回值。原有双调色板注入和修改调用者数组仍严格核对session隔离。source/bytecode和现有运行后端分别执行；生产loader测试保留nativeClipboard要求，新增旧nativeSystem=1拒绝，并用完整cap2内核恢复后真实调用toActualColor。
 
-以上均等待GitHub-hosted Actions；本阶段未在本机执行。后续报告必须保留实际浏览器、case数量、source/bytecode、跳过、不支持、失败和完整日志。原版97×2记录、此前阶段测试、静态源码检查都不能替代本候选PASS。
+修订后的定义等待GitHub-hosted Actions；本阶段未在本机执行。后续报告必须保留实际浏览器、case数量、source/bytecode、跳过、不支持、失败和完整日志。原版97×2记录、此前阶段测试、静态源码检查及此次组合运行中的其他通过项都不能替代本修订候选PASS。

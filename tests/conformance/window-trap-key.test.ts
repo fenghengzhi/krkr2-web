@@ -542,6 +542,10 @@ for (const binary of [false, true]) {
       assert.equal(await f.trace(), '', 'A stale ordinary keyUp must not arm the reset gate')
 
       await f.execute('newest();')
+      // Showing the new focusable C may activate it. Restore the physical
+      // source before testing whether trapped input itself changes activation.
+      await f.session.activateWindow(f.a)
+      assert.equal(f.session.snapshot().activeWindow, f.a)
       const replacement = f.route(f.a)
       assert.ok(replacement.inputRevision !== undefined)
       assert.notEqual(replacement.windowId, reset.windowId)
@@ -588,6 +592,9 @@ for (const binary of [false, true]) {
       assert.equal(await f.trace(), '', 'Hiding C must not retarget its stale keyUp to arm B')
 
       await f.execute('c.visible=true;')
+      // Re-showing C has its own activation behavior, independent of trapKey.
+      await f.session.activateWindow(f.a)
+      assert.equal(f.session.snapshot().activeWindow, f.a)
       const restored = f.route(f.a)
       assert.ok(restored.inputRevision !== undefined)
       assert.equal(restored.windowId, replacement.windowId)
