@@ -8,6 +8,7 @@ import { PROTOCOL_VERSION, type InputAdmissionAck, type SessionApi } from '../pr
 import type { EngineSession, SessionAdmission } from '../engine/session.ts'
 import { LibraryService, type LibraryLease } from '../player/library/service.ts'
 
+let generation = 0
 let session: EngineSession | undefined
 const sources = new HttpRangePool()
 let prepared: SourceFile[] | undefined
@@ -134,6 +135,7 @@ const api: SessionApi = {
     if (!prepared || request.gameId !== gameId)
       throw new Error('Prepare the game sources before initializing')
     session = createSession(request)
+    generation = request.generation
     session.control.onCancel(() => sources.close())
     await session.initialize()
     sources.signal.throwIfAborted()
@@ -238,6 +240,14 @@ const api: SessionApi = {
   },
   async selectFont(id, face) {
     active().selectFont(id, face)
+  },
+  async padFont(requestGeneration, id, epoch) {
+    if (requestGeneration !== generation) return null
+    return active().padFont(id, epoch)
+  },
+  async pad(message) {
+    if (message.generation !== generation) return { status: 'ignored' }
+    return active().pad(message)
   },
   async selectSystemDialog(id, value) {
     return active().selectSystemDialog(id, value)

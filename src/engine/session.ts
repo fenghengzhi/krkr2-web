@@ -1,3 +1,6 @@
+import { PadService } from './scene/pads.ts'
+import { padClass } from './tvp/pad.ts'
+import type { PadAck, PadMessage, PadPresentation, PadFontData } from '../protocol/pad.ts'
 import { bootstrap } from './tvp/bootstrap.ts'
 import { clipboardClass } from './tvp/clipboard.ts'
 import { assertClipboardText, unavailableClipboard, type ClipboardPort } from './ports/clipboard.ts'
@@ -75,7 +78,7 @@ import { fontClass } from './tvp/font.ts'
 import { transitionBridge } from './tvp/transitions.ts'
 import { rectClass } from './tvp/rect.ts'
 import { fontSpec } from './graphics/font.ts'
-import { FontService } from './graphics/fonts.ts'
+import { FontService, type NamedFontFace } from './graphics/fonts.ts'
 import { FontCatalog } from './graphics/font-catalog.ts'
 import { FontSelection } from './graphics/font-selection.ts'
 import { cancelable } from './scheduler/cancelable.ts'
@@ -161,6 +164,7 @@ export type EngineEvent =
   | { type: 'window-activate'; windowId: number }
   | { type: 'window-input'; windowId: number; input: InputView }
   | { type: 'input'; input: InputView }
+  | ({ type: 'pads' } & PadPresentation)
   | { type: 'font-selection'; request: FontSelectionRequest | null }
   | ({ type: 'system-dialog' } & SystemDialogSnapshot)
   | { type: 'log'; level: 'info' | 'error'; text: string }
@@ -205,6 +209,7 @@ export class EngineSession {
   private clipboardClosed = false
   private readonly textEncoding = new ScriptTextEncoding()
   private readonly fontCatalog: FontCatalog
+  private padFonts = new Map<string, NamedFontFace[]>()
   private readonly fontSelection: FontSelection
   private fontPreviewBusy = false
   readonly control = new ExecutionControl()
@@ -264,6 +269,8 @@ export class EngineSession {
   private windowModals?: WindowModals
   private menuModals?: MenuModals
   private systemDialogs?: SystemDialogs
+  private pads?: PadService
+  private clipboardBusy = 0
   private windowInputGeneration = 0
   private modalWakeup?: () => void
   private detachPendingEvents?: () => void
@@ -348,16 +355,26 @@ export class EngineSession {
     this.fontCatalog = new FontCatalog({
       files: () => this.storage.list().map((file) => this.resolveResource(file.name)),
       resolve: (name) => this.resolveResource(name),
-      bind: (fonts) => this.fonts.registerNamed(fonts),
+      bind: (fonts) => {
+        this.fonts.registerNamed(fonts)
+        this.padFonts = fonts
+      },
       check: () => this.control.check(),
-      yield: () => this.yieldGraphics(),
+      // Catalog discovery is pure host work shared with Pad. A paused VM must
+      // not prevent an auxiliary editor from obtaining its font bytes.
+      yield: async () => {
+        await this.deps.yieldToHost()
+        this.control.check()
+      },
       wait: (work) => cancelable(work, this.control),
       warn: (text) => this.log(text),
     })
     this.fontCatalog.setSystem(deps.systemFonts ?? [])
-    this.fontSelection = new FontSelection(this.fontCatalog, (request) =>
-      this.deps.event({ type: 'font-selection', request }),
-    )
+    this.fontSelection = new FontSelection(this.fontCatalog, (request) => {
+      if (request) this.deps.event({ type: 'font-selection', request })
+      this.pads?.present()
+      if (!request) this.deps.event({ type: 'font-selection', request })
+    })
     if (deps.activity) {
       validateActivity(deps.activity)
       this.activity = { ...deps.activity }
@@ -380,11 +397,15 @@ export class EngineSession {
       // can throw. Preserve those failures for the terminal stop result.
       this.cancelEventReceipts(new ExecutionCancelled())
       for (const cleanup of [
+        () => this.pads?.dispose(),
         () => this.closeClipboard(),
         () => this.modalLoop?.dispose(),
         () => this.menus.dismiss(undefined, undefined, 'unavailable'),
         () => this.fontSelection.cancel(),
-        () => this.fontCatalog.clear(),
+        () => {
+          this.fontCatalog.clear()
+          this.padFonts.clear()
+        },
         () => this.cancelRedraw?.(),
         () => this.detachRenderer?.(),
         () => this.transitions?.dispose(),
@@ -486,9 +507,15 @@ export class EngineSession {
         changed: (phase) => {
           // Opening the native dialog captures the old DOM focus before the
           // Window roster applies inert. Unwinding restores eligibility first.
-          if (phase === 'open') this.systemDialogs?.present()
+          if (phase === 'open') {
+            this.systemDialogs?.present()
+            this.pads?.present()
+          }
           this.present()
-          if (phase === 'release') this.systemDialogs?.present()
+          if (phase === 'release') {
+            this.pads?.present()
+            this.systemDialogs?.present()
+          }
           this.notify()
         },
       })
@@ -719,6 +746,24 @@ export class EngineSession {
           this.present()
         },
       })
+      this.pads = new PadService(this.runtime, this.systemColors, this.modalLoop, {
+        changed: (presentation) => this.deps.event({ type: 'pads', ...presentation }),
+        blocked: () =>
+          !['running', 'paused'].includes(this.state) ||
+          this.activity.state !== 'visible' ||
+          !!this.modalLoop?.depth ||
+          this.fontSelection.active ||
+          this.clipboardBusy > 0,
+        covered: () => this.fontSelection.active || this.clipboardBusy > 0,
+        enter: () => {
+          this.windowInputGeneration++
+          for (const window of this.windows!.registered()) this.systemEvents!.cancelSource(window)
+          this.inputControllers.releaseCaptures()
+          this.physicalKeys.clear()
+          this.menus.dismiss(undefined, undefined, 'unavailable')
+          this.present()
+        },
+      })
       this.layerObjects = new LayerService(
         this.runtime,
         this.layers,
@@ -749,6 +794,7 @@ export class EngineSession {
       this.discard(await this.runtime.execute(inputBridge, 'krkr2-web/input.tjs'))
       this.discard(await this.runtime.execute(checkpointBridge, 'krkr2-web/checkpoints.tjs'))
       this.discard(await this.runtime.execute(modalBridge, 'krkr2-web/modal.tjs'))
+      this.discard(await this.runtime.execute(padClass, 'krkr2-web/pad.tjs'))
       this.discard(await this.runtime.execute(transitionBridge, 'krkr2-web/transitions.tjs'))
       this.discard(await this.runtime.execute(fontClass, 'krkr2-web/font.tjs'))
       this.discard(await this.runtime.execute(layerClass, 'krkr2-web/layer.tjs'))
@@ -2408,6 +2454,41 @@ export class EngineSession {
     if (face === null) this.fontSelection.cancel(id)
     else if (this.activity.state === 'visible') this.fontSelection.choose(id, face)
   }
+  async padFont(id: number, epoch: number): Promise<PadFontData | null> {
+    if (!Number.isSafeInteger(id) || !Number.isSafeInteger(epoch) || this.control.cancelled)
+      return null
+    const request = this.pads?.fontRequest(id, epoch)
+    if (!request) return null
+    await this.fontCatalog.prepare()
+    this.control.check()
+    const current = this.pads?.fontRequest(id, epoch)
+    if (!current || JSON.stringify(current) !== JSON.stringify(request)) return null
+    const choices = this.padFonts.get(request.fontFace.toLowerCase())
+    if (!choices?.length) return null
+    const face =
+      choices.find(
+        (face) => face.bold === request.fontBold && face.italic === request.fontItalic,
+      ) ?? choices[0]!
+    if (face.resource.size > 16 * 1024 * 1024) throw new Error('Pad font exceeds 16 MiB')
+    const bytes = await cancelable(face.resource.read(), this.control)
+    this.control.check()
+    if (bytes.length !== face.resource.size) throw new Error('Pad font resource length changed')
+    const latest = this.pads?.fontRequest(id, epoch)
+    if (!latest || JSON.stringify(latest) !== JSON.stringify(request)) return null
+    return { family: request.fontFace, bold: face.bold, italic: face.italic, bytes }
+  }
+  pad(message: PadMessage): PadAck {
+    if (
+      this.control.cancelled ||
+      !['running', 'paused'].includes(this.state) ||
+      (this.activity.state !== 'visible' &&
+        message?.kind !== 'save-outcome' &&
+        message?.kind !== 'save-cancel') ||
+      !this.pads
+    )
+      return { status: 'ignored' }
+    return this.pads.admit(message)
+  }
   selectSystemDialog(id: number, value: string | null): boolean {
     if (
       this.control.cancelled ||
@@ -2473,6 +2554,8 @@ export class EngineSession {
     windowSources: number
     menuSources: number
     layerSources: number
+    padSources: number
+    padTextUnits: number
     fontSources: number
     closingLayers: number
     closingWindows: number
@@ -2496,6 +2579,8 @@ export class EngineSession {
       windowSources: this.windows?.count ?? 0,
       menuSources: this.menuItems?.count ?? 0,
       layerSources: this.layerObjects?.count ?? 0,
+      padSources: this.pads?.count ?? 0,
+      padTextUnits: this.pads?.textUnits ?? 0,
       fontSources: this.layerObjects?.fontCount ?? 0,
       closingLayers: this.layerObjects?.closing ?? 0,
       closingWindows: this.windows?.closing ?? 0,
@@ -2533,6 +2618,7 @@ export class EngineSession {
     }
   }
   private notify(): void {
+    this.pads?.present()
     this.snapshotRevision++
     this.deps.event({ type: 'state', snapshot: this.snapshot() })
   }
@@ -2610,6 +2696,7 @@ export class EngineSession {
           throw new AggregateError(errors, 'Session cancellation cleanup failed')
         }
       })
+      await attempt(() => this.pads?.dispose())
       await attempt(() => this.modalLoop?.dispose())
       await attempt(() => {
         this.detachPendingEvents?.()
@@ -2735,8 +2822,11 @@ export class EngineSession {
 
   private async clipboardCall<T>(operation: () => Promise<T>): Promise<T> {
     this.control.check()
+    this.clipboardBusy++
     try {
-      return await cancelable(operation(), this.control)
+      const pending = operation()
+      this.pads?.present()
+      return await cancelable(pending, this.control)
     } catch (error) {
       if (this.control.cancelled) throw new ExecutionCancelled()
       // The generic TJS host error bridge carries a message. Keep the actual
@@ -2751,6 +2841,9 @@ export class EngineSession {
         throw new Error(`${failure.name}: ${failure.message}`, { cause: error })
       }
       throw new Error(`${name}: ${message}`, { cause: error })
+    } finally {
+      this.clipboardBusy--
+      this.pads?.present()
     }
   }
 
@@ -2759,6 +2852,25 @@ export class EngineSession {
     args: ScriptValue[],
     context: HostContext,
   ): Promise<HostReply> {
+    if (operation === 'Pad.class')
+      return {
+        kind: 'value',
+        value: { type: 'class', namespace: 'Pad', id: 0, className: 'Pad', properties: [] },
+      }
+    if (operation === 'Pad.construct') {
+      if (!isScriptObject(args[0])) throw new Error('Expected native Pad owner')
+      return { kind: 'value', value: BigInt(this.pads!.construct(args[0])) }
+    }
+    if (operation.startsWith('Pad.')) {
+      const id = Number(args[0])
+      if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid Pad identifier')
+      if (operation === 'Pad.nativeInvalidate') this.pads?.remove(id)
+      else if (operation === 'Pad.get')
+        return { kind: 'value', value: this.pads!.get(id, String(args[1])) }
+      else if (operation === 'Pad.set') this.pads!.set(id, String(args[1]), args[2])
+      else throw new Error('Unknown Pad operation')
+      return { kind: 'value', value: undefined }
+    }
     if (operation === 'System.class') return { kind: 'value', value: systemClassValue(args) }
     if (operation === 'System.createUUID')
       return { kind: 'value', value: this.systemEnvironment.createUUID() }
@@ -3737,6 +3849,8 @@ export class EngineSession {
         if (data.type !== 'dictionary') throw new Error('Expected font dictionary')
         const spec = fontSpec(data)
         await this.fontCatalog.prepare(spec)
+        await this.control.wait()
+        this.control.check()
         value = scriptList(this.fontCatalog.list(number(0), spec).map((font) => font.name))
         break
       }
@@ -3750,6 +3864,7 @@ export class EngineSession {
         }
         const spec = fontSpec(data)
         await this.fontCatalog.prepare(spec)
+        await this.control.wait()
         this.control.check()
         this.inputControllers.resetTransient()
         value = await this.fontSelection.open(number(0), text(1), text(2), text(3), spec)

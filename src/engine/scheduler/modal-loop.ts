@@ -31,6 +31,7 @@ const empty = (): HostReply => ({ kind: 'value', value: undefined })
 export class ModalLoop {
   private readonly scopes = new ModalScopes()
   private readonly invoked = new Set<number>()
+  private readonly hostScopes = new Set<number>()
   private readonly outcomes = new Map<number, ModalOutcome>()
   private pump?: ScriptObject
   private disposed = false
@@ -73,7 +74,7 @@ export class ModalLoop {
   blockedWindow(windowId: number): boolean {
     for (let token = this.scopes.top; token !== undefined;) {
       const scope = this.scopes.info(token)!
-      if (scope.kind === 'system-dialog') return true
+      if (scope.kind === 'system-dialog' || scope.kind === 'pad-save') return true
       if (scope.kind === 'window') return (scope.windowId ?? scope.ownerId) !== windowId
       token = scope.parentToken
     }
@@ -81,11 +82,44 @@ export class ModalLoop {
   }
 
   open(options: ModalScopeOptions): number {
+    return this.openScope(options, false)
+  }
+  /** Auxiliary UI has no suspended TJS caller. It uses the same stack, but a
+   * host receipt owns release and cannot release a native/TJS child frame. */
+  openHost(options: ModalScopeOptions): number {
+    if (options.kind !== 'pad-save') throw new Error('Unsupported host modal scope')
+    return this.openScope(options, true)
+  }
+  finishHost(token: number): boolean {
+    if (!this.hostScopes.has(token)) return false
+    const finished = this.scopes.finish(token)
+    this.releaseEndedHosts()
+    return finished
+  }
+  private releaseEndedHosts(): void {
+    const errors: unknown[] = []
+    for (
+      let token = this.scopes.top;
+      token !== undefined && this.hostScopes.has(token) && !this.scopes.isPending(token);
+      token = this.scopes.top
+    ) {
+      try {
+        this.scopes.release(token)
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Host modal scope cleanup failed')
+  }
+  private openScope(options: ModalScopeOptions, hostOwned: boolean): number {
     this.control.check()
-    if (this.disposed || !this.pump) throw new Error('Modal dispatcher is unavailable')
+    if (this.disposed || (!hostOwned && !this.pump))
+      throw new Error('Modal dispatcher is unavailable')
     const token = this.scopes.open({
       ...options,
       cleanup: () => {
+        this.hostScopes.delete(token)
         this.invoked.delete(token)
         this.outcomes.delete(token)
         const errors: unknown[] = []
@@ -103,13 +137,23 @@ export class ModalLoop {
         if (errors.length) throw new AggregateError(errors, 'Modal scope cleanup failed')
       },
     })
+    if (hostOwned) this.hostScopes.add(token)
     try {
       this.deps.changed('open')
+      if (hostOwned) {
+        this.control.check()
+        if (!this.scopes.isPending(token)) throw new Error('Host modal scope ended during opening')
+      }
     } catch (error) {
       // Failure to publish a newly blocked scope must not leave an invisible
       // modal frame behind. Preserve both errors if cleanup also fails.
       try {
-        this.scopes.release(token)
+        if (hostOwned) {
+          // Publication may synchronously create a child host surface. End
+          // the failed parent first; retire only host frames in LIFO order.
+          this.scopes.cancel(token, 'host-opening-failed')
+          this.releaseEndedHosts()
+        } else this.scopes.release(token)
       } catch (cleanup) {
         throw new AggregateError([error, cleanup], 'Modal opening and cleanup failed')
       }
@@ -122,7 +166,7 @@ export class ModalLoop {
     this.control.check()
     if (!this.pump || this.disposed || !this.scopes.info(token))
       throw new Error('Modal scope has ended')
-    if (this.scopes.top !== token || this.invoked.has(token))
+    if (this.hostScopes.has(token) || this.scopes.top !== token || this.invoked.has(token))
       throw new Error('Modal continuation must enter the current scope exactly once')
     this.invoked.add(token)
     return { kind: 'invoke', callback: this.pump, args: [BigInt(token)] }
@@ -132,7 +176,9 @@ export class ModalLoop {
     return this.scopes.finish(token, value)
   }
   cancel(token: number, reason?: string): boolean {
-    return this.scopes.cancel(token, reason)
+    const cancelled = this.scopes.cancel(token, reason)
+    this.releaseEndedHosts()
+    return cancelled
   }
   cancelOwner(kind: ModalScopeInfo['kind'], ownerId: number, reason: string): void {
     // Walk a snapshot: ending an ancestor also cancels its descendants, but
@@ -144,9 +190,22 @@ export class ModalLoop {
       token = scope.parentToken
     }
     for (const token of matching) this.scopes.cancel(token, reason)
+    this.releaseEndedHosts()
   }
   release(token: number): void {
-    this.scopes.release(token)
+    const errors: unknown[] = []
+    try {
+      this.scopes.release(token)
+    } catch (error) {
+      errors.push(error)
+    }
+    try {
+      this.releaseEndedHosts()
+    } catch (error) {
+      errors.push(error)
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Modal frame and host scope cleanup failed')
   }
   notify(): void {
     this.scopes.notify()
@@ -230,6 +289,7 @@ export class ModalLoop {
     } catch (error) {
       errors.push(error)
     }
+    this.hostScopes.clear()
     this.invoked.clear()
     this.outcomes.clear()
     try {

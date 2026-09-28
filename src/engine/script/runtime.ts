@@ -46,6 +46,7 @@ export interface ScriptProxy {
 }
 export interface ScriptClass {
   readonly type: 'class'
+  /** Pad is a fixed native factory: id 0, className Pad and no host properties. */
   readonly namespace: string
   readonly id: number
   readonly className: string

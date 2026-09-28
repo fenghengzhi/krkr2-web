@@ -1,3 +1,4 @@
+import { createGamePads } from './game-pads.ts'
 import { createPlayer } from '../player/create-player.ts'
 import { demoFiles } from './demo.ts'
 import { encodeBackup, decodeBackup } from '../player/save-backup.ts'
@@ -366,6 +367,7 @@ export function mountApp(root: HTMLDivElement): void {
       el<HTMLInputElement>('pause-background').checked,
       {
         windows,
+        pads: createGamePads(el('stage')),
         onClipboardRequest(request) {
           if (current !== generation) return
           if (request && !gameClipboard) throw new Error('Clipboard presentation is not available')

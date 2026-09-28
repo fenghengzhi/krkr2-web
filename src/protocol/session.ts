@@ -5,7 +5,8 @@ import type { ActivityState } from '../engine/ports/activity.ts'
 import type { FontDescriptor, FontPreview } from '../engine/ports/fonts.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
-export const PROTOCOL_VERSION = 17
+import type { PadAck, PadMessage, PadFontData } from './pad.ts'
+export const PROTOCOL_VERSION = 18
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -71,6 +72,8 @@ export interface SessionApi {
   setDebugVisibility(panel: DebugPanel, visible: boolean): Promise<SessionSnapshot>
   selectFont(id: number, face: string | null): Promise<void>
   selectSystemDialog(id: number, value: string | null): Promise<boolean>
+  pad(message: PadMessage): Promise<PadAck>
+  padFont(generation: number, id: number, epoch: number): Promise<PadFontData | null>
   previewFont(id: number, face: string, kind?: 'sample' | 'label'): Promise<FontPreview | null>
   inspect(): Promise<SessionSnapshot>
   stop(): Promise<void>

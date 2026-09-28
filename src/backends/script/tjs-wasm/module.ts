@@ -59,6 +59,8 @@ export interface WasmManifest {
     /** Version 2 includes the fixed System.toActualColor method binding. */
     nativeSystem?: number
     nativeStorages?: number
+    /** True native Pad instance construction, receiver checks and properties. */
+    nativePad?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string
