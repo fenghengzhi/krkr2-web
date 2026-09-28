@@ -1,4 +1,5 @@
 import { BinaryReader } from '../binary/reader.ts'
+import { parseStreamMode, parseTextWriterMode } from './mode.ts'
 
 export interface TextCodecs {
   narrow(bytes: Uint8Array, encoding?: string): string
@@ -9,11 +10,7 @@ export interface TextCodecs {
 const MAX_TEXT_BYTES = 64 * 1024 * 1024
 
 export function modeOffset(mode: string): number {
-  const match = /o(\d+)/.exec(mode)
-  const offset = match ? Number(match[1]) : 0
-  if (!Number.isSafeInteger(offset) || offset > MAX_TEXT_BYTES)
-    throw new Error('Invalid text stream offset')
-  return offset
+  return parseStreamMode(mode).offset
 }
 function decodeUtf16(bytes: Uint8Array, littleEndian = true): string {
   if (bytes.length % 2) throw new Error('Truncated UTF-16 text stream')
@@ -43,7 +40,8 @@ export async function decodeTextStream(
   mode = '',
   defaultEncoding?: string,
 ): Promise<string> {
-  const offset = modeOffset(mode)
+  const parsedMode = parseStreamMode(mode)
+  const offset = parsedMode.offset
   if (offset > input.length) throw new Error('Text stream offset exceeds file length')
   const bytes = input.subarray(offset)
   if (bytes.length > MAX_TEXT_BYTES) throw new Error('Text stream exceeds 64 MiB budget')
@@ -89,7 +87,7 @@ export async function decodeTextStream(
   if (bytes[0] === 0xfe && bytes[1] === 0xff) return decodeUtf16(bytes.subarray(2), false)
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf)
     return codecs.narrow(bytes, 'utf-8')
-  return codecs.narrow(bytes, /utf-?8/i.test(mode) ? 'utf-8' : defaultEncoding)
+  return codecs.narrow(bytes, /utf-?8/i.test(parsedMode.mode) ? 'utf-8' : defaultEncoding)
 }
 
 export async function encodeTextStream(
@@ -97,9 +95,12 @@ export async function encodeTextStream(
   codecs: TextCodecs,
   mode = '',
 ): Promise<Uint8Array> {
-  if (/utf-?8/i.test(mode)) return codecs.utf8(text)
+  const parsedMode = parseTextWriterMode(mode)
+  if (parsedMode.encoding === 'utf8') return codecs.utf8(text)
   const data = utf16(text)
-  if (/z(?:-?\d+)?/.test(mode)) {
+  if (parsedMode.encoding === 'compressed') {
+    // CompressionStream provides the host default level; the parsed native
+    // level is retained as metadata, not a promise of an identical bitstream.
     const packed = await codecs.deflate(data),
       output = new Uint8Array(21 + packed.length)
     output.set([0xfe, 0xfe, 2, 0xff, 0xfe])
@@ -109,20 +110,14 @@ export async function encodeTextStream(
     output.set(packed, 21)
     return output
   }
-  const cipher = /c(\d*)/.exec(mode)
-  if (cipher) {
-    const kind = cipher[1] === '' ? 1 : Number(cipher[1])
-    if (kind !== 0 && kind !== 1) throw new Error(`Unsupported text writer encoding ${kind}`)
+  if (parsedMode.encoding === 'simple') {
     const view = new DataView(data.buffer)
     for (let i = 0; i < data.length; i += 2) {
-      let ch = view.getUint16(i, true)
-      if (kind === 0) {
-        if (ch >= 0x20) ch ^= ((ch & 0xfe) << 8) ^ 1
-      } else ch = ((ch & 0xaaaa) >>> 1) | ((ch & 0x5555) << 1)
-      view.setUint16(i, ch, true)
+      const ch = view.getUint16(i, true)
+      view.setUint16(i, ((ch & 0xaaaa) >>> 1) | ((ch & 0x5555) << 1), true)
     }
     const output = new Uint8Array(5 + data.length)
-    output.set([0xfe, 0xfe, kind, 0xff, 0xfe])
+    output.set([0xfe, 0xfe, 1, 0xff, 0xfe])
     output.set(data, 5)
     return output
   }

@@ -109,6 +109,7 @@ manifest.capabilities = {
   nativeClipboard: 1,
   nativeSystem: 2,
   nativeStorages: 2,
+  nativeTextStreams: 1,
   nativePad: 1,
   nativePhaseVocoder: 1,
 }

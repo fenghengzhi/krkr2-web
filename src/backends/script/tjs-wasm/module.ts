@@ -59,6 +59,8 @@ export interface WasmManifest {
     /** Version 2 includes the fixed System.toActualColor method binding. */
     nativeSystem?: number
     nativeStorages?: number
+    /** Distinct, suspendable text writer preflight before native allocation. */
+    nativeTextStreams?: number
     /** True native Pad instance construction, receiver checks and properties. */
     nativePad?: number
     nativePhaseVocoder?: number

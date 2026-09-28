@@ -42,6 +42,7 @@ import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts
 import { SaveOverlay } from './storage/save-overlay.ts'
 import { StorageSelector, normalizeSelectorPath } from './storage/selector.ts'
 import { modeOffset } from '../formats/text/stream.ts'
+import { parseStreamMode, parseTextWriterMode } from '../formats/text/mode.ts'
 import { ScriptEvents } from './scheduler/events.ts'
 import { SystemEvents, type EventOptions, type EventOutcome } from './scheduler/system-events.ts'
 import { systemEventsBridge } from './tvp/system.ts'
@@ -3235,25 +3236,34 @@ export class EngineSession {
         value = bytes.subarray(offset)
         break
       }
+      case 'Storage.validateTextWrite':
+        // Text mode errors belong to construction, before a stream can queue
+        // bytes on destruction. Match the native mode-before-path ordering.
+        parseTextWriterMode(text(1))
+        storageWritePath(text(0))
+        break
       case 'Storage.validateWrite':
         storageWritePath(text(0))
-        modeOffset(text(1))
+        parseStreamMode(text(1))
         break
       case 'Storage.writeText':
       case 'Storage.writeBinary': {
         this.materializeLogs()
-        const path = storageWritePath(text(0)),
-          mode = text(1)
+        const mode = text(1),
+          parsed =
+            operation === 'Storage.writeText' ? parseTextWriterMode(mode) : parseStreamMode(mode),
+          path = storageWritePath(text(0))
         const encoded =
           operation === 'Storage.writeText' ? await this.deps.writeText(text(2), mode) : args[2]
         if (!(encoded instanceof Uint8Array)) throw new Error('Expected binary file contents')
-        const offset = modeOffset(mode)
         let output = encoded
-        if (offset > 0 || mode.includes('a')) {
+        if (parsed.hasOffset || parsed.append) {
           let original: Uint8Array = new Uint8Array()
           if (this.resourceExists(path)) original = await this.readResource(path)
-          const position = mode.includes('a') ? original.length : offset
-          output = new Uint8Array(Math.max(original.length, position + encoded.length))
+          const position = parsed.append ? original.length : parsed.offset,
+            length = Math.max(original.length, position + encoded.length)
+          if (length > 64 * 1024 * 1024) throw new Error('Save file exceeds 64 MiB budget')
+          output = new Uint8Array(length)
           output.set(original)
           output.set(encoded, position)
         }
