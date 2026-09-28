@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import type { Page, TestInfo } from '@playwright/test'
+import type { AudioEvent, SoundEvent } from '../../src/engine/ports/audio.ts'
 import { wave } from '../helpers/audio.ts'
 import { evaluate } from '../helpers/browser-expression.ts'
 import {
@@ -34,6 +35,9 @@ function soundEvents(capture: CapturedPhaseAudio) {
         ? (message.result?.events ?? [])
         : [],
   )
+}
+function isLabelEvent(event: AudioEvent): event is SoundEvent & { type: 'label' } {
+  return event.type === 'label'
 }
 function assertFinite(metrics: Awaited<ReturnType<typeof attachPhaseCapture>>, audible = true) {
   for (const channel of metrics) {
@@ -279,7 +283,7 @@ test('release AudioWorklet publishes consumed labels and flushes seek while pres
     const early = await endPhaseCapture(page),
       paused = await phaseCommand(page, { op: 'set', id: 1, property: 'paused', value: true })
     await attachPhaseCapture(info, 'before-source-label', early)
-    expect(soundEvents(early).filter((event) => event.type === 'label')).toEqual([])
+    expect(soundEvents(early).filter(isLabelEvent)).toEqual([])
     expect(paused.snapshot!.position).toBeLessThan(sourceRate / 2)
     await beginPhaseCapture(page, 0.18)
     const silence = await endPhaseCapture(page),
@@ -296,7 +300,7 @@ test('release AudioWorklet publishes consumed labels and flushes seek while pres
     expect(Math.abs(resumedMetrics[0]!.spectrum.peakHz / 750 - 1)).toBeLessThan(0.01)
     expect(
       soundEvents(resumed)
-        .filter((event) => event.type === 'label')
+        .filter(isLabelEvent)
         .map((event) => event.label),
     ).toEqual(['pre-read-boundary'])
     // The explicit seek must discard the old buffered phase. Its label must not
@@ -308,7 +312,7 @@ test('release AudioWorklet publishes consumed labels and flushes seek while pres
     await phaseCommand(page, { op: 'set', id: 1, property: 'paused', value: true })
     const seekMetrics = await attachPhaseCapture(info, 'seek-new-frequency', seek)
     expect(Math.abs(seekMetrics[0]!.spectrum.peakHz / 1125 - 1)).toBeLessThan(0.01)
-    const labels = soundEvents(seek).filter((event) => event.type === 'label')
+    const labels = soundEvents(seek).filter(isLabelEvent)
     expect(labels.map((event) => event.label)).toEqual(['after-seek'])
     expect(labels[0]!.snapshot.position).toBeGreaterThanOrEqual(sourceRate * 0.65)
     const fadeDurations: number[] = []

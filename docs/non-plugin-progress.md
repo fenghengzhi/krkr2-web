@@ -10,6 +10,8 @@
 
 068 的 DSP 使用共享 TypeScript FFT／流式处理链并接入生产 AudioWorklet，实际波形、标签和寿命验收仍待新批次。对固定源码的标签重复偏移行为采用已明示的 Web 归一化策略，不宣称全部原版数值或事件时序等价。069 的六个整数只读显示属性来自本 Player 的真实 stage／全屏 viewport；它没有请求 OS 窗口管理权限。上述新增功能与本轮修复将统一验证。
 
+合并 068／069 后的 [36454241579](https://github.com/fenghengzhi/krkr2-web/actions/runs/36454241579) 对应 `20c0dec`，原生编译及缓存成功，但新增 PhaseVocoder 测试有 17 条 TypeScript 诊断：16 条事件联合类型访问未缩窄、1 条空数组断言将随后要修改的数组缩窄成 never[]。实际普通测试 **0 项**，未生成 test-build，未启动同构建兼容工作流；该失败及原始日志独立保留。后续测试类型修订不改变原断言，也不把构建成功阶段视为测试通过。
+
 以下保留 main 及此前阶段当时的已验证状态与历史证据。
 
 当前已验证组合包含协作式 `MenuItem.popup`、Window 隐藏关闭查询校准、Layer.drawText／Font 参数与空操作语义，以及 crossfade／universal 的 opaque 定点像素核。菜单保留 TJS 调用栈并允许 Timer 和子模态工作，选中通知在返回后投递；原版 SDK 已确认单独 N 标志仍通知，仅 R 抑制。会话协议 **11**、TJS ABI **5**、字体 ABI **2**，内核提供 `nativeReleaseState: 1`。 实现与边界见 [052](decisions/052-modal-scopes.md)、[056](decisions/056-layer-text-semantics.md)、[057](decisions/057-opaque-transition-kernels.md)。

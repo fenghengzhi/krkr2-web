@@ -9,7 +9,15 @@ import {
   type AudioEvent,
   type PcmAsset,
   type PhaseVocoderFilter,
+  type SoundEvent,
 } from '../../src/engine/ports/audio.ts'
+
+function isLabelEvent(event: AudioEvent): event is SoundEvent & { type: 'label' } {
+  return event.type === 'label'
+}
+function isEndedEvent(event: AudioEvent): event is SoundEvent & { type: 'ended' } {
+  return event.type === 'ended'
+}
 
 const filter = (id = 1, parameters: Partial<PhaseVocoderFilter> = {}): PhaseVocoderFilter => ({
   type: 'phase-vocoder',
@@ -60,7 +68,7 @@ function finish(mixer: AudioMixer, maximum = 100000) {
     events.filter((event) => event.type === 'error'),
     [],
   )
-  assert.equal(events.filter((event) => event.type === 'ended').length, 1)
+  assert.equal(events.filter(isEndedEvent).length, 1)
   return { left, right, events }
 }
 function frequency(samples: readonly number[] | Float32Array, rate: number) {
@@ -114,7 +122,7 @@ test('wave segment scaling uses cumulative ends, preserves discontinuities and r
   assert.equal(rounded.length, 2)
   assert.equal(rounded.positionAt(2), 49, 'segment endpoint scaling remains independent')
   rounded.emitThrough(1, false, (label) => roundedLabels.push([label.name, label.offset]))
-  assert.deepEqual(roundedLabels, [], 'the scaled label remains at its exact boundary')
+  assert.deepEqual([...roundedLabels], [], 'the scaled label remains at its exact boundary')
   rounded.emitThrough(1, true, (label) => roundedLabels.push([label.name, label.offset]))
   assert.deepEqual(roundedLabels, [['ratio-first', 1]])
 })
@@ -166,7 +174,7 @@ test('source expression flags can change during lookahead while labels and posit
   assert.deepEqual(first.events, [], 'pre-read labels do not become audible callbacks')
   const before = render(mixer, 127)
   assert.deepEqual(before.events, [])
-  const at = render(mixer, 1).events.filter((event) => event.type === 'label')
+  const at = render(mixer, 1).events.filter(isLabelEvent)
   assert.deepEqual(
     at.map((event) => [event.label, event.snapshot.position]),
     [
@@ -190,7 +198,7 @@ test('SLI conditions operate before the ordered filter chain without resetting p
   const output = finish(mixer, 10000)
   assert.equal(mixer.snapshot(1).flags[0], 3)
   assert.deepEqual(
-    output.events.filter((event) => event.type === 'label').map((event) => event.label),
+    output.events.filter(isLabelEvent).map((event) => event.label),
     [':[0]++', 'mark', ':[0]++', 'mark', ':[0]++', 'mark'],
   )
   assert.ok(output.left.some((sample) => Math.abs(sample) > 0.01))
@@ -217,7 +225,7 @@ test('seek discards old buffered samples and labels even while individually paus
     'no pre-seek overlap or cached PCM survives',
   )
   assert.deepEqual(
-    output.events.filter((event) => event.type === 'label').map((event) => event.label),
+    output.events.filter(isLabelEvent).map((event) => event.label),
     ['new'],
   )
 })
@@ -415,16 +423,16 @@ test('natural filtered EOF rewinds the decoder for replay without exposing pre-r
   const mixer = open(asset)
   const first = finish(mixer, 10000)
   assert.deepEqual(
-    first.events.filter((event) => event.type === 'label').map((event) => event.label),
+    first.events.filter(isLabelEvent).map((event) => event.label),
     ['begin'],
   )
   assert.equal(mixer.snapshot(1).position, 0, 'native natural EOF clears the public sample cursor')
-  assert.equal(first.events.find((event) => event.type === 'ended')!.snapshot.position, 0)
+  assert.equal(first.events.find(isEndedEvent)!.snapshot.position, 0)
   mixer.command({ op: 'play', id: 1 })
   const again = finish(mixer, 10000)
   assert.deepEqual(again.left, first.left)
   assert.deepEqual(
-    again.events.filter((event) => event.type === 'label').map((event) => event.label),
+    again.events.filter(isLabelEvent).map((event) => event.label),
     ['begin'],
   )
   mixer.command({ op: 'set', id: 1, property: 'position', value: 1024 })
@@ -435,7 +443,7 @@ test('natural filtered EOF rewinds the decoder for replay without exposing pre-r
     'an explicit post-EOF seek cancels the rewind marker',
   )
   assert.deepEqual(
-    render(mixer, 128).events.filter((event) => event.type === 'label'),
+    render(mixer, 128).events.filter(isLabelEvent),
     [],
   )
 })
@@ -474,11 +482,11 @@ test('multiple filter stages scale labels and audible source position independen
   const mixer = open(asset, [filter(1, { time: 1.5 }), filter(2, { window: 128, time: 0.5 })])
   const first = render(mixer, 384)
   assert.deepEqual(
-    first.events.filter((event) => event.type === 'label'),
+    first.events.filter(isLabelEvent),
     [],
   )
   assert.equal(mixer.snapshot(1).position, 512)
-  const at = render(mixer, 1).events.filter((event) => event.type === 'label')
+  const at = render(mixer, 1).events.filter(isLabelEvent)
   assert.deepEqual(
     at.map((event) => [event.label, event.snapshot.position]),
     [['scaled', 512]],
@@ -561,7 +569,7 @@ test('filtered source freezes a Decode request before a label makes an earlier l
   assert.equal(mixer.snapshot(1).position, 8)
   assert.deepEqual(
     first.events
-      .filter((event) => event.type === 'label')
+      .filter(isLabelEvent)
       .map((event) => [event.label, event.snapshot.position]),
     [[':[0]++', 4]],
   )
@@ -767,7 +775,7 @@ test('dynamic overlap preserves native input-ring request boundaries in the real
   const before = render(mixer, 256)
   assert.deepEqual(
     before.events
-      .filter((event) => event.type === 'label')
+      .filter(isLabelEvent)
       .map((event) => [event.label, event.snapshot.position]),
     [[':[0]++', 500]],
   )

@@ -1,6 +1,7 @@
 # 068 — Built-in PhaseVocoder and the WaveSoundBuffer filter chain
 
-Status: implementation frozen after source-review corrections; no execution result is recorded for this slice.
+Status: implementation includes test-type corrections after a hosted build failure;
+no runtime case has executed for this slice.
 All executable verification belongs on GitHub-hosted Actions runners. Local source
 inspection is not a passing test, and earlier audio/Pad/Storages results do not
 verify this change.
@@ -196,7 +197,20 @@ it does not replace AudioContext, the mixer processor, or DSP samples. Applicati
 cases also exercise real Worker startup under Asyncify and supported JSPI with
 source and bytecode.
 
+[Actions run 36454241579](https://github.com/fenghengzhi/krkr2-web/actions/runs/36454241579),
+at candidate `20c0dec`, completed native compilation but failed TypeScript checking
+before the ordinary suites could run. The archived build log records 17
+diagnostics: 16 TS2339 accesses to `label`/`snapshot` after predicates that did not
+narrow `AudioEvent`, and one TS2345 after an empty-array assertion narrowed the
+mutable `roundedLabels` collector to `never[]`. Actual ordinary case count was
+zero; no `test-build` artifact was produced and compatibility was not dispatched.
+This remains a failed build, not a partial test pass.
+
+The test-only repair uses explicit discriminant guards that exclude error events
+while leaving `label` optional, and checks a snapshot of the mutable label array.
+The original predicates, expected values, and runtime assertions are preserved;
+case inventory is unchanged. These repairs have not yet been executed by Actions.
+
 No tests, build, typecheck, browser probe, or native execution have been run
-locally. Hosted run IDs, actual case counts, failures, skips, and artifacts will
-be appended after the next combined batch. Until then all new cases are unrun.
+locally. The new runtime cases remain unrun pending the next combined hosted batch.
 This slice does not complete all remaining nonplugin KRKR2 compatibility work.
