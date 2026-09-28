@@ -139,6 +139,13 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
   /** Read native instance metadata without consulting script fields. Like a
    * native class cast, this still works after explicit script invalidation. */
   nativeLifetimeIdentifier(owner: ScriptObject, operation: string): number | undefined
+  /** Cast the real native filter slot. Zero is visible only during its constructor;
+   * public interface values and ordinary script fields cannot impersonate it. */
+  nativePhaseVocoderIdentifier?(owner: ScriptObject): number | undefined
+  /** Snapshot at most 16 genuine native filter entries. Returned leases belong to the caller. */
+  snapshotPhaseVocoderFilters?(array: ScriptObject): ScriptObject[]
+  /** Install the native class as a static WaveSoundBuffer member. */
+  bindPhaseVocoderClass?(owner: ScriptObject): void
   /** Invalidate this owned dependent at a safe boundary after its owner expires. */
   bindDependent(owner: ScriptObject, dependent: ScriptObject): ScriptDependent
   /** Revoke before invalidation begins; release its lease at the next VM boundary.

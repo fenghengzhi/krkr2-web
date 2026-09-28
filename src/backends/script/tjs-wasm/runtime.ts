@@ -207,6 +207,17 @@ export class TjsWasmRuntime implements ScriptRuntime {
         )
           throw new Error('TJS WASM is missing native Pad support')
       }
+      if (value.type === 'class' && value.namespace === 'PhaseVocoder') {
+        if (
+          value.id !== 0 ||
+          value.className !== 'PhaseVocoder' ||
+          value.properties.length !== 0 ||
+          value.systemMethods ||
+          value.systemProperties
+        )
+          throw new Error('Invalid PhaseVocoder class factory')
+        this.requirePhaseVocoder()
+      }
       if (value.type === 'class' && (value.systemMethods || value.systemProperties)) {
         if (
           value.namespace !== 'System' ||
@@ -423,6 +434,49 @@ export class TjsWasmRuntime implements ScriptRuntime {
     } finally {
       this.call('free', name)
     }
+  }
+  private requirePhaseVocoder(): void {
+    if (
+      typeof this.module._krkr_native_phase_vocoder_version !== 'function' ||
+      this.call('krkr_native_phase_vocoder_version') !== 1
+    )
+      throw new Error('TJS WASM is missing native PhaseVocoder support')
+  }
+  nativePhaseVocoderIdentifier(owner: ScriptObject): number | undefined {
+    this.assertObject(owner)
+    this.requirePhaseVocoder()
+    const id = this.call('krkr_phase_vocoder_identifier', this.vm, owner.id)
+    return id < 0 ? undefined : id
+  }
+  snapshotPhaseVocoderFilters(array: ScriptObject): ScriptObject[] {
+    this.assertObject(array)
+    this.requirePhaseVocoder()
+    const reply = this.call('krkr_data_entries', this.vm, array.id)
+    const leases: ScriptObject[] = []
+    try {
+      const kind = this.call('krkr_reply_kind', reply)
+      if (kind === 1) throw new Error(String(this.readValue(this.call('krkr_reply_value', reply))))
+      if (kind !== 6) throw new Error('WaveSoundBuffer filters must be an Array')
+      const count = this.call('krkr_reply_arg_count', reply)
+      if (count > 16) throw new Error('WaveSoundBuffer filter chain budget exceeded')
+      for (let i = 0; i < count; i++) {
+        const value = this.readValue(this.call('krkr_reply_arg_at', reply, i), leases)
+        if (!isScriptObject(value) || !(this.nativePhaseVocoderIdentifier(value)! > 0))
+          throw new Error('WaveSoundBuffer filters require live native PhaseVocoder instances')
+      }
+      return leases
+    } catch (error) {
+      for (const lease of leases) this.release(lease)
+      throw error
+    } finally {
+      this.call('krkr_reply_delete', reply)
+    }
+  }
+  bindPhaseVocoderClass(owner: ScriptObject): void {
+    this.assertObject(owner)
+    this.requirePhaseVocoder()
+    if (!this.call('krkr_bind_phase_vocoder_class', this.vm, owner.id))
+      throw new Error('PhaseVocoder requires a live script class')
   }
   bindDependent(owner: ScriptObject, dependent: ScriptObject): ScriptDependent {
     this.assertObject(owner)

@@ -61,6 +61,7 @@ export interface WasmManifest {
     nativeStorages?: number
     /** True native Pad instance construction, receiver checks and properties. */
     nativePad?: number
+    nativePhaseVocoder?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string

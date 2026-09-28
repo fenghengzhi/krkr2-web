@@ -90,6 +90,7 @@ export class HeadlessAudioBackend implements AudioBackend {
           asset,
           settings: command.settings,
           kind: command.kind,
+          filters: command.filters,
         })
       } finally {
         this.operations.finish(command.id, ticket)
