@@ -756,16 +756,19 @@ layer.onPaint=function(){global.paintCount++;};layer.update();
         'accepted',
       )
       assert.equal(f.session.inspectOwnership().modalScopes, 0)
+      // Check the host save before entering another VM operation. evaluate()
+      // may submit already composed pixels for the pending Layer.update even
+      // while eventDisabled correctly prevents its onPaint callback.
+      assert.equal(
+        presentations,
+        painted,
+        'Saving must not grant the disabled game a paint checkpoint',
+      )
       assert.equal(
         await f.session.evaluate(
           '[timerCount,continuousCount,paintCount,System.eventDisabled,pad.fileName].join("|")',
         ),
         '0|0|0|1|disabled.tjs',
-      )
-      assert.equal(
-        presentations,
-        painted,
-        'Saving must not grant the disabled game a paint checkpoint',
       )
     } finally {
       await f.session.stop()

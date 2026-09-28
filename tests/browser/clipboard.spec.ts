@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { WasmManifest } from '../../src/backends/script/tjs-wasm/module.ts'
+import { registerPadClipboardTests } from '../helpers/pad-clipboard.ts'
 
 type ClipboardCall = {
   method: 'read' | 'write' | 'writeText'
@@ -27,15 +28,18 @@ const unicode = '剪贴板の文字 😀 café\n第二行',
   recordedGrants = new WeakMap<Page, string[]>(),
   grantHistory = new WeakMap<Page, { fromCall: number; grants: string[] }[]>()
 
-// All clipboard cases share one sequential file. In particular, the hosted
-// headed Firefox job uses its display clipboard, not a headless private one.
+// All real clipboard content cases, including Pad, register in this sequential
+// file. Headed Firefox workers share one DISPLAY; per-file default mode cannot
+// serialize clipboard use registered in a different test file.
 test.describe.configure({ mode: 'default' })
 
 test.afterEach(async ({ page }, info) => {
+  // Pad cases retain their own API evidence and do not install clipboardProof.
   // If the initial read never settled, even a failure-time evaluation could
   // manufacture activation. Retain the timeout/trace without such a probe.
   if (
     info.status !== info.expectedStatus &&
+    recordedGrants.has(page) &&
     !info.title.startsWith('page-owned initial') &&
     !page.isClosed()
   )
@@ -795,3 +799,5 @@ test('production loader rejects a real manifest missing nativeClipboard before s
     if (await page.locator('#stop').isEnabled()) await stop(page, setup.errors)
   }
 })
+
+registerPadClipboardTests()

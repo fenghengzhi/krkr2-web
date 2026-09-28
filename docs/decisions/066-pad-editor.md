@@ -59,3 +59,13 @@
 ## 首次集成构建的类型检查失败
 
 [36447967665](https://github.com/fenghengzhi/krkr2-web/actions/runs/36447967665) 在提交 `660e5feedfc7f7913e04f1ac082d2e4f6447e9b0` 完成原生编译及内核缓存后，因 `pad.test.ts` 两处 TS2353 失败。纯服务夹具 `message()` 实际始终生成 `kind:'edit'`，返回类型却写成整个 `PadMessage` 联合，展开后修改正文时被当作可能的 selection 消息。修订将返回注解收窄到 edit 分支，不改消息内容、产品代码或断言。该轮普通测试实际零项，未生成 test-build，兼容检查没有启动；失败构建记录与日志保留，修订仍需新的托管结果。
+
+## 第二轮 Node 结果与验收边界修订
+
+[36448613310](https://github.com/fenghengzhi/krkr2-web/actions/runs/36448613310) 在 `eca4086a280cea71e6d8bfc1f8bc8c9deae3778a` 构建和类型检查成功，内核缓存命中。Node 实际 2,308 项：2,304 通过、4 失败，无取消、跳过或未报告。两项暂停 trigger 清理测试只因完整对象断言缺少新增的 `padSources:0`、`padTextUnits:0` 失败，其余计数均为零；修订补上这两个严格零值。
+
+另两项 source/bytecode 的禁用事件保存测试已验证 Timer、continuous、onPaint 均未调用，但最终 renderer 提交数为 3、预期 2。源码审查发现最后用于读取计数的 `session.evaluate` 也是一次 VM operation：未消费的 Layer.update 会将已有合成画面标脏，尽管 eventDisabled 阻止 onPaint，execute 收尾仍可提交已有像素。修订把同一严格次数断言放到显式查询之前，隔离宿主保存阶段；三个回调零值及 eventDisabled/文件名断言全部保留，不修改次数预期或产品行为。这一因果解释来自实际失败与源码，修订尚待下一批托管验证。
+
+静态审查还发现真实 Clipboard 内容测试分散在 Pad 和 Clipboard 两个文件；headed Firefox 的两个 worker 共享一个 DISPLAY，单文件 default 模式不保证跨文件互斥。Pad 的四个真实 Clipboard 变体现只从 `clipboard.spec.ts` 注册，全部真实 API、空选区、迟到结果及撤销断言保持不变，总用例数不增加。旧 Clipboard 失败钩子仅处理已安装其观察器的页面，迁入的 Pad 保留自身证据钩子。没有证据证明本轮发生了跨文件污染，不用这项风险解释尚未读取的失败。
+
+同次构建的 [36448778629](https://github.com/fenghengzhi/krkr2-web/actions/runs/36448778629) 已失败：30 项旧 ABI 检查通过，9 项 KAG 场景因 `MainWindow.tjs:436` 读取缺失的 `System.desktopLeft` 失败，39 项未运行。此错误另行补齐显示几何合同，不能归因给 Clipboard 污染或先前的 Highlight。记录本节时，完整回归的常规浏览器作业仍在执行；这里的 Node 与兼容证据不构成完整通过结论。

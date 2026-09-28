@@ -540,6 +540,8 @@ function createOwner(){global.owner=new EventOwner();}
             windowSources: 0,
             menuSources: 0,
             layerSources: 0,
+            padSources: 0,
+            padTextUnits: 0,
             fontSources: 0,
             closingLayers: 0,
             closingWindows: 0,
