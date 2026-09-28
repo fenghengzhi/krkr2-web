@@ -1,0 +1,476 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Original KRKR2 Pad source observations",
+  "description": "Actual data only. Static source expectations are kept in pad-cases.json and never serve as manufactured results.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "kind",
+    "state",
+    "executionMode",
+    "scope",
+    "capturedAt",
+    "run",
+    "environment",
+    "hostMetadata",
+    "sourceReference",
+    "engine",
+    "scriptVersions",
+    "execution",
+    "evidence",
+    "completeness",
+    "records"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "const": "original-pad-observations"
+    },
+    "state": {
+      "enum": ["observed", "incomplete", "not-run"]
+    },
+    "executionMode": {
+      "const": "source"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "capturedAt": {
+      "type": "string"
+    },
+    "run": {
+      "$ref": "#/definitions/run"
+    },
+    "environment": {
+      "$ref": "#/definitions/environment"
+    },
+    "hostMetadata": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ansiCodePage", "hostSystemDpi", "scope"],
+          "properties": {
+            "ansiCodePage": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "hostSystemDpi": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "scope": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sourceReference": {
+      "$ref": "#/definitions/sourceReference"
+    },
+    "engine": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/engine"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scriptVersions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processId",
+        "exitCode",
+        "timedOut",
+        "processDeadlineMs",
+        "workflowStateAtConversion",
+        "workflowStageAtConversion",
+        "workflowErrorAtConversion"
+      ],
+      "properties": {
+        "processId": {
+          "type": ["integer", "null"]
+        },
+        "exitCode": {
+          "type": ["integer", "null"]
+        },
+        "timedOut": {
+          "type": "boolean"
+        },
+        "processDeadlineMs": {
+          "const": 30000
+        },
+        "workflowStateAtConversion": {
+          "type": "string"
+        },
+        "workflowStageAtConversion": {
+          "type": "string"
+        },
+        "workflowErrorAtConversion": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventsFile",
+        "eventsPresent",
+        "eventsSha256",
+        "generatedScriptSha256",
+        "inputs"
+      ],
+      "properties": {
+        "eventsFile": {
+          "const": "native-events.txt"
+        },
+        "eventsPresent": {
+          "type": "boolean"
+        },
+        "eventsSha256": {
+          "$ref": "#/definitions/nullableHash"
+        },
+        "generatedScriptSha256": {
+          "$ref": "#/definitions/nullableHash"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fixture", "plan", "cases", "schema", "sourceManifest", "driver"],
+          "properties": {
+            "fixture": {
+              "$ref": "#/definitions/inputFile"
+            },
+            "plan": {
+              "$ref": "#/definitions/inputFile"
+            },
+            "cases": {
+              "$ref": "#/definitions/inputFile"
+            },
+            "schema": {
+              "$ref": "#/definitions/inputFile"
+            },
+            "sourceManifest": {
+              "$ref": "#/definitions/inputFile"
+            },
+            "driver": {
+              "$ref": "#/definitions/inputFile"
+            }
+          }
+        }
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestedCaseCount",
+        "recordedCaseCount",
+        "returnedCount",
+        "errorCount",
+        "startCount",
+        "scenarioCount",
+        "modeCount",
+        "completionMarkerCount",
+        "missingCaseIds",
+        "duplicateCaseIds",
+        "unexpectedCaseIds",
+        "parseErrors",
+        "fatalErrors"
+      ],
+      "properties": {
+        "requestedCaseCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordedCaseCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "returnedCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errorCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "startCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scenarioCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modeCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completionMarkerCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missingCaseIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "duplicateCaseIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unexpectedCaseIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parseErrors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fatalErrors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/record"
+      }
+    }
+  },
+  "definitions": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableHash": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/hash"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "attempt", "commit", "runner", "scenario"],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "attempt": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "runner": {
+          "enum": ["windows-2022", "windows-2025"]
+        },
+        "scenario": {
+          "const": "pad"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "OSDescription",
+        "OSVersion",
+        "ImageOS",
+        "ImageVersion",
+        "processArchitecture",
+        "processArchitectureScope"
+      ],
+      "properties": {
+        "OSDescription": {
+          "type": "string"
+        },
+        "OSVersion": {
+          "type": "string"
+        },
+        "ImageOS": {
+          "type": ["string", "null"]
+        },
+        "ImageVersion": {
+          "type": ["string", "null"]
+        },
+        "processArchitecture": {
+          "type": "string"
+        },
+        "processArchitectureScope": {
+          "type": "string"
+        }
+      }
+    },
+    "sourceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit", "branchPath", "relationshipToSdk"],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/krkrz/krkr2"
+        },
+        "commit": {
+          "const": "dec49af97e174d31059c3ccd7efc700ba3c6b788"
+        },
+        "branchPath": {
+          "const": "kirikiri2/branches/2.32stable/kirikiri2/src/"
+        },
+        "relationshipToSdk": {
+          "type": "string"
+        }
+      }
+    },
+    "inputFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/definitions/hash"
+        }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "sha256", "fileVersion", "productVersion"],
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/definitions/hash"
+        },
+        "fileVersion": {
+          "type": ["string", "null"]
+        },
+        "productVersion": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 65535
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "outcome",
+        "resultType",
+        "resultTextUtf16Units",
+        "inputType",
+        "inputTextUtf16Units",
+        "errorMessageUtf16Units",
+        "rawLineNumber"
+      ],
+      "properties": {
+        "caseId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+$"
+        },
+        "outcome": {
+          "enum": ["returned", "error"]
+        },
+        "resultType": {
+          "enum": ["", "void", "String", "Integer", "Real"]
+        },
+        "resultTextUtf16Units": {
+          "$ref": "#/definitions/units"
+        },
+        "inputType": {
+          "enum": ["void", "String", "Integer", "Real"]
+        },
+        "inputTextUtf16Units": {
+          "$ref": "#/definitions/units"
+        },
+        "errorMessageUtf16Units": {
+          "$ref": "#/definitions/units"
+        },
+        "rawLineNumber": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "returned"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resultType": {
+                "enum": ["void", "String", "Integer", "Real"]
+              },
+              "errorMessageUtf16Units": {
+                "maxItems": 0
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "resultType": {
+                "const": ""
+              },
+              "resultTextUtf16Units": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

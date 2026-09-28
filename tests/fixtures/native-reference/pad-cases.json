@@ -1,0 +1,746 @@
+{
+  "schema": 1,
+  "suite": "pad",
+  "executionMode": "source",
+  "scope": "Bounded hidden Pad observations. sourceExpectation is static design evidence, never used to manufacture or classify SDK results. No UI/rendering/saving observation is claimed.",
+  "sourceReference": {
+    "repository": "https://github.com/krkrz/krkr2",
+    "commit": "dec49af97e174d31059c3ccd7efc700ba3c6b788",
+    "branchPath": "kirikiri2/branches/2.32stable/kirikiri2/src/",
+    "relationshipToSdk": "Static reference only; sdk.json pins distribution bytes whose exact source commit and VCL build are not assumed."
+  },
+  "cases": [
+    {
+      "id": "identity-class",
+      "group": "identity",
+      "action": "return Pad instanceof \"Class\";",
+      "sourceExpectation": "Pad is a registered native class."
+    },
+    {
+      "id": "identity-instance",
+      "group": "identity",
+      "action": "return global.nativePad instanceof \"Pad\";",
+      "sourceExpectation": "Fresh object is a Pad instance."
+    },
+    {
+      "id": "identity-typeof",
+      "group": "identity",
+      "action": "return typeof global.nativePad;",
+      "sourceExpectation": "Record actual type; no inferred value is used as the output oracle."
+    },
+    {
+      "id": "default-text",
+      "group": "defaults",
+      "action": "return global.nativePad.text;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-fileName",
+      "group": "defaults",
+      "action": "return global.nativePad.fileName;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-color",
+      "group": "defaults",
+      "action": "return global.nativePad.color;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-visible",
+      "group": "defaults",
+      "action": "return global.nativePad.visible;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-title",
+      "group": "defaults",
+      "action": "return global.nativePad.title;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-fontColor",
+      "group": "defaults",
+      "action": "return global.nativePad.fontColor;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-fontHeight",
+      "group": "defaults",
+      "action": "return global.nativePad.fontHeight;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-fontSize",
+      "group": "defaults",
+      "action": "return global.nativePad.fontSize;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-fontBold",
+      "group": "defaults",
+      "action": "return global.nativePad.fontBold;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-fontItalic",
+      "group": "defaults",
+      "action": "return global.nativePad.fontItalic;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-fontUnderline",
+      "group": "defaults",
+      "action": "return global.nativePad.fontUnderline;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-fontStrikeOut",
+      "group": "defaults",
+      "action": "return global.nativePad.fontStrikeOut;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-fontFace",
+      "group": "defaults",
+      "action": "return global.nativePad.fontFace;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-readOnly",
+      "group": "defaults",
+      "action": "return global.nativePad.readOnly;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-wordWrap",
+      "group": "defaults",
+      "action": "return global.nativePad.wordWrap;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-opacity",
+      "group": "defaults",
+      "action": "return global.nativePad.opacity;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-showStatusBar",
+      "group": "defaults",
+      "action": "return global.nativePad.showStatusBar;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-showScrollBars",
+      "group": "defaults",
+      "action": "return global.nativePad.showScrollBars;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-statusText",
+      "group": "defaults",
+      "action": "return global.nativePad.statusText;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-borderStyle",
+      "group": "defaults",
+      "action": "return global.nativePad.borderStyle;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-width",
+      "group": "defaults",
+      "action": "return global.nativePad.width;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-height",
+      "group": "defaults",
+      "action": "return global.nativePad.height;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-top",
+      "group": "defaults",
+      "action": "return global.nativePad.top;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "default-left",
+      "group": "defaults",
+      "action": "return global.nativePad.left;",
+      "sourceExpectation": "Read before any setter. DFM/source values are design evidence; DPI, ACP, VCL defaults and OS placement remain actual observations."
+    },
+    {
+      "id": "geometry-small",
+      "group": "geometry",
+      "action": "global.nativePad.width=160;global.nativePad.height=120;return string(global.nativePad.width)+\",\"+string(global.nativePad.height);",
+      "sourceExpectation": "Small hidden outer geometry; pair is width,height."
+    },
+    {
+      "id": "text-empty",
+      "group": "text",
+      "action": "global.nativePad.text=\"\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-ascii",
+      "group": "text",
+      "action": "global.nativePad.text=\"a\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-lf",
+      "group": "text",
+      "action": "global.nativePad.text=\"a\\nb\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-crlf",
+      "group": "text",
+      "action": "global.nativePad.text=\"a\\r\\nb\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-cr",
+      "group": "text",
+      "action": "global.nativePad.text=\"a\\rb\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-only-lf",
+      "group": "text",
+      "action": "global.nativePad.text=\"\\n\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-tail-lf",
+      "group": "text",
+      "action": "global.nativePad.text=\"a\\n\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-tail-crlf",
+      "group": "text",
+      "action": "global.nativePad.text=\"a\\r\\n\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-tail-cr",
+      "group": "text",
+      "action": "global.nativePad.text=\"a\\r\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-blank-lines",
+      "group": "text",
+      "action": "global.nativePad.text=\"a\\n\\nb\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-nul",
+      "group": "text",
+      "action": "global.nativePad.text=\"a\\0b\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-unicode",
+      "group": "text",
+      "action": "global.nativePad.text=\"A雪明朝😀éΩZ\";return global.nativePad.text;",
+      "sourceExpectation": "Actual UTF-16 units after ANSI/RichEdit round trip. Source inserts CR before lone LF and traverses to NUL; actual input units distinguish a TJS literal already truncated before the setter. Getter normalization and ACP loss are not predeclared."
+    },
+    {
+      "id": "text-number",
+      "group": "conversion",
+      "action": "global.nativePad.text=42;return global.nativePad.text;",
+      "sourceExpectation": "TJS string conversion, then the same native text boundary."
+    },
+    {
+      "id": "text-void",
+      "group": "conversion",
+      "action": "global.nativePad.text=void;return global.nativePad.text;",
+      "sourceExpectation": "Record actual void-to-string native conversion."
+    },
+    {
+      "id": "bool-readOnly-half",
+      "group": "conversion",
+      "action": "global.nativePad.readOnly=0.5;return global.nativePad.readOnly;",
+      "sourceExpectation": "Setter uses TJS bool conversion (nonzero real remains true). visible is not set true by this hidden-only suite."
+    },
+    {
+      "id": "bool-readOnly-zero",
+      "group": "conversion",
+      "action": "global.nativePad.readOnly=0;return global.nativePad.readOnly;",
+      "sourceExpectation": "Setter uses TJS bool conversion (nonzero real remains true). visible is not set true by this hidden-only suite."
+    },
+    {
+      "id": "bool-readOnly-negative-half",
+      "group": "conversion",
+      "action": "global.nativePad.readOnly=-0.5;return global.nativePad.readOnly;",
+      "sourceExpectation": "Setter uses TJS bool conversion (nonzero real remains true). visible is not set true by this hidden-only suite."
+    },
+    {
+      "id": "bool-wordWrap-half",
+      "group": "conversion",
+      "action": "global.nativePad.wordWrap=0.5;return global.nativePad.wordWrap;",
+      "sourceExpectation": "Setter uses TJS bool conversion (nonzero real remains true). visible is not set true by this hidden-only suite."
+    },
+    {
+      "id": "bool-wordWrap-zero",
+      "group": "conversion",
+      "action": "global.nativePad.wordWrap=0;return global.nativePad.wordWrap;",
+      "sourceExpectation": "Setter uses TJS bool conversion (nonzero real remains true). visible is not set true by this hidden-only suite."
+    },
+    {
+      "id": "bool-wordWrap-negative-half",
+      "group": "conversion",
+      "action": "global.nativePad.wordWrap=-0.5;return global.nativePad.wordWrap;",
+      "sourceExpectation": "Setter uses TJS bool conversion (nonzero real remains true). visible is not set true by this hidden-only suite."
+    },
+    {
+      "id": "bool-showStatusBar-half",
+      "group": "conversion",
+      "action": "global.nativePad.showStatusBar=0.5;return global.nativePad.showStatusBar;",
+      "sourceExpectation": "Setter uses TJS bool conversion (nonzero real remains true). visible is not set true by this hidden-only suite."
+    },
+    {
+      "id": "bool-showStatusBar-zero",
+      "group": "conversion",
+      "action": "global.nativePad.showStatusBar=0;return global.nativePad.showStatusBar;",
+      "sourceExpectation": "Setter uses TJS bool conversion (nonzero real remains true). visible is not set true by this hidden-only suite."
+    },
+    {
+      "id": "bool-showStatusBar-negative-half",
+      "group": "conversion",
+      "action": "global.nativePad.showStatusBar=-0.5;return global.nativePad.showStatusBar;",
+      "sourceExpectation": "Setter uses TJS bool conversion (nonzero real remains true). visible is not set true by this hidden-only suite."
+    },
+    {
+      "id": "readonly-script-text",
+      "group": "conversion",
+      "action": "global.nativePad.readOnly=true;global.nativePad.text=\"script-while-readonly\";return global.nativePad.text;",
+      "sourceExpectation": "ReadOnly blocks user editing, not script replacement."
+    },
+    {
+      "id": "style-fontBold-half",
+      "group": "font",
+      "action": "global.nativePad.fontBold=0.5;return global.nativePad.fontBold;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontBold-one",
+      "group": "font",
+      "action": "global.nativePad.fontBold=1;return global.nativePad.fontBold;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontBold-negative-half",
+      "group": "font",
+      "action": "global.nativePad.fontBold=-0.5;return global.nativePad.fontBold;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontBold-zero",
+      "group": "font",
+      "action": "global.nativePad.fontBold=0;return global.nativePad.fontBold;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontItalic-half",
+      "group": "font",
+      "action": "global.nativePad.fontItalic=0.5;return global.nativePad.fontItalic;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontItalic-one",
+      "group": "font",
+      "action": "global.nativePad.fontItalic=1;return global.nativePad.fontItalic;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontItalic-negative-half",
+      "group": "font",
+      "action": "global.nativePad.fontItalic=-0.5;return global.nativePad.fontItalic;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontItalic-zero",
+      "group": "font",
+      "action": "global.nativePad.fontItalic=0;return global.nativePad.fontItalic;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontUnderline-half",
+      "group": "font",
+      "action": "global.nativePad.fontUnderline=0.5;return global.nativePad.fontUnderline;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontUnderline-one",
+      "group": "font",
+      "action": "global.nativePad.fontUnderline=1;return global.nativePad.fontUnderline;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontUnderline-negative-half",
+      "group": "font",
+      "action": "global.nativePad.fontUnderline=-0.5;return global.nativePad.fontUnderline;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontUnderline-zero",
+      "group": "font",
+      "action": "global.nativePad.fontUnderline=0;return global.nativePad.fontUnderline;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontStrikeOut-half",
+      "group": "font",
+      "action": "global.nativePad.fontStrikeOut=0.5;return global.nativePad.fontStrikeOut;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontStrikeOut-one",
+      "group": "font",
+      "action": "global.nativePad.fontStrikeOut=1;return global.nativePad.fontStrikeOut;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontStrikeOut-negative-half",
+      "group": "font",
+      "action": "global.nativePad.fontStrikeOut=-0.5;return global.nativePad.fontStrikeOut;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "style-fontStrikeOut-zero",
+      "group": "font",
+      "action": "global.nativePad.fontStrikeOut=0;return global.nativePad.fontStrikeOut;",
+      "sourceExpectation": "Setter narrows TJS integer, then tests nonzero; unlike bool 0.5 becomes zero."
+    },
+    {
+      "id": "font-fontHeight-12",
+      "group": "font",
+      "action": "global.nativePad.fontHeight=12;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-fontHeight-negative-12",
+      "group": "font",
+      "action": "global.nativePad.fontHeight=-12;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-fontHeight-13",
+      "group": "font",
+      "action": "global.nativePad.fontHeight=13;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-fontHeight-14",
+      "group": "font",
+      "action": "global.nativePad.fontHeight=14;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-fontHeight-0",
+      "group": "font",
+      "action": "global.nativePad.fontHeight=0;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-fontSize-9",
+      "group": "font",
+      "action": "global.nativePad.fontSize=9;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-fontSize-negative-9",
+      "group": "font",
+      "action": "global.nativePad.fontSize=-9;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-fontSize-10",
+      "group": "font",
+      "action": "global.nativePad.fontSize=10;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-fontSize-11",
+      "group": "font",
+      "action": "global.nativePad.fontSize=11;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-fontSize-0",
+      "group": "font",
+      "action": "global.nativePad.fontSize=0;return string(global.nativePad.fontHeight)+\",\"+string(global.nativePad.fontSize);",
+      "sourceExpectation": "Result pair is height,size. Magnitudes are positive; zero and VCL/DPI coupling are observed, not assumed."
+    },
+    {
+      "id": "font-face-ascii",
+      "group": "font",
+      "action": "global.nativePad.fontFace=\"Courier New\";return global.nativePad.fontFace;",
+      "sourceExpectation": "Requested font name round trip; no proof that a font was rendered or installed."
+    },
+    {
+      "id": "color-background",
+      "group": "color",
+      "action": "global.nativePad.color=0x123456;return global.nativePad.color;",
+      "sourceExpectation": "Ordinary 24-bit RGB is retained."
+    },
+    {
+      "id": "color-font-setter",
+      "group": "color",
+      "action": "global.nativePad.fontColor=0xaabbcc;return global.nativePad.fontColor;",
+      "sourceExpectation": "Fixed source setter changes Memo.Font.Color but getter reads Memo.Color. Successful assignment plus getter is not a rendered-font observation."
+    },
+    {
+      "id": "color-font-background-unchanged",
+      "group": "color",
+      "action": "return global.nativePad.color;",
+      "sourceExpectation": "Font color setter does not change background."
+    },
+    {
+      "id": "color-background-changes-font-getter",
+      "group": "color",
+      "action": "global.nativePad.color=0x654321;return global.nativePad.fontColor;",
+      "sourceExpectation": "Getter follows background in fixed source."
+    },
+    {
+      "id": "opacity-negative-one",
+      "group": "opacity",
+      "action": "global.nativePad.opacity=-1;return global.nativePad.opacity;",
+      "sourceExpectation": "Hidden only. BCB project enables clamp 0..255 or defines TVP_NO_USE_PAD_ALPHABLEND and always returns 255; this observation chooses the distribution behavior."
+    },
+    {
+      "id": "opacity-0",
+      "group": "opacity",
+      "action": "global.nativePad.opacity=0;return global.nativePad.opacity;",
+      "sourceExpectation": "Hidden only. BCB project enables clamp 0..255 or defines TVP_NO_USE_PAD_ALPHABLEND and always returns 255; this observation chooses the distribution behavior."
+    },
+    {
+      "id": "opacity-128",
+      "group": "opacity",
+      "action": "global.nativePad.opacity=128;return global.nativePad.opacity;",
+      "sourceExpectation": "Hidden only. BCB project enables clamp 0..255 or defines TVP_NO_USE_PAD_ALPHABLEND and always returns 255; this observation chooses the distribution behavior."
+    },
+    {
+      "id": "opacity-255",
+      "group": "opacity",
+      "action": "global.nativePad.opacity=255;return global.nativePad.opacity;",
+      "sourceExpectation": "Hidden only. BCB project enables clamp 0..255 or defines TVP_NO_USE_PAD_ALPHABLEND and always returns 255; this observation chooses the distribution behavior."
+    },
+    {
+      "id": "opacity-256",
+      "group": "opacity",
+      "action": "global.nativePad.opacity=256;return global.nativePad.opacity;",
+      "sourceExpectation": "Hidden only. BCB project enables clamp 0..255 or defines TVP_NO_USE_PAD_ALPHABLEND and always returns 255; this observation chooses the distribution behavior."
+    },
+    {
+      "id": "scrollbars-0",
+      "group": "geometry",
+      "action": "global.nativePad.showScrollBars=0;return global.nativePad.showScrollBars;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "scrollbars-1",
+      "group": "geometry",
+      "action": "global.nativePad.showScrollBars=1;return global.nativePad.showScrollBars;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "scrollbars-2",
+      "group": "geometry",
+      "action": "global.nativePad.showScrollBars=2;return global.nativePad.showScrollBars;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "scrollbars-3",
+      "group": "geometry",
+      "action": "global.nativePad.showScrollBars=3;return global.nativePad.showScrollBars;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "border-0",
+      "group": "geometry",
+      "action": "global.nativePad.borderStyle=0;return global.nativePad.borderStyle;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "border-1",
+      "group": "geometry",
+      "action": "global.nativePad.borderStyle=1;return global.nativePad.borderStyle;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "border-2",
+      "group": "geometry",
+      "action": "global.nativePad.borderStyle=2;return global.nativePad.borderStyle;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "border-3",
+      "group": "geometry",
+      "action": "global.nativePad.borderStyle=3;return global.nativePad.borderStyle;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "border-4",
+      "group": "geometry",
+      "action": "global.nativePad.borderStyle=4;return global.nativePad.borderStyle;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "border-5",
+      "group": "geometry",
+      "action": "global.nativePad.borderStyle=5;return global.nativePad.borderStyle;",
+      "sourceExpectation": "Valid enum only; no window-decoration pixel claim."
+    },
+    {
+      "id": "geometry-position",
+      "group": "geometry",
+      "action": "global.nativePad.borderStyle=2;global.nativePad.left=23;global.nativePad.top=31;return string(global.nativePad.left)+\",\"+string(global.nativePad.top);",
+      "sourceExpectation": "Small hidden position; pair is left,top. Default OS placement is not asserted."
+    },
+    {
+      "id": "geometry-minimum",
+      "group": "geometry",
+      "action": "global.nativePad.width=60;global.nativePad.height=90;return string(global.nativePad.width)+\",\"+string(global.nativePad.height);",
+      "sourceExpectation": "Small values below DFM MinWidth=70/MinHeight=100; actual VCL result is observed."
+    },
+    {
+      "id": "status-text",
+      "group": "state",
+      "action": "global.nativePad.statusText=\"status-only\";return global.nativePad.statusText;",
+      "sourceExpectation": "Second status panel holds this text."
+    },
+    {
+      "id": "status-survives-text",
+      "group": "state",
+      "action": "global.nativePad.text=\"first\\nsecond\";return global.nativePad.statusText;",
+      "sourceExpectation": "Caret status and explicit statusText are different panels."
+    },
+    {
+      "id": "filename-set",
+      "group": "state",
+      "action": "global.nativePad.title=\"first-title\";global.nativePad.text=\"first-text\";global.nativePad.fileName=\"pad-observe.tjs\";return global.nativePad.fileName;",
+      "sourceExpectation": "SaveDialog.FileName setter only; no dialog or file API is invoked."
+    },
+    {
+      "id": "filename-title",
+      "group": "state",
+      "action": "return global.nativePad.title;",
+      "sourceExpectation": "FileName assignment does not change title."
+    },
+    {
+      "id": "filename-text",
+      "group": "state",
+      "action": "return global.nativePad.text;",
+      "sourceExpectation": "FileName assignment does not read a file or change text."
+    },
+    {
+      "id": "second-pad",
+      "group": "isolation",
+      "action": "global.nativePadOther=new Pad();global.nativePadOther.visible=false;global.nativePadOther.width=160;global.nativePadOther.height=120;global.nativePadOther.text=\"second-text\";global.nativePadOther.title=\"second-title\";global.nativePadOther.fileName=\"second.tjs\";return global.nativePadOther.text;",
+      "sourceExpectation": "Second independent hidden Pad; no game Window is created."
+    },
+    {
+      "id": "isolation-first-text",
+      "group": "isolation",
+      "action": "return global.nativePad.text;",
+      "sourceExpectation": "Two Pad native Forms have independent state."
+    },
+    {
+      "id": "isolation-first-title",
+      "group": "isolation",
+      "action": "return global.nativePad.title;",
+      "sourceExpectation": "Two Pad native Forms have independent state."
+    },
+    {
+      "id": "isolation-first-fileName",
+      "group": "isolation",
+      "action": "return global.nativePad.fileName;",
+      "sourceExpectation": "Two Pad native Forms have independent state."
+    },
+    {
+      "id": "isolation-second-title",
+      "group": "isolation",
+      "action": "return global.nativePadOther.title;",
+      "sourceExpectation": "Two Pad native Forms have independent state."
+    },
+    {
+      "id": "isolation-second-fileName",
+      "group": "isolation",
+      "action": "return global.nativePadOther.fileName;",
+      "sourceExpectation": "Two Pad native Forms have independent state."
+    },
+    {
+      "id": "lifetime-direct-finalize",
+      "group": "lifetime",
+      "action": "global.nativePad.finalize();return global.nativePad.text;",
+      "sourceExpectation": "Direct native finalize method is empty and does not invalidate the object."
+    },
+    {
+      "id": "lifetime-direct-finalize-valid",
+      "group": "lifetime",
+      "action": "return isvalid global.nativePad;",
+      "sourceExpectation": "Direct finalize leaves native instance usable."
+    },
+    {
+      "id": "lifetime-throw-install",
+      "group": "lifetime",
+      "action": "global.nativePad.finalize=function(){global.nativeFinalizeCount++;throw new Exception(\"pad-finalize-once\");};return isvalid global.nativePad;",
+      "sourceExpectation": "Strong global reference retained throughout. Throw is only reached by explicit invalidate, never last-reference destruction."
+    },
+    {
+      "id": "lifetime-throw-invalidate",
+      "group": "lifetime",
+      "action": "invalidate global.nativePad;return isvalid global.nativePad;",
+      "sourceExpectation": "Fixed TJS finalize propagates the deliberate exception before native destruction. Record actual error, not a pass assertion."
+    },
+    {
+      "id": "lifetime-throw-count",
+      "group": "lifetime",
+      "action": "return global.nativeFinalizeCount;",
+      "sourceExpectation": "Number of invocations of the deliberate finalizer."
+    },
+    {
+      "id": "lifetime-after-throw-valid",
+      "group": "lifetime",
+      "action": "return isvalid global.nativePad;",
+      "sourceExpectation": "Fixed TJS resets IsInvalidating after exception; object remains valid."
+    },
+    {
+      "id": "lifetime-after-throw-text",
+      "group": "lifetime",
+      "action": "return global.nativePad.text;",
+      "sourceExpectation": "Strongly referenced native resource is readable after failed invalidation."
+    },
+    {
+      "id": "lifetime-retry",
+      "group": "lifetime",
+      "action": "global.nativePad.finalize=function(){global.nativeFinalizeCount++;};invalidate global.nativePad;return isvalid global.nativePad;",
+      "sourceExpectation": "Replace throwing callback before retry. Successful invalidate removes native Form once."
+    },
+    {
+      "id": "lifetime-retry-count",
+      "group": "lifetime",
+      "action": "return global.nativeFinalizeCount;",
+      "sourceExpectation": "Records both explicit invalidation attempts."
+    },
+    {
+      "id": "lifetime-invalid-read",
+      "group": "lifetime",
+      "action": "return global.nativePad.text;",
+      "sourceExpectation": "Ordinary TJS access after successful invalidation should error."
+    },
+    {
+      "id": "lifetime-second-cleanup",
+      "group": "lifetime",
+      "action": "invalidate global.nativePadOther;return isvalid global.nativePadOther;",
+      "sourceExpectation": "Independent second Pad is explicitly invalidated."
+    }
+  ]
+}

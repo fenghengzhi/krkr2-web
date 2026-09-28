@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/krkrz/krkr2",
+  "commit": "dec49af97e174d31059c3ccd7efc700ba3c6b788",
+  "branchPath": "kirikiri2/branches/2.32stable/kirikiri2/src/",
+  "relationshipToSdk": "Static reference only; sdk.json pins distribution bytes whose exact source commit and VCL build are not assumed.",
+  "files": [
+    {
+      "file": "core/utils/PadIntf.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/PadIntf.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/PadIntf.cpp",
+      "bytes": 15813,
+      "sha256": "47d99bc247097708ee27aac4e27b15c42ba9d307b6b4dd8d1cf4318c0ac0a663"
+    },
+    {
+      "file": "core/utils/win32/PadImpl.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/win32/PadImpl.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/win32/PadImpl.cpp",
+      "bytes": 9967,
+      "sha256": "59bea7e5545b266fea3415a283e5df6f0f7bb822ea167413ba84cd44b9bed585"
+    },
+    {
+      "file": "core/utils/win32/PadFormUnit.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/win32/PadFormUnit.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/win32/PadFormUnit.cpp",
+      "bytes": 18248,
+      "sha256": "43fd32588940ce9167229b7c66f6874efd00710796b859805b5ae7a0c3f4984e"
+    },
+    {
+      "file": "core/utils/win32/PadFormUnit.dfm",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/win32/PadFormUnit.dfm",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/utils/win32/PadFormUnit.dfm",
+      "bytes": 5125,
+      "sha256": "e42ed5d0999be1a7ad726c7819a2bddc19ea86ba1134a188376c5bb550a1a496"
+    },
+    {
+      "file": "core/tjs2/tjsObject.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/tjs2/tjsObject.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/tjs2/tjsObject.cpp",
+      "bytes": 53672,
+      "sha256": "e12c12b6005cf8c5e92d0453fbe344b75d760358b4ac1297ccf359619b658345"
+    },
+    {
+      "file": "core/tjs2/tjsConfig.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/tjs2/tjsConfig.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/tjs2/tjsConfig.cpp",
+      "bytes": 11838,
+      "sha256": "1ea5256126bcb59321e2bb1a3a191eb0af615b648141821374816bb19aad36b9"
+    },
+    {
+      "file": "core/environ/win32/tvpwin32.bpr",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/environ/win32/tvpwin32.bpr",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/environ/win32/tvpwin32.bpr",
+      "bytes": 15779,
+      "sha256": "6a0ef9e8f552f6d0898e3a15a16aea93fcf511f8ca3a9ec5f44de19b7af3f163"
+    },
+    {
+      "file": "core/environ/win32/bcb6/tvpwin32.bpr",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/environ/win32/bcb6/tvpwin32.bpr",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/environ/win32/bcb6/tvpwin32.bpr",
+      "bytes": 38981,
+      "sha256": "35ebcddcb6f3bcd27caf0ccd584e3aef419eb29aa97a3fe3b7153c5065ed67f2"
+    },
+    {
+      "file": "core/tjs2/tjsInterCodeExec.cpp",
+      "sourcePath": "kirikiri2/branches/2.32stable/kirikiri2/src/core/tjs2/tjsInterCodeExec.cpp",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/tjs2/tjsInterCodeExec.cpp",
+      "bytes": 93591,
+      "sha256": "0189ca5d0e28a2127bd7f258032de354e53866191b1c31b3451712a0dc9b1b4d"
+    }
+  ]
+}

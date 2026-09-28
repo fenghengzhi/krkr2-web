@@ -1,0 +1,162 @@
+// Original SDK Pad/source observations; GitHub-hosted Windows only.
+// No visible Pad, Window, UI input, screenshot, hook, clipboard, file dialog,
+// large allocation, repeated constructor, plugin, or destructor-throw probe.
+// Every scalar is serialized as decimal UTF-16 units, even errors and empty text.
+var nativeRows=[],nativePad=void,nativePadOther=void,nativeFinalizeCount=0;
+function padRecord(text){nativeRows.add(text);nativeRows.save("native-events.txt");}
+function padUnits(value){
+  var text=string(value),units=[];
+  for(var i=0;i<text.length;i++) units.add(#(text.charAt(i)));
+  return units.join(",");
+}
+function padObserve(id,action,input){
+  var inputType=typeof input,inputUnits=padUnits(input);
+  try{
+    var value=action();
+    padRecord("case|"+id+"|returned|"+typeof value+"|"+padUnits(value)+"|"+inputType+"|"+inputUnits+"|");
+  }catch(error){global.padRecord("case|"+id+"|error|||"+inputType+"|"+inputUnits+"|"+global.padUnits(error.message));}
+}
+function padCleanup(){
+  // Always replace any deliberate throwing finalizer while the strong global
+  // reference is retained; never release a live object with that callback.
+  try{if(typeof global.nativePad==="Object" && global.nativePad!==null && (isvalid global.nativePad)){global.nativePad.finalize=function(){};invalidate global.nativePad;}}
+  catch(error){global.padRecord("error:cleanup-first:"+global.padUnits(error.message));}
+  try{if(typeof global.nativePadOther==="Object" && global.nativePadOther!==null && (isvalid global.nativePadOther)){global.nativePadOther.finalize=function(){};invalidate global.nativePadOther;}}
+  catch(error){global.padRecord("error:cleanup-second:"+global.padUnits(error.message));}
+}
+System.exceptionHandler=function(error){
+  global.padRecord("error:unhandled:"+global.padUnits(error.message));
+  global.padCleanup();System.exit();return true;
+};
+padRecord("start");padRecord("scenario:pad");
+padRecord("version:"+System.versionString);padRecord("mode:source");
+try{
+  nativePad=new Pad();
+  // Read all defaults before writing anything. Constructor remains hidden.
+  padObserve("identity-class",function(){return Pad instanceof "Class";},void);
+  padObserve("identity-instance",function(){return global.nativePad instanceof "Pad";},void);
+  padObserve("identity-typeof",function(){return typeof global.nativePad;},void);
+  padObserve("default-text",function(){return global.nativePad.text;},void);
+  padObserve("default-fileName",function(){return global.nativePad.fileName;},void);
+  padObserve("default-color",function(){return global.nativePad.color;},void);
+  padObserve("default-visible",function(){return global.nativePad.visible;},void);
+  padObserve("default-title",function(){return global.nativePad.title;},void);
+  padObserve("default-fontColor",function(){return global.nativePad.fontColor;},void);
+  padObserve("default-fontHeight",function(){return global.nativePad.fontHeight;},void);
+  padObserve("default-fontSize",function(){return global.nativePad.fontSize;},void);
+  padObserve("default-fontBold",function(){return global.nativePad.fontBold;},void);
+  padObserve("default-fontItalic",function(){return global.nativePad.fontItalic;},void);
+  padObserve("default-fontUnderline",function(){return global.nativePad.fontUnderline;},void);
+  padObserve("default-fontStrikeOut",function(){return global.nativePad.fontStrikeOut;},void);
+  padObserve("default-fontFace",function(){return global.nativePad.fontFace;},void);
+  padObserve("default-readOnly",function(){return global.nativePad.readOnly;},void);
+  padObserve("default-wordWrap",function(){return global.nativePad.wordWrap;},void);
+  padObserve("default-opacity",function(){return global.nativePad.opacity;},void);
+  padObserve("default-showStatusBar",function(){return global.nativePad.showStatusBar;},void);
+  padObserve("default-showScrollBars",function(){return global.nativePad.showScrollBars;},void);
+  padObserve("default-statusText",function(){return global.nativePad.statusText;},void);
+  padObserve("default-borderStyle",function(){return global.nativePad.borderStyle;},void);
+  padObserve("default-width",function(){return global.nativePad.width;},void);
+  padObserve("default-height",function(){return global.nativePad.height;},void);
+  padObserve("default-top",function(){return global.nativePad.top;},void);
+  padObserve("default-left",function(){return global.nativePad.left;},void);
+  nativePad.visible=false;
+  padObserve("geometry-small",function(){global.nativePad.width=160;global.nativePad.height=120;return string(global.nativePad.width)+","+string(global.nativePad.height);},void);
+  padObserve("text-empty",function(){global.nativePad.text="";return global.nativePad.text;},"");
+  padObserve("text-ascii",function(){global.nativePad.text="a";return global.nativePad.text;},"a");
+  padObserve("text-lf",function(){global.nativePad.text="a\nb";return global.nativePad.text;},"a\nb");
+  padObserve("text-crlf",function(){global.nativePad.text="a\r\nb";return global.nativePad.text;},"a\r\nb");
+  padObserve("text-cr",function(){global.nativePad.text="a\rb";return global.nativePad.text;},"a\rb");
+  padObserve("text-only-lf",function(){global.nativePad.text="\n";return global.nativePad.text;},"\n");
+  padObserve("text-tail-lf",function(){global.nativePad.text="a\n";return global.nativePad.text;},"a\n");
+  padObserve("text-tail-crlf",function(){global.nativePad.text="a\r\n";return global.nativePad.text;},"a\r\n");
+  padObserve("text-tail-cr",function(){global.nativePad.text="a\r";return global.nativePad.text;},"a\r");
+  padObserve("text-blank-lines",function(){global.nativePad.text="a\n\nb";return global.nativePad.text;},"a\n\nb");
+  padObserve("text-nul",function(){global.nativePad.text="a\0b";return global.nativePad.text;},"a\0b");
+  padObserve("text-unicode",function(){global.nativePad.text="A雪明朝😀éΩZ";return global.nativePad.text;},"A雪明朝😀éΩZ");
+  padObserve("text-number",function(){global.nativePad.text=42;return global.nativePad.text;},void);
+  padObserve("text-void",function(){global.nativePad.text=void;return global.nativePad.text;},void);
+  padObserve("bool-readOnly-half",function(){global.nativePad.readOnly=0.5;return global.nativePad.readOnly;},void);
+  padObserve("bool-readOnly-zero",function(){global.nativePad.readOnly=0;return global.nativePad.readOnly;},void);
+  padObserve("bool-readOnly-negative-half",function(){global.nativePad.readOnly=-0.5;return global.nativePad.readOnly;},void);
+  padObserve("bool-wordWrap-half",function(){global.nativePad.wordWrap=0.5;return global.nativePad.wordWrap;},void);
+  padObserve("bool-wordWrap-zero",function(){global.nativePad.wordWrap=0;return global.nativePad.wordWrap;},void);
+  padObserve("bool-wordWrap-negative-half",function(){global.nativePad.wordWrap=-0.5;return global.nativePad.wordWrap;},void);
+  padObserve("bool-showStatusBar-half",function(){global.nativePad.showStatusBar=0.5;return global.nativePad.showStatusBar;},void);
+  padObserve("bool-showStatusBar-zero",function(){global.nativePad.showStatusBar=0;return global.nativePad.showStatusBar;},void);
+  padObserve("bool-showStatusBar-negative-half",function(){global.nativePad.showStatusBar=-0.5;return global.nativePad.showStatusBar;},void);
+  padObserve("readonly-script-text",function(){global.nativePad.readOnly=true;global.nativePad.text="script-while-readonly";return global.nativePad.text;},void);
+  padObserve("style-fontBold-half",function(){global.nativePad.fontBold=0.5;return global.nativePad.fontBold;},void);
+  padObserve("style-fontBold-one",function(){global.nativePad.fontBold=1;return global.nativePad.fontBold;},void);
+  padObserve("style-fontBold-negative-half",function(){global.nativePad.fontBold=-0.5;return global.nativePad.fontBold;},void);
+  padObserve("style-fontBold-zero",function(){global.nativePad.fontBold=0;return global.nativePad.fontBold;},void);
+  padObserve("style-fontItalic-half",function(){global.nativePad.fontItalic=0.5;return global.nativePad.fontItalic;},void);
+  padObserve("style-fontItalic-one",function(){global.nativePad.fontItalic=1;return global.nativePad.fontItalic;},void);
+  padObserve("style-fontItalic-negative-half",function(){global.nativePad.fontItalic=-0.5;return global.nativePad.fontItalic;},void);
+  padObserve("style-fontItalic-zero",function(){global.nativePad.fontItalic=0;return global.nativePad.fontItalic;},void);
+  padObserve("style-fontUnderline-half",function(){global.nativePad.fontUnderline=0.5;return global.nativePad.fontUnderline;},void);
+  padObserve("style-fontUnderline-one",function(){global.nativePad.fontUnderline=1;return global.nativePad.fontUnderline;},void);
+  padObserve("style-fontUnderline-negative-half",function(){global.nativePad.fontUnderline=-0.5;return global.nativePad.fontUnderline;},void);
+  padObserve("style-fontUnderline-zero",function(){global.nativePad.fontUnderline=0;return global.nativePad.fontUnderline;},void);
+  padObserve("style-fontStrikeOut-half",function(){global.nativePad.fontStrikeOut=0.5;return global.nativePad.fontStrikeOut;},void);
+  padObserve("style-fontStrikeOut-one",function(){global.nativePad.fontStrikeOut=1;return global.nativePad.fontStrikeOut;},void);
+  padObserve("style-fontStrikeOut-negative-half",function(){global.nativePad.fontStrikeOut=-0.5;return global.nativePad.fontStrikeOut;},void);
+  padObserve("style-fontStrikeOut-zero",function(){global.nativePad.fontStrikeOut=0;return global.nativePad.fontStrikeOut;},void);
+  padObserve("font-fontHeight-12",function(){global.nativePad.fontHeight=12;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-fontHeight-negative-12",function(){global.nativePad.fontHeight=-12;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-fontHeight-13",function(){global.nativePad.fontHeight=13;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-fontHeight-14",function(){global.nativePad.fontHeight=14;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-fontHeight-0",function(){global.nativePad.fontHeight=0;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-fontSize-9",function(){global.nativePad.fontSize=9;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-fontSize-negative-9",function(){global.nativePad.fontSize=-9;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-fontSize-10",function(){global.nativePad.fontSize=10;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-fontSize-11",function(){global.nativePad.fontSize=11;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-fontSize-0",function(){global.nativePad.fontSize=0;return string(global.nativePad.fontHeight)+","+string(global.nativePad.fontSize);},void);
+  padObserve("font-face-ascii",function(){global.nativePad.fontFace="Courier New";return global.nativePad.fontFace;},void);
+  padObserve("color-background",function(){global.nativePad.color=0x123456;return global.nativePad.color;},void);
+  padObserve("color-font-setter",function(){global.nativePad.fontColor=0xaabbcc;return global.nativePad.fontColor;},void);
+  padObserve("color-font-background-unchanged",function(){return global.nativePad.color;},void);
+  padObserve("color-background-changes-font-getter",function(){global.nativePad.color=0x654321;return global.nativePad.fontColor;},void);
+  padObserve("opacity-negative-one",function(){global.nativePad.opacity=-1;return global.nativePad.opacity;},void);
+  padObserve("opacity-0",function(){global.nativePad.opacity=0;return global.nativePad.opacity;},void);
+  padObserve("opacity-128",function(){global.nativePad.opacity=128;return global.nativePad.opacity;},void);
+  padObserve("opacity-255",function(){global.nativePad.opacity=255;return global.nativePad.opacity;},void);
+  padObserve("opacity-256",function(){global.nativePad.opacity=256;return global.nativePad.opacity;},void);
+  padObserve("scrollbars-0",function(){global.nativePad.showScrollBars=0;return global.nativePad.showScrollBars;},void);
+  padObserve("scrollbars-1",function(){global.nativePad.showScrollBars=1;return global.nativePad.showScrollBars;},void);
+  padObserve("scrollbars-2",function(){global.nativePad.showScrollBars=2;return global.nativePad.showScrollBars;},void);
+  padObserve("scrollbars-3",function(){global.nativePad.showScrollBars=3;return global.nativePad.showScrollBars;},void);
+  padObserve("border-0",function(){global.nativePad.borderStyle=0;return global.nativePad.borderStyle;},void);
+  padObserve("border-1",function(){global.nativePad.borderStyle=1;return global.nativePad.borderStyle;},void);
+  padObserve("border-2",function(){global.nativePad.borderStyle=2;return global.nativePad.borderStyle;},void);
+  padObserve("border-3",function(){global.nativePad.borderStyle=3;return global.nativePad.borderStyle;},void);
+  padObserve("border-4",function(){global.nativePad.borderStyle=4;return global.nativePad.borderStyle;},void);
+  padObserve("border-5",function(){global.nativePad.borderStyle=5;return global.nativePad.borderStyle;},void);
+  padObserve("geometry-position",function(){global.nativePad.borderStyle=2;global.nativePad.left=23;global.nativePad.top=31;return string(global.nativePad.left)+","+string(global.nativePad.top);},void);
+  padObserve("geometry-minimum",function(){global.nativePad.width=60;global.nativePad.height=90;return string(global.nativePad.width)+","+string(global.nativePad.height);},void);
+  padObserve("status-text",function(){global.nativePad.statusText="status-only";return global.nativePad.statusText;},void);
+  padObserve("status-survives-text",function(){global.nativePad.text="first\nsecond";return global.nativePad.statusText;},void);
+  padObserve("filename-set",function(){global.nativePad.title="first-title";global.nativePad.text="first-text";global.nativePad.fileName="pad-observe.tjs";return global.nativePad.fileName;},void);
+  padObserve("filename-title",function(){return global.nativePad.title;},void);
+  padObserve("filename-text",function(){return global.nativePad.text;},void);
+  padObserve("second-pad",function(){global.nativePadOther=new Pad();global.nativePadOther.visible=false;global.nativePadOther.width=160;global.nativePadOther.height=120;global.nativePadOther.text="second-text";global.nativePadOther.title="second-title";global.nativePadOther.fileName="second.tjs";return global.nativePadOther.text;},void);
+  padObserve("isolation-first-text",function(){return global.nativePad.text;},void);
+  padObserve("isolation-first-title",function(){return global.nativePad.title;},void);
+  padObserve("isolation-first-fileName",function(){return global.nativePad.fileName;},void);
+  padObserve("isolation-second-title",function(){return global.nativePadOther.title;},void);
+  padObserve("isolation-second-fileName",function(){return global.nativePadOther.fileName;},void);
+  padObserve("lifetime-direct-finalize",function(){global.nativePad.finalize();return global.nativePad.text;},void);
+  padObserve("lifetime-direct-finalize-valid",function(){return isvalid global.nativePad;},void);
+  padObserve("lifetime-throw-install",function(){global.nativePad.finalize=function(){global.nativeFinalizeCount++;throw new Exception("pad-finalize-once");};return isvalid global.nativePad;},void);
+  padObserve("lifetime-throw-invalidate",function(){invalidate global.nativePad;return isvalid global.nativePad;},void);
+  padObserve("lifetime-throw-count",function(){return global.nativeFinalizeCount;},void);
+  padObserve("lifetime-after-throw-valid",function(){return isvalid global.nativePad;},void);
+  padObserve("lifetime-after-throw-text",function(){return global.nativePad.text;},void);
+  padObserve("lifetime-retry",function(){global.nativePad.finalize=function(){global.nativeFinalizeCount++;};invalidate global.nativePad;return isvalid global.nativePad;},void);
+  padObserve("lifetime-retry-count",function(){return global.nativeFinalizeCount;},void);
+  padObserve("lifetime-invalid-read",function(){return global.nativePad.text;},void);
+  padObserve("lifetime-second-cleanup",function(){invalidate global.nativePadOther;return isvalid global.nativePadOther;},void);
+}catch(error){global.padRecord("error:fixture:"+global.padUnits(error.message));}
+padCleanup();
+padRecord("observations-complete");
+System.exit();
