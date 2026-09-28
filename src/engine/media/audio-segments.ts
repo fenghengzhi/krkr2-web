@@ -124,9 +124,11 @@ export class WaveSegmentQueue {
     this.segments = scaled
     this.segmentHead = 0
     this.length = frames
+    // Native Scale rounds the ratio before multiplication and integer truncation.
+    const labelRatio = frames / previousLength
     for (let i = this.labelHead; i < this.labels.length; i++) {
       const label = this.labels[i]!
-      label.offset = Math.trunc(((label.offset - this.labelBase) * frames) / previousLength)
+      label.offset = Math.trunc((label.offset - this.labelBase) * labelRatio)
     }
     if (this.labelHead) this.labels = this.labels.slice(this.labelHead)
     this.labelHead = this.labelBase = 0

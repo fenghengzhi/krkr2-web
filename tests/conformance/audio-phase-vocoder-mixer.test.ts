@@ -102,6 +102,21 @@ test('wave segment scaling uses cumulative ends, preserves discontinuities and r
   const finalLabels: string[] = []
   queue.emitThrough(0, true, (label) => finalLabels.push(label.name))
   assert.deepEqual(finalLabels, ['end'])
+
+  // Fixed WaveSegmentQueue::Scale calculates double ratio = 2 / 49 first.
+  // Its rounded ratio puts label 49 at 1 after truncation, while reassociating
+  // the expression as (49 * 2) / 49 incorrectly leaves it at output offset 2.
+  const rounded = new WaveSegmentQueue(),
+    roundedLabels: Array<[string, number]> = []
+  rounded.appendSegment({ start: 0, length: 49, filteredLength: 49 })
+  rounded.appendLabel('ratio-first', 49)
+  rounded.scale(2)
+  assert.equal(rounded.length, 2)
+  assert.equal(rounded.positionAt(2), 49, 'segment endpoint scaling remains independent')
+  rounded.emitThrough(1, false, (label) => roundedLabels.push([label.name, label.offset]))
+  assert.deepEqual(roundedLabels, [], 'the scaled label remains at its exact boundary')
+  rounded.emitThrough(1, true, (label) => roundedLabels.push([label.name, label.offset]))
+  assert.deepEqual(roundedLabels, [['ratio-first', 1]])
 })
 
 test('wave segment partial dequeue truncates source lengths and supports repeated loop positions', () => {

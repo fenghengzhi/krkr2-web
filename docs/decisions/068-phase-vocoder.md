@@ -178,6 +178,14 @@ The follow-up review also corrected input-ring fragment request boundaries and
 short-read padding, nonempty-queue label baselines, and the independent raw
 decoder cursor retained after a prepared smooth crossfade. The label-offset
 normalization difference above remains intentional rather than being marked fixed.
+Final integration review found one additional arithmetic-order defect: label
+scaling multiplied the offset by the new length before division, whereas fixed
+`WaveSegmentQueue.cpp` first stores the double ratio and then multiplies. The
+implementation now preserves that order. The existing segment-scaling test also
+defines the safe 49-to-2 boundary: source offset 49 becomes output offset 1 after
+ratio rounding and truncation, rather than 2 from the reassociated expression.
+This is a source-contract regression definition, not an executed SDK observation
+or a passing test result; no new test case was added to the inventory.
 
 The slice defines 81 new Node cases: 18 native identity/snapshot cases, 16 real
 Session/VM integration cases, 14 DSP numerical cases, and 33 mixer/timeline cases.

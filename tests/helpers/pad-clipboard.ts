@@ -2,11 +2,21 @@ import { test, expect } from '@playwright/test'
 import { evaluate } from './browser-expression.ts'
 import { launchPads, padSource, padSurface } from './web-pad.ts'
 
+interface PadClipboardFocus {
+  tag: string | null
+  padId: string | null
+  action: string | null
+}
 interface PadClipboardCall {
   method: string
   active: boolean
   state: string
   delivery: string
+  focusAtCall: PadClipboardFocus
+  focusAtSettlement?: PadClipboardFocus
+  focusAtText?: PadClipboardFocus
+  readTypes?: string[][]
+  textUnits?: number
   representation?: string
   error?: string
 }
@@ -34,6 +44,14 @@ export function registerPadClipboardTests(): void {
         await page.addInitScript(() => {
           const calls: PadClipboardCall[] = [],
             gate: PadClipboardGate = { events: [] },
+            focus = (): PadClipboardFocus => {
+              const active = document.activeElement
+              return {
+                tag: active?.tagName ?? null,
+                padId: active?.closest('.game-pad')?.getAttribute('data-pad-id') ?? null,
+                action: active?.getAttribute('data-action') ?? null,
+              }
+            },
             hold = <T>(call: PadClipboardCall, value: T): Promise<T> =>
               new Promise<T>((resolve) => {
                 call.delivery = 'held'
@@ -59,6 +77,7 @@ export function registerPadClipboardTests(): void {
                     active: navigator.userActivation.isActive,
                     state: 'pending',
                     delivery: delayed ? 'awaiting-native' : 'direct',
+                    focusAtCall: focus(),
                   }
                 if (delayed) gate.next = undefined
                 calls.push(call)
@@ -66,28 +85,47 @@ export function registerPadClipboardTests(): void {
                   return Promise.resolve(Reflect.apply(original, this, args)).then(
                     (value) => {
                       call.state = 'fulfilled'
-                      if (delayed && method === 'read') {
+                      call.focusAtSettlement = focus()
+                      if (method === 'read') {
+                        call.readTypes = (value as ClipboardItem[]).map((item) => [...item.types])
                         for (const item of value as ClipboardItem[]) {
                           const getType = item.getType
                           Object.defineProperty(item, 'getType', {
                             configurable: true,
                             value: function (this: ClipboardItem, type: string) {
                               call.representation = 'type-pending'
-                              return Reflect.apply(getType, this, [type]).then((blob: Blob) => {
-                                call.representation = 'type-fulfilled'
-                                const text = blob.text
-                                Object.defineProperty(blob, 'text', {
-                                  configurable: true,
-                                  value: function (this: Blob) {
-                                    call.representation = 'text-pending'
-                                    return Reflect.apply(text, this, []).then((result: string) => {
-                                      call.representation = 'text-fulfilled'
-                                      return result
-                                    })
-                                  },
-                                })
-                                return blob
-                              })
+                              return Reflect.apply(getType, this, [type]).then(
+                                (blob: Blob) => {
+                                  call.representation = 'type-fulfilled'
+                                  const text = blob.text
+                                  Object.defineProperty(blob, 'text', {
+                                    configurable: true,
+                                    value: function (this: Blob) {
+                                      call.representation = 'text-pending'
+                                      return Reflect.apply(text, this, []).then(
+                                        (result: string) => {
+                                          call.representation = 'text-fulfilled'
+                                          call.focusAtText = focus()
+                                          call.textUnits = result.length
+                                          return result
+                                        },
+                                        (error: unknown) => {
+                                          call.representation = 'text-rejected'
+                                          call.error =
+                                            error instanceof Error ? error.name : String(error)
+                                          throw error
+                                        },
+                                      )
+                                    },
+                                  })
+                                  return blob
+                                },
+                                (error: unknown) => {
+                                  call.representation = 'type-rejected'
+                                  call.error = error instanceof Error ? error.name : String(error)
+                                  throw error
+                                },
+                              )
                             },
                           })
                         }
@@ -98,12 +136,14 @@ export function registerPadClipboardTests(): void {
                     },
                     (error: unknown) => {
                       call.state = 'rejected'
+                      call.focusAtSettlement = focus()
                       call.error = error instanceof Error ? error.name : String(error)
                       throw error
                     },
                   )
                 } catch (error) {
                   call.state = 'rejected'
+                  call.focusAtSettlement = focus()
                   call.error = error instanceof Error ? error.name : String(error)
                   throw error
                 }
@@ -167,6 +207,16 @@ export function registerPadClipboardTests(): void {
           await second.locator('[data-action="menu"]').click()
           await second.locator('[data-action="paste"]').click()
           await expect(second.locator('textarea')).toHaveValue(value)
+          await expect(second.locator('textarea')).toBeFocused()
+          expect(
+            await page.evaluate(
+              () => (window as unknown as PadClipboardEvidence).padClipboardCalls[2]?.focusAtCall,
+            ),
+          ).toEqual({
+            tag: 'BUTTON',
+            padId: await second.getAttribute('data-pad-id'),
+            action: 'paste',
+          })
           await second.locator('textarea').focus()
           await page.keyboard.press('ControlOrMeta+a')
           await second.locator('[data-action="cut"]').click()
@@ -254,10 +304,6 @@ export function registerPadClipboardTests(): void {
               gates: (window as unknown as PadClipboardEvidence).padClipboardGate.events,
             })),
             calls = proof.calls
-          await info.attach('pad-real-clipboard.json', {
-            body: JSON.stringify({ browser: browserName, grants, ...proof }, null, 2),
-            contentType: 'application/json',
-          })
           expect(calls.map((call) => call.method)).toEqual([
             'writeText',
             'writeText',
@@ -276,6 +322,11 @@ export function registerPadClipboardTests(): void {
             'fulfilled',
           ])
           expect(calls.slice(4).map((call) => call.delivery)).toEqual(['released', 'released'])
+          for (const index of [2, 5]) {
+            expect(calls[index].readTypes?.some((types) => types.includes('text/plain'))).toBe(true)
+            expect(calls[index].representation).toBe('text-fulfilled')
+            expect(calls[index].textUnits).toBe(value.length)
+          }
           expect(proof.gates).toEqual([
             { call: 5, method: 'writeText', phase: 'held' },
             { call: 5, method: 'writeText', phase: 'released' },
@@ -284,7 +335,22 @@ export function registerPadClipboardTests(): void {
           ])
           if (browserName === 'chromium') expect(calls[0].error).toBe('NotAllowedError')
         } finally {
-          await game.stop()
+          try {
+            // Preserve the real API and focus observations even when the
+            // original textarea assertion fails before reaching the end.
+            const proof = await page
+              .evaluate(() => ({
+                calls: (window as unknown as PadClipboardEvidence).padClipboardCalls,
+                gates: (window as unknown as PadClipboardEvidence).padClipboardGate.events,
+              }))
+              .catch((error: unknown) => ({ unavailable: String(error) }))
+            await info.attach('pad-real-clipboard.json', {
+              body: JSON.stringify({ browser: browserName, grants, ...proof }, null, 2),
+              contentType: 'application/json',
+            })
+          } finally {
+            await game.stop()
+          }
         }
       })
     }

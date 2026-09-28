@@ -80,3 +80,11 @@
 - Firefox 的四个 pending-save Stop 用例中，真实停止按钮点击完成后 Pad/保存 UI 已撤销，应用状态却持续为“停止中”，重启步骤尚未到达。原 trace 未观测 Worker RPC 返回与状态端口先后，不能把通道竞争称为已实测根因。静态审查确定 Pad 的 Stop 直接调用 player.stop，绕过 app.stop 的完整状态清理，依赖最后 stopped 事件在 RPC 停止关闭事件端口前送达。新增可选 `PlayerOptions.onStopRequested`：应用按创建时的 instance/generation 校验后调用既有完整 stop；独立嵌入未提供处理器时继续直接停止 player。停止失败在 Pad UI 已退休后仍由应用日志保留。原真实停止/待机/新会话断言保留，并在新会话先确认旧 Stop/下载元素已 detached 且 disabled，再显式派发旧表单的 submit 与旧 Stop 的 click 事件，验证实际动作监听不能影响新播放器或恢复下载；不以 disabled 元素原生 `.click()` 的无操作冒充失效隔离证据。
 
 上述修订只完成源码审查与编辑，等待后续统一 GitHub-hosted 批次；旧失败仍是失败。未运行本地测试、构建、类型检查或浏览器探针。
+
+## 第二轮完整终态与 WebKit 观测
+
+该完整工作流现已结束为 failure：Node **2,304/2,308**，浏览器 **1,796/1,833**，直接运行时 **6/6**。浏览器未通过为 33 failed、4 timedOut，无遗漏、跳过或重试；其中 36 项属于 Pad，另 1 项为原有 WebKit Asyncify image-writing。WebKit 常规作业实际 553/570；其独立编辑器、geometry、保存 Stop 的失败与上文相应修订分别对应，不能仅凭结果相似推断相同动态根因。所有原始 ZIP、日志、截图、trace 与终态计数保留在主工作树 `out/verification/github-actions/36448613310/`。
+
+剩余四个 WebKit Pad Clipboard 变体都在首次 Paste 后正文仍为空时失败。原始记录证明第二次真实 writeText 已 fulfilled、Paste click 已完成；因为观察附件原先位于测试末尾，没有记录 read 返回值或当时 activeElement。菜单打开已显式聚焦 Copy，不能声称焦点一直留在 First Pad。源码缺少命令按钮在执行前取得本编辑器焦点的保证；修订公共按钮处理器，在 editable 且未 disabled 时同步 focus 后执行命令，仍保留异步结果的原焦点、选区、epoch 资格检查。真实 API 观察器增加调用／完成／正文读取时的焦点、read types 与文本长度，并在 finally 保存附件；原正文、空选区、迟到 Cut/Paste、撤销断言不减少。这是待验证修补，不是已经证实的 WebKit 根因。
+
+独立 image-writing 原始截图的十二个采样点均为窗口背景 `[16,23,34,255]`，而浏览器二次解码同一 PNG 得到透明全零；两层证据分别保留，尚不能归因给渲染或读取中的单一环节。下一轮截图断言使用独立 Node PNG 解码，并在原 12 秒 expect 超时内逐次读取新截图、严格比较原十二组 RGBA，保存每次原始 PNG 与采样；导出 PNG 的真实浏览器解码验收保留。没有为此修改产品绘制逻辑，也没有增加超时或将背景当作正确画面。

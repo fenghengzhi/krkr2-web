@@ -1,45 +1,106 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type TestInfo } from '@playwright/test'
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { decodeTlg } from '../../src/formats/image/tlg/index.ts'
+import { readScreenshotPng } from '../helpers/screenshot-png.ts'
 function finish<T>(work: Generator<void, T>): T {
   let next = work.next()
   while (!next.done) next = work.next()
   return next.value
 }
-async function pixels(page: Page) {
-  await expect(page.locator('canvas')).toHaveJSProperty('width', 12)
-  await expect(page.locator('canvas')).toHaveJSProperty('height', 2)
-  await page.locator('canvas').evaluate((node) => {
-    const c = node as HTMLCanvasElement
-    c.style.width = '384px'
-    c.style.height = '64px'
-    c.style.imageRendering = 'pixelated'
-  })
-  const screenshot = await page.locator('canvas').screenshot()
-  return page.evaluate(
-    async (url) => {
-      const image = await createImageBitmap(await (await fetch(url)).blob()),
-        canvas = new OffscreenCanvas(image.width, image.height),
-        context = canvas.getContext('2d')!
-      context.drawImage(image, 0, 0)
-      const result = Array.from({ length: 12 }, (_, x) => [
-        ...context.getImageData(
-          Math.floor(((x + 0.5) * image.width) / 12),
-          Math.floor(image.height / 4),
-          1,
-          1,
-        ).data,
-      ])
-      image.close()
-      return result
-    },
-    'data:image/png;base64,' + screenshot.toString('base64'),
-  )
+async function expectPixels(page: Page, info: TestInfo, phase: string, expected: number[][]) {
+  const attempts: {
+    number: number
+    startedAt: string
+    durationMs?: number
+    attachment?: string
+    sha256?: string
+    width?: number
+    height?: number
+    positions?: number[][]
+    samples?: number[][]
+    error?: string
+  }[] = []
+  try {
+    await expect(page.locator('canvas')).toHaveJSProperty('width', 12)
+    await expect(page.locator('canvas')).toHaveJSProperty('height', 2)
+    await page.locator('canvas').evaluate((node) => {
+      const c = node as HTMLCanvasElement
+      c.style.width = '384px'
+      c.style.height = '64px'
+      c.style.imageRendering = 'pixelated'
+    })
+    // The script log and GL ready state do not acknowledge browser composition.
+    // Observe fresh displayed pixels with the existing assertion timeout. Keep
+    // failed observations; do not execute script or force a redraw while waiting.
+    await expect
+      .poll(async () => {
+        const started = performance.now(),
+          attempt: (typeof attempts)[number] = {
+            number: attempts.length + 1,
+            startedAt: new Date().toISOString(),
+          }
+        attempts.push(attempt)
+        try {
+          const screenshot = await page.locator('canvas').screenshot()
+          attempt.attachment = `image-writing-${phase}-${attempt.number}`
+          attempt.sha256 = createHash('sha256').update(screenshot).digest('hex')
+          await info.attach(attempt.attachment, { body: screenshot, contentType: 'image/png' })
+          // Independent Node decoding avoids a second browser canvas/readback
+          // obscuring the bytes of the actual displayed-surface screenshot.
+          const image = readScreenshotPng(screenshot)
+          attempt.width = image.width
+          attempt.height = image.height
+          attempt.positions = Array.from({ length: 12 }, (_, x) => [
+            Math.floor(((x + 0.5) * image.width) / 12),
+            Math.floor(image.height / 4),
+          ])
+          attempt.samples = attempt.positions.map(([x, y]) => {
+            const offset = (y! * image.width + x!) * 4
+            return [...image.rgba.subarray(offset, offset + 4)]
+          })
+          return attempt.samples
+        } catch (error) {
+          attempt.error = String(error)
+          throw error
+        } finally {
+          attempt.durationMs = performance.now() - started
+        }
+      })
+      .toEqual(expected)
+  } finally {
+    const dom = await page
+      .evaluate(() => {
+        const canvas = document.querySelector('canvas'),
+          stage = document.querySelector<HTMLElement>('#stage')
+        return {
+          observedAt: new Date().toISOString(),
+          visibility: document.visibilityState,
+          graphics: stage?.dataset.graphics,
+          activity: stage?.dataset.activity,
+          canvas: canvas && {
+            width: canvas.width,
+            height: canvas.height,
+            style: canvas.getAttribute('style'),
+            bounds: canvas.getBoundingClientRect().toJSON(),
+          },
+          status: document.querySelector('#status')?.textContent,
+          runtime: document.querySelector('#runtime-info')?.textContent,
+          saves: document.querySelector('#save-status')?.textContent,
+          logs: document.querySelector('#logs')?.textContent,
+        }
+      })
+      .catch((error: unknown) => ({ error: String(error) }))
+    await info.attach(`image-writing-${phase}-observations`, {
+      body: JSON.stringify({ expected, attempts, dom }, null, 2),
+      contentType: 'application/json',
+    })
+  }
 }
 for (const backend of ['asyncify', 'jspi']) {
   test(`${backend}: PNG and TLG image files preserve pixels, tags, exports and reloads`, async ({
     page,
-  }) => {
+  }, info) => {
     const errors: string[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     await page.goto(`/?backend=${backend}`)
@@ -71,7 +132,7 @@ Debug.message("saved-ready:"+string(existing)+":"+string(ok));
       [200, 100, 50, 255],
       [0, 0, 255, 255],
     ]).flat()
-    expect(await pixels(page)).toEqual(expected)
+    await expectPixels(page, info, 'initial', expected)
     await expect(page.locator('#save-status')).toContainText('6 个存档文件，已保存')
     const waiting = page.waitForEvent('download')
     await page.locator('#export-saves').click()
@@ -97,6 +158,12 @@ Debug.message("saved-ready:"+string(existing)+":"+string(ok));
         ])
         expect(image.metadata!.get('mode')).toBe('addalpha')
       } else {
+        await info.attach(`image-writing-export-${file.path.split('/').at(-1)}`, {
+          body: bytes,
+          contentType: 'image/png',
+        })
+        // Exported PNGs still use the real browser decoder. The independent
+        // screenshot observer above must not bypass this interoperability check.
         const values = await page.evaluate(async (base64) => {
           const image = await createImageBitmap(
               await (await fetch('data:image/png;base64,' + base64)).blob(),
@@ -115,7 +182,7 @@ Debug.message("saved-ready:"+string(existing)+":"+string(ok));
     await page.reload()
     await page.locator('#files').setInputFiles(file)
     await expect(page.locator('#logs')).toContainText('saved-ready:1:1')
-    expect(await pixels(page)).toEqual(expected)
+    await expectPixels(page, info, 'reload', expected)
     await page.locator('#stop').click()
     expect(errors).toEqual([])
   })

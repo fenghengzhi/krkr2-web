@@ -1031,7 +1031,12 @@ export function createGamePads(stage: HTMLElement): PadHost {
       control.addEventListener(
         'click',
         () => {
-          if (editable(view)) action()
+          if (!editable(view) || control.disabled) return
+          // A command owns this editor when it starts, including on hosts
+          // where a pointer click does not focus buttons by default. Later
+          // clipboard results must still pass the current focus/range checks.
+          control.focus({ preventScroll: true })
+          action()
         },
         options,
       )
