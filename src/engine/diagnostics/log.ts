@@ -1,5 +1,5 @@
 import type { SaveOverlay } from '../storage/save-overlay.ts'
-import { normalizePath } from '../storage/resolver.ts'
+import { parseStoragePath, storageWritePath } from '../storage/public-path.ts'
 
 export interface LogEntry {
   text: string
@@ -104,8 +104,10 @@ export class DebugLog {
   }
   setLocation(value: string, options: ReadonlyMap<string, string>): void {
     if (value.length > 4096 || value.includes('>')) throw new Error('Invalid Debug log directory')
-    const trimmed = value.replace(/[/\\]*$/, ''),
-      path = normalizePath((trimmed ? trimmed + '/' : '') + filename)
+    const directory = parseStoragePath(value),
+      path = storageWritePath(
+        (directory && !directory.endsWith('/') ? directory + '/' : directory) + filename,
+      )
     try {
       this.flush()
     } catch (error) {

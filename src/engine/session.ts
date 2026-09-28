@@ -18,7 +18,16 @@ import {
   type ScriptRuntime,
   type ScriptValue,
 } from './script/runtime.ts'
-import { StorageResolver, normalizePath } from './storage/resolver.ts'
+import { StorageResolver } from './storage/resolver.ts'
+import {
+  chopStorageExt,
+  extractStorageExt,
+  extractStorageName,
+  extractStoragePath,
+  getFullStoragePath,
+  storageWritePath,
+  toPublicStoragePath,
+} from './storage/public-path.ts'
 import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree } from './scene/layers.ts'
@@ -3079,14 +3088,13 @@ export class EngineSession {
         break
       }
       case 'Storage.validateWrite':
-        if (text(0).includes('>')) throw new Error('Archive storage is read-only')
-        normalizePath(text(0))
+        storageWritePath(text(0))
         modeOffset(text(1))
         break
       case 'Storage.writeText':
       case 'Storage.writeBinary': {
         this.materializeLogs()
-        const path = text(0),
+        const path = storageWritePath(text(0)),
           mode = text(1)
         const encoded =
           operation === 'Storage.writeText' ? await this.deps.writeText(text(2), mode) : args[2]
@@ -3105,12 +3113,40 @@ export class EngineSession {
         this.notify()
         break
       }
+      case 'Storages.class':
+        return {
+          kind: 'value',
+          value: {
+            type: 'class',
+            namespace: 'Storages',
+            id: 0,
+            className: 'Storages',
+            properties: [],
+          },
+        }
+      case 'Storages.getFullPath':
+        value = getFullStoragePath(text(0))
+        break
+      case 'Storages.extractStorageExt':
+        value = extractStorageExt(text(0))
+        break
+      case 'Storages.extractStorageName':
+        value = extractStorageName(text(0))
+        break
+      case 'Storages.extractStoragePath':
+        value = extractStoragePath(text(0))
+        break
+      case 'Storages.chopStorageExt':
+        value = chopStorageExt(text(0))
+        break
       case 'Storages.exists':
         value = BigInt(this.resourceExists(text(0)))
         break
-      case 'Storages.getPlacedPath':
-        value = this.resourceExists(text(0)) ? this.resolveResource(text(0)).name : ''
+      case 'Storages.getPlacedPath': {
+        const resource = this.findResource(text(0))
+        value = resource ? toPublicStoragePath(resource.name) : ''
         break
+      }
       case 'Storages.addAutoPath':
         this.storage.addAutoPath(text(0))
         break
@@ -3938,9 +3974,7 @@ export class EngineSession {
         break
       }
       case 'Layer.saveImage': {
-        const name = text(1)
-        if (name.includes('>')) throw new Error('Archive storage is read-only')
-        const path = normalizePath(name)
+        const path = storageWritePath(text(1))
         const id = number(0),
           layer = this.layers.get(id),
           bytes = await this.imageWriter.encode(

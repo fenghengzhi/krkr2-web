@@ -557,8 +557,8 @@ test.describe('public createPlayer System dataPath embedding', () => {
       /^Error: Invalid System dataPath: absolute URL or drive$/,
       /^Error: Invalid System dataPath: unknown macro or archive directory$/,
       /^Error: Invalid System dataPath: unknown macro or archive directory$/,
-      /^Error: Invalid System dataPath: absolute URL or drive$/,
-      /^Error: Invalid System dataPath: absolute URL or drive$/,
+      /^Error: Invalid resource path:/,
+      /^Error: Invalid resource path:/,
     ]
     for (const [index, item] of rejected.entries()) {
       expect(item.constructed).toBe(false)

@@ -1,5 +1,6 @@
 import type { SaveFile, SaveStore } from '../ports/saves.ts'
 import { normalizePath } from './resolver.ts'
+import { parseStoragePath, storageWritePath } from './public-path.ts'
 import type { Resource } from '../ports/storage.ts'
 
 export class SaveOverlay {
@@ -36,8 +37,8 @@ export class SaveOverlay {
     return found ? this.resources.get(found) : undefined
   }
   locate(path: string): string | undefined {
-    if (path.includes('>')) return undefined
-    const name = normalizePath(path)
+    const name = parseStoragePath(path)
+    if (!name || name.includes('>') || name.endsWith('/')) return undefined
     if (this.files.has(name)) return name
     const matches = [...this.files.keys()].filter(
       (path) => path.toLowerCase() === name.toLowerCase(),
@@ -52,8 +53,7 @@ export class SaveOverlay {
     this.writeFile(path, bytes, false)
   }
   private writeFile(path: string, bytes: Uint8Array, gameWrite: boolean): void {
-    if (path.includes('>')) throw new Error('Archive storage is read-only')
-    const name = normalizePath(path)
+    const name = storageWritePath(path)
     let size = bytes.length
     for (const [existing, value] of this.files) if (existing !== name) size += value.length
     if (size > 64 * 1024 * 1024)

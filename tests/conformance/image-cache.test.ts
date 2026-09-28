@@ -219,7 +219,7 @@ test('mounted and saved resource versions stay stable until replacement and pres
   const storage = new StorageResolver(),
     a = resource('Art/a.png')
   storage.mount([a])
-  storage.addAutoPath('Art')
+  storage.addAutoPath('Art/')
   const before = storage.resolve('A.PNG')
   assert.equal(before, storage.resolve('Art/a.png'))
   assert.throws(() => storage.mount([resource('Art/a.png'), resource('../invalid')]))
@@ -307,7 +307,7 @@ test('raw cache reuse preserves palette keys, companion updates and auto-path sw
     resource('patch/a.png', 9),
     resource('base/a_p.png', 4),
   ])
-  storage.addAutoPath('base')
+  storage.addAutoPath('base/')
   const loader = new ImageLoader(
     (name) => {
       try {
@@ -330,9 +330,9 @@ test('raw cache reuse preserves palette keys, companion updates and auto-path sw
   assert.equal(plain.province![0], 4)
   storage.mount([resource('base/a_p.png', 5)])
   assert.equal((await loader.load('a', noColorKey)).province![0], 5)
-  storage.addAutoPath('patch')
+  storage.addAutoPath('patch/')
   assert.equal((await loader.load('a', noColorKey)).image.data[0], 9)
-  storage.removeAutoPath('patch')
+  storage.removeAutoPath('patch/')
   assert.equal((await loader.load('a', noColorKey)).image.data[0], 7)
   assert.equal(reads.filter((n) => n === 7).length, 1)
 })

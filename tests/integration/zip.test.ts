@@ -32,7 +32,7 @@ test('ZIP import runs real TJS and images, preserving mount order, qualified pat
     assert.equal(await session.evaluate('Scripts.evalStorage("base.ZIP>シーン/value.tjs")'), '42')
     assert.equal(
       await session.evaluate('Storages.getPlacedPath("base.ZIP>シーン/value.tjs")'),
-      'base.ZIP>シーン/value.tjs',
+      'game://./base.ZIP>シーン/value.tjs',
     )
     assert.equal(session.exportSaves().length, 1)
     session.pause()
@@ -50,7 +50,7 @@ test('ZIP import runs real TJS and images, preserving mount order, qualified pat
       await session.evaluate(
         '(function(){Storages.addAutoPath("base.ZIP>folder/");return Storages.getPlacedPath("CAFÉ.TXT");})()',
       ),
-      'base.ZIP>folder/café.txt',
+      'game://./base.ZIP>folder/café.txt',
     )
     assert.equal(
       await session.evaluate(
