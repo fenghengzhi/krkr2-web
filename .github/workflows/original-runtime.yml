@@ -6,7 +6,7 @@ on:
       suite:
         description: Original SDK observation suite
         type: choice
-        options: [modal, menu, system-dialog, system-colors]
+        options: [modal, menu, system-dialog, system-colors, pad]
         default: modal
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
-        scenario: ${{ inputs.suite == 'menu' && fromJSON('["menu-0-select","menu-0-cancel","menu-128-select","menu-128-cancel","menu-256-select","menu-256-cancel","menu-384-select","menu-384-cancel"]') || inputs.suite == 'system-dialog' && fromJSON('["system-inform","system-input-unicode","system-input-empty","system-input-cancel"]') || inputs.suite == 'system-colors' && fromJSON('["system-colors"]') || fromJSON('["modal-close","modal-accepted-reclose","modal-hidden-timer","modal-parent-child"]') }}
+        scenario: ${{ inputs.suite == 'menu' && fromJSON('["menu-0-select","menu-0-cancel","menu-128-select","menu-128-cancel","menu-256-select","menu-256-cancel","menu-384-select","menu-384-cancel"]') || inputs.suite == 'system-dialog' && fromJSON('["system-inform","system-input-unicode","system-input-empty","system-input-cancel"]') || inputs.suite == 'system-colors' && fromJSON('["system-colors"]') || inputs.suite == 'pad' && fromJSON('["pad"]') || fromJSON('["modal-close","modal-accepted-reclose","modal-hidden-timer","modal-parent-child"]') }}
     defaults:
       run:
         shell: pwsh
@@ -56,7 +56,8 @@ jobs:
           }
           $process = $null
           $isSystemColors = $env:NATIVE_SCENARIO -ceq 'system-colors'
-          $systemColorsDriverLoaded = $false
+          $isPad = $env:NATIVE_SCENARIO -ceq 'pad'
+          $structuredDriverLoaded = $false
           $work = Join-Path $env:RUNNER_TEMP ('krkr2-original-' + [Guid]::NewGuid().ToString('N'))
           New-Item -ItemType Directory $work | Out-Null
           try {
@@ -102,32 +103,34 @@ jobs:
               Copy-Item $driver (Join-Path $output 'original-system-dialog-driver.cs')
               $status.driverSha256 = (Get-FileHash $driver -Algorithm SHA256).Hash.ToLowerInvariant()
               Add-Type -Path $driver
-            } elseif ($isSystemColors) {
-              $status.stage = 'system-colors-inputs'
-              $fixture = 'tests/fixtures/native-reference/system-colors.tjs'
+            } elseif ($isSystemColors -or $isPad) {
+              $suiteName = if ($isPad) { 'pad' } else { 'system-colors' }
+              $inputsKey = if ($isPad) { 'padInputs' } else { 'systemColorsInputs' }
+              $status.stage = $suiteName + '-inputs'
+              $fixture = if ($isPad) { 'tests/fixtures/native-reference/pad-core-source.tjs' } else { 'tests/fixtures/native-reference/system-colors.tjs' }
               $sourceInputs = [ordered]@{
                 fixture = $fixture
-                plan = 'tests/fixtures/native-reference/system-colors-plan.md'
-                cases = 'tests/fixtures/native-reference/system-colors-cases.json'
-                schema = 'tests/fixtures/native-reference/system-colors.schema.json'
-                sourceManifest = 'tests/fixtures/native-reference/system-colors-source.json'
-                driver = 'tests/probes/original-system-colors.ps1'
+                plan = 'tests/fixtures/native-reference/' + $suiteName + '-plan.md'
+                cases = 'tests/fixtures/native-reference/' + $suiteName + '-cases.json'
+                schema = 'tests/fixtures/native-reference/' + $suiteName + '.schema.json'
+                sourceManifest = 'tests/fixtures/native-reference/' + $suiteName + '-source.json'
+                driver = 'tests/probes/original-' + $suiteName + '.ps1'
               }
-              $status.systemColorsInputs = [ordered]@{}
+              $status[$inputsKey] = [ordered]@{}
               foreach ($inputName in $sourceInputs.Keys) {
                 $sourcePath = $sourceInputs[$inputName]
                 $archivedPath = Join-Path $output (Split-Path $sourcePath -Leaf)
                 Copy-Item $sourcePath $archivedPath
-                $status.systemColorsInputs[$inputName] = [ordered]@{
+                $status[$inputsKey][$inputName] = [ordered]@{
                   file = Split-Path $archivedPath -Leaf
                   sha256 = (Get-FileHash $archivedPath -Algorithm SHA256).Hash.ToLowerInvariant()
                 }
               }
-              $systemColorsCases = Join-Path $output 'system-colors-cases.json'
-              $status.sourceReference = (Get-Content $systemColorsCases -Raw -Encoding utf8 | ConvertFrom-Json).sourceReference
-              $status.driverSha256 = $status.systemColorsInputs.driver.sha256
+              $structuredCases = Join-Path $output ($suiteName + '-cases.json')
+              $status.sourceReference = (Get-Content $structuredCases -Raw -Encoding utf8 | ConvertFrom-Json).sourceReference
+              $status.driverSha256 = $status[$inputsKey].driver.sha256
               $status.stage = 'source-reference'
-              $sourceManifest = Get-Content (Join-Path $output 'system-colors-source.json') -Raw -Encoding utf8 | ConvertFrom-Json
+              $sourceManifest = Get-Content (Join-Path $output ($suiteName + '-source.json')) -Raw -Encoding utf8 | ConvertFrom-Json
               if ($sourceManifest.repository -cne $status.sourceReference.repository -or
                   $sourceManifest.commit -cne $status.sourceReference.commit -or
                   $sourceManifest.branchPath -cne $status.sourceReference.branchPath) {
@@ -153,9 +156,10 @@ jobs:
                 }
                 $sourceObservation.verified = $true
               }
-              $status.stage = 'system-colors-driver'
-              . (Join-Path $output 'original-system-colors.ps1')
-              $systemColorsDriverLoaded = $true
+              $status.stage = $suiteName + '-driver'
+              . (Join-Path $output ('original-' + $suiteName + '.ps1'))
+              $structuredDriverLoaded = $true
+              if ($isPad) { $status.padHost = Read-OriginalPadHostMetadata }
             } else {
               $fixture = Join-Path 'tests/fixtures/native-reference' ($env:NATIVE_SCENARIO + '.tjs')
             }
@@ -216,10 +220,14 @@ jobs:
             if ($process.ExitCode -ne 0 -or $events -cnotcontains 'observations-complete' -or ($events | Where-Object { $_.StartsWith('error:') })) {
               throw 'Original script did not complete every requested observation.'
             }
-            if ($isSystemColors) {
+            if ($isPad) {
+              $status.stage = 'structured-evidence'
+              Convert-OriginalPadObservations -EventsPath (Join-Path $output 'native-events.txt') `
+                -OutputDirectory $output -CasesPath $structuredCases -Status $status | Out-Null
+            } elseif ($isSystemColors) {
               $status.stage = 'structured-evidence'
               Convert-OriginalSystemColorObservations -EventsPath (Join-Path $output 'native-events.txt') `
-                -OutputDirectory $output -CasesPath $systemColorsCases -Status $status | Out-Null
+                -OutputDirectory $output -CasesPath $structuredCases -Status $status | Out-Null
             }
             # Do not predeclare the VCL ordering being investigated as the oracle.
             # Completion means these events were observed; their values are compared separately.
@@ -237,10 +245,15 @@ jobs:
             foreach ($file in Get-ChildItem -LiteralPath $work -File -ErrorAction SilentlyContinue) {
               if ($file.Extension -in @('.log', '.txt')) { Copy-Item $file.FullName (Join-Path $output $file.Name) -Force }
             }
-            if ($isSystemColors -and $systemColorsDriverLoaded -and $status.state -cne 'observed') {
+            if (($isSystemColors -or $isPad) -and $structuredDriverLoaded -and $status.state -cne 'observed') {
               try {
-                Convert-OriginalSystemColorObservations -EventsPath (Join-Path $output 'native-events.txt') `
-                  -OutputDirectory $output -CasesPath $systemColorsCases -Status $status -AllowIncomplete | Out-Null
+                if ($isPad) {
+                  Convert-OriginalPadObservations -EventsPath (Join-Path $output 'native-events.txt') `
+                    -OutputDirectory $output -CasesPath $structuredCases -Status $status -AllowIncomplete | Out-Null
+                } else {
+                  Convert-OriginalSystemColorObservations -EventsPath (Join-Path $output 'native-events.txt') `
+                    -OutputDirectory $output -CasesPath $structuredCases -Status $status -AllowIncomplete | Out-Null
+                }
               } catch {
                 # Partial conversion is secondary evidence and must not replace
                 # the original execution/completion/conversion failure.
