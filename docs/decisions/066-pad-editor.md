@@ -35,6 +35,8 @@
 
 保存按钮或 Pad 内 Ctrl/Meta+S 先 flush 编辑，纯值 RPC 固定正文/revision/文件名快照，再 `openHost(kind='pad-save')`。共享 scope 同样发布游戏/Pad 阻塞与输入 generation；用户暂停和 eventDisabled 时宿主编辑/保存仍可执行，不进入用户 TJS、exceptionHandler、continuous 或游戏绘制回调。长脚本在可处理 Worker 消息的异步 host wait 时也不阻挡保存。
 
+集成静态审查还发现：原 Layer 自更新计时器用 `modalLoop.depth` 判断是否将到期绘制交给 TJS 模态 continuation，纯宿主保存也会满足这个条件，却没有相应等待者；这可能让自驱动画停在已到期队列。修订区分实际 TJS continuation 与宿主作用域，纯宿主保存期间仍使用已有串行绘制调度，不为保存新增事件泵。主窗口关闭后的完成回执与提前退出判断也使用实际 TJS continuation 身份，宿主保存不提前取消普通回调的剩余语句。启用状态下的自更新、Timer 关闭主窗后正常返回与清理、暂停／eventDisabled 边界均列入同批验证；静态修订不代表运行通过。
+
 确认只分配一次性 receipt；浏览器核对 generation/request/Pad epoch 后发起一次 Blob download，再返回 outcome ACK，host scope 此时才 finish/release。取消不下载，错误保留重试 UI。已发起下载的 outcome/cancel 回执在页面转后台或新子界面覆盖时仍按 request/receipt 接纳一次；父保存记录等待子界面真正结束，不要求浏览器重复下载或恢复游戏。host parent 若结束时存在 TJS child frame，必须等 child 真正 LIFO release；自动回收只作用于已结束 host scope，不能提前释放 TJS scope。临时被 System/Font/Clipboard 子界面覆盖的保存控件保留文件名、receipt 去重、选区与焦点；`pendingSaveId` 与当前可见 save 分离。
 
 下载为 UTF-8、无 BOM，保留固定逻辑文本（通常 CRLF，同时保留脚本孤立 CR）；不是旧 ACP 保存字节的逐字兼容。安全 basename、默认 `.tjs`、只在用户操作后下载，不读写 KRKR VFS，不宣称浏览器发起下载等于用户磁盘写入成功。没有新增原版不存在的公开 `open/save/showModal/onChange/execute` API，执行按钮禁用。
@@ -50,6 +52,6 @@
 
 ## 验证范围
 
-新增 91 个 Node 测试定义（native factory 10、Pad 44、save 20、host modal 14、下载宿主 3）和 13 个浏览器场景模板（四种 VM 模式、三个项目，共 156 个预期实例）。覆盖真实原生 source/bytecode 工厂、属性/转换/寿命、消息排序与小预算、host modal LIFO/暂停/取消、真实 Worker 三浏览器 Asyncify/JSPI source/bytecode 编辑/输入/模态/下载。以上是静态库存，不是执行结果。浏览器保存测试读取实际 download 字节，字体测试使用实际游戏文件，合成事件测试仅证明生命周期，不能代称系统 IME 的端到端观察。
+新增 95 个 Node 测试定义（native factory 10、Pad 44、save 24、host modal 14、下载宿主 3）和 13 个浏览器场景模板（四种 VM 模式、三个项目，共 156 个预期实例）。覆盖真实原生 source/bytecode 工厂、属性/转换/寿命、消息排序与小预算、host modal LIFO/暂停/取消、真实 Worker 三浏览器 Asyncify/JSPI source/bytecode 编辑/输入/模态/下载。以上是静态库存，不是执行结果。浏览器保存测试读取实际 download 字节，字体测试使用实际游戏文件，合成事件测试仅证明生命周期，不能代称系统 IME 的端到端观察。
 
 当前只有上文原版 SDK 托管结果；本实现的 Web 构建和测试等待整批 freeze 后交给 root 的 GitHub-hosted Actions。失败、取消、未执行、原始日志与 artifact 将各自保留，不以重跑绿灯覆盖历史。

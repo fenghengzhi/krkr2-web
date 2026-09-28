@@ -51,6 +51,11 @@ export class ModalLoop {
   get depth(): number {
     return this.scopes.depth
   }
+  /** A native/TJS caller owns the event pump until its modal frame releases.
+   * Host-only scopes block input but do not consume serialized frame work. */
+  get hasTjsContinuation(): boolean {
+    return this.invoked.size > 0
+  }
   get pendingWaits(): number {
     return this.scopes.pendingWaits
   }

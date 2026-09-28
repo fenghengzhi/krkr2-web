@@ -1139,13 +1139,15 @@ export class EngineSession {
           this.armRedraw()
           return
         }
-        if (this.modalLoop?.depth) {
+        if (this.modalLoop?.hasTjsContinuation) {
           for (const [id, generation] of due) this.modalReadyRedraw.set(id, generation)
           this.frameRequested = true
           this.dirty = true
           this.modalWakeup?.()
           return
         }
+        // A Pad save owns a host scope, not a suspended TJS pump. Its ordinary
+        // redraw deadlines must keep using this existing serialized execution.
         this.redrawQueued = true
         void this.execute(async () => {
           // Recheck when the VM actually takes this task: it can have waited
@@ -1506,7 +1508,9 @@ export class EngineSession {
     return native.drainingReleased || native.pendingHandles > 0 || native.pendingInvalidations > 0
   }
   private completeReadyReceipts(): void {
-    if (this.exitAfterOperation && !(this.modalLoop?.depth ?? 0)) return
+    // A host-only save does not suspend the outer VM entry. Keep its main-close
+    // receipts pending until execute.finally requests ordinary termination.
+    if (this.exitAfterOperation && !this.modalLoop?.hasTjsContinuation) return
     for (const receipt of [...this.eventReceipts.values()]) {
       if (!receipt.nativeDone || !receipt.tailDone || !receipt.epilogueDone) continue
       const frameComplete = receipt.frameWindows.every(
@@ -1744,7 +1748,7 @@ export class EngineSession {
       }
       this.checkpoints.delete(id)
       this.completeReadyReceipts()
-      if (checkpoint.tail && this.exitAfterOperation && (this.modalLoop?.depth ?? 0) > 0) {
+      if (checkpoint.tail && this.exitAfterOperation && this.modalLoop?.hasTjsContinuation) {
         this.exitAfterOperation = false
         this.requestExit()
       }

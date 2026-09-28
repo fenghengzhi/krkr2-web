@@ -98,6 +98,7 @@ test('Pad save opens and finishes while execution is paused without a pump or a 
       cleanup: () => cleanup.push('save'),
     })
     assert.equal(f.loop.activeToken, token)
+    assert.equal(f.loop.hasTjsContinuation, false)
     assert.equal(f.loop.blockedWindow(1), true)
     assert.equal(f.loop.blockedWindow(200), true)
     assert.equal(f.loop.modalWindowId, undefined)
@@ -151,7 +152,9 @@ test('a Pad receipt cannot complete a native scope even when owner identifiers c
       ownerId: 7,
       cleanup: () => cleanup.push('native'),
     })
+    assert.equal(f.loop.hasTjsContinuation, false)
     f.loop.invoke(native)
+    assert.equal(f.loop.hasTjsContinuation, true)
     const host = f.loop.openHost({
       kind: 'pad-save',
       ownerId: 7,
@@ -162,6 +165,7 @@ test('a Pad receipt cannot complete a native scope even when owner identifiers c
     assert.equal(f.loop.isPending(native), true)
     assert.equal(f.loop.isPending(host), true)
     assert.equal(f.loop.activeToken, host)
+    assert.equal(f.loop.hasTjsContinuation, true, 'A host child does not replace its TJS caller')
     assert.deepEqual(cleanup, [])
     assert.equal(f.loop.finishHost(host), true)
     assert.deepEqual(cleanup, ['host'])
@@ -172,7 +176,9 @@ test('a Pad receipt cannot complete a native scope even when owner identifiers c
     assert.deepEqual(await f.host('Modal.wait', native), { kind: 'value', value: 0n })
     assert.deepEqual(await f.host('Modal.result', native), { kind: 'value', value: 19n })
     assert.equal(f.loop.depth, 1, 'A terminal native result still owns its frame')
+    assert.equal(f.loop.hasTjsContinuation, true)
     await f.host('Modal.end', native)
+    assert.equal(f.loop.hasTjsContinuation, false)
     assert.deepEqual(cleanup, ['host', 'native'])
   } finally {
     f.dispose()

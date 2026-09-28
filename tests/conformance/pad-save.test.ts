@@ -40,6 +40,28 @@ async function bounded<T>(promise: Promise<T>, description: string): Promise<T> 
   }
 }
 
+function frameClock() {
+  let now = 0
+  const tasks = new Set<{ at: number; run(): void }>()
+  return {
+    now: () => now,
+    schedule(run: () => void, delay: number) {
+      const task = { at: now + delay, run }
+      tasks.add(task)
+      return () => {
+        tasks.delete(task)
+      }
+    },
+    advance(milliseconds: number) {
+      now += milliseconds
+      for (const task of [...tasks]) if (task.at <= now && tasks.delete(task)) task.run()
+    },
+    get pending() {
+      return tasks.size
+    },
+  }
+}
+
 async function fixture(
   binary: boolean,
   source = '',
@@ -372,6 +394,111 @@ for (const binary of [false, true]) {
     }
   })
 
+  test(`Layer self-updates keep their ordinary frame schedule during and after a Pad save (${mode})`, async () => {
+    const clock = frameClock(),
+      f = await fixture(
+        binary,
+        `
+var win=new Window();win.setInnerSize(4,4);win.visible=true;
+var layer=new Layer(win,null);layer.setSize(4,4);layer.visible=true;
+var padPaintCount=0;
+layer.onPaint=function(){
+  global.padPaintCount++;
+  Debug.message("pad-save-paint:"+global.padPaintCount);
+  if(global.padPaintCount<5)layer.update();
+};
+layer.update();
+`,
+        { now: clock.now, schedule: clock.schedule },
+      ),
+      painted = () => f.logs.filter((line) => line.startsWith('pad-save-paint:')),
+      advance = async (milliseconds: number) => {
+        clock.advance(milliseconds)
+        // Drain only work scheduled by the actual deadline. Evaluating a TJS
+        // expression here would hide the missing autonomous redraw regression.
+        await f.session.idle()
+      }
+    try {
+      await f.session.idle()
+      assert.deepEqual(painted(), ['pad-save-paint:1'])
+      assert.equal(clock.pending, 1)
+      const save = f.open()
+      assert.equal(f.session.inspectOwnership().modalWaits, 0)
+      assert.deepEqual(painted(), ['pad-save-paint:1'], 'Opening a save does not create a VM turn')
+      await advance(15)
+      assert.deepEqual(painted(), ['pad-save-paint:1'])
+      await advance(1)
+      assert.deepEqual(painted(), ['pad-save-paint:1', 'pad-save-paint:2'])
+      assert.equal(f.request().id, save.id)
+      assert.equal(f.session.inspectOwnership().modalScopes, 1)
+      assert.equal(clock.pending, 1)
+      assert.equal(
+        f.session.pad({
+          ...f.identity(),
+          kind: 'save-confirm',
+          requestId: save.id,
+          fileName: 'animating.tjs',
+        }).status,
+        'accepted',
+      )
+      const receipt = f.request().receipt!
+      await advance(16)
+      assert.deepEqual(painted(), ['pad-save-paint:1', 'pad-save-paint:2', 'pad-save-paint:3'])
+      assert.equal(f.request().receipt, receipt)
+      assert.equal(
+        f.session.pad({
+          ...f.identity(),
+          kind: 'save-outcome',
+          requestId: save.id,
+          receipt,
+          ok: true,
+        }).status,
+        'accepted',
+      )
+      assert.equal(f.session.inspectOwnership().modalScopes, 0)
+      await advance(16)
+      assert.deepEqual(painted(), [
+        'pad-save-paint:1',
+        'pad-save-paint:2',
+        'pad-save-paint:3',
+        'pad-save-paint:4',
+      ])
+
+      const pausedSave = f.open()
+      f.session.pause()
+      assert.equal(clock.pending, 0)
+      await advance(100)
+      assert.equal(painted().length, 4)
+      assert.equal(
+        f.session.pad({
+          ...f.identity(),
+          kind: 'save-cancel',
+          requestId: pausedSave.id,
+        }).status,
+        'accepted',
+      )
+      assert.equal(f.session.snapshot().state, 'paused')
+      assert.equal(f.session.inspectOwnership().modalScopes, 0)
+      assert.equal(clock.pending, 0)
+      assert.equal(painted().length, 4, 'Host completion cannot override the game pause')
+      f.session.resume()
+      assert.equal(clock.pending, 1)
+      await advance(0)
+      assert.deepEqual(painted(), [
+        'pad-save-paint:1',
+        'pad-save-paint:2',
+        'pad-save-paint:3',
+        'pad-save-paint:4',
+        'pad-save-paint:5',
+      ])
+      assert.equal(clock.pending, 0)
+    } finally {
+      await f.session.stop()
+    }
+    assert.equal(clock.pending, 0)
+    assert.equal(f.session.snapshot().handles, 0)
+  })
+
   test(`Pad discovers its actual mounted font bytes while the game VM remains user-paused (${mode})`, async () => {
     const bytes = await readFile(new URL('../fixtures/font-selection/latin.ttf', import.meta.url))
     const f = await fixture(
@@ -400,6 +527,79 @@ for (const binary of [false, true]) {
       assert.deepEqual(f.logs, baselineLogs)
       f.session.resume()
       assert.equal(await f.session.evaluate('pad.fontFace'), 'Selection Latin')
+    } finally {
+      await f.session.stop()
+    }
+  })
+
+  test(`A timer can finish its main-window close and nested event round while a host Pad save is open (${mode})`, async () => {
+    const clock = frameClock(),
+      f = await fixture(
+        binary,
+        `
+System.exitOnWindowClose=true;
+class ClosingWindow extends Window {
+  function ClosingWindow(){super.Window();visible=true;}
+  function finalize(){Debug.message("pad-main-close:finalized");}
+}
+class Managed {
+  function finalize(){Debug.message("pad-main-close:managed");}
+}
+var win=new ClosingWindow();win.add(new Managed());
+var timer=new Timer(function(){
+  timer.enabled=false;
+  invalidate win;
+  Debug.message("pad-main-close:callback");
+  System.eventDisabled=false;
+  Debug.message("pad-main-close:after-round");
+},"");
+timer.interval=16;timer.enabled=true;
+`,
+        { now: clock.now, schedule: clock.schedule },
+      )
+    try {
+      await f.session.idle()
+      const save = f.open()
+      assert.equal(f.session.inspectOwnership().modalScopes, 1)
+      assert.equal(f.session.inspectOwnership().modalWaits, 0)
+      assert.equal(
+        f.session.pad({
+          ...f.identity(),
+          kind: 'save-confirm',
+          requestId: save.id,
+          fileName: 'closing.tjs',
+        }).status,
+        'accepted',
+      )
+      const outcome: PadMessage = {
+        ...f.identity(),
+        kind: 'save-outcome',
+        requestId: save.id,
+        receipt: f.request().receipt!,
+        ok: true,
+      }
+      clock.advance(16)
+      // Observe automatic termination before finally calls stop. The callback's
+      // nested empty event round must return before ordinary VM-entry shutdown.
+      await until(() => f.session.snapshot().state === 'stopped', 'timer main-window exit')
+      assert(f.logs.includes('pad-main-close:finalized'))
+      assert(f.logs.includes('pad-main-close:managed'))
+      assert(f.logs.includes('pad-main-close:callback'))
+      assert(
+        f.logs.indexOf('pad-main-close:after-round') > f.logs.indexOf('pad-main-close:callback'),
+        'A host save must not cancel the rest of the ordinary timer callback at a nested tail',
+      )
+      assert.equal(
+        f.events.some((event) => event.type === 'state' && event.snapshot.state === 'failed'),
+        false,
+      )
+      assert.equal(f.logs.some((line) => line.includes('Execution cancelled')), false)
+      assert.equal(f.session.snapshot().handles, 0)
+      assert(Object.values(f.session.inspectOwnership()).every((value) => value === 0))
+      assert.deepEqual(latestPads(f.events).pads, [])
+      assert.equal(latestPads(f.events).save, null)
+      assert.equal(f.session.pad(outcome).status, 'ignored', 'Stop retires the pending save receipt')
+      assert.equal(clock.pending, 0)
     } finally {
       await f.session.stop()
     }
