@@ -4,6 +4,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+[完整回归 35001345784](https://github.com/fenghengzhi/krkr2-web/actions/runs/35001345784)在精确提交 `34367abda6a4519d54fa1ff8daae3b7776b20cb8` 通过 **1,756 项 Node、1,146 项浏览器和 6 组直接运行时**，14 个作业全部成功，零失败、取消、跳过或重试。浏览器包含 1,023 项常规、57 项游戏库、59 项 PWA 和 7 项可信生命周期。 [兼容检查 34997605307](https://github.com/fenghengzhi/krkr2-web/actions/runs/34997605307)在 `6678d6e` 使用构建 `34997020864` 通过 **78 项原 KAG／旧 ABI 检查**。从该提交到 `34367ab` 只修改测试与文档，应用及内核源码相同；这是同源码的另一构建证据，不冒充最终回归的同次构建。
+
 ## 运行
 
 ```sh
@@ -50,7 +52,9 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 `Window.mainWindow` 已返回实际主窗口实例或 null；`piledCopy` 的空目标区域会在 onPaint 前返回，并保留待绘制状态。图像保存取消新增浏览器按钮调用顺序和编码器内部检查点验证，三项已随 050 完整回归通过，见 [Window 查询](docs/decisions/047-window-main-instance.md)、[空矩形复制](docs/decisions/049-piled-copy-empty-region.md)及[保存取消](docs/decisions/050-image-save-cancellation.md)。同一会话现支持多个页面内 Window，各自拥有画布、图层输入、菜单和视频平面；共享一个 Worker 与 TJS VM。单窗嵌入布局、浮动窗口、主窗退出和画布恢复见[多窗口实现](docs/decisions/051-multiwindow.md)。图层裁剪、copyRect 空写入和 assignImages 目标字体保留已随 055 组合验证，参见[裁剪](docs/decisions/053-layer-clip.md)、[复制](docs/decisions/054-layer-copy-rect.md)和[图像赋值](docs/decisions/055-layer-assign-images.md)。
 
-`Window.showModal()` 已接入协作式事件循环：保留调用者栈，继续处理子窗口输入、计时器和关闭查询，退出时恢复合格的原窗口。输入接收确认与完成分开，原生释放和窗口更新使用各自的检查点；暂停、隐藏页面及 Stop 的边界已由 Actions 验证。实现和旧 VCL 推断限制见[决策 052](docs/decisions/052-modal-scopes.md)。`MenuItem.popup` 的新嵌套业务仍在 052 工作目录实现，未验证、未合入 main。
+`Window.showModal()` 已接入协作式事件循环：保留调用者栈，继续处理子窗口输入、计时器和关闭查询，退出时恢复合格的原窗口。输入接收确认与完成分开，原生释放和窗口更新使用各自的检查点；暂停、隐藏页面及 Stop 的边界已由 Actions 验证。实现和旧 VCL 推断限制见[决策 052](docs/decisions/052-modal-scopes.md)。`MenuItem.popup` 现已接通嵌套菜单、Timer 与子 Window 模态，选择结果和返回后的通知分别处理。原版 SDK 校准了 N／R 标志与隐藏关闭查询，见同一决策中的后续记录。
+
+`Layer.drawText`／Font 已校准参数数量、无主图检查、空操作及 holdAlpha 路由，见 [056](docs/decisions/056-layer-text-semantics.md)。crossfade／universal 的 opaque 路径已采用原版定点核并保留原始 mask，见 [057](docs/decisions/057-opaque-transition-kernels.md)；Alpha／AddAlpha 核和全部时钟顺序仍有待校准。
 
 菜单更新保留仍存在的项目节点，避免更新打断展开或点击。视频打开等待真实首帧，周期和区间事件使用媒体时钟补充呈现回调；错误历史和精度边界见 [视频首帧与时钟](docs/decisions/035-video-readiness.md)。
 
