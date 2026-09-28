@@ -1,7 +1,7 @@
 # 068 — Built-in PhaseVocoder and the WaveSoundBuffer filter chain
 
-Status: implementation includes test-type corrections after a hosted build failure;
-no runtime case has executed for this slice.
+Status: hosted runtime cases have executed and exposed failures; narrow corrections
+for sound-class lookup and the snapshot fixture await the next combined run.
 All executable verification belongs on GitHub-hosted Actions runners. Local source
 inspection is not a passing test, and earlier audio/Pad/Storages results do not
 verify this change.
@@ -209,8 +209,41 @@ This remains a failed build, not a partial test pass.
 The test-only repair uses explicit discriminant guards that exclude error events
 while leaving `label` optional, and checks a snapshot of the mutable label array.
 The original predicates, expected values, and runtime assertions are preserved;
-case inventory is unchanged. These repairs have not yet been executed by Actions.
+case inventory is unchanged. The next run reached runtime cases; this preceding
+build failure remains in the verification history.
+
+[Actions run 36455312915](https://github.com/fenghengzhi/krkr2-web/actions/runs/36455312915),
+at candidate `56769cf`, executed 2396 Node cases: 2322 passed and 74 failed, with
+zero cancellations, skips, or todos. The archived TAP identifies 64 direct
+`Member "__snapshotPhaseVocoderFilters" does not exist` failures and eight
+assertion failures containing that same error. The remaining two failures are
+the source/bytecode native snapshot fixture. Browser media failures also reported
+the sound-open error; other browser jobs were still running when these repairs
+were prepared, so this entry is not a final browser or aggregate result.
+
+The production lookup defect was in the TJS `open` method: an unqualified
+`WaveSoundBuffer` searches the receiver before the global object and resolves the
+instance's same-named constructor function. The native static helper exists on
+the class, not that function. `open` now explicitly uses
+`global.WaveSoundBuffer.__snapshotPhaseVocoderFilters`; helper execution remains
+on the ordinary TJS stack. Only the wave branch requests a snapshot; MIDI and CDDA
+retain their existing open path. The existing source/bytecode connection test
+now also checks this name collision using a derived sound and opens both derived
+and direct wave instances without removing its ownership or PCM assertions.
+
+The two native snapshot failures were a separate fixture error. At lookup flag
+zero, the bundled Dictionary implementation returns success with `void` for an
+absent member; this is not the negative-status lookup the fixture intended to
+exercise. The production helper retains the fixed source's flag-zero lookup and
+rejects a successful non-native interface safely. The fixture now uses an ordinary
+`NoInterface` class for the negative-status skip and separately requires an empty
+Dictionary to be rejected, alongside the existing forged-interface rejection.
+The fixed native pointer conversion would not provide a safe executable interface
+for that `void` value; no native reproduction was attempted. Getter exception,
+single-read ordering, invalidated-object handling, and selected-identity assertions
+remain intact. No test case was added or removed. These runtime corrections are
+unverified until the next hosted batch.
 
 No tests, build, typecheck, browser probe, or native execution have been run
-locally. The new runtime cases remain unrun pending the next combined hosted batch.
+locally. Failed hosted results above are preserved rather than relabeled as passes.
 This slice does not complete all remaining nonplugin KRKR2 compatibility work.

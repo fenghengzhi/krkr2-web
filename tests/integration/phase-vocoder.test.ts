@@ -168,7 +168,14 @@ var other=new WaveSoundBuffer(null);other.filters.add(phase);other.open("tone.wa
         binary,
         String.raw`
 var phase=new WaveSoundBuffer.PhaseVocoder();phase.window=512;
-var first=new WaveSoundBuffer(null),second=new WaveSoundBuffer(null),busy=0;
+class ProbeSound extends WaveSoundBuffer {
+  function ProbeSound(){super.WaveSoundBuffer(null);}
+  function resolveClass(){return (WaveSoundBuffer===this.WaveSoundBuffer)+","+
+    (WaveSoundBuffer instanceof "Function")+","+(global.WaveSoundBuffer instanceof "Class")+","+
+    (global.WaveSoundBuffer.__snapshotPhaseVocoderFilters instanceof "Function");}
+}
+var first=new ProbeSound(),second=new WaveSoundBuffer(null),busy=0;
+var classResolution=first.resolveClass();
 var sameArray=first.filters===first.filters;
 first.filters.add(phase);first.open("tone.wav");first.filters.clear();second.filters.add(phase);
 try{second.open("tone.wav");}catch(e){busy++;}
@@ -177,6 +184,7 @@ function releaseAndReuse(){first.open("tone.wav");second.open("tone.wav");second
 `,
       )
       try {
+        assert.equal(await harness.session.evaluate('classResolution'), '1,1,1,1')
         assert.equal(
           await harness.session.evaluate('sameArray+","+busy+","+first.status'),
           '1,2,stop',

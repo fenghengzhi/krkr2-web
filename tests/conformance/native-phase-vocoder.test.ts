@@ -287,14 +287,18 @@ class Throwing {
 class Later {
   property interface {getter(){global.laterReads++;return 1;}}
 }
+class NoInterface {}
 function snapshotError(value){
   try{global.Wave.__snapshotPhaseVocoderFilters(value);return "accepted";}
   catch(error){return error.message;}
 }
 var failure=snapshotError([new Throwing(),new Later()]);
 var dead=new PhaseVocoder(),good=new Wave.PhaseVocoder();invalidate dead;
-var selected=Wave.__snapshotPhaseVocoderFilters([%[],dead,good]);
+var selected=Wave.__snapshotPhaseVocoderFilters([new NoInterface(),dead,good]);
 var selectedIdentity=[selected.count,selected[0]===good,__host("Identity",selected[0])].join("|");
+// Dictionary's missing member succeeds with void at flag 0; it is not a
+// negative-status lookup and cannot supply a safe native filter interface.
+var emptyDictionary=snapshotError([%[]]);
 var forged=snapshotError([%[interface:good.interface,__phaseVocoderId:good.interface]]);
 var notArray=snapshotError(%[count:0]),over=[];over.count=17;
 var overBudget=snapshotError(over);
@@ -307,6 +311,10 @@ invalidate good;
         assert.equal(await vm.execute('failure', '', true), 'interface-getter-failed')
         assert.equal(await vm.execute('[firstReads,laterReads].join("|")', '', true), '1|0')
         assert.equal(await vm.execute('selectedIdentity', '', true), '1|1|2')
+        assert.match(
+          String(await vm.execute('emptyDictionary', '', true)),
+          /filters require live native PhaseVocoder instances/,
+        )
         assert.match(
           String(await vm.execute('forged', '', true)),
           /filters require live native PhaseVocoder instances/,

@@ -14,7 +14,7 @@ class __SoundBase {
   }
   function finalize(){} // Native owner invalidation retires the resource.
   function __clearSoundLabels(){if(__soundLabels!==void)invalidate __soundLabels;__soundLabels=void;}
-  function open(name){__soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[string(name)],__soundKind=="wave"?WaveSoundBuffer.__snapshotPhaseVocoderFilters(__filters):void);}
+  function open(name){__soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[string(name)],__soundKind=="wave"?global.WaveSoundBuffer.__snapshotPhaseVocoderFilters(__filters):void);}
   function play(){__soundRun("play",[]);}
   function stop(){__soundRun("stop",[]);}
   function fade(to,time,delay=0){__soundRun("stopFade",[false]);__soundRun("fade",[int(to),int(time),int(delay)]);}
