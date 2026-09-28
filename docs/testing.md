@@ -94,21 +94,25 @@ gh workflow run test.yml --ref BRANCH -f runtime-only=true
 
 构建作业固定 Node.js 24.19.0 和 Emscripten 6.0.9，使用锁文件安装依赖，编译 Asyncify、JSPI 和 FreeType 内核，执行类型检查、生产构建和离线发布文件校验，再生成两个 PWA 更新样本。原生源码、第三方源码、构建脚本与工具链版本完全匹配时复用云端内核缓存，应用和 PWA 样本每次重新构建。缓存 key 和是否命中写入构建信息。生成目录、应用和 PWA 样本打包为 `test-build`，同次运行的所有测试作业共享这一份构建。
 
-| 作业                       | 范围                                                                    |
-| -------------------------- | ----------------------------------------------------------------------- |
-| Node                       | `tests/conformance`、`tests/integration`，含真实 WASM                   |
-| Browser × 9                | Chromium、Firefox、WebKit × 常规浏览器、持久游戏库、PWA，各组合独立运行 |
-| Chromium trusted lifecycle | 独立浏览器进程的真实隐藏、恢复、冻结与取消                              |
-| Direct runtime             | 三浏览器 × Asyncify/JSPI，直接验证 compile、转储、调用栈、异常和取消    |
-| All tests                  | 要求所有上述作业成功；失败、取消或跳过均不能通过汇总门槛                |
+| 作业                       | 范围                                                                 |
+| -------------------------- | -------------------------------------------------------------------- |
+| Node                       | `tests/conformance`、`tests/integration`，含真实 WASM                |
+| Browser × 10               | 三浏览器 × 三套件共九个逻辑组合；仅 WebKit 常规套件分为两个作业      |
+| Chromium trusted lifecycle | 独立浏览器进程的真实隐藏、恢复、冻结与取消                           |
+| Direct runtime             | 三浏览器 × Asyncify/JSPI，直接验证 compile、转储、调用栈、异常和取消 |
+| All tests                  | 要求所有上述作业成功；失败、取消或跳过均不能通过汇总门槛             |
 
 Chromium/Firefox 套件使用 Ubuntu 24.04，WebKit 套件使用 GitHub 托管的 macOS 15。Linux runner 上的 Firefox 使用 Xvfb 虚拟显示和 Mesa 软件渲染；所有持久浏览器重开都沿用同一显示模式。套件开始前先在 Worker 中创建 WebGL2 上下文、清屏并读取像素，同时检查 JSPI；能力缺失会明确失败，避免每个场景重复超时。Chromium 和 macOS WebKit 保持 headless。Linux 作业提供 PulseAudio 虚拟输出设备，让真实 AudioContext/AudioWorklet 推进音频时钟；不替换页面的音频 API。WebKit 保留 DOM/网络 trace 和失败截图，关闭会明显拖慢协议操作的连续截图采集。
 
 Playwright 1.63 的 Linux WebKit 在本次云端检查中不能创建 Worker WebGL2，即使使用 Xvfb 也失败。其上游版本的 [OffscreenCanvas 创建路径](https://github.com/WebKit/WebKit/blob/4d05d732e5a84f32675bef4cc135a2e7a9269a87/Source/WebCore/html/OffscreenCanvas.cpp) 受 `allowWebGLInWorkers` 控制，[Cocoa 配置](https://github.com/WebKit/WebKit/blob/4d05d732e5a84f32675bef4cc135a2e7a9269a87/Source/WTF/wtf/PlatformEnableCocoa.h) 启用了该能力。因此 WebKit 图形和持久场景放在 macOS 上验证；不需要渲染的直接 WASM 探测仍覆盖 Linux WebKit。这不表示 Linux GTK WebKit 可以运行当前播放器。
 
-浏览器和套件形成九个独立作业，一个组合失败不会取消其他组合。每个组合完成后立即上传报告，不必等待同一浏览器的其他套件；GitHub reporter 同时提供错误注释。保留现有用例断言和超时，不增加自动重试。Chromium、Firefox 与原生生命周期使用 2 个 worker；云端 WebKit 使用 1 个 worker。在相同构建和 macOS 镜像上，媒体启动诊断双并发 6 次有 2 次失败，单并发 6 次全部通过；记录显示争用期间 Blob 读取和媒体加载明显延迟，见 [双并发记录](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809235409) 和 [单并发对照](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809666778)。原有 WebKit 网络模拟排除仍由 PWA 配置明确控制。
+浏览器和套件形成十个独立作业，一个组合失败不会取消其他组合。WebKit 常规套件使用 [Playwright 分片](https://playwright.dev/docs/test-sharding) `--shard=1/2` 和 `--shard=2/2`，分别在两个托管 macOS runner 执行，每片仍为 1 个 worker；不启用 `fullyParallel`，保留文件内原有顺序。分片按测试分组分配，不能据此假定两片用例数或耗时严格相等。游戏库、PWA、Chromium 和 Firefox 套件保持未分片，九个逻辑组合的用例集合不变。正常完整运行由 14 个 job 变为 15 个，浏览器能力预检由 9 次变为 10 次；这不增加工作流触发频率。All tests 必须等待两个分片及其余作业全部成功。
+
+每个作业完成后立即上传报告，不必等待同一浏览器的其他套件；GitHub reporter 同时提供错误注释。保留现有用例断言、超时和零自动重试。Chromium、Firefox 与原生生命周期使用 2 个 worker。在相同构建和 macOS 镜像上，媒体启动诊断双并发 6 次有 2 次失败，单并发 6 次全部通过；记录显示争用期间 Blob 读取和媒体加载明显延迟，见 [双并发记录](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809235409) 和 [单并发对照](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809666778)。原有 WebKit 网络模拟排除仍由 PWA 配置明确控制。
 
 每个作业上传日志、JSON 报告以及可用的失败截图/trace，保留 14 天。`test-build` 含 commit、run ID 和运行次数，另含带哈希的 WASM manifest 与离线发布清单。Actions 详情页的 Artifacts 可下载这些文件；需要长期保存的阶段证据应另行归档。
+
+两个 WebKit 常规产物分别命名为 `browser-results-webkit-browser-shard-1-of-2` 和 `browser-results-webkit-browser-shard-2-of-2`，其余产物名称保持原样。每份浏览器产物的 `out/ci/browser-job.json` 记录 project、suite、shard/index/total、worker 数、commit、run ID、attempt 和实际还原的 build-info；未分片的 shard 字段为 null。两片均通过 `prepare-tests` 获取同次运行的唯一 `test-build`。归档时保留独立目录、作业日志、JSON、trace 和原生崩溃清单，不能覆盖合并同名 `results.json`，也不能用一片成功替代完整 WebKit 结果。取消、超时、未报告或缺失结果仍分别记录；历史未分片产物与数字保持原样。首次分片运行尚未完成验证，不能提前声称解决了超时。
 
 ## 远程运行
 
@@ -137,12 +141,14 @@ gh run download RUN_ID --dir out/verification/github-actions/RUN_ID
 gh workflow run compatibility.yml --ref main -f build-run=BUILD_RUN_ID
 ```
 
-复用前严格比较应用源码、依赖和构建脚本。**Verification report** 工作流读取已完成的 Tests、兼容性和对应阶段的独立专项，逐项核对用例、构建、源码、样本及证据哈希。ABI 5 根据能力标记生成 `execution-budgets-matrix.json`、`bytecode-lifetime-matrix.json`、`binary-scripts-matrix.json` 或 `compiler-matrix.json`，更早的原生 Scripts 阶段保留 `native-scripts-matrix.json`；此前 ABI 4 阶段要求输入时序专项，生成 `stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。这些文件位于 `out/verification/`。报告工具不会重新运行浏览器测试，当前报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
+复用前严格比较应用源码、依赖和构建脚本。**Verification report** 是历史阶段的报告工作流，其 `tests/probes/vm-console-matrix.mjs` 仍固定协议 9、历史用例数、14 个 Tests job 和旧的未分片产物路径，不支持当前应用及两分片布局；保留这些严格校验，不将更改 job 数当成完成迁移。以下命令仅适用于对应历史源码与证据，不应向当前分支提交新的构建 run ID。
+
+历史报告逐项核对用例、构建、源码、样本及证据哈希。ABI 5 根据能力标记生成 `execution-budgets-matrix.json`、`bytecode-lifetime-matrix.json`、`binary-scripts-matrix.json` 或 `compiler-matrix.json`，更早的原生 Scripts 阶段保留 `native-scripts-matrix.json`；此前 ABI 4 阶段要求输入时序专项，生成 `stack-traces-matrix.json`；ABI 3 阶段使用独立长冻结专项，生成原 `vm-console-matrix.json`。这些文件位于 `out/verification/`。报告工具不会重新运行浏览器测试，报告与引用证据保存在 `runtime-verification` artifact，保留 90 天。
 
 [VM 控制台阶段汇总](https://github.com/fenghengzhi/krkr2-web/actions/runs/34812958010)已通过，绑定 487 份证据文件、116 份持久 context 预算记录及 6 份媒体时钟记录。生成时提交为 `d97a3c9`，报告 SHA-256 为 `81beb0d8763cfc667c01b6e799d561ab80db8fb9944cba4c1e40408a9f18059d`。矩阵和引用的完整产物已下载到 `out/verification/github-actions/34812958010/`，矩阵另复制到上述标准路径；报告生成后的本次文档更新不改变应用或测试代码。
 
 ```sh
-gh workflow run verification-report.yml --ref main \
+gh workflow run verification-report.yml --ref HISTORICAL_REPORT_REF \
   -f build-run=BUILD_RUN_ID \
   -f compatibility-run=COMPATIBILITY_RUN_ID
 ```

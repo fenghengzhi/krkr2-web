@@ -204,19 +204,27 @@ jobs:
           retention-days: 14
 
   browser:
-    name: Browser / ${{ matrix.browser }} / ${{ matrix.suite }} (${{ matrix.os }})
+    name: Browser / ${{ matrix.browser }} / ${{ matrix.suite }}${{ matrix.shardIndex && format(' / shard {0}/{1}', matrix.shardIndex, matrix.shardTotal) || '' }} (${{ matrix.os }})
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     needs: build
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
       KRKR_TEST_HEADED: ${{ matrix.headed }}
+      KRKR_TEST_BROWSER: ${{ matrix.browser }}
+      KRKR_TEST_SUITE: ${{ matrix.suite }}
+      KRKR_TEST_WORKERS: ${{ matrix.workers }}
+      KRKR_TEST_SHARD_INDEX: ${{ matrix.shardIndex || '' }}
+      KRKR_TEST_SHARD_TOTAL: ${{ matrix.shardTotal || '' }}
       LIBGL_ALWAYS_SOFTWARE: '1'
     strategy:
       fail-fast: false
       matrix:
         browser: [chromium, firefox, webkit]
         suite: [browser, library, pwa]
+        exclude:
+          - browser: webkit
+            suite: browser
         include:
           - browser: chromium
             os: ubuntu-24.04
@@ -230,6 +238,22 @@ jobs:
             os: macos-15
             headed: '0'
             workers: '1'
+          # Keep each file's existing execution order and one worker per Mac.
+          # Only the regular WebKit suite is split between hosted runners.
+          - browser: webkit
+            suite: browser
+            os: macos-15
+            headed: '0'
+            workers: '1'
+            shardIndex: '1'
+            shardTotal: '2'
+          - browser: webkit
+            suite: browser
+            os: macos-15
+            headed: '0'
+            workers: '1'
+            shardIndex: '2'
+            shardTotal: '2'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -241,6 +265,32 @@ jobs:
           touch out/ci/native-reports-start.marker
           date -u '+%Y-%m-%dT%H:%M:%SZ' > out/ci/native-reports-start.txt
       - uses: ./.github/actions/prepare-tests
+      - name: Record browser job and shared build identity
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const project = process.env.KRKR_TEST_BROWSER
+          const suite = process.env.KRKR_TEST_SUITE
+          const index = process.env.KRKR_TEST_SHARD_INDEX
+          const total = process.env.KRKR_TEST_SHARD_TOTAL
+          if ((index || total) &&
+              (project !== 'webkit' || suite !== 'browser' ||
+               !['1', '2'].includes(index) || total !== '2')) {
+            throw new Error('Unexpected browser shard selection')
+          }
+          writeFileSync('out/ci/browser-job.json', JSON.stringify({
+            commit: process.env.GITHUB_SHA,
+            runId: process.env.GITHUB_RUN_ID,
+            attempt: process.env.GITHUB_RUN_ATTEMPT,
+            project,
+            suite,
+            shard: index ? `${index}/${total}` : null,
+            shardIndex: index ? Number(index) : null,
+            shardTotal: total ? Number(total) : null,
+            workers: Number(process.env.KRKR_TEST_WORKERS),
+            build: JSON.parse(readFileSync('out/ci/build-info.json', 'utf8')),
+          }, null, 2) + '\n')
+          JS
       - name: Install browser and system dependencies
         id: browser-install
         run: npx playwright install --with-deps "${{ matrix.browser }}"
@@ -262,9 +312,6 @@ jobs:
           # process lifetimes; test deadlines and retry settings stay fixed.
           DEBUG: ${{ matrix.browser != 'chromium' && 'pw:browser' || '' }}
           PLAYWRIGHT_JSON_OUTPUT_NAME: out/ci/results.json
-          KRKR_TEST_BROWSER: ${{ matrix.browser }}
-          KRKR_TEST_SUITE: ${{ matrix.suite }}
-          KRKR_TEST_WORKERS: ${{ matrix.workers }}
         run: |
           case "$KRKR_TEST_SUITE" in
             browser) krkr_playwright_config=playwright.config.ts ;;
@@ -272,13 +319,15 @@ jobs:
             pwa) krkr_playwright_config=playwright.pwa.config.ts ;;
             *) exit 1 ;;
           esac
+          krkr_shard_args=()
+          if [[ -n "$KRKR_TEST_SHARD_INDEX" ]]; then
+            krkr_shard_args=("--shard=$KRKR_TEST_SHARD_INDEX/$KRKR_TEST_SHARD_TOTAL")
+          fi
           bash scripts/ci-browser.sh npx playwright test -c "$krkr_playwright_config" \
-            --project="$KRKR_TEST_BROWSER" --workers="$KRKR_TEST_WORKERS" --reporter=list,json,github 2>&1 | tee out/ci/results.log
+            --project="$KRKR_TEST_BROWSER" --workers="$KRKR_TEST_WORKERS" \
+            "${krkr_shard_args[@]}" --reporter=list,json,github 2>&1 | tee out/ci/results.log
       - name: Preserve new hosted macOS browser crash reports
         if: ${{ always() && runner.os == 'macOS' && runner.environment == 'github-hosted' }}
-        env:
-          KRKR_TEST_BROWSER: ${{ matrix.browser }}
-          KRKR_TEST_SUITE: ${{ matrix.suite }}
         run: |
           python3 - <<'PY'
           import datetime
@@ -304,6 +353,8 @@ jobs:
               'commit': os.environ.get('GITHUB_SHA'),
               'browser': os.environ.get('KRKR_TEST_BROWSER'),
               'suite': os.environ.get('KRKR_TEST_SUITE'),
+              'shardIndex': os.environ.get('KRKR_TEST_SHARD_INDEX') or None,
+              'shardTotal': os.environ.get('KRKR_TEST_SHARD_TOTAL') or None,
               'jobStarted': marker.exists(),
               'scope': 'New browser-related report candidates; correlate crash time and PID with Playwright logs',
               'roots': [], 'reports': [], 'errors': [], 'unrelatedNewReports': 0,
@@ -362,7 +413,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: browser-results-${{ matrix.browser }}-${{ matrix.suite }}
+          name: browser-results-${{ matrix.browser }}-${{ matrix.suite }}${{ matrix.shardIndex && format('-shard-{0}-of-{1}', matrix.shardIndex, matrix.shardTotal) || '' }}
           path: |
             out/ci/
             test-results/
