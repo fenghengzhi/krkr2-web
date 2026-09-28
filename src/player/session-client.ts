@@ -63,6 +63,7 @@ export class SessionClient {
     debugMode = false,
     clipboard?: MessagePort,
     dataPath?: string,
+    systemColors?: readonly number[],
   ) {
     const request = {
       version: PROTOCOL_VERSION,
@@ -77,6 +78,7 @@ export class SessionClient {
       video,
       clipboard,
       dataPath,
+      systemColors,
       activity: this.activity,
       systemFonts: this.systemFonts,
     }

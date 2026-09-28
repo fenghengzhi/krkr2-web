@@ -3,6 +3,7 @@ import type { InputAttentionFont } from '../ports/input.ts'
 import { Bitmap, dimension, intersect, textOpacity } from '../graphics/bitmap.ts'
 import { ProvincePlane } from '../graphics/province.ts'
 import { imageTypes, autoFace, neutralColor } from '../graphics/blend.ts'
+import { SystemColors } from '../graphics/system-colors.ts'
 
 export interface LayerState {
   windowId: number
@@ -65,6 +66,7 @@ export interface LayerImageLoad extends ProvinceImageLoad {
 const MAX_BYTES = 64 * 1024 * 1024
 const noImageTypes = new Set([0, 6, 7])
 export class LayerTree {
+  constructor(private readonly systemColors = new SystemColors()) {}
   has(id: number): boolean {
     return this.layers.has(id)
   }
@@ -714,6 +716,8 @@ export class LayerTree {
       return true
     }
     const bitmap = this.bitmap(id)
+    // Other main-image fill faces treat the complete value as raw ARGB.
+    if (face === 1 && layer.holdAlpha) color = this.systemColors.toActualColor(color)
     if (bitmap.fill(rect, color, face, layer.holdAlpha)) layer.imageModified = true
     return true
   }
@@ -765,7 +769,14 @@ export class LayerTree {
       this.fillProvince(layer, target, color)
       return true
     }
-    const bitmap = this.bitmap(id)
+    const bitmap = this.bitmap(id),
+      target = intersect(bitmap.clip, rect)
+    if (
+      target.width &&
+      target.height &&
+      (face === 1 || (face === 0 && opacity > 0) || (face === 4 && opacity >= 0))
+    )
+      color = this.systemColors.toActualColor(color)
     bitmap.color(rect, color, opacity, face)
     this.get(id).imageModified = true
     return true
@@ -833,6 +844,12 @@ export class LayerTree {
       return true
     }
     const bitmap = this.bitmap(id)
+    if (plane === 'main') {
+      const clip = bitmap.clip
+      if (!(x >= clip.x && y >= clip.y && x < clip.x + clip.width && y < clip.y + clip.height))
+        return false
+      value = this.systemColors.toActualColor(value)
+    }
     const written = bitmap.setPixel(x, y, value, plane)
     if (written) layer.imageModified = true
     return written

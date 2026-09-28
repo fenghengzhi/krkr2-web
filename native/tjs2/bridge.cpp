@@ -621,7 +621,7 @@ constexpr SystemMethodPolicy systemMethodPolicies[] = {
     {u"getKeyState", 1}, {u"getTickCount", 0x100},
     {u"clearGraphicCache", 0}, {u"touchImages", 1},
     {u"createAppLock", 1 | 0x100}, {u"exit", 0}, {u"terminate", 0},
-    {u"inform", 1}, {u"inputString", 3}
+    {u"inform", 1}, {u"inputString", 3}, {u"toActualColor", 1 | 0x100}
 };
 constexpr const tjs_char* systemPropertyNames[] = {
     u"eventDisabled", u"graphicCacheLimit", u"exitOnWindowClose", u"title"

@@ -235,7 +235,7 @@ for (const backend of ['asyncify', 'jspi']) {
     })
   }
 
-  test(`${backend}: production loader rejects missing nativeSystem while retaining nativeClipboard and recovers with an intact kernel`, async ({
+  test(`${backend}: production loader rejects missing and old nativeSystem while retaining nativeClipboard and recovers with the version 2 kernel`, async ({
     page,
   }, info) => {
     const setup = await prepareSystemPage(page, backend),
@@ -245,6 +245,7 @@ for (const backend of ['asyncify', 'jspi']) {
       matchManifest = (url: URL) => url.pathname === manifestPath,
       intercepted: { url: string; original: WasmManifest; served: WasmManifest }[] = [],
       routeErrors: string[] = []
+    let suppliedVersion: 1 | undefined
     await page.context().route(matchManifest, async (route) => {
       try {
         const response = await route.fetch(),
@@ -253,11 +254,12 @@ for (const backend of ['asyncify', 'jspi']) {
           throw new Error('The served WASM manifest differs from this exact hosted build')
         const original = JSON.parse(bytes.toString('utf8')) as WasmManifest,
           served = structuredClone(original)
-        if (served.capabilities?.nativeSystem !== 1 || served.capabilities.nativeClipboard !== 1)
+        if (served.capabilities?.nativeSystem !== 2 || served.capabilities.nativeClipboard !== 1)
           throw new Error(
-            'The real hosted manifest must provide nativeSystem=1 and nativeClipboard=1',
+            'The real hosted manifest must provide nativeSystem=2 and nativeClipboard=1',
           )
-        delete served.capabilities.nativeSystem
+        if (suppliedVersion === undefined) delete served.capabilities.nativeSystem
+        else served.capabilities.nativeSystem = suppliedVersion
         intercepted.push({ url: route.request().url(), original, served })
         await route.fulfill({ response, json: served })
       } catch (error) {
@@ -266,39 +268,46 @@ for (const backend of ['asyncify', 'jspi']) {
       }
     })
     try {
-      await page
-        .locator('#files')
-        .setInputFiles(
-          systemFiles(
-            false,
-            `Debug.message("${systemPrefix}manifest-startup-must-not-run");System.createUUID();`,
-          ),
+      for (const version of [undefined, 1] as const) {
+        suppliedVersion = version
+        await page
+          .locator('#files')
+          .setInputFiles(
+            systemFiles(
+              false,
+              `Debug.message("${systemPrefix}manifest-startup-must-not-run");System.createUUID();`,
+            ),
+          )
+        await expect(page.locator('#logs')).toContainText(
+          'WASM manifest is missing native System support',
         )
-      await expect(page.locator('#logs')).toContainText(
-        'WASM manifest is missing native System support',
-      )
-      await expect(page.locator('#status')).toHaveText('运行失败')
-      await expect(page.locator('#choose-files')).toBeEnabled()
-      await expect(page.locator('#stop')).toBeDisabled()
-      await expect(page.locator('#evaluate')).toBeDisabled()
-      await expect(systemMark(page, 'manifest-startup-must-not-run')).toHaveCount(0)
-      await expect(page.locator('.game-clipboard')).toHaveCount(0)
-      await expect.poll(() => setup.workers.map((entry) => entry.closed)).toEqual([true])
-      expect(routeErrors).toEqual([])
-      expect(intercepted).toHaveLength(1)
-      const rejected = intercepted[0]
-      expect({
-        ...rejected.served,
-        capabilities: { ...rejected.served.capabilities, nativeSystem: 1 },
-      }).toEqual(rejected.original)
-      expect(rejected.served.capabilities?.nativeClipboard).toBe(1)
-      const rejectedLogs = await page.locator('#logs').innerText()
-      expect(rejectedLogs).not.toContain('Worker did not stop in time')
-      expect(rejectedLogs).not.toContain('RPC client has been disposed')
-      await info.attach('missing-native-system-loader-logs', {
-        body: rejectedLogs,
-        contentType: 'text/plain',
-      })
+        await expect(page.locator('#status')).toHaveText('运行失败')
+        await expect(page.locator('#choose-files')).toBeEnabled()
+        await expect(page.locator('#stop')).toBeDisabled()
+        await expect(page.locator('#evaluate')).toBeDisabled()
+        await expect(systemMark(page, 'manifest-startup-must-not-run')).toHaveCount(0)
+        await expect(page.locator('.game-clipboard')).toHaveCount(0)
+        await expect
+          .poll(() => setup.workers.map((entry) => entry.closed))
+          .toEqual(version === undefined ? [true] : [true, true])
+        expect(routeErrors).toEqual([])
+        expect(intercepted).toHaveLength(version === undefined ? 1 : 2)
+        const rejected = intercepted.at(-1)!
+        expect({
+          ...rejected.served,
+          capabilities: { ...rejected.served.capabilities, nativeSystem: 2 },
+        }).toEqual(rejected.original)
+        expect(rejected.served.capabilities?.nativeSystem).toBe(version)
+        expect(rejected.served.capabilities?.nativeClipboard).toBe(1)
+        const rejectedLogs = await page.locator('#logs').innerText()
+        expect(rejectedLogs).not.toContain('Worker did not stop in time')
+        expect(rejectedLogs).not.toContain('RPC client has been disposed')
+        await info.attach(`native-system-${version ?? 'missing'}-loader-logs`, {
+          body: rejectedLogs,
+          contentType: 'text/plain',
+        })
+        await page.locator('#clear-log').click()
+      }
 
       await page.context().unroute(matchManifest)
       await page
@@ -306,7 +315,7 @@ for (const backend of ['asyncify', 'jspi']) {
         .setInputFiles(
           systemFiles(
             false,
-            `var recovered=System.createUUID();Debug.message("${systemPrefix}manifest-recovered:"+recovered);`,
+            `if(System.toActualColor(0x01123456)!==0x563412)throw "nativeSystem version 2 color method missing";var recovered=System.createUUID();Debug.message("${systemPrefix}manifest-recovered:"+recovered);`,
           ),
         )
       await expect(page.getByText(/^system-core-proof:manifest-recovered:/)).toBeVisible()
@@ -316,7 +325,7 @@ for (const backend of ['asyncify', 'jspi']) {
       ).slice((systemPrefix + 'manifest-recovered:').length)
       expect(recovered).toMatch(uuidPattern)
       await expect(page.locator('#runtime-info')).toContainText(backend.toUpperCase())
-      expect(setup.workers).toHaveLength(2)
+      expect(setup.workers).toHaveLength(3)
       expect(setup.errors).toEqual([])
     } finally {
       await info.attach('missing-native-system-manifest-intervention', {

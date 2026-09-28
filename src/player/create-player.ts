@@ -13,6 +13,8 @@ import type { InputView } from '../engine/ports/input.ts'
 import type { WindowPresentation, WindowView } from '../engine/scene/window.ts'
 import type { WindowSurfaceIdentity } from '../protocol/surfaces.ts'
 import { normalizeSystemDataPath } from '../engine/system/environment.ts'
+import { copySystemColorPalette } from '../engine/graphics/system-colors.ts'
+import { sampleSystemColorPalette } from './system-colors.ts'
 
 /** Player-facing DOM ownership; compatible with the app's GameWindows host. */
 export interface PlayerWindowSurface {
@@ -37,6 +39,8 @@ export interface PlayerOptions {
   windows: PlayerWindowHost
   /** Optional game-relative startup directory; never a host filesystem path. */
   dataPath?: string
+  /** 31 RGB values for legacy indices 0..30 (25 must be zero); defaults to page CSS colors. */
+  systemColors?: readonly number[]
   onClipboardRequest?(request: ClipboardRequest | null): void
   ownsClipboardFocus?(target: EventTarget | null): boolean
   /** Input and video are attached, and the canvas has not yet been transferred. */
@@ -55,6 +59,11 @@ export function createPlayer(
 ) {
   const dataPath = options.dataPath
   normalizeSystemDataPath(dataPath)
+  const suppliedSystemColors = options.systemColors
+  const systemColors =
+    suppliedSystemColors === undefined
+      ? sampleSystemColorPalette(canvas)
+      : copySystemColorPalette(suppliedSystemColors)
   const audioChannel = new MessageChannel()
   const audio = new WebAudioHost(audioChannel.port1, onAudio)
   const videoChannel = new MessageChannel()
@@ -266,6 +275,7 @@ export function createPlayer(
         debugMode,
         clipboardChannel.port2,
         dataPath,
+        systemColors,
       )
       await session.mount()
       // Only ordered Session events update the host. A start RPC snapshot can
