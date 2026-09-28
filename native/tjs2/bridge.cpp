@@ -92,6 +92,7 @@ struct Vm {
     std::set<unsigned> released;
     bool drainingReleased = false;
     unsigned nextHandle = 1;
+    tjs_int32 phaseVocoderClassId = -1;
     std::map<unsigned, std::unique_ptr<WeakOwner>> owners;
     unsigned nextOwner = 1;
     bool ownerUpgradeFailed = false;
@@ -991,6 +992,175 @@ public:
     iTJSNativeInstance* CreateNativeInstance() override { return new PadInstance(vm); }
 };
 
+
+// The slot, rather than public script fields or an integer interface token,
+// authenticates a built-in filter. Connected sound chains retain its receiver.
+class PhaseVocoderInstance final : public tTJSNativeInstance {
+    Vm* vm;
+    unsigned identifier = 0;
+    bool constructing = false, constructed = false, invalidated = false;
+public:
+    explicit PhaseVocoderInstance(Vm* vm) : vm(vm) {}
+    bool BelongsTo(Vm* context) const noexcept { return vm == context; }
+    unsigned Identifier() const noexcept { return invalidated ? 0 : identifier; }
+    int HostIdentifier() const noexcept {
+        return invalidated ? -1 : constructed ? static_cast<int>(identifier) : constructing ? 0 : -1;
+    }
+    tjs_error Construct(tjs_int, tTJSVariant**, iTJSDispatch2* owner) override {
+        if(invalidated || shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(constructing || constructed) TJS_eTJSError(u"PhaseVocoder has already been constructed");
+        constructing = true;
+        struct ConstructionScope { bool& value; ~ConstructionScope() { value = false; } } scope{constructing};
+        tTJSVariant receiver(owner, owner), response;
+        tTJSVariant* args[] = {&receiver};
+        constexpr auto operation = u"PhaseVocoder.construct";
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 1, args));
+        if(!reply) TJS_eTJSError(u"PhaseVocoder.construct returned no response");
+        resolveReply(vm, *reply, &response);
+        if(response.Type() != tvtInteger && response.Type() != tvtReal)
+            TJS_eTJSError(u"PhaseVocoder.construct returned an invalid identity");
+        const auto number = response.AsReal();
+        if(!(number >= 1 && number <= 2147483647.0))
+            TJS_eTJSError(u"PhaseVocoder.construct returned an invalid identity");
+        const auto id = static_cast<unsigned>(number);
+        if(static_cast<tjs_real>(id) != number)
+            TJS_eTJSError(u"PhaseVocoder.construct returned an invalid identity");
+        identifier = id;
+        constructed = true;
+        return TJS_S_OK;
+    }
+    // Invalidation revokes script access. Its pure host settings and the PCM
+    // chain remain owned by the connected sound until Clear/unload.
+    void Invalidate() override { invalidated = true; }
+};
+
+tjs_error phaseVocoderInstance(Vm* vm, iTJSDispatch2* receiver, PhaseVocoderInstance*& result) {
+    if(!receiver) return TJS_E_NATIVECLASSCRASH;
+    if(shuttingDown) return TJS_E_INVALIDOBJECT;
+    const auto* object = dynamic_cast<tTJSCustomObject*>(receiver);
+    if(object && !object->IsLifetimeValid()) return TJS_E_INVALIDOBJECT;
+    if(vm->phaseVocoderClassId < 0) return TJS_E_NATIVECLASSCRASH;
+    iTJSNativeInstance* instance = nullptr;
+    if(TJS_FAILED(receiver->NativeInstanceSupport(TJS_NIS_GETINSTANCE, vm->phaseVocoderClassId, &instance)))
+        return TJS_E_NATIVECLASSCRASH;
+    result = dynamic_cast<PhaseVocoderInstance*>(instance);
+    return result && result->BelongsTo(vm) ? TJS_S_OK : TJS_E_NATIVECLASSCRASH;
+}
+class PhaseVocoderConstructor final : public tTJSNativeClassConstructor {
+    Vm* vm;
+public:
+    explicit PhaseVocoderConstructor(Vm* vm) : tTJSNativeClassConstructor(nullptr), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* receiver) override {
+        if(member) return tTJSNativeClassConstructor::FuncCall(flag, member, hint, result, count, args, receiver);
+        if(result) result->Clear();
+        PhaseVocoderInstance* instance = nullptr;
+        const auto status = phaseVocoderInstance(vm, receiver, instance);
+        if(TJS_FAILED(status)) return status;
+        return instance->Construct(count, args, receiver);
+    }
+};
+class PhaseVocoderProperty final : public tTJSNativeClassProperty {
+    Vm* vm;
+    ttstr name;
+    tjs_error dispatch(iTJSDispatch2* receiver, tTJSVariant* result, const tTJSVariant* input) {
+        PhaseVocoderInstance* instance = nullptr;
+        const auto status = phaseVocoderInstance(vm, receiver, instance);
+        if(TJS_FAILED(status)) return status;
+        if(!instance->Identifier()) return TJS_E_NATIVECLASSCRASH;
+        if(name == u"interface") {
+            if(input) return TJS_E_ACCESSDENYED;
+            // Web opaque token, deliberately not an executable native pointer.
+            *result = static_cast<tjs_int64>(instance->Identifier());
+            return TJS_S_OK;
+        }
+        tTJSVariant identifier(static_cast<tjs_int64>(instance->Identifier())), key(name), converted;
+        tTJSVariant* args[] = {&identifier, &key, &converted};
+        if(input) {
+            if(name == u"window" || name == u"overlap") converted = static_cast<tjs_int>(*input);
+            else converted = static_cast<tjs_real>(static_cast<float>(input->AsReal()));
+        }
+        const auto operation = input ? u"PhaseVocoder.set" : u"PhaseVocoder.get";
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), input ? 3 : 2, args));
+        if(!reply) TJS_eTJSError(u"PhaseVocoder property returned no response");
+        resolveReply(vm, *reply, result);
+        return TJS_S_OK;
+    }
+public:
+    PhaseVocoderProperty(Vm* vm, const tjs_char* name)
+        : tTJSNativeClassProperty(nullptr, nullptr), vm(vm), name(name) {}
+    tjs_error PropGet(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, iTJSDispatch2* receiver) override {
+        if(member) return tTJSNativeClassProperty::PropGet(flag, member, hint, result, receiver);
+        if(!result) return TJS_E_FAIL;
+        return dispatch(receiver, result, nullptr);
+    }
+    tjs_error PropSet(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        const tTJSVariant* input, iTJSDispatch2* receiver) override {
+        if(member) return tTJSNativeClassProperty::PropSet(flag, member, hint, input, receiver);
+        if(!input) return TJS_E_FAIL;
+        return dispatch(receiver, nullptr, input);
+    }
+};
+class PhaseVocoderClass final : public tTJSNativeClass {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit PhaseVocoderClass(Vm* vm) : tTJSNativeClass(u"PhaseVocoder"), vm(vm) {
+        vm->phaseVocoderClassId = TJSRegisterNativeClass(u"PhaseVocoder");
+        SetClassID(vm->phaseVocoderClassId);
+        RegisterNCM(u"PhaseVocoder", new PhaseVocoderConstructor(vm), u"PhaseVocoder", nitMethod);
+        RegisterNCM(u"finalize", TJSCreateNativeClassMethod(noOp), u"PhaseVocoder", nitMethod);
+        for(const auto* name : {u"interface", u"window", u"overlap", u"pitch", u"time"})
+            RegisterNCM(name, new PhaseVocoderProperty(vm, name), u"PhaseVocoder", nitProperty);
+    }
+    iTJSNativeInstance* CreateNativeInstance() override { return new PhaseVocoderInstance(vm); }
+};
+
+// This helper runs on the ordinary suspendable TJS stack. In particular an
+// interface getter may execute script/host calls or throw: only negative native
+// PropGet statuses are ignored, never exceptions raised by user code.
+class PhaseVocoderSnapshot final : public tTJSNativeClassMethod {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit PhaseVocoderSnapshot(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* receiver) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, receiver);
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(count < 1) return TJS_E_BADPARAMCOUNT;
+        const auto array = args[0]->AsObjectClosureNoAddRef();
+        if(!dynamic_cast<tTJSArrayObject*>(array.Object)) TJS_eTJSError(u"WaveSoundBuffer filters must be an Array");
+        tTJSVariant value;
+        const auto status = array.PropGet(0, u"count", nullptr, &value, nullptr);
+        if(TJS_FAILED(status)) return status;
+        const tjs_int size = value;
+        if(size < 0 || size > 16) TJS_eTJSError(u"WaveSoundBuffer filter snapshot budget exceeded");
+        std::vector<tTJSVariant> snapshot;
+        for(tjs_int i = 0; i < size; ++i) {
+            value.Clear();
+            const auto itemStatus = array.PropGetByNum(0, i, &value, nullptr);
+            if(TJS_FAILED(itemStatus)) return itemStatus;
+            const auto filter = value.AsObjectClosureNoAddRef();
+            tTJSVariant interfaceValue;
+            if(TJS_FAILED(filter.PropGet(0, u"interface", nullptr, &interfaceValue, nullptr))) continue;
+            PhaseVocoderInstance* instance = nullptr;
+            if(TJS_FAILED(phaseVocoderInstance(vm, filter.Object, instance)) || !instance->Identifier() ||
+                (filter.ObjThis && filter.ObjThis != filter.Object))
+                TJS_eTJSError(u"WaveSoundBuffer filters require live native PhaseVocoder instances");
+            snapshot.push_back(value);
+        }
+        krkr::NativeOwner<iTJSDispatch2> output(TJSCreateArrayObject());
+        for(tjs_int i = 0; i < static_cast<tjs_int>(snapshot.size()); ++i) {
+            const auto written = output->PropSetByNum(TJS_MEMBERENSURE | TJS_IGNOREPROP, i, &snapshot[i], output.get());
+            if(TJS_FAILED(written)) return written;
+        }
+        if(result) *result = tTJSVariant(output.get(), output.get());
+        return TJS_S_OK;
+    }
+};
+
 template<typename Fn> Reply* capture(Fn fn) {
     krkr::CleanupErrors cleanup;
     auto reply = std::make_unique<Reply>();
@@ -1200,6 +1370,11 @@ API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix
         *value = tTJSVariant(object.get());
         return;
     }
+    if(id == 0 && ttstr(prefix) == u"PhaseVocoder" && ttstr(className) == u"PhaseVocoder") {
+        krkr::NativeOwner<PhaseVocoderClass> object(new PhaseVocoderClass(vm));
+        *value = tTJSVariant(object.get());
+        return;
+    }
     const bool system = id == 0 && ttstr(prefix) == u"System" && ttstr(className) == u"System";
     const bool storages = id == 0 && ttstr(prefix) == u"Storages" && ttstr(className) == u"Storages";
     krkr::NativeOwner<HostClass> object(new HostClass(className, system ? vm : nullptr, storages));
@@ -1268,6 +1443,32 @@ API int krkr_class_system_property(Vm* vm, tTJSVariant* value, const tjs_char* m
 }
 API unsigned krkr_tjs_version() { return TJSVersionHex; }
 API unsigned krkr_native_pad_version() { return 1; }
+API unsigned krkr_native_phase_vocoder_version() { return 1; }
+API int krkr_phase_vocoder_identifier(Vm* vm, unsigned handle) {
+    if(shuttingDown || !vm || vm->released.count(handle)) return -1;
+    const auto found = vm->handles.find(handle);
+    if(found == vm->handles.end() || found->second.Type() != tvtObject) return -1;
+    const auto closure = found->second.AsObjectClosureNoAddRef();
+    if(closure.ObjThis && closure.ObjThis != closure.Object) return -1;
+    PhaseVocoderInstance* instance = nullptr;
+    if(TJS_FAILED(phaseVocoderInstance(vm, closure.Object, instance))) return -1;
+    return instance->HostIdentifier();
+}
+API int krkr_bind_phase_vocoder_class(Vm* vm, unsigned handle) {
+    if(shuttingDown || !vm || vm->released.count(handle)) return 0;
+    const auto found = vm->handles.find(handle);
+    if(found == vm->handles.end() || found->second.Type() != tvtObject) return 0;
+    auto* object = dynamic_cast<tTJSInterCodeContext*>(found->second.AsObjectNoAddRef());
+    if(!object || !object->IsLifetimeValid() || object->GetContextType() != ctClass) return 0;
+    krkr::NativeOwner<PhaseVocoderClass> filter(new PhaseVocoderClass(vm));
+    tTJSVariant value(filter.get());
+    if(TJS_FAILED(object->PropSet(TJS_MEMBERENSURE | TJS_IGNOREPROP | TJS_STATICMEMBER,
+        u"PhaseVocoder", nullptr, &value, object))) return 0;
+    krkr::NativeOwner<PhaseVocoderSnapshot> snapshot(new PhaseVocoderSnapshot(vm));
+    value = tTJSVariant(snapshot.get());
+    return TJS_SUCCEEDED(object->PropSet(TJS_MEMBERENSURE | TJS_IGNOREPROP | TJS_STATICMEMBER,
+        u"__snapshotPhaseVocoderFilters", nullptr, &value, object)) ? 1 : 0;
+}
 // Called only while assembling a fresh native-class reply, before publishing it.
 API void krkr_class_property(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* member, int options) {
     auto* object = dynamic_cast<HostClass*>(value->AsObjectNoAddRef());

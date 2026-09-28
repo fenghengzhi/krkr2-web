@@ -1,20 +1,20 @@
 export const soundClasses = String.raw`
 class __SoundBase {
-  var __soundId,__soundOwner,__soundFlags,__filters,__soundLabels;
+  var __soundId,__soundKind,__soundOwner,__soundFlags,__filters,__soundLabels;
   function __SoundBase(kind,owner) {
     if(owner===void)throw new Exception("SoundBuffer requires an action owner");
     if(typeof owner!="Object")throw new Exception("SoundBuffer requires an object action owner");
-    __soundOwner=owner;__filters=[];
+    __soundKind=kind;__soundOwner=owner;__filters=[];
     __soundId=__host("Sound.create",kind,this);
   }
-  function __soundRun(method,args) {
-    var result=__host("Sound.call",__soundId,method,args);
+  function __soundRun(method,args,filters=void) {
+    var result=__host("Sound.call",__soundId,method,args,filters);
     for(var i=0;i<result.callbacks.count;i++){var event=result.callbacks[i];if(!System.eventDisabled)this[event[0]](event[1]*);}
     return result.value;
   }
   function finalize(){} // Native owner invalidation retires the resource.
   function __clearSoundLabels(){if(__soundLabels!==void)invalidate __soundLabels;__soundLabels=void;}
-  function open(name){__soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[string(name)]);}
+  function open(name){__soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[string(name)],__soundKind=="wave"?WaveSoundBuffer.__snapshotPhaseVocoderFilters(__filters):void);}
   function play(){__soundRun("play",[]);}
   function stop(){__soundRun("stop",[]);}
   function fade(to,time,delay=0){__soundRun("stopFade",[false]);__soundRun("fade",[int(to),int(time),int(delay)]);}
@@ -33,6 +33,7 @@ class WaveSoundBuffer extends __SoundBase {
   property globalVolume{getter(){return __host("Sound.global","volume");}setter(value){__host("Sound.global","volume",int(value));}}
   property globalFocusMode{getter(){return __host("Sound.global","focusMode");}setter(value){__host("Sound.global","focusMode",int(value));}}
 }
+__host("PhaseVocoder.bindClass",WaveSoundBuffer);
 class MIDISoundBuffer extends __SoundBase {
   function MIDISoundBuffer(owner){super.__SoundBase("midi",owner);}
   function midiOut(data){__host("Sound.global","midiOut",data);}

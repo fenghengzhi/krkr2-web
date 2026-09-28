@@ -1,5 +1,11 @@
 Audio decoder notices
 
+The built-in PhaseVocoder also adapts KRKR2 2.32stable / Risa source and algorithm,
+Copyright (C) 2000 W.Dee <dee@kikyou.info> and contributors, under the Kirikiri
+original license. Its complete notice and original license are distributed in
+phase-vocoder/NOTICE.txt and phase-vocoder/license-original.txt, with a UTF-8
+reading copy and the upstream GPL alternative in the same directory.
+
 The npm dependencies are pinned by package-lock.json.
 The codec-parser source archive is supplied alongside this notice. Rebuild the application with npm ci and npm run build to use a modified library.
 

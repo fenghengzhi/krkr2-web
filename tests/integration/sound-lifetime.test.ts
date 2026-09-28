@@ -354,7 +354,7 @@ function createSound(){global.sound=new SoundOwner();sound.open("tone.wav");glob
           await session.evaluate('labels.cue.samplePosition+","+(labels===sound.labels)'),
           '20,1',
         )
-        await execute('sound.open("tone.wav");')
+        await execute('filters.clear();sound.open("tone.wav");filters.add(42);')
         assert.equal(
           await session.evaluate('(isvalid labels)+","+(isvalid filters)+","+filters[0]'),
           '0,1,42',

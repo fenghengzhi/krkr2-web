@@ -3018,7 +3018,7 @@ export class EngineSession {
       return { kind: 'value', value: this.physicalKeys.has(Number(args[0])) ? 1n : 0n }
     if (operation.startsWith('Input.')) return this.inputs!.host(operation, args, context)
     if (operation.startsWith('Transition.')) return this.transitions!.host(operation, args)
-    if (operation.startsWith('Sound.'))
+    if (operation.startsWith('Sound.') || operation.startsWith('PhaseVocoder.'))
       return { kind: 'value', value: await this.sounds!.host(operation, args, context) }
     if (operation.startsWith('Video.'))
       return { kind: 'value', value: await this.videos!.host(operation, args, context) }

@@ -1,0 +1,17 @@
+KRKR2 2.32stable / Risa PhaseVocoder algorithm
+Copyright (C) 2000 W.Dee <dee@kikyou.info> and contributors
+
+This software uses altered TypeScript adaptations of the original Kirikiri
+PhaseVocoder, WaveSegmentQueue and WaveLoopManager source and algorithms.
+The selected license is the Kirikiri original
+license in license-original.txt. license-utf8.txt is a reading copy of the same
+document; gpl-2e-plain.txt preserves the upstream alternative license.
+
+Original source revision:
+https://github.com/krkrz/krkr2/tree/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable
+
+Original source bytes, hashes and changes are documented in the application's
+source under third_party/phase-vocoder/. The TypeScript FFT is project-owned,
+not a translation or redistribution of the upstream NAS real FFT executable.
+The adaptation uses Math trigonometric functions and bounded double-precision
+scratch arithmetic; it does not claim bit-identical native PCM.

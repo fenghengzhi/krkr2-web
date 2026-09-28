@@ -38,6 +38,15 @@ export interface MidiAsset extends AudioInfo {
   loops: LoopInfo
 }
 export type AudioAsset = PcmAsset | MidiAsset
+/** A connected filter identity is fixed by open; parameters may change afterwards. */
+export interface PhaseVocoderFilter {
+  type: 'phase-vocoder'
+  id: number
+  window: number
+  overlap: number
+  pitch: number
+  time: number
+}
 export interface SoundSettings {
   volume: number
   volume2: number
@@ -64,7 +73,15 @@ export interface SoundEvent {
 export type AudioEvent = SoundEvent | { type: 'error'; message: string }
 export type MixerCommand =
   | { op: 'create'; id: number; settings: SoundSettings; kind?: SoundKind }
-  | { op: 'load'; id: number; asset: AudioAsset; settings: SoundSettings; kind?: SoundKind }
+  | {
+      op: 'load'
+      id: number
+      asset: AudioAsset
+      settings: SoundSettings
+      kind?: SoundKind
+      filters?: readonly PhaseVocoderFilter[]
+    }
+  | { op: 'filters'; id: number; filters: readonly PhaseVocoderFilter[] }
   | { op: 'play' | 'stop' | 'close' | 'inspect'; id: number }
   | { op: 'set'; id: number; property: keyof SoundSettings; value: number | boolean }
   | { op: 'flag'; id: number; index: number; value: number }
@@ -84,6 +101,7 @@ export type AudioCommand =
       bytes: Uint8Array
       loops: LoopInfo
       settings: SoundSettings
+      filters?: readonly PhaseVocoderFilter[]
     }
   | { op: 'focusMode'; mode: number }
 export interface AudioResult {

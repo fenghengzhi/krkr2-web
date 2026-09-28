@@ -67,6 +67,7 @@ export class PortAudioBackend implements AudioBackend {
             asset,
             settings: command.settings,
             kind: command.kind,
+            filters: command.filters,
           }
         }
         return await this.send(command)

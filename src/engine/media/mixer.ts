@@ -10,8 +10,16 @@ import {
   type SoundKind,
   type SoundSettings,
   type SoundSnapshot,
+  type PhaseVocoderFilter,
 } from '../ports/audio.ts'
 import { MidiSynth } from './midi-synth.ts'
+import {
+  AudioFilterChain,
+  newAudioFilterBudget,
+  type AudioFilterBudget,
+} from './audio-filter-chain.ts'
+import { FilteredWaveSource, filteredWaveSourceMemoryBytes } from './filtered-wave-source.ts'
+import { phaseVocoderMemoryBytes, validatePhaseVocoderParameters } from './phase-vocoder.ts'
 interface Fade {
   target: number
   delta: number
@@ -34,6 +42,11 @@ interface Voice {
   link?: LoopLink
   synth?: MidiSynth
   tail?: { source: number; progress: number; total: number }
+  filters?: PhaseVocoderFilter[]
+  filterChain?: AudioFilterChain
+  filterSource?: FilteredWaveSource
+  filterBudget?: AudioFilterBudget
+  ended?: boolean
 }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 const lowerBound = <T>(items: T[], position: number, key: (item: T) => number): number => {
@@ -98,7 +111,7 @@ export class AudioMixer {
       sampleRate: asset?.sampleRate ?? 0,
       sampleCount: asset?.sampleCount ?? 0,
       channels: asset?.channels ?? 0,
-      bits: asset?.bits ?? 0,
+      bits: voice.filters?.length ? 32 : (asset?.bits ?? 0),
     }
   }
   private event(voice: Voice, type: SoundEvent['type'], label?: string): void {
@@ -127,6 +140,60 @@ export class AudioMixer {
     }
     this.voices.set(id, voice)
     return voice
+  }
+  /** Validate/reserve the complete replacement before touching the active voice. */
+  private filters(
+    id: number,
+    asset: AudioAsset,
+    filters: readonly PhaseVocoderFilter[],
+    activeWindows: readonly number[] = [],
+  ): PhaseVocoderFilter[] {
+    if (filters.length > 4) throw new Error('Audio filter chain exceeds four stages')
+    if (filters.length && asset.kind !== 'pcm') throw new Error('Audio filters require PCM audio')
+    const identities = new Set<number>()
+    const next = filters.map((filter, index) => {
+      if (
+        filter.type !== 'phase-vocoder' ||
+        !Number.isSafeInteger(filter.id) ||
+        filter.id <= 0 ||
+        identities.has(filter.id)
+      )
+        throw new Error('Invalid or duplicate audio filter identity')
+      identities.add(filter.id)
+      const parameters = validatePhaseVocoderParameters(filter)
+      if (activeWindows[index] !== undefined)
+        validatePhaseVocoderParameters({ ...parameters, window: activeWindows[index]! })
+      return { ...filter, ...parameters }
+    })
+    let count = next.length,
+      bytes = 0
+    const reserve = (
+      channels: number,
+      items: readonly PhaseVocoderFilter[],
+      windows: readonly number[],
+    ) => {
+      for (let index = 0; index < items.length; index++) {
+        const window = Math.max(items[index]!.window, windows[index] ?? 0)
+        bytes += phaseVocoderMemoryBytes(channels, window) + channels * window * 20
+      }
+      if (items.length) bytes += channels * 512 * 4
+    }
+    reserve(asset.channels, next, activeWindows)
+    if (next.length && asset.kind === 'pcm') bytes += filteredWaveSourceMemoryBytes(asset)
+    for (const voice of this.voices.values()) {
+      if (voice.id === id || !voice.asset) continue
+      const connected = voice.filters ?? []
+      for (const filter of connected)
+        if (identities.has(filter.id))
+          throw new Error('Audio filter is already connected to a voice')
+      count += connected.length
+      reserve(voice.asset.channels, connected, voice.filterChain?.windows() ?? [])
+      if (connected.length && voice.asset.kind === 'pcm')
+        bytes += filteredWaveSourceMemoryBytes(voice.asset)
+    }
+    if (count > 16 || bytes > 64 * 1024 * 1024)
+      throw new Error('Audio filter session budget exceeded')
+    return next
   }
   command(command: MixerCommand): AudioResult {
     const start = this.pending.length
@@ -179,12 +246,14 @@ export class AudioMixer {
           link.to < 0
         )
           throw new Error('SLI link is outside the decoded audio')
+      const filters = this.filters(id, asset, command.filters ?? [])
       const voice = this.create(
         id,
         settings,
         command.kind ?? (asset.kind === 'midi' ? 'midi' : 'wave'),
       )
       voice.asset = asset
+      voice.filters = filters
       voice.status = 'stop'
       voice.settings.frequency = asset.sampleRate
       voice.settings.position = 0
@@ -197,13 +266,29 @@ export class AudioMixer {
       const voice = this.get(id),
         settings = voice.settings
       if (command.op === 'play' && voice.asset && voice.status !== 'play') {
-        if (settings.position >= voice.asset.sampleCount) this.seek(voice, 0)
+        if (voice.ended || settings.position >= voice.asset.sampleCount) this.seek(voice, 0)
+        else this.resetFilters(voice)
         voice.status = 'play'
         voice.epoch = this.nextEpoch++
       } else if (command.op === 'stop') {
         if (voice.asset) voice.status = 'stop'
         voice.epoch = this.nextEpoch++
         this.seek(voice, 0)
+      } else if (command.op === 'filters') {
+        if (!voice.asset) throw new Error('Audio filters require an open voice')
+        const previous = voice.filters ?? []
+        if (
+          previous.length !== command.filters.length ||
+          previous.some(
+            (filter, index) =>
+              filter.id !== command.filters[index]!.id ||
+              filter.type !== command.filters[index]!.type,
+          )
+        )
+          throw new Error('Connected audio filter order cannot change before reopen')
+        const filters = this.filters(id, voice.asset, command.filters, voice.filterChain?.windows())
+        voice.filterChain?.configure(filters)
+        voice.filters = filters
       } else if (command.op === 'set') {
         const { property, value } = command
         if (property === 'looping' || property === 'paused') {
@@ -254,6 +339,7 @@ export class AudioMixer {
     this.event(voice, 'fade')
   }
   private seek(voice: Voice, position: number): void {
+    voice.ended = false
     voice.settings.position = position
     voice.labelIndex = lowerBound(
       voice.asset?.loops.labels ?? [],
@@ -263,6 +349,30 @@ export class AudioMixer {
     voice.linkDirty = true
     voice.tail = undefined
     voice.synth?.seek(position / (voice.asset?.sampleRate ?? 44100))
+    this.resetFilters(voice)
+  }
+  private resetFilters(voice: Voice): void {
+    voice.filterChain = undefined
+    voice.filterSource = undefined
+  }
+  private filtered(voice: Voice, budget: AudioFilterBudget): AudioFilterChain {
+    voice.filterBudget = budget
+    if (!voice.filterChain) {
+      voice.filterSource = new FilteredWaveSource(
+        voice.asset as PcmAsset,
+        voice.settings.position,
+        voice.flags,
+        () => voice.settings.looping,
+        () => voice.filterBudget!,
+      )
+      voice.filterChain = new AudioFilterChain(
+        voice.asset!.channels,
+        voice.filters!,
+        voice.filterSource,
+      )
+    }
+    voice.filterChain.setBudget(budget)
+    return voice.filterChain
   }
   private match(voice: Voice, link: LoopLink): boolean {
     if (link.whenLooping && !voice.settings.looping) return false
@@ -295,11 +405,12 @@ export class AudioMixer {
         let i = lowerBound(links, voice.settings.position, (link) => link.from);
         i < links.length;
         i++
-      )
+      ) {
         if (this.match(voice, links[i]!)) {
           voice.link = links[i]
           break
         }
+      }
     }
     return voice.link
   }
@@ -456,11 +567,19 @@ export class AudioMixer {
     right.fill(0)
     this.peak = 0
     if (this.paused) return []
-    const dt = 1 / this.sampleRate
+    const dt = 1 / this.sampleRate,
+      filterBudget = newAudioFilterBudget(left.length)
     for (const voice of this.voices.values()) {
       const settings = voice.settings,
         asset = voice.asset
       const master = voice.kind === 'wave' ? (this.waveMuted ? 0 : this.globalVolume / 100000) : 1
+      let chain: AudioFilterChain | undefined
+      const label = (name: string, position: number) => {
+        settings.position = position
+        this.event(voice, 'label', name)
+      }
+      const sample = (channel: number) =>
+        chain ? chain.sample(channel) : this.sample(voice, channel)
       for (let frame = 0; frame < left.length; frame++) {
         voice.clock += dt
         if (voice.fade && voice.clock + 1e-10 >= voice.fade.next) {
@@ -472,35 +591,61 @@ export class AudioMixer {
             settings.volume = clamp(settings.volume + voice.fade.delta, 0, 100000)
           }
         }
-        if (!asset || settings.paused || voice.status !== 'play' || !this.prepareSample(voice))
-          continue
-        const step = settings.frequency / this.sampleRate
-        let l: number, r: number
-        if (asset.kind === 'midi') {
-          voice.synth!.render(settings.position / asset.sampleRate, step / asset.sampleRate)
-          l = voice.synth!.left
-          r = voice.synth!.right
-        } else {
-          l = this.sample(voice, 0)
-          r = asset.channels === 1 ? l : this.sample(voice, 1)
-          if (asset.channels === 4) {
-            l += this.sample(voice, 2) * 0.70710678
-            r += this.sample(voice, 3) * 0.70710678
-          } else if (asset.channels >= 3) {
-            const center = this.sample(voice, 2) * 0.70710678
-            l += center
-            r += center
-            if (asset.channels >= 5) l += this.sample(voice, 4) * 0.70710678
-            if (asset.channels >= 6) r += this.sample(voice, 5) * 0.70710678
-            if (asset.channels >= 7) l += this.sample(voice, 6) * 0.5
-            if (asset.channels >= 8) r += this.sample(voice, 7) * 0.5
+        if (!asset || settings.paused || voice.status !== 'play') continue
+        try {
+          chain = voice.filters?.length ? this.filtered(voice, filterBudget) : undefined
+          if (chain) {
+            if (!chain.prepare(label)) {
+              voice.status = 'stop'
+              // Original natural EOF rewinds LoopManager independently of the
+              // last audible segment position. Replay must start at the source start.
+              voice.ended = true
+              settings.position = 0
+              this.resetFilters(voice)
+              this.event(voice, 'ended')
+              continue
+            }
+            settings.position = chain.sourcePosition()
+          } else if (!this.prepareSample(voice)) continue
+          const step = settings.frequency / this.sampleRate
+          let l: number, r: number
+          if (asset.kind === 'midi') {
+            voice.synth!.render(settings.position / asset.sampleRate, step / asset.sampleRate)
+            l = voice.synth!.left
+            r = voice.synth!.right
+          } else {
+            l = sample(0)
+            r = asset.channels === 1 ? l : sample(1)
+            if (asset.channels === 4) {
+              l += sample(2) * 0.70710678
+              r += sample(3) * 0.70710678
+            } else if (asset.channels >= 3) {
+              const center = sample(2) * 0.70710678
+              l += center
+              r += center
+              if (asset.channels >= 5) l += sample(4) * 0.70710678
+              if (asset.channels >= 6) r += sample(5) * 0.70710678
+              if (asset.channels >= 7) l += sample(6) * 0.5
+              if (asset.channels >= 8) r += sample(7) * 0.5
+            }
           }
+          const gain = (((settings.volume / 100000) * settings.volume2) / 100000) * master,
+            pan = settings.pan / 100000
+          left[frame] += l * gain * (pan > 0 ? 1 - pan : 1)
+          right[frame] += r * gain * (pan < 0 ? 1 + pan : 1)
+          if (chain) {
+            chain.advance(step, label)
+            settings.position = chain.sourcePosition()
+          } else this.advance(voice, step)
+        } catch (error) {
+          voice.status = 'stop'
+          voice.fade = undefined
+          this.resetFilters(voice)
+          this.pending.push({
+            type: 'error',
+            message: error instanceof Error ? error.message : String(error),
+          })
         }
-        const gain = (((settings.volume / 100000) * settings.volume2) / 100000) * master,
-          pan = settings.pan / 100000
-        left[frame] += l * gain * (pan > 0 ? 1 - pan : 1)
-        right[frame] += r * gain * (pan < 0 ? 1 + pan : 1)
-        this.advance(voice, step)
       }
     }
     for (let frame = 0; frame < left.length; frame++) {

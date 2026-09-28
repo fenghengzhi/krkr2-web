@@ -150,7 +150,9 @@ export async function exerciseSoundLifetime(
     )
     const dependent = owned()
     check(dependent.dependents === baseline.dependents + 1, 'Labels did not bind to their owner')
-    await execute('sound.open("tone.wav");global.currentLabels=sound.labels;delete global.sound;')
+    await execute(
+      'filters.clear();sound.open("tone.wav");filters.add(42);global.currentLabels=sound.labels;delete global.sound;',
+    )
     const external = state()
     check(
       external.soundSources === baseline.soundSources &&

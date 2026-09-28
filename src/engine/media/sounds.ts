@@ -7,6 +7,7 @@ import {
   type AudioEvent,
   type SoundKind,
   type SoundSnapshot,
+  type LoopInfo,
 } from '../ports/audio.ts'
 import {
   isScriptObject,
@@ -18,6 +19,7 @@ import {
   type ScriptWeakObject,
   type ScriptValue,
 } from '../script/runtime.ts'
+import { PhaseVocoderService, type PhaseVocoderConnection } from './phase-vocoder-service.ts'
 import { parseSli } from '../../formats/audio/sli.ts'
 interface Sound {
   id: number
@@ -29,9 +31,11 @@ interface Sound {
   inflight: Set<Promise<AudioResult>>
   version: number
   labels: ScriptValue
+  filters?: PhaseVocoderConnection
 }
 type Callback = { name: string; args: ScriptValue[] }
 export class SoundService {
+  private readonly filters: PhaseVocoderService
   private nextId = 1
   private buffers = new Map<number, Sound>()
   private unsubscribe?: () => void
@@ -56,6 +60,12 @@ export class SoundService {
     private readonly error: (error: unknown) => void,
     private readonly cancelQueued: (source: object) => void = () => {},
   ) {
+    this.filters = new PhaseVocoderService(objects, async (id, filters) => {
+      const sound = this.get(id)
+      const result = await this.voiceCommand(sound, { op: 'filters', id, filters })
+      if (result.snapshot) sound.snapshot = result.snapshot
+      for (const event of result.events) if (event.type === 'error') throw new Error(event.message)
+    })
     this.unsubscribe = backend?.listen((event) => this.receive(event))
   }
   get count(): number {
@@ -77,12 +87,18 @@ export class SoundService {
     } finally {
       this.objects.unobserve(sound.owner)
     }
-    if (!sound.resourceRequested) return
+    if (!sound.resourceRequested) {
+      sound.filters?.release()
+      sound.filters = undefined
+      return
+    }
     // Invalidation is a synchronous native notification. Starting a backend
     // command here could synchronously emit events; defer it until we return.
     const closing = Promise.resolve().then(async () => {
       await Promise.allSettled([...sound.inflight])
       await this.command({ op: 'close', id })
+      sound.filters?.release()
+      sound.filters = undefined
     })
     this.closes.add(closing)
     void closing.then(
@@ -187,6 +203,7 @@ export class SoundService {
     })
   }
   async host(operation: string, args: ScriptValue[], context: HostContext): Promise<ScriptValue> {
+    if (operation.startsWith('PhaseVocoder.')) return this.filters.host(operation, args)
     const number = (i: number) => {
       const value = Number(args[i])
       if (!Number.isSafeInteger(value)) throw new Error('Invalid sound numeric argument')
@@ -350,6 +367,8 @@ export class SoundService {
       const previous = sound.snapshot.status
       this.cancelEvents(sound)
       if (sound.resourceRequested) await this.voiceCommand(sound, { op: 'close', id: sound.id })
+      sound.filters?.release()
+      sound.filters = undefined
       sound.resourceRequested = false
       sound.ready = false
       sound.labels = scriptRecord({})
@@ -372,17 +391,57 @@ export class SoundService {
       this.cancelEvents(sound)
       const name = text(0),
         previous = sound.snapshot.status
-      const bytes = await this.read(name),
-        sli = name + '.sli',
+      if (sound.filters) throw new Error('Sound must unload before opening a new stream')
+      if (sound.kind === 'wave') {
+        if (!isScriptObject(args[3])) throw new Error('WaveSoundBuffer filters must be an Array')
+        sound.filters = this.filters.connect(sound.id, args[3])
+      }
+      let loops: LoopInfo
+      try {
+        const bytes = await this.read(name),
+          sli = name + '.sli'
         loops = this.exists(sli) ? parseSli(await this.text(await this.read(sli))) : emptyLoops()
-      await apply({
-        op: 'open',
-        id: sound.id,
-        kind: sound.kind,
-        bytes,
-        loops,
-        settings: sound.snapshot,
-      })
+        await apply({
+          op: 'open',
+          id: sound.id,
+          kind: sound.kind,
+          bytes,
+          loops,
+          settings: sound.snapshot,
+          filters: sound.filters?.settings(),
+        })
+      } catch (error) {
+        // open may already have allocated a backend voice before returning an
+        // error. Its serialized close completes before releasing native leases.
+        // An expired owner already scheduled close after all inflight work;
+        // that task owns its leases until close completes. Releasing them here
+        // would let another sound connect while the old decoder is still live.
+        if (this.buffers.get(sound.id) !== sound) throw error
+        const cleanupErrors: unknown[] = []
+        try {
+          if (sound.resourceRequested) await this.voiceCommand(sound, { op: 'close', id: sound.id })
+        } catch (failure) {
+          cleanupErrors.push(failure)
+        }
+        if (this.buffers.get(sound.id) !== sound) {
+          if (cleanupErrors.length)
+            throw new AggregateError([error, ...cleanupErrors], 'Sound open and retirement failed')
+          throw error
+        }
+        // A failed close has not proved the decoder is gone. Keep its Source
+        // reservation for the next unload/terminal cleanup rather than permit
+        // another sound to reuse the same filter while that decoder may exist.
+        if (cleanupErrors.length)
+          throw new AggregateError([error, ...cleanupErrors], 'Sound open and rollback failed')
+        try {
+          sound.filters?.release()
+        } finally {
+          sound.filters = undefined
+          sound.resourceRequested = false
+          sound.ready = false
+        }
+        throw error
+      }
       sound.ready = true
       sound.labels = scriptRecord(
         Object.fromEntries(
@@ -478,6 +537,14 @@ export class SoundService {
     } catch (error) {
       primary = error
       failed = true
+    }
+    try {
+      this.filters.dispose()
+    } catch (error) {
+      if (!failed) {
+        primary = error
+        failed = true
+      }
     }
     try {
       await this.backend?.close()

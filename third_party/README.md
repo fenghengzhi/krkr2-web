@@ -32,6 +32,12 @@ fmt's `format.h` adds its missing `<cstdlib>` include for the bundled Emscripten
 
 Project-owned sample scripts and `examples/minimal/background.png` were created for this implementation; the image is a deterministic procedural PNG, with no external art or game assets.
 
+The built-in PhaseVocoder uses a TypeScript adaptation of W.Dee and contributors'
+KRKR2 2.32stable algorithm under the Kirikiri original license. Fixed source
+bytes, hashes and changes are documented in [phase-vocoder/README.md](phase-vocoder/README.md);
+the complete license and notice are distributed in `public/licenses/phase-vocoder/`.
+The accompanying complex FFT is project-owned and does not copy the NAS real FFT.
+
 Audio decoding also uses npm-pinned `@wasm-audio-decoders/ogg-vorbis` 0.1.20 and
 `@wasm-audio-decoders/common` 9.0.7 from
 [wasm-audio-decoders](https://github.com/eshaz/wasm-audio-decoders), declared MIT.

@@ -86,6 +86,8 @@ export function createSession(request: InitializeRequest): EngineSession {
           throw new Error('WASM manifest is missing native Clipboard support')
         if (manifest.capabilities?.nativePad !== 1)
           throw new Error('WASM manifest is missing native Pad support')
+        if (manifest.capabilities?.nativePhaseVocoder !== 1)
+          throw new Error('WASM manifest is missing native PhaseVocoder support')
         if (manifest.capabilities?.nativeSystem !== 2)
           throw new Error('WASM manifest is missing native System support')
         if (manifest.capabilities?.nativeStorages !== 1)

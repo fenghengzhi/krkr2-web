@@ -41,7 +41,7 @@
 
 纯 EngineSession 接受相同 `systemDisplay` 依赖；未注入时六字段明确为 0，表示无显示设备的 headless 环境，不冒充真实屏幕。每次更新原子替换一份复制的六字段快照，六个 native getter 将 number 转成 BigInt 传回 TJS 整数，不变成 TJS Real。原子替换不意味着多次异步 getter 调用组成数据库式读取事务。
 
-原生 static Property 使用已有 `krkr_class_property` / HostProperty，不增加 C++ export 或改变布局。借用属性引用、普通写入拒绝、强制引用替换等行为继续由原生 TJS 属性机制提供。`nativeSystem` 保持 2、TJS ABI 保持 5；这不是新增 WASM 内核能力。初始化几何及后续 RPC 使页面与 Worker 协议升为 19；与同批其他协议变更合并时可以统一升号。
+原生 static Property 使用已有 `krkr_class_property` / HostProperty，不增加 C++ export 或改变布局。借用属性引用、普通写入拒绝、强制引用替换等行为继续由原生 TJS 属性机制提供。`nativeSystem` 保持 2、TJS ABI 保持 5；这不是新增 WASM 内核能力。本切片独立分支暂用协议 19，初始化几何及后续 RPC 与 068 音频滤镜在集成分支合并后，页面与 Worker 统一使用协议 20。
 
 初始默认样本在创建 Player 时产生；初始化传当时最新快照，SessionClient 在初始化后重放最新 revision，覆盖 prepare/initialize 期间布局变化。后续 RPC 携带该 client generation；Worker 拒绝旧 generation，Engine 拒绝旧/相同 revision，暂停状态允许几何更新而不恢复脚本执行。Stop 在等待 Worker 退出前断开观察器与事件监听；已排队的 ResizeObserver 回调检查 closed，已取消/停止/失败 Session 拒绝更新。观察器半构造失败也会逐一断开已经创建的观察器和监听，随后借用现有 Player 清理路径释放其余资源，不为清理新建 Worker；host 全屏查询异常沿现有 updateParts/onError 路径报告。新 Player 拥有独立 Worker、generation、revision 与源容器。
 
