@@ -368,6 +368,17 @@ export function mountApp(root: HTMLDivElement): void {
       {
         windows,
         pads: createGamePads(el('stage')),
+        async onStopRequested() {
+          if (current !== generation || player !== instance) return
+          try {
+            await stop()
+          } catch (error) {
+            // The player retires Pad UI before asynchronous cleanup finishes.
+            // Preserve failures in the application log after that UI is gone.
+            report(error)
+            throw error
+          }
+        },
         onClipboardRequest(request) {
           if (current !== generation) return
           if (request && !gameClipboard) throw new Error('Clipboard presentation is not available')

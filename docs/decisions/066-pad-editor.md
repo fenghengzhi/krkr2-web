@@ -1,6 +1,6 @@
 # 066：原生 Pad 与独立 Web 文本编辑窗口
 
-状态：实现与托管测试定义已编写，尚未取得本批 Web 验证结果。所有测试、构建、类型检查、浏览器与原版程序仅在 GitHub-hosted Actions 执行；本文不把定义数或静态审查计为 PASS。
+状态：实现及首轮托管结果已记录；已发现的问题完成修订，仍待下一统一批次验证。所有测试、构建、类型检查、浏览器与原版程序仅在 GitHub-hosted Actions 执行；本文不把定义数或静态审查计为 PASS。
 
 ## 固定参考与实际观察
 
@@ -54,7 +54,7 @@
 
 新增 95 个 Node 测试定义（native factory 10、Pad 44、save 24、host modal 14、下载宿主 3）和 13 个浏览器场景模板（四种 VM 模式、三个项目，共 156 个预期实例）。覆盖真实原生 source/bytecode 工厂、属性/转换/寿命、消息排序与小预算、host modal LIFO/暂停/取消、真实 Worker 三浏览器 Asyncify/JSPI source/bytecode 编辑/输入/模态/下载。以上是静态库存，不是执行结果。浏览器保存测试读取实际 download 字节，字体测试使用实际游戏文件，合成事件测试仅证明生命周期，不能代称系统 IME 的端到端观察。
 
-当前只有上文原版 SDK 托管结果；本实现的 Web 构建和测试等待整批 freeze 后交给 root 的 GitHub-hosted Actions。失败、取消、未执行、原始日志与 artifact 将各自保留，不以重跑绿灯覆盖历史。
+初次编写本节时仅有上文原版 SDK 托管结果；后续 Web 托管结果依次记录于下方。失败、取消、未执行、原始日志与 artifact 各自保留，不以修订或重跑结果覆盖历史。
 
 ## 首次集成构建的类型检查失败
 
@@ -69,3 +69,14 @@
 静态审查还发现真实 Clipboard 内容测试分散在 Pad 和 Clipboard 两个文件；headed Firefox 的两个 worker 共享一个 DISPLAY，单文件 default 模式不保证跨文件互斥。Pad 的四个真实 Clipboard 变体现只从 `clipboard.spec.ts` 注册，全部真实 API、空选区、迟到结果及撤销断言保持不变，总用例数不增加。旧 Clipboard 失败钩子仅处理已安装其观察器的页面，迁入的 Pad 保留自身证据钩子。没有证据证明本轮发生了跨文件污染，不用这项风险解释尚未读取的失败。
 
 同次构建的 [36448778629](https://github.com/fenghengzhi/krkr2-web/actions/runs/36448778629) 已失败：30 项旧 ABI 检查通过，9 项 KAG 场景因 `MainWindow.tjs:436` 读取缺失的 `System.desktopLeft` 失败，39 项未运行。此错误另行补齐显示几何合同，不能归因给 Clipboard 污染或先前的 Highlight。记录本节时，完整回归的常规浏览器作业仍在执行；这里的 Node 与兼容证据不构成完整通过结论。
+
+## 第二轮 Chromium / Firefox Pad 失败与修订
+
+同一 [36448613310](https://github.com/fenghengzhi/krkr2-web/actions/runs/36448613310) 的 Chromium 常规作业实际 562 通过、8 失败；Firefox 常规作业实际 558 通过、12 失败。此处是已结束作业的结果，不能据此声称完整 workflow 通过。原始 JSON、error-context 和 trace 分别保存在主工作树 `out/verification/github-actions/36448613310/artifacts/browser-results-{chromium,firefox}-browser/`。
+
+- 独立编辑器模板的四种 VM 模式在两个浏览器都实际输出 `1,0,0`，并非缺少日志或 Pad 没启动。夹具使用 JavaScript 风格的 `first instanceof Pad`；真实 TJS `InstanceOf` 先将右操作数转为类名字符串，已有原生一致性测试使用 `first instanceof "Pad"`。修订两个 RHS 为 `"Pad"` / `"Window"`，仍严格要求 `1,1,0`，不改变原生类身份或结果期望。
+- Chromium 的四个 geometry trace 都已经得到移动 `31,17`、尺寸 `349,243`；第一处阻塞是 First Pad 的真实 Close click 被 Second Pad 的 Save 按钮拦截。所有原始快照中 First 的 z-index 仍为 1000、Second 为 1001。源码原因是拖动/缩放处理器调用 stopPropagation，使 Pad 现有冒泡阶段激活监听收不到事件。修订将同一个局部监听改为 capture，在 gesture 之前置前并取得编辑焦点；不新增全局监听、不强制点击、不改窗口布局绕开遮挡。原模板补上每次 gesture 后的焦点及前后顺序断言，缩放前明确激活另一个 Pad，以分别验证两条路径。
+- Firefox 的四个 geometry 用例与 Chromium 首错不同：移动成功，缩放表达式实际输出 `320,220`，尚未执行 Close。夹具取 14×14 三角缩放把手的包围盒中心，恰落在 clip-path 斜边；原始 trace 没有记录 DOM pointer target，边界命中归因属于结合坐标、快照与源码的推断。修订只把 resize 起点选在明确内部的 75%/75%，并在 mousedown 前断言实际 elementFromPoint 命中该控件；仍使用相同位移和精确 `349,243` 期望，不延时或增加超时。
+- Firefox 的四个 pending-save Stop 用例中，真实停止按钮点击完成后 Pad/保存 UI 已撤销，应用状态却持续为“停止中”，重启步骤尚未到达。原 trace 未观测 Worker RPC 返回与状态端口先后，不能把通道竞争称为已实测根因。静态审查确定 Pad 的 Stop 直接调用 player.stop，绕过 app.stop 的完整状态清理，依赖最后 stopped 事件在 RPC 停止关闭事件端口前送达。新增可选 `PlayerOptions.onStopRequested`：应用按创建时的 instance/generation 校验后调用既有完整 stop；独立嵌入未提供处理器时继续直接停止 player。停止失败在 Pad UI 已退休后仍由应用日志保留。原真实停止/待机/新会话断言保留，并在新会话先确认旧 Stop/下载元素已 detached 且 disabled，再显式派发旧表单的 submit 与旧 Stop 的 click 事件，验证实际动作监听不能影响新播放器或恢复下载；不以 disabled 元素原生 `.click()` 的无操作冒充失效隔离证据。
+
+上述修订只完成源码审查与编辑，等待后续统一 GitHub-hosted 批次；旧失败仍是失败。未运行本地测试、构建、类型检查或浏览器探针。

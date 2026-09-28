@@ -17,12 +17,30 @@ async function fontFiles() {
   )
 }
 
-async function movePointer(page: Page, target: Locator, dx: number, dy: number) {
+async function movePointer(
+  page: Page,
+  target: Locator,
+  dx: number,
+  dy: number,
+  resizeGrip = false,
+) {
   await target.scrollIntoViewIfNeeded()
   const bounds = await target.boundingBox()
   expect(bounds).not.toBeNull()
-  const x = bounds!.x + Math.min(12, bounds!.width / 2),
-    y = bounds!.y + bounds!.height / 2
+  // A resize grip is clipped to its lower-right triangle. Its box center is
+  // exactly on the diagonal, so use a strict interior point across browsers.
+  const x = bounds!.x + (resizeGrip ? bounds!.width * 0.75 : Math.min(12, bounds!.width / 2)),
+    y = bounds!.y + bounds!.height * (resizeGrip ? 0.75 : 0.5)
+  expect(
+    await target.evaluate(
+      (element, point) => {
+        const hit = element.ownerDocument.elementFromPoint(point.x, point.y)
+        return hit !== null && (hit === element || element.contains(hit))
+      },
+      { x, y },
+    ),
+    'The drag origin must hit its intended Pad control',
+  ).toBe(true)
   await page.mouse.move(x, y)
   await page.mouse.down()
   await page.mouse.move(x + dx, y + dy)
@@ -77,7 +95,7 @@ for (const backend of ['asyncify', 'jspi']) {
         await expect(page.locator('.game-window[data-window-id]')).toHaveCount(0)
         await evaluate(
           page,
-          '(global.Window.mainWindow===null)+","+(first instanceof Pad)+","+(first instanceof Window)',
+          '(global.Window.mainWindow===null)+","+(first instanceof "Pad")+","+(first instanceof "Window")',
           '1,1,0',
         )
         await text.fill('编辑 😀\nsecond line')
@@ -166,11 +184,25 @@ for (const backend of ['asyncify', 'jspi']) {
       page,
     }) => {
       const game = await launchPads(page, backend, binary, padSource),
-        first = padSurface(page, 'First pad')
+        first = padSurface(page, 'First pad'),
+        second = padSurface(page, 'Second pad')
+      const expectActiveEditor = async () => {
+        await expect(first.locator('textarea')).toBeFocused()
+        const firstOrder = await first.evaluate((element) =>
+            Number(getComputedStyle(element).zIndex),
+          ),
+          secondOrder = await second.evaluate((element) => Number(getComputedStyle(element).zIndex))
+        expect(firstOrder).toBeGreaterThan(secondOrder)
+      }
       try {
         await movePointer(page, first.locator('.game-pad-header'), 31, 17)
+        await expectActiveEditor()
         await evaluate(page, 'first.left+","+first.top', '31,17')
-        await movePointer(page, first.locator('.game-pad-resize'), 29, 23)
+        // Resize must activate its owner independently of the preceding drag.
+        await second.locator('textarea').click()
+        await expect(second.locator('textarea')).toBeFocused()
+        await movePointer(page, first.locator('.game-pad-resize'), 29, 23, true)
+        await expectActiveEditor()
         await evaluate(page, 'first.width+","+first.height', '349,243')
         await first.locator('[data-action="close"]').click()
         await expect(first).toBeHidden()
@@ -562,7 +594,10 @@ var padTimer=new Timer(global,"padDeferredMutation");padTimer.interval=10;
       await first.locator('textarea').fill('unsaved')
       await first.locator('[data-action="save"]').click()
       await expect(save).toBeVisible()
-      const retired = await save.getByRole('button', { name: '下载', exact: true }).elementHandle()
+      const retired = await save.getByRole('button', { name: '下载', exact: true }).elementHandle(),
+        retiredStop = await save
+          .getByRole('button', { name: '停止游戏', exact: true })
+          .elementHandle()
       await save.getByRole('button', { name: '停止游戏', exact: true }).click()
       await game.stopped()
       const fresh = await launchPads(
@@ -574,14 +609,40 @@ var padTimer=new Timer(global,"padDeferredMutation");padTimer.interval=10;
         true,
       )
       try {
-        // A previously detached confirmation cannot resurrect an old download.
-        await retired!.evaluate((element) => (element as HTMLButtonElement).click())
+        // Stop disables and detaches these buttons. Native .click() is a no-op
+        // on a disabled button, so first verify retirement, then explicitly
+        // deliver each stale event through the listener that owns the action.
+        for (const old of [retired, retiredStop]) {
+          expect(
+            await old!.evaluate((element) => ({
+              connected: element.isConnected,
+              disabled: (element as HTMLButtonElement).disabled,
+            })),
+          ).toEqual({ connected: false, disabled: true })
+        }
+        // Save is handled by the form's submit listener, not button click.
+        expect(
+          await retired!.evaluate((element) => {
+            const form = element.closest('form')
+            if (!form) throw new Error('Retired Pad confirmation lost its form')
+            return form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+          }),
+        ).toBe(false)
+        await retiredStop!.evaluate((element) =>
+          element.dispatchEvent(
+            new MouseEvent('click', {
+              bubbles: true,
+              cancelable: true,
+            }),
+          ),
+        )
         await evaluate(page, 'first.text+","+second.text', 'fresh session,second')
         await expect(page.locator('.game-pad')).toHaveCount(2)
         await expect(page.locator('.game-pad-save')).toHaveCount(0)
         expect(downloads).toEqual([])
       } finally {
         await retired?.dispose()
+        await retiredStop?.dispose()
         await fresh.stop()
       }
     })

@@ -1200,7 +1200,9 @@ export function createGamePads(stage: HTMLElement): PadHost {
         if (editable(view) && !(event.target as Element).closest('button, textarea, input'))
           textarea.focus({ preventScroll: true })
       },
-      options,
+      // Drag/resize handlers stop propagation on their own controls. Activate
+      // the owning Pad first, so its newly moved close button stays reachable.
+      { ...options, capture: true },
     )
     textarea.addEventListener(
       'contextmenu',

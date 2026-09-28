@@ -39,6 +39,9 @@ export interface PlayerWindowHost {
 export interface PlayerOptions {
   windows: PlayerWindowHost
   pads?: PadHost
+  /** Route a host editor's Stop button through the embedding application's
+   * lifecycle. Without an application owner, stop this player directly. */
+  onStopRequested?(): Promise<void>
   /** Optional game-relative startup directory; never a host filesystem path. */
   dataPath?: string
   /** 31 RGB values for legacy indices 0..30 (25 must be zero); defaults to page CSS colors. */
@@ -360,7 +363,7 @@ export function createPlayer(
     generation: session.generation,
     send: (message) => session.pad(message),
     font: (id, epoch) => session.padFont(id, epoch),
-    stop: () => player.stop(),
+    stop: () => (options.onStopRequested ? options.onStopRequested() : player.stop()),
   })
   return player
 }
