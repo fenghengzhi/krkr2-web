@@ -108,9 +108,11 @@ test.describe('native System display through public Players and actual Session W
           // second Window takes fullscreen, the first Window's script flag stays
           // true even though its host surface is suppressed. Geometry must follow
           // the actually presented fullscreen surface, including the final exit.
+          // Session.evaluate uses TJS expression mode. Keep the statement list
+          // inside a called function and retain the second Window on global.
           await page.evaluate(() =>
             window.systemDisplayEmbeddings![0]!.player.session.evaluate(
-              'var sdSecondWindow=new Window();sdSecondWindow.caption="Display secondary";sdSecondWindow.setInnerSize(84,52);sdSecondWindow.visible=true;sdSecondWindow.fullScreen=true;',
+              '(function(){global.sdSecondWindow=new Window();sdSecondWindow.caption="Display secondary";sdSecondWindow.setInnerSize(84,52);sdSecondWindow.visible=true;sdSecondWindow.fullScreen=true;})()',
             ),
           )
           await expect(
@@ -142,7 +144,7 @@ test.describe('native System display through public Players and actual Session W
           expect(await readSystemDisplay(page, 1)).toBe(initialSecond)
           await page.evaluate(() =>
             window.systemDisplayEmbeddings![0]!.player.session.evaluate(
-              'sdWindow.fullScreen=false;invalidate sdSecondWindow;',
+              '(function(){sdWindow.fullScreen=false;invalidate sdSecondWindow;})()',
             ),
           )
 

@@ -50,3 +50,15 @@
 新增定义使用真实 hosted WASM source / compileStorage 字节码，检查六个原生属性身份、TJS Integer、readonly 与借用引用、复制输入、signed-int32 边界、更新/暂停/旧 revision/Stop/新 Session。浏览器使用真实 public createPlayer、createGameWindows、Worker 与独立 DOM 读数，覆盖默认尺寸、实际 stage resize、全屏进退、两个 Player 隔离、固定注入、无效输入及 Stop 后清理。KAG 的真实 flow、panels、diagnostics 由根任务下一次同构建兼容运行验证。
 
 此切片新增 7 个 Node 用例及 9 个浏览器模板（后者包含 source/bytecode 与 Asyncify/JSPI 的定义展开；三浏览器为 27 个调度用例，JSPI 支持状况仍由既有门控如实记录）。这些均为待执行的验收定义。此前失败或未执行记录不因此改记为通过。
+
+## 首轮集成 Actions 的局部结果与表达式夹具修复
+
+`36455312915`、源提交 `56769cf` 的原始 `artifacts/node-results/node.tap` 在条目 1037–1043 记录本切片七个 Node 用例全部 `ok`，包含 source 与 compileStorage 字节码。Chromium regular 的原始 `results.json` 记录本切片 9 个用例为 5 passed / 4 failed：四个固定注入与 revision/generation 用例及一个无效配置/观察器失败恢复用例通过；四个默认 DOM 几何变体均在创建第二个全屏 Window 的同一夹具调用失败。这不是该完整 workflow 或另外浏览器的通过结论。
+
+四个失败 attachment 均记录初始两个 Player 的原生属性检查 `6|6|6|6|6`，以及真实 stage resize、padding-only resize、进入全屏和 viewport resize 的先行读数。它们的清理记录都为两个 Player disposed、零 liveWindow、空 errors。后续全屏替换、暂停后更新、Stop 后 resize 与重建分支尚未到达，不能据此宣称通过。
+
+失败 trace 的实际 `page.evaluate` 发送 `var sdSecondWindow=new Window();...`，随后收到原生 TJS `Syntax error`。`EngineSession.evaluate` 明确传 `expression=true`，经 `TjsWasmRuntime.execute` 的 mode 1 到 `krkr_execute` 的 `EvalExpression`；该 console 入口不接受顶层 var 语句。独立源码复核还确认 `tjsLex.cpp` 为表达式模式补入 `return`：创建串相当于 `return var ...` 而语法失败；尚未到达的清理串则会在 `sdWindow.fullScreen=false` 后返回，后面的 `invalidate sdSecondWindow` 不会执行。后者是源码推导，不是本次失败运行中已到达的观测。
+
+修复将创建过程放入立即调用的函数表达式，使用 `global.sdSecondWindow` 保留后续操作所需的 Window，并把同一用例尚未到达的多语句清理也放入函数表达式。生产代码、全部原有几何期望、真实 DOM 测量、后端与字节码覆盖、用例数量均不变。
+
+原始报告、TAP、trace 和失败状态保留；局部数据审计位于主工作区 `out/verification/system-display/ci-36455312915-chromium-diagnosis.json`。这个修复仅完成静态审查，没有本地执行或单独 Actions 重跑，等待根任务下一批统一验证。
