@@ -862,3 +862,181 @@ footer {
 .font-actions button:first-child {
   margin-right: auto;
 }
+
+/* Pad is an auxiliary desktop: no game canvas, renderer, or input controller. */
+.game-pad-desktop {
+  position: relative;
+}
+.game-pad {
+  position: absolute;
+  display: grid;
+  grid-template-rows: 27px 31px minmax(0, 1fr) 22px 20px;
+  border: 1px solid #74829b;
+  background: #202c3f;
+  color: #f0f4ff;
+  box-shadow: 0 12px 40px #0005;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  overflow: hidden;
+}
+.game-pad[hidden] {
+  display: none;
+}
+.game-pad[inert] {
+  filter: saturate(0.55);
+}
+.game-pad-header,
+.game-pad-toolbar,
+.game-pad-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.game-pad-header {
+  background: #344761;
+  padding-left: 7px;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.game-pad-title {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.game-pad button {
+  padding: 3px 7px;
+  font:
+    12px system-ui,
+    sans-serif;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.game-pad-header button {
+  height: 24px;
+}
+.game-pad-toolbar {
+  padding: 2px;
+}
+.game-pad-text {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 3px;
+  resize: none;
+  line-height: normal;
+  font-synthesis: weight style;
+  tab-size: 8;
+  outline-offset: -2px;
+}
+.game-pad-footer {
+  border-top: 1px solid #566078;
+}
+.game-pad-caret {
+  min-width: 112px;
+  padding: 0 5px;
+  border-right: 1px solid #566078;
+}
+.game-pad-status {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.game-pad-notice {
+  padding: 1px 5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #fcd49d;
+}
+.game-pad-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: repeating-linear-gradient(135deg, transparent 0 4px, #a0b4cb 5px 6px);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+.game-pad-resize[hidden] {
+  display: none;
+}
+.game-pad[data-border='0'] {
+  border: 0;
+  grid-template-rows: 0 31px minmax(0, 1fr) 22px 20px;
+  box-shadow: none;
+}
+.game-pad[data-border='0'] .game-pad-header {
+  visibility: hidden;
+}
+.game-pad[data-border='3'] {
+  border: 3px double #74829b;
+}
+.game-pad[data-border='4'] .game-pad-header,
+.game-pad[data-border='5'] .game-pad-header {
+  font-size: 11px;
+}
+.game-pad-menu {
+  position: absolute;
+  top: 56px;
+  left: 46px;
+  width: 150px;
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid #8192ad;
+  background: #1b2637;
+  box-shadow: 0 8px 24px #0007;
+}
+.game-pad-menu[hidden] {
+  display: none;
+}
+.game-pad-menu button {
+  text-align: left;
+}
+.game-pad-save {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  border: 1px solid #8192ad;
+  border-radius: 9px;
+  padding: 22px;
+  background: #182332;
+  color: #f0f4ff;
+}
+.game-pad-save::backdrop {
+  background: #11182799;
+}
+.game-pad-save h2 {
+  margin-top: 0;
+}
+.game-pad-save label {
+  display: block;
+  margin-bottom: 8px;
+}
+.game-pad-save input {
+  width: 100%;
+  padding: 8px;
+}
+.game-pad-save-status {
+  min-height: 1.5em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.game-pad-save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.game-pad-save-actions [data-action='stop'] {
+  margin-right: auto;
+}

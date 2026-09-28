@@ -795,6 +795,151 @@ public:
     }
 };
 
+// Pad instances carry only their host identity. HostLifetime owns retirement;
+// neither this native slot nor the copied properties retain the TJS receiver.
+class PadInstance final : public tTJSNativeInstance {
+    Vm* vm;
+    unsigned identifier = 0;
+    bool constructing = false, constructed = false, invalidated = false;
+public:
+    explicit PadInstance(Vm* vm) : vm(vm) {}
+    bool BelongsTo(Vm* context) const noexcept { return vm == context; }
+    unsigned Identifier() const noexcept { return invalidated ? 0 : identifier; }
+    tjs_error Construct(tjs_int, tTJSVariant**, iTJSDispatch2* owner) override {
+        if(invalidated || shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(constructing || constructed) TJS_eTJSError(u"Pad has already been constructed");
+        constructing = true;
+        struct ConstructionScope { bool& value; ~ConstructionScope() { value = false; } } scope{constructing};
+        tTJSVariant receiver(owner, owner), response;
+        tTJSVariant* args[] = {&receiver};
+        constexpr auto operation = u"Pad.construct";
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 1, args));
+        if(!reply) TJS_eTJSError(u"Pad.construct returned no response");
+        resolveReply(vm, *reply, &response);
+        if(response.Type() != tvtInteger && response.Type() != tvtReal)
+            TJS_eTJSError(u"Pad.construct returned an invalid identity");
+        const auto number = response.AsReal();
+        if(!(number >= 1 && number <= 4294967295.0))
+            TJS_eTJSError(u"Pad.construct returned an invalid identity");
+        const auto id = static_cast<unsigned>(number);
+        if(static_cast<tjs_real>(id) != number)
+            TJS_eTJSError(u"Pad.construct returned an invalid identity");
+        // The host has registered HostLifetime before returning this identity.
+        // A failed host constructor leaves the native slot unconstructed.
+        identifier = id;
+        constructed = true;
+        return TJS_S_OK;
+    }
+    void Invalidate() override { invalidated = true; identifier = 0; }
+};
+
+tjs_error padInstance(Vm* vm, tjs_int32 classId, iTJSDispatch2* receiver, PadInstance*& result) {
+    if(!receiver) return TJS_E_NATIVECLASSCRASH;
+    if(shuttingDown) return TJS_E_INVALIDOBJECT;
+    const auto* object = dynamic_cast<tTJSCustomObject*>(receiver);
+    if(object && !object->IsLifetimeValid()) return TJS_E_INVALIDOBJECT;
+    iTJSNativeInstance* instance = nullptr;
+    if(TJS_FAILED(receiver->NativeInstanceSupport(TJS_NIS_GETINSTANCE, classId, &instance)))
+        return TJS_E_NATIVECLASSCRASH;
+    result = dynamic_cast<PadInstance*>(instance);
+    return result && result->BelongsTo(vm) ? TJS_S_OK : TJS_E_NATIVECLASSCRASH;
+}
+
+class PadConstructor final : public tTJSNativeClassConstructor {
+    Vm* vm;
+    tjs_int32 classId;
+public:
+    PadConstructor(Vm* vm, tjs_int32 classId)
+        : tTJSNativeClassConstructor(nullptr), vm(vm), classId(classId) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* receiver) override {
+        if(member) return tTJSNativeClassConstructor::FuncCall(flag, member, hint, result, count, args, receiver);
+        if(result) result->Clear();
+        PadInstance* instance = nullptr;
+        const auto status = padInstance(vm, classId, receiver, instance);
+        if(TJS_FAILED(status)) return status;
+        // The original constructor ignores all arguments, including owner-like
+        // objects. The actual receiver is the sole host lifetime owner.
+        return instance->Construct(count, args, receiver);
+    }
+};
+
+enum class PadConversion { Text, Integer, Boolean };
+struct PadPropertyPolicy { const tjs_char* name; PadConversion conversion; };
+constexpr PadPropertyPolicy padPropertyPolicies[] = {
+    {u"text", PadConversion::Text}, {u"fileName", PadConversion::Text},
+    {u"color", PadConversion::Integer}, {u"visible", PadConversion::Boolean},
+    {u"title", PadConversion::Text}, {u"fontColor", PadConversion::Integer},
+    {u"fontHeight", PadConversion::Integer}, {u"fontSize", PadConversion::Integer},
+    {u"fontBold", PadConversion::Integer}, {u"fontItalic", PadConversion::Integer},
+    {u"fontUnderline", PadConversion::Integer}, {u"fontStrikeOut", PadConversion::Integer},
+    {u"fontFace", PadConversion::Text}, {u"readOnly", PadConversion::Boolean},
+    {u"wordWrap", PadConversion::Boolean}, {u"opacity", PadConversion::Integer},
+    {u"showStatusBar", PadConversion::Boolean}, {u"showScrollBars", PadConversion::Integer},
+    {u"statusText", PadConversion::Text}, {u"borderStyle", PadConversion::Integer},
+    {u"width", PadConversion::Integer}, {u"height", PadConversion::Integer},
+    {u"top", PadConversion::Integer}, {u"left", PadConversion::Integer}
+};
+class PadProperty final : public tTJSNativeClassProperty {
+    Vm* vm;
+    tjs_int32 classId;
+    PadPropertyPolicy policy;
+    tjs_error dispatch(iTJSDispatch2* receiver, tTJSVariant* result, const tTJSVariant* input) {
+        PadInstance* instance = nullptr;
+        const auto status = padInstance(vm, classId, receiver, instance);
+        if(TJS_FAILED(status)) return status;
+        if(!instance->Identifier()) return TJS_E_NATIVECLASSCRASH;
+        tTJSVariant identifier(static_cast<tjs_int64>(instance->Identifier())), key(policy.name), converted;
+        tTJSVariant* args[] = {&identifier, &key, &converted};
+        if(input) {
+            // Narrow before crossing the JS boundary: int64 low bits and TJS
+            // numeric-string/real truthiness must not depend on JS coercion.
+            switch(policy.conversion) {
+                case PadConversion::Text: converted = ttstr(*input); break;
+                case PadConversion::Integer: converted = static_cast<tjs_int>(*input); break;
+                case PadConversion::Boolean: converted = static_cast<tjs_int>(input->operator bool()); break;
+            }
+        }
+        const auto operation = input ? u"Pad.set" : u"Pad.get";
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), input ? 3 : 2, args));
+        if(!reply) TJS_eTJSError(u"Pad property returned no response");
+        resolveReply(vm, *reply, result);
+        return TJS_S_OK;
+    }
+public:
+    PadProperty(Vm* vm, tjs_int32 classId, PadPropertyPolicy policy)
+        : tTJSNativeClassProperty(nullptr, nullptr), vm(vm), classId(classId), policy(policy) {}
+    tjs_error PropGet(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, iTJSDispatch2* receiver) override {
+        if(member) return tTJSNativeClassProperty::PropGet(flag, member, hint, result, receiver);
+        if(!receiver) return TJS_E_NATIVECLASSCRASH;
+        if(!result) return TJS_E_FAIL;
+        return dispatch(receiver, result, nullptr);
+    }
+    tjs_error PropSet(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        const tTJSVariant* input, iTJSDispatch2* receiver) override {
+        if(member) return tTJSNativeClassProperty::PropSet(flag, member, hint, input, receiver);
+        if(!receiver) return TJS_E_NATIVECLASSCRASH;
+        if(!input) return TJS_E_FAIL;
+        return dispatch(receiver, nullptr, input);
+    }
+};
+
+class PadClass final : public tTJSNativeClass {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit PadClass(Vm* vm) : tTJSNativeClass(u"Pad"), vm(vm) {
+        const auto classId = TJSRegisterNativeClass(u"Pad");
+        SetClassID(classId);
+        RegisterNCM(u"Pad", new PadConstructor(vm, classId), u"Pad", nitMethod);
+        RegisterNCM(u"finalize", TJSCreateNativeClassMethod(noOp), u"Pad", nitMethod);
+        for(const auto& policy : padPropertyPolicies)
+            RegisterNCM(policy.name, new PadProperty(vm, classId, policy), u"Pad", nitProperty);
+    }
+    iTJSNativeInstance* CreateNativeInstance() override { return new PadInstance(vm); }
+};
+
 template<typename Fn> Reply* capture(Fn fn) {
     krkr::CleanupErrors cleanup;
     auto reply = std::make_unique<Reply>();
@@ -997,6 +1142,13 @@ API int krkr_proxy_bind_owner(Vm* vm, tTJSVariant* value, unsigned handle) {
     return proxy->BindOwner(owner);
 }
 API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* className) {
+    if(id == 0 && ttstr(prefix) == u"Pad" && ttstr(className) == u"Pad") {
+        krkr::NativeOwner<PadClass> object(new PadClass(vm));
+        // Like the original global native-class registration, keep the class
+        // closure unbound so super.Pad() receives the derived instance.
+        *value = tTJSVariant(object.get());
+        return;
+    }
     const bool system = id == 0 && ttstr(prefix) == u"System" && ttstr(className) == u"System";
     krkr::NativeOwner<HostClass> object(new HostClass(className, system ? vm : nullptr));
     if(id == 0 && ttstr(prefix) == u"Clipboard" && ttstr(className) == u"Clipboard") {
@@ -1061,9 +1213,11 @@ API int krkr_class_system_property(Vm* vm, tTJSVariant* value, const tjs_char* m
     return 0;
 }
 API unsigned krkr_tjs_version() { return TJSVersionHex; }
+API unsigned krkr_native_pad_version() { return 1; }
 // Called only while assembling a fresh native-class reply, before publishing it.
 API void krkr_class_property(Vm* vm, tTJSVariant* value, const tjs_char* prefix, int id, const tjs_char* member, int options) {
-    auto object = static_cast<HostClass*>(value->AsObjectNoAddRef());
+    auto* object = dynamic_cast<HostClass*>(value->AsObjectNoAddRef());
+    if(!object) TJS_eTJSError(u"Host property requires a generic host class");
     object->RegisterNCM(member, new HostProperty(vm, prefix, id, member, options),
         object->GetClassName().c_str(), nitProperty, options & 2 ? TJS_STATICMEMBER : 0);
 }

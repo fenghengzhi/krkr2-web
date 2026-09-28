@@ -116,7 +116,8 @@ export function createGameFonts(actions: FontActions) {
     cancelButton = undefined
     readingLocal = false
     status = undefined
-    if (previousFocus?.isConnected) previousFocus.focus()
+    if (previousFocus?.isConnected && !previousFocus.closest('[hidden], [inert]'))
+      previousFocus.focus()
     previousFocus = null
   }
   const renderChoices = () => {

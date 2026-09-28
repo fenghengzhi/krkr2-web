@@ -1,3 +1,4 @@
+import type { PadMessage } from '../protocol/pad.ts'
 import { createRpcClient, type RpcClient } from 'vite-plugin-worker-rpc/runtime'
 import { transfer } from 'vite-plugin-worker-rpc/client'
 import type { SaveFile } from '../engine/ports/saves.ts'
@@ -103,6 +104,14 @@ export class SessionClient {
     if (this.disposed) return Promise.resolve()
     this.activity = { ...activity }
     return this.initialized ? this.call('setActivity', this.activity) : Promise.resolve()
+  }
+  padFont(id: number, epoch: number) {
+    return this.call('padFont', this.generation, id, epoch)
+  }
+  pad(message: PadMessage) {
+    if (message.generation !== this.generation)
+      return Promise.resolve({ status: 'ignored' as const })
+    return this.call('pad', message)
   }
   prepare(files: GameInput) {
     return this.call('prepare', files)

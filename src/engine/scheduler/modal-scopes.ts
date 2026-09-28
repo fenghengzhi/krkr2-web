@@ -4,7 +4,7 @@ export type ModalValue = undefined | null | boolean | string | number | bigint
 export interface ModalScopeInfo {
   readonly token: number
   readonly parentToken: number | undefined
-  readonly kind: 'window' | 'menu' | 'system-dialog'
+  readonly kind: 'window' | 'menu' | 'system-dialog' | 'pad-save'
   readonly ownerId: number
   readonly windowId: number | undefined
 }
@@ -72,7 +72,7 @@ export class ModalScopes {
     if (this.ended) throw new Error('Modal scopes have stopped')
     if (this.stack.length >= this.maxDepth) throw new Error('Modal scope nesting limit exceeded')
     if (
-      !['window', 'menu', 'system-dialog'].includes(options.kind) ||
+      !['window', 'menu', 'system-dialog', 'pad-save'].includes(options.kind) ||
       !this.validId(options.ownerId) ||
       (options.windowId !== undefined && !this.validId(options.windowId))
     )

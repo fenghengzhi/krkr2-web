@@ -1,3 +1,4 @@
+import type { PadHost } from './pad-host.ts'
 import { SessionClient } from './session-client.ts'
 import { ClipboardChannel } from './clipboard-channel.ts'
 import type { ClipboardRequest } from '../protocol/clipboard.ts'
@@ -37,6 +38,7 @@ export interface PlayerWindowHost {
 
 export interface PlayerOptions {
   windows: PlayerWindowHost
+  pads?: PadHost
   /** Optional game-relative startup directory; never a host filesystem path. */
   dataPath?: string
   /** 31 RGB values for legacy indices 0..30 (25 must be zero); defaults to page CSS colors. */
@@ -150,6 +152,7 @@ export function createPlayer(
       workerPaused = event.snapshot.state !== 'running'
     }
     onEvent(event)
+    if (event.type === 'pads') options.pads?.update(event)
     // Roster snapshots describe completed script work; they never command DOM
     // focus. Only explicit native activation can request a move, and later user
     // focus supersedes a request still waiting for its surface or dialog.
@@ -248,7 +251,7 @@ export function createPlayer(
     // Post visibility before any activation packet produced by releasing input.
     syncInput()
   }, pauseWhenHidden)
-  return {
+  const player = {
     isWindowActive(windowId: number, epoch?: number): boolean {
       return !retiredWindows.has(windowId) && input!.isActive(windowId, epoch)
     },
@@ -283,6 +286,7 @@ export function createPlayer(
       return session.start(entry)
     },
     session,
+    pads: options.pads,
     clipboard,
     toggleAudio() {
       audio.toggle()
@@ -298,6 +302,7 @@ export function createPlayer(
         for (const action of [
           // Retire the buttons locally. A clipboard-close message on its own
           // port must not resume TJS catch before the stop RPC cancels control.
+          () => options.pads?.dispose(),
           () => options.onClipboardRequest?.(null),
           () => video.setPagePaused(true),
           () => input?.close(),
@@ -351,4 +356,11 @@ export function createPlayer(
       return stopping
     },
   }
+  options.pads?.attach({
+    generation: session.generation,
+    send: (message) => session.pad(message),
+    font: (id, epoch) => session.padFont(id, epoch),
+    stop: () => player.stop(),
+  })
+  return player
 }

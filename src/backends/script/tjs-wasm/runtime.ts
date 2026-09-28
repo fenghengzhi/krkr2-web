@@ -180,11 +180,33 @@ export class TjsWasmRuntime implements ScriptRuntime {
       this.call('krkr_value_set_scripts_class', this.vm, pointer)
     } else if (value.type === 'proxy' || value.type === 'class') {
       if (
+        !value.namespace ||
+        value.namespace.includes('\0') ||
+        !value.className ||
+        value.className.includes('\0')
+      )
+        throw new Error('Invalid native class identity')
+      if (
         value.type === 'class' &&
         (value.properties.length > 64 ||
           value.properties.some((p) => !p.name || p.name.includes('\0')))
       )
         throw new Error('Invalid native class properties')
+      if (value.type === 'class' && value.namespace === 'Pad') {
+        if (
+          value.id !== 0 ||
+          value.className !== 'Pad' ||
+          value.properties.length !== 0 ||
+          value.systemMethods ||
+          value.systemProperties
+        )
+          throw new Error('Invalid Pad class factory')
+        if (
+          typeof this.module._krkr_native_pad_version !== 'function' ||
+          this.call('krkr_native_pad_version') !== 1
+        )
+          throw new Error('TJS WASM is missing native Pad support')
+      }
       if (value.type === 'class' && (value.systemMethods || value.systemProperties)) {
         if (
           value.namespace !== 'System' ||

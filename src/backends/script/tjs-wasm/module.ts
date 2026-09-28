@@ -58,6 +58,8 @@ export interface WasmManifest {
     nativeClipboard?: number
     /** Version 2 includes the fixed System.toActualColor method binding. */
     nativeSystem?: number
+    /** True native Pad instance construction, receiver checks and properties. */
+    nativePad?: number
   }
   diagnosticAllocator?: boolean
   toolchain: string
