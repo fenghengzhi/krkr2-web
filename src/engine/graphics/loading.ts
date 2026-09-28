@@ -2,18 +2,7 @@ import type { DecodedImage, Pixels } from '../ports/graphics.ts'
 
 export const noColorKey = 0x1fffffff
 export function validateColorKey(key: number): void {
-  if (
-    !Number.isInteger(key) ||
-    key < 0 ||
-    key > 0xffffffff ||
-    !(
-      key === noColorKey ||
-      key === 0x01ffffff ||
-      key <= 0xffffff ||
-      key >>> 24 === 3 ||
-      key >>> 24 === 4
-    )
-  )
+  if (!Number.isInteger(key) || key < 0 || key > 0xffffffff)
     throw new Error('Invalid image color key')
 }
 
@@ -21,7 +10,9 @@ export function validateColorKey(key: number): void {
 export function* applyImageKey(image: DecodedImage, key: number): Generator<void, void> {
   validateColorKey(key)
   const { data, width } = image
-  if (key === noColorKey || key >>> 24 === 4 || (key >>> 24 === 3 && !image.indices)) return
+  // Only a zero high byte is an RGB key. Other high-byte values retain
+  // decoded alpha, apart from the two explicit keying modes below.
+  if (key !== 0x01ffffff && key >>> 24 !== 0 && !(key >>> 24 === 3 && image.indices)) return
   if (key === 0x01ffffff) {
     const counts = new Map<number, number>()
     let maximum = 0,
