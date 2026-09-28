@@ -30,6 +30,16 @@ export function phaseTone(seconds: number, frequencies = [750]): number[][] {
     ),
   )
 }
+interface PhaseCompletionPause {
+  voiceId: number
+  requestContextTime: number
+  requestContextFrameEstimate: number
+  receiptContextTime?: number
+  receiptContextFrameEstimate?: number
+  result?: AudioResult
+  failureContextTime?: number
+  error?: string
+}
 export interface CapturedPhaseAudio {
   sampleRate: number
   startFrame: number
@@ -37,6 +47,9 @@ export interface CapturedPhaseAudio {
   channels: number[][]
   completedAt?: number
   barrierAt?: number
+  completionPause?: PhaseCompletionPause
+  eventRange?: { gapStart: number; start: number; end: number }
+  gapEvents?: { contextTime: number; message: AudioMessage }[]
   events: { contextTime: number; message: AudioMessage }[]
 }
 interface CapturePacket {
@@ -53,6 +66,7 @@ interface PhaseCaptureState {
   ownsContext: boolean
   serial: number
   events: CapturedPhaseAudio['events']
+  eventCursor: number
   pending?: Promise<CapturedPhaseAudio>
   observer?: (event: MessageEvent<AudioMessage>) => void
   send(command: MixerCommand): Promise<AudioResult>
@@ -187,6 +201,7 @@ export async function openPhaseCapture(page: Page, releaseUrl?: string) {
         ownsContext: !!releaseUrl,
         serial: -1000000,
         events: [],
+        eventCursor: 0,
         send(command) {
           return new Promise((resolve, reject) => {
             const serial = --state.serial,
@@ -289,64 +304,120 @@ export async function loadPhasePcm(
   )
 }
 
-export async function beginPhaseCapture(page: Page, seconds: number) {
-  await page.evaluate(async (seconds) => {
-    const state = (globalThis as PhaseWindow).__phaseCapture!
-    if (state.pending) throw new Error('Capture already pending')
-    state.events = []
-    let armed!: () => void, failArm!: (error: Error) => void
-    const ready = new Promise<void>((resolve, reject) => {
-      armed = resolve
-      failArm = reject
-    })
-    state.pending = new Promise<CapturedPhaseAudio>((resolve, reject) => {
-      const handler = (event: MessageEvent<CapturePacket>) => {
-          const packet = event.data
-          if (packet.type === 'armed') {
-            armed()
-            return
-          }
-          if (packet.type !== 'complete') return
-          clearTimeout(timeout)
-          state.capture.port.removeEventListener('message', handler)
-          const completedAt = state.context.currentTime
-          // Capture and mixer use different MessagePorts. Wait for the actual
-          // mixer's own reply so already-emitted events are not lost. Empty
-          // MIDI data executes no parser iteration and changes no voice state;
-          // unlike inspect(id), this barrier also works after a voice is closed.
-          // The evidence records its later boundary separately from the PCM.
-          void state.send({ op: 'midiOut', data: new Uint8Array(0) }).then(
-            () =>
-              resolve({
+export async function beginPhaseCapture(
+  page: Page,
+  seconds: number,
+  options: { pauseVoiceOnComplete?: number } = {},
+) {
+  await page.evaluate(
+    async ({ seconds, options }) => {
+      const state = (globalThis as PhaseWindow).__phaseCapture!,
+        pauseVoice = options.pauseVoiceOnComplete
+      if (state.pending) throw new Error('Capture already pending')
+      if (
+        pauseVoice !== undefined &&
+        (!state.ownsContext || !Number.isSafeInteger(pauseVoice) || pauseVoice < 1)
+      )
+        throw new Error('Completion pause requires a voice in a direct capture context')
+      // Keep one bounded observer journal. Events after the previous capture's
+      // reply barrier belong to its following gap, never silently to this stage.
+      const gapStart = state.eventCursor,
+        eventStart = state.events.length,
+        gapEvents = state.events.slice(gapStart, eventStart)
+      let armed!: () => void, failArm!: (error: Error) => void
+      const ready = new Promise<void>((resolve, reject) => {
+        armed = resolve
+        failArm = reject
+      })
+      state.pending = new Promise<CapturedPhaseAudio>((resolve, reject) => {
+        const handler = (event: MessageEvent<CapturePacket>) => {
+            const packet = event.data
+            if (packet.type === 'armed') {
+              armed()
+              return
+            }
+            if (packet.type !== 'complete') return
+            clearTimeout(timeout)
+            state.capture.port.removeEventListener('message', handler)
+            const completedAt = state.context.currentTime
+            const finish = async (): Promise<CapturedPhaseAudio> => {
+              let completionPause: PhaseCompletionPause | undefined
+              if (pauseVoice !== undefined) {
+                const requestContextTime = state.context.currentTime
+                completionPause = {
+                  voiceId: pauseVoice,
+                  requestContextTime,
+                  // Derived from the main-thread AudioContext clock, not an
+                  // assertion about the worklet's exact command execution frame.
+                  requestContextFrameEstimate: Math.round(
+                    requestContextTime * state.context.sampleRate,
+                  ),
+                }
+                try {
+                  completionPause.result = await state.send({
+                    op: 'set',
+                    id: pauseVoice,
+                    property: 'paused',
+                    value: true,
+                  })
+                  completionPause.receiptContextTime = state.context.currentTime
+                  completionPause.receiptContextFrameEstimate = Math.round(
+                    completionPause.receiptContextTime * state.context.sampleRate,
+                  )
+                } catch (error) {
+                  // Preserve captured PCM and the actual failed/timed-out
+                  // operation for the caller's assertions and failure artifact.
+                  completionPause.failureContextTime = state.context.currentTime
+                  completionPause.error = error instanceof Error ? error.message : String(error)
+                }
+              } else {
+                // Capture and mixer use different MessagePorts. This actual
+                // same-port reply follows already-emitted events. Empty MIDI
+                // data executes no parser iteration and changes no voice state.
+                await state.send({ op: 'midiOut', data: new Uint8Array(0) })
+              }
+              // The explicit pause reply is itself a same-port barrier. Obtain
+              // it before Array.from or the large Playwright result transfer;
+              // neither serialization nor attachment work may advance this voice.
+              const barrierAt = completionPause?.error ? undefined : state.context.currentTime,
+                eventEnd = state.events.length,
+                events = state.events.slice(eventStart, eventEnd)
+              state.eventCursor = eventEnd
+              return {
                 sampleRate: state.context.sampleRate,
                 startFrame: packet.startFrame,
                 endFrame: packet.endFrame,
                 channels: packet.channels!.map((channel) => Array.from(channel)),
                 completedAt,
-                barrierAt: state.context.currentTime,
-                events: state.events.slice(),
-              }),
-            reject,
-          )
-        },
-        timeout = setTimeout(() => {
-          state.capture.port.removeEventListener('message', handler)
-          const error = new Error('Actual AudioWorklet capture timed out')
-          failArm(error)
-          reject(error)
-        }, 8000)
-      state.capture.port.addEventListener('message', handler)
-      state.capture.port.start()
-      state.capture.port.postMessage({
-        type: 'arm',
-        frames: Math.ceil(seconds * state.context.sampleRate),
+                barrierAt,
+                completionPause,
+                eventRange: { gapStart, start: eventStart, end: eventEnd },
+                gapEvents,
+                events,
+              }
+            }
+            void finish().then(resolve, reject)
+          },
+          timeout = setTimeout(() => {
+            state.capture.port.removeEventListener('message', handler)
+            const error = new Error('Actual AudioWorklet capture timed out')
+            failArm(error)
+            reject(error)
+          }, 8000)
+        state.capture.port.addEventListener('message', handler)
+        state.capture.port.start()
+        state.capture.port.postMessage({
+          type: 'arm',
+          frames: Math.ceil(seconds * state.context.sampleRate),
+        })
       })
-    })
-    // A render failure can precede endPhaseCapture; retain rejection for that
-    // consumer without creating an unhandled rejection on the page.
-    void state.pending.catch(() => {})
-    await ready
-  }, seconds)
+      // A render failure can precede endPhaseCapture; retain rejection for that
+      // consumer without creating an unhandled rejection on the page.
+      void state.pending.catch(() => {})
+      await ready
+    },
+    { seconds, options },
+  )
 }
 export async function endPhaseCapture(page: Page): Promise<CapturedPhaseAudio> {
   return page.evaluate(async () => {
@@ -511,6 +582,9 @@ export async function attachPhaseCapture(
         frameCount: capture.channels[0]!.length,
         completedAt: capture.completedAt,
         barrierAt: capture.barrierAt,
+        completionPause: capture.completionPause,
+        eventRange: capture.eventRange,
+        gapEvents: capture.gapEvents,
         sha256: createHash('sha256').update(wav).digest('hex'),
         metrics,
         events: capture.events,

@@ -278,13 +278,15 @@ test('release AudioWorklet publishes consumed labels and flushes seek while pres
     // At 0.25 output seconds source consumption is near 0.125 seconds;
     // the 4096-frame lookahead can already cross the 0.2-second label.
     // Keep 150 ms before its audible deadline for the port reply barrier.
-    await beginPhaseCapture(page, 0.25)
+    await beginPhaseCapture(page, 0.25, { pauseVoiceOnComplete: 1 })
     await phaseCommand(page, { op: 'play', id: 1 })
-    const early = await endPhaseCapture(page),
-      paused = await phaseCommand(page, { op: 'set', id: 1, property: 'paused', value: true })
+    const early = await endPhaseCapture(page)
     await attachPhaseCapture(info, 'before-source-label', early)
+    expect(early.completionPause?.error).toBeUndefined()
+    expect(early.completionPause?.result?.snapshot?.paused).toBe(true)
+    const paused = early.completionPause!.result!
+    expect(paused.snapshot!.position).toBeLessThan(sourceRate * 0.2)
     expect(soundEvents(early).filter(isLabelEvent)).toEqual([])
-    expect(paused.snapshot!.position).toBeLessThan(sourceRate / 2)
     await beginPhaseCapture(page, 0.18)
     const silence = await endPhaseCapture(page),
       silentMetrics = await attachPhaseCapture(info, 'paused-silence', silence)
@@ -292,11 +294,14 @@ test('release AudioWorklet publishes consumed labels and flushes seek while pres
       paused.snapshot!.position,
     )
     expect(silentMetrics[0]!.peak).toBe(0)
-    await beginPhaseCapture(page, 0.35)
+    await beginPhaseCapture(page, 0.35, { pauseVoiceOnComplete: 1 })
     await phaseCommand(page, { op: 'set', id: 1, property: 'paused', value: false })
-    const resumed = await endPhaseCapture(page)
-    await phaseCommand(page, { op: 'set', id: 1, property: 'paused', value: true })
-    const resumedMetrics = await attachPhaseCapture(info, 'resumed-before-seek', resumed)
+    const resumed = await endPhaseCapture(page),
+      resumedMetrics = await attachPhaseCapture(info, 'resumed-before-seek', resumed)
+    expect(resumed.completionPause?.error).toBeUndefined()
+    expect(resumed.completionPause?.result?.snapshot?.paused).toBe(true)
+    expect(resumed.completionPause!.result!.snapshot!.position).toBeGreaterThan(sourceRate * 0.2)
+    expect(resumed.completionPause!.result!.snapshot!.position).toBeLessThan(sourceRate / 2)
     expect(Math.abs(resumedMetrics[0]!.spectrum.peakHz / 750 - 1)).toBeLessThan(0.01)
     expect(
       soundEvents(resumed)
@@ -306,11 +311,12 @@ test('release AudioWorklet publishes consumed labels and flushes seek while pres
     // The explicit seek must discard the old buffered phase. Its label must not
     // escape from a prefetched FFT window after the seek generation changes.
     await phaseCommand(page, { op: 'set', id: 1, property: 'position', value: sourceRate * 0.6 })
-    await beginPhaseCapture(page, 0.4)
+    await beginPhaseCapture(page, 0.4, { pauseVoiceOnComplete: 1 })
     await phaseCommand(page, { op: 'set', id: 1, property: 'paused', value: false })
-    const seek = await endPhaseCapture(page)
-    await phaseCommand(page, { op: 'set', id: 1, property: 'paused', value: true })
-    const seekMetrics = await attachPhaseCapture(info, 'seek-new-frequency', seek)
+    const seek = await endPhaseCapture(page),
+      seekMetrics = await attachPhaseCapture(info, 'seek-new-frequency', seek)
+    expect(seek.completionPause?.error).toBeUndefined()
+    expect(seek.completionPause?.result?.snapshot?.paused).toBe(true)
     expect(Math.abs(seekMetrics[0]!.spectrum.peakHz / 1125 - 1)).toBeLessThan(0.01)
     const labels = soundEvents(seek).filter(isLabelEvent)
     expect(labels.map((event) => event.label)).toEqual(['after-seek'])

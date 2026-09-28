@@ -244,6 +244,37 @@ single-read ordering, invalidated-object handling, and selected-identity asserti
 remain intact. No test case was added or removed. These runtime corrections are
 unverified until the next hosted batch.
 
+The same run also exposed an independent Firefox direct-Worklet timeline fixture
+failure: the resumed capture expected `['pre-read-boundary']` but recorded `[]`.
+The target source frame was 9600, while the trace's first pause, paused inspection,
+and resume receipts all report position 11776. Chromium's corresponding resume
+receipt was 8916 and its capture included the label at 9600. Firefox's resumed
+WAV contains 0.331333 seconds of audible 750 Hz output; its paused WAV is all zero.
+The saved WAVs match their recorded hashes. These facts invalidate the old
+assumption that the resumed phase begins before the label; they do not establish
+a product-level lost label.
+
+Firefox's initial `endPhaseCapture` API spans 362.366 ms and returns before a
+further 103.163 ms delay to the pause request. The API span includes waiting for
+capture, its port barrier, and returning the large arrays; it is not an isolated
+serialization measurement. The second pause reaches source position 26304 after
+another delayed return. The helper previously returned an event slice and then
+cleared its observer array at the next capture. No intervening label packet was
+archived, so actual delivery in that gap cannot be claimed. The primary workspace
+archive preserves the parsed trace/WAV evidence in
+`out/verification/github-actions/36455312915/phase-vocoder-firefox-timeline-review.json`
+and its accompanying report; the original failure remains unchanged.
+
+The fixture repair pauses the actual direct-test mixer in the page's capture
+completion handler and collects the receipt before returning PCM to Playwright.
+It records real source snapshots, request/receipt context times and derived
+context-frame bounds, and preserves observer events between capture stages.
+The early endpoint must remain below source frame 9600, while the resumed endpoint
+must pass it; the original exact label expectations are retained. Completion
+control is opt-in for these direct timeline captures, and the player/Worker path
+keeps its default behavior. No timeout, expected label, or production DSP change
+is used to hide the failure. This fixture repair is unverified pending Actions.
+
 No tests, build, typecheck, browser probe, or native execution have been run
 locally. Failed hosted results above are preserved rather than relabeled as passes.
 This slice does not complete all remaining nonplugin KRKR2 compatibility work.
