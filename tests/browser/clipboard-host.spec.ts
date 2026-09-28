@@ -9,7 +9,7 @@ import type { ClipboardRequest, ClipboardResponse } from '../../src/protocol/cli
 // platform clipboard and are not evidence of browser clipboard permissions.
 type AdapterCall = { op: 'has-text' | 'read-text' | 'write-text'; text?: string }
 interface FixtureOptions {
-  complete?: 'clear' | 'dispose' | 'throw'
+  complete?: 'clear' | 'dispose' | 'throw' | 'replace'
   pendingThrows?: 'start' | 'finish'
   stop?: 'throw' | 'reject'
   closeThrows?: boolean
@@ -26,7 +26,11 @@ interface ClipboardHostFixture {
   stopped(): number
   unhandled(): string[]
   parentEvents(): string[]
-  settle(index: number, result?: ClipboardText | boolean, error?: string): void
+  settle(
+    index: number,
+    result?: ClipboardText | boolean,
+    error?: string | { name: string; message: string },
+  ): void
   retain(): void
   useRetired(index: number): void
   isRetained(index: number): boolean
@@ -186,6 +190,10 @@ async function launch(page: Page, options: FixtureOptions = {}) {
           if (options.complete === 'clear') host.show(null)
           else if (options.complete === 'dispose') host.dispose()
           else if (options.complete === 'throw') throw new Error('complete failed')
+          else if (options.complete === 'replace') {
+            document.querySelector<HTMLButtonElement>('#other')!.focus()
+            host.show({ generation: response.generation, id: response.id + 1, op: 'read-text' })
+          }
         },
         pending(active) {
           pending.push(active)
@@ -217,7 +225,12 @@ async function launch(page: Page, options: FixtureOptions = {}) {
         const work = operations[index]
         if (!work) throw new Error(`Missing clipboard operation ${index}`)
         if (error === undefined) work.resolve(result)
-        else work.reject(new Error(error))
+        else
+          work.reject(
+            typeof error === 'string'
+              ? new Error(error)
+              : Object.assign(new Error(error.message), { name: error.name }),
+          )
       },
       retain() {
         const panel = document.querySelector<HTMLElement>('.game-clipboard')
@@ -282,6 +295,8 @@ for (const { complete, outcome } of [
   { complete: 'clear', outcome: 'success' },
   { complete: 'clear', outcome: 'error' },
   { complete: 'dispose', outcome: 'error' },
+  { complete: 'clear', outcome: 'cancel' },
+  { complete: 'dispose', outcome: 'cancel' },
 ] as const)
   test(`synchronous complete ${complete} retires a ${outcome} request and preserves only its allowed notice`, async ({
     page,
@@ -293,6 +308,9 @@ for (const { complete, outcome } of [
       await page.evaluate(() =>
         window.clipboardHost.settle(0, { hasText: true, text: 'delivered once🙂' }),
       )
+    } else if (outcome === 'error') {
+      await page.locator(perform).click()
+      await page.evaluate(() => window.clipboardHost.settle(0, undefined, 'platform failure'))
     } else {
       await page.locator(cancel).focus()
       await page.keyboard.press('Enter')
@@ -326,10 +344,10 @@ for (const { complete, outcome } of [
             generation: 7,
             id: 1,
             ok: false,
-            error: {
-              name: 'AbortError',
-              message: 'Clipboard request cancelled by the user',
-            },
+            error:
+              outcome === 'cancel'
+                ? { name: 'AbortError', message: 'Clipboard request cancelled by the user' }
+                : { name: 'Error', message: 'platform failure' },
           },
     ])
     expect(await page.evaluate(() => window.clipboardHost.pending())).toEqual([true, false])
@@ -399,8 +417,9 @@ test('the same nonmodal panel follows the actual top dialog and survives parent 
   await expect(page.locator('#child-origin')).toBeFocused()
   expect(await page.locator(panel).evaluate((node) => node.closest('form'))).toBeNull()
   expect(await page.locator('dialog:modal').count()).toBe(2)
-  await page.locator(cancel).focus()
-  await page.keyboard.press('Escape')
+  await page.locator(perform).focus()
+  await page.keyboard.press('Enter')
+  await page.evaluate(() => window.clipboardHost.settle(0, undefined, 'platform failure'))
   await expect(page.locator(close)).toBeFocused()
   expect(await page.evaluate(() => window.clipboardHost.parentEvents())).toEqual([])
   expect(await page.locator('dialog:modal').count()).toBe(2)
@@ -420,23 +439,126 @@ test('the same nonmodal panel follows the actual top dialog and survives parent 
   await expectClean(page, errors)
 })
 
-test('keyboard cancellation focuses its close action and closing restores the original control', async ({
+for (const key of ['Enter', 'Escape'])
+  test(`keyboard cancellation by ${key} restores the original control without another dismissal`, async ({
+    page,
+  }) => {
+    const errors = await launch(page)
+    await page.evaluate((request) => window.clipboardHost.show(request), request(1))
+    await expect(page.locator('#origin')).toBeFocused()
+    await page.locator(cancel).focus()
+    await page.keyboard.press(key)
+    await expect(page.locator(panel)).toHaveCount(0)
+    await expect(page.locator('#origin')).toBeFocused()
+    expect(await page.evaluate(() => window.clipboardHost.responses())).toEqual([
+      {
+        generation: 7,
+        id: 1,
+        ok: false,
+        error: { name: 'AbortError', message: 'Clipboard request cancelled by the user' },
+      },
+    ])
+    expect(await page.evaluate(() => window.clipboardHost.calls())).toEqual([])
+    expect(await page.evaluate(() => window.clipboardHost.pending())).toEqual([true, false])
+    await expectClean(page, errors)
+  })
+
+test('Escape cancels clipboard access without dismissing its containing native dialog', async ({
   page,
 }) => {
-  const errors = await launch(page)
+  const errors = await launch(page, { initialModals: true })
   await page.evaluate((request) => window.clipboardHost.show(request), request(1))
-  await expect(page.locator('#origin')).toBeFocused()
   await page.locator(cancel).focus()
-  await page.keyboard.press('Enter')
-  await expect(page.locator(close)).toBeFocused()
-  await expect(page.locator(`${panel} .game-clipboard-status`)).toContainText('AbortError')
-  await page.keyboard.press('Enter')
+  await page.keyboard.press('Escape')
   await expect(page.locator(panel)).toHaveCount(0)
-  await expect(page.locator('#origin')).toBeFocused()
+  await expect(page.locator('#child-origin')).toBeFocused()
+  expect(await page.locator('dialog:modal').count()).toBe(2)
+  expect(await page.evaluate(() => window.clipboardHost.parentEvents())).toEqual([])
   expect(await page.evaluate(() => window.clipboardHost.responses())).toHaveLength(1)
   expect(await page.evaluate(() => window.clipboardHost.calls())).toEqual([])
   await expectClean(page, errors)
 })
+
+test('a platform AbortError remains dismissible and does not become silent user cancellation', async ({
+  page,
+}) => {
+  const errors = await launch(page, { complete: 'clear' })
+  await page.evaluate((request) => window.clipboardHost.show(request), request(1))
+  await page.locator(perform).focus()
+  await page.keyboard.press('Enter')
+  await page.evaluate(() =>
+    window.clipboardHost.settle(0, undefined, {
+      name: 'AbortError',
+      message: 'Platform read aborted',
+    }),
+  )
+  await expect(page.locator(close)).toBeFocused()
+  await expect(page.locator(`${panel} .game-clipboard-status`)).toHaveText(
+    'AbortError: Platform read aborted',
+  )
+  await page.keyboard.press('Enter')
+  await expect(page.locator(panel)).toHaveCount(0)
+  await expect(page.locator('#origin')).toBeFocused()
+  expect(await page.evaluate(() => window.clipboardHost.responses())).toEqual([
+    {
+      generation: 7,
+      id: 1,
+      ok: false,
+      error: { name: 'AbortError', message: 'Platform read aborted' },
+    },
+  ])
+  await expectClean(page, errors)
+})
+
+for (const operation of ['read-text', 'write-text'] as const)
+  for (const late of ['resolve', 'reject'] as const)
+    test(`cancelling a pending ${operation} ignores its late ${late} and preserves synchronous replacement focus`, async ({
+      page,
+    }) => {
+      const errors = await launch(page, { complete: 'replace' })
+      await page.evaluate((operation) => {
+        window.clipboardHost.show(
+          operation === 'write-text'
+            ? { generation: 7, id: 1, op: operation, text: 'issued write' }
+            : { generation: 7, id: 1, op: operation },
+        )
+        window.clipboardHost.retain()
+      }, operation)
+      await page.locator(perform).focus()
+      await page.keyboard.press('Enter')
+      await expect(page.locator(cancel)).toBeFocused()
+      await page.keyboard.press('Enter')
+      await expect(page.locator(panel)).toHaveAttribute('data-request-id', '2')
+      await expect(page.locator(panel)).toHaveAttribute('data-state', 'waiting')
+      await expect(page.locator('#other')).toBeFocused()
+      await page.evaluate((late) => {
+        window.clipboardHost.useRetired(0)
+        window.clipboardHost.settle(
+          0,
+          { hasText: true, text: 'late read' },
+          late === 'reject' ? 'late platform error' : undefined,
+        )
+      }, late)
+      await expect(page.locator(panel)).toHaveCount(1)
+      await expect(page.locator(panel)).toHaveAttribute('data-request-id', '2')
+      await expect(page.locator(panel)).toHaveAttribute('data-state', 'waiting')
+      await expect(page.locator('#other')).toBeFocused()
+      expect(await page.evaluate(() => window.clipboardHost.responses())).toEqual([
+        {
+          generation: 7,
+          id: 1,
+          ok: false,
+          error: { name: 'AbortError', message: 'Clipboard request cancelled by the user' },
+        },
+      ])
+      expect(await page.evaluate(() => window.clipboardHost.calls())).toEqual([
+        operation === 'write-text' ? { op: operation, text: 'issued write' } : { op: operation },
+      ])
+      expect(await page.evaluate(() => window.clipboardHost.pending())).toEqual([true, false, true])
+      expect(await page.evaluate(() => window.clipboardHost.stopped())).toBe(0)
+      expect(await page.evaluate(() => window.clipboardHost.closed())).toBe(0)
+      await expectClean(page, errors)
+    })
 
 test('a throwing complete callback leaves one dismissible notice without delivering twice', async ({
   page,
@@ -499,6 +621,33 @@ test('a throwing pending-finish callback preserves the API result and leaves a c
   ])
   await page.locator(close).click()
   await expect(page.locator(panel)).toHaveCount(0)
+  await expectClean(page, errors)
+})
+
+test('a cleanup error while cancelling remains visible without changing the cancellation result', async ({
+  page,
+}) => {
+  const errors = await launch(page, { pendingThrows: 'finish', complete: 'clear' })
+  await page.evaluate((request) => window.clipboardHost.show(request), request(1))
+  await page.locator(cancel).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.locator(close)).toBeFocused()
+  await expect(page.locator(`${panel} .game-clipboard-status`)).toHaveText(
+    'Error: pending finish failed',
+  )
+  expect(await page.evaluate(() => window.clipboardHost.responses())).toEqual([
+    {
+      generation: 7,
+      id: 1,
+      ok: false,
+      error: { name: 'AbortError', message: 'Clipboard request cancelled by the user' },
+    },
+  ])
+  expect(await page.evaluate(() => window.clipboardHost.calls())).toEqual([])
+  expect(await page.evaluate(() => window.clipboardHost.pending())).toEqual([true, false])
+  await page.keyboard.press('Enter')
+  await expect(page.locator(panel)).toHaveCount(0)
+  await expect(page.locator('#origin')).toBeFocused()
   await expectClean(page, errors)
 })
 

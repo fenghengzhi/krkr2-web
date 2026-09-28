@@ -182,14 +182,14 @@ export function createGameClipboard(
     refreshPlacement()
     if (owned && canFocus(close)) close.focus({ preventScroll: true })
   }
-  const finish = (view: ClipboardView, response: ClipboardResponse) => {
+  const finish = (view: ClipboardView, response: ClipboardResponse, showFailure = true) => {
     if (!live(view)) return
     view.settled = true
-    if (!response.ok) showError(view, response.error)
+    if (!response.ok && showFailure) showError(view, response.error)
     const errors = setPending(false)
     if (disposed || current !== view) return
     current = undefined
-    if (errors.length && response.ok) showError(view, errorDetails(errors[0]))
+    if (errors.length && (response.ok || !showFailure)) showError(view, errorDetails(errors[0]))
     let accepted: boolean | void = undefined
     try {
       accepted = actions.complete(response)
@@ -205,13 +205,17 @@ export function createGameClipboard(
       } else if (notice !== view) remove(view, true)
     }
   }
-  const fail = (view: ClipboardView, reason: unknown) =>
-    finish(view, {
-      generation: view.request.generation,
-      id: view.request.id,
-      ok: false,
-      error: errorDetails(reason),
-    })
+  const fail = (view: ClipboardView, reason: unknown, showFailure = true) =>
+    finish(
+      view,
+      {
+        generation: view.request.generation,
+        id: view.request.id,
+        ok: false,
+        error: errorDetails(reason),
+      },
+      showFailure,
+    )
 
   const perform = (view: ClipboardView) => {
     if (!canAct(view) || view.started) return
@@ -267,7 +271,10 @@ export function createGameClipboard(
   }
   const cancel = (view: ClipboardView) => {
     if (!canAct(view)) return
-    fail(view, new DOMException('Clipboard request cancelled by the user', 'AbortError'))
+    // A requested cancellation completes this interaction without another
+    // dismissal. Keep actual platform/cleanup errors visible, even when the
+    // platform itself uses AbortError; only this explicit action is silent.
+    fail(view, new DOMException('Clipboard request cancelled by the user', 'AbortError'), false)
   }
   const stop = (view: ClipboardView) => {
     if (!canAct(view)) return

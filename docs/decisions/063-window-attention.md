@@ -12,6 +12,12 @@
 
 同轮 Chromium 普通浏览器组实际 **451 通过、12 失败、4 超时，共 467 个用例**。12 个 attention 用例均未越过启动标记，原 error-context 记录 `The primary layer cannot move`：夹具对 Primary 调用 `setPos(70,60)`，不是启动速度问题。删除非法 Primary 移动，并在几何场景精确断言其坐标仍为 `(0,0)`；不改变引擎约束。4 个宿主编辑场景的原 trace 先记录字体选项期望 2、实际 3（包括 `@Selection Mono`），随后 finally 的页面 Stop 被仍打开的字体对话框拦截，最终报告 30000 ms 超时；Clipboard 阶段尚未到达。夹具改为显式 `fsfNoVertical`，清理通过开放对话框内真实“停止游戏”按钮完成，保留原字号／键盘选择／宿主隔离断言及原超时。其它浏览器结果独立记录；这些 fixture 修正仍待下一轮 Actions。
 
+第三轮 [35016583396](https://github.com/fenghengzhi/krkr2-web/actions/runs/35016583396) 在 `25913c15e57b91f2f3afef46a0ae6dcd6d893d3f` 实际通过 **2,154/2,154 项 Node、1,510/1,524 项浏览器、6/6 项直接运行时**，整轮仍失败。没有跳过、重试或未报告；此前十项 Node 失败／取消及所有 attention 浏览器案例在本轮通过，但不改写历史结果。
+
+本轮剩余失败分为三个实际阶段。Chromium／Firefox 各一项既有 JSPI 输入测试的复合焦点／文字表达式返回 0；原件没有记录各子值，不能从失败断言单独判定丢失的是焦点还是文字。同两浏览器各四项宿主编辑案例已到 Clipboard：取消已返回 TJS，但同一请求仍留下错误提示区。WebKit 四项案例停在更早的字体选择阶段：选中 Latin 后 ArrowDown 没有使 Mono 获得焦点；原 trace 未记录实际 `activeElement`，不能声称已观测到某个控件抢走焦点，Clipboard 段也未执行。
+
+随后单独的 [35017540148 Node 诊断](https://github.com/fenghengzhi/krkr2-web/actions/runs/35017540148) 在仅有文档差异的 `c8ecee4ff6afe9b6084996c52a77a57371e422c4` 再次实际通过 **2,154/2,154**，浏览器及直接运行时没有运行。这不替代失败的完整回归。两次完整回归、Node 诊断及原始失败均独立归档；后续输入、字体焦点和 Clipboard 取消修复与 064／065 合并后再集中验证，尚不能记为通过。
+
 ## 原版依据
 
 固定官方源码为 `krkrz/krkr2@dec49af97e174d31059c3ccd7efc700ba3c6b788` 的 `kirikiri2/branches/2.32stable/kirikiri2/src/core/`。完整只读审计及 12 份原始源码的 SHA-256 保存于工作区 `out/verification/window-attention/contract.md` 与 `reference/SHA256SUMS`；该目录是验证归档，不是分发依赖。

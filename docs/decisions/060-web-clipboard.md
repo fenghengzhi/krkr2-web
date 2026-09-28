@@ -32,6 +32,10 @@ WASM manifest 新增 `capabilities.nativeClipboard=1`，生产加载器明确拒
 
 UI 每次显示明确的“复制文本”“读取剪贴板”或“检查文本格式”，并提供取消与停止。写入前可查看游戏提供的文本；读权限提示说明内容会交给当前游戏。实际 Clipboard API 在按钮 click handler 内直接调用，之前不 await Worker、权限查询或定时器；没有自动读写或最近写入值缓存。
 
+063 后续统一取消交互：用户点击“取消”或按 Escape 后，仍向脚本返回可捕获的 `AbortError`，正常完成时移除请求面板，不再要求额外关闭取消提示；仅在焦点仍由旧面板持有、原控件仍可交互时恢复焦点。平台操作失败（包括平台返回的 `AbortError`）继续显示可关闭错误；完成回调或解除父对话框禁用时发生的错误同样保留提示，不改变已选择的取消结果。已发出的 Clipboard Promise 继续被消费，其迟到结果不能重新显示取消面板，也不能完成新请求；已发出的系统写入仍无法撤回。
+
+这项产品选择来自 063 第三轮实际失败 [35016583396](https://github.com/fenghengzhi/krkr2-web/actions/runs/35016583396)：Chromium／Firefox 各四个 host-control 用例已收到脚本取消日志，却在面板数量为零的断言失败。原 Clipboard host 用例曾有意要求取消后保留提示，新 trap 用例则要求完成即清理，两个预期冲突；这里同步调整产品与专属 host 合同，不把旧行为改写成未经证明的回归。新增和调整的 host 用例覆盖 Enter／Escape、父原生对话框、注入的端口错误与清理错误、取消后迟到结果及同步 replacement 的焦点，不充作真实系统剪贴板证据；真实 VM 取消用例补充末次取消后无残留面板断言。当前仅完成源代码编辑，尚未执行本次修复的 GitHub-hosted 验证，旧失败与原始 trace 保留。
+
 文本上限统一为 **1,048,576 个 UTF-16 code units**，恰好达到上限允许；超限返回明确 QuotaExceededError，不静默截断。Session、Worker 发送前、主线程协议边界与 BrowserClipboard 都使用同一常量。读取 text/plain Blob 先检查不超过 **4 MiB**，才调用 text()，解码后的文本再检查 UTF-16 长度。hasFormat 仅查看类型，不把 Blob 大小当作格式不存在。传输中的错误 name/message 也分别受同一文本限额约束，超限改为短的额度错误。
 
 可识别 id/generation 的畸形或超限新请求收到明确失败回复，不显示无效操作；当前请求的畸形或超限回复同样结算为失败。不能通过只忽略这些消息让 Worker 永久等待。错误 generation、旧 id 或已知的另一 operation 仍不能代替当前请求；发送失败会退休通道并尽力通知关闭。UI 写预览只展示前 **2,000 个 UTF-16 code units**，明确总长度和预览范围；用户确认写入的仍是完整、已通过上限检查的文本。

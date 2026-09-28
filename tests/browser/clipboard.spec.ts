@@ -389,6 +389,7 @@ clipboardMark("cancel-done");`),
           await expect(mark(page, `${name}-cancel:1`)).toBeVisible()
         }
         await expect(mark(page, 'cancel-done')).toBeVisible()
+        await expect(page.locator(panel)).toHaveCount(0)
         await expect(page.getByText(/^clipboard-proof:unexpected-/)).toHaveCount(0)
         expect(await evidence(page, info, setup.grants)).toEqual([])
       } finally {
