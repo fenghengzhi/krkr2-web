@@ -88,3 +88,15 @@
 剩余四个 WebKit Pad Clipboard 变体都在首次 Paste 后正文仍为空时失败。原始记录证明第二次真实 writeText 已 fulfilled、Paste click 已完成；因为观察附件原先位于测试末尾，没有记录 read 返回值或当时 activeElement。菜单打开已显式聚焦 Copy，不能声称焦点一直留在 First Pad。源码缺少命令按钮在执行前取得本编辑器焦点的保证；修订公共按钮处理器，在 editable 且未 disabled 时同步 focus 后执行命令，仍保留异步结果的原焦点、选区、epoch 资格检查。真实 API 观察器增加调用／完成／正文读取时的焦点、read types 与文本长度，并在 finally 保存附件；原正文、空选区、迟到 Cut/Paste、撤销断言不减少。这是待验证修补，不是已经证实的 WebKit 根因。
 
 独立 image-writing 原始截图的十二个采样点均为窗口背景 `[16,23,34,255]`，而浏览器二次解码同一 PNG 得到透明全零；两层证据分别保留，尚不能归因给渲染或读取中的单一环节。下一轮截图断言使用独立 Node PNG 解码，并在原 12 秒 expect 超时内逐次读取新截图、严格比较原十二组 RGBA，保存每次原始 PNG 与采样；导出 PNG 的真实浏览器解码验收保留。没有为此修改产品绘制逻辑，也没有增加超时或将背景当作正确画面。
+
+## 第三轮 Pad 回归结果与独立启动失败
+
+[36455312915](https://github.com/fenghengzhi/krkr2-web/actions/runs/36455312915) 使用提交 `56769cfbfe69bede8599b33fe963ac2c3d6f2411`。对照上一轮失败标题，Chromium 原 8 项 Pad 失败和 Firefox 原 12 项 Pad 失败均在本轮通过；这证明相应实例身份、交互命中及 Stop 回归通过，不代表该完整工作流通过，也不覆盖后来合入的 070/071。
+
+WebKit 的逐项终态日志证明 geometry 四变体、pending-save Stop 四变体和 Pad 专属真实 Clipboard 四变体均通过。独立编辑器四变体中三项通过，JSPI/source 在 `launchPads` 等待 `pad-ready-25` 时超时，尚未到达实例身份、fontColor 或字体断言。普通 `clipboard.spec.ts` 的 JSPI/bytecode startup-Clipboard Stop 用例另行失败，它不是 Pad Clipboard 或 Pad 保存 Stop，不能混计为这两组回归失败。本轮 WebKit 通过项的附件没有落盘，因此只能引用其终态日志；不能把 Chromium/Firefox 已归档的实际 API 附件当作 WebKit 的观察证据，也不能称三浏览器通过附件齐全。
+
+该 Pad 启动 trace 的首个浏览器错误为 `Unable to get image data from canvas. Requested size was 1 x 1`，发生于 `2026-09-28T17:34:37.797036Z`。用同构建 TAR 中 `index-q3-oFTje.js` 的 SHA-256 `9efeed39e38707ea0c939976efbe5f566d6de57a2ae7af3f32e263ef619cd560` 对照原始行列，错误位于 CSS 系统色采样的 `getImageData(0,0,1,1)`。五项网络记录中没有 Session Worker 或 WASM 请求：这是播放器同步构造阶段的失败，不是已执行 Pad/JSPI 脚本后的行为错误，不能沿用上一轮 `instanceof` 解释。
+
+同时期游戏库提示 OPFS 目录初始化的 unknown transient error；这不是已观测的 IndexedDB 错误，也不能证明 OOM 或 GPU 崩溃。该 WebKit 作业的 native crash manifest 没有收集到报告。当前源码审查确认 `createPlayer` 位于应用启动 try/finally 之外，同步取色错误会绕过 busy 复位和已创建宿主资源清理。应用恢复边界、原错阶段诊断与临时 Canvas 显式释放的修订仍待下一批 Actions，不将资源清理改进称为底层 WebKit readback 根因已修复。
+
+独立证据与限制记录在主工作树 `out/verification/github-actions/36455312915/pad-webkit-startup-review.json` 和 `.md`，原始 ZIP、失败 trace/截图、终态日志与旧失败均保持不变。没有增加等待时长、重试或静态调色板回退，也没有运行本地验证。

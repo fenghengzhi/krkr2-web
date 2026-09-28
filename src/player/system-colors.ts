@@ -66,5 +66,8 @@ export function sampleCssColorPalette(
     return copySystemColorPalette(palette)
   } finally {
     probe.remove()
+    // This synchronous sampler never uses its bitmap again, including when a
+    // browser readback fails. Release it without waiting for canvas collection.
+    sample.width = sample.height = 0
   }
 }

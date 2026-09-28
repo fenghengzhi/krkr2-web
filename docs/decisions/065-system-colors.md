@@ -99,3 +99,13 @@ Node使用真实WASM/EngineSession，分别运行source与 `Scripts.compileStora
 浏览器定义覆盖实际应用CSS默认路径与单独Vite编译的真实public createPlayer/Worker嵌入入口、31项注入、修改原数组和多player隔离、页面color-scheme变化后快照不变，以及真实字体的前景/阴影颜色分界。独立期望采样器记录实际 computed CSS、透明画布上的原始RGBA、合成后的RGB与Canvas底色。另一组明确标注的四项CSS输入覆盖半透明角色、半透明Canvas及角色、全透明Canvas及角色、透明角色；这些使用真实样式解析和Canvas2D，却不是原生系统色观测，也不改写Worker/System返回值。原有双调色板注入和修改调用者数组仍严格核对session隔离。source/bytecode和现有运行后端分别执行；生产loader测试保留nativeClipboard要求，新增旧nativeSystem=1拒绝，并用完整cap2内核恢复后真实调用toActualColor。
 
 修订后的定义等待GitHub-hosted Actions；本阶段未在本机执行。后续报告必须保留实际浏览器、case数量、source/bytecode、跳过、不支持、失败和完整日志。原版97×2记录、此前阶段测试、静态源码检查及此次组合运行中的其他通过项都不能替代本修订候选PASS。
+
+## 36455312915 WebKit 启动失败与恢复边界
+
+[完整回归 36455312915](https://github.com/fenghengzhi/krkr2-web/actions/runs/36455312915) 中，WebKit 的 `input/asyncify` 和 `pad/jspi/source` 两例在应用启动时记录 `Unable to get image data from canvas. Requested size was 1 x 1`，随后应用日志为 `The object is in an invalid state.`。这不是 TJS 输入或 Pad 脚本已经运行后的错误。原始 trace 的零基 `lineNumber:3,columnNumber:99311` 与该轮实际构建 `dist/assets/index-q3-oFTje.js`（SHA256 `9efeed39e38707ea0c939976efbe5f566d6de57a2ae7af3f32e263ef619cd560`）中的系统色 `getImageData(0,0,1,1)` 调用匹配；各例网络记录只有应用、样式、manifest 和 library Worker，没有 Session Worker。此同步采样早于音频通道与 SessionClient，因此与本轮另行修正的 Wave filter helper 名称解析无关。
+
+同一页面显示的浏览器存储 `unknown transient reason` 来自 OPFS 目录初始化；不能据此断言 IndexedDB、内存不足或画布异常具有共同根因。现有证据也没有原始抛出异常的 name/stack，应用仅记录 message。上面两个消息可以来自同一次原生 readback 失败，不代表已观察到第二个清理异常。原始失败继续保留，画布 readback 的底层原因未得到证明。
+
+静态审查另发现确定的恢复缺口：此前 App 在 `busy=true` 后先创建 Window/Pad 页面 host，再同步调用 `createPlayer`，但 `try/catch/finally` 只覆盖后续异步 `load`。采样失败会绕过 busy 复位与页面 host 清理。修订将这整个启动阶段纳入同一个保护范围：尚未返回 Player 时分别清理已经建立的 Pad、Window host 和未附加的初始 canvas；已返回 Player 时沿用现有 `stop`、`session.isDisposed` 与 generation 检查。原错误与独立清理错误分别进入日志。系统色临时采样 canvas 在成功和失败出口都明确归零释放 backing store，并保留原有临时 probe 清理、CSS alpha 合成、原始异常传播；没有默认色降级或自动重试，不能宣称这已解决 WebKit 的底层 readback 故障。
+
+在现有 `player.spec.ts` 新增每后端一例、三个浏览器共六个待执行定义：只在明确的 1×1 系统色 `getImageData` 入口注入一次 `InvalidStateError`，保存临时 canvas/probe 引用，要求原错误可见、画布归零、probe 与部分游戏 DOM 清理、操作控件恢复且尚无 Session Worker；撤销 API 注入后，通过真实“重新开始”按钮使用同一脚本建立新的实际 Worker/VM，检查脚本日志和 Layer 像素，再停止并观察 Worker 关闭。故障注入只验证恢复合同，不冒充自然发生的 WebKit 故障复现。新增定义尚未执行，只允许后续 GitHub-hosted Actions 结果作为验证。

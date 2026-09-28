@@ -283,180 +283,193 @@ export function mountApp(root: HTMLDivElement): void {
     busy = true
     lastFiles = files
     let failedLaunch = false
-    const canvas = document.createElement('canvas')
-    canvas.width = 800
-    canvas.height = 600
-    canvas.setAttribute('aria-label', '游戏画布')
-    el('stage').replaceChildren(canvas)
-    const windows: GameWindows = createGameWindows(el('stage'), canvas, (action) => {
-      if (current !== generation || !windows.get(action.windowId, action.surfaceEpoch)) return
-      if (action.type === 'activate') instance.focusWindow(action.windowId, action.surfaceEpoch)
-      else {
-        const session = instance.session
-        const operation =
-          action.type === 'close'
-            ? session.closeWindow(action.windowId)
-            : action.type === 'move'
-              ? session.moveWindow(action.windowId, action.left, action.top)
-              : action.type === 'resize'
-                ? session.resizeWindow(action.windowId, action.width, action.height)
-                : session.exitFullScreen(action.windowId)
-        void operation.catch(report)
-      }
-    })
-    const instance: ReturnType<typeof createPlayer> = createPlayer(
-      canvas,
-      (event) => {
-        if (current !== generation) return
-        if (event.type === 'log') log(event.text, event.level === 'error')
-        else if (event.type === 'font-selection') {
-          gameFonts.update(event.request)
-          fontSelecting = !!event.request
+    let launchPlayer: ReturnType<typeof createPlayer> | undefined
+    let launchWindows: GameWindows | undefined
+    let launchPads: ReturnType<typeof createGamePads> | undefined
+    let launchCanvas: HTMLCanvasElement | undefined
+    try {
+      const canvas = document.createElement('canvas')
+      launchCanvas = canvas
+      canvas.width = 800
+      canvas.height = 600
+      canvas.setAttribute('aria-label', '游戏画布')
+      el('stage').replaceChildren(canvas)
+      const windows: GameWindows = createGameWindows(el('stage'), canvas, (action) => {
+        if (current !== generation || !windows.get(action.windowId, action.surfaceEpoch)) return
+        if (action.type === 'activate') instance.focusWindow(action.windowId, action.surfaceEpoch)
+        else {
+          const session = instance.session
+          const operation =
+            action.type === 'close'
+              ? session.closeWindow(action.windowId)
+              : action.type === 'move'
+                ? session.moveWindow(action.windowId, action.left, action.top)
+                : action.type === 'resize'
+                  ? session.resizeWindow(action.windowId, action.width, action.height)
+                  : session.exitFullScreen(action.windowId)
+          void operation.catch(report)
+        }
+      })
+      launchWindows = windows
+      const pads = createGamePads(el('stage'))
+      launchPads = pads
+      const instance: ReturnType<typeof createPlayer> = createPlayer(
+        canvas,
+        (event) => {
+          if (current !== generation) return
+          if (event.type === 'log') log(event.text, event.level === 'error')
+          else if (event.type === 'font-selection') {
+            gameFonts.update(event.request)
+            fontSelecting = !!event.request
+            gameDialogs?.state(
+              snapshot?.state === 'running' &&
+                snapshot.activity.state === 'visible' &&
+                !fontSelecting &&
+                !clipboardSelecting &&
+                !stopRequested,
+            )
+            gameFonts.state(!clipboardSelecting && !stopRequested)
+            gameClipboard?.refreshPlacement()
+            updateMenus()
+          } else if (event.type === 'system-dialog') {
+            gameDialogs?.update(event.request, event.pendingIds)
+            gameClipboard?.refreshPlacement()
+            systemDialogSelecting = !!event.request
+            updateMenus()
+          } else if (event.type === 'window-menus') {
+            menuViews.clear()
+            for (const { windowId, menus } of event.windows) menuViews.set(windowId, menus)
+            for (const [id, menus] of gameMenus) menus.update(menuViews.get(id) ?? {})
+          } else if (event.type === 'windows') {
+            windowViews.clear()
+            for (const window of event.windows) windowViews.set(window.id, window)
+            updateMenus()
+          } else if (event.type === 'state') {
+            acceptSnapshot(event.snapshot)
+            update()
+            // A native main-window close finishes the engine independently of
+            // the transport button. Retire its page hosts and Worker as well.
+            if (event.snapshot.state === 'stopped' && !failedLaunch) void stop().catch(report)
+          }
+        },
+        (audio) => {
+          if (current !== generation) return
+          const button = el<HTMLButtonElement>('sound-toggle'),
+            meter = el<HTMLMeterElement>('sound-level')
+          button.disabled = audio.state === 'closed' || audio.state === 'unavailable'
+          setText(
+            button,
+            audio.state !== 'running' ? '开启声音' : audio.muted ? '取消静音' : '静音',
+          )
+          el('sound-status').textContent = audio.error
+            ? audio.error
+            : audio.state === 'running'
+              ? audio.muted
+                ? '声音已静音。'
+                : '声音已开启。'
+              : audio.state === 'suspended'
+                ? '点击开启声音后播放。'
+                : audio.state === 'closed'
+                  ? '声音已关闭。'
+                  : '浏览器音频不可用。'
+          meter.value = audio.muted ? 0 : audio.peak
+          meter.dataset.maxPeak = String(audio.maxPeak)
+          meter.dataset.frames = String(audio.frames)
+        },
+        el<HTMLInputElement>('pause-background').checked,
+        {
+          windows,
+          pads,
+          desktopElement: el('stage'),
+          async onStopRequested() {
+            if (current !== generation || player !== instance) return
+            try {
+              await stop()
+            } catch (error) {
+              // The player retires Pad UI before asynchronous cleanup finishes.
+              // Preserve failures in the application log after that UI is gone.
+              report(error)
+              throw error
+            }
+          },
+          onClipboardRequest(request) {
+            if (current !== generation) return
+            if (request && !gameClipboard)
+              throw new Error('Clipboard presentation is not available')
+            gameClipboard?.show(request)
+          },
+          ownsClipboardFocus: (target) =>
+            current === generation && !!gameClipboard?.ownsFocus(target),
+          onSurfaceAttach(surface) {
+            if (current !== generation) return
+            if (!el('stage').querySelector('#game-menus')) surface.menu.id = 'game-menus'
+            const menus = createGameMenus(
+              surface.menu,
+              () => windows.get(surface.windowId, surface.surfaceEpoch)?.canvas ?? null,
+              (id, popup) => {
+                if (current !== generation || instance.session.isDisposed) return
+                void instance.session.menuClick(id, popup).catch(report)
+              },
+              (popup) => {
+                if (current !== generation || instance.session.isDisposed) return
+                void instance.session.menuDismiss(popup).catch(report)
+              },
+              { active: () => instance.isWindowActive(surface.windowId, surface.surfaceEpoch) },
+            )
+            gameMenus.set(surface.windowId, menus)
+            updateMenus()
+            menus.update(menuViews.get(surface.windowId) ?? {})
+          },
+          onSurfaceDetach(surface) {
+            gameMenus.get(surface.windowId)?.dispose()
+            gameMenus.delete(surface.windowId)
+          },
+        },
+      )
+      launchPlayer = instance
+      player = instance
+      gameDialogs = createGameDialogs({
+        choose: (id, value) => {
+          if (
+            current !== generation ||
+            instance.session.isDisposed ||
+            clipboardSelecting ||
+            stopRequested
+          )
+            return
+          return instance.session.selectSystemDialog(id, value)
+        },
+        stop: async () => {
+          if (current === generation && player === instance) await stop()
+        },
+      })
+      gameClipboard = createGameClipboard({
+        complete: (response) => {
+          if (current !== generation || player !== instance || instance.session.isDisposed)
+            return false
+          return instance.clipboard.respond(response)
+        },
+        pending: (active) => {
+          if (current !== generation || player !== instance) return
+          clipboardSelecting = active
+          gameFonts.state(!active && !stopRequested)
           gameDialogs?.state(
             snapshot?.state === 'running' &&
               snapshot.activity.state === 'visible' &&
               !fontSelecting &&
-              !clipboardSelecting &&
+              !active &&
               !stopRequested,
           )
-          gameFonts.state(!clipboardSelecting && !stopRequested)
-          gameClipboard?.refreshPlacement()
-          updateMenus()
-        } else if (event.type === 'system-dialog') {
-          gameDialogs?.update(event.request, event.pendingIds)
-          gameClipboard?.refreshPlacement()
-          systemDialogSelecting = !!event.request
-          updateMenus()
-        } else if (event.type === 'window-menus') {
-          menuViews.clear()
-          for (const { windowId, menus } of event.windows) menuViews.set(windowId, menus)
-          for (const [id, menus] of gameMenus) menus.update(menuViews.get(id) ?? {})
-        } else if (event.type === 'windows') {
-          windowViews.clear()
-          for (const window of event.windows) windowViews.set(window.id, window)
-          updateMenus()
-        } else if (event.type === 'state') {
-          acceptSnapshot(event.snapshot)
-          update()
-          // A native main-window close finishes the engine independently of
-          // the transport button. Retire its page hosts and Worker as well.
-          if (event.snapshot.state === 'stopped' && !failedLaunch) void stop().catch(report)
-        }
-      },
-      (audio) => {
-        if (current !== generation) return
-        const button = el<HTMLButtonElement>('sound-toggle'),
-          meter = el<HTMLMeterElement>('sound-level')
-        button.disabled = audio.state === 'closed' || audio.state === 'unavailable'
-        setText(button, audio.state !== 'running' ? '开启声音' : audio.muted ? '取消静音' : '静音')
-        el('sound-status').textContent = audio.error
-          ? audio.error
-          : audio.state === 'running'
-            ? audio.muted
-              ? '声音已静音。'
-              : '声音已开启。'
-            : audio.state === 'suspended'
-              ? '点击开启声音后播放。'
-              : audio.state === 'closed'
-                ? '声音已关闭。'
-                : '浏览器音频不可用。'
-        meter.value = audio.muted ? 0 : audio.peak
-        meter.dataset.maxPeak = String(audio.maxPeak)
-        meter.dataset.frames = String(audio.frames)
-      },
-      el<HTMLInputElement>('pause-background').checked,
-      {
-        windows,
-        pads: createGamePads(el('stage')),
-        desktopElement: el('stage'),
-        async onStopRequested() {
-          if (current !== generation || player !== instance) return
-          try {
-            await stop()
-          } catch (error) {
-            // The player retires Pad UI before asynchronous cleanup finishes.
-            // Preserve failures in the application log after that UI is gone.
-            report(error)
-            throw error
-          }
         },
-        onClipboardRequest(request) {
-          if (current !== generation) return
-          if (request && !gameClipboard) throw new Error('Clipboard presentation is not available')
-          gameClipboard?.show(request)
+        stop: () => {
+          if (current === generation && player === instance) return stop()
         },
-        ownsClipboardFocus: (target) =>
-          current === generation && !!gameClipboard?.ownsFocus(target),
-        onSurfaceAttach(surface) {
-          if (current !== generation) return
-          if (!el('stage').querySelector('#game-menus')) surface.menu.id = 'game-menus'
-          const menus = createGameMenus(
-            surface.menu,
-            () => windows.get(surface.windowId, surface.surfaceEpoch)?.canvas ?? null,
-            (id, popup) => {
-              if (current !== generation || instance.session.isDisposed) return
-              void instance.session.menuClick(id, popup).catch(report)
-            },
-            (popup) => {
-              if (current !== generation || instance.session.isDisposed) return
-              void instance.session.menuDismiss(popup).catch(report)
-            },
-            { active: () => instance.isWindowActive(surface.windowId, surface.surfaceEpoch) },
-          )
-          gameMenus.set(surface.windowId, menus)
-          updateMenus()
-          menus.update(menuViews.get(surface.windowId) ?? {})
-        },
-        onSurfaceDetach(surface) {
-          gameMenus.get(surface.windowId)?.dispose()
-          gameMenus.delete(surface.windowId)
-        },
-      },
-    )
-    player = instance
-    gameDialogs = createGameDialogs({
-      choose: (id, value) => {
-        if (
-          current !== generation ||
-          instance.session.isDisposed ||
-          clipboardSelecting ||
-          stopRequested
-        )
-          return
-        return instance.session.selectSystemDialog(id, value)
-      },
-      stop: async () => {
-        if (current === generation && player === instance) await stop()
-      },
-    })
-    gameClipboard = createGameClipboard({
-      complete: (response) => {
-        if (current !== generation || player !== instance || instance.session.isDisposed)
-          return false
-        return instance.clipboard.respond(response)
-      },
-      pending: (active) => {
-        if (current !== generation || player !== instance) return
-        clipboardSelecting = active
-        gameFonts.state(!active && !stopRequested)
-        gameDialogs?.state(
-          snapshot?.state === 'running' &&
-            snapshot.activity.state === 'visible' &&
-            !fontSelecting &&
-            !active &&
-            !stopRequested,
-        )
-      },
-      stop: () => {
-        if (current === generation && player === instance) return stop()
-      },
-    })
-    void instance.session.setSystemFonts(systemFonts).catch(report)
-    canvas.addEventListener('playererror', (event) =>
-      report((event as CustomEvent<unknown>).detail),
-    )
-    update()
-    try {
+      })
+      void instance.session.setSystemFonts(systemFonts).catch(report)
+      canvas.addEventListener('playererror', (event) =>
+        report((event as CustomEvent<unknown>).detail),
+      )
+      update()
       const preference = el<HTMLSelectElement>('backend').value as BackendPreference
       const requested = new URLSearchParams(location.search).get('backend')
       const loaded = await instance.load(
@@ -475,12 +488,29 @@ export function mountApp(root: HTMLDivElement): void {
         // the failed state available for the user to inspect and reopen.
         failedLaunch = true
         report(error)
-        try {
-          await instance.stop()
-        } catch (stopError) {
-          report(stopError)
+        if (launchPlayer) {
+          try {
+            await launchPlayer.stop()
+          } catch (stopError) {
+            report(stopError)
+          }
+        } else {
+          // Synchronous construction (including CSS color sampling) can fail
+          // before a Player owns these hosts. Retire each partial resource while
+          // preserving the original error and every independent cleanup error.
+          for (const dispose of [
+            () => launchPads?.dispose(),
+            () => launchWindows?.dispose(),
+            () => launchCanvas?.remove(),
+          ]) {
+            try {
+              dispose()
+            } catch (cleanupError) {
+              report(cleanupError)
+            }
+          }
         }
-        if (instance.session.isDisposed) {
+        if (!launchPlayer || launchPlayer.session.isDisposed) {
           player = undefined
           gameClipboard?.dispose()
           gameClipboard = undefined
