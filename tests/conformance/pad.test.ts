@@ -686,7 +686,7 @@ function serviceFixture(policy: Partial<PadPolicy> = {}) {
     block(value: boolean) {
       blocked = value
     },
-    message(id: number, seq: number, text: string): PadMessage {
+    message(id: number, seq: number, text: string): Extract<PadMessage, { kind: 'edit' }> {
       const pad = view(id)
       return {
         generation: 1,

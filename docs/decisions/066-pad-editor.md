@@ -55,3 +55,7 @@
 新增 95 个 Node 测试定义（native factory 10、Pad 44、save 24、host modal 14、下载宿主 3）和 13 个浏览器场景模板（四种 VM 模式、三个项目，共 156 个预期实例）。覆盖真实原生 source/bytecode 工厂、属性/转换/寿命、消息排序与小预算、host modal LIFO/暂停/取消、真实 Worker 三浏览器 Asyncify/JSPI source/bytecode 编辑/输入/模态/下载。以上是静态库存，不是执行结果。浏览器保存测试读取实际 download 字节，字体测试使用实际游戏文件，合成事件测试仅证明生命周期，不能代称系统 IME 的端到端观察。
 
 当前只有上文原版 SDK 托管结果；本实现的 Web 构建和测试等待整批 freeze 后交给 root 的 GitHub-hosted Actions。失败、取消、未执行、原始日志与 artifact 将各自保留，不以重跑绿灯覆盖历史。
+
+## 首次集成构建的类型检查失败
+
+[36447967665](https://github.com/fenghengzhi/krkr2-web/actions/runs/36447967665) 在提交 `660e5feedfc7f7913e04f1ac082d2e4f6447e9b0` 完成原生编译及内核缓存后，因 `pad.test.ts` 两处 TS2353 失败。纯服务夹具 `message()` 实际始终生成 `kind:'edit'`，返回类型却写成整个 `PadMessage` 联合，展开后修改正文时被当作可能的 selection 消息。修订将返回注解收窄到 edit 分支，不改消息内容、产品代码或断言。该轮普通测试实际零项，未生成 test-build，兼容检查没有启动；失败构建记录与日志保留，修订仍需新的托管结果。
