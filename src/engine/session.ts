@@ -2898,7 +2898,7 @@ export class EngineSession {
         throw new Error(`${operation}: expected a finite numeric argument at ${i}`)
       return Number(value)
     }
-    // Drawing entry points narrow TJS integers to native tjs_int.
+    // Native image and drawing entry points narrow TJS integers to 32 bits.
     // Preserve the low bits before Number conversion.
     const clipInteger = (i: number) => {
       const value = args[i]
@@ -3528,7 +3528,7 @@ export class EngineSession {
           ticket = this.layers.beginImageLoad(id)
         try {
           const { image, province } = await cancelable(
-            this.images.load(text(1), number(2)),
+            this.images.load(text(1), clipInteger(2) >>> 0),
             this.control,
           )
           this.control.check()
