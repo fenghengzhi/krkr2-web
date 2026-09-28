@@ -92,6 +92,8 @@ export function createSession(request: InitializeRequest): EngineSession {
           throw new Error('WASM manifest is missing native System support')
         if (manifest.capabilities?.nativeStorages !== 2)
           throw new Error('WASM manifest is missing native Storages support')
+        if (manifest.capabilities?.nativeTextStreams !== 1)
+          throw new Error('WASM manifest is missing native text stream support')
         const supportsJspi = 'Suspending' in WebAssembly && 'promising' in WebAssembly
         const variant: WasmVariant =
           request.backend === 'auto'

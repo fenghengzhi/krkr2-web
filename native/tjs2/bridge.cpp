@@ -509,7 +509,9 @@ public:
 };
 iTJSTextReadStream* createTextRead(const ttstr& name, const ttstr& mode) { return new HostTextRead(name, mode); }
 iTJSTextWriteStream* createTextWrite(const ttstr& name, const ttstr& mode) {
-    requestStorage(u"Storage.validateWrite", name, mode);
+    // Stream kind is selected by the native caller, not by characters in mode.
+    // Reject text modes before constructing a stream whose close queues data.
+    requestStorage(u"Storage.validateTextWrite", name, mode);
     return new HostTextWrite(name, mode);
 }
 tTJSBinaryStream* createBinaryRead(const ttstr& name, const ttstr& mode) {
