@@ -1,4 +1,5 @@
 import type { SystemDialogRequest } from '../engine/ports/system-dialogs.ts'
+import { createStorageSelectorView } from './storage-selector-view.ts'
 
 interface DialogActions {
   choose(id: number, value: string | null): Promise<unknown> | undefined
@@ -11,6 +12,7 @@ interface DialogView {
   heading: HTMLHeadingElement
   prompt: HTMLParagraphElement
   input?: HTMLInputElement
+  selector?: ReturnType<typeof createStorageSelectorView>
   status: HTMLParagraphElement
   confirm: HTMLButtonElement
   cancel?: HTMLButtonElement
@@ -62,6 +64,7 @@ export function createGameDialogs(actions: DialogActions) {
     view.confirm.disabled = !enabled || stopping || view.pending
     if (view.cancel) view.cancel.disabled = !enabled || stopping || view.pending
     if (view.input) view.input.readOnly = !enabled || stopping || view.pending
+    view.selector?.enabled(enabled && !stopping && !view.pending)
     view.stop.disabled = stopping
     view.dialog.setAttribute('aria-busy', String(stopping || view.pending))
     if (ownedFocus && !canFocus(focused)) {
@@ -70,7 +73,7 @@ export function createGameDialogs(actions: DialogActions) {
     }
   }
   const error = (view: DialogView, reason: unknown) => {
-    if (live(view))
+    if (live(view) && !view.selector?.rejected(reason))
       view.status.textContent = reason instanceof Error ? reason.message : String(reason)
   }
   const choose = async (view: DialogView, value: string | null) => {
@@ -153,7 +156,10 @@ export function createGameDialogs(actions: DialogActions) {
       prompt = element('p', request.text),
       status = element('p'),
       footer = element('div'),
-      confirm = element('button', '确定'),
+      confirm = element(
+        'button',
+        request.kind === 'storage-selector' ? (request.selector.save ? '保存' : '打开') : '确定',
+      ),
       stopButton = element('button', '停止游戏')
     dialog.className = 'game-system-dialog'
     dialog.dataset.requestId = String(request.id)
@@ -165,7 +171,16 @@ export function createGameDialogs(actions: DialogActions) {
     // An explicitly empty caption stays empty; the dialog still has a useful
     // accessible name when a script deliberately supplies no visible title.
     if (!request.caption)
-      dialog.setAttribute('aria-label', request.kind === 'inform' ? '消息' : '输入文字')
+      dialog.setAttribute(
+        'aria-label',
+        request.kind === 'storage-selector'
+          ? request.selector.save
+            ? '保存文件'
+            : '打开文件'
+          : request.kind === 'inform'
+            ? '消息'
+            : '输入文字',
+      )
     status.className = 'system-dialog-status'
     status.setAttribute('role', 'status')
     status.tabIndex = -1
@@ -189,10 +204,28 @@ export function createGameDialogs(actions: DialogActions) {
     }
     form.append(heading, prompt)
     footer.append(stopButton)
+    if (request.kind === 'storage-selector') {
+      dialog.classList.add('game-storage-selector')
+      view.selector = createStorageSelectorView(request.id, request.selector, {
+        available: () =>
+          active(view) &&
+          enabled &&
+          !stopping &&
+          !view.pending &&
+          !view.composing &&
+          !view.composingKey,
+        choose: (value) => void choose(view, value),
+        status: (value) => {
+          view.status.textContent = value
+        },
+      })
+      view.input = view.selector.input
+      view.input.setAttribute('aria-describedby', prompt.id)
+      form.append(view.selector.element)
+    }
     if (request.kind === 'input-string') {
       const input = element('input'),
-        label = element('label', '输入内容'),
-        cancel = element('button', '取消')
+        label = element('label', '输入内容')
       input.type = 'text'
       input.value = request.value
       input.id = `system-dialog-value-${request.id}`
@@ -201,11 +234,14 @@ export function createGameDialogs(actions: DialogActions) {
       input.setAttribute('aria-describedby', prompt.id)
       label.htmlFor = input.id
       view.input = input
+      form.append(label, input)
+    }
+    if (request.kind === 'input-string' || request.kind === 'storage-selector') {
+      const cancel = element('button', '取消')
       view.cancel = cancel
       cancel.type = 'button'
       cancel.dataset.action = 'cancel'
       cancel.addEventListener('click', () => void choose(view, null))
-      form.append(label, input)
       footer.append(cancel)
     }
     footer.append(confirm)
@@ -213,7 +249,10 @@ export function createGameDialogs(actions: DialogActions) {
     dialog.append(form)
     form.addEventListener('submit', (event) => {
       event.preventDefault()
-      void choose(view, view.input?.value ?? '')
+      if (view.selector) {
+        const selection = view.selector.selection()
+        if (selection !== undefined) void choose(view, selection)
+      } else void choose(view, view.input?.value ?? '')
     })
     stopButton.addEventListener('click', () => void stop(view))
     dialog.addEventListener('compositionstart', () => {

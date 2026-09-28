@@ -628,19 +628,37 @@ export class TjsWasmRuntime implements ScriptRuntime {
     const temporary: ScriptObject[] = []
     try {
       if (vm !== this.vm) throw new Error('VM identity mismatch')
-      this.checkOwnerFailure()
-      await this.flush()
-      await this.control.wait()
-      this.control.check()
       const operation = this.readText(name, length)
-      const values = Array.from({ length: count }, (_, i) =>
-        this.readValue(this.module.HEAPU32[(args >>> 2) + i]!, temporary),
-      )
       const context: HostContext = {
         retain: (object) => this.retain(object),
         release: (object) => this.release(object),
         snapshot: (object) => this.snapshot(object),
       }
+      if (operation === 'Storages.selectFileAbort') {
+        // Native may need to revoke a selector whose continuation never entered.
+        // Only this primitive, exact-id cleanup may precede the ordinary host
+        // entry gates. Reading an object here could pin it or invoke conversions.
+        const argument = count === 1 ? this.module.HEAPU32[args >>> 2]! : 0
+        if (!argument || this.call('krkr_value_type', argument) !== 4)
+          throw new Error('Invalid Storages.selectFileAbort identity')
+        const identity = BigInt(this.module._krkr_value_integer!(argument))
+        if (identity <= 0n || identity > BigInt(Number.MAX_SAFE_INTEGER))
+          throw new Error('Invalid Storages.selectFileAbort identity')
+        const reply = await this.handler(operation, [identity], context)
+        // Keep writes and owner failures for the existing execution boundary;
+        // cleanup itself must not initiate I/O or consume either pending error.
+        // Paused script still cannot resume, including through catch/finally.
+        await this.control.wait()
+        this.control.check()
+        return this.buildReply(reply)
+      }
+      this.checkOwnerFailure()
+      await this.flush()
+      await this.control.wait()
+      this.control.check()
+      const values = Array.from({ length: count }, (_, i) =>
+        this.readValue(this.module.HEAPU32[(args >>> 2) + i]!, temporary),
+      )
       const reply =
         operation === 'Runtime.console'
           ? await (this.consoleOutput?.(String(values[0])) ?? { kind: 'value', value: undefined })

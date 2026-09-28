@@ -92,6 +92,7 @@ struct Vm {
     std::set<unsigned> released;
     bool drainingReleased = false;
     unsigned nextHandle = 1;
+    tjs_uint64 nextStorageSelector = 1;
     tjs_int32 phaseVocoderClassId = -1;
     std::map<unsigned, std::unique_ptr<WeakOwner>> owners;
     unsigned nextOwner = 1;
@@ -658,6 +659,170 @@ public:
         // add/remove return void regardless of a host reply's payload, but
         // host exceptions must still propagate through the normal reply path.
         resolveReply(vm, *reply, policy.mutates ? nullptr : result);
+        return TJS_S_OK;
+    }
+};
+
+// Unlike the path-only methods, selectFile always runs, even for a discarded
+// result. Keep the original options object and every getter/conversion on this
+// suspendable native stack; the host only sees copied primitive values.
+class StorageSelectFile final : public tTJSNativeClassMethod {
+    Vm* vm;
+    static constexpr tjs_uint maxText = 256u * 1024;
+    static constexpr tjs_uint maxField = 4096;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+    static void account(const ttstr& text, tjs_uint& total, tjs_uint limit = maxText) {
+        const auto length = text.GetLen();
+        if(length > limit || length > maxText - total)
+            TJS_eTJSError(u"Storages.selectFile text budget exceeded");
+        total += length;
+    }
+    ttstr path(const tTJSVariant& value, tjs_uint& total) {
+        const ttstr converted(value);
+        account(converted, total, maxField);
+        if(converted.IsEmpty()) return converted;
+        tTJSVariant input(converted), output;
+        auto* argument = &input;
+        constexpr auto operation = u"Storages.selectFilePath";
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 1, &argument));
+        if(!reply) TJS_eTJSError(u"Storages.selectFile path host returned no response");
+        resolveReply(vm, *reply, &output);
+        if(output.Type() != tvtString || ttstr(output).GetLen() > maxField)
+            TJS_eTJSError(u"Storages.selectFile path host returned an invalid path");
+        return ttstr(output);
+    }
+public:
+    explicit StorageSelectFile(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        if(count < 1) return TJS_E_BADPARAMCOUNT;
+        const tTJSVariant owner(*args[0]);
+        auto* options = owner.AsObjectNoAddRef();
+        // The Win32 implementation dereferences null. Reject it deliberately
+        // rather than reproducing a native crash in the Web runtime.
+        if(!options) TJS_eTJSError(u"Storages.selectFile requires non-null options");
+        // filterIndex, name, initialDir, title, save, defaultExt, filterProvided,
+        // followed by the successfully read filter strings in index order.
+        std::vector<tTJSVariant> values(7);
+        values[0] = static_cast<tjs_int>(0);
+        values[1] = ttstr(u"");
+        values[2] = ttstr(u"");
+        values[4] = static_cast<tjs_int>(0);
+        values[6] = static_cast<tjs_int>(0);
+        tjs_uint total = 0;
+        tTJSVariant value;
+        auto get = [&](const tjs_char* key) {
+            return TJS_SUCCEEDED(options->PropGet(TJS_MEMBERMUSTEXIST, key, nullptr, &value, options));
+        };
+        auto appendFilter = [&](const tTJSVariant& item) {
+            const ttstr text(item);
+            account(text, total);
+            values.emplace_back(text);
+        };
+        if(get(u"filter")) {
+            values[6] = static_cast<tjs_int>(1);
+            if(value.Type() != tvtObject) appendFilter(value);
+            else {
+                auto* array = value.AsObjectNoAddRef();
+                if(!array) TJS_eTJSError(u"Storages.selectFile requires a non-null filter object");
+                tTJSVariant item;
+                tjs_int length = 0;
+                if(TJS_SUCCEEDED(array->PropGet(TJS_MEMBERMUSTEXIST, u"count", nullptr, &item, array)))
+                    length = static_cast<tjs_int>(item);
+                // A fixed, explicit Web allocation/iteration budget. Negative
+                // counts keep the original empty traversal behavior.
+                if(length > 256) TJS_eTJSError(u"Storages.selectFile filter count exceeds 256");
+                for(tjs_int index = 0; index < length; ++index)
+                    if(TJS_SUCCEEDED(array->PropGetByNum(TJS_MEMBERMUSTEXIST, index, &item, array)))
+                        appendFilter(item);
+            }
+        }
+        if(get(u"filterIndex"))
+            values[0] = static_cast<tjs_int64>(static_cast<tjs_uint32>(static_cast<tjs_int>(value)));
+        if(get(u"name")) values[1] = path(value, total);
+        if(get(u"initialDir")) values[2] = path(value, total);
+        if(get(u"title")) {
+            const ttstr text(value); account(text, total, maxField); values[3] = text;
+        }
+        if(get(u"save")) values[4] = static_cast<tjs_int>(value.operator bool());
+        if(get(u"defaultExt")) {
+            const ttstr text(value); account(text, total, maxField); values[5] = text;
+        }
+        // Reserve after the last getter, at VM scope so replacing the public
+        // Storages class cannot reuse an in-flight modal request's identity.
+        if(vm->nextStorageSelector > 9007199254740991ull)
+            TJS_eTJSError(u"Storages.selectFile request identity exhausted");
+        tTJSVariant identifier(static_cast<tjs_int64>(vm->nextStorageSelector++));
+        std::vector<tTJSVariant*> inputs;
+        inputs.reserve(values.size() + 1);
+        inputs.push_back(&identifier);
+        for(auto& input : values) inputs.push_back(&input);
+        tTJSVariant response;
+        bool abortAttempted = false;
+        auto abort = [&] {
+            if(abortAttempted) return;
+            abortAttempted = true;
+            auto* argument = &identifier;
+            constexpr auto operation = u"Storages.selectFileAbort";
+            std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 1, &argument));
+            // No continuation may run here: this cleanup must still work when
+            // entering the modal pump failed at the native frame-depth limit.
+            if(!reply || reply->kind != 0 || reply->value.Type() != tvtVoid)
+                TJS_eTJSError(u"Storages.selectFile abort host returned an invalid response");
+        };
+        {
+            krkr::CleanupErrors cleanup;
+            try {
+                {
+                    constexpr auto operation = u"Storages.selectFile";
+                    std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), inputs.size(), inputs.data()));
+                    if(!reply) TJS_eTJSError(u"Storages.selectFile host returned no response");
+                    resolveReply(vm, *reply, &response);
+                }
+                cleanup.rethrow();
+                // Normally Modal.end already released it. This exact-id,
+                // idempotent operation also closes a continuation that never
+                // entered its TJS body, before any successful option writeback.
+                abort();
+                cleanup.rethrow();
+            } catch(...) {
+                const auto primary = std::current_exception();
+                cleanup.suppress();
+                krkr::CleanupErrors secondary;
+                secondary.suppress();
+                try { abort(); } catch(...) {}
+                std::rethrow_exception(primary);
+            }
+        }
+        if(response.Type() == tvtVoid) {
+            if(result) *result = static_cast<tjs_int>(0);
+            return TJS_S_OK;
+        }
+        if(response.Type() != tvtString)
+            TJS_eTJSError(u"Storages.selectFile host returned an invalid response");
+        const ttstr encoded(response);
+        const auto* text = encoded.c_str();
+        const auto length = encoded.GetLen();
+        tjs_uint offset = 0;
+        tjs_uint64 index = 0;
+        while(offset < length && text[offset] >= u'0' && text[offset] <= u'9') {
+            if(offset >= 10) TJS_eTJSError(u"Storages.selectFile host returned an invalid filter index");
+            index = index * 10 + (text[offset++] - u'0');
+            if(index > 0xffffffffu) TJS_eTJSError(u"Storages.selectFile host returned an invalid filter index");
+        }
+        if(!offset || offset >= length || text[offset++] != u'\n' || offset == length || length - offset > maxField)
+            TJS_eTJSError(u"Storages.selectFile host returned an invalid response");
+        tTJSVariant selectedIndex(static_cast<tjs_int32>(static_cast<tjs_uint32>(index)));
+        tTJSVariant selectedName(ttstr(text + offset, length - offset));
+        // Preserve partial writeback: returned failure statuses are ignored,
+        // while actual setter exceptions propagate and do not roll back index.
+        options->PropSet(TJS_MEMBERENSURE, u"filterIndex", nullptr, &selectedIndex, options);
+        options->PropSet(TJS_MEMBERENSURE, u"name", nullptr, &selectedName, options);
+        if(result) *result = static_cast<tjs_int>(1);
         return TJS_S_OK;
     }
 };
@@ -1383,8 +1548,11 @@ API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix
         object->RegisterNCM(u"asText", new ClipboardText(vm), u"Clipboard", nitProperty, TJS_STATICMEMBER);
     }
     if(system) object->RegisterNCM(u"createUUID", new SystemUuid(vm), u"System", nitMethod, TJS_STATICMEMBER);
-    if(storages) for(const auto& policy : storageMethodPolicies)
-        object->RegisterNCM(policy.name, new StorageMethod(vm, policy), u"Storages", nitMethod, TJS_STATICMEMBER);
+    if(storages) {
+        for(const auto& policy : storageMethodPolicies)
+            object->RegisterNCM(policy.name, new StorageMethod(vm, policy), u"Storages", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"selectFile", new StorageSelectFile(vm), u"Storages", nitMethod, TJS_STATICMEMBER);
+    }
     *value = tTJSVariant(object.get(), object.get());
 }
 // Private assembly exports: only the fixed System delegates may be installed,
