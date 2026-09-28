@@ -33,6 +33,8 @@ export interface GameWindows {
   /** Supply the epoch when forwarding asynchronous protocol events. */
   update(windowId: number, view: WindowHostView, active: boolean, surfaceEpoch?: number): void
   get(windowId: number, surfaceEpoch?: number): GameWindowSurface | undefined
+  /** Whether this exact surface is actually placed in the viewport. */
+  isFullscreen(windowId: number, surfaceEpoch: number): boolean
   dispose(): void
 }
 
@@ -538,6 +540,11 @@ export function createGameWindows(
       return surface && (surfaceEpoch === undefined || surface.surfaceEpoch === surfaceEpoch)
         ? surface
         : undefined
+    },
+    isFullscreen(windowId, surfaceEpoch) {
+      return (
+        !disposed && fullscreen?.windowId === windowId && fullscreen.surfaceEpoch === surfaceEpoch
+      )
     },
     dispose() {
       if (disposed) return

@@ -46,6 +46,11 @@ import { SystemEvents, type EventOptions, type EventOutcome } from './scheduler/
 import { systemEventsBridge } from './tvp/system.ts'
 import { systemClassValue, systemReadonlyProperties } from './tvp/system-class.ts'
 import { SystemEnvironment } from './system/environment.ts'
+import {
+  systemDisplayProperties,
+  type SystemDisplayMetrics,
+  type SystemDisplayUpdate,
+} from './system/display.ts'
 import { checkpointBridge } from './tvp/checkpoints.ts'
 import { ModalLoop } from './scheduler/modal-loop.ts'
 import { WindowModals } from './scene/window-modal.ts'
@@ -169,6 +174,7 @@ export type EngineEvent =
   | ({ type: 'system-dialog' } & SystemDialogSnapshot)
   | { type: 'log'; level: 'info' | 'error'; text: string }
 export interface SessionDependencies {
+  systemDisplay?: SystemDisplayMetrics
   systemFonts?: FontDescriptor[]
   systemColors?: readonly number[]
   activity?: ActivityState
@@ -345,7 +351,11 @@ export class EngineSession {
     this.inputControllers = new InputControllers(this.layers, () => this.windowId)
     this.composer = new SceneComposer(this.layers, (id) => this.transitions?.frame(id))
     this.systemArguments = new Map(deps.arguments)
-    this.systemEnvironment = new SystemEnvironment(this.systemArguments, deps.fillRandomBytes)
+    this.systemEnvironment = new SystemEnvironment(
+      this.systemArguments,
+      deps.fillRandomBytes,
+      deps.systemDisplay,
+    )
     this.clipboard = deps.clipboard ?? unavailableClipboard()
     this.fonts = new FontService(
       (name) => this.resolveResource(name),
@@ -1224,6 +1234,12 @@ export class EngineSession {
     this.applyPause()
     this.notify()
   }
+  setSystemDisplay(update: SystemDisplayUpdate): boolean {
+    if (this.control.cancelled || ['stopping', 'stopped', 'failed'].includes(this.state))
+      return false
+    return this.systemEnvironment.display.update(update)
+  }
+
   setActivity(activity: ActivityState): void {
     validateActivity(activity)
     if (this.control.cancelled || activity.sequence <= this.activity.sequence) return
@@ -2886,13 +2902,23 @@ export class EngineSession {
         !systemReadonlyProperties.includes(property as (typeof systemReadonlyProperties)[number])
       )
         throw new Error('Invalid System property')
+      if (systemDisplayProperties.includes(property as (typeof systemDisplayProperties)[number]))
+        return {
+          kind: 'value',
+          value: this.systemEnvironment.display.get(
+            property as (typeof systemDisplayProperties)[number],
+          ),
+        }
       return {
         kind: 'value',
         value:
           property === 'versionInformation'
             ? this.systemEnvironment.versionInformation(this.runtime?.languageVersion)
             : this.systemEnvironment[
-                property as Exclude<(typeof systemReadonlyProperties)[number], 'versionInformation'>
+                property as Exclude<
+                  (typeof systemReadonlyProperties)[number],
+                  'versionInformation' | (typeof systemDisplayProperties)[number]
+                >
               ],
       }
     }

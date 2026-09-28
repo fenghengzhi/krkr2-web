@@ -16,6 +16,8 @@ import type { WindowSurfaceIdentity } from '../protocol/surfaces.ts'
 import { normalizeSystemDataPath } from '../engine/system/environment.ts'
 import { copySystemColorPalette } from '../engine/graphics/system-colors.ts'
 import { sampleSystemColorPalette } from './system-colors.ts'
+import { BrowserSystemDisplay } from './system-display.ts'
+import { copySystemDisplayMetrics, type SystemDisplayMetrics } from '../engine/system/display.ts'
 
 /** Player-facing DOM ownership; compatible with the app's GameWindows host. */
 export interface PlayerWindowSurface {
@@ -33,6 +35,8 @@ export interface PlayerWindowHost {
   detach(windowId: number, surfaceEpoch: number): void
   update(windowId: number, view: WindowView, active: boolean, surfaceEpoch?: number): void
   get(windowId: number, surfaceEpoch?: number): PlayerWindowSurface | undefined
+  /** Actual host placement, which may suppress a requested fullscreen window. */
+  isFullscreen?(windowId: number, surfaceEpoch: number): boolean
   dispose(): void
 }
 
@@ -43,6 +47,10 @@ export interface PlayerOptions {
   dataPath?: string
   /** 31 RGB values for legacy indices 0..30 (25 must be zero); defaults to page CSS colors. */
   systemColors?: readonly number[]
+  /** Fixed, copied virtual display geometry. Defaults to the live player desktop. */
+  systemDisplay?: SystemDisplayMetrics
+  /** Stable containing stage; defaults to the canvas's parent before surface attachment. */
+  desktopElement?: HTMLElement
   onClipboardRequest?(request: ClipboardRequest | null): void
   ownsClipboardFocus?(target: EventTarget | null): boolean
   /** Input and video are attached, and the canvas has not yet been transferred. */
@@ -62,6 +70,21 @@ export function createPlayer(
   const dataPath = options.dataPath
   normalizeSystemDataPath(dataPath)
   const suppliedSystemColors = options.systemColors
+  const suppliedSystemDisplay = options.systemDisplay
+  const systemDisplay =
+    suppliedSystemDisplay === undefined
+      ? undefined
+      : copySystemDisplayMetrics(suppliedSystemDisplay)
+  const desktopElement =
+    options.desktopElement ?? canvas.parentElement ?? canvas.ownerDocument.documentElement
+  const browser = canvas.ownerDocument.defaultView
+  if (
+    !browser ||
+    !(desktopElement instanceof (browser as Window & typeof globalThis).HTMLElement) ||
+    desktopElement.ownerDocument !== canvas.ownerDocument ||
+    !desktopElement.ownerDocument.defaultView
+  )
+    throw new Error('System display desktop must belong to the player document')
   const systemColors =
     suppliedSystemColors === undefined
       ? sampleSystemColorPalette(canvas)
@@ -79,6 +102,7 @@ export function createPlayer(
   let stopping: Promise<void> | undefined
   let input: BrowserInputCoordinator | undefined
   let surfaces: BrowserWindowSurfaces | undefined
+  let display: BrowserSystemDisplay | undefined
   let activity = initialActivity()
   let workerPaused = true
   let fontSelecting = false
@@ -106,6 +130,23 @@ export function createPlayer(
     if (errors.length === 1) onError(errors[0])
     else if (errors.length) onError(new AggregateError(errors, 'Window presentation update failed'))
   }
+  const syncDisplay = () => {
+    if (!display || stopping || systemDisplay !== undefined) return
+    updateParts([
+      () =>
+        display?.setFullscreen(
+          [...windows.values()].some(({ id, view }) => {
+            const surface = surfaces?.get(id)
+            return (
+              !!surface &&
+              view.visible &&
+              view.fullScreen &&
+              (options.windows.isFullscreen?.(id, surface.identity.surfaceEpoch) ?? true)
+            )
+          }),
+        ),
+    ])
+  }
   const retireWindow = (windowId: number) => {
     retiredWindows.add(windowId)
     windows.delete(windowId)
@@ -114,6 +155,7 @@ export function createPlayer(
     // Retirement is independent of whether a presentation or canvas ever
     // arrived. Tombstone before cleanup so late messages cannot recreate it.
     updateParts([() => surfaces?.retireWindow(windowId), () => video.removeWindow(windowId)])
+    syncDisplay()
   }
   const updateWindows = (presentations: WindowPresentation[]) => {
     const removed = new Set(windows.keys())
@@ -134,6 +176,7 @@ export function createPlayer(
       ])
     }
     for (const id of removed) retireWindow(id)
+    syncDisplay()
   }
   const session = new SessionClient((event) => {
     if (event.type === 'font-selection') {
@@ -209,6 +252,7 @@ export function createPlayer(
       video.attachWindow(windowId, surfaceEpoch, canvas, surface.videoPlane)
       if (window) video.setWindow(window.view, windowId)
       options.onSurfaceAttach?.(surface, identity)
+      syncDisplay()
       syncInput()
     },
     onDetach: (_canvas, identity) => {
@@ -235,6 +279,7 @@ export function createPlayer(
           errors.push(error)
         }
       }
+      syncDisplay()
       if (errors.length === 1) throw errors[0]
       if (errors.length) throw new AggregateError(errors, 'Window host cleanup failed')
     },
@@ -300,6 +345,7 @@ export function createPlayer(
       stopping = (async () => {
         const errors: unknown[] = []
         for (const action of [
+          () => display?.close(),
           // Retire the buttons locally. A clipboard-close message on its own
           // port must not resume TJS catch before the stop RPC cancels control.
           () => options.pads?.dispose(),
@@ -355,6 +401,21 @@ export function createPlayer(
       })
       return stopping
     },
+  }
+  try {
+    display = new BrowserSystemDisplay(
+      desktopElement,
+      (update) => {
+        void session.setSystemDisplay(update).catch(onError)
+      },
+      systemDisplay,
+    )
+  } catch (error) {
+    // The monitor cleans partial observer setup itself. Retire the remaining
+    // player resources without lazily creating a Worker just to send Stop.
+    session.dispose()
+    void player.stop().catch(onError)
+    throw error
   }
   options.pads?.attach({
     generation: session.generation,

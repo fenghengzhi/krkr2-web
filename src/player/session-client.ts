@@ -1,4 +1,5 @@
 import type { PadMessage } from '../protocol/pad.ts'
+import { copySystemDisplayUpdate, type SystemDisplayUpdate } from '../engine/system/display.ts'
 import { createRpcClient, type RpcClient } from 'vite-plugin-worker-rpc/runtime'
 import { transfer } from 'vite-plugin-worker-rpc/client'
 import type { SaveFile } from '../engine/ports/saves.ts'
@@ -26,6 +27,7 @@ export class SessionClient {
   private initialized = false
   private activity = initialActivity()
   private systemFonts: FontDescriptor[] = []
+  private systemDisplay?: SystemDisplayUpdate
   constructor(onEvent: (event: SessionEvent) => void) {
     this.rpc = createRpcClient(
       () =>
@@ -80,6 +82,7 @@ export class SessionClient {
       clipboard,
       dataPath,
       systemColors,
+      systemDisplay: this.systemDisplay?.metrics,
       activity: this.activity,
       systemFonts: this.systemFonts,
     }
@@ -94,6 +97,9 @@ export class SessionClient {
       ]),
     )
     this.initialized = true
+    // Initialization carries dimensions, while this ordered update also
+    // establishes the source revision and catches layout changes during load.
+    if (this.systemDisplay) await this.call('setSystemDisplay', this.generation, this.systemDisplay)
     if (this.systemFonts !== request.systemFonts)
       await this.call('setSystemFonts', this.systemFonts)
     if (this.activity.sequence > request.activity.sequence)
@@ -104,6 +110,15 @@ export class SessionClient {
     if (this.disposed) return Promise.resolve()
     this.activity = { ...activity }
     return this.initialized ? this.call('setActivity', this.activity) : Promise.resolve()
+  }
+  setSystemDisplay(update: SystemDisplayUpdate): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    const next = copySystemDisplayUpdate(update)
+    if (this.systemDisplay && next.revision <= this.systemDisplay.revision) return Promise.resolve()
+    this.systemDisplay = next
+    return this.initialized
+      ? this.call('setSystemDisplay', this.generation, next)
+      : Promise.resolve()
   }
   padFont(id: number, epoch: number) {
     return this.call('padFont', this.generation, id, epoch)

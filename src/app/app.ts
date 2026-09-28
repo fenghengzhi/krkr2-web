@@ -368,6 +368,7 @@ export function mountApp(root: HTMLDivElement): void {
       {
         windows,
         pads: createGamePads(el('stage')),
+        desktopElement: el('stage'),
         onClipboardRequest(request) {
           if (current !== generation) return
           if (request && !gameClipboard) throw new Error('Clipboard presentation is not available')

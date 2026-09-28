@@ -238,6 +238,10 @@ const api: SessionApi = {
   async setSystemFonts(fonts) {
     active().setSystemFonts(fonts)
   },
+  async setSystemDisplay(requestGeneration, update) {
+    if (requestGeneration !== generation) return
+    active().setSystemDisplay(update)
+  },
   async selectFont(id, face) {
     active().selectFont(id, face)
   },
