@@ -8,9 +8,9 @@
 
 第二次组合运行 [36443186745](https://github.com/fenghengzhi/krkr2-web/actions/runs/36443186745) 的 Firefox PWA 原始 `out/ci/results.json` 明确记录 `Browser system color is not opaque: Highlight`，多个游戏因而在建立 Player 时无法启动。初版错误要求每个原始采样的 alpha 都为255；修订改用下述明确的24位合成政策。该轮未记录具体 CSS 字符串/RGBA，不能据此报告某个精确透明度。历史失败及完整原始产物保留，**本修订尚未运行，不能声称已经恢复通过**。
 
-## 原版证据与解释边界
-
 第二次整合 [36443186745](https://github.com/fenghengzhi/krkr2-web/actions/runs/36443186745) 的构建成功，实际 Node 为 **2,172 通过、2 失败**，直接运行时 **6/6** 通过；浏览器暴露了上述共同初始化问题。为避免继续重复该错误，剩余普通浏览器作业被取消，保留全部已完成与部分报告，不能把此轮计为完整回归成功。复用同一构建的 [兼容检查 36443590538](https://github.com/fenghengzhi/krkr2-web/actions/runs/36443590538) 在取消请求前已经自行失败：原 78 项中 **24 失败、54 未执行、0 通过**，24 项均独立记录相同 Highlight 错误；15 项旧 PWA 的旧版在线／离线启动已完成，失败发生于当前版本启动。后续半透明颜色修复和输入夹具修正尚待与下一批功能一起验证，不覆盖这些历史结果。
+
+## 原版证据与解释边界
 
 固定源码是 `krkrz/krkr2@dec49af97e174d31059c3ccd7efc700ba3c6b788` 的 2.32stable：
 
