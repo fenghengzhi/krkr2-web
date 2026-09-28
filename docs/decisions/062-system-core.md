@@ -63,3 +63,7 @@ ABI 保持 5，manifest 增加 `nativeSystem:1`；生产 loader 必须同时满�
 ## 首次组合构建结果
 
 [35013970344](https://github.com/fenghengzhi/krkr2-web/actions/runs/35013970344) 在 `8cf6ae9bb1b1b26a0d96cf53ba51f65f4fcf6c2f` 成功编译 Asyncify／JSPI／字体内核，随后在 `web-crypto.ts:5` 类型检查失败：宽泛的 `Uint8Array<ArrayBufferLike>` 可能包含 SharedArrayBuffer，不能直接传给当前 Web Crypto 类型所要求的 ArrayBuffer view。普通测试实际执行数为 **0**，原始构建日志与终态单独保留。UUID 本来就新建自有的 16 字节 ArrayBuffer，修订只把 adapter、Session 依赖和 SystemEnvironment 的对应类型统一为 `Uint8Array<ArrayBuffer>`，没有使用类型断言或替换随机源。修订仍须 GitHub-hosted Actions 验证。
+
+## 065 后续能力版本
+
+[065 系统色](065-system-colors.md) 在本阶段13个委托之后追加 `toActualColor`，实际manifest的 `nativeSystem` 升至2，生产loader同时拒绝缺失和旧cap1；ABI仍为5。页面调色板进入初始化消息，协议16升17。本文件的13方法/cap1/协议16和待实现清单描述062当时范围，保留为历史记录；后续实现及尚待执行的验收以065为准，不改写上述原始失败结果。

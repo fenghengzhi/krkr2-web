@@ -71,6 +71,7 @@ import { FontCatalog } from './graphics/font-catalog.ts'
 import { FontSelection } from './graphics/font-selection.ts'
 import { cancelable } from './scheduler/cancelable.ts'
 import { Bitmap, intersect } from './graphics/bitmap.ts'
+import { SystemColors } from './graphics/system-colors.ts'
 import type { FontDescriptor, FontPreview, FontSelectionRequest } from './ports/fonts.ts'
 import { fontPreviewSize } from './ports/fonts.ts'
 import type { AudioBackend } from './ports/audio.ts'
@@ -156,6 +157,7 @@ export type EngineEvent =
   | { type: 'log'; level: 'info' | 'error'; text: string }
 export interface SessionDependencies {
   systemFonts?: FontDescriptor[]
+  systemColors?: readonly number[]
   activity?: ActivityState
   createRuntime: (
     handler: HostHandler,
@@ -189,6 +191,7 @@ export interface SessionDependencies {
 
 export class EngineSession {
   private readonly systemEnvironment: SystemEnvironment
+  private readonly systemColors: SystemColors
   private readonly clipboard: ClipboardPort
   private clipboardClosed = false
   private readonly textEncoding = new ScriptTextEncoding()
@@ -220,8 +223,8 @@ export class EngineSession {
   private readonly menus = new MenuTree()
   private menuRevision = -1
   private menuWindowsView = ''
-  private readonly layers = new LayerTree()
-  private readonly inputControllers = new InputControllers(this.layers, () => this.windowId)
+  private readonly layers: LayerTree
+  private readonly inputControllers: InputControllers
   private get inputController() {
     return this.inputControllers.active
   }
@@ -235,7 +238,7 @@ export class EngineSession {
   private nextKeyboardRouteRevision = 1
   private windowsView = ''
   private transitions?: SceneTransitions
-  private readonly composer = new SceneComposer(this.layers, (id) => this.transitions?.frame(id))
+  private readonly composer: SceneComposer
   private preparingFrame = false
   private paintedLayers = new Set<number>()
   private readonly redrawRequests = new Set<number>()
@@ -321,6 +324,10 @@ export class EngineSession {
   private readonly cancellationErrors: unknown[] = []
   private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
+    this.systemColors = new SystemColors(deps.systemColors)
+    this.layers = new LayerTree(this.systemColors)
+    this.inputControllers = new InputControllers(this.layers, () => this.windowId)
+    this.composer = new SceneComposer(this.layers, (id) => this.transitions?.frame(id))
     this.systemArguments = new Map(deps.arguments)
     this.systemEnvironment = new SystemEnvironment(this.systemArguments, deps.fillRandomBytes)
     this.clipboard = deps.clipboard ?? unavailableClipboard()
@@ -2898,7 +2905,7 @@ export class EngineSession {
         throw new Error(`${operation}: expected a finite numeric argument at ${i}`)
       return Number(value)
     }
-    // Native image and drawing entry points narrow TJS integers to 32 bits.
+    // Native image, color and drawing entry points narrow TJS integers to 32 bits.
     // Preserve the low bits before Number conversion.
     const clipInteger = (i: number) => {
       const value = args[i]
@@ -2910,6 +2917,9 @@ export class EngineSession {
     }
     let value: ScriptValue
     switch (operation) {
+      case 'System.toActualColor':
+        value = BigInt(this.systemColors.toActualColor(clipInteger(0)))
+        break
       case 'System.dialog': {
         if (!isScriptObject(args[0])) throw new Error('System dialog request must be an object')
         const kind = text(1)
@@ -3587,14 +3597,19 @@ export class EngineSession {
         const data = context.snapshot(args[5])
         if (data.type !== 'dictionary') throw new Error('Expected font dictionary')
         const font = fontSpec(data),
-          draws = await this.fonts.draw(text(3), font, clipInteger(4) >>> 0, {
-            antialiased: !!number(7),
-            shadowLevel: clipInteger(8),
-            shadowColor: clipInteger(9) >>> 0,
-            shadowWidth: clipInteger(10),
-            shadowX: clipInteger(11),
-            shadowY: clipInteger(12),
-          })
+          draws = await this.fonts.draw(
+            text(3),
+            font,
+            this.systemColors.toActualColor(clipInteger(4)),
+            {
+              antialiased: !!number(7),
+              shadowLevel: clipInteger(8),
+              shadowColor: clipInteger(9) >>> 0,
+              shadowWidth: clipInteger(10),
+              shadowX: clipInteger(11),
+              shadowY: clipInteger(12),
+            },
+          )
         const session = this,
           left = clipInteger(1),
           top = clipInteger(2)

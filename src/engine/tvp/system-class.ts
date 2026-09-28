@@ -83,6 +83,11 @@ const methods = [
     }
   }`,
   ],
+  [
+    'toActualColor',
+    0x101,
+    String.raw`function(color) { return global.__host("System.toActualColor", int(color)); }`,
+  ],
 ] as const
 
 const properties = [

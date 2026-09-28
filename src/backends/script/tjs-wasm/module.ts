@@ -56,6 +56,7 @@ export interface WasmManifest {
     windowObjectLifetime?: number
     nativeReleaseState?: number
     nativeClipboard?: number
+    /** Version 2 includes the fixed System.toActualColor method binding. */
     nativeSystem?: number
   }
   diagnosticAllocator?: boolean

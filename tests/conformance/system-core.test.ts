@@ -14,7 +14,7 @@ test('System conformance uses a kernel advertising native System and preserved C
   const manifest: WasmManifest = JSON.parse(
     readFileSync(resolve('.generated/wasm/manifest.json'), 'utf8'),
   )
-  assert.equal(manifest.capabilities?.nativeSystem, 1)
+  assert.equal(manifest.capabilities?.nativeSystem, 2)
   assert.equal(manifest.capabilities?.nativeClipboard, 1)
 })
 
@@ -117,11 +117,11 @@ var originalSystem=System;
 function badAssembly(){
   var delegate=function(){},message="";
   try{
-    // Thirteen valid method delegates, followed by four functions where the
+    // Fourteen valid method delegates, followed by four functions where the
     // native bridge requires property delegates. None of these bodies runs.
     var unpublished=__host("System.class",
       delegate,delegate,delegate,delegate,delegate,delegate,delegate,
-      delegate,delegate,delegate,delegate,delegate,delegate,
+      delegate,delegate,delegate,delegate,delegate,delegate,delegate,
       delegate,delegate,delegate,delegate);
   }catch(error){message=error.message;}
   if(System!==originalSystem)throw new Exception("Published System was replaced");
