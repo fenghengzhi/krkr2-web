@@ -395,9 +395,249 @@ for (const binary of [false, true]) {
     }
   })
 
+  test(`${mode}: Tab preserves ordinary input admission while retiring the previous Layer composition route`, async () => {
+    const f = await fixture(
+      binary,
+      `ar.focusable=false;
+       class TabLayer extends Layer {
+         function TabLayer(win,parent){
+           super.Layer(win,parent);setSize(32,32);visible=true;focusable=true;
+         }
+         function onKeyDown(key,shift,process){
+           trace.add("first:L:down:"+key);
+           // TrapLayer intentionally omits this default focus traversal.
+           super.onKeyDown(key,shift,process);
+         }
+       }
+       var first=new TabLayer(a,ar),next=new TrapLayer(a,ar,"next");first.focus();`,
+    )
+    const pending: Promise<unknown>[] = []
+    try {
+      const previous = f.route(f.a)
+      assert.equal(previous.windowId, f.a)
+      assert.ok(previous.inputRevision !== undefined, 'Publish the ordinary input generation')
+      assert.equal(await f.session.evaluate('a.focusedLayer===first'), '1')
+      await f.session.input({
+        type: 'keyDown',
+        key: 9,
+        shift: 0,
+        windowId: f.a,
+        keyboardRouteRevision: previous.revision,
+        keyboardInputRevision: previous.inputRevision,
+      })
+      assert.equal(await f.trace(), 'A:W:down:9|first:L:down:9')
+      assert.equal(await f.session.evaluate('a.focusedLayer===next'), '1')
+      const current = f.route(f.a)
+      assert.notEqual(current.focused, previous.focused)
+      assert.notEqual(current.revision, previous.revision)
+      assert.equal(current.inputRevision, previous.inputRevision)
+
+      await f.execute('trace.clear();')
+      // A composition started on first carries only its strict route. It must
+      // not become text on next after Tab has changed the focused Layer.
+      const oldComposition = f.session.acceptInput({
+        type: 'text',
+        text: '旧',
+        windowId: f.a,
+        keyboardRouteRevision: previous.revision,
+      })
+      assert.equal(oldComposition.status, 'ignored')
+      await oldComposition.completion
+      assert.equal(await f.trace(), '')
+
+      // Ordinary DOM input may still have the pre-Tab view while the Worker
+      // publishes its focus update. It follows the current Layer in this Window.
+      await f.session.input({
+        type: 'keyUp',
+        key: 9,
+        shift: 0,
+        windowId: f.a,
+        keyboardRouteRevision: previous.revision,
+        keyboardInputRevision: previous.inputRevision,
+      })
+      await f.session.input({
+        type: 'keyDown',
+        key: 65,
+        shift: 0,
+        windowId: f.a,
+        keyboardRouteRevision: previous.revision,
+        keyboardInputRevision: previous.inputRevision,
+      })
+      await f.session.input({
+        type: 'text',
+        text: '新',
+        windowId: f.a,
+        keyboardRouteRevision: previous.revision,
+        keyboardInputRevision: previous.inputRevision,
+      })
+      assert.equal(
+        await f.trace(),
+        'A:W:up:9|next:L:up:9|A:W:down:65|next:L:down:65|A:W:text:新|next:L:text:新',
+      )
+      assert.equal(f.session.snapshot().activeWindow, f.a)
+
+      // Worker input acknowledges admission before the preceding callback
+      // completes. Exercise a focus change after both texts were admitted.
+      await f.execute('trace.clear();first.focus();')
+      const queuedRoute = f.route(f.a),
+        reading = f.session.evaluate('Scripts.execStorage("trap-gate.tjs")')
+      pending.push(reading)
+      await gateEntry(f.blocked.entered, reading)
+      for (const packet of [
+        {
+          type: 'keyDown' as const,
+          key: 9,
+          shift: 0,
+          keyboardInputRevision: queuedRoute.inputRevision,
+        },
+        { type: 'text' as const, text: '旧' },
+        { type: 'text' as const, text: '後', keyboardInputRevision: queuedRoute.inputRevision },
+      ]) {
+        const admitted = f.session.acceptInput({
+          ...packet,
+          windowId: f.a,
+          keyboardRouteRevision: queuedRoute.revision,
+        })
+        assert.equal(admitted.status, 'accepted')
+        pending.push(admitted.completion)
+      }
+      f.blocked.release()
+      await Promise.all(pending)
+      assert.equal(await f.trace(), 'A:W:down:9|first:L:down:9|A:W:text:後|next:L:text:後')
+      assert.equal(await f.session.evaluate('a.focusedLayer===next'), '1')
+      assert.equal(f.session.inspectOwnership().eventReceipts, 0)
+    } finally {
+      await f.stop()
+      await Promise.allSettled(pending)
+    }
+  })
+
+  test(`${mode}: stale ordinary input generations cannot arm reset, replacement or hidden trap receivers`, async () => {
+    const f = await fixture(binary, 'b.trapKey=true;')
+    try {
+      const previous = f.route(f.a)
+      assert.ok(previous.inputRevision !== undefined)
+      await f.execute('b.trapKey=true;')
+      const reset = f.route(f.a)
+      assert.ok(reset.inputRevision !== undefined)
+      assert.notEqual(reset.inputRevision, previous.inputRevision)
+      f.session.keyState([65])
+      const oldRelease = f.session.acceptInput({
+        type: 'keyUp',
+        key: 65,
+        shift: 0,
+        windowId: f.a,
+        keyboardRouteRevision: reset.revision,
+        keyboardInputRevision: previous.inputRevision,
+      })
+      assert.equal(oldRelease.status, 'ignored')
+      await oldRelease.completion
+      assert.equal(await f.session.evaluate('System.getKeyState(65)'), '0')
+      await f.session.input({
+        type: 'text',
+        text: '未',
+        windowId: f.a,
+        keyboardInputRevision: reset.inputRevision,
+      })
+      assert.equal(await f.trace(), '', 'A stale ordinary keyUp must not arm the reset gate')
+
+      await f.execute('newest();')
+      const replacement = f.route(f.a)
+      assert.ok(replacement.inputRevision !== undefined)
+      assert.notEqual(replacement.windowId, reset.windowId)
+      assert.notEqual(replacement.inputRevision, reset.inputRevision)
+      const oldPress = f.session.acceptInput({
+        type: 'keyDown',
+        key: 66,
+        shift: 0,
+        windowId: f.a,
+        keyboardRouteRevision: replacement.revision,
+        keyboardInputRevision: reset.inputRevision,
+      })
+      assert.equal(oldPress.status, 'ignored')
+      await oldPress.completion
+      await f.session.input({
+        type: 'text',
+        text: '未',
+        windowId: f.a,
+        keyboardInputRevision: replacement.inputRevision,
+      })
+      assert.equal(await f.trace(), '', 'A stale ordinary keyDown must not arm the replacement')
+
+      await f.execute('c.visible=false;')
+      const hidden = f.route(f.a)
+      assert.ok(hidden.inputRevision !== undefined)
+      assert.equal(hidden.windowId, f.b)
+      assert.notEqual(hidden.inputRevision, replacement.inputRevision)
+      const hiddenRelease = f.session.acceptInput({
+        type: 'keyUp',
+        key: 67,
+        shift: 0,
+        windowId: f.a,
+        keyboardRouteRevision: hidden.revision,
+        keyboardInputRevision: replacement.inputRevision,
+      })
+      assert.equal(hiddenRelease.status, 'ignored')
+      await hiddenRelease.completion
+      await f.session.input({
+        type: 'text',
+        text: '未',
+        windowId: f.a,
+        keyboardInputRevision: hidden.inputRevision,
+      })
+      assert.equal(await f.trace(), '', 'Hiding C must not retarget its stale keyUp to arm B')
+
+      await f.execute('c.visible=true;')
+      const restored = f.route(f.a)
+      assert.ok(restored.inputRevision !== undefined)
+      assert.equal(restored.windowId, replacement.windowId)
+      assert.notEqual(restored.inputRevision, replacement.inputRevision)
+      assert.notEqual(restored.inputRevision, hidden.inputRevision)
+      await f.session.input({
+        type: 'text',
+        text: '未',
+        windowId: f.a,
+        keyboardInputRevision: restored.inputRevision,
+      })
+      assert.equal(await f.trace(), '', 'The restored trapper still has not received an arming key')
+      await f.session.input({
+        type: 'keyDown',
+        key: 68,
+        shift: 0,
+        windowId: f.a,
+        keyboardInputRevision: restored.inputRevision,
+      })
+      assert.equal(await f.trace(), 'C:W:down:68|C:L:down:68')
+      // Check stale text after arming C so its rejection cannot be explained
+      // merely by an unarmed trap gate.
+      const hiddenText = f.session.acceptInput({
+        type: 'text',
+        text: '旧',
+        windowId: f.a,
+        keyboardRouteRevision: restored.revision,
+        keyboardInputRevision: replacement.inputRevision,
+      })
+      assert.equal(hiddenText.status, 'ignored')
+      await hiddenText.completion
+      assert.equal(await f.trace(), 'C:W:down:68|C:L:down:68')
+      await f.session.input({
+        type: 'text',
+        text: '新',
+        windowId: f.a,
+        keyboardInputRevision: restored.inputRevision,
+      })
+      assert.equal(await f.trace(), 'C:W:down:68|C:L:down:68|C:W:text:新|C:L:text:新')
+      assert.equal(f.session.snapshot().activeWindow, f.a)
+    } finally {
+      await f.stop()
+    }
+  })
+
   test(`${mode}: a hidden physical source cannot deliver keys or arm a visible trapper but still releases its physical key`, async () => {
     const f = await fixture(binary, 'b.trapKey=true;')
     try {
+      const previous = f.route(f.a)
+      assert.ok(previous.inputRevision !== undefined)
       await f.execute('a.visible=false;')
       f.session.keyState([65, 16])
       const hidden = f.session.acceptInput({ type: 'keyUp', key: 65, shift: 0, windowId: f.a })
@@ -410,6 +650,17 @@ for (const binary of [false, true]) {
         '0,0',
       )
       await f.execute('a.visible=true;')
+      const restored = f.route(f.a)
+      assert.notEqual(restored.inputRevision, previous.inputRevision)
+      const beforeHide = f.session.acceptInput({
+        type: 'keyUp',
+        key: 65,
+        shift: 0,
+        windowId: f.a,
+        keyboardInputRevision: previous.inputRevision,
+      })
+      assert.equal(beforeHide.status, 'ignored')
+      await beforeHide.completion
       await f.session.input({ type: 'text', text: '未', windowId: f.a })
       assert.equal(await f.trace(), '', 'The hidden-source keyUp cannot arm the trapper')
       await f.session.input({ type: 'keyDown', key: 66, shift: 0, windowId: f.a })

@@ -11,12 +11,12 @@ import {
 
 const source = String.raw`
 System.exitOnWindowClose=false;
-var trapKeys=[],trapUps=[],trapClicks=[],trapFlow="",c=null,rootC=null;
+var trapKeys=[],trapUps=[],trapAllUps=[],trapClicks=[],trapFlow="",c=null,rootC=null;
 class TrapWindow extends Window {
   var tag,typed="";
   function TrapWindow(tag,left){super.Window();this.tag=tag;caption="Trap "+tag;setInnerSize(160,90);setPos(left,0);visible=true;}
   function onKeyDown(key,shift){global.trapKeys.add("W"+tag+":"+key);}
-  function onKeyUp(key,shift){if(key>=65 && key<=90){global.trapUps.add(tag+":"+key+":"+int(System.getKeyState(key)));Debug.message("trap-ups:"+global.trapUps.join("|"));}}
+  function onKeyUp(key,shift){global.trapAllUps.add(tag+":"+key);if(key>=65 && key<=90){global.trapUps.add(tag+":"+key+":"+int(System.getKeyState(key)));Debug.message("trap-ups:"+global.trapUps.join("|"));}}
   function onKeyPress(key){typed+=key;Debug.message("trap-text:"+tag+":"+typed);}
   function onMouseDown(){
     global.trapClicks.add(tag);
@@ -173,6 +173,7 @@ for (const backend of ['asyncify', 'jspi']) {
         await page.keyboard.type('HostConsole')
         await expect(consoleInput).toHaveValue('HostConsole')
         await evaluate(page, 'trapKeys.join("|")+","+b.typed', 'WB:65|LB:65,a')
+        await evaluate(page, '(trapAllUps.clear(),0)', '0')
 
         await evaluate(page, '(trapFlow="system",0)', '0')
         // The pointer remains addressed to A even though all game keys trap to B.
@@ -190,14 +191,49 @@ for (const backend of ['asyncify', 'jspi']) {
         await a.locator('canvas[data-window-id]').click({ position: { x: 8, y: 8 } })
         const font = page.getByRole('dialog', { name: 'Trap font', exact: true })
         await expect(font.getByRole('option')).toHaveCount(2)
-        await font.getByRole('option', { name: 'Selection Latin', exact: true }).click()
-        await page.keyboard.press('ArrowDown')
-        await expect(
-          font.getByRole('option', { name: 'Selection Mono', exact: true }),
-        ).toBeFocused()
-        await page.keyboard.press('Enter')
+        const latin = font.getByRole('option', { name: 'Selection Latin', exact: true }),
+          mono = font.getByRole('option', { name: 'Selection Mono', exact: true })
+        try {
+          await latin.click()
+          await expect(latin).toBeFocused()
+          await page.keyboard.press('ArrowDown')
+          await expect(mono).toBeFocused()
+          await expect(mono).toHaveAttribute('aria-selected', 'true')
+          await page.keyboard.press('Enter')
+        } catch (error) {
+          // Historical runs did not record activeElement. Preserve the actual
+          // focus destination and selection separately on any future failure.
+          await page
+            .evaluate(() => ({
+              active: document.activeElement
+                ? {
+                    tag: document.activeElement.tagName,
+                    id: document.activeElement.id,
+                    role: document.activeElement.getAttribute('role'),
+                    label: document.activeElement.getAttribute('aria-label'),
+                    dialog: document.activeElement.closest('dialog')?.id ?? null,
+                  }
+                : null,
+              choices: [...document.querySelectorAll('#game-font-dialog [role="option"]')].map(
+                (row) => ({
+                  label: row.getAttribute('aria-label'),
+                  selected: row.getAttribute('aria-selected'),
+                  focused: row === document.activeElement,
+                }),
+              ),
+            }))
+            .then((snapshot) =>
+              test.info().attach('trap-font-focus', {
+                body: JSON.stringify(snapshot, null, 2),
+                contentType: 'application/json',
+              }),
+            )
+            .catch(() => {})
+          throw error
+        }
         await expect(page.getByText('trap-font:1:Selection Mono', { exact: true })).toBeVisible()
         await expect(font).toHaveCount(0)
+        await evaluate(page, 'trapAllUps.join("|")', '')
         await evaluate(page, '(trapFlow="clipboard",0)', '0')
         await a.locator('canvas[data-window-id]').click({ position: { x: 8, y: 8 } })
         const clipboard = page.getByRole('region', { name: '游戏剪贴板请求', exact: true })
@@ -208,6 +244,7 @@ for (const backend of ['asyncify', 'jspi']) {
         await page.keyboard.press('Enter')
         await expect(page.getByText('trap-clipboard-cancelled', { exact: true })).toBeVisible()
         await expect(clipboard).toHaveCount(0)
+        await evaluate(page, 'trapAllUps.join("|")', '')
         await evaluate(
           page,
           'trapKeys.join("|")+","+a.typed+","+b.typed+","+rootB.typed',

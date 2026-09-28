@@ -1,4 +1,10 @@
-export type InputPacket = { windowId?: number; keyboardRouteRevision?: number } & (
+export type InputPacket = {
+  windowId?: number
+  /** Exact editing ownership, including the focused Layer; used by IME commits. */
+  keyboardRouteRevision?: number
+  /** Ordinary input follows Layer focus within the same live Window route. */
+  keyboardInputRevision?: number
+} & (
   | {
       type: 'move' | 'down' | 'up'
       x: number
@@ -48,6 +54,7 @@ export interface InputView {
   keyboardRoute?: {
     windowId: number
     revision: number
+    inputRevision?: number
     focused: number
     imeMode: number
   }

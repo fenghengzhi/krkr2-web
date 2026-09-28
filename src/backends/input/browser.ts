@@ -103,7 +103,7 @@ export interface BrowserInputHooks {
   key(key: number, down: boolean): void
   activate(): boolean
   deactivate(pageBlur: boolean, nextTarget: EventTarget | null): void
-  keyboard(): boolean
+  keyboard(event?: KeyboardEvent): boolean
   mouse(type: 'down' | 'move' | 'up', buttons: number): boolean
 }
 export class BrowserInput {
@@ -238,7 +238,7 @@ export class BrowserInput {
         this.composed = event.data
         if (!commit) this.retiredComposition = event.data
         this.text.value = ''
-        if (commit && event.data) this.push({ type: 'text', text: event.data })
+        if (commit && event.data) this.push({ type: 'text', text: event.data }, true)
         clearTimeout(this.composeTimer)
         this.composeTimer = setTimeout(() => {
           this.composed = ''
@@ -269,7 +269,7 @@ export class BrowserInput {
         if (inputEvent.inputType === 'insertFromPaste' || inputEvent.inputType === 'insertFromDrop')
           this.composed = ''
         if (value && value !== this.composed && value !== this.retiredComposition)
-          this.push({ type: 'text', text: value })
+          this.push({ type: 'text', text: value }, compositionInput)
         this.composed = ''
         this.retiredComposition = ''
       },
@@ -504,7 +504,7 @@ export class BrowserInput {
     }
   }
   private key(event: KeyboardEvent, down: boolean): void {
-    if (!this.keyboard()) return
+    if (!this.keyboard(event)) return
     if (this.composing || event.isComposing || event.keyCode === 229) return
     if (down) this.retiredComposition = ''
     const key = virtualKey(event),
@@ -552,12 +552,12 @@ export class BrowserInput {
     )
       event.preventDefault()
   }
-  private keyboard(): boolean {
+  private keyboard(event?: KeyboardEvent): boolean {
     return (
       !this.suspended &&
       !this.disposed &&
       this.ownsFocus(document.activeElement) &&
-      (this.shared?.keyboard() ?? true)
+      (this.shared?.keyboard(event) ?? true)
     )
   }
   private activate(): void {
@@ -614,13 +614,19 @@ export class BrowserInput {
     this.clearTransient()
     this.push({ type: 'deactivate' })
   }
-  private push(packet: InputPacket): void {
+  private push(packet: InputPacket, composition = false): void {
     if (this.disposed || this.suspended) return
     if (
       this.input?.keyboardRoute &&
       (packet.type === 'keyDown' || packet.type === 'keyUp' || packet.type === 'text')
     )
-      packet = { ...packet, keyboardRouteRevision: this.input.keyboardRoute.revision }
+      packet = {
+        ...packet,
+        keyboardRouteRevision: this.input.keyboardRoute.revision,
+        ...(!composition && this.input.keyboardRoute.inputRevision !== undefined
+          ? { keyboardInputRevision: this.input.keyboardRoute.inputRevision }
+          : {}),
+      }
     if (
       packet.type === 'down' ||
       packet.type === 'move' ||

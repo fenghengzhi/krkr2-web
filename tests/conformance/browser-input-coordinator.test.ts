@@ -970,6 +970,140 @@ test('keyboard receiver changes preserve source focus, capture and physical key 
   }
 })
 
+test('ordinary input uses the Window route while composition retains exact Layer ownership', async () => {
+  const f = fixture(),
+    route = (revision: number, focused: number) =>
+      inputView({
+        keyboardRoute: { windowId: 101, revision, inputRevision: 50, focused, imeMode: 1 },
+      })
+  try {
+    f.coordinator.setInput(101, route(10, 11))
+    f.coordinator.focus(101)
+    f.key(f.textareas[0]!, 'a')
+    f.textareas[0]!.value = 'Hi'
+    f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertText' })
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'committed before Tab' })
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    f.coordinator.setInput(101, route(11, 12))
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'retired composition' })
+    f.textareas[0]!.value = 'retired composition'
+    f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertFromComposition' })
+    f.key(f.textareas[0]!, 'b')
+    f.textareas[0]!.value = 'after Tab'
+    f.dispatch(f.textareas[0]!, 'input', { inputType: 'insertText' })
+    f.dispatch(f.textareas[0]!, 'compositionstart')
+    f.dispatch(f.textareas[0]!, 'compositionend', { data: 'new composition' })
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'keyDown' || packet.type === 'text'
+          ? [
+              [
+                packet.type,
+                packet.type === 'text' ? packet.text : packet.key,
+                packet.keyboardRouteRevision,
+                packet.keyboardInputRevision,
+              ],
+            ]
+          : [],
+      ),
+      [
+        ['keyDown', 65, 10, 50],
+        ['text', 'Hi', 10, 50],
+        ['text', 'committed before Tab', 10, undefined],
+        ['keyDown', 66, 11, 50],
+        ['text', 'after Tab', 11, 50],
+        ['text', 'new composition', 11, undefined],
+      ],
+    )
+    assert.equal(f.document.activeElement, f.textareas[0])
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
+test('host action keyup tails cannot enter a restored game but isolated keyups still can', async () => {
+  const f = fixture(),
+    editor = f.canvas(),
+    capturedKey = (
+      target: EventTarget,
+      key: string,
+      keyCode: number,
+      down: boolean,
+      repeat = false,
+    ) => {
+      const event = new Event(down ? 'keydown' : 'keyup', { cancelable: true })
+      Object.assign(event, {
+        key,
+        keyCode,
+        code: key,
+        shiftKey: false,
+        ctrlKey: false,
+        altKey: false,
+        repeat,
+        isComposing: false,
+      })
+      Object.defineProperty(event, 'target', { value: target })
+      // This minimal DOM fixture has no propagation tree. Deliver the actual
+      // capture-before-target order with the same event identity.
+      f.page.dispatchEvent(event)
+      target.dispatchEvent(event)
+      return event
+    }
+  try {
+    f.coordinator.focus(101)
+    editor.focus()
+    assert.equal(capturedKey(editor, 'Enter', 13, true).defaultPrevented, false)
+    f.coordinator.focus(101)
+    assert.equal(capturedKey(f.textareas[0]!, 'Enter', 13, true, true).defaultPrevented, true)
+    assert.equal(capturedKey(f.textareas[0]!, 'Enter', 13, false).defaultPrevented, false)
+    // The observed host pair suppresses exactly one tail, not all unpaired ups.
+    capturedKey(f.textareas[0]!, 'Enter', 13, false)
+    capturedKey(f.textareas[0]!, 'Enter', 13, true)
+    capturedKey(f.textareas[0]!, 'Enter', 13, false)
+    editor.focus()
+    capturedKey(editor, 'Escape', 27, true)
+    f.coordinator.focus(101)
+    capturedKey(f.textareas[0]!, 'Escape', 27, true)
+    capturedKey(f.textareas[0]!, 'Escape', 27, false)
+    await settle()
+    // Font selection suspends game input while its controls own the keydown.
+    f.coordinator.setSuspended(true)
+    editor.focus()
+    capturedKey(editor, 'Enter', 13, true)
+    f.coordinator.setSuspended(false)
+    f.coordinator.focus(101)
+    capturedKey(f.textareas[0]!, 'Enter', 13, false)
+    editor.focus()
+    capturedKey(editor, ' ', 32, true)
+    f.dispatch(f.page, 'blur')
+    f.coordinator.focus(101)
+    capturedKey(f.textareas[0]!, ' ', 32, false)
+    capturedKey(f.textareas[0]!, 'a', 65, false)
+    await settle()
+    assert.deepEqual(
+      f.packets.flatMap((packet) =>
+        packet.type === 'keyDown' || packet.type === 'keyUp' ? [[packet.type, packet.key]] : [],
+      ),
+      [
+        ['keyUp', 13],
+        ['keyDown', 13],
+        ['keyUp', 13],
+        ['keyDown', 27],
+        ['keyUp', 27],
+        ['keyUp', 32],
+        ['keyUp', 65],
+      ],
+    )
+    assert.deepEqual(f.keys.at(-1), [])
+    assert.deepEqual(f.errors, [])
+  } finally {
+    f.close()
+  }
+})
+
 for (const [changed, route] of [
   ['revision', { windowId: 202, revision: 11, focused: 22, imeMode: 1 }],
   ['receiver', { windowId: 303, revision: 10, focused: 22, imeMode: 1 }],

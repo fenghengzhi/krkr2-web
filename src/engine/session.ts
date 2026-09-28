@@ -230,7 +230,7 @@ export class EngineSession {
   private readonly windowInputViews = new Map<number, string>()
   private readonly keyboardRoutes = new Map<
     number,
-    { signature: string; route: NonNullable<InputView['keyboardRoute']> }
+    { signature: string; inputSignature: string; route: NonNullable<InputView['keyboardRoute']> }
   >()
   private nextKeyboardRouteRevision = 1
   private windowsView = ''
@@ -1811,21 +1811,24 @@ export class EngineSession {
       sourceController = this.inputControllers.get(source.id),
       focused = controller?.focused ?? 0,
       imeMode = controller?.view().imeMode ?? 0,
-      signature = JSON.stringify([
+      inputSignature = JSON.stringify([
         receiver.id,
-        focused,
-        controller?.focusRevision ?? 0,
         controller?.epoch ?? 0,
         controller?.ownershipEpoch ?? 0,
-        sourceController?.focusRevision ?? 0,
         sourceController?.epoch ?? 0,
         sourceController?.ownershipEpoch ?? 0,
-        imeMode,
         receiver.state.keyboardRevision,
         source.state.keyboardRevision,
         this.windowInputGeneration,
         !!this.windowModals?.blocked(source.id),
         this.fontSelection.active,
+      ]),
+      signature = JSON.stringify([
+        inputSignature,
+        focused,
+        controller?.focusRevision ?? 0,
+        sourceController?.focusRevision ?? 0,
+        imeMode,
       ]),
       previous = this.keyboardRoutes.get(source.id)
     if (previous?.signature === signature) return previous.route
@@ -1834,8 +1837,12 @@ export class EngineSession {
       focused,
       imeMode,
       revision: this.nextKeyboardRouteRevision++,
+      inputRevision:
+        previous?.inputSignature === inputSignature
+          ? previous.route.inputRevision!
+          : this.nextKeyboardRouteRevision++,
     }
-    this.keyboardRoutes.set(source.id, { signature, route })
+    this.keyboardRoutes.set(source.id, { signature, inputSignature, route })
     return route
   }
   private refreshKeyboardRoutes(): void {
@@ -1859,6 +1866,11 @@ export class EngineSession {
       (!Number.isSafeInteger(packet.keyboardRouteRevision) || packet.keyboardRouteRevision < 1)
     )
       throw new Error('Invalid keyboard route revision')
+    if (
+      packet.keyboardInputRevision !== undefined &&
+      (!Number.isSafeInteger(packet.keyboardInputRevision) || packet.keyboardInputRevision < 1)
+    )
+      throw new Error('Invalid keyboard input revision')
     if (
       (packet.type === 'keyDown' || packet.type === 'keyUp') &&
       packet.systemKey !== undefined &&
@@ -1931,11 +1943,16 @@ export class EngineSession {
     if (keyboard) {
       if (!window.state.visible) return ignoredAdmission()
       const route = this.keyboardRoute(window)
-      // Physical observation above must still release keys whose old logical
-      // route was retired while DOM/Worker messages were crossing.
+      // Ordinary keystrokes follow focus moves performed by preceding input
+      // (such as Tab) even before the updated view reaches the DOM. IME commits
+      // retain exact Layer ownership. Both generations retire when either
+      // Window/receiver or its input lifetime changes. Physical observation
+      // above still releases keys from a retired route.
       if (
-        packet.keyboardRouteRevision !== undefined &&
-        packet.keyboardRouteRevision !== route.revision
+        packet.keyboardInputRevision !== undefined
+          ? packet.keyboardInputRevision !== route.inputRevision
+          : packet.keyboardRouteRevision !== undefined &&
+            packet.keyboardRouteRevision !== route.revision
       )
         return ignoredAdmission()
       if (
@@ -1970,6 +1987,12 @@ export class EngineSession {
           this.registeredWindow(windowId) === window &&
           this.registeredWindow(receiver.id) === receiver &&
           (!keyboard || window.state.visible) &&
+          // Admission can precede an earlier callback's focus change. A
+          // composition queued behind it must not commit to the new Layer.
+          (packet.type !== 'text' ||
+            packet.keyboardInputRevision !== undefined ||
+            packet.keyboardRouteRevision === undefined ||
+            packet.keyboardRouteRevision === this.keyboardRoute(window).revision) &&
           generation === this.windowInputGeneration &&
           (!this.windowModals?.blocked(windowId) ||
             packet.type === 'cancel' ||

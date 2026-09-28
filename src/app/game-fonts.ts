@@ -138,7 +138,12 @@ export function createGameFonts(actions: FontActions) {
             ? '本机字体'
             : '浏览器通用字体'
       row.addEventListener('click', () => {
-        if (enabled) select(font.name)
+        if (enabled) {
+          select(font.name)
+          // Pointer selection owns subsequent list navigation even on hosts
+          // where clicking a button does not focus it by default.
+          row.focus({ preventScroll: true })
+        }
       })
       row.addEventListener('dblclick', () => {
         if (enabled && current) void actions.choose(current.id, font.name)?.catch(showError)

@@ -31,6 +31,8 @@ export class BrowserInputCoordinator {
   private readonly inputs = new Map<number, InputView>()
   private readonly pressed = new Set<number>()
   private readonly physicalOwners = new Map<number, number>()
+  private readonly hostKeys = new Set<number>()
+  private readonly hostKeyEvents = new WeakSet<KeyboardEvent>()
   private publishedKeys = ''
   private queue: QueuedInput[] = []
   private active?: SurfaceInput
@@ -57,14 +59,40 @@ export class BrowserInputCoordinator {
       },
       { signal: this.abort.signal, capture: true },
     )
+    // A host control can close itself and restore game focus on keydown. Its
+    // matching keyup still belongs to that host action. Record only observed
+    // host keydowns: isolated game keyups retain the native trap-key contract.
+    window.addEventListener(
+      'keydown',
+      (event) => {
+        if (this.closed) return
+        const key = virtualKey(event)
+        if (!key) return
+        const game =
+          !this.suspended &&
+          this.active?.visible &&
+          !this.active.blocked &&
+          this.active.input.ownsFocus(event.target)
+        if (game && event.repeat && this.hostKeys.has(key)) {
+          this.hostKeyEvents.add(event)
+          // A held host key can repeat after focus returns to the textarea.
+          // Suppress its default edit as well as its game key callback.
+          event.preventDefault()
+        } else if (game) this.hostKeys.delete(key)
+        else this.hostKeys.add(key)
+      },
+      { signal: this.abort.signal, capture: true },
+    )
     // A key may be released over a menu or another page control after canvas blur.
     // This observer only releases previously observed physical keys; script events
     // still originate from the active surface's textarea/canvas.
     window.addEventListener(
       'keyup',
       (event) => {
-        if (this.closed || this.suspended) return
+        if (this.closed) return
         const key = virtualKey(event)
+        if (this.hostKeys.delete(key)) this.hostKeyEvents.add(event)
+        if (this.suspended) return
         this.physicalOwners.delete(key)
         if (this.pressed.delete(key)) this.keys()
       },
@@ -199,7 +227,8 @@ export class BrowserInputCoordinator {
           this.clearPhysical()
         } else this.observeFocus(nextTarget)
       },
-      keyboard: () => current() && this.active === surface,
+      keyboard: (event) =>
+        current() && this.active === surface && (!event || !this.hostKeyEvents.has(event)),
       mouse: (type, buttons) => {
         if (!current() || (this.mouseOwner && this.mouseOwner !== surface)) return false
         if (type === 'down') this.mouseOwner = surface
@@ -393,6 +422,7 @@ export class BrowserInputCoordinator {
 
   private clearPhysical(): void {
     if (this.closed) return
+    this.hostKeys.clear()
     this.pressed.clear()
     this.physicalOwners.clear()
     this.keys()

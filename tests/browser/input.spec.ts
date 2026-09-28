@@ -1,9 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
-async function evaluate(page: Page, source: string, value: string) {
-  await page.locator('#expression').fill(source)
-  await page.locator('#evaluate').click()
-  await expect(page.locator('#logs p span').last()).toHaveText(value)
-}
+import { test, expect } from '@playwright/test'
+import { evaluate } from '../helpers/browser-expression.ts'
 const source = String.raw`
 var window=new Window();window.setInnerSize(160,80);window.visible=true;
 var root=new Layer(window,null);root.setSize(160,80);root.fillRect(0,0,160,80,0xff101010);
@@ -14,7 +10,8 @@ class Control extends Layer {
   function onMouseUp(x,y,button,shift){position=name+":"+x+","+y;}
   function onClick(x,y){clicked+=name;Debug.message("clicked="+clicked);}
   function onKeyDown(key,shift,process){keys+=key+":"+System.getKeyState(key)+",";if(key==88)Debug.message("key-state="+key+":"+System.getKeyState(key));super.onKeyDown(...);}
-  function onKeyPress(key,process){text+=key;}
+  function onKeyPress(key,process){text+=key;Debug.message("input-text:"+text+":layer="+name);}
+  function onFocus(){Debug.message("input-focus:"+name);}
   function onTouchDown(x,y,cx,cy,id){touches++;}
 }
 var a=new Control("a",0),b=new Control("b",60);
@@ -55,6 +52,10 @@ for (const backend of ['asyncify', 'jspi'])
     await expect(page.locator('#logs')).toContainText('clicked=a')
     await page.keyboard.press('Tab')
     await page.keyboard.type('Hi')
+    // Keep Tab and typing adjacent. Only after all real key events have been
+    // generated do we await their TJS receipt, before moving to the console.
+    // Separate focus/text logs retain component evidence if delivery fails.
+    await expect(page.getByText('input-text:Hi:layer=b', { exact: true })).toBeVisible()
     await evaluate(page, 'window.focusedLayer===b && text=="Hi"', '1')
     await canvas.focus()
     await page.keyboard.down('Control')
