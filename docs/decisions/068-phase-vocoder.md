@@ -218,8 +218,12 @@ zero cancellations, skips, or todos. The archived TAP identifies 64 direct
 `Member "__snapshotPhaseVocoderFilters" does not exist` failures and eight
 assertion failures containing that same error. The remaining two failures are
 the source/bytecode native snapshot fixture. Browser media failures also reported
-the sound-open error; other browser jobs were still running when these repairs
-were prepared, so this entry is not a final browser or aggregate result.
+the sound-open error. The workflow later completed with failure; the WebKit
+regular job reached its 45-minute job limit without a final JSON report. Its
+list log records a failure in the same direct-Worklet resumed-label assertion;
+that observation does not establish the missing label's delivery time. The
+Firefox timeline below remains browser-specific evidence, not a reconstructed
+WebKit timeline.
 
 The production lookup defect was in the TJS `open` method: an unqualified
 `WaveSoundBuffer` searches the receiver before the global object and resolves the
@@ -268,7 +272,7 @@ and its accompanying report; the original failure remains unchanged.
 The fixture repair pauses the actual direct-test mixer in the page's capture
 completion handler and collects the receipt before returning PCM to Playwright.
 It records real source snapshots, request/receipt context times and derived
-context-frame bounds, and preserves observer events between capture stages.
+context-frame estimates, and preserves observer events between capture stages.
 The early endpoint must remain below source frame 9600, while the resumed endpoint
 must pass it; the original exact label expectations are retained. Completion
 control is opt-in for these direct timeline captures, and the player/Worker path

@@ -219,18 +219,30 @@ export class SessionClient {
   }
   async stop(): Promise<void> {
     if (this.disposed) return
+    const timeout = new Error('Worker did not stop in time and was terminated')
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([
         this.call('stop'),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
-            this.dispose()
-            reject(new Error('Worker did not stop in time and was terminated'))
+            // RPC disposal synchronously rejects pending calls, including Stop.
+            // Settle this race with the actual timeout reason before cleanup.
+            reject(timeout)
           }, 2000)
         }),
       ])
       this.dispose()
+    } catch (error) {
+      if (error === timeout) {
+        try {
+          this.dispose()
+        } catch (cleanup) {
+          throw new AggregateError([timeout, cleanup], timeout.message, { cause: timeout })
+        }
+      }
+      // A real Stop failure can be retried, for example after saving failed.
+      throw error
     } finally {
       if (timer) clearTimeout(timer)
     }

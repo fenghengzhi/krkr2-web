@@ -405,6 +405,7 @@ clipboardMark("cancel-done");`),
       page,
       browserName,
     }, info) => {
+      await page.addInitScript({ path: resolve('tests/helpers/worker-observation.js') })
       const setup = await prepare(page, backend, browserName)
       let retired: ElementHandle<SVGElement | HTMLElement> | null = null
       try {
@@ -460,7 +461,23 @@ clipboardMark("cancel-done");`),
         try {
           await stop(page, setup.errors)
         } finally {
-          await retired?.dispose()
+          try {
+            if (!page.isClosed()) {
+              const observation = await page.evaluate(() =>
+                (
+                  window as unknown as {
+                    __krkrWorkerObservation?: () => unknown
+                  }
+                ).__krkrWorkerObservation?.(),
+              )
+              await info.attach('clipboard-stop-worker-observation', {
+                contentType: 'application/json',
+                body: JSON.stringify(observation ?? { unavailable: 'not-installed' }, null, 2),
+              })
+            }
+          } finally {
+            await retired?.dispose()
+          }
         }
       }
     })

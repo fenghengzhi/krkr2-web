@@ -84,3 +84,13 @@ WebKit 的这次拒绝也有自动化专属依据：固定 Playwright WebKit 原
 `page.evaluate()` 在固定驱动里会模拟用户激活，所以不能用它启动请求来证明无激活规则。正向操作来自页面真实 click；无激活用例由全新页面自己的初始脚本记录状态与结果，完成前不通过 evaluate 污染激活。[Chromium](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/chromium/crExecutionContext.ts)、[WebKit](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/webkit/wkExecutionContext.ts)、[Firefox](https://github.com/microsoft/playwright/blob/v1.63.0/browser_patches/firefox/juggler/content/Runtime.js)。
 
 官方测试明确现代 headless 使用每 browser 实例私有的剪贴板；通过这些用例只能证明真实浏览器 API/后端行为，不能证明与桌面应用的 OS 剪贴板互通，也不能推导同一 browser 各 context 隔离。当前 hosted Firefox 的 headed 配置须按实际 OS 显示后端记录，不能混称 headless 私有。用例不得互相并行覆盖同一剪贴板；报告保留实际 browser revision、headless 配置与 grant。任何结果都不承诺任意部署、权限策略或系统剪贴板总可用。[固定 browser inventory](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/browsers.json)、[headless 隔离证据](https://github.com/microsoft/playwright/blob/v1.63.0/tests/library/permissions.spec.ts)。
+
+## 36455312915 的停止诊断与后续修订
+
+[36455312915](https://github.com/fenghengzhi/krkr2-web/actions/runs/36455312915) 的 WebKit JSPI/bytecode startup Clipboard Stop 用例在首次停止、旧按钮隔离及新 Worker 的真实 `fresh-read:1` 后，最终停止时记录两条 `RPC client has been disposed.`。实际 writeText/read 都已完成，失败位于 finally 的日志断言，不能推断剪贴板读取失败或旧按钮污染了新 Worker。精确 trace 索引保存在工作区 `out/verification/github-actions/36455312915/independent-failures-index.json`；该轮没有 Worker/RPC 阶段观察器，不能确认这两条日志分别来自哪两个调用，也不能仅凭两秒左右的页面时序认定 Worker 内部卡在何处。
+
+静态审查确认一个独立的诊断缺陷：`SessionClient.stop` 的两秒 watchdog 原先先 dispose RPC，再 reject 超时；RPC dispose 同步拒绝尚未完成的 stop 调用，使 disposed 错误先赢 Promise.race，覆盖了预期的超时原因。修订让独有的超时错误先结算，再在受控异步分支执行清理；清理若也失败，以 AggregateError 保留两个错误。普通 RPC 错误仍原样传播，不强制销毁可供重试的 Worker。`LibraryClient.cancel` 的相同顺序问题也修正为先结算超时取消，再执行原有强制关闭策略；清理错误仍向调用者传播。两秒时限没有增加。
+
+新增两个客户端边界定义，三浏览器共六项：使用真实 SessionClient／LibraryClient、RPC 和 Worker，仅在页面消息入口明确截留一次真实 Stop/cancel 回包，要求 watchdog 的结果、Worker 终止及拥有的 MessagePort 关闭均正确，随后新客户端实际 prepare／list／stop 可用。Session 路径只准备源文件，不启动 WASM；这些定义验证客户端超时与清理合同，不是历史 WebKit 慢 Stop 的复现或修复证明。
+
+原 Clipboard Stop 变体增加现有透明 Worker/RPC 观察器的 finally 附件，保留真实浏览器 API、旧按钮隔离、成功读回以及日志中不得出现超时或 disposed 的全部断言。该修订及新增定义尚待下一批 GitHub-hosted Actions，旧失败保持原身份，本地没有执行验证。

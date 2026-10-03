@@ -1,16 +1,28 @@
 # 插件以外的实现进度
 
-2026-09-29 集成候选已合并 058–069 的非插件改动：System 对话框、视频混合图层、Clipboard、province、窗口输入与焦点、图像颜色键、系统颜色、Pad、公开 Storages 路径、内置 PhaseVocoder 及显示几何。当前会话协议 **20**、TJS ABI **5**、字体 ABI **2**，保留 `nativeReleaseState:1`、`nativeClipboard:1`，并要求 `nativeSystem:2`、`nativePad:1`、`nativeStorages:1`、`nativePhaseVocoder:1`。Pad 的 24 个属性由真实 native class 实现，保存使用共享宿主模态作用域；公开路径统一为 `game://./`，保存层继续使用原相对键。具体范围见 [063](decisions/063-window-attention.md)、[065](decisions/065-system-colors.md)、[066](decisions/066-pad-editor.md)、[067](decisions/067-storage-public-paths.md)、[068](decisions/068-phase-vocoder.md)、[069](decisions/069-system-display.md)。本段是候选实现状态，尚未作为已验证版本合入 main。
+2026-10-04 迁移后在 `codex/migrated-window-attention` 接续原候选，保留迁移的所有未提交修订；没有从旧 main 重新开发。已静态复查客户端 Stop/cancel watchdog 的先结算、后清理顺序，并新增 [072](decisions/072-runtime-write-settlement.md) 的脚本异常／尾部写入双错保留及八项真实 VM 定义。它们尚未验证，静态预计 Node 库存在下列 2,512 项基础上增加八项。按用户要求整批触发 GitHub-hosted Actions，不实时监控；下一次准备验证时取回上一批结果，未取回结果的运行始终记为待核验。兼容检查仍须绑定成功的精确 build-run，不能在构建结果未知时宣称完成。
+
+本机仅恢复了 `36455312915` 的两份 Markdown 摘要；完整 ZIP、JSON 首错索引及 storage12 原始 trace 尚未迁入，历史归档收尾保持未完成。交接提到的 `next-after071-audit.md` 未包含在小迁移包中，不能声称已阅读。UPDATE 实际路径绑定、Web 帮助链路和其他媒体／图形兼容仍是后续工作。
+
+2026-09-29 集成候选已合并 058–071 的非插件改动：System 对话框、视频混合图层、Clipboard、province、窗口输入与焦点、图像颜色键、系统颜色、Pad、公开 Storages 路径、内置 PhaseVocoder、显示几何、虚拟文件选择器及文本流写入模式。当前会话协议 **22**、TJS ABI **5**、字体 ABI **2**，保留 `nativeReleaseState:1`、`nativeClipboard:1`，并要求 `nativeSystem:2`、`nativePad:1`、`nativeStorages:2`、`nativePhaseVocoder:1`、`nativeTextStreams:1`。Pad 的 24 个属性由真实 native class 实现，保存使用共享宿主模态作用域；公开路径统一为 `game://./`，保存层继续使用原相对键。具体范围见 [063](decisions/063-window-attention.md)、[065](decisions/065-system-colors.md)、[066](decisions/066-pad-editor.md)、[067](decisions/067-storage-public-paths.md)、[068](decisions/068-phase-vocoder.md)、[069](decisions/069-system-display.md)、[070](decisions/070-storage-selector.md)、[071](decisions/071-text-writer-modes.md)。本段是候选实现状态，尚未作为已验证版本合入 main。
 
 本批包含 CSS 半透明系统颜色的合成修复及输入路由夹具校正，并已合入 main 的历史验证文档。前次构建 [36442487130](https://github.com/fenghengzhi/krkr2-web/actions/runs/36442487130) 因负向测试的 TypeScript 类型断言失败，普通用例未运行；修订后的 [36443186745](https://github.com/fenghengzhi/krkr2-web/actions/runs/36443186745) 被取消，Node 实际 2,172 通过、2 失败，浏览器已报告 97 通过、260 失败、1,260 无终态报告，直接运行时 6 组通过。同次构建的 [36443590538](https://github.com/fenghengzhi/krkr2-web/actions/runs/36443590538) 兼容检查失败，24 失败、54 未运行。浏览器共享初始化错误为 Highlight 颜色包含透明度；修订及新功能需要新的完整托管结果，不能追认上述失败为通过。
 
-下一次完整回归的静态库存预计为 2,396 项 Node、1,881 项浏览器和 6 组直接运行时，最终数量和结论以实际 Actions 报告为准。所有测试、构建、类型检查及浏览器探针只在 GitHub-hosted runners 执行；按功能批次运行，原 KAG／旧 ABI 兼容检查复用相同构建。插件仍不在本阶段范围内，PhaseVocoder 的原版数值与边界兼容、流式媒体、旧编码及其他系统／图形接口继续进行，完整非插件目标尚未完成。
+下一次完整回归的静态库存预计为 2,512 项 Node、1,983 项浏览器和 6 组直接运行时，最终数量和结论以实际 Actions 报告为准。所有测试、构建、类型检查及浏览器探针只在 GitHub-hosted runners 执行；按功能批次运行，原 KAG／旧 ABI 兼容检查复用相同构建。插件仍不在本阶段范围内，PhaseVocoder 的原版数值与边界兼容、流式媒体、旧编码及其他系统／图形接口继续进行，完整非插件目标尚未完成。
 
-最新已结束的 [36448613310](https://github.com/fenghengzhi/krkr2-web/actions/runs/36448613310) 对应 `eca4086`，实际 **Node 2,304 通过／2,308，浏览器 1,796 通过／1,833，直接运行时 6／6**；Node 4 项失败，浏览器 33 项失败、4 项超时，无遗漏、跳过或重试。36 个 Pad 浏览器失败已按原始 trace 分开诊断；另一个 WebKit image-writing 失败同时保留纯背景原截图与浏览器二次读取全零两份证据，原因仍未证明。同次构建 [36448778629](https://github.com/fenghengzhi/krkr2-web/actions/runs/36448778629) 实际 30 项旧 ABI 通过、9 项 KAG 失败、39 项未运行，9 项首错均为缺失 System.desktopLeft。后续 Node 观测边界、Pad 焦点／停止及 System 显示属性修订不改变这两次失败的身份。
+此前已结束的 [36448613310](https://github.com/fenghengzhi/krkr2-web/actions/runs/36448613310) 对应 `eca4086`，实际 **Node 2,304 通过／2,308，浏览器 1,796 通过／1,833，直接运行时 6／6**；Node 4 项失败，浏览器 33 项失败、4 项超时，无遗漏、跳过或重试。36 个 Pad 浏览器失败已按原始 trace 分开诊断；另一个 WebKit image-writing 失败同时保留纯背景原截图与浏览器二次读取全零两份证据，原因仍未证明。同次构建 [36448778629](https://github.com/fenghengzhi/krkr2-web/actions/runs/36448778629) 实际 30 项旧 ABI 通过、9 项 KAG 失败、39 项未运行，9 项首错均为缺失 System.desktopLeft。后续 Node 观测边界、Pad 焦点／停止及 System 显示属性修订不改变这两次失败的身份。
 
 068 的 DSP 使用共享 TypeScript FFT／流式处理链并接入生产 AudioWorklet，实际波形、标签和寿命验收仍待新批次。对固定源码的标签重复偏移行为采用已明示的 Web 归一化策略，不宣称全部原版数值或事件时序等价。069 的六个整数只读显示属性来自本 Player 的真实 stage／全屏 viewport；它没有请求 OS 窗口管理权限。上述新增功能与本轮修复将统一验证。
 
 合并 068／069 后的 [36454241579](https://github.com/fenghengzhi/krkr2-web/actions/runs/36454241579) 对应 `20c0dec`，原生编译及缓存成功，但新增 PhaseVocoder 测试有 17 条 TypeScript 诊断：16 条事件联合类型访问未缩窄、1 条空数组断言将随后要修改的数组缩窄成 never[]。实际普通测试 **0 项**，未生成 test-build，未启动同构建兼容工作流；该失败及原始日志独立保留。后续测试类型修订不改变原断言，也不把构建成功阶段视为测试通过。
+
+070 将 `Storages.selectFile` 接入真实 native 方法、当前游戏虚拟目录、已有共享模态栈和 DOM 文件选择器，覆盖原版 getter／回写顺序、只读归档成员、存档覆盖确认、暂停和 Stop。针对模态 continuation 进入前失败，增加精确请求清理与严格限定的 runtime 撤销入口，保留其他 scope 和原错误。新增 78 项 Node、48 项浏览器定义及 6 项原始 KAG 自选持久存读档，下一次兼容库存为 84；这些新增定义尚未执行。通用 runtime 的未捕获 ScriptError 与尾部写失败双错误覆盖仍属已记录的后续工作，不能算作本切片已修。
+
+[同构建兼容 36455447465](https://github.com/fenghengzhi/krkr2-web/actions/runs/36455447465) 复用完整测试 `36455312915` 的 `56769cf` 产物，实际 **78/78 通过**（48 项原始 KAG、30 项旧 ABI，三个浏览器各 26），构建与所有来源哈希一致，无未运行或遗漏。它不验证后续音频、显示夹具、指针清理修订及 070／071，也不替代已结束但失败的完整回归。此次完整回归的 Node 实际 2,322/2,396、直接运行时 0/6，主要阻塞已定位为 Wave 实例构造方法遮蔽全局滤镜 helper；修订明确使用全局类。其余独立失败、实际结果和修复范围分别保留在 052、068、069 文档中。
+
+071 在创建真实文本写入器时校验模式，支持原版 `c2` 压缩和 `z` 覆盖、保留显式 `o0` 的原文件尾部，统一首次 `o`、八进制及 NUL 终止规则；binary 与 text 由 native 入口区分。保留 Web UTF-8／append 扩展，尚未实现原版 UPDATE 必须命中已有实际路径的完整绑定。新增 38 项 Node、42 项浏览器定义；其实现和新增能力检查尚待整批 Actions 验证。
+
+完整回归 [36455312915](https://github.com/fenghengzhi/krkr2-web/actions/runs/36455312915) 的 WebKit 常规作业触及 **45 分钟 job 上限**，官方 annotation 已保留。日志声明 586 项，实际连续报告 453 通过、25 未通过，另 108 项没有终态报告；没有生成该作业的 results.json，不能推断这些用例未运行或通过。合并其他完整 JSON 报告，该轮浏览器范围为 **1,691 通过、82 未通过、108 无终态报告／1,881**；WebKit 的 25 个日志失败没有最终 JSON 类型分类，不能补记成断言失败或 case 超时。其 Pad Clipboard 四项和图像写入两项已报告通过，但通过用例的相应正文附件没有落盘，不能声称 WebKit 的细节证据完整。Pad／input 的两个启动失败均定位到 CSS 系统色 1×1 Canvas 读回异常，发生在 Session Worker 建立之前；Canvas 底层失败原因尚未证明。后续恢复处理、停止清理及套件分片将作为下一批候选验证。启动恢复和客户端 watchdog 边界另新增 12 项浏览器定义，已计入上述预计库存；两分片本身不增加或删减用例。
 
 以下保留 main 及此前阶段当时的已验证状态与历史证据。
 

@@ -55,17 +55,20 @@ export class LibraryClient {
     if (this.importing?.id === operation) this.importing.cancelled = true
     if (!this.rpc) return
     const rpc = this.rpc
+    const timeout = Symbol('forced library cancellation')
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      await Promise.race([
+      const outcome = await Promise.race([
         rpc.call('cancel', [operation]),
-        new Promise<void>((resolve) => {
+        new Promise<typeof timeout>((resolve) => {
           timer = setTimeout(() => {
-            if (this.rpc === rpc) this.close()
-            resolve()
+            // Closing RPC synchronously rejects pending cancel calls. Settle
+            // this race first; cleanup failures remain part of cancel below.
+            resolve(timeout)
           }, 2000)
         }),
       ])
+      if (outcome === timeout && this.rpc === rpc) this.close()
     } finally {
       if (timer) clearTimeout(timer)
     }

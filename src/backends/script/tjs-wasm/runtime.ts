@@ -716,9 +716,21 @@ export class TjsWasmRuntime implements ScriptRuntime {
       )
       try {
         result = this.consumeReply(pointer)
-      } finally {
-        await this.flush()
+      } catch (primary) {
+        try {
+          await this.flush()
+        } catch (write) {
+          throw new AggregateError(
+            [primary, write],
+            primary instanceof Error ? primary.message : String(primary),
+            { cause: primary },
+          )
+        }
+        throw primary
       }
+      // A successful reply still needs durable writes; its returned handle is
+      // released by the outer catch if this flush fails.
+      await this.flush()
       this.checkOwnerFailure()
       if (this.control.cancelled) {
         this.control.check()
