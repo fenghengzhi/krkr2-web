@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+当前待核验批次：[Full test suite 37162952459](https://github.com/fenghengzhi/krkr2-web/actions/runs/37162952459)，精确提交 `f976640b1b031ac8fb6fb1bd75f555178753faa7`，由候选分支 push 触发。2026-10-04 仅查询一次以确认运行创建及提交绑定，当时为 in_progress、conclusion=null；未取回终态，不是通过记录。下一批验证前取回该轮全部结果和两份独立 WebKit 分片产物；确认其 build 成功后，兼容工作流必须使用这个 build-run，并在该提交或已证明同应用源码的 ref 上启动。历史 `36455312915` 归档缺口继续保留。
+
 2026-10-04 迁移后在 `codex/migrated-window-attention` 接续原候选，保留迁移的所有未提交修订；没有从旧 main 重新开发。已静态复查客户端 Stop/cancel watchdog 的先结算、后清理顺序，并新增 [072](decisions/072-runtime-write-settlement.md) 的脚本异常／尾部写入双错保留及八项真实 VM 定义。它们尚未验证，静态预计 Node 库存在下列 2,512 项基础上增加八项。按用户要求整批触发 GitHub-hosted Actions，不实时监控；下一次准备验证时取回上一批结果，未取回结果的运行始终记为待核验。兼容检查仍须绑定成功的精确 build-run，不能在构建结果未知时宣称完成。
 
 本机仅恢复了 `36455312915` 的两份 Markdown 摘要；完整 ZIP、JSON 首错索引及 storage12 原始 trace 尚未迁入，历史归档收尾保持未完成。交接提到的 `next-after071-audit.md` 未包含在小迁移包中，不能声称已阅读。UPDATE 实际路径绑定、Web 帮助链路和其他媒体／图形兼容仍是后续工作。
