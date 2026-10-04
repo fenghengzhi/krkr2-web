@@ -2,6 +2,8 @@
 
 状态：实施候选，尚未执行验证。所有构建、类型检查、VM、Node 和浏览器检查只在 GitHub-hosted Actions 运行。074 的运行与本切片分开记录；没有用前批次的测试数量证明新行为。
 
+候选已随 `d4bfabb593a598d8999da74dfe5467f512910555` 推送至 [37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481)。首次查询时 in_progress，只确认运行创建；尚未取回执行结果，下面的用例定义不是通过记录。
+
 ## 实际缺失链路与固定来源
 
 原有 `Layer.cursorX/cursorY` 只有 getter，`setCursorPos` 未实现。固定原始 KAG `system/MessageLayer.tjs` 的 `setFocusToLink` 在 2275–2276 写入两个属性；`onKeyDown` 的方向键和 Tab，以及 `onBeforeFocus`，都会调用这个原方法。鼠标点击能选择链接并不代表键盘这条路径可用。

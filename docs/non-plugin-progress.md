@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481)，精确提交 `d4bfabb593a598d8999da74dfe5467f512910555`。075、音频观测顺序及帮助控制台夹具修正已推送；首次查询仅确认创建和提交身份，当时 **in_progress／conclusion=null**，未检查实时作业。后续准备批次时先补取 074 的未决终态/缺失产物，再取回本批完整结果；失败、取消和未报告继续独立保留。整体非插件目标仍 active，未合入旧 main。
+
 2026-10-05 下一批实施 [075 Layer 光标写入](decisions/075-layer-script-cursor.md)：原 KAG 键盘链接导航确实写 `cursorX/cursorY`，候选补齐每层暂存 X、Y 提交、setCursorPos、可见虚拟光标、既有鼠标事件路径与真实输入接管；协议候选升 24，新增原 KAG 键盘探针，兼容库存预期 96 项。尚未执行该候选。
 
 准备 075 时仅查询一次 [37227951808](https://github.com/fenghengzhi/krkr2-web/actions/runs/37227951808)：当时仍 **in_progress／conclusion=null**，Node 和两份 WebKit 常规分片尚在运行，不再连续轮询。该快照已发布的 15 份 ZIP 已全部取回、核对 GitHub digest 并归档；它们不是整个运行的完整归档。已完成 Chromium／Firefox 常规报告各 **632 通过、2 失败**，四项都在帮助测试的多行表达式填入单行输入框后、提交前失败；本批仅把同一表达式整理成单行，保留原断言。兼容 Chromium／WebKit 各 **30/30**，Firefox **29/30**，后者原 KAG Help Asyncify 在第一阶段截图超时，仍独立保留。此记录不代表整批通过，余下终态及产物需后续取回。
