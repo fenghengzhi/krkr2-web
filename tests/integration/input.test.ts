@@ -212,15 +212,15 @@ var seen="";w.onMouseDown=function(){seen=child.cursorX+","+child.cursorY;};Syst
     await session.start()
     const pending = session.input({ type: 'down', x: 20, y: 40, button: 0, shift: 8, clicks: 1 })
     await session.pointerMove(50, 80)
-    assert.equal(await session.evaluate('child.cursorX+","+child.cursorY'), '15,23')
+    assert.equal(await session.evaluate('child.cursorX+","+child.cursorY'), '10,13')
     assert.equal(await session.evaluate('seen'), '')
     await session.evaluate('System.eventDisabled=false')
     await pending
-    assert.equal(await session.evaluate('seen'), '15,23')
+    assert.equal(await session.evaluate('seen'), '10,13')
     session.setActivity({ sequence: 1, state: 'hidden', pauseWhenHidden: false })
     session.pointerState(100, 120)
     session.setActivity({ sequence: 2, state: 'visible', pauseWhenHidden: false })
-    assert.equal(await session.evaluate('child.cursorX+","+child.cursorY'), '15,23')
+    assert.equal(await session.evaluate('child.cursorX+","+child.cursorY'), '10,13')
   } finally {
     await session.stop()
   }

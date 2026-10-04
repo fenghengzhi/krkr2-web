@@ -158,19 +158,24 @@ function exercise(){
 function project(){
   win.left=90;win.top=-80;win.setLayerPos(-7,5);win.setZoom(2,3);
   parent.setPos(10,-5);child.setPos(-3,4);
+  child.setImageSize(42,31);
   child.setImagePos(-2,-1);child.setClip(2,3,10,11);
   child.setCursorPos(-1,7);return childPosition();
 }
 function fractional(){win.setZoom(1,2);child.setCursorPos(-10,-2);}
 `)
     try {
-      assert.equal(await f.run('project'), '-1,7')
+      // Native MulDiv gives origin (-5,3) and DestRect 107x80. Primary
+      // (6,6) projects to client (-1,7), then inverse integer scaling reads
+      // primary (5,6), so the child getter loses one unit on its X round trip.
+      assert.equal(await f.run('project'), '-2,7')
       await f.session.idle()
-      assert.deepEqual([cursor(f.view()).x, cursor(f.view()).y], [-3, 9])
+      assert.deepEqual([cursor(f.view()).x, cursor(f.view()).y], [-1, 7])
       await f.run('fractional')
       await f.session.idle()
-      // Primary (-3,-3) at half zoom truncates before adding layerLeft/Top.
-      assert.deepEqual([cursor(f.view()).x, cursor(f.view()).y], [-8, 4])
+      // Half zoom rounds the origin to (-4,3), then projects primary (-3,-3)
+      // to (-1,-1) by truncation using the integer DestRect size 80x60.
+      assert.deepEqual([cursor(f.view()).x, cursor(f.view()).y], [-5, 2])
     } finally { await f.stop() }
   })
 

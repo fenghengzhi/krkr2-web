@@ -1,6 +1,14 @@
 import { LayerTree } from '../scene/layers.ts'
 import type { WindowView } from '../scene/window.ts'
 import {
+  deviceInt,
+  drawDeviceGeometry,
+  fromPrimary,
+  paintBoxPoint,
+  toPrimary,
+  type DevicePoint,
+} from '../scene/draw-device.ts'
+import {
   shiftButtons,
   type InputAttention,
   type InputPacket,
@@ -21,6 +29,9 @@ export interface InputOwnershipStep {
   kind: 'ownership'
   key: string
   layer: number
+  /** Copy an existing VM-owned reference after native invalidation retired
+   * its tree/weak registration. This does not create a host-side retain. */
+  sourceKey?: string
 }
 export interface InputInvocation {
   kind: 'invoke'
@@ -32,13 +43,6 @@ export interface InputInvocation {
 export type InputStep = InputCall | InputOwnershipStep | InputInvocation
 export type InputOperation = Generator<InputStep, InputValue, unknown>
 const ref = (layer: number): LayerRef => ({ layer })
-// Native Window legacy mouse callbacks receive tjs_int coordinates. Convert
-// only their arguments: physical observation and Layer transforms retain the
-// original fractional point. Web touch packets remain real-valued.
-const windowMousePoint = (x: number, y: number): number[] => [
-  Math.trunc(x) || 0,
-  Math.trunc(y) || 0,
-]
 export class InputController {
   epoch = 0
   /** Focus/modal leases survive a transient packet reset, but never a manager clear. */
@@ -51,7 +55,6 @@ export class InputController {
   hover = 0
   point = { x: -1, y: -1 }
   shift = 0
-  private mouseAt = { x: -1, y: -1 }
   // Native manager notifications hit-test the last delivered primary integer
   // sample, independently of later Window transforms or physical observations.
   private lastMousePrimary = { x: -1, y: -1 }
@@ -96,14 +99,14 @@ export class InputController {
       if (owner === id && key.endsWith(`:${role}`)) return Number(key.split(':')[0])
     return this.manager(id)
   }
-  private ownership(role: string, id: number, manager: number): InputOwnershipStep {
+  private ownership(role: string, id: number, manager: number, sourceKey?: string): InputOwnershipStep {
     const key = `${manager}:${role}`
     if (id) this.owners.set(key, id)
     else this.owners.delete(key)
-    return { kind: 'ownership', key, layer: id }
+    return { kind: 'ownership', key, layer: id, ...(sourceKey ? { sourceKey } : {}) }
   }
-  private *own(role: string, id: number, manager: number): InputOperation {
-    yield this.ownership(role, id, manager)
+  private *own(role: string, id: number, manager: number, sourceKey?: string): InputOperation {
+    yield this.ownership(role, id, manager, sourceKey)
     return undefined
   }
   private *dropOwner(role: string, id?: number): InputOperation {
@@ -133,15 +136,16 @@ export class InputController {
     return undefined
   }
   root(): number {
-    return (
-      this.layers
-        .ids()
-        .find(
-          (id) =>
-            this.layers.get(id).primary &&
-            (!this.windowId || this.layers.get(id).windowId === this.windowId()),
-        ) ?? 0
-    )
+    let root = 0, firstManager = Infinity
+    for (const id of this.layers.ids()) {
+      const layer = this.layers.get(id)
+      if (layer.primary && layer.managerId < firstManager &&
+        (!this.windowId || layer.windowId === this.windowId())) {
+        root = id
+        firstManager = layer.managerId
+      }
+    }
+    return root
   }
   attached(id: number): boolean {
     return this.layers.has(id) && this.layers.contains(this.root(), id)
@@ -415,7 +419,8 @@ export class InputController {
         yield* this.focus(next, true)
         if (ownershipEpoch !== this.ownershipEpoch) return undefined
       }
-      if (this.capture && (!this.visible(this.capture) || !this.enabled(this.capture)))
+      if (this.capture && this.layers.has(this.capture) &&
+        (!this.visible(this.capture) || !this.enabled(this.capture)))
         this.release()
       for (const [id, layer] of this.touchCapture)
         if (!this.visible(layer) || !this.enabled(layer)) this.release(id)
@@ -482,10 +487,23 @@ export class InputController {
       this.releaseOwners('capture')
     }
   }
-  private primary(x = this.point.x, y = this.point.y) {
-    const view = this.window(),
-      zoom = view.zoomNumer / view.zoomDenom
-    return { x: (x - view.layerLeft) / zoom, y: (y - view.layerTop) / zoom }
+  private *releaseMouseCapture(): InputOperation {
+    this.released = true
+    this.capture = 0
+    // Finish the old VM reference release while the manager slot is empty.
+    // Its finalizer can reenter input or retire the Window before acquisition.
+    yield* this.dropOwner('capture')
+    return undefined
+  }
+  private drawing() {
+    const root = this.root()
+    if (!root) return undefined
+    const { width, height } = this.layers.get(root)
+    return { width, height, geometry: drawDeviceGeometry(this.window(), width, height) }
+  }
+  private primary(point: DevicePoint): DevicePoint | undefined {
+    const drawing = this.drawing()
+    return drawing && toPrimary(point, drawing.geometry, drawing.width, drawing.height)
   }
   chooseHit(id: number, hit: boolean): void {
     this.hitChoice.set(id, hit)
@@ -534,11 +552,19 @@ export class InputController {
     return ref(yield* this.hit(x, y, root, excludeSelf, getDisabled))
   }
   private local(id: number, x: number, y: number): number[] {
-    const p = this.layers.localPoint(id, x, y)
-    return [Math.floor(p.x), Math.floor(p.y)]
+    let layer = this.layers.get(id), px = BigInt(deviceInt(x)), py = BigInt(deviceInt(y))
+    while (!layer.primary) {
+      px = BigInt.asIntN(32, px - BigInt(layer.left))
+      py = BigInt.asIntN(32, py - BigInt(layer.top))
+      if (!layer.parent) break
+      layer = this.layers.get(layer.parent)
+    }
+    return [Number(px), Number(py)]
   }
   private *target(x: number, y: number): Generator<InputCall, number, unknown> {
-    return this.capture && this.attached(this.capture) ? this.capture : yield* this.hit(x, y)
+    // Native invalidation may detach a still-owned captured Layer. Shutdown
+    // suppresses its callbacks; it must not redirect the event underneath it.
+    return this.capture || (yield* this.hit(x, y))
   }
   private activeCursor(id: number): number {
     let layer = this.layers.get(id)
@@ -582,22 +608,13 @@ export class InputController {
     yield* this.notifyHintOrCursor(id, { hint: value })
     return undefined
   }
-  private *mouseMove(
-    x: number,
-    y: number,
-    shift: number,
-    force = false,
-    primaryOverride?: { x: number; y: number },
-  ): InputOperation {
+  private *mouseMove(p: { x: number; y: number }, shift: number): InputOperation {
     const epoch = this.epoch
     this.mouseDepth++
     try {
-      const changed = force || x !== this.mouseAt.x || y !== this.mouseAt.y
-      this.mouseAt = { x, y }
-      this.point = { x, y }
+      const changed = p.x !== this.lastMousePrimary.x || p.y !== this.lastMousePrimary.y
       this.shift = shift
-      const p = primaryOverride ?? this.primary()
-      this.lastMousePrimary = { x: Math.trunc(p.x) || 0, y: Math.trunc(p.y) || 0 }
+      this.lastMousePrimary = { ...p }
       let target = yield* this.target(p.x, p.y)
       if (epoch !== this.epoch) return undefined
       if (this.hover !== target) {
@@ -640,12 +657,18 @@ export class InputController {
         this.hover = 0
         yield* this.dropOwner('hover', previous)
         if (epoch !== this.epoch) return undefined
-        if (this.attached(target)) {
+        if (this.layers.has(target)) {
           this.hover = target
           yield* this.own('hover', target, this.manager(target))
+        } else if (target && target === this.capture) {
+          // Explicit invalidate retires the tree before the manager's strong
+          // capture reference. Native hover acquires that same invalid object.
+          const manager = this.ownerManager('capture', target)
+          this.hover = target
+          yield* this.own('hover', target, manager, `${manager}:capture`)
         }
       }
-      if (this.hover && changed)
+      if (this.hover && this.layers.has(this.hover) && changed)
         yield {
           target: this.hover,
           method: 'onMouseMove',
@@ -661,7 +684,7 @@ export class InputController {
       // A native ForceMouseRecheck reuses LastMouseMove primary coordinates.
       // Both hit testing and notifications retain that sample after a later
       // Window transform. Native rechecks also use zero modifier flags.
-      yield* this.mouseMove(this.point.x, this.point.y, 0, false, this.lastMousePrimary)
+      yield* this.mouseMove(this.lastMousePrimary, 0)
     return undefined
   }
   *defaultKey(id: number, kind: string, key: string | number, shift = 0): InputOperation {
@@ -710,7 +733,7 @@ export class InputController {
     this.shift = 0
     this.hover = 0
     this.releaseOwners('hover')
-    this.point = this.mouseAt = { x: -1, y: -1 }
+    this.point = { x: -1, y: -1 }
     this.hitChoice.clear()
   }
   *packet(packet: InputPacket, epoch = this.epoch): InputOperation {
@@ -737,6 +760,14 @@ export class InputController {
     }
   }
   private *dispatchPacket(packet: InputPacket): InputOperation {
+    // The Window receives the PaintBox integer point captured at admission.
+    // Retain it across callbacks; only the destination size is sampled later.
+    const mousePoint = packet.type === 'down' || packet.type === 'up' ||
+      packet.type === 'move' || packet.type === 'wheel'
+      ? packet.paintBoxPoint
+        ? { ...packet.paintBoxPoint }
+        : paintBoxPoint(this.window(), packet.x, packet.y)
+      : undefined
     if (packet.type === 'activate') {
       yield { target: 0, method: 'onActivate', args: [] }
       return
@@ -752,7 +783,7 @@ export class InputController {
     if (!this.window().visible) return
     if (packet.type === 'leave') {
       yield { target: 0, method: 'onMouseLeave', args: [] }
-      if (!this.capture) yield* this.mouseMove(-1, -1, 0)
+      if (!this.capture) yield* this.mouseMove({ x: -1, y: -1 }, 0)
       return
     }
     if (packet.type === 'text') {
@@ -783,14 +814,14 @@ export class InputController {
       yield {
         target: 0,
         method: 'onMouseWheel',
-        args: [packet.shift, packet.delta, ...windowMousePoint(packet.x, packet.y)],
+        args: [packet.shift, packet.delta, mousePoint!.x, mousePoint!.y],
       }
-      const p = this.primary()
-      if (this.focused)
+      const p = this.primary(mousePoint!)
+      if (p && this.focused)
         yield {
           target: this.focused,
           method: 'onMouseWheel',
-          args: [packet.shift, packet.delta, Math.floor(p.x), Math.floor(p.y)],
+          args: [packet.shift, packet.delta, p.x, p.y],
         }
       return
     }
@@ -806,7 +837,12 @@ export class InputController {
         method,
         args: [packet.x, packet.y, packet.width, packet.height, packet.id],
       }
-      const p = this.primary(packet.x, packet.y),
+      const drawing = this.drawing()
+      if (!drawing) return
+      const { geometry, width, height } = drawing,
+        scaleX = geometry.width ? width / geometry.width : 0,
+        scaleY = geometry.height ? height / geometry.height : 0,
+        p = { x: (packet.x - geometry.x) * scaleX, y: (packet.y - geometry.y) * scaleY },
         target = this.touchCapture.get(packet.id) ?? (yield* this.hit(p.x, p.y))
       if (packet.type === 'touchDown') {
         yield* this.dropOwner(`touch:${packet.id}`)
@@ -814,12 +850,11 @@ export class InputController {
         this.releasedTouches.delete(packet.id)
       }
       if (target) {
-        const local = this.layers.localPoint(target, p.x, p.y),
-          zoom = this.window().zoomNumer / this.window().zoomDenom
+        const local = this.layers.localPoint(target, p.x, p.y)
         yield {
           target,
           method,
-          args: [local.x, local.y, packet.width / zoom, packet.height / zoom, packet.id],
+          args: [local.x, local.y, packet.width * scaleX, packet.height * scaleY, packet.id],
         }
         if (
           packet.type === 'touchDown' &&
@@ -845,69 +880,75 @@ export class InputController {
       yield {
         target: 0,
         method: 'onMouseMove',
-        args: [...windowMousePoint(packet.x, packet.y), packet.shift],
+        args: [mousePoint!.x, mousePoint!.y, packet.shift],
       }
-      yield* this.mouseMove(packet.x, packet.y, packet.shift)
+      const p = this.primary(mousePoint!)
+      if (p) yield* this.mouseMove(p, packet.shift)
       return
     }
     if (packet.type === 'down') {
       yield {
         target: 0,
         method: 'onMouseDown',
-        args: [...windowMousePoint(packet.x, packet.y), packet.button, packet.shift],
+        args: [mousePoint!.x, mousePoint!.y, packet.button, packet.shift],
       }
-      yield* this.mouseMove(packet.x, packet.y, packet.shift)
-      const p = this.primary(),
-        target = yield* this.target(p.x, p.y)
+      const p = this.primary(mousePoint!)
+      if (!p) return
+      const target = yield* this.target(p.x, p.y)
       this.released = false
       if (target) {
-        yield {
-          target,
-          method: 'onMouseDown',
-          args: [...this.local(target, p.x, p.y), packet.button, packet.shift],
-        }
-        if (
-          !this.released &&
-          this.visible(target) &&
-          this.enabled(target) &&
-          this.capture !== target
-        ) {
-          this.release()
-          // release() queues an explicit VM release. InputService delivers it
-          // before this acquisition, so a finalizer cannot be postponed past it.
-          this.capture = target
-          yield* this.own('capture', target, this.manager(target))
+        if (this.layers.has(target))
+          yield {
+            target,
+            method: 'onMouseDown',
+            args: [...this.local(target, p.x, p.y), packet.button, packet.shift],
+          }
+        const noCapture = this.released,
+          epoch = this.epoch,
+          ownershipEpoch = this.ownershipEpoch
+        if (this.capture !== target) {
+          yield* this.releaseMouseCapture()
+          if (epoch !== this.epoch || ownershipEpoch !== this.ownershipEpoch) return undefined
+          if (!noCapture && this.layers.has(target)) {
+            this.capture = target
+            yield* this.own('capture', target, this.manager(target))
+          }
         }
         // Native PrimaryMouseDown hides the hint after the callback and
         // capture acquisition. A throwing callback never reaches this write.
         this.currentHint = ''
-      } else this.release()
+      } else yield* this.releaseMouseCapture()
       return
     }
     if (packet.clicks > 0) {
       const method = packet.clicks === 2 ? 'onDoubleClick' : 'onClick'
-      yield { target: 0, method, args: windowMousePoint(packet.x, packet.y) }
-      const p = this.primary(),
-        hit = yield* this.hit(p.x, p.y)
+      yield { target: 0, method, args: [mousePoint!.x, mousePoint!.y] }
+      const p = this.primary(mousePoint!),
+        hit = p ? (yield* this.hit(p.x, p.y)) : 0
       if (hit && (packet.clicks === 2 || this.capture === hit))
-        yield { target: hit, method, args: this.local(hit, p.x, p.y) }
+        yield { target: hit, method, args: this.local(hit, p!.x, p!.y) }
     }
     yield {
       target: 0,
       method: 'onMouseUp',
-      args: [...windowMousePoint(packet.x, packet.y), packet.button, packet.shift],
+      args: [mousePoint!.x, mousePoint!.y, packet.button, packet.shift],
     }
-    const p = this.primary(),
-      target = yield* this.target(p.x, p.y)
-    if (this.layers.has(target))
-      yield {
-        target,
-        method: 'onMouseUp',
-        args: [...this.local(target, p.x, p.y), packet.button, packet.shift],
+    const p = this.primary(mousePoint!)
+    if (!p) return
+    const target = yield* this.target(p.x, p.y)
+    if (target) {
+      if (this.layers.has(target))
+        yield {
+          target,
+          method: 'onMouseUp',
+          args: [...this.local(target, p.x, p.y), packet.button, packet.shift],
+        }
+      if (!(packet.shift & shiftButtons)) {
+        const epoch = this.epoch, ownershipEpoch = this.ownershipEpoch
+        yield* this.releaseMouseCapture()
+        if (epoch !== this.epoch || ownershipEpoch !== this.ownershipEpoch) return undefined
+        yield* this.mouseMove(p, packet.shift)
       }
-    if (!(packet.shift & shiftButtons)) {
-      this.release()
-      yield* this.mouseMove(packet.x, packet.y, packet.shift)
     }
   }
   view(): InputView {
@@ -922,13 +963,11 @@ export class InputController {
         !this.attached(this.attention.pointLayerId))
     )
       this.attention = null
-    const window = this.window(),
-      zoom = window.zoomNumer / window.zoomDenom,
-      attention = this.attention
+    const drawing = this.drawing(),
+      attention = this.attention && drawing
         ? {
             ...this.attention,
-            x: window.layerLeft + this.attention.x * zoom,
-            y: window.layerTop + this.attention.y * zoom,
+            ...fromPrimary(this.attention, drawing.geometry, drawing.width, drawing.height),
             font: this.attention.font ? { ...this.attention.font } : null,
           }
         : null
@@ -960,7 +999,7 @@ export class InputController {
     this.attention = null
     this.focusLock = false
     this.released = true
-    this.point = this.mouseAt = { x: -1, y: -1 }
+    this.point = { x: -1, y: -1 }
     this.shift = 0
     this.choice.clear()
     this.hitChoice.clear()

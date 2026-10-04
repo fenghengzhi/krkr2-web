@@ -36,6 +36,7 @@ import {
 import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree, type LayerState } from './scene/layers.ts'
+import { drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
 import { LayerService } from './scene/layer-objects.ts'
 import { captureVideoMixingBitmap } from './media/video-mixing.ts'
 import type { DecodedImage, GraphicsDecoder, Renderer, RendererStatus } from './ports/graphics.ts'
@@ -1468,13 +1469,15 @@ export class EngineSession {
     const pointer = this.currentVirtualCursor(window.id)?.view ??
       this.windowPointers.get(window.id) ?? { x: 0, y: 0 },
       state = window.state,
-      primary = (value: number, origin: number) =>
-        (BigInt(Math.trunc(value)) - BigInt(origin)) * BigInt(state.zoomDenom) / BigInt(state.zoomNumer)
+      primaryLayer = this.layers.get(this.inputControllers.get(window.id)!.root()),
+      geometry = drawDeviceGeometry(state, primaryLayer.width, primaryLayer.height),
+      primary = toPrimary(paintBoxPoint(state, pointer.x, pointer.y), geometry,
+        primaryLayer.width, primaryLayer.height)
     // Native client pixels and the inverse drawing transform truncate toward
     // zero before subtracting Layer positions, including negative coordinates.
     return {
-      x: Number(BigInt.asIntN(32, primary(pointer.x, state.layerLeft) - offset.x)),
-      y: Number(BigInt.asIntN(32, primary(pointer.y, state.layerTop) - offset.y)),
+      x: Number(BigInt.asIntN(32, BigInt(primary.x) - offset.x)),
+      y: Number(BigInt.asIntN(32, BigInt(primary.y) - offset.y)),
     }
   }
   private setCursorPosition(id: number, x: number, y: number): void {
@@ -1488,13 +1491,14 @@ export class EngineSession {
     ) return
     const controller = this.inputControllers.get(window.id)!,
       offset = this.cursorOffset(layer), state = window.state,
-      project = (value: number, origin: bigint, clientOrigin: number) =>
-        Number(BigInt.asIntN(32,
-          BigInt.asIntN(32, BigInt(value) + origin) * BigInt(state.zoomNumer) /
-          BigInt(state.zoomDenom) + BigInt(clientOrigin))),
+      primaryLayer = this.layers.get(controller.root()),
+      geometry = drawDeviceGeometry(state, primaryLayer.width, primaryLayer.height),
+      position = fromPrimary({
+        x: Number(BigInt.asIntN(32, BigInt(x) + offset.x)),
+        y: Number(BigInt.asIntN(32, BigInt(y) + offset.y)),
+      }, geometry, primaryLayer.width, primaryLayer.height),
       view: VirtualCursor = {
-        x: project(x, offset.x, state.layerLeft),
-        y: project(y, offset.y, state.layerTop),
+        ...position,
         revision: this.nextVirtualCursorRevision,
         basePhysicalSequence: this.physicalPointerSequences.get(window.id) ?? 0,
       }
@@ -2112,6 +2116,15 @@ export class EngineSession {
         throw new Error('Invalid input coordinates or key')
     if (packet.type === 'text' && packet.text.length > 65536)
       throw new Error('Input text budget exceeded')
+    if (packet.paintBoxPoint !== undefined) {
+      const point = packet.paintBoxPoint
+      if (
+        !['move', 'down', 'up', 'wheel'].includes(packet.type) ||
+        !point || typeof point !== 'object' ||
+        ![point.x, point.y].every((value) =>
+          Number.isInteger(value) && value >= -2147483648 && value <= 2147483647)
+      ) throw new Error('Invalid PaintBox mouse coordinates')
+    }
     if (
       packet.pointerSequence !== undefined &&
       (!Number.isSafeInteger(packet.pointerSequence) || packet.pointerSequence < 1)
@@ -2144,7 +2157,7 @@ export class EngineSession {
       packet.type !== 'deactivate'
     )
       return ignoredAdmission()
-    packet = { ...packet, windowId }
+    packet = { ...this.captureMousePoint(packet, window), windowId }
     if (
       packet.type === 'activate' &&
       (!window.state.visible || !window.state.focusable || this.state !== 'running')
@@ -2266,6 +2279,14 @@ export class EngineSession {
       },
     )
   }
+  private captureMousePoint(packet: InputPacket, window: WindowRecord): InputPacket {
+    if (packet.type !== 'move' && packet.type !== 'down' && packet.type !== 'up' && packet.type !== 'wheel')
+      return packet
+    return {
+      ...packet,
+      paintBoxPoint: { ...(packet.paintBoxPoint ?? paintBoxPoint(window.state, packet.x, packet.y)) },
+    }
+  }
   private postInput(packet: InputPacket, window: WindowRecord, additionalValid?: () => boolean): void {
     const controller = this.inputControllers.get(window.id)
     if (this.registeredWindow(window.id) !== window || !controller) return
@@ -2279,7 +2300,7 @@ export class EngineSession {
         epoch === controller.epoch &&
         this.activity.state === 'visible' &&
         (!additionalValid || additionalValid())
-    packet = { ...packet, windowId: window.id }
+    packet = { ...this.captureMousePoint(packet, window), windowId: window.id }
     this.postedInputPending++
     // Queue a VM call, never reenter the active TJS host import. A destroyed
     // window cannot deliver its pending input to a newly created window.
@@ -2472,16 +2493,21 @@ export class EngineSession {
       this.deps.renderer.present([], this.width, this.height)
     let complete = true
     for (const target of targets) {
-      const window = target.state
+      const window = target.state,
+        primaryId = this.inputControllers.get(target.id)?.root() ?? 0,
+        primary = this.layers.has(primaryId) ? this.layers.get(primaryId) : undefined,
+        geometry = drawDeviceGeometry(window, primary?.width ?? 0, primary?.height ?? 0)
       const presented = this.deps.renderer.present(
-        window.visible
+        window.visible && primary && primary.width > 0 && primary.height > 0
           ? this.composer.frame(
               window.width,
               window.height,
-              window.layerLeft,
-              window.layerTop,
-              window.zoomNumer / window.zoomDenom,
+              geometry.x,
+              geometry.y,
+              geometry.width / primary.width,
               target.id,
+              geometry.height / primary.height,
+              primaryId,
             )
           : [],
         window.width,
@@ -3773,10 +3799,8 @@ export class EngineSession {
         break
       case 'Window.primary': {
         const window = this.windows!.get(number(0))
-        const id = this.layers
-          .ids()
-          .find((id) => this.layers.get(id).primary && this.layers.get(id).windowId === window.id)
-        value = id === undefined || window.finished ? null : (this.layerObjects!.owner(id) ?? null)
+        const id = this.inputControllers.get(window.id)?.root() ?? 0
+        value = !id || window.finished ? null : (this.layerObjects!.owner(id) ?? null)
         break
       }
       case 'Window.resize': {

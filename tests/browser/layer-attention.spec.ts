@@ -110,23 +110,23 @@ var witnessRoot=new Layer(witness,null);witnessRoot.setSize(60,40);
           '(parent.useAttention=true,child.useAttention=false,w.setZoom(3,2),w.setLayerPos(7,11),0)',
           '0',
         )
-        // Web policy follows the actually rendered canvas: layer offset plus
-        // sampled primary point times zoom, then CSS projection. The primary
-        // stays at (0,0); outer Window left/top must not be added a second time.
-        await expectAttentionAnchor(surface, 49 / 200, 35 / 100)
+        // MulDiv gives PaintBox origin (11,17), size (300,150). Its native
+        // integer projection maps sampled primary (28,16) to client (53,41).
+        // Outer Window left/top must not be added a second time.
+        await expectAttentionAnchor(surface, 53 / 200, 41 / 100)
         await evaluate(
           page,
           '(child.setImageSize(150,70),child.setImagePos(-90,-40),child.setClip(2,3,10,11),child.opacity=41,child.imageLeft+","+child.imageTop)',
           '-90,-40',
         )
         await evaluate(page, 'root.left+","+root.top', '0,0')
-        await expectAttentionAnchor(surface, 49 / 200, 35 / 100)
+        await expectAttentionAnchor(surface, 53 / 200, 41 / 100)
         await evaluate(
           page,
           '(parent.setAttentionPos(-40,-20),child.attentionLeft=child.attentionLeft,0)',
           '0',
         )
-        await expectAttentionAnchor(surface, -23 / 200, -4 / 100)
+        await expectAttentionAnchor(surface, -19 / 200, 2 / 100)
         const beforeMove = (await surface.locator('canvas[data-window-id]').boundingBox())!
         await evaluate(page, '(w.setPos(190,75),0)', '0')
         await expect
@@ -135,7 +135,7 @@ var witnessRoot=new Layer(witness,null);witnessRoot.setSize(60,40);
             return Math.abs(after.x - beforeMove.x) + Math.abs(after.y - beforeMove.y)
           })
           .toBeGreaterThan(10)
-        await expectAttentionAnchor(surface, -23 / 200, -4 / 100)
+        await expectAttentionAnchor(surface, -19 / 200, 2 / 100)
         const width = (await surface.locator('canvas[data-window-id]').boundingBox())!.width
         await page.addStyleTag({
           content: '.game-window[aria-label="Attention"] { width: 27vw !important; }',
@@ -143,9 +143,9 @@ var witnessRoot=new Layer(witness,null);witnessRoot.setSize(60,40);
         await expect
           .poll(async () => (await surface.locator('canvas[data-window-id]').boundingBox())!.width)
           .not.toBe(width)
-        await expectAttentionAnchor(surface, -23 / 200, -4 / 100)
+        await expectAttentionAnchor(surface, -19 / 200, 2 / 100)
         await page.setViewportSize({ width: 1030, height: 710 })
-        await expectAttentionAnchor(surface, -23 / 200, -4 / 100)
+        await expectAttentionAnchor(surface, -19 / 200, 2 / 100)
         await expect(text).toHaveCSS('font-size', '22px')
         await info.attach('dom-attention-projection', {
           contentType: 'application/json',

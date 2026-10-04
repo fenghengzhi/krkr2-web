@@ -289,11 +289,13 @@ for (const backend of ['asyncify', 'jspi']) {
           '(a.setZoom(2,1),a.setLayerPos(3,4),b.setZoom(3,2),b.setLayerPos(5,7),0)',
           '0',
         )
-        await clickLogical(canvasA, 27.5, 19.5)
+        // Scaled PaintBox origins are A(6,8), B(8,11). Pick integer
+        // PaintBox samples A(24,14), B(32,20) inside these logical pixels.
+        await clickLogical(canvasA, 30.5, 22.5)
         await expect(
           page.getByText('surface-layer-click=B:10,9|A:12,11|A:4,3', { exact: true }),
         ).toBeVisible()
-        await clickLogical(canvasB, 37.5, 27.5)
+        await clickLogical(canvasB, 40.5, 31.5)
         await expect(
           page.getByText('surface-layer-click=B:10,9|A:12,11|A:4,3|B:11,7', { exact: true }),
         ).toBeVisible()

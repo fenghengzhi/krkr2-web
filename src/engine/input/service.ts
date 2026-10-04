@@ -166,6 +166,7 @@ export class InputService {
           ownership: 1n,
           key: event.key,
           target: event.layer ? (this.layer(event.layer) ?? null) : null,
+          ...(event.sourceKey ? { sourceKey: event.sourceKey } : {}),
         })
       }
       if (record.unwinding && !(event.kind === 'invoke' && event.unwind)) continue

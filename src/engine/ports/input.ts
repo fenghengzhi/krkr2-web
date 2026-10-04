@@ -8,6 +8,11 @@ export type InputPacket = {
    * increasing within a Window across surface replacement; absent for legacy
    * embedding input and script-posted events. */
   pointerSequence?: number
+  /** Legacy mouse integer coordinates relative to the PaintBox at event
+   * capture/admission time. Raw x/y remain Window client observation values.
+   * Window callbacks must not reinterpret this point after a queued zoom or
+   * layer-origin change. Touch events never use this field. */
+  paintBoxPoint?: { x: number; y: number }
 } & (
   | {
       type: 'move' | 'down' | 'up'

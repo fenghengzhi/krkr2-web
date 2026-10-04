@@ -7,7 +7,12 @@ function __krkrInputClearStep(step){
 }
 function __krkrInputApplyStep(step,ownership){
   if(step.ownership){
-    if(step.target===null)delete ownership[step.key];
+    if(step.sourceKey!==void){
+      var source=ownership[step.sourceKey];
+      if(source===void)throw new global.Exception("Input ownership source has ended");
+      ownership[step.key]=source;
+    }
+    else if(step.target===null)delete ownership[step.key];
     else ownership[step.key]=step.target;
     return;
   }

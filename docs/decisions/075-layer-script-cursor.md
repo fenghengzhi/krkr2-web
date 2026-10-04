@@ -1,6 +1,8 @@
 # 075 — Layer 光标写入与 KAG 键盘链接导航
 
-状态：已实施并取得部分托管验证结果，整批尚未收齐。所有构建、类型检查、VM、Node 和浏览器检查只在 GitHub-hosted Actions 运行。074 的运行与本切片分开记录；没有用前批次的测试数量证明新行为。
+状态：已实施，该批终态及全部归档已回收，仍有失败和未报告范围。所有构建、类型检查、VM、Node 和浏览器检查只在 GitHub-hosted Actions 运行。074 的运行与本切片分开记录；没有用前批次的测试数量证明新行为。
+
+准备 077 时已补齐同次运行终态及 18 份 ZIP：run **failure**。本切片常规浏览器 **24/24**、原 KAG 六项全部通过；Node cursor **16 通过、2 失败／18**，两项在 `setImagePos(-2,-1)` 处因默认图像没有额外尺寸而抛错，尚未执行后续投影断言。077 候选先补图像尺寸 42×31，并统一原版 MulDiv 显示矩形与整数正逆投影；新期望有固定源码的独立手算依据，不能追认旧失败通过。整个 Node 作业仍因 selector 未退出而取消，另一个 event-lifetime 进程留下 SIGABRT core；全部历史边界见 run 目录的 `final-summary.md`。
 
 准备 076 时只回收一次 [37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481)：当时仍 in_progress，Node 及两份 WebKit 常规分片未结束。已发布的 15 份 ZIP 均取回并核对 digest。Chromium／Firefox 常规各 **642/642** 通过；三浏览器兼容 **95 通过、1 失败／96**，其中本切片的原 KAG 键盘链接导航六项全部通过。唯一已报告兼容失败是 Firefox JSPI 的旧 Help 首次打开截图超时 5 秒，原始错误和 trace 保留，不是 cursor 用例失败。Node 和 WebKit 常规仍未取回，不能据部分通过宣称本切片或整批全部完成。新候选 076 不属于上述运行。证据保留于 `out/verification/github-actions/37229833481/`。
 

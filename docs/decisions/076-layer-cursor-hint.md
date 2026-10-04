@@ -4,6 +4,8 @@
 
 候选已随 `3443f9fc6beaf1f1c79c60d7421587c482486d01` 推送至 [37231345437](https://github.com/fenghengzhi/krkr2-web/actions/runs/37231345437)。首次查询仅确认创建及提交身份，当时 in_progress；执行结果尚未取回，下批回收，不实时监控。下面的验收数量是用例定义，不能当成通过记录。
 
+准备 077 时的一次回收仍为 in_progress。已发布的 13 份 ZIP 全部核对 digest；兼容检查 96/96 通过，library 57、PWA 59、trusted 7 通过，direct runtime 六组 failures 为空。Node 与四份常规浏览器作业尚无归档，本切片新加的 26 个 VM 用例和 24 个浏览器项目实例尚未取回，不能由兼容检查替代。保留首次快照与新 partial 摘要，后续只在下一批补取。
+
 ## 问题与决定
 
 原 Web `InputController.view()` 每次直接取 hover Layer 的 cursor，没有 `crDefault` 的父链继承；hint 则在本层为空时动态向父层搜索。两者都把“属性当前值”当成“Window 已收到的呈现值”，会跳过原版通知的时机及回调顺序。

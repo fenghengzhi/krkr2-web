@@ -1,5 +1,11 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [077 鼠标事件与绘制几何](decisions/077-mouse-manager-geometry.md)：按固定原版分开 Window 回调、PaintBox 整数快照、DrawDevice 投影和 manager 事件；修正 down 额外 move、up 尾部坐标、capture 释放时点及失效目标路由。画面、cursor、attention 和 touch 统一使用取整后的显示矩形，鼠标按原版整数转换，touch 保留实数。主图层交换后按稳定 manager 注册顺序选择显示对象。协议候选升 **25**；新增和调整的验收定义尚未执行，完整非插件目标仍 active。
+
+本批补取 [075／37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481) 终态 **failure**，18 份 ZIP 全部核对 digest。Node 已报告 **983 通过、4 失败／987**，无最终 plan：两个 Help 缺分号旧失败、两个 cursor 夹具图像偏移越界；后者未到光标断言，本批先扩图像，再按固定原版几何更新独立手算期望。selector-native 确认到作业取消仍未退出；event-lifetime 没有 exit 是 **SIGABRT 原生崩溃**，回溯为堆一致性检查失败，不能归为同一挂起。两份 integration 的 code 1 仍缺具体用例。常规浏览器 **1925 通过、1 失败／1926**；cursor 24/24、Help 24/24、Vocoder 21/21 已通过。唯一 Pad 失败与 WebKit JSPI Worker SIGILL 时间吻合，尚未确定根因。旧 Firefox Help compatibility 截图失败也保留。原始归档、backtrace、crash 和最终摘要在 `out/verification/github-actions/37229833481/`，没有覆盖此前 partial 证据。
+
+对 [076／37231345437](https://github.com/fenghengzhi/krkr2-web/actions/runs/37231345437) 本批只回收一次，当时仍 **in_progress**。13 份已发布 ZIP 全部核对 digest；compatibility **96/96**、library 57/57、PWA 59/59、trusted 7/7，六组 direct runtime 的 failures 为空。Node 与全部常规浏览器尚无报告，因此本次无法取得新 execution-events／selector journal，仍不能确定 selector 内部卡点或补造未报告失败。下批继续补取，不实时轮询。
+
 最新待核验批次：[Full test suite 37231345437](https://github.com/fenghengzhi/krkr2-web/actions/runs/37231345437)，精确提交 `3443f9fc6beaf1f1c79c60d7421587c482486d01`。076、帮助夹具分号和 Node 诊断采集已整批推送；首次查询只确认运行创建及提交绑定，当时 **in_progress／conclusion=null**。不实时监控，不记为通过。下一批先补取 075 剩余 Node／WebKit／终态，再取回本批结果；全部测试及可执行验证仅在 GitHub-hosted runners 运行。整体非插件目标仍 active，未合入旧 main。
 
 2026-10-05 准备 [076 stock cursor／hint 通知语义](decisions/076-layer-cursor-hint.md)：候选补齐数值光标继承、提示继承开关、原版通知时点、共享重入保护、异常恢复及缩放后的旧主坐标重查。新增真实 VM 源码／字节码和浏览器验收定义，尚未执行。自定义 CUR／ANI、完整鼠标入口顺序等仍在范围内，整体非插件目标保持 active；协议 24、TJS ABI 5、字体 ABI 2 不变。

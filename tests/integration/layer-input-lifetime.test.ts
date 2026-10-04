@@ -144,6 +144,9 @@ for (const binary of [false, true]) {
     const f = await fixture(binary)
     try {
       await f.execute('var a=new InputOwnedLayer(root,"a",0);')
+      // Native mouse-down acquires capture without creating hover. Establish
+      // the independently owned hover through its actual move entry first.
+      await f.session.input({ type: 'move', x: 5, y: 5, button: 0, shift: 0, clicks: 0 })
       await f.session.input({ type: 'down', x: 5, y: 5, button: 0, shift: 8, clicks: 0 })
       await f.execute('delete global.a;')
       assert.equal(await f.session.evaluate('inputDeaths.count'), '0')

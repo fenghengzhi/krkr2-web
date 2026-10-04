@@ -158,15 +158,15 @@ for (const backend of ['asyncify', 'jspi']) {
         await evaluate(page, '(cursorChild.setCursorPos(10,12),0)', '0')
         await expectCursor(a, 33, 26)
         await evaluate(page, '(wa.setZoom(3,2),wa.setLayerPos(7,11),cursorChild.setCursorPos(10,12),0)', '0')
-        await expectCursor(a, 56, 50)
+        await expectCursor(a, 60, 56)
         await evaluate(page, '(wa.setPos(90,45),0)', '0')
-        await expectCursor(a, 56, 50)
+        await expectCursor(a, 60, 56)
         await page.addStyleTag({ content: '.game-window[aria-label="Cursor A"] { width: 29vw !important; }' })
         await page.setViewportSize({ width: 1100, height: 760 })
-        await expectCursor(a, 56, 50)
+        await expectCursor(a, 60, 56)
         await evaluate(page, '(rb.setCursorPos(40,30),0)', '0')
         await expectCursor(b, 40, 30, 'text')
-        await expectCursor(a, 56, 50)
+        await expectCursor(a, 60, 56)
 
         // Use actual game keyboard delivery to make a marker while the canvas
         // is onscreen. The marker's own DOM must not intercept its hotspot.
@@ -175,7 +175,7 @@ for (const backend of ['asyncify', 'jspi']) {
         await canvas.focus()
         await expect(a.locator('.game-text-input')).toBeFocused()
         await page.keyboard.press('F6')
-        await expectCursor(a, 56, 50)
+        await expectCursor(a, 60, 56)
         const point = await a.evaluate((element) => {
           const marker = element.querySelector<HTMLElement>('.game-virtual-cursor')!,
             rect = marker.getBoundingClientRect(), x = rect.left + 12, y = rect.top + 12,
@@ -194,7 +194,7 @@ for (const backend of ['asyncify', 'jspi']) {
         await evaluate(page, '(cursorChild.cursor=crCross,wa.mouseCursorState=2,cursorChild.setCursorPos(10,12),0)', '0')
         await expect(a.locator('.game-virtual-cursor')).toHaveCount(0)
         await evaluate(page, '(wa.mouseCursorState=0,cursorChild.setCursorPos(10,12),0)', '0')
-        await expectCursor(a, 56, 50)
+        await expectCursor(a, 60, 56)
         await page.locator('#pause').click()
         await expect(page.locator('.game-virtual-cursor')).toHaveCount(0)
         await page.locator('#pause').click()
@@ -207,7 +207,7 @@ for (const backend of ['asyncify', 'jspi']) {
         await evaluate(page, '(wb.visible=true,0)', '0')
         await expect(b.locator('.game-virtual-cursor')).toHaveCount(0)
         await evaluate(page, '(cursorChild.setCursorPos(10,12),0)', '0')
-        await expectCursor(a, 56, 50)
+        await expectCursor(a, 60, 56)
         await evaluate(page, '(function(){invalidate wa;return 0;})()', '0')
         await expect(a).toHaveCount(0)
         await expect(page.locator('.game-virtual-cursor')).toHaveCount(0)

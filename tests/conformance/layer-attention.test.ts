@@ -326,7 +326,7 @@ function changeAppearance(){
     }
   })
 
-  test(`${mode}: Web caret projection uses internal Layer offset and fractional Window zoom without resampling geometry`, async () => {
+  test(`${mode}: caret projection uses integer DrawDevice origin and destination size without resampling attention`, async () => {
     const f = await fixture(
       binary,
       String.raw`
@@ -341,13 +341,13 @@ function projectAgain(){
     )
     try {
       const first = point(f.view())
-      assert(Math.abs(first.x - -11 / 3) < 1e-12)
-      assert.equal(first.y, 9)
+      assert.equal(first.x, -2)
+      assert.equal(first.y, 7)
       assert.equal(first.pointLayerId, f.childId)
       await f.run('projectAgain')
       assert.deepEqual(point(f.view()), {
-        x: 17.25,
-        y: -5.5,
+        x: 20,
+        y: -9,
         focusLayerId: f.childId,
         pointLayerId: f.childId,
       })

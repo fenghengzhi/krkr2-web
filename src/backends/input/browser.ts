@@ -1,5 +1,6 @@
 import type { InputPacket, InputView } from '../../engine/ports/input.ts'
 import type { WindowView } from '../../engine/scene/window.ts'
+import { paintBoxPoint } from '../../engine/scene/draw-device.ts'
 const cursors: Record<number, string> = {
   0: 'default',
   [-1]: 'none',
@@ -753,7 +754,14 @@ export class BrowserInput {
         return
       }
       const sequence = ++this.cursorState.physicalSequence
-      packet = { ...packet, pointerSequence: sequence }
+      // VCL captures PaintBox-relative integers before the Window callback.
+      // Preserve this origin snapshot while the packet waits behind earlier
+      // input; raw coordinates still feed physical observation and takeover.
+      packet = {
+        ...packet,
+        pointerSequence: sequence,
+        ...(this.view ? { paintBoxPoint: paintBoxPoint(this.view, packet.x, packet.y) } : {}),
+      }
       if (this.shared) this.shared.pointer(packet.x, packet.y, sequence)
       else {
         const epoch = this.epoch

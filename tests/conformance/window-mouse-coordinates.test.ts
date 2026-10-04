@@ -22,11 +22,11 @@ function fixture(withLayer = false) {
     window = new WindowState(),
     controller = new InputController(layers, () => window)
   window.visible = true
-  let child = 0
+  let child = 0, root = 0
   if (withLayer) {
     window.zoomNumer = 1
     window.zoomDenom = 2
-    const root = layers.create(0)
+    root = layers.create(0)
     child = layers.create(root)
     Object.assign(layers.get(child), {
       left: 10,
@@ -36,14 +36,17 @@ function fixture(withLayer = false) {
       hitThreshold: 0,
     })
   }
-  return { layers, window, controller, child }
+  return { layers, window, controller, root, child }
 }
 
-function drain(operation: InputOperation): InputCall[] {
+function drain(operation: InputOperation, callback?: (call: InputCall) => void): InputCall[] {
   const calls: InputCall[] = []
   let next = operation.next()
   while (!next.done) {
-    if (next.value.kind !== 'ownership' && next.value.kind !== 'invoke') calls.push(next.value)
+    if (next.value.kind !== 'ownership' && next.value.kind !== 'invoke') {
+      calls.push(next.value)
+      callback?.(next.value)
+    }
     next = operation.next()
   }
   return calls
@@ -52,11 +55,12 @@ function drain(operation: InputOperation): InputCall[] {
 // WindowIntf.cpp 320–381 and 466–476 take tjs_int x/y for these six
 // callbacks. The browser's fractional canvas conversion must not leak a real
 // TJS value into their arguments, including negative positions during capture.
-test('all Window legacy mouse coordinates truncate toward zero at the callback boundary', () => {
+test('all Window legacy mouse coordinates narrow to int32 before their callback', () => {
   for (const [x, y, expectedX, expectedY] of [
     [15.8125, 20.999, 15, 20],
     [-15.8125, -20.999, -15, -20],
     [-0.8125, 0.75, 0, 0],
+    [0x100000000 + 15.8125, -0x100000000 - 20.999, 15, -20],
   ]) {
     const { controller } = fixture(),
       common = { x: x!, y: y!, button: 2, shift: 16, clicks: 0 },
@@ -87,7 +91,7 @@ test('all Window legacy mouse coordinates truncate toward zero at the callback b
   }
 })
 
-test('Window argument conversion does not round before zoom, Layer hit tests or capture transforms', () => {
+test('mouse coordinates enter DrawDevice as integers before Layer hit tests and capture transforms', () => {
   const { controller, child } = fixture(true),
     down: InputPacket = { type: 'down', x: 10.875, y: 8.875, button: 0, shift: 8, clicks: 0 },
     calls = drain(controller.packet(down))
@@ -97,7 +101,7 @@ test('Window argument conversion does not round before zoom, Layer hit tests or 
   )
   assert.deepEqual(
     calls.find((call) => call.target === child && call.method === 'onMouseDown')?.args,
-    [11, 11, 0, 8],
+    [10, 10, 0, 8],
   )
   assert.equal(controller.capture, child)
   const moved = drain(controller.packet({ ...down, type: 'move', x: -0.75, y: -1.25 }))
@@ -107,7 +111,7 @@ test('Window argument conversion does not round before zoom, Layer hit tests or 
   )
   assert.deepEqual(
     moved.find((call) => call.target === child && call.method === 'onMouseMove')?.args,
-    [-12, -9, 8],
+    [-10, -8, 8],
   )
   assert.deepEqual(controller.point, { x: -0.75, y: -1.25 })
   const clicked = drain(controller.packet({ ...down, type: 'up', shift: 0, clicks: 1 }))
@@ -117,15 +121,65 @@ test('Window argument conversion does not round before zoom, Layer hit tests or 
   )
   assert.deepEqual(
     clicked.find((call) => call.target === child && call.method === 'onClick')?.args,
-    [11, 11],
+    [10, 10],
   )
   controller.focused = child
   const wheel = drain(
     controller.packet({ type: 'wheel', x: 10.875, y: 8.875, shift: 0, delta: 120 }),
   )
   assert.deepEqual(wheel.find((call) => call.target === 0)?.args, [0, 120, 10, 8])
-  assert.deepEqual(wheel.find((call) => call.target === child)?.args, [0, 120, 21, 17])
+  assert.deepEqual(wheel.find((call) => call.target === child)?.args, [0, 120, 20, 16])
   assert.deepEqual(controller.point, { x: 10.875, y: 8.875 })
+})
+
+test('mouse projection uses integer PaintBox dimensions with nearest-size rounding and signed truncating division', () => {
+  const { controller, layers, root, child } = fixture(true)
+  layers.resize(root, 101, 103)
+  // Native InternalSetPaintBoxSize uses MulDiv: half-size is (51,52),
+  // independently rounded from (101,103). DrawDevice then divides by those
+  // dimensions; replacing this with x / 0.5 would produce different results.
+  drain(controller.packet({ type: 'down', x: 10, y: 8, button: 0, shift: 8, clicks: 0 }))
+  assert.equal(controller.capture, child)
+  for (const [x, y, expectedX, expectedY] of [
+    [25.875, 25.875, 39, 43],
+    [-25.875, -25.875, -59, -55],
+  ]) {
+    const calls = drain(controller.packet({ type: 'move', x: x!, y: y!, button: 0, shift: 8, clicks: 0 }))
+    assert.deepEqual(
+      calls.find((call) => call.target === child && call.method === 'onMouseMove')?.args,
+      [expectedX, expectedY, 8],
+    )
+  }
+})
+
+test('queued PaintBox coordinates survive origin changes while a Window callback changes the current destination size', () => {
+  const { controller, layers, window, root, child } = fixture(true)
+  layers.resize(root, 101, 103)
+  // The physical event was captured at zoom 1/2, layerPos (3,-3):
+  // MulDiv origin=(2,-2), so raw client (20.875,15.875) becomes (18,17).
+  const packet: InputPacket = {
+    type: 'down', x: 20.875, y: 15.875, button: 0, shift: 8, clicks: 0,
+    paintBoxPoint: { x: 18, y: 17 },
+  }
+  window.layerLeft = 100
+  window.layerTop = 100
+  const calls = drain(controller.packet(packet), (call) => {
+    if (call.target === 0 && call.method === 'onMouseDown') {
+      window.zoomNumer = 2
+      window.zoomDenom = 3
+      window.layerLeft = -3
+      window.layerTop = 5
+    }
+  })
+  assert.deepEqual(calls.find((call) => call.target === 0 && call.method === 'onMouseDown')?.args,
+    [18, 17, 0, 8])
+  // Current destination=(67,69); the same captured (18,17) projects to (27,25).
+  // Subtract child(10,6) only after this integer division.
+  assert.deepEqual(calls.find((call) => call.target === child && call.method === 'onMouseDown')?.args,
+    [17, 19, 0, 8])
+  assert.equal(controller.capture, child)
+  assert.deepEqual(controller.point, { x: 20.875, y: 15.875 })
+  assert.deepEqual(packet.paintBoxPoint, { x: 18, y: 17 })
 })
 
 test('Window and Layer touch coordinates and contact sizes remain real-valued', () => {
