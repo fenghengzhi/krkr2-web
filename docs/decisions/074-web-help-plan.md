@@ -2,6 +2,8 @@
 
 ## 2026-10-05 实施候选，尚待 Actions 验证
 
+候选提交 `a0ec1b9d7abc11a9abf6b82a31889b5aa1ce5edc` 已触发 [37227951808](https://github.com/fenghengzhi/krkr2-web/actions/runs/37227951808)。只确认了运行创建及提交身份，未取回终态；所有下述新增验证定义仍不算通过。
+
 已新增真正的 native `Storages.getLocalName`、`System.shellExecute`，并接通 Session/VFS、独立 MessagePort 和非模态只读帮助面板。会话协议由 22 升至 **23**，单独要求 **`nativeHelp:1`**；TJS ABI 5、`nativeSystem:2`、`nativeStorages:2`、`nativeTextStreams:2` 保持。以下描述源码候选，不代表构建、类型或运行通过；原计划和原有验证历史保留在后文。
 
 `getLocalName` 采用专用 native 包装：检查参数数量后，丢弃结果的调用不转换参数、不访问宿主。使用结果时按现有 public path 规则做词法转换，空 `System.exePath` 明确映射 `game://./`；不查询存在性，不搜索 autoPath，不改变大小写。归档成员、越根、其他媒体和超长地址抛错。`System.exePath` 本身保持原空串约定。

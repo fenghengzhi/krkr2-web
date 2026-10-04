@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37227951808](https://github.com/fenghengzhi/krkr2-web/actions/runs/37227951808)，精确提交 `a0ec1b9d7abc11a9abf6b82a31889b5aa1ce5edc`。2026-10-05 已推送 074、上一批夹具修正及整批兼容工作流接线，首次查询仅确认 push 创建运行，当时 **in_progress／conclusion=null**；没有查询实时作业或宣称通过。下一批前取回终态、全部原始 artifacts、Node 进程记录、两份 WebKit 分片及三浏览器兼容报告；兼容库存 **90 项**仅表示预期范围。默认 SSH 22 连接被关闭后，通过校验既有 GitHub 主机密钥的 SSH 443 完成推送。
+
 2026-10-05：整体目标仍是完成插件以外的 KRKR2 Web 模拟器。当前候选已接通 [074 Web 帮助文档链路](decisions/074-web-help-plan.md)：native 包装、VFS 实际文本、Worker 确认、非模态面板和 Stop 清理；协议 **23**、`nativeHelp:1`。还没有该候选的执行结果，完整目标没有完成。下一批完整 Tests 将同时运行原 KAG／旧 ABI 兼容矩阵并复用同次构建，结果下次取回，不实时监控。
 
 已取回 [37163692990 @ ce6ea52](https://github.com/fenghengzhi/krkr2-web/actions/runs/37163692990) 的终态 **cancelled**，All tests **failure**。Node 仅送达 **936 通过、2 失败**，随后 20 分钟超时，剩余范围未报告；常规浏览器 **1852 通过、26 失败**，library 57、PWA 59、可信生命周期 7 均通过，直接运行时 6 个结果组无失败。15 份原 artifact ZIP 全部保留并与 GitHub digest 一致，详细摘要和原 trace 在 `out/verification/github-actions/37163692990/root-summary.md`。本批静态修正 Array 二进制读取器、已有双大小写文件夹具、全屏接管预期；Node 取消卡点、WebKit Vocoder 时间边界和 Clipboard 启动存储异常仍未闭合。增加被动 Node 进程/文件开始与退出记录，不增加超时或放宽断言。
