@@ -9,6 +9,8 @@ import { WebAudioHost } from '../backends/audio/web/host.ts'
 import type { AudioState } from '../protocol/audio.ts'
 import { WebVideoHost } from '../backends/video/browser/host.ts'
 import { BrowserInputCoordinator } from '../backends/input/coordinator.ts'
+import { selectCursorAsset, type SelectedCursorAsset } from '../backends/input/cursor.ts'
+import type { CursorAsset } from '../formats/cursor/index.ts'
 import { BrowserWindowSurfaces } from './window-surfaces.ts'
 import { PageActivityMonitor } from './page-activity.ts'
 import { activityPaused, initialActivity } from '../engine/ports/activity.ts'
@@ -107,6 +109,10 @@ export function createPlayer(
   const surfaceChannel = new MessageChannel()
   const windows = new Map<number, WindowPresentation>()
   const inputViews = new Map<number, InputView>()
+  const cursorAssets = new Map<number, SelectedCursorAsset>()
+  const unselectedCursorAssets = new Map<number, CursorAsset>()
+  const cursorAssetIds = new Set<number>()
+  let cursorsRetired = false
   const retiredWindows = new Set<number>()
   let identity = ''
   let stopping: Promise<void> | undefined
@@ -189,6 +195,34 @@ export function createPlayer(
     syncDisplay()
   }
   const session = new SessionClient((event) => {
+    // Stop retires page ownership synchronously, before the Worker drains its
+    // channel. A previously sent definition arriving now is merely stale.
+    if (event.type === 'cursor-asset' && !cursorsRetired) {
+      try {
+        if (!Number.isSafeInteger(event.id) || event.id < 2 || cursorAssetIds.has(event.id))
+          throw new Error('Invalid cursor asset identity')
+        // Keep the full decoded definition if presentation rejects a timeline
+        // whose native playback policy has not yet been established.
+        unselectedCursorAssets.set(event.id, event.asset)
+        cursorAssetIds.add(event.id)
+        if (event.asset.frames.every((frame) => frame.images.length === 1)) {
+          cursorAssets.set(event.id, selectCursorAsset(event.asset, () => 0))
+          unselectedCursorAssets.delete(event.id)
+        } else {
+          // Preserve the complete definition until a verified selection policy
+          // is available. Never silently turn a directory into its first image.
+          onError(new Error('自定义光标暂不支持此文件的多图像选择。'))
+        }
+        input?.refreshCursors()
+      } catch (error) { onError(error) }
+    }
+    if (event.type === 'cursor-assets-clear') {
+      cursorsRetired = true
+      cursorAssets.clear()
+      unselectedCursorAssets.clear()
+      cursorAssetIds.clear()
+      input?.refreshCursors()
+    }
     if (event.type === 'font-selection') {
       fontSelecting = !!event.request
     }
@@ -233,6 +267,10 @@ export function createPlayer(
     (x, y, windowId, sequence) => session.pointerState(x, y, windowId, sequence),
     onError,
     {
+      cursor: {
+        resolve: (id) => cursorAssets.get(id),
+        scene: (windowId, epoch) => video.cursorScene(windowId, epoch),
+      },
       isTransientFocus: (target) => {
         if (options.ownsClipboardFocus?.(target)) return true
         if (options.ownsHelpFocus?.(target)) return true
@@ -268,6 +306,7 @@ export function createPlayer(
       if (state) input!.setInput(windowId, state)
       video.attachWindow(windowId, surfaceEpoch, canvas, surface.videoPlane)
       if (window) video.setWindow(window.view, windowId)
+      input!.refreshCursors()
       options.onSurfaceAttach?.(surface, identity)
       syncDisplay()
       syncInput()
@@ -371,6 +410,12 @@ export function createPlayer(
           () => help.suspend(),
           () => video.setPagePaused(true),
           () => input?.close(),
+          () => {
+            cursorsRetired = true
+            cursorAssets.clear()
+            unselectedCursorAssets.clear()
+            cursorAssetIds.clear()
+          },
         ]) {
           try {
             action()

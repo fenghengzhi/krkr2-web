@@ -1,6 +1,7 @@
 import type { InputPacket, InputView } from '../../engine/ports/input.ts'
 import type { WindowView } from '../../engine/scene/window.ts'
 import { BrowserInput, virtualKey, type BrowserCursorState, type BrowserInputHooks } from './browser.ts'
+import type { CursorScene, SelectedCursorAsset } from './cursor.ts'
 
 interface SurfaceInput {
   readonly id: number
@@ -21,6 +22,10 @@ interface QueuedInput {
 export interface BrowserInputCoordinatorOptions {
   /** Temporary page controls such as owned menu popups preserve Window focus. */
   isTransientFocus?(target: EventTarget | null): boolean
+  cursor?: {
+    resolve(id: number): SelectedCursorAsset | undefined
+    scene(windowId: number, epoch: number): CursorScene | undefined
+  }
 }
 
 /** One DOM-order queue and physical keyboard for all surfaces in a Session. */
@@ -250,6 +255,10 @@ export class BrowserInputCoordinator {
       this.error,
       hooks,
       cursorState,
+      this.options.cursor && {
+        resolve: (id) => this.options.cursor!.resolve(id),
+        scene: () => this.current(surface) ? this.options.cursor!.scene(windowId, epoch) : undefined,
+      },
     )
     surface = {
       id: windowId,
@@ -268,6 +277,12 @@ export class BrowserInputCoordinator {
     if (view) input.setWindow(view)
     if (state) input.setInput(state, windowId)
     input.setSuspended(this.suspended || !surface.visible || surface.blocked)
+  }
+
+  /** An asset event can arrive after the input snapshot that references it. */
+  refreshCursors(): void {
+    if (this.closed) return
+    for (const surface of this.surfaces.values()) surface.input.refreshCursor()
   }
 
   detach(windowId: number, epoch: number): void {

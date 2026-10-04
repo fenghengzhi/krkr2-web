@@ -122,6 +122,9 @@ Bytes dib(const Image& i) {
                 unsigned r = (37 * i.tag + x * 3) & 255, g = (71 * i.tag + y * 5) & 255,
                     bl = (113 * i.tag + x + y) & 255,
                     alpha = i.alphaMode ? (x % 3 == 0 ? 0 : x % 3 == 1 ? 128 : 255) : 0;
+                // Every possible alpha, with independently varying source
+                // channels. Mode 3 is raw straight data, not premultiplied.
+                if (i.alphaMode == 3) alpha = (x + y * i.width) & 255;
                 if (i.alphaMode == 2) { r = r * alpha / 255; g = g * alpha / 255; bl = bl * alpha / 255; }
                 const auto pixel = at + x * (i.bpp / 8);
                 if (i.bpp == 16) {
@@ -177,7 +180,8 @@ Bytes png(unsigned width, unsigned height, unsigned mode) {
             if (mode == 2) scan.push_back((x + y) % 4);
             else {
                 scan.push_back((x * 5 + 31) & 255); scan.push_back((y * 7 + 61) & 255); scan.push_back((x + y + 127) & 255);
-                if (mode == 0) scan.push_back(x % 3 == 0 ? 0 : x % 3 == 1 ? 128 : 255);
+                if (mode == 0 || mode == 3)
+                    scan.push_back(mode == 3 ? (x + y * width) & 255 : x % 3 == 0 ? 0 : x % 3 == 1 ? 128 : 255);
             }
         }
     }
@@ -259,6 +263,16 @@ std::vector<Fixture> fixtures() {
         Image i; i.header = header; i.alphaMode = alpha; i.compression = header == 40 ? BI_RGB : BI_BITFIELDS;
         add("dib-alpha-" + std::to_string(header) + "-" + std::to_string(alpha), {i});
     }
+    { Image i; i.alphaMode = 3; add("dib-alpha-sweep", {i}); }
+    { Image i; i.header = 0; i.encoding = "png-rgba"; i.alphaMode = 3; i.payload = png(32, 32, 3); add("png-alpha-sweep", {i}); }
+    // Loading itself can resize a single candidate to the system cursor size.
+    // Keep the source files and masks independent of any portable scaler.
+    for (unsigned bpp : {1u, 24u}) {
+        Image i; i.width = 8; i.height = 4; i.hotX = 2; i.hotY = 1; i.bpp = bpp;
+        add("dib-small-" + std::to_string(bpp), {i}, "scaling");
+    }
+    { Image i; i.width = 13; i.height = 9; i.hotX = 12; i.hotY = 8; i.alphaMode = 3; add("dib-alpha-small", {i}, "scaling"); }
+    { Image i; i.width = 13; i.height = 9; i.hotX = 12; i.hotY = 8; i.header = 0; i.encoding = "png-rgba"; i.alphaMode = 3; i.payload = png(13, 9, 3); add("png-small", {i}, "scaling"); }
     { Image i; i.width = 13; i.height = 9; i.bpp = 4; i.hotX = 12; i.hotY = 8; add("dib-odd-stride", {i}); }
     { Image i; i.topDown = true; add("dib-top-down", {i}, "characterization"); }
     { Image i; i.alphaMode = 1; i.omitMask = true; add("dib-alpha-no-mask", {i}, "characterization"); }
@@ -275,6 +289,12 @@ std::vector<Fixture> fixtures() {
     std::vector<Image> depths;
     for (unsigned bpp : {1u, 4u, 8u, 24u, 32u}) { Image i; i.bpp = bpp; i.tag = bpp; i.hotX = bpp / 2; depths.push_back(i); }
     add("multi-depths", depths, "selection"); std::reverse(depths.begin(), depths.end()); add("multi-depths-reversed", depths, "selection");
+    auto withoutExact = sizes;
+    withoutExact.erase(std::remove_if(withoutExact.begin(), withoutExact.end(), [](const Image& i) { return i.width == 32; }), withoutExact.end());
+    add("multi-without-exact", withoutExact, "selection");
+    std::reverse(withoutExact.begin(), withoutExact.end()); add("multi-without-exact-reversed", withoutExact, "selection");
+    Image tieA, tieB; tieA.tag = 3; tieA.hotX = 4; tieB.tag = 9; tieB.hotX = 23;
+    add("multi-equal-tie", {tieA, tieB}, "selection"); add("multi-equal-tie-reversed", {tieB, tieA}, "selection");
     Image a; a.tag = 1; a.hotX = 2; a.hotY = 3;
     Image b = a; b.tag = 2; b.hotX = 7; b.hotY = 11;
     Image c = a; c.tag = 3; c.hotX = 17; c.hotY = 23;
@@ -411,8 +431,11 @@ std::string observe(const fs::path& output, const Fixture& f, GetCursorFrameInfo
             } else o << ",\"frameInfo\":{\"available\":false}";
             o << ",\"draws\":[";
             bool first = true;
+            std::vector<unsigned> backgrounds{0u, 0xffffffu, 0x123456u};
+            if (f.id == "dib-alpha-sweep" || f.id == "png-alpha-sweep")
+                for (unsigned channel : {1u, 127u, 129u, 253u}) backgrounds.push_back(channel * 0x010101u);
             for (unsigned flags : {static_cast<unsigned>(DI_NORMAL | DI_NOMIRROR), static_cast<unsigned>(DI_MASK | DI_NOMIRROR), static_cast<unsigned>(DI_IMAGE | DI_NOMIRROR)})
-                for (unsigned background : {0u, 0xffffffu, 0x123456u}) for (unsigned size : {0u, 1u}) {
+                for (unsigned background : backgrounds) for (unsigned size : {0u, 1u}) {
                     if (!first) o << ','; first = false;
                     o << draw(output, f.id, cursor, step, flags, background, size ? 48 : 0, size ? 40 : 0, frame);
                 }

@@ -1,5 +1,13 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [080 自定义光标资源与浏览器呈现](decisions/080-cursor-storage-presentation.md)：接入严格 String 资源路径、Session 解析路径缓存／稳定 ID／预算／Stop 清理，以及真实 canvas/video 背景上的 AND/XOR、完整非零 rate ANI 和物理／虚拟位置呈现。协议升至 **26**，TJS ABI **5**、字体 ABI **2** 不变。新增 16 个缓存、16 个真实 Session、每浏览器 6 个呈现定义；根据回收原生结果再新增 5 个格式定义（共 28），参考矩阵从 47 扩至 57。所有本批定义待托管执行，当前不是通过记录，整体非插件目标仍 active。
+
+本批保留明确缺口：Windows 加载时的多图选择、源图缩放及 DPI，零 rate ANI 的墙钟策略，非整数 CSS pixelated 过滤，以及原生拒绝但通用解码器接受的格式加载政策。079 实测单图 13×9／256×256 都被 Windows 加载为 32×32；当前浏览器按源尺寸呈现因此不是原生尺寸兼容的完成状态。新增 alpha 全 256 阶／奇数背景和选图缩放样本用于继续补齐，不用窄范围通过代替这些要求。
+
+已完整回收 [079／37236286963](https://github.com/fenghengzhi/krkr2-web/actions/runs/37236286963) **failure**：23/23 原 ZIP 大小与 SHA-256 匹配；Node **2744 通过、6 失败、2 超时取消／2752**，有 reporter finish／最终 plan；CUR 格式 **23/23**。Firefox **658/658**（cursor/hint **8/8**），常规三浏览器 **1972 通过、2 失败／1974**，剩余两项 WebKit 为 Target crashed 和视频 first-frame ready 超时。Windows 两系统各 **135 比较、117 匹配、18 像素差异**，另 3 项原生接受／候选拒绝；1,017 个未比较 draw／系统及 7 项相反接受差异另记。080 根据原始像素修正 16-bit 展开、alpha 预乘量化、图外热点及 ANI 边界；目的项全部舍入规则仍由新矩阵确认。终态与原失败在 `out/verification/github-actions/37236286963/080-final-summary.md`，旧快照原样保留。
+
+也已完整回收 [078／37234602267](https://github.com/fenghengzhi/krkr2-web/actions/runs/37234602267) **failure**：20/20 ZIP 核对通过，Node **2720 通过、7 失败、2 超时取消／2729**，终于具备完整终态。selector native **26/26**、abort-entry **10/10**、integration **38/38**、browser **48/48**，原 bounded source/bytecode 均到 dispose 返回；字符串自追加 **2/2** 且原生 ASan/UBSan 日志 PASS，identity allocator **120/120**。这些成功不改写旧失败。080 修订 identity 非法操作名、invalidate 后 Scripts 全局查找和提前结束诊断；079 几何剩余的浮点差异用小于 `1e-10` 的尺寸误差界验证，整数原点和脚本光标仍精确。原证据在 `out/verification/github-actions/37234602267/080-final-summary.md`。
+
 最新待核验批次：[Full test suite 37236286963](https://github.com/fenghengzhi/krkr2-web/actions/runs/37236286963)，精确提交 `ae42bf93fddc6c0bada0483bb3556a4629a1a855`。079 格式候选、Windows 原生对照、Firefox display 隔离和几何夹具修订已整批推送；首次唯一查询确认创建与提交身份，当时 **pending／conclusion=null**，没有检查实时作业或当作已执行。下一批先补取 078 的完整终态／后续产物，再取回本批全部证据；失败、取消及未比较范围继续保留。协议 25、TJS ABI 5、字体 ABI 2 不变，完整非插件目标仍 active，未合入旧 main。
 
 2026-10-05 准备 [079 CUR／ANI 格式与参考证据](decisions/079-cursor-format-reference.md)：新增有界多图 CUR 和完整逐步 ANI 资产解码、热点、RGBA／AND-XOR 两种操作及整数比例动画采样；新增 23 个格式验收定义，以及 Windows 2022／2025 上 47 份独立二进制夹具的 User32 加载／离屏像素对照。所有定义尚未运行，字符串 cursor 的 Session 资源缓存和浏览器实际呈现仍未接入，自定义光标及整体非插件目标均未完成。并修正 077 的公开 transition／绘制坐标夹具；Firefox 改为每个 headed display 一个 worker、常规测试分两台 host，并新增被动输入时间线，不放宽断言或时限。

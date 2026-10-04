@@ -262,7 +262,7 @@ class IdentityDownLayer extends Layer {
     if(global.identityMode=="retire-window"){
       invalidate global.win;delete global.win;delete global.root;
     }
-    if(global.identityMode=="stop")Scripts.evalStorage("hold-identity.tjs");
+    if(global.identityMode=="stop")global.Scripts.evalStorage("hold-identity.tjs");
     global.trace.add("upper-return");
   }
   function onMouseMove(){global.trace.add("invalid-move");}
@@ -402,7 +402,12 @@ for (const binary of [false, true]) {
     let outcome: Promise<unknown> | undefined
     try {
       outcome = f.mouse('down').then(() => undefined, (error: unknown) => error)
-      await ready
+      await Promise.race([
+        ready,
+        outcome.then((error) => {
+          throw new Error('Invalidating down ended before reaching the suspended storage read', { cause: error })
+        }),
+      ])
       assert.equal(f.session.inspectOwnership().objectIdentities, 1,
         'Only the currently suspended down operation observes the invalid object identity')
       assert.equal(f.session.inspectOwnership().layerSources, 1)

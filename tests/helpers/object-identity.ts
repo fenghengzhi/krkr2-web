@@ -108,7 +108,7 @@ class IdentityOwner {
         const lease = vm.upgradeIdentity(token)
         check(lease, 'Alive invalid identity did not upgrade')
         if (lease) {
-          check(vm.nativeLifetimeIdentifier(lease, 'not-registered') === undefined, 'Identity upgrade invented native state')
+          check(vm.nativeLifetimeIdentifier(lease, 'Identity.Missing') === undefined, 'Identity upgrade invented native state')
           vm.release(lease)
           await vm.collect()
         }

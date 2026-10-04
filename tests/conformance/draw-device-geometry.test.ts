@@ -136,7 +136,12 @@ for (const binary of [false, true]) {
       const id = Number(await f.session.evaluate('replacement.__id')),
         frame = f.frames.at(-1)!
       assert.equal(frame[0]!.id, id)
-      assert.deepEqual([frame[0]!.x, frame[0]!.y, frame[0]!.width, frame[0]!.height], [2, -2, 38, 39])
+      assert.deepEqual([frame[0]!.x, frame[0]!.y], [2, -2])
+      // FrameLayer uses floating scale ratios; 77 * (39 / 77) can be one
+      // representable value below 39. Keep the native destination to far less
+      // than a pixel, as for the child projections above.
+      assert(Math.abs(frame[0]!.width - 38) < 1e-10)
+      assert(Math.abs(frame[0]!.height - 39) < 1e-10)
       assert.equal(await f.run('moveReplacement'), '19,19')
       assert.deepEqual([f.view().virtualCursor!.x, f.view().virtualCursor!.y], [12, 8])
     } finally { await f.stop() }

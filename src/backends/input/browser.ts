@@ -1,6 +1,7 @@
 import type { InputPacket, InputView } from '../../engine/ports/input.ts'
 import type { WindowView } from '../../engine/scene/window.ts'
 import { paintBoxPoint } from '../../engine/scene/draw-device.ts'
+import { BrowserCursorPresenter, type BrowserCursorOptions, type CursorPosition } from './cursor.ts'
 const cursors: Record<number, string> = {
   0: 'default',
   [-1]: 'none',
@@ -160,6 +161,8 @@ export class BrowserInput {
   private keyboardRoute = ''
   private virtualMarker?: HTMLSpanElement
   private markerShape = ''
+  private customCursor?: BrowserCursorPresenter
+  private physicalCursor?: { x: number; y: number }
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly sendPacket: (packet: InputPacket) => Promise<void>,
@@ -172,6 +175,7 @@ export class BrowserInput {
       highestRevision: 0,
       retiredRevision: 0,
     },
+    private readonly cursorOptions?: BrowserCursorOptions,
   ) {
     this.text = document.createElement('textarea')
     this.text.setAttribute('aria-label', '游戏文字输入')
@@ -239,6 +243,8 @@ export class BrowserInput {
       'wheel',
       (event) => {
         event.preventDefault()
+        if (!this.suspended && !this.disposed)
+          this.physicalCursor = { x: event.clientX, y: event.clientY }
         const p = this.point(event.clientX, event.clientY)
         const delta = Math.round(
           -event.deltaY *
@@ -360,6 +366,7 @@ export class BrowserInput {
     this.suspended = suspended
     if (suspended) {
       this.epoch++
+      this.physicalCursor = undefined
       this.retireVirtualCursor()
       this.queue = []
       this.active = false
@@ -405,39 +412,82 @@ export class BrowserInput {
       : ''
     this.text.inputMode = (route?.imeMode ?? this.input?.imeMode) === 0 ? 'none' : 'text'
   }
+  refreshCursor(): void {
+    // Asset-clear events also arrive while Stop has already suspended input.
+    if (!this.cursorOptions?.resolve(this.input?.cursor ?? 0)) this.customCursor?.clear()
+    this.cursorAppearance()
+  }
+  private restoreCursor(): void {
+    this.canvas.style.cursor = this.view?.mouseCursorState || this.virtualMarker || this.customCursor?.visible
+      ? 'none'
+      : (cursors[this.input?.cursor ?? 0] ?? 'default')
+  }
   private retireVirtualCursor(): void {
     this.cursorState.retiredRevision = Math.max(
       this.cursorState.retiredRevision,
       this.cursorState.highestRevision,
     )
     this.removeVirtualMarker()
+    this.customCursor?.hide()
   }
   private removeVirtualMarker(): void {
     this.virtualMarker?.remove()
     this.virtualMarker = undefined
     this.markerShape = ''
-    this.canvas.style.cursor = this.view?.mouseCursorState
-      ? 'none'
-      : (cursors[this.input?.cursor ?? 0] ?? 'default')
+    this.restoreCursor()
   }
   private cursorAppearance(): void {
+    if (this.disposed) return
     if (this.suspended || this.view?.visible === false || this.view?.blocked) {
+      this.physicalCursor = undefined
       this.retireVirtualCursor()
       return
     }
-    const cursor = this.input?.virtualCursor,
+    const candidate = this.input?.virtualCursor,
       shape = cursors[this.input?.cursor ?? 0] ?? 'default',
       width = this.view?.width ?? 800,
       height = this.view?.height ?? 600
+    const cursor = candidate &&
+      Number.isFinite(candidate.x) && Number.isFinite(candidate.y) &&
+      Number.isSafeInteger(candidate.revision) &&
+      candidate.revision > this.cursorState.retiredRevision &&
+      candidate.revision >= this.cursorState.highestRevision &&
+      Number.isSafeInteger(candidate.basePhysicalSequence) &&
+      candidate.basePhysicalSequence >= this.cursorState.physicalSequence &&
+      candidate.x >= 0 && candidate.y >= 0 && candidate.x < width && candidate.y < height
+      ? candidate : undefined
+    const id = this.input?.cursor ?? 0
+    if (id >= 2) {
+      this.removeVirtualMarker()
+      const asset = this.cursorOptions?.resolve(id)
+      if (!asset) {
+        this.customCursor?.clear()
+        this.restoreCursor()
+        return
+      }
+      if (this.view?.mouseCursorState || (!cursor && !this.physicalCursor)) {
+        this.customCursor?.hide()
+        this.restoreCursor()
+        return
+      }
+      try {
+        this.customCursor ??= new BrowserCursorPresenter(this.canvas, this.cursorOptions!.scene,
+          () => this.restoreCursor(), this.error)
+        this.customCursor.show(asset, (): CursorPosition | undefined => {
+          if (this.disposed || this.suspended || this.view?.visible === false || this.view?.blocked ||
+              this.view?.mouseCursorState || this.input?.cursor !== id) return undefined
+          const bounds = this.canvas.getBoundingClientRect(), point = cursor
+            ? { x: bounds.left + cursor.x * bounds.width / (this.view?.width ?? 800),
+                y: bounds.top + cursor.y * bounds.height / (this.view?.height ?? 600) }
+            : this.physicalCursor
+          return point && { ...point, windowId: this.sourceWindowId, cursorId: id, revision: cursor?.revision }
+        })
+      } catch (error) { this.error(error) }
+      return
+    }
+    this.customCursor?.clear()
     if (
       !cursor ||
-      !Number.isFinite(cursor.x) || !Number.isFinite(cursor.y) ||
-      !Number.isSafeInteger(cursor.revision) ||
-      cursor.revision <= this.cursorState.retiredRevision ||
-      cursor.revision < this.cursorState.highestRevision ||
-      !Number.isSafeInteger(cursor.basePhysicalSequence) ||
-      cursor.basePhysicalSequence < this.cursorState.physicalSequence ||
-      cursor.x < 0 || cursor.y < 0 || cursor.x >= width || cursor.y >= height ||
       this.view?.mouseCursorState || shape === 'none' ||
       !this.canvas.parentElement
     ) {
@@ -534,6 +584,7 @@ export class BrowserInput {
   private mouse(event: MouseEvent, type: 'down' | 'move' | 'up'): void {
     if (this.suspended || this.disposed) return
     if (this.shared && !this.shared.mouse(type, event.buttons)) return
+    this.physicalCursor = { x: event.clientX, y: event.clientY }
     const button = [0, 2, 1, 3, 4][event.button] ?? 0,
       p = this.point(event.clientX, event.clientY)
     if (type === 'down') {
@@ -571,6 +622,7 @@ export class BrowserInput {
       }
       return
     }
+    this.physicalCursor = undefined
     this.retireVirtualCursor()
     event.preventDefault()
     const p = this.point(event.clientX, event.clientY),
@@ -714,7 +766,10 @@ export class BrowserInput {
     clearTimeout(this.composeTimer)
   }
   private deactivate(pageBlur = false, nextTarget: EventTarget | null = null): void {
-    if (pageBlur) this.retireVirtualCursor()
+    if (pageBlur) {
+      this.physicalCursor = undefined
+      this.retireVirtualCursor()
+    }
     const captured = !!(this.mouseButtons || this.touches.size || this.captured.size)
     if (this.shared) {
       this.clearTransient()
@@ -762,6 +817,7 @@ export class BrowserInput {
         pointerSequence: sequence,
         ...(this.view ? { paintBoxPoint: paintBoxPoint(this.view, packet.x, packet.y) } : {}),
       }
+      this.cursorAppearance()
       if (this.shared) this.shared.pointer(packet.x, packet.y, sequence)
       else {
         const epoch = this.epoch
@@ -771,7 +827,10 @@ export class BrowserInput {
         })
       }
     }
-    if (packet.type === 'leave' || packet.type === 'cancel') this.retireVirtualCursor()
+    if (packet.type === 'leave' || packet.type === 'cancel') {
+      this.physicalCursor = undefined
+      this.retireVirtualCursor()
+    }
     if (this.shared) {
       this.shared.enqueue(packet)
       return
@@ -823,6 +882,8 @@ export class BrowserInput {
     clearTimeout(this.composeTimer)
     this.text.remove()
     this.removeVirtualMarker()
+    this.customCursor?.close()
+    this.customCursor = undefined
     this.pressed.clear()
     this.touches.clear()
   }

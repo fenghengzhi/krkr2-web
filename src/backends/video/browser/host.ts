@@ -15,6 +15,7 @@ import type { Pixels } from '../../../engine/ports/graphics.ts'
 import type { WindowView } from '../../../engine/scene/window.ts'
 import type { VideoMessage, VideoRequest } from '../../../protocol/video.ts'
 import type { WebAudioHost } from '../../audio/web/host.ts'
+import type { CursorRasterLayer, CursorScene } from '../../input/cursor.ts'
 import {
   createVideoMixingSurface,
   releaseVideoMixingSurface,
@@ -142,6 +143,42 @@ export class WebVideoHost {
     if (this.closed || this.retiredWindows.has(id)) return
     this.window(id).view = view
     this.layout(id)
+  }
+  /** A synchronous description of the host-owned raster stack. Read actual
+   * DOM rectangles so responsive layout, video output sizing and clipping agree
+   * with the pixels beneath a destination-dependent cursor. Layer-mode movies
+   * are already inside the game canvas and must not be painted a second time. */
+  cursorScene(id: number, epoch: number): CursorScene | undefined {
+    const window = this.windows.get(id), surface = window?.surface
+    if (this.closed || window?.epoch !== epoch || !surface || !surface.plane.isConnected)
+      return undefined
+    const layers: CursorRasterLayer[] = [],
+      movies = new Map<HTMLDivElement, Movie>([...this.movies.values()].filter((movie) => movie.windowId === id)
+        .map((movie) => [movie.container, movie]))
+    for (const child of surface.plane.children) {
+      const movie = movies.get(child as HTMLDivElement)
+      if (!movie || movie.disposed || movie.settings.mode === 1) continue
+      const style = getComputedStyle(movie.container)
+      if (style.display === 'none' || style.visibility !== 'visible') continue
+      const rectangle = movie.container.getBoundingClientRect()
+      if (!rectangle.width || !rectangle.height) continue
+      layers.push({ rectangle, clip: rectangle, background: style.backgroundColor })
+      const video = movie.element, videoStyle = getComputedStyle(video)
+      if (video.readyState >= 2 && video.videoWidth && video.videoHeight &&
+          videoStyle.display !== 'none' && videoStyle.visibility === 'visible')
+        layers.push({ source: video, rectangle: video.getBoundingClientRect(), clip: rectangle,
+          opacity: Number(videoStyle.opacity),
+          smoothing: videoStyle.imageRendering !== 'pixelated' && videoStyle.imageRendering !== 'crisp-edges' })
+      const bitmap = movie.mixing?.canvas
+      if (bitmap?.parentElement === movie.container) {
+        const bitmapStyle = getComputedStyle(bitmap)
+        if (bitmapStyle.display !== 'none' && bitmapStyle.visibility === 'visible')
+          layers.push({ source: bitmap, rectangle: bitmap.getBoundingClientRect(), clip: rectangle,
+            opacity: Number(bitmapStyle.opacity),
+            smoothing: bitmapStyle.imageRendering !== 'pixelated' && bitmapStyle.imageRendering !== 'crisp-edges' })
+      }
+    }
+    return { plane: surface.plane, layers }
   }
   attachWindow(id: number, epoch: number, canvas: HTMLCanvasElement, plane?: HTMLElement): void {
     if (this.closed || this.retiredWindows.has(id)) return

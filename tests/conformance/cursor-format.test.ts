@@ -109,7 +109,7 @@ test('CUR 24-bit bottom-up and top-down DIBs decode rows and AND masks independe
   }
 })
 
-test('CUR 16-bit RGB555 and explicit RGB565 fields scale channels with rounding', async () => {
+test('CUR 16-bit RGB555 and explicit RGB565 fields replicate high channel bits', async () => {
   const ordinary = cursorDib({ width: 4, height: 1, depth: 16,
       xorRows: [[0x00, 0x7c, 0xe0, 0x03, 0x1f, 0x00, 0x10, 0x42]] }),
     fields = cursorDib({ width: 4, height: 1, depth: 16, masks: [0xf800, 0x07e0, 0x001f],
@@ -123,6 +123,21 @@ test('CUR 16-bit RGB555 and explicit RGB565 fields scale channels with rounding'
   assert.deepEqual([...asset.frames[0]!.images[1]!.data], [
     255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 132, 130, 132, 255,
   ])
+})
+
+test('CUR RGB555/565 low channel values match the hosted Win32 byte expansion', async () => {
+  // 079 native-cursor-windows-{2022,2025}-1: dib-info-16 at (23,16)
+  // is RGB(57,66,123), not the former ratio-rounded RGB(58,66,123).
+  // dib-bitfields-16 at (16,41) expands source 31 26 to RGB(33,199,140),
+  // so the 6-bit green channel also distinguishes replication from rounding.
+  const asset = await decodeCursor(cursorFile([
+    { width: 2, height: 1, payload: cursorDib({ width: 2, height: 1, depth: 16,
+      xorRows: [[0x0f, 0x1d, 0x17, 0x5e]] }) },
+    { width: 2, height: 1, payload: cursorDib({ width: 2, height: 1, depth: 16,
+      masks: [0xf800, 0x07e0, 0x001f], xorRows: [[0x2f, 0x3a, 0x31, 0x26]] }) },
+  ]), { png })
+  assert.deepEqual([...asset.frames[0]!.images[0]!.data], [57, 66, 123, 255, 189, 132, 189, 255])
+  assert.deepEqual([...asset.frames[0]!.images[1]!.data], [57, 69, 123, 255, 33, 199, 140, 255])
 })
 
 test('CUR rejects overlapping, noncontiguous and out-of-depth bit fields', async () => {
@@ -193,7 +208,31 @@ test('CUR PNG uses real bounded decoding, retains transparency, and owns host pi
   assert.deepEqual([...image.data], [200, 100, 50, 0, 201, 101, 51, 128])
   const target = surface(2, 1, [10, 20, 30, 255, 100, 150, 200, 255])
   compositeCursor(image, target, 0, 0)
-  assert.deepEqual([...target.data], [10, 20, 30, 255, 151, 125, 125, 255])
+  assert.deepEqual([...target.data], [10, 20, 30, 255, 150, 125, 125, 255])
+})
+
+test('CUR DIB and PNG alpha quantize source premultiplication before background blending', async () => {
+  // The two hosted Windows versions agree for dib-alpha-40-1 pixel(17,16):
+  // source BGRA is 72 47 28 80, native black BGRA is 39 23 14 ff.
+  // Include the already-premultiplied source fixture too: loading multiplies
+  // it again, so its input bytes must not be reinterpreted as premultiplied.
+  for (const [rgba, expected] of [
+    [[40, 71, 114, 128], [[20, 35, 57], [147, 162, 184], [29, 61, 100]]],
+    [[20, 35, 57, 128], [[10, 17, 28], [137, 144, 155], [19, 43, 71]]],
+  ] as const) {
+    const [r, g, b, a] = rgba
+    for (const payload of [
+      cursorDib({ width: 1, height: 1, depth: 32, xorRows: [[b, g, r, a]], andRows: [[0x80]] }),
+      cursorPng(1, 1, rgba),
+    ]) {
+      const image = (await decodeCursor(cursorFile([{ width: 1, height: 1, payload }]), { png })).frames[0]!.images[0]!
+      for (const [index, rgb] of [[0, [0, 0, 0]], [1, [255, 255, 255]], [2, [18, 52, 86]]] as const) {
+        const target = surface(1, 1, [...rgb, 255])
+        compositeCursor(image, target, 0, 0)
+        assert.deepEqual([...target.data], [...expected[index], 255])
+      }
+    }
+  }
 })
 
 test('CUR preflights PNG directory dimensions and budgets before calling its decoder', async () => {
@@ -291,6 +330,34 @@ test('ANI defaults to directory order and header rate when seq and rate chunks a
   assert.equal(cursorStep(asset, 200), 0)
 })
 
+test('ANI sequence chunk presence takes precedence over its advisory sequence flag', async () => {
+  const frames = [solid(1, 2, 3), solid(4, 5, 6), solid(7, 8, 9)],
+    absent = await decodeCursor(animatedCursor(frames, { flags: 3 }), { png }),
+    present = await decodeCursor(animatedCursor(frames, { flags: 1, sequence: [2, 0, 2, 1, 0],
+      rates: [1, 4, 7, 2, 9] }), { png })
+  assert.deepEqual(absent.sequence, [0, 1, 2])
+  assert.deepEqual(absent.rates, [6, 6, 6])
+  assert.equal(absent.animation!.flags, 3)
+  assert.deepEqual(present.sequence, [2, 0, 2, 1, 0])
+  assert.deepEqual(present.rates, [1, 4, 7, 2, 9])
+  assert.equal(present.animation!.flags, 1)
+})
+
+test('ANI retains native zero rates for indexed frames without inventing wall-clock timing', async () => {
+  const frames = [solid(1, 2, 3), solid(4, 5, 6), solid(7, 8, 9)]
+  for (const rates of [[0, 1, 0], undefined]) {
+    const asset = await decodeCursor(animatedCursor(frames, { defaultRate: 0, rates }), { png })
+    assert.deepEqual(asset.sequence, [0, 1, 2])
+    assert.deepEqual(asset.rates, rates ?? [0, 0, 0])
+    assert.equal(asset.durationJiffies, rates ? 1 : 0)
+    assert.deepEqual(asset.frames.map((frame) => [...frame.images[0]!.data]), [
+      [1, 2, 3, 255], [4, 5, 6, 255], [7, 8, 9, 255],
+    ])
+    for (const elapsed of [0, 1, 1000])
+      assert.throws(() => cursorStep(asset, elapsed), /zero-rate playback timing is not calibrated/)
+  }
+})
+
 test('ANI one-jiffy steps keep exact 50ms and 100ms boundaries over many loops', async () => {
   const asset = await decodeCursor(animatedCursor([solid(255, 0, 0), solid(0, 0, 255)], {
     rates: [1, 1],
@@ -311,7 +378,19 @@ test('ANI accepts embedded ICO frames with centered hotspots but standalone ICO 
   await assert.rejects(decodeCursor(icon, { png }), /CUR directory/)
 })
 
-test('CUR rejects truncation, unsafe offsets, invalid hotspots, and extra DIB data', async () => {
+test('CUR preserves unsigned hotspots outside the image bounds', async () => {
+  for (const hotspot of [[33, 40], [65535, 65535]] as const) {
+    const image = (await decodeCursor(cursorFile([{ width: 1, height: 1, hotspot,
+      payload: cursorDib({ width: 1, height: 1, depth: 24, xorRows: [[30, 20, 10]] }),
+    }]), { png })).frames[0]!.images[0]!
+    assert.deepEqual(image.hotspot, { x: hotspot[0], y: hotspot[1] })
+    const target = surface(1, 1, [1, 2, 3, 255])
+    compositeCursor(image, target, -hotspot[0], -hotspot[1])
+    assert.deepEqual([...target.data], [1, 2, 3, 255])
+  }
+})
+
+test('CUR rejects truncation, unsafe offsets, and extra DIB data', async () => {
   const valid = solid(10, 20, 30)
   for (const length of [0, 1, 5, 6, 21, 22, 33, valid.length - 1])
     await assert.rejects(decodeCursor(valid.subarray(0, length), { png }), /Cursor:/, `length=${length}`)
@@ -323,9 +402,6 @@ test('CUR rejects truncation, unsafe offsets, invalid hotspots, and extra DIB da
     bytes.writeUInt32LE(value, offset)
     await assert.rejects(decodeCursor(bytes, { png }), message)
   }
-  const hotspot = Buffer.from(valid)
-  hotspot.writeUInt16LE(1, 10)
-  await assert.rejects(decodeCursor(hotspot, { png }), /hotspot/)
   const reserved = Buffer.from(valid)
   reserved[9] = 1
   await assert.rejects(decodeCursor(reserved, { png }), /directory entry/)
@@ -344,9 +420,6 @@ test('ANI rejects truncated RIFF/chunks, missing frames, invalid sequence/rates,
     [{ sequence: [0, 2] }, /missing frame/],
     [{ sequence: [0], steps: 2 }, /sequence length/],
     [{ rates: [6] }, /rate length/],
-    [{ rates: [6, 0] }, /zero duration/],
-    [{ defaultRate: 0 }, /zero duration/],
-    [{ flags: 3 }, /missing its frame sequence/],
     [{ steps: 3 }, /missing its frame sequence/],
     [{ frameCount: 3, steps: 3 }, /frame count/],
     [{ flags: 0 }, /unsupported ANI/],

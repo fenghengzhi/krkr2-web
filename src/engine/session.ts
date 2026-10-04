@@ -34,6 +34,8 @@ import {
   toPublicStoragePath,
 } from './storage/public-path.ts'
 import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
+import { CursorStorage } from './storage/cursors.ts'
+import { decodeCursor, type CursorAsset } from '../formats/cursor/index.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree, type LayerState } from './scene/layers.ts'
 import { drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
@@ -163,6 +165,9 @@ export interface SessionSnapshot {
   imageCacheHits: number
   imageCacheMisses: number
   imageCacheLimit: number
+  cursorCacheEntries: number
+  cursorCacheBytes: number
+  cursorCachePending: number
 }
 export type EngineEvent =
   | { type: 'state'; snapshot: SessionSnapshot }
@@ -173,6 +178,8 @@ export type EngineEvent =
   | { type: 'window-closed'; windowId: number }
   | { type: 'window-activate'; windowId: number }
   | { type: 'window-input'; windowId: number; input: InputView }
+  | { type: 'cursor-asset'; id: number; asset: CursorAsset }
+  | { type: 'cursor-assets-clear' }
   | { type: 'input'; input: InputView }
   | ({ type: 'pads' } & PadPresentation)
   | { type: 'font-selection'; request: FontSelectionRequest | null }
@@ -246,6 +253,14 @@ export class EngineSession {
       yield: () => this.yieldGraphics(),
     },
   )
+  private readonly cursors = new CursorStorage(
+    (name) => this.findResource(name),
+    (bytes) => this.decodeCursorAsset(bytes),
+    () => this.control.check(),
+    (id, asset) => this.deps.event({ type: 'cursor-asset', id, asset }),
+  )
+  private readonly cursorLoads = new WeakMap<LayerState, number>()
+  private cursorDefinitionsCleared = false
   private readonly imageWriter = new ImageWriter(
     (bytes) => this.deps.deflateImage(bytes),
     (work) => this.finishGraphics(work),
@@ -442,6 +457,7 @@ export class EngineSession {
         () => this.transitions?.dispose(),
         () => this.composer.clear(),
         () => this.images.dispose(),
+        () => this.closeCursors(),
         () => this.fonts.dispose(),
         () => deps.graphics.dispose?.(),
       ]) {
@@ -2852,6 +2868,7 @@ export class EngineSession {
       saveFiles: this.saves.count,
       pendingSaves: this.saves.pending,
       ...this.images.snapshot(),
+      ...this.cursors.snapshot(),
     }
   }
   private notify(): void {
@@ -2962,6 +2979,7 @@ export class EngineSession {
       await attempt(() => this.videos?.dispose())
       await attempt(() => this.sounds?.dispose())
       await attempt(() => this.inputs?.dispose())
+      await attempt(() => this.closeCursors())
       await attempt(() => this.layerObjects?.dispose())
       await attempt(() => this.kag.clear())
       await attempt(() => this.windows?.dispose())
@@ -3049,6 +3067,25 @@ export class EngineSession {
     if (bmp) return bmp
     const work = decodeTlg(bytes) ?? decodeGif(bytes)
     return work ? this.finishGraphics(work) : this.deps.graphics.decode(bytes)
+  }
+  private closeCursors(): void {
+    this.cursors.dispose()
+    if (this.cursorDefinitionsCleared) return
+    this.cursorDefinitionsCleared = true
+    this.deps.event({ type: 'cursor-assets-clear' })
+  }
+  private async decodeCursorAsset(bytes: Uint8Array): Promise<CursorAsset> {
+    let deadline = this.deps.now() + 8
+    return decodeCursor(bytes, {
+      png: (payload) => this.decodeImage(payload),
+      checkpoint: async () => {
+        this.control.check()
+        if (this.deps.now() >= deadline) {
+          await this.yieldGraphics()
+          deadline = this.deps.now() + 8
+        }
+      },
+    })
   }
   private async yieldGraphics(): Promise<void> {
     await new Promise<void>((resolve) => {
@@ -3957,14 +3994,24 @@ export class EngineSession {
         break
       }
       case 'Layer.set':
-        if (text(1) === 'cursor' || text(1) === 'hint') {
+        if (text(1) === 'cursor') {
+          const id = number(0), layer = this.layers.get(id), record = this.layerObjects!.get(id),
+            request = (this.cursorLoads.get(layer) ?? 0) + 1
+          if (!Number.isSafeInteger(request)) throw new Error('Layer cursor request identity exhausted')
+          this.cursorLoads.set(layer, request)
+          const valid = () => !record.finished && !record.closing && this.layers.has(id) &&
+            this.layers.get(id) === layer && this.cursorLoads.get(layer) === request,
+            cursor = typeof args[2] === 'string'
+              ? await cancelable(this.cursors.load(args[2], valid), this.control)
+              : clipInteger(2)
+          this.control.check()
+          if (!valid()) throw new Error('Cursor load destination changed')
+          const controller = this.inputControllers.forLayer(id)
+          return this.inputs!.start(controller.setCursor(id, cursor), controller)
+        }
+        if (text(1) === 'hint') {
           const id = number(0), controller = this.inputControllers.forLayer(id)
-          return this.inputs!.start(
-            text(1) === 'cursor'
-              ? controller.setCursor(id, clipInteger(2))
-              : controller.setHint(id, text(2)),
-            controller,
-          )
+          return this.inputs!.start(controller.setHint(id, text(2)), controller)
         }
         if (text(1) === 'showParentHint') {
           // Native SetShowParentHint only stores the flag. It does not notify

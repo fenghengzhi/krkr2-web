@@ -14,7 +14,8 @@ export interface CursorFrame { images: CursorImage[] }
 export interface CursorAsset {
   kind: 'cur' | 'ani'
   frames: CursorFrame[]
-  /** Indices into frames; durations are per step, not per distinct frame. */
+  /** Indices into frames; durations are per step, not per distinct frame.
+   * Native zero rates are preserved but require a calibrated playback policy. */
   sequence: number[]
   rates: number[]
   durationJiffies: number
@@ -80,7 +81,13 @@ function channel(mask: number, depth: number): { mask: number; shift: number; ma
   return { mask, shift, maximum: bits }
 }
 function component(pixel: number, field: ReturnType<typeof channel>) {
-  return field.maximum ? Math.round(((pixel & field.mask) >>> field.shift) * 255 / field.maximum) : 0
+  if (!field.maximum) return 0
+  const value = (pixel & field.mask) >>> field.shift
+  // LoadCursorFromFile/DrawIconEx on the fixed Windows 2022/2025 matrix
+  // expands RGB555/565 by repeating high bits, not by rounding a ratio.
+  if (field.maximum === 31) return (value << 3) | (value >>> 2)
+  if (field.maximum === 63) return (value << 2) | (value >>> 4)
+  return Math.round(value * 255 / field.maximum)
 }
 
 async function dib(bytes: Uint8Array, width: number, height: number, options: CursorDecodeOptions) {
@@ -183,7 +190,8 @@ async function frame(bytes: Uint8Array, budget: Budget, options: CursorDecodeOpt
       hotspot = type === 2
         ? { x: h.getUint16(at + 4, true), y: h.getUint16(at + 6, true) }
         : { x: width >>> 1, y: height >>> 1 }
-    if (hotspot.x >= width || hotspot.y >= height) fail('hotspot outside image')
+    // CUR hotspots are unsigned 16-bit coordinates, not bounded by the image.
+    // The hosted Win32 reference preserves an outside hotspot verbatim.
     charge(budget, width, height)
     if (payload[0] === 137 && tag(payload, 1) === 'PNG\r') {
       range(payload, 0, 33)
@@ -229,12 +237,16 @@ async function animated(bytes: Uint8Array, budget: Budget, options: CursorDecode
   if (!count || count > budget.limits.frames || !steps || steps > budget.limits.steps) fail('ANI frame or step budget exceeded')
   if (sequenceBytes && sequenceBytes.length !== steps * 4) fail('ANI sequence length differs from step count')
   if (rateBytes && rateBytes.length !== steps * 4) fail('ANI rate length differs from step count')
-  if (!sequenceBytes && (steps !== count || (flags & 2))) fail('ANI is missing its frame sequence')
+  // AF_SEQUENCE alone does not require a seq chunk: the observed native
+  // loader uses directory order when steps and frames have equal counts.
+  if (!sequenceBytes && steps !== count) fail('ANI is missing its frame sequence')
   const sequence = Array.from({ length: steps }, (_, i) => sequenceBytes ? view(sequenceBytes).getUint32(i * 4, true) : i),
     rates = Array.from({ length: steps }, (_, i) => rateBytes ? view(rateBytes).getUint32(i * 4, true) : rate),
     durationJiffies = rates.reduce((sum, value) => sum + value, 0)
   if (sequence.some((index) => index >= count)) fail('ANI sequence references a missing frame')
-  if (rates.some((value) => !value) || durationJiffies > budget.limits.durationJiffies) fail('ANI duration budget exceeded or zero duration')
+  // Native frame metadata preserves zero rates and explicit indexed drawing
+  // still works. Keep those bytes; wall-clock playback needs a separate policy.
+  if (durationJiffies > budget.limits.durationJiffies) fail('ANI duration budget exceeded')
   const lists = top.filter((chunk) => chunk.name === 'LIST' && tag(chunk.bytes, 0) === 'fram')
   if (lists.length !== 1) fail('ANI must contain one frame list')
   const encoded = chunks(lists[0]!.bytes.subarray(4)).filter((chunk) => chunk.name === 'icon')
@@ -268,6 +280,7 @@ export async function decodeCursor(input: Uint8Array, options: CursorDecodeOptio
 export function cursorStep(asset: CursorAsset, elapsedMilliseconds: number): number {
   if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds < 0) fail('invalid animation time')
   if (asset.kind === 'cur') return 0
+  if (asset.rates.some((rate) => rate === 0)) fail('ANI zero-rate playback timing is not calibrated')
   // Keep integer ratios. Modulo by a fractional millisecond cycle first can
   // put an exact 50 ms boundary below 1 jiffy for a two-jiffy animation.
   const period = asset.durationJiffies * 1000
@@ -295,7 +308,11 @@ export function compositeCursor(image: CursorImage, destination: Pixels, left: n
         a = image.data[from + 3]!
       for (let c = 0; c < 3; c++) destination.data[to + c] = image.mode === 'and-xor'
         ? (destination.data[to + c]! & image.andMask[pixel]!) ^ image.data[from + c]!
-        : Math.round((image.data[from + c]! * a + destination.data[to + c]! * (255 - a)) / 255)
+        // Native loading quantizes the source's premultiplication first. A
+        // single rounded source-over expression loses that byte boundary.
+        // The destination term remains a candidate outside the observed
+        // alpha/background matrix; the hosted reference gate compares exactly.
+        : Math.floor(image.data[from + c]! * a / 255) + Math.round(destination.data[to + c]! * (255 - a) / 255)
       destination.data[to + 3] = 255
     }
 }
