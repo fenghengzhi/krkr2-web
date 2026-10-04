@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+当前待核验批次：[37163692990](https://github.com/fenghengzhi/krkr2-web/actions/runs/37163692990)，精确提交 `ce6ea52ae6ad9300b7651e756126d4bcc72d4e2c`。073 及上一轮类型修正已整批推送，首次确认时为 in_progress／conclusion=null，不实时监控，不记为通过。下一实施项为 [074 Web 帮助链路](decisions/074-web-help-plan.md)；该文档只是计划，没有实现或验证声明。插件以外的整体目标仍未完成。
+
 2026-10-04 下一批接续 [073](decisions/073-storage-write-targets.md)：显式 UPDATE 必须命中已有目标，预检返回实际名称并由 native writer 绑定；普通 WRITE 不搜索 autoPath，保留直接目标大小写；尾部合并不再重新搜索。`nativeTextStreams` 候选能力升至 **2**，ABI 5／协议 22 保持。新增源码／字节码、浏览器持久重载、旧能力拒绝定义均未执行，不能称为已验证。Web 帮助链路已确认 `getLocalName`／`shellExecute` 两个入口仍缺失；原 KAG 默认隐藏 Help 菜单，既有兼容测试不能证明它们已实现。
 
 上一批 [37162952459](https://github.com/fenghengzhi/krkr2-web/actions/runs/37162952459) 已取回终态 **failure**：精确提交 `f976640b1b031ac8fb6fb1bd75f555178753faa7` 的类型／构建作业失败，汇总作业失败，Node、浏览器、可信生命周期、直接运行时作业均 skipped，实际产品测试未执行。官方注释为 `tests/probes/storage-selector-kag.ts` 两处 provenance 隐式 any[] 诊断，本批已补类型。run／jobs／artifacts 列表及注释已存本机 `out/verification/github-actions/37162952459/`；build-logs ZIP 仍可见但未登录 API 下载返回 401，原始日志未取回。未生成成功 test-build，不启动或宣称同构建兼容通过。下面的 in_progress 是当时首次查询记录，已由本段终态更新，历史字节保留。
