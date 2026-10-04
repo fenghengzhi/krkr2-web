@@ -2,6 +2,8 @@
 
 状态：实施候选，尚无本批执行结果。测试、类型检查、构建和浏览器验证只在 GitHub-hosted Actions 运行；本地只编辑与静态审读。下面的验收数量是已定义库存，不是通过数。075、076 的历史结果另行保存，不作为本切片的通过证据。
 
+候选随 `567da391e9172c38c1683b9b897899b2fd42f78d` 推送至 [37233070087](https://github.com/fenghengzhi/krkr2-web/actions/runs/37233070087)。首次查询只确认运行创建及精确提交，当时 in_progress／conclusion=null；执行结果下批回收，不实时轮询。原始首次快照保留于该 run 的本地归档目录。
+
 ## 问题与决定
 
 076 暴露了两个相连的差异：Web down 会额外执行 mouse move，改变 hover、最后一次移动位置及 cursor/hint 通知；鼠标投影、画面、虚拟光标和 IME 锚点则直接使用 zoom 比值，跳过原版 PaintBox 整数尺寸和 origin 的舍入。对于非整倍缩放或非零 layerPos，画面与输入可能落在不同位置；Window 回调中修改变换，还会使已经入队的事件被重新解释。

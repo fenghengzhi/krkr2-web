@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37233070087](https://github.com/fenghengzhi/krkr2-web/actions/runs/37233070087)，精确提交 `567da391e9172c38c1683b9b897899b2fd42f78d`。077 的事件顺序、共享绘制几何、捕获引用与主 manager 选择已整批推送；首次查询仅确认创建和提交身份，当时 **in_progress／conclusion=null**，未取实时作业结果。下批补取 076 尚未报告的 Node／常规浏览器和本批执行证据。完整非插件目标保持 active；原版 self-invalidate 后首次 capture 的寿命身份、CUR／ANI 等仍是后续要求。
+
 2026-10-05 准备 [077 鼠标事件与绘制几何](decisions/077-mouse-manager-geometry.md)：按固定原版分开 Window 回调、PaintBox 整数快照、DrawDevice 投影和 manager 事件；修正 down 额外 move、up 尾部坐标、capture 释放时点及失效目标路由。画面、cursor、attention 和 touch 统一使用取整后的显示矩形，鼠标按原版整数转换，touch 保留实数。主图层交换后按稳定 manager 注册顺序选择显示对象。协议候选升 **25**；新增和调整的验收定义尚未执行，完整非插件目标仍 active。
 
 本批补取 [075／37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481) 终态 **failure**，18 份 ZIP 全部核对 digest。Node 已报告 **983 通过、4 失败／987**，无最终 plan：两个 Help 缺分号旧失败、两个 cursor 夹具图像偏移越界；后者未到光标断言，本批先扩图像，再按固定原版几何更新独立手算期望。selector-native 确认到作业取消仍未退出；event-lifetime 没有 exit 是 **SIGABRT 原生崩溃**，回溯为堆一致性检查失败，不能归为同一挂起。两份 integration 的 code 1 仍缺具体用例。常规浏览器 **1925 通过、1 失败／1926**；cursor 24/24、Help 24/24、Vocoder 21/21 已通过。唯一 Pad 失败与 WebKit JSPI Worker SIGILL 时间吻合，尚未确定根因。旧 Firefox Help compatibility 截图失败也保留。原始归档、backtrace、crash 和最终摘要在 `out/verification/github-actions/37229833481/`，没有覆盖此前 partial 证据。
