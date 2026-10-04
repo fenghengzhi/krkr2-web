@@ -310,88 +310,90 @@ for (const backend of ['asyncify', 'jspi'] as const) {
     })
   }
 
-  test(`${backend}: the production loader rejects a missing text-stream capability and recovers with the exact original manifest`, async ({
-    page,
-  }, info) => {
-    const setup = await prepareSystemPage(page, backend),
-      manifestBytes = await readFile(resolve('.generated/wasm/manifest.json')),
-      manifestHash = createHash('sha256').update(manifestBytes).digest('hex'),
-      manifestPath = `/wasm/manifest-${manifestHash.slice(0, 16)}.json`,
-      matches = (url: URL) => url.pathname === manifestPath,
-      intercepted: { original: WasmManifest; served: WasmManifest }[] = [],
-      routeErrors: string[] = []
-    await page.context().route(matches, async (route) => {
+  for (const capability of [undefined, 1])
+    test(`${backend}: the production loader rejects ${capability === undefined ? 'missing' : 'obsolete'} text-stream capability and recovers with the exact original manifest`, async ({
+      page,
+    }, info) => {
+      const setup = await prepareSystemPage(page, backend),
+        manifestBytes = await readFile(resolve('.generated/wasm/manifest.json')),
+        manifestHash = createHash('sha256').update(manifestBytes).digest('hex'),
+        manifestPath = `/wasm/manifest-${manifestHash.slice(0, 16)}.json`,
+        matches = (url: URL) => url.pathname === manifestPath,
+        intercepted: { original: WasmManifest; served: WasmManifest }[] = [],
+        routeErrors: string[] = []
+      await page.context().route(matches, async (route) => {
+        try {
+          const response = await route.fetch(),
+            bytes = await response.body()
+          if (!response.ok() || !bytes.equals(manifestBytes))
+            throw new Error('Text-stream loader intervention requires the exact hosted manifest')
+          const original = JSON.parse(bytes.toString('utf8')) as WasmManifest,
+            served = structuredClone(original)
+          if (served.capabilities?.nativeTextStreams !== 2)
+            throw new Error('The hosted build must provide nativeTextStreams=2')
+          if (capability === undefined) delete served.capabilities.nativeTextStreams
+          else served.capabilities.nativeTextStreams = capability
+          intercepted.push({ original, served })
+          await route.fulfill({ response, json: served })
+        } catch (error) {
+          routeErrors.push(String(error))
+          await route.abort('failed')
+        }
+      })
       try {
-        const response = await route.fetch(),
-          bytes = await response.body()
-        if (!response.ok() || !bytes.equals(manifestBytes))
-          throw new Error('Text-stream loader intervention requires the exact hosted manifest')
-        const original = JSON.parse(bytes.toString('utf8')) as WasmManifest,
-          served = structuredClone(original)
-        if (served.capabilities?.nativeTextStreams !== 1)
-          throw new Error('The hosted build must provide nativeTextStreams=1')
-        delete served.capabilities.nativeTextStreams
-        intercepted.push({ original, served })
-        await route.fulfill({ response, json: served })
-      } catch (error) {
-        routeErrors.push(String(error))
-        await route.abort('failed')
+        await page
+          .locator('#files')
+          .setInputFiles(files(false, 'Debug.message("text-writer-modes:must-not-start");'))
+        await expect(page.locator('#logs')).toContainText(
+          'WASM manifest is missing native text stream support',
+        )
+        await expect(page.locator('#status')).toHaveText('运行失败')
+        await expect(page.locator('#choose-files')).toBeEnabled()
+        await expect(page.locator('#evaluate')).toBeDisabled()
+        await expect(page.locator('#stop')).toBeDisabled()
+        await expect(page.getByText(prefix + 'must-not-start', { exact: true })).toHaveCount(0)
+        await expect.poll(() => setup.workers.map(({ closed }) => closed)).toEqual([true])
+        expect(routeErrors).toEqual([])
+        expect(intercepted).toHaveLength(1)
+        expect({
+          ...intercepted[0].served,
+          capabilities: { ...intercepted[0].served.capabilities, nativeTextStreams: 2 },
+        }).toEqual(intercepted[0].original)
+        await info.attach('text-stream-rejected-loader-logs', {
+          body: await page.locator('#logs').innerText(),
+          contentType: 'text/plain',
+        })
+        await page.context().unroute(matches)
+        await page.locator('#clear-log').click()
+        await page.locator('#files').setInputFiles(
+          files(
+            false,
+            String.raw`
+  var rejected=false;try{["bad"].save("savedata/rejected.txt","c0");}catch(e){rejected=true;}
+  writerCheck(rejected,"recovered-mode-preflight");
+  ["recovered"].save("savedata/recovered.txt","utf-8");
+  writerCheck([].load("savedata/recovered.txt","utf-8")[0]=="recovered","recovered-text-save");
+  writerCheck(!Storages.isExistentStorage("savedata/rejected.txt"),"recovered-no-invalid-file");
+  Debug.message("text-writer-modes:loader-recovered");
+  `,
+          ),
+        )
+        await ready(page, 'loader-recovered')
+        const backup = await exportSystemSaves(page)
+        expect(backup.files.map(({ path }) => path)).toEqual(['savedata/recovered.txt'])
+        expect(saved(backup, 'savedata/recovered.txt')).toEqual(Buffer.from('recovered\r\n'))
+        expect(setup.workers).toHaveLength(2)
+        await stopSystemPage(page, setup.errors)
+        await expect.poll(() => setup.workers.map(({ closed }) => closed)).toEqual([true, true])
+      } finally {
+        await page.context().unroute(matches)
+        await info.attach('text-stream-manifest-intervention', {
+          body: JSON.stringify({ manifestPath, manifestHash, intercepted, routeErrors }),
+          contentType: 'application/json',
+        })
+        if (await page.locator('#stop').isEnabled()) await stopSystemPage(page, setup.errors)
       }
     })
-    try {
-      await page
-        .locator('#files')
-        .setInputFiles(files(false, 'Debug.message("text-writer-modes:must-not-start");'))
-      await expect(page.locator('#logs')).toContainText(
-        'WASM manifest is missing native text stream support',
-      )
-      await expect(page.locator('#status')).toHaveText('运行失败')
-      await expect(page.locator('#choose-files')).toBeEnabled()
-      await expect(page.locator('#evaluate')).toBeDisabled()
-      await expect(page.locator('#stop')).toBeDisabled()
-      await expect(page.getByText(prefix + 'must-not-start', { exact: true })).toHaveCount(0)
-      await expect.poll(() => setup.workers.map(({ closed }) => closed)).toEqual([true])
-      expect(routeErrors).toEqual([])
-      expect(intercepted).toHaveLength(1)
-      expect({
-        ...intercepted[0].served,
-        capabilities: { ...intercepted[0].served.capabilities, nativeTextStreams: 1 },
-      }).toEqual(intercepted[0].original)
-      await info.attach('text-stream-rejected-loader-logs', {
-        body: await page.locator('#logs').innerText(),
-        contentType: 'text/plain',
-      })
-      await page.context().unroute(matches)
-      await page.locator('#clear-log').click()
-      await page.locator('#files').setInputFiles(
-        files(
-          false,
-          String.raw`
-var rejected=false;try{["bad"].save("savedata/rejected.txt","c0");}catch(e){rejected=true;}
-writerCheck(rejected,"recovered-mode-preflight");
-["recovered"].save("savedata/recovered.txt","utf-8");
-writerCheck([].load("savedata/recovered.txt","utf-8")[0]=="recovered","recovered-text-save");
-writerCheck(!Storages.isExistentStorage("savedata/rejected.txt"),"recovered-no-invalid-file");
-Debug.message("text-writer-modes:loader-recovered");
-`,
-        ),
-      )
-      await ready(page, 'loader-recovered')
-      const backup = await exportSystemSaves(page)
-      expect(backup.files.map(({ path }) => path)).toEqual(['savedata/recovered.txt'])
-      expect(saved(backup, 'savedata/recovered.txt')).toEqual(Buffer.from('recovered\r\n'))
-      expect(setup.workers).toHaveLength(2)
-      await stopSystemPage(page, setup.errors)
-      await expect.poll(() => setup.workers.map(({ closed }) => closed)).toEqual([true, true])
-    } finally {
-      await page.context().unroute(matches)
-      await info.attach('text-stream-manifest-intervention', {
-        body: JSON.stringify({ manifestPath, manifestHash, intercepted, routeErrors }),
-        contentType: 'application/json',
-      })
-      if (await page.locator('#stop').isEnabled()) await stopSystemPage(page, setup.errors)
-    }
-  })
 }
 
 // Original KAG's nonzero BMP thumbnail offset remains covered by the existing

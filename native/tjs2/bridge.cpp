@@ -507,12 +507,21 @@ public:
     HostBinaryWrite(const ttstr& name, const ttstr& mode) : name(name), mode(mode) {}
     ~HostBinaryWrite() override { queue_storage_write(name.c_str(), name.GetLen(), mode.c_str(), mode.GetLen(), data.data(), data.size(), 0); }
 };
+ttstr storageWriteTarget(const tjs_char* operation, const ttstr& name, const ttstr& mode) {
+    const auto reply = requestStorage(operation, name, mode);
+    if(reply->kind != 0 || reply->value.Type() != tvtString)
+        TJS_eTJSError(u"Storage write preflight returned an invalid target");
+    const ttstr target(reply->value);
+    if(!target.GetLen()) TJS_eTJSError(u"Storage write preflight returned an invalid target");
+    return target;
+}
 iTJSTextReadStream* createTextRead(const ttstr& name, const ttstr& mode) { return new HostTextRead(name, mode); }
 iTJSTextWriteStream* createTextWrite(const ttstr& name, const ttstr& mode) {
     // Stream kind is selected by the native caller, not by characters in mode.
-    // Reject text modes before constructing a stream whose close queues data.
-    requestStorage(u"Storage.validateTextWrite", name, mode);
-    return new HostTextWrite(name, mode);
+    // Bind the host-resolved target before constructing a stream whose close
+    // queues data; later host calls must not resolve the request name again.
+    const auto target = storageWriteTarget(u"Storage.validateTextWrite", name, mode);
+    return new HostTextWrite(target, mode);
 }
 tTJSBinaryStream* createBinaryRead(const ttstr& name, const ttstr& mode) {
     auto result = requestStorage(u"Storage.readBinary", name, mode);
@@ -524,8 +533,8 @@ tTJSBinaryStream* createBinaryRead(const ttstr& name, const ttstr& mode) {
 tTJSBinaryStream* createBinaryWrite(const ttstr& name, const ttstr& mode) {
     // Destruction queues bytes without throwing; reject invalid targets while
     // still on the caller's suspendable, exception-capable script stack.
-    requestStorage(u"Storage.validateWrite", name, mode);
-    return new HostBinaryWrite(name, mode);
+    const auto target = storageWriteTarget(u"Storage.validateWrite", name, mode);
+    return new HostBinaryWrite(target, mode);
 }
 
 class HostFunction final : public tTJSDispatch {

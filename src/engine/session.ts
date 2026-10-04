@@ -42,7 +42,7 @@ import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts
 import { SaveOverlay } from './storage/save-overlay.ts'
 import { StorageSelector, normalizeSelectorPath } from './storage/selector.ts'
 import { modeOffset } from '../formats/text/stream.ts'
-import { parseStreamMode, parseTextWriterMode } from '../formats/text/mode.ts'
+import { parseStreamMode, parseTextWriterMode, type StreamMode } from '../formats/text/mode.ts'
 import { ScriptEvents } from './scheduler/events.ts'
 import { SystemEvents, type EventOptions, type EventOutcome } from './scheduler/system-events.ts'
 import { systemEventsBridge } from './tvp/system.ts'
@@ -2806,6 +2806,23 @@ export class EngineSession {
   private resourceExists(name: string): boolean {
     return !!this.findResource(name)
   }
+  private storageWriteTarget(name: string, mode: StreamMode): string {
+    const requested = storageWritePath(name)
+    this.materializeLogs()
+    if (mode.hasOffset || mode.append) {
+      const existing = this.findResource(requested)
+      if (existing) return storageWritePath(existing.name)
+      // Append alone is a Web extension that may create a new file. An explicit
+      // offset still selects UPDATE and requires a target, including ao0.
+      if (mode.hasOffset) throw new Error(`Update target not found: ${name}`)
+    } else {
+      // Ordinary WRITE does not search auto paths, but must keep the spelling
+      // of a direct existing target instead of creating a case-only shadow.
+      const existing = this.saves.resource(requested) ?? this.storage.find(requested)
+      if (existing) return storageWritePath(existing.name)
+    }
+    return requested
+  }
   private async decodeImage(bytes: Uint8Array): Promise<DecodedImage> {
     const png = decodePng(bytes)
     if (png) {
@@ -3239,12 +3256,11 @@ export class EngineSession {
       case 'Storage.validateTextWrite':
         // Text mode errors belong to construction, before a stream can queue
         // bytes on destruction. Match the native mode-before-path ordering.
-        parseTextWriterMode(text(1))
-        storageWritePath(text(0))
+        value = this.storageWriteTarget(text(0), parseTextWriterMode(text(1)))
         break
       case 'Storage.validateWrite':
         storageWritePath(text(0))
-        parseStreamMode(text(1))
+        value = this.storageWriteTarget(text(0), parseStreamMode(text(1)))
         break
       case 'Storage.writeText':
       case 'Storage.writeBinary': {
@@ -3259,7 +3275,11 @@ export class EngineSession {
         let output = encoded
         if (parsed.hasOffset || parsed.append) {
           let original: Uint8Array = new Uint8Array()
-          if (this.resourceExists(path)) original = await this.readResource(path)
+          // Native saved the preflight target on its stream. Never resolve it
+          // through a possibly changed auto-path list during serialization.
+          const existing = this.saves.resource(path) ?? this.storage.find(path)
+          if (existing) original = await existing.read()
+          else if (parsed.hasOffset) throw new Error(`Update target not found: ${path}`)
           const position = parsed.append ? original.length : parsed.offset,
             length = Math.max(original.length, position + encoded.length)
           if (length > 64 * 1024 * 1024) throw new Error('Save file exceeds 64 MiB budget')

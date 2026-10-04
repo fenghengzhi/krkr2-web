@@ -51,7 +51,7 @@ assert.equal(
   '8f850acfd1c87b77bb37c792e9f80630f4a15f9c5bd0d9aafce5ce59cfedcea7',
 )
 await mkdir(out, { recursive: true })
-const provenance = []
+const provenance: { source: string; artifact: string; bytes: number; sha256: string }[] = []
 await writeFile(resolve(out, 'kag3_template.xp3'), source)
 provenance.push({
   source: sourcePath,

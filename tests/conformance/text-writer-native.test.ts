@@ -30,7 +30,9 @@ interface Write {
 /** The real native stream factories choose the operation and serializer.
  * This host observes their boundary only; text mode policy and storage are
  * tested separately through the production Session, not reproduced here. */
-async function boundary() {
+async function boundary(
+  preflight?: (operation: string, name: string, mode: string) => HostReply | Promise<HostReply>,
+) {
   const calls: Call[] = []
   const writes: Write[] = []
   const vm = await TjsWasmRuntime.create(
@@ -47,7 +49,9 @@ async function boundary() {
         await Promise.resolve()
         if (operation === 'Storage.validateTextWrite' && args[0].startsWith('rejected-'))
           throw new Error(`text-preflight:${args[0]}`)
-        return { kind: 'value', value: undefined }
+        return preflight
+          ? await preflight(operation, args[0], args[1])
+          : { kind: 'value', value: args[0] }
       }
       assert(operation === 'Storage.writeText' || operation === 'Storage.writeBinary', operation)
       assert.equal(args.length, 3)
@@ -77,15 +81,157 @@ async function execute(vm: TjsWasmRuntime, binary: boolean, source: string) {
   await vm.execute(input, binary ? 'text-writer-native.cjs' : 'text-writer-native.tjs')
 }
 
-test('native text preflight capability retains ABI 5, Storages 2 and PhaseVocoder 1', async () => {
+test('native write target binding capability retains ABI 5, Storages 2 and PhaseVocoder 1', async () => {
   assert.equal(manifest.abi, 5)
-  assert.equal(manifest.capabilities?.nativeTextStreams, 1)
+  assert.equal(manifest.capabilities?.nativeTextStreams, 2)
   assert.equal(manifest.capabilities?.nativeStorages, 2)
   assert.equal(manifest.capabilities?.nativePhaseVocoder, 1)
 })
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
+
+  test(`every native writer queues the preflight target through host-call and final flushes (${mode})`, async () => {
+    let targetIndex = 0
+    const { vm, calls, writes } = await boundary((_operation, name) => ({
+      kind: 'value',
+      value: `game://./bound/雪-${targetIndex++}/${name}`,
+    }))
+    try {
+      await execute(
+        vm,
+        binary,
+        `
+var array=["雪",7],dictionary=%[text:"雪",number:7];
+array.save("array.txt","b");__host("After",0);
+array.saveStruct("array-struct.txt");__host("After",1);
+(Dictionary.saveStruct incontextof dictionary)("dictionary-struct.txt");__host("After",2);
+array.saveStruct("array.bin","b");__host("After",3);
+(Dictionary.saveStruct incontextof dictionary)("dictionary.bin","b");
+`,
+      )
+      const requested = [
+        'array.txt',
+        'array-struct.txt',
+        'dictionary-struct.txt',
+        'array.bin',
+        'dictionary.bin',
+      ]
+      assert.deepEqual(
+        calls
+          .filter((call) => call.operation.startsWith('Storage.validate'))
+          .map((call) => call.args[0]),
+        requested,
+      )
+      assert.deepEqual(
+        writes.map((write) => write.path),
+        requested.map((name, index) => `game://./bound/雪-${index}/${name}`),
+      )
+      assert.deepEqual(
+        writes.map((write) => write.operation),
+        [
+          'Storage.writeText',
+          'Storage.writeText',
+          'Storage.writeText',
+          'Storage.writeBinary',
+          'Storage.writeBinary',
+        ],
+      )
+      assert.deepEqual(
+        calls.map((call) => call.operation),
+        requested.flatMap((_name, index) => [
+          index < 3 ? 'Storage.validateTextWrite' : 'Storage.validateWrite',
+          index < 3 ? 'Storage.writeText' : 'Storage.writeBinary',
+          ...(index < 4 ? ['After'] : []),
+        ]),
+      )
+      assert.equal(writes[0]!.value, '雪\r\n7\r\n')
+      for (const write of writes.slice(3)) {
+        assert(write.value instanceof Uint8Array)
+        assert.deepEqual([...write.value.subarray(0, 8)], [75, 66, 65, 68, 49, 48, 48, 0])
+      }
+      await vm.flush()
+      assert.equal(writes.length, 5, 'A second flush cannot queue a second write')
+      await vm.collect()
+      assert.equal(vm.inspect().handles, 0)
+      assert.equal(vm.inspect().pendingHandles, 0)
+    } finally {
+      vm.dispose()
+    }
+  })
+
+  test(`native writers reject invalid preflight replies before creating a queued stream (${mode})`, async () => {
+    let reply: HostReply | Error = { kind: 'value', value: undefined }
+    const { vm, writes } = await boundary(() => {
+      if (reply instanceof Error) throw reply
+      return reply
+    })
+    try {
+      await execute(
+        vm,
+        binary,
+        `
+var array=["pending"],dictionary=%[text:"pending"],redirected=0;
+function attempt(index){
+  try{
+    if(index===0)array.save("request.txt");
+    else if(index===1)array.saveStruct("request.txt");
+    else if(index===2)(Dictionary.saveStruct incontextof dictionary)("request.txt");
+    else if(index===3)array.saveStruct("request.bin","b");
+    else (Dictionary.saveStruct incontextof dictionary)("request.bin","b");
+    return "accepted";
+  }catch(error){return error.message;}
+}
+`,
+      )
+      const invalidValues: ScriptValue[] = [
+        undefined,
+        null,
+        '',
+        0n,
+        1.5,
+        new Uint8Array([1]),
+        { type: 'array', items: [] },
+        { type: 'dictionary', entries: {} },
+      ]
+      const invalid: HostReply[] = [
+        ...invalidValues.map((value): HostReply => ({ kind: 'value', value })),
+        { kind: 'script', source: 'redirected++;"untrusted.txt"', name: 'invalid-preflight.tjs' },
+        { kind: 'dump' },
+      ]
+      for (reply of invalid) {
+        for (let index = 0; index < 5; index++) {
+          assert.match(
+            String(await vm.execute(`attempt(${index})`, '', true)),
+            /Storage write preflight returned an invalid target/,
+          )
+          assert.equal(writes.length, 0)
+        }
+      }
+      reply = new Error('write-preflight-denied')
+      for (let index = 0; index < 5; index++)
+        assert.equal(await vm.execute(`attempt(${index})`, '', true), 'write-preflight-denied')
+      await vm.flush()
+      assert.equal(writes.length, 0, 'Rejected construction must never leave a deferred write')
+      assert.equal(await vm.execute('redirected', '', true), 0n)
+
+      reply = { kind: 'value', value: 'game://./bound/recovered.txt' }
+      assert.equal(await vm.execute('attempt(0)', '', true), 'accepted')
+      assert.deepEqual(writes, [
+        {
+          operation: 'Storage.writeText',
+          path: 'game://./bound/recovered.txt',
+          mode: '',
+          value: 'pending\r\n',
+        },
+      ])
+      await vm.collect()
+      assert.equal(vm.inspect().handles, 0)
+      assert.equal(vm.inspect().pendingHandles, 0)
+    } finally {
+      vm.dispose()
+    }
+  })
 
   test(`Array.save selects native text preflight even with binary mode characters (${mode})`, async () => {
     const { vm, calls, writes } = await boundary()

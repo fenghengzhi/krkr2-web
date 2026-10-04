@@ -1,5 +1,7 @@
 # 071 — 文本流创建期模式校验与有界偏移
 
+2026-10-04 后续候选：[072](072-runtime-write-settlement.md) 接续双错误保留，[073](073-storage-write-targets.md) 接续 UPDATE 既存目标绑定并将 `nativeTextStreams` 提至 2。以下保留 071 当时的实现与未验证边界，不作为这些后续修订的验证结果。
+
 状态：独立实现候选，尚未运行本切片的 GitHub Actions。源码审查和新增用例定义不是通过证据。TJS ABI 保持 **5**，新增 `nativeTextStreams: 1`，会话协议为 **22**；保留 `nativeStorages: 2`、`nativePhaseVocoder: 1` 及其他既有能力。生产 Worker 拒绝不提供专用文本创建期预检的旧内核。
 
 ## 固定来源与边界

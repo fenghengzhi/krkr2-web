@@ -28,7 +28,7 @@ for (const binary of [false, true])
           factory,
           (operation, args) => {
             if (operation === 'Storage.validateTextWrite')
-              return { kind: 'value', value: undefined }
+              return { kind: 'value', value: args[0] }
             assert.equal(operation, 'Storage.writeText')
             writes.push([...args])
             if (rejectWrite) throw writeFailure
