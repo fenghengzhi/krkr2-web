@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37234602267](https://github.com/fenghengzhi/krkr2-web/actions/runs/37234602267)，精确提交 `05bb6552fa0d5f05a242596092ecb9efc670ad8c`。078 的对象身份、输入 capture、自追加字符串及诊断工作流已整批推送；唯一首次查询只确认运行创建和提交身份，当时 **in_progress／conclusion=null**，未查询实时作业结果。下一批补取 077 的完整终态与全部原 ZIP，再取回本批执行证据；失败、取消与未报告保持独立。整体目标仍是完成插件以外的 KRKR2 Web 模拟器，尚未完成，也未合入旧 main。
+
 2026-10-05 准备 [078 原生对象身份](decisions/078-object-identity.md)：补齐首次 down 回调 self-invalidate 后、对象尚未真正析构时的 capture 取得路径；独立 native identity 不拥有对象、不延长回调引用，也不改变资源 WeakObject 在 invalidate 时失效的合同。输入泵在 VM 实际赋值成功后确认 capture，并在完成、异常、Window 退休和 Stop 时撤销临时 identity。会话协议仍为 **25**、TJS ABI **5**、字体 ABI **2**；新增强制能力 `objectIdentity:1`。另修复真实文件选择器边界用例暴露的字符串自追加别名错误。源码、字节码、三浏览器及独立分配失败诊断定义已接入完整托管批次，尚未执行，不是通过记录。整体非插件目标仍 active，CUR／ANI、剩余图形／系统及音视频兼容继续在范围内。
 
 对 [077／37233070087](https://github.com/fenghengzhi/krkr2-web/actions/runs/37233070087) 本轮只取一次快照：仍为 **in_progress／conclusion=null**，Node 未结束，Firefox 常规作业已 **failure**；其余已结束作业为 success，但本次没有下载报告或换算用例数量。清单有 17 份产物且尚无 node-results，原快照保存在 `out/verification/github-actions/37233070087/`。完整终态、原 ZIP 和 Firefox 具体失败留待下一批取回，不继续轮询；此状态不能算整批通过。
