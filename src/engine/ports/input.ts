@@ -4,6 +4,10 @@ export type InputPacket = {
   keyboardRouteRevision?: number
   /** Ordinary input follows Layer focus within the same live Window route. */
   keyboardInputRevision?: number
+  /** One physical mouse observation, shared with pointerState. Positive and
+   * increasing within a Window across surface replacement; absent for legacy
+   * embedding input and script-posted events. */
+  pointerSequence?: number
 } & (
   | {
       type: 'move' | 'down' | 'up'
@@ -43,6 +47,15 @@ export interface InputAttention {
   pointLayerId: number
   font: InputAttentionFont | null
 }
+export interface VirtualCursor {
+  /** Window client coordinates after the drawing transform, before CSS scaling. */
+  x: number
+  y: number
+  /** Session-monotonic write identity; never reused after retirement. */
+  revision: number
+  /** Latest physical sample observed by this Window when the script moved it. */
+  basePhysicalSequence: number
+}
 export interface InputView {
   cursor: number
   hint: string
@@ -51,6 +64,8 @@ export interface InputView {
   attentionX: number
   attentionY: number
   imeMode: number
+  /** A Web cursor overlay, never an assertion that the OS pointer moved. */
+  virtualCursor?: VirtualCursor | null
   keyboardRoute?: {
     windowId: number
     revision: number

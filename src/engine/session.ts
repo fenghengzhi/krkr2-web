@@ -35,7 +35,7 @@ import {
 } from './storage/public-path.ts'
 import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
-import { LayerTree } from './scene/layers.ts'
+import { LayerTree, type LayerState } from './scene/layers.ts'
 import { LayerService } from './scene/layer-objects.ts'
 import { captureVideoMixingBitmap } from './media/video-mixing.ts'
 import type { DecodedImage, GraphicsDecoder, Renderer, RendererStatus } from './ports/graphics.ts'
@@ -104,7 +104,7 @@ import { videoClass } from './tvp/video.ts'
 import { InputControllers } from './input/controllers.ts'
 import { InputService } from './input/service.ts'
 import { inputBridge } from './tvp/input.ts'
-import type { InputPacket, InputView } from './ports/input.ts'
+import type { InputPacket, InputView, VirtualCursor } from './ports/input.ts'
 import { SceneComposer } from './scene/composer.ts'
 import { SceneTransitions } from './scene/transitions.ts'
 import { decodeBmp } from '../formats/image/bmp.ts'
@@ -177,6 +177,13 @@ export type EngineEvent =
   | { type: 'font-selection'; request: FontSelectionRequest | null }
   | ({ type: 'system-dialog' } & SystemDialogSnapshot)
   | { type: 'log'; level: 'info' | 'error'; text: string }
+interface VirtualCursorState {
+  view: VirtualCursor
+  layer: LayerState
+  window: WindowRecord
+  controllerEpoch: number
+  inputGeneration: number
+}
 export interface SessionDependencies {
   systemDisplay?: SystemDisplayMetrics
   systemFonts?: FontDescriptor[]
@@ -332,6 +339,9 @@ export class EngineSession {
   private windowRevision = -1
   private postedInputPending = 0
   private readonly windowPointers = new Map<number, { x: number; y: number }>()
+  private readonly physicalPointerSequences = new Map<number, number>()
+  private readonly virtualCursors = new Map<number, VirtualCursorState>()
+  private nextVirtualCursorRevision = 1
   private physicalKeys = new Set<number>()
   private readonly fonts: FontService
   private sceneDirty = true
@@ -389,6 +399,7 @@ export class EngineSession {
     })
     this.fontCatalog.setSystem(deps.systemFonts ?? [])
     this.fontSelection = new FontSelection(this.fontCatalog, (request) => {
+      if (request) this.clearVirtualCursors()
       if (request) this.deps.event({ type: 'font-selection', request })
       this.pads?.present()
       if (!request) this.deps.event({ type: 'font-selection', request })
@@ -673,6 +684,7 @@ export class EngineSession {
           }
         },
         async (window) => {
+          this.clearVirtualCursors(window.id)
           this.windowModals?.invalidate(window.id)
           this.menus.dismiss(window.id, undefined, 'unavailable')
           this.systemEvents!.cancelSource(window)
@@ -696,6 +708,8 @@ export class EngineSession {
           this.menuItems?.disconnectWindow(window)
           this.inputControllers.remove(window.id)
           this.windowPointers.delete(window.id)
+          this.physicalPointerSequences.delete(window.id)
+          this.virtualCursors.delete(window.id)
           this.windowInputViews.delete(window.id)
           this.keyboardRoutes.delete(window.id)
           this.refreshKeyboardRoutes()
@@ -711,6 +725,7 @@ export class EngineSession {
           // Clear queued input without invalidating the currently executing
           // input generator or its suspended caller's continuation.
           this.windowInputGeneration++
+          this.clearVirtualCursors()
           for (const existing of this.windows!.registered()) {
             this.systemEvents!.cancelSource(existing)
             if (existing !== window) this.menus.dismiss(existing.id, undefined, 'unavailable')
@@ -723,6 +738,7 @@ export class EngineSession {
           this.observeAdmission(this.acceptActivateWindow(window.id))
         },
         leave: (window, previousId) => {
+          this.clearVirtualCursors(window.id)
           if (this.registeredWindow(window.id) === window) {
             window.state.set('visible', 0)
             window.inputActive = false
@@ -757,6 +773,7 @@ export class EngineSession {
       this.systemDialogs = new SystemDialogs(this.modalLoop, {
         changed: (snapshot) => this.deps.event({ type: 'system-dialog', ...snapshot }),
         enter: (_id, kind) => {
+          this.clearVirtualCursors()
           // The original file picker does not clear the game's Window event
           // queue. Block input through the shared modal scope without silently
           // applying System.inform's separate event cleanup policy.
@@ -781,6 +798,7 @@ export class EngineSession {
         covered: () => this.fontSelection.active || this.clipboardBusy > 0,
         enter: () => {
           this.windowInputGeneration++
+          this.clearVirtualCursors()
           for (const window of this.windows!.registered()) this.systemEvents!.cancelSource(window)
           this.inputControllers.releaseCaptures()
           this.physicalKeys.clear()
@@ -1264,6 +1282,7 @@ export class EngineSession {
     if (activityPaused(activity) && !activityPaused(previous) && this.state === 'paused')
       this.events?.pause(true)
     if (previous.state === 'visible' && activity.state !== 'visible') {
+      this.clearVirtualCursors()
       this.physicalKeys.clear()
       for (const window of this.windows?.registered() ?? []) window.inputActive = false
       this.inputControllers.resetTransient()
@@ -1300,6 +1319,7 @@ export class EngineSession {
       activityPaused(this.activity)
     if (paused === (this.state === 'paused')) return
     if (paused) {
+      this.clearVirtualCursors()
       this.physicalKeys.clear()
       for (const window of this.windows?.registered() ?? []) window.inputActive = false
       this.inputControllers.resetTransient()
@@ -1363,16 +1383,144 @@ export class EngineSession {
       active: this.windowId === window.id,
     }))
   }
-  pointerState(x: number, y: number, windowId = this.windowId): void {
+  pointerState(x: number, y: number, windowId = this.windowId, pointerSequence?: number): void {
     if (
       [x, y].some((value) => !Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER)
     )
       throw new Error('Invalid physical cursor coordinates')
+    if (
+      pointerSequence !== undefined &&
+      (!Number.isSafeInteger(pointerSequence) || pointerSequence < 1)
+    )
+      throw new Error('Invalid physical pointer sequence')
     if (this.activity.state !== 'visible' || this.state !== 'running') return
     const window = this.registeredWindow(windowId)
-    if (!window || this.windowModals?.blocked(windowId)) return
+    if (!window || !window.state.visible || this.windowModals?.blocked(windowId)) return
+    if (pointerSequence !== undefined) {
+      if (pointerSequence <= (this.physicalPointerSequences.get(windowId) ?? 0)) return
+      this.physicalPointerSequences.set(windowId, pointerSequence)
+    }
     this.windowPointers.set(windowId, { x, y })
     if (window.state.mouseCursorState === 1) window.state.set('mouseCursorState', 0)
+    // Observation remains independent of script delivery. The packet carrying
+    // this same sample must not retire a newer script write a second time.
+    this.clearVirtualCursors(windowId)
+  }
+  private cursorWindow(id: number): WindowRecord | undefined {
+    const layer = this.layers.get(id),
+      window = this.registeredWindow(layer.windowId),
+      controller = this.inputControllers.get(layer.windowId)
+    // The primary Layer can exchange positions within its manager, so its
+    // current identity need not equal the manager's stable creation identity.
+    return window && controller && controller.attached(id)
+      ? window
+      : undefined
+  }
+  private cursorOffset(layer: LayerState): { x: bigint; y: bigint } {
+    let x = 0n, y = 0n
+    for (let current = layer; current.parent; current = this.layers.get(current.parent)) {
+      x = BigInt.asIntN(32, x + BigInt(current.left))
+      y = BigInt.asIntN(32, y + BigInt(current.top))
+    }
+    return { x, y }
+  }
+  private currentVirtualCursor(windowId: number): VirtualCursorState | undefined {
+    const cursor = this.virtualCursors.get(windowId)
+    if (!cursor) return undefined
+    const controller = this.inputControllers.get(windowId)
+    if (
+      this.state !== 'running' || this.activity.state !== 'visible' ||
+      this.control.cancelled || this.registeredWindow(windowId) !== cursor.window ||
+      !cursor.window.state.visible || this.windowModals?.blocked(windowId) ||
+      this.fontSelection.active || this.clipboardBusy > 0 ||
+      controller?.epoch !== cursor.controllerEpoch ||
+      this.windowInputGeneration !== cursor.inputGeneration ||
+      !this.layers.has(cursor.layer.id) || this.layers.get(cursor.layer.id) !== cursor.layer ||
+      this.layerObjects?.isClosing(cursor.layer.id) ||
+      this.cursorWindow(cursor.layer.id) !== cursor.window
+    ) {
+      this.virtualCursors.delete(windowId)
+      return undefined
+    }
+    return cursor
+  }
+  private clearVirtualCursors(windowId?: number): void {
+    const changed = windowId === undefined
+      ? this.virtualCursors.size !== 0
+      : this.virtualCursors.has(windowId)
+    if (windowId === undefined) this.virtualCursors.clear()
+    else this.virtualCursors.delete(windowId)
+    if (changed) this.presentInputViews()
+  }
+  private cursorPosition(id: number): { x: number; y: number } {
+    const layer = this.layers.get(id)
+    let root = layer
+    while (root.parent) root = this.layers.get(root.parent)
+    // Native detached Layers have no Manager and return zero immediately.
+    // A secondary manager is different: DrawDevice supplies primary (0,0),
+    // then the Layer getter still subtracts its ancestry's coordinates.
+    if (!root.primary || !this.registeredWindow(layer.windowId)) return { x: 0, y: 0 }
+    const window = this.cursorWindow(id), offset = this.cursorOffset(layer)
+    if (!window) return {
+      x: Number(BigInt.asIntN(32, -offset.x)),
+      y: Number(BigInt.asIntN(32, -offset.y)),
+    }
+    const pointer = this.currentVirtualCursor(window.id)?.view ??
+      this.windowPointers.get(window.id) ?? { x: 0, y: 0 },
+      state = window.state,
+      primary = (value: number, origin: number) =>
+        (BigInt(Math.trunc(value)) - BigInt(origin)) * BigInt(state.zoomDenom) / BigInt(state.zoomNumer)
+    // Native client pixels and the inverse drawing transform truncate toward
+    // zero before subtracting Layer positions, including negative coordinates.
+    return {
+      x: Number(BigInt.asIntN(32, primary(pointer.x, state.layerLeft) - offset.x)),
+      y: Number(BigInt.asIntN(32, primary(pointer.y, state.layerTop) - offset.y)),
+    }
+  }
+  private setCursorPosition(id: number, x: number, y: number): void {
+    const layer = this.layers.get(id), window = this.cursorWindow(id)
+    if (
+      !window || !window.state.visible || this.state !== 'running' ||
+      this.activity.state !== 'visible' || this.control.cancelled ||
+      this.layerObjects?.isClosing(id) ||
+      this.windowModals?.blocked(window.id) || this.fontSelection.active ||
+      this.clipboardBusy > 0
+    ) return
+    const controller = this.inputControllers.get(window.id)!,
+      offset = this.cursorOffset(layer), state = window.state,
+      project = (value: number, origin: bigint, clientOrigin: number) =>
+        Number(BigInt.asIntN(32,
+          BigInt.asIntN(32, BigInt(value) + origin) * BigInt(state.zoomNumer) /
+          BigInt(state.zoomDenom) + BigInt(clientOrigin))),
+      view: VirtualCursor = {
+        x: project(x, offset.x, state.layerLeft),
+        y: project(y, offset.y, state.layerTop),
+        revision: this.nextVirtualCursorRevision,
+        basePhysicalSequence: this.physicalPointerSequences.get(window.id) ?? 0,
+      }
+    if (!Number.isSafeInteger(this.nextVirtualCursorRevision + 1))
+      throw new Error('Virtual cursor revision exhausted')
+    // Check before publishing any new position. An over-budget event cannot
+    // leave a moved marker whose hover operation was never admitted.
+    if (this.postedInputPending >= 256) throw new Error('Posted input queue budget exceeded')
+    const previous = this.virtualCursors.get(window.id),
+      cursor: VirtualCursorState = {
+        view, layer, window, controllerEpoch: controller.epoch,
+        inputGeneration: this.windowInputGeneration,
+      }
+    this.nextVirtualCursorRevision++
+    this.virtualCursors.set(window.id, cursor)
+    try {
+      this.postInput({
+        type: 'move', x: view.x, y: view.y, shift: controller.shift, button: 0, clicks: 0,
+      }, window, () => this.currentVirtualCursor(window.id) === cursor)
+    } catch (error) {
+      if (previous) this.virtualCursors.set(window.id, previous)
+      else this.virtualCursors.delete(window.id)
+      throw error
+    }
+    if (state.mouseCursorState === 1) state.set('mouseCursorState', 0)
+    this.presentInputViews()
   }
   keyState(keys: number[]): void {
     if (keys.length > 256 || keys.some((key) => !Number.isInteger(key) || key < 0 || key > 65535))
@@ -1946,6 +2094,13 @@ export class EngineSession {
     // visible/trap values before the next frame reaches the browser.
     for (const source of this.windows?.registered() ?? []) this.keyboardRoute(source)
   }
+  private stalePointerMove(packet: InputPacket, windowId: number): boolean {
+    if (packet.type !== 'move' || packet.pointerSequence === undefined) return false
+    const sequence = packet.pointerSequence,
+      cursor = this.currentVirtualCursor(windowId)
+    return sequence < (this.physicalPointerSequences.get(windowId) ?? 0) ||
+      (!!cursor && sequence <= cursor.view.basePhysicalSequence)
+  }
   acceptInput(packet: InputPacket, observe = true): SessionAdmission {
     if (this.fontSelection.active && packet.type !== 'cancel' && packet.type !== 'deactivate')
       return ignoredAdmission()
@@ -1957,6 +2112,11 @@ export class EngineSession {
         throw new Error('Invalid input coordinates or key')
     if (packet.type === 'text' && packet.text.length > 65536)
       throw new Error('Input text budget exceeded')
+    if (
+      packet.pointerSequence !== undefined &&
+      (!Number.isSafeInteger(packet.pointerSequence) || packet.pointerSequence < 1)
+    )
+      throw new Error('Invalid physical pointer sequence')
     if (
       packet.keyboardRouteRevision !== undefined &&
       (!Number.isSafeInteger(packet.keyboardRouteRevision) || packet.keyboardRouteRevision < 1)
@@ -2023,15 +2183,17 @@ export class EngineSession {
         for (const other of this.inputControllers.values())
           if (other !== controller) other.keys = new Set(this.physicalKeys)
       }
-      if (
-        packet.type === 'down' ||
-        packet.type === 'move' ||
-        packet.type === 'up' ||
-        packet.type === 'wheel'
-      )
-        this.pointerState(packet.x, packet.y, windowId)
     }
+    // A sequenced packet also establishes physical authority if its separate
+    // observation RPC has not arrived. The duplicate sample is harmless when
+    // that RPC already ran, including if a script moved the cursor in between.
+    if (
+      (observe || packet.pointerSequence !== undefined) &&
+      (packet.type === 'down' || packet.type === 'move' ||
+        packet.type === 'up' || packet.type === 'wheel')
+    ) this.pointerState(packet.x, packet.y, windowId, packet.pointerSequence)
     if (this.state !== 'running') return ignoredAdmission()
+    if (this.stalePointerMove(packet, windowId)) return ignoredAdmission()
     const keyboard = packet.type === 'keyDown' || packet.type === 'keyUp' || packet.type === 'text',
       receiver = keyboard ? this.keyboardReceiver(window) : window,
       receiverController = this.inputControllers.get(receiver.id)
@@ -2071,17 +2233,17 @@ export class EngineSession {
       () =>
         this.inputs!.packet(
           routedPacket,
-          receiver === window
-            ? undefined
-            : () =>
+          () => !this.stalePointerMove(packet, windowId) &&
+            (receiver === window || (
                 this.registeredWindow(windowId) === window &&
                 window.state.visible &&
-                controller.epoch === epoch,
+                controller.epoch === epoch)),
         ),
       {
         valid: () =>
           this.registeredWindow(windowId) === window &&
           this.registeredWindow(receiver.id) === receiver &&
+          !this.stalePointerMove(packet, windowId) &&
           (!keyboard || window.state.visible) &&
           // Admission can precede an earlier callback's focus change. A
           // composition queued behind it must not commit to the new Layer.
@@ -2104,23 +2266,25 @@ export class EngineSession {
       },
     )
   }
-  private postInput(packet: InputPacket, window: WindowRecord): void {
+  private postInput(packet: InputPacket, window: WindowRecord, additionalValid?: () => boolean): void {
     const controller = this.inputControllers.get(window.id)
     if (this.registeredWindow(window.id) !== window || !controller) return
     if (this.postedInputPending >= 256) throw new Error('Posted input queue budget exceeded')
     const epoch = controller.epoch,
-      generation = this.windowInputGeneration
-    packet = { ...packet, windowId: window.id }
-    this.postedInputPending++
-    // Queue a VM call, never reenter the active TJS host import. A destroyed
-    // window cannot deliver its pending input to a newly created window.
-    void this.systemEvents!.post(() => this.inputs!.packet(packet), {
-      valid: () =>
+      generation = this.windowInputGeneration,
+      valid = () =>
         this.registeredWindow(window.id) === window &&
         generation === this.windowInputGeneration &&
         !this.windowModals?.blocked(window.id) &&
         epoch === controller.epoch &&
-        this.activity.state === 'visible',
+        this.activity.state === 'visible' &&
+        (!additionalValid || additionalValid())
+    packet = { ...packet, windowId: window.id }
+    this.postedInputPending++
+    // Queue a VM call, never reenter the active TJS host import. A destroyed
+    // window cannot deliver its pending input to a newly created window.
+    void this.systemEvents!.post(() => this.inputs!.packet(packet, additionalValid ? valid : undefined), {
+      valid,
       priority: 1,
       source: window,
     })
@@ -2250,32 +2414,43 @@ export class EngineSession {
       completion: admission.completion.then(() => modalCompletion),
     }
   }
-  present(): void {
+  /** Publish cursor authority without requesting a frame or reentering TJS.
+   * Physical observation can call this while a script is suspended. */
+  private presentInputViews(): void {
     for (const window of this.windows?.registered() ?? []) {
       const view = this.inputControllers.get(window.id)?.view()
       if (!view) continue
-      const input = { ...view, keyboardRoute: this.keyboardRoute(window) }
+      const cursor = this.currentVirtualCursor(window.id),
+        input: InputView = {
+          ...view, keyboardRoute: this.keyboardRoute(window),
+          virtualCursor: cursor ? { ...cursor.view } : null,
+        }
       const serialized = JSON.stringify(input)
       if (this.windowInputViews.get(window.id) !== serialized) {
         this.windowInputViews.set(window.id, serialized)
         this.deps.event({ type: 'window-input', windowId: window.id, input })
       }
     }
-    const windows = this.windowPresentations(),
-      windowViews = JSON.stringify(windows)
-    if (this.windowsView !== windowViews) {
-      this.windowsView = windowViews
-      this.deps.event({ type: 'windows', windows })
-    }
     const active = this.registeredWindow(this.windowId),
-      input = {
+      cursor = active ? this.currentVirtualCursor(active.id) : undefined,
+      input: InputView = {
         ...this.inputController.view(),
         ...(active ? { keyboardRoute: this.keyboardRoute(active) } : {}),
+        virtualCursor: cursor ? { ...cursor.view } : null,
       },
       serialized = JSON.stringify(input)
     if (serialized !== this.inputView) {
       this.inputView = serialized
       this.deps.event({ type: 'input', input })
+    }
+  }
+  present(): void {
+    this.presentInputViews()
+    const windows = this.windowPresentations(),
+      windowViews = JSON.stringify(windows)
+    if (this.windowsView !== windowViews) {
+      this.windowsView = windowViews
+      this.deps.event({ type: 'windows', windows })
     }
     this.presentMenus()
     if (this.windowRevision !== this.window.revision) {
@@ -2662,6 +2837,7 @@ export class EngineSession {
   }
   private setState(state: SessionState): void {
     this.state = state
+    if (state !== 'running') this.clearVirtualCursors()
     this.notify()
   }
   fail(error: unknown, recorded = false, persist = true): void {
@@ -2761,6 +2937,9 @@ export class EngineSession {
       await attempt(() => this.layerObjects?.dispose())
       await attempt(() => this.kag.clear())
       await attempt(() => this.windows?.dispose())
+      this.virtualCursors.clear()
+      this.physicalPointerSequences.clear()
+      this.windowPointers.clear()
       this.keyboardRoutes.clear()
       await attempt(() => this.menuItems?.dispose())
       await attempt(() => this.menus.clear())
@@ -2881,6 +3060,7 @@ export class EngineSession {
     this.control.check()
     this.clipboardBusy++
     try {
+      this.clearVirtualCursors()
       const pending = operation()
       this.pads?.present()
       return await cancelable(pending, this.control)
@@ -3578,6 +3758,7 @@ export class EngineSession {
         this.windows!.finish(number(0))
         break
       case 'Window.detachInput': {
+        this.clearVirtualCursors(number(0))
         const controller = this.inputControllers.get(number(0))
         controller?.clear()
         return this.inputs!.start(this.inputControllers.synchronize(), controller)
@@ -3634,6 +3815,7 @@ export class EngineSession {
           before = [window.state.width, window.state.height],
           property = text(1)
         window.state.set(text(1), typeof args[2] === 'string' ? text(2) : number(2))
+        if (property === 'visible' && !window.state.visible) this.clearVirtualCursors(window.id)
         if (property === 'visible' || property === 'focusable' || property === 'trapKey')
           this.refreshKeyboardRoutes()
         if (before[0] !== window.state.width || before[1] !== window.state.height)
@@ -3740,16 +3922,8 @@ export class EngineSession {
         break
       case 'Layer.get': {
         if (text(1) === 'cursorX' || text(1) === 'cursorY') {
-          const windowId = this.layers.get(number(0)).windowId,
-            window = this.registeredWindow(windowId)?.state ?? this.window,
-            pointer = this.windowPointers.get(windowId) ?? { x: 0, y: 0 },
-            zoom = window.zoomNumer / window.zoomDenom,
-            p = this.layers.localPoint(
-              number(0),
-              (pointer.x - window.layerLeft) / zoom,
-              (pointer.y - window.layerTop) / zoom,
-            )
-          value = BigInt(Math.floor(text(1) === 'cursorX' ? p.x : p.y))
+          const position = this.cursorPosition(number(0))
+          value = BigInt(text(1) === 'cursorX' ? position.x : position.y)
           break
         }
         const field = this.layers.property(number(0), text(1))
@@ -3757,6 +3931,12 @@ export class EngineSession {
         break
       }
       case 'Layer.set':
+        if (text(1) === 'cursorX' || text(1) === 'cursorY') {
+          const id = number(0), coordinate = clipInteger(2), layer = this.layers.get(id)
+          if (text(1) === 'cursorX') layer.cursorXWork = coordinate
+          else this.setCursorPosition(id, layer.cursorXWork, coordinate)
+          break
+        }
         if (text(1) === 'neutralColor') {
           // The native setter accepts an int64, then stores its low uint32.
           // Mask before converting to Number so large TJS integers stay exact.
@@ -3792,6 +3972,9 @@ export class EngineSession {
           },
           this.inputControllers.forLayer(number(0)),
         )
+      case 'Layer.setCursorPos':
+        this.setCursorPosition(number(0), clipInteger(1), clipInteger(2))
+        break
       case 'Layer.setAttentionPos': {
         const id = number(0),
           left = clipInteger(1),

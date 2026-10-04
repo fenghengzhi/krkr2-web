@@ -465,9 +465,18 @@ sound.looping=true;sound.play();Debug.message("phase-native-ready");
           '1,2',
         )
         const positionBefore = await nativePhasePosition(page)
-        await beginPhaseCapture(page, 0.75)
+        await beginPhaseCapture(page, 0.75, {
+          positionVoiceOnComplete: positionBefore.snapshot.id,
+        })
         const updated = await endPhaseCapture(page),
-          positionAfter = await nativePhasePosition(page),
+          updatedMetrics = await attachPhaseCapture(info, 'native-retained-filter-updated', updated),
+          terminal = updated.completionPosition,
+          bulk = updated.bulkTransfer
+        // PCM and any failed endpoint observation are already archived above.
+        expect(terminal?.error).toBeUndefined()
+        if (!terminal?.observation || !bulk || bulk.returnReadyAt === undefined)
+          throw new Error('Capture omitted its pre-transfer terminal position evidence')
+        const positionAfter = terminal.observation,
           elapsed =
             (positionAfter.before +
               positionAfter.after -
@@ -484,11 +493,29 @@ sound.looping=true;sound.play();Debug.message("phase-native-ready");
           elapsedHigh = positionAfter.after - positionBefore.before,
           ratioLow = sourceAdvance / (elapsedHigh * positionAfter.snapshot.sampleRate),
           ratioHigh = sourceAdvance / (elapsedLow * positionAfter.snapshot.sampleRate),
-          updatedMetrics = await attachPhaseCapture(info, 'native-retained-filter-updated', updated)
+          terminalReplies = updated.events.flatMap(({ contextTime, message }) =>
+            message.type === 'reply' && message.serial === terminal.requestSerial
+              ? [{ contextTime, message }]
+              : [],
+          )
         await info.attach('native-time-two-position-slope.json', {
           body: JSON.stringify({
+            observationBoundary: 'terminal production-mixer inspect before PCM materialization and Playwright return',
             positionBefore,
             positionAfter,
+            capture: {
+              sampleRate: updated.sampleRate,
+              startFrame: updated.startFrame,
+              endFrame: updated.endFrame,
+              startContextTime: updated.startFrame / updated.sampleRate,
+              endContextTime: updated.endFrame / updated.sampleRate,
+              completedAt: updated.completedAt,
+              barrierAt: updated.barrierAt,
+            },
+            terminal,
+            terminalReplies,
+            bulkTransfer: bulk,
+            bulkTransferBoundary: 'page AudioContext timestamps; returnReadyAt precedes protocol serialization and delivery, not their completion',
             elapsed,
             sourceAdvance,
             sourceRatio,
@@ -499,10 +526,30 @@ sound.looping=true;sound.play();Debug.message("phase-native-ready");
           }),
           contentType: 'application/json',
         })
+        expect(updated.channels[0]!.length).toBe(Math.ceil(0.75 * updated.sampleRate))
+        expect(updated.endFrame - updated.startFrame).toBe(updated.channels[0]!.length)
+        expect(terminal.voiceId).toBe(positionBefore.snapshot.id)
+        expect(positionAfter.snapshot.id).toBe(positionBefore.snapshot.id)
+        expect(positionAfter.snapshot.epoch).toBe(positionBefore.snapshot.epoch)
+        expect(positionAfter.snapshot.status).toBe('play')
+        expect(positionAfter.snapshot.paused).toBe(false)
+        expect(terminal.requestSerial).toBe(positionAfter.serial)
+        expect(terminal.requestContextTime).toBe(positionAfter.before)
+        expect(terminalReplies).toHaveLength(1)
+        expect(terminalReplies[0]!.message.error).toBeUndefined()
+        expect(terminalReplies[0]!.message.result?.snapshot).toEqual(positionAfter.snapshot)
+        expect(terminalReplies[0]!.contextTime).toBeGreaterThanOrEqual(positionAfter.before)
+        expect(terminalReplies[0]!.contextTime).toBeLessThanOrEqual(positionAfter.after)
+        expect(positionAfter.before).toBeGreaterThanOrEqual(updated.completedAt!)
+        expect(positionAfter.after).toBeGreaterThanOrEqual(positionAfter.before)
+        expect(updated.barrierAt).toBeGreaterThanOrEqual(positionAfter.after)
+        expect(bulk.materializeStartedAt).toBeGreaterThanOrEqual(updated.barrierAt!)
+        expect(bulk.materializeFinishedAt).toBeGreaterThanOrEqual(bulk.materializeStartedAt)
+        expect(bulk.returnReadyAt).toBeGreaterThanOrEqual(bulk.materializeFinishedAt)
         expect(elapsed).toBeLessThan(1.5)
         // Replies bracket the actual sample instant; do not mistake main
-        // thread delivery jitter for a DSP time error. The measured interval
-        // must still be tight enough to reject an unfiltered 1:1 source clock.
+        // thread delivery jitter for a DSP time error. Bulk PCM transfer is
+        // outside this interval; retain its tight bounds and the 1.5s limit.
         expect(elapsedLow).toBeGreaterThan(0.5)
         expect(ratioHigh - ratioLow).toBeLessThan(0.1)
         expect(ratioLow).toBeLessThan(0.505)

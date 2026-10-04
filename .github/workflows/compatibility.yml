@@ -86,6 +86,9 @@ jobs:
       - name: Original KAG Help menu, text presentation and session cleanup
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/help-kag.ts out/verification/compatibility 2>&1 | tee out/ci/kag-help.log
+      - name: Original KAG keyboard links, virtual cursor and physical takeover
+        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/cursor-kag.ts out/verification/compatibility 2>&1 | tee out/ci/kag-cursor.log
       - name: TJS ABI 1 to current release offline update
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/system-abi-pwa.ts out/verification/compatibility out/verification/compatibility-baselines/tjs-abi1 2>&1 | tee out/ci/tjs-abi1.log

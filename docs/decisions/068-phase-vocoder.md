@@ -282,3 +282,57 @@ is used to hide the failure. This fixture repair is unverified pending Actions.
 No tests, build, typecheck, browser probe, or native execution have been run
 locally. Failed hosted results above are preserved rather than relabeled as passes.
 This slice does not complete all remaining nonplugin KRKR2 compatibility work.
+
+### Native position sampling across the PCM return boundary (unverified candidate)
+
+[Actions run 37163692990](https://github.com/fenghengzhi/krkr2-web/actions/runs/37163692990)
+at `ce6ea52` retains one WebKit `asyncify source` native-player failure:
+`elapsed < 1.5` received `1.7560000000000002`. Its original trace and attachments
+remain under `out/verification/github-actions/37163692990/`; no rerun replaces
+this failure. The archived helper and browser spec were compared byte-for-byte
+with their pre-repair sources before the following fixture change.
+
+The failed interval uses the real page `AudioContext.currentTime`, not a wall-clock
+estimate. The evidence nevertheless proves that it spans large-result delivery
+outside the intended capture boundary. The retained updated PCM contains exactly
+36,000 frames at 48,000 Hz, or 0.750 seconds. The first position bracket is
+`3.6373333333333333 .. 3.6373333333333333`. Capture frames are
+`175232 .. 211232`, corresponding to context-frame times
+`3.6506666667 .. 4.4006666667`; the completion receipt is `4.4426666667`, and the
+same-mixer barrier receipt is `4.4533333333`. The subsequent position bracket is
+only taken at `5.392 .. 5.3946666667`, after returning two arrays totaling 72,000
+sample numbers through Playwright. Thus 0.940 seconds of the 1.756-second
+midpoint interval occurs after the already-recorded barrier receipt.
+
+The trace independently shows the browser-side `endPhaseCapture` evaluation
+ending at monotonic time `181370.936 ms`, its test-runner call ending at
+`181921.450 ms`, and the next browser-side position evaluation starting at
+`181993.888 ms`. This identifies an observation boundary that includes result
+serialization, delivery and intervening scheduling; it does not isolate each
+component's cost or prove a browser/audio-clock defect. The measured source ratio
+`0.4988610478359908` and 750 Hz captured peak are retained observations, not reasons
+to relabel the failed timing assertion as passing.
+
+The candidate moves only the terminal position inspection into the page's real
+capture-completion handler, before `Array.from` and before PCM is returned to
+Playwright. It inspects the same live production mixer and voice, without pausing
+native playback. The exact inspect serial identifies both the returned snapshot
+and its entry in the existing same-port observer journal; that reply serves as
+the event barrier. The initial position observation, 0.75-second capture,
+source/bytecode and backend coverage, `elapsed < 1.5`, and all existing ratio
+bounds are retained. Endpoint failures preserve the captured PCM and their error
+metadata before failing the scenario.
+
+Attachments now include the worklet start/end frames, completion receipt,
+terminal request/receipt context-time bracket, matching reply serial, barrier
+receipt, and page-side PCM materialization and return-ready context times. A
+return-ready timestamp precedes protocol serialization/delivery; it is explicitly
+not a measurement of completed transfer. Assertions check same-voice/epoch,
+continued playback, the one matching reply, and the page-clock ordering from
+terminal observation through PCM return. Worklet frame times and page clock
+readings remain separately identified rather than claiming their cross-thread
+receipt timing is exact.
+
+This is an unverified test-observation repair. Production DSP and audio clocks
+are unchanged; no timeout or threshold has been relaxed, and no local product
+test, build, typecheck or browser probe was run.

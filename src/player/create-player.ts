@@ -230,7 +230,7 @@ export function createPlayer(
   input = new BrowserInputCoordinator(
     (packet) => session.input(packet),
     (keys) => session.keyState(keys),
-    (x, y, windowId) => session.pointerState(x, y, windowId),
+    (x, y, windowId, sequence) => session.pointerState(x, y, windowId, sequence),
     onError,
     {
       isTransientFocus: (target) => {

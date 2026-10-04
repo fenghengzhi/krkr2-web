@@ -14,12 +14,12 @@ const directory = resolve(process.argv[2] ?? 'out/verification/compatibility'),
   json = async (path) => JSON.parse(await readFile(path, 'utf8')),
   series = [
     { name: 'kag', keys: ['xp3', 'zip'].flatMap((container) => backends.flatMap((backend) => ['flow', 'save', 'transition'].map((mode) => `${container}/${backend}/${mode}`))) },
-    ...['kag-panels', 'kag-diagnostics', 'kag-storage-selector', 'kag-help', 'abi-pwa', 'runtime-abi-pwa', 'font-abi-pwa', 'trace-abi-pwa', 'scripts-abi-pwa'].map((name) => ({ name, keys: backends })),
+    ...['kag-panels', 'kag-diagnostics', 'kag-storage-selector', 'kag-help', 'kag-cursor', 'abi-pwa', 'runtime-abi-pwa', 'font-abi-pwa', 'trace-abi-pwa', 'scripts-abi-pwa'].map((name) => ({ name, keys: backends })),
   ],
   results = series.flatMap(({ name, keys }) => keys.map((key) => ({ series: name, key, status: 'unreported' }))),
   evidenceErrors = []
 assert(browsers.includes(browser), 'A single known browser is required')
-assert.equal(results.length, 30)
+assert.equal(results.length, 32)
 await mkdir(directory, { recursive: true })
 let buildInfo, indexSha256, wasm, font, release
 try {
@@ -76,14 +76,14 @@ for (const { name, keys } of series) {
     assert.deepEqual(report.results.map(keyFor).sort(), [...keys].sort(), 'The report must contain each expected case exactly once')
     assert(report.results.every((row) => row.browser === browser), 'Reports cannot mix browsers')
     let manifestError
-    if (name === 'kag-storage-selector' || name === 'kag-help') {
+    if (name === 'kag-storage-selector' || name === 'kag-help' || name === 'kag-cursor') {
       try { await validateManifest(name) }
       catch (error) { manifestError = error }
     }
     for (const result of rows) {
       const row = report.results.find((row) => keyFor(row) === result.key)
       try {
-        if (name === 'kag-storage-selector' || name === 'kag-help') {
+        if (name === 'kag-storage-selector' || name === 'kag-help' || name === 'kag-cursor') {
           // Preserve an interrupted/failed probe's identity before reading a
           // potentially absent per-case report.
           if (row.status !== 'passed') {
@@ -119,7 +119,20 @@ for (const { name, keys } of series) {
             assert(detail.workers.every((worker) => worker.closed))
             for (const stage of ['first-open', 'closed', 'reopened-open', 'stop-with-help-open', 'fresh-ready-without-old-help', 'fresh-open', 'stale-close-cannot-affect-new-session', 'final-stop-releases-help'])
               await nonempty(`${name}/${browser}-${result.key}/${stage}.png`)
-          } else assert.equal(detail.originalMethods, true)
+          } else {
+            assert.equal(detail.originalMethods, true)
+            if (name === 'kag-cursor') {
+              for (const step of [
+                'first-link-highlight', 'second-link-highlight', 'previous-link-highlight',
+                'tab-link-highlight', 'enter-runs-original-link-target',
+                'physical-pointer-takes-over', 'stop-releases-marker-and-worker',
+              ]) assert(detail.steps.includes(step), `Missing KAG cursor stage: ${step}`)
+              assert.equal(detail.workers.length, 1)
+              assert(detail.workers[0].closed)
+              for (const stage of ['first-link-highlight', 'second-link-highlight', 'previous-link-highlight', 'tab-link-highlight', 'entered-second-target', 'physical-takeover', 'stopped'])
+                await nonempty(`${name}/${browser}-${result.key}/${stage}.png`)
+            }
+          }
         } else if (name === 'kag') {
           const bytes = await readFile(artifact(row.report)), detail = JSON.parse(bytes)
           assert.equal(hash(bytes), row.sha256)
@@ -170,12 +183,12 @@ const counts = Object.fromEntries(['passed', 'failed', 'unreported'].map((status
 const summary = {
   recordedAt: new Date().toISOString(), githubRun: process.env.GITHUB_RUN_ID,
   githubSha: process.env.GITHUB_SHA, browser, buildInfo, indexSha256,
-  inventory: { perBrowser: 30, matrixBrowsers: browsers, matrixCases: 90, originalHelpCases: 6 },
+  inventory: { perBrowser: 32, matrixBrowsers: browsers, matrixCases: 96, originalHelpCases: 6, originalCursorCases: 6 },
   counts, evidenceErrors, results,
-  passing: counts.passed === 30 && evidenceErrors.length === 0,
+  passing: counts.passed === 32 && evidenceErrors.length === 0,
 }
 await writeFile(resolve(directory, 'current-inventory.json'), JSON.stringify(summary, null, 2) + '\n')
-const markdown = `Compatibility ${browser}: ${counts.passed}/30 passed, ${counts.failed} failed, ${counts.unreported} unreported. Full matrix inventory: 90 cases (including 6 original KAG help cases).\n`
+const markdown = `Compatibility ${browser}: ${counts.passed}/32 passed, ${counts.failed} failed, ${counts.unreported} unreported. Full matrix inventory: 96 cases (including 6 original KAG help and 6 cursor cases).\n`
 console.log(markdown.trim())
 if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, markdown)
 if (!summary.passing) process.exitCode = 1

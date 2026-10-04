@@ -40,6 +40,20 @@ interface PhaseCompletionPause {
   failureContextTime?: number
   error?: string
 }
+interface PhasePositionObservation {
+  serial: number
+  before: number
+  after: number
+  snapshot: SoundSnapshot
+}
+interface PhaseCompletionPosition {
+  voiceId: number
+  requestSerial: number
+  requestContextTime: number
+  observation?: PhasePositionObservation
+  failureContextTime?: number
+  error?: string
+}
 export interface CapturedPhaseAudio {
   sampleRate: number
   startFrame: number
@@ -48,6 +62,14 @@ export interface CapturedPhaseAudio {
   completedAt?: number
   barrierAt?: number
   completionPause?: PhaseCompletionPause
+  completionPosition?: PhaseCompletionPosition
+  /** AudioContext times on the page. returnReadyAt precedes Playwright's
+   * serialization/delivery; it is not an observation of completed transfer. */
+  bulkTransfer?: {
+    materializeStartedAt: number
+    materializeFinishedAt: number
+    returnReadyAt?: number
+  }
   eventRange?: { gapStart: number; start: number; end: number }
   gapEvents?: { contextTime: number; message: AudioMessage }[]
   events: { contextTime: number; message: AudioMessage }[]
@@ -260,11 +282,12 @@ export async function nativePhasePosition(page: Page) {
         (voice) => voice.status === 'play',
       )
     if (active.length !== 1) throw new Error('Expected one observed real playing voice')
-    const before = state.context.currentTime,
+    const serial = state.serial - 1,
+      before = state.context.currentTime,
       result = await state.send({ op: 'inspect', id: active[0]!.id }),
       after = state.context.currentTime
     if (!result.snapshot) throw new Error('Actual mixer omitted its position snapshot')
-    return { before, after, snapshot: result.snapshot }
+    return { serial, before, after, snapshot: result.snapshot }
   })
 }
 export async function loadPhasePcm(
@@ -307,18 +330,24 @@ export async function loadPhasePcm(
 export async function beginPhaseCapture(
   page: Page,
   seconds: number,
-  options: { pauseVoiceOnComplete?: number } = {},
+  options: { pauseVoiceOnComplete?: number; positionVoiceOnComplete?: number } = {},
 ) {
   await page.evaluate(
     async ({ seconds, options }) => {
       const state = (globalThis as PhaseWindow).__phaseCapture!,
-        pauseVoice = options.pauseVoiceOnComplete
+        pauseVoice = options.pauseVoiceOnComplete,
+        positionVoice = options.positionVoiceOnComplete
       if (state.pending) throw new Error('Capture already pending')
       if (
         pauseVoice !== undefined &&
         (!state.ownsContext || !Number.isSafeInteger(pauseVoice) || pauseVoice < 1)
       )
         throw new Error('Completion pause requires a voice in a direct capture context')
+      if (
+        positionVoice !== undefined &&
+        (!Number.isSafeInteger(positionVoice) || positionVoice < 1 || pauseVoice !== undefined)
+      )
+        throw new Error('Completion position requires one voice and cannot also pause it')
       // Keep one bounded observer journal. Events after the previous capture's
       // reply barrier belong to its following gap, never silently to this stage.
       const gapStart = state.eventCursor,
@@ -341,7 +370,8 @@ export async function beginPhaseCapture(
             state.capture.port.removeEventListener('message', handler)
             const completedAt = state.context.currentTime
             const finish = async (): Promise<CapturedPhaseAudio> => {
-              let completionPause: PhaseCompletionPause | undefined
+              let completionPause: PhaseCompletionPause | undefined,
+                completionPosition: PhaseCompletionPosition | undefined
               if (pauseVoice !== undefined) {
                 const requestContextTime = state.context.currentTime
                 completionPause = {
@@ -370,27 +400,61 @@ export async function beginPhaseCapture(
                   completionPause.failureContextTime = state.context.currentTime
                   completionPause.error = error instanceof Error ? error.message : String(error)
                 }
+              } else if (positionVoice !== undefined) {
+                // Record the actual production mixer's endpoint before copying
+                // PCM into JS arrays or returning those arrays to Playwright.
+                // The inspect reply is also an exact same-port event barrier.
+                const serial = state.serial - 1,
+                  before = state.context.currentTime
+                completionPosition = {
+                  voiceId: positionVoice,
+                  requestSerial: serial,
+                  requestContextTime: before,
+                }
+                try {
+                  const result = await state.send({ op: 'inspect', id: positionVoice }),
+                    after = state.context.currentTime
+                  if (!result.snapshot)
+                    throw new Error('Actual mixer omitted its terminal position snapshot')
+                  completionPosition.observation = {
+                    serial,
+                    before,
+                    after,
+                    snapshot: result.snapshot,
+                  }
+                } catch (error) {
+                  completionPosition.failureContextTime = state.context.currentTime
+                  completionPosition.error = error instanceof Error ? error.message : String(error)
+                }
               } else {
                 // Capture and mixer use different MessagePorts. This actual
                 // same-port reply follows already-emitted events. Empty MIDI
                 // data executes no parser iteration and changes no voice state.
                 await state.send({ op: 'midiOut', data: new Uint8Array(0) })
               }
-              // The explicit pause reply is itself a same-port barrier. Obtain
-              // it before Array.from or the large Playwright result transfer;
-              // neither serialization nor attachment work may advance this voice.
-              const barrierAt = completionPause?.error ? undefined : state.context.currentTime,
+              // An explicit pause/inspect reply is itself a same-port barrier.
+              // Native playback may continue during PCM transfer, but its
+              // terminal position observation has already been retained here.
+              const barrierAt =
+                  completionPause?.error || completionPosition?.error
+                    ? undefined
+                    : state.context.currentTime,
                 eventEnd = state.events.length,
                 events = state.events.slice(eventStart, eventEnd)
               state.eventCursor = eventEnd
+              const materializeStartedAt = state.context.currentTime,
+                channels = packet.channels!.map((channel) => Array.from(channel)),
+                materializeFinishedAt = state.context.currentTime
               return {
                 sampleRate: state.context.sampleRate,
                 startFrame: packet.startFrame,
                 endFrame: packet.endFrame,
-                channels: packet.channels!.map((channel) => Array.from(channel)),
+                channels,
                 completedAt,
                 barrierAt,
                 completionPause,
+                completionPosition,
+                bulkTransfer: { materializeStartedAt, materializeFinishedAt },
                 eventRange: { gapStart, start: eventStart, end: eventEnd },
                 gapEvents,
                 events,
@@ -423,7 +487,9 @@ export async function endPhaseCapture(page: Page): Promise<CapturedPhaseAudio> {
   return page.evaluate(async () => {
     const state = (globalThis as PhaseWindow).__phaseCapture!
     try {
-      return await state.pending!
+      const capture = await state.pending!
+      if (capture.bulkTransfer) capture.bulkTransfer.returnReadyAt = state.context.currentTime
+      return capture
     } finally {
       state.pending = undefined
     }
@@ -583,6 +649,8 @@ export async function attachPhaseCapture(
         completedAt: capture.completedAt,
         barrierAt: capture.barrierAt,
         completionPause: capture.completionPause,
+        completionPosition: capture.completionPosition,
+        bulkTransfer: capture.bulkTransfer,
         eventRange: capture.eventRange,
         gapEvents: capture.gapEvents,
         sha256: createHash('sha256').update(wav).digest('hex'),

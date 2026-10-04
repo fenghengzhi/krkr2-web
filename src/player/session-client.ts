@@ -158,9 +158,9 @@ export class SessionClient {
   pointerMove(x: number, y: number) {
     return this.call('pointerMove', x, y)
   }
-  pointerState(x: number, y: number, windowId?: number) {
+  pointerState(x: number, y: number, windowId?: number, pointerSequence?: number) {
     if (!this.initialized) return Promise.resolve()
-    return this.call('pointerState', x, y, windowId)
+    return this.call('pointerState', x, y, windowId, pointerSequence)
   }
   /** Browser send queues await admission only; callback completion stays in the Worker. */
   async input(packet: InputPacket): Promise<void> {

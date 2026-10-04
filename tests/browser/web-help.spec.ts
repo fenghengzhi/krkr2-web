@@ -109,6 +109,8 @@ for (const backend of ['asyncify', 'jspi'] as const) {
       })
       await evaluate(page, 'tryHelp()', '1')
       expect(await page.locator('.game-help-text').textContent()).toBe(secondText)
+      // The console is a single-line input, so submit the same flattened source
+      // that its DOM value preserves before checking or executing it.
       await evaluate(page, `(function(){
 global.helpMenuCount=0;global.helpWindow=new Window();
 global.helpLayer=new Layer(global.helpWindow,null);
@@ -117,7 +119,7 @@ global.helpMenu=new MenuItem(global.helpWindow,"Help shortcut");
 global.helpWindow.menu.add(global.helpMenu);global.helpMenu.shortcut="Shift+F6";
 global.helpMenu.onClick=function(){global.helpMenuCount++;Debug.message("help-shortcut:"+global.helpMenuCount);};
 return "ready";
-})()`, 'ready')
+})()`.replaceAll('\n', ' '), 'ready')
       const surface = page.locator('#stage .game-window[data-window-id]'),
         canvas = surface.locator('canvas'),
         gameInput = surface.locator('.game-text-input'),
@@ -147,7 +149,7 @@ return "ready";
 var open=new MenuItem(global.helpWindow,"Open fullscreen help");
 open.onClick=function(){global.helpWindow.fullScreen=true;System.shellExecute("second.md");Debug.message("fullscreen-help-continued");};
 global.helpWindow.menu.add(open);return "ready";
-})()`, 'ready')
+})()`.replaceAll('\n', ' '), 'ready')
       await surface.getByRole('button', { name: 'Open fullscreen help', exact: true }).click()
       await expect(surface).toHaveClass(/game-window-fullscreen/)
       const panel = page.locator('.game-help'), close = panel.locator('.game-help-close')

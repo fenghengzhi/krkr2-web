@@ -640,10 +640,10 @@ function continuation(){throw new Exception("continuation-primary");}
 `,
       )
       fixture.faults.selection = 'dispatch-primary'
-      assert.match(String(await vm.execute('attempt()', '', true)), /dispatch-primary/)
+      fixture.faults.abort = 'cleanup-secondary'
+      assert.equal(await vm.execute('attempt()', '', true), 'dispatch-primary')
       delete fixture.faults.selection
       await vm.execute('__host("Capture",continuation);')
-      fixture.faults.abort = 'cleanup-secondary'
       assert.equal(await vm.execute('attempt()', '', true), 'continuation-primary')
       delete fixture.faults.abort
       fixture.release()
@@ -679,8 +679,10 @@ function continuation(){global.continued++;return __host("Answer");}
 `,
       )
       fixture.faults.abort = 'cleanup-primary'
-      assert.match(String(await vm.execute('attempt()', '', true)), /cleanup-primary/)
+      assert.equal(await vm.execute('attempt()', '', true), 'cleanup-primary')
       assert.equal(await vm.execute('writes', '', true), 0n)
+      assert.deepEqual(fixture.aborted, [1n])
+      fixture.assertSettled()
       delete fixture.faults.abort
       fixture.faults.invokeAbort = true
       await vm.execute('__host("Capture",continuation);')

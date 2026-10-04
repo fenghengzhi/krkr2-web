@@ -203,8 +203,8 @@ const api: SessionApi = {
   async pointerMove(x, y) {
     await completeInput((target) => target.pointerMove(x, y))
   },
-  async pointerState(x, y, windowId) {
-    active().pointerState(x, y, windowId)
+  async pointerState(x, y, windowId, pointerSequence) {
+    active().pointerState(x, y, windowId, pointerSequence)
   },
   async input(packet) {
     return admitInput((target) => target.acceptInput(packet, false))

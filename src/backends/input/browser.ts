@@ -98,13 +98,40 @@ export function shiftState(
 /** Shared page input is scheduled at DOM observation time, before any VM await. */
 export interface BrowserInputHooks {
   enqueue(packet: InputPacket): void
-  pointer(x: number, y: number): void
+  pointer(x: number, y: number, sequence: number): void
   modifiers(shift: number, pointer: boolean): void
   key(key: number, down: boolean): void
   activate(): boolean
   deactivate(pageBlur: boolean, nextTarget: EventTarget | null): void
   keyboard(event?: KeyboardEvent): boolean
   mouse(type: 'down' | 'move' | 'up', buttons: number): boolean
+}
+/** Retained by the coordinator across replacement surfaces of one Window. */
+export interface BrowserCursorState {
+  physicalSequence: number
+  highestRevision: number
+  retiredRevision: number
+}
+
+const cursorArtwork: Record<string, { path: string; x: number; y: number }> = {
+  default: { path: 'M3 2 L3 19 L7 15 L11 22 L14 20 L10 13 L18 13 Z', x: 3, y: 2 },
+  crosshair: { path: 'M12 2V22M2 12H22M8 8H16V16H8Z', x: 12, y: 12 },
+  text: { path: 'M8 2H16M12 2V22M8 22H16', x: 12, y: 12 },
+  'vertical-text': { path: 'M2 8V16M2 12H22M22 8V16', x: 12, y: 12 },
+  move: { path: 'M12 2V22M2 12H22M8 6L12 2L16 6M8 18L12 22L16 18M6 8L2 12L6 16M18 8L22 12L18 16', x: 12, y: 12 },
+  'ew-resize': { path: 'M2 12H22M7 7L2 12L7 17M17 7L22 12L17 17', x: 12, y: 12 },
+  'ns-resize': { path: 'M12 2V22M7 7L12 2L17 7M7 17L12 22L17 17', x: 12, y: 12 },
+  'nwse-resize': { path: 'M3 3L21 21M3 10V3H10M14 21H21V14', x: 12, y: 12 },
+  'nesw-resize': { path: 'M21 3L3 21M14 3H21V10M3 14V21H10', x: 12, y: 12 },
+  'n-resize': { path: 'M12 3V22M5 10L12 3L19 10', x: 12, y: 3 },
+  'col-resize': { path: 'M9 2V22M15 2V22M1 12H7M4 9L1 12L4 15M17 12H23M20 9L23 12L20 15', x: 12, y: 12 },
+  'row-resize': { path: 'M2 9H22M2 15H22M12 1V7M9 4L12 1L15 4M12 17V23M9 20L12 23L15 20', x: 12, y: 12 },
+  wait: { path: 'M5 2H19M5 22H19M7 2V6L17 18V22M17 2V6L7 18V22M7 6H17M7 18H17', x: 12, y: 12 },
+  progress: { path: 'M3 2V19L7 15L11 22L14 20L10 13H18ZM17 2A4 4 0 1 1 16 10', x: 3, y: 2 },
+  'not-allowed': { path: 'M21 12A9 9 0 1 1 3 12A9 9 0 1 1 21 12ZM6 6L18 18', x: 12, y: 12 },
+  pointer: { path: 'M9 22L4 13Q3 10 6 11L9 14V3Q9 0 12 3V10Q13 7 15 10Q17 8 18 11Q22 9 21 14L19 22Z', x: 10, y: 2 },
+  grab: { path: 'M6 21L2 12Q2 9 5 11L7 14V6Q7 3 9 5L10 11V4Q11 1 13 4V11L15 5Q18 3 17 7L16 13L19 9Q22 8 21 12L18 21Z', x: 12, y: 12 },
+  help: { path: 'M3 2V19L7 15L11 22L14 20L10 13H18ZM16 3Q16 0 20 1Q24 3 20 6L19 8M19 10V11', x: 3, y: 2 },
 }
 export class BrowserInput {
   private readonly abort = new AbortController()
@@ -130,13 +157,20 @@ export class BrowserInput {
   private input?: InputView
   private sourceWindowId?: number
   private keyboardRoute = ''
+  private virtualMarker?: HTMLSpanElement
+  private markerShape = ''
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly sendPacket: (packet: InputPacket) => Promise<void>,
     private readonly sendKeys: (keys: number[]) => Promise<void>,
-    private readonly sendPointer: (x: number, y: number) => Promise<void>,
+    private readonly sendPointer: (x: number, y: number, sequence?: number) => Promise<void>,
     private readonly error: (error: unknown) => void,
     private readonly shared?: BrowserInputHooks,
+    private readonly cursorState: BrowserCursorState = {
+      physicalSequence: 0,
+      highestRevision: 0,
+      retiredRevision: 0,
+    },
   ) {
     this.text = document.createElement('textarea')
     this.text.setAttribute('aria-label', '游戏文字输入')
@@ -315,6 +349,9 @@ export class BrowserInput {
     this.keyboardRoute = signature
     this.input = input
     this.sourceWindowId = sourceWindowId
+    const virtual = input.virtualCursor
+    if (virtual && Number.isSafeInteger(virtual.revision) && virtual.revision > 0)
+      this.cursorState.highestRevision = Math.max(this.cursorState.highestRevision, virtual.revision)
     this.appearance()
   }
   setSuspended(suspended: boolean): void {
@@ -322,6 +359,7 @@ export class BrowserInput {
     this.suspended = suspended
     if (suspended) {
       this.epoch++
+      this.retireVirtualCursor()
       this.queue = []
       this.active = false
       this.cancelComposition()
@@ -333,6 +371,7 @@ export class BrowserInput {
       this.releasePointerCaptures()
       this.keys()
     } else if (document.activeElement === this.text) this.activate()
+    this.appearance()
   }
   private appearance(): void {
     if (this.disposed) return
@@ -340,6 +379,7 @@ export class BrowserInput {
       ? 'none'
       : (cursors[this.input?.cursor ?? 0] ?? 'default')
     this.canvas.title = this.input?.hint ?? ''
+    this.cursorAppearance()
     const route = this.input?.keyboardRoute,
       crossWindow = !!route && route.windowId !== this.sourceWindowId,
       attention = crossWindow ? null : this.input?.attention,
@@ -363,6 +403,78 @@ export class BrowserInput {
           .join(' ') || 'none'
       : ''
     this.text.inputMode = (route?.imeMode ?? this.input?.imeMode) === 0 ? 'none' : 'text'
+  }
+  private retireVirtualCursor(): void {
+    this.cursorState.retiredRevision = Math.max(
+      this.cursorState.retiredRevision,
+      this.cursorState.highestRevision,
+    )
+    this.removeVirtualMarker()
+  }
+  private removeVirtualMarker(): void {
+    this.virtualMarker?.remove()
+    this.virtualMarker = undefined
+    this.markerShape = ''
+    this.canvas.style.cursor = this.view?.mouseCursorState
+      ? 'none'
+      : (cursors[this.input?.cursor ?? 0] ?? 'default')
+  }
+  private cursorAppearance(): void {
+    if (this.suspended || this.view?.visible === false || this.view?.blocked) {
+      this.retireVirtualCursor()
+      return
+    }
+    const cursor = this.input?.virtualCursor,
+      shape = cursors[this.input?.cursor ?? 0] ?? 'default',
+      width = this.view?.width ?? 800,
+      height = this.view?.height ?? 600
+    if (
+      !cursor ||
+      !Number.isFinite(cursor.x) || !Number.isFinite(cursor.y) ||
+      !Number.isSafeInteger(cursor.revision) ||
+      cursor.revision <= this.cursorState.retiredRevision ||
+      cursor.revision < this.cursorState.highestRevision ||
+      !Number.isSafeInteger(cursor.basePhysicalSequence) ||
+      cursor.basePhysicalSequence < this.cursorState.physicalSequence ||
+      cursor.x < 0 || cursor.y < 0 || cursor.x >= width || cursor.y >= height ||
+      this.view?.mouseCursorState || shape === 'none' ||
+      !this.canvas.parentElement
+    ) {
+      this.removeVirtualMarker()
+      return
+    }
+    const artwork = cursorArtwork[shape] ?? cursorArtwork.default!
+    if (!this.virtualMarker) {
+      const marker = document.createElement('span')
+      marker.className = 'game-virtual-cursor'
+      marker.setAttribute('aria-hidden', 'true')
+      Object.assign(marker.style, {
+        position: 'absolute',
+        width: '24px',
+        height: '24px',
+        pointerEvents: 'none',
+        userSelect: 'none',
+        zIndex: '6',
+        lineHeight: '0',
+      })
+      this.virtualMarker = marker
+      this.canvas.parentElement.append(marker)
+    }
+    const marker = this.virtualMarker
+    marker.dataset.windowId = String(this.sourceWindowId ?? '')
+    marker.dataset.cursorRevision = String(cursor.revision)
+    marker.dataset.cursorShape = shape
+    if (this.markerShape !== shape) {
+      // Fixed artwork only. No game string or storage name becomes SVG markup.
+      const fill = shape === 'default' || shape === 'pointer' || shape === 'grab' || shape === 'help' || shape === 'progress'
+        ? '#fff' : 'none'
+      marker.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="${artwork.path}" fill="${fill}" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/><path d="${artwork.path}" fill="${fill}" stroke="#101620" stroke-width="1.5" stroke-linejoin="round"/></svg>`
+      this.markerShape = shape
+    }
+    marker.style.left = `${this.canvas.offsetLeft + cursor.x * this.canvas.clientWidth / width}px`
+    marker.style.top = `${this.canvas.offsetTop + cursor.y * this.canvas.clientHeight / height}px`
+    marker.style.transform = `translate(${-artwork.x}px, ${-artwork.y}px)`
+    this.canvas.style.cursor = 'none'
   }
   private point(x: number, y: number) {
     const bounds = this.canvas.getBoundingClientRect()
@@ -458,6 +570,7 @@ export class BrowserInput {
       }
       return
     }
+    this.retireVirtualCursor()
     event.preventDefault()
     const p = this.point(event.clientX, event.clientY),
       bounds = this.canvas.getBoundingClientRect()
@@ -600,6 +713,7 @@ export class BrowserInput {
     clearTimeout(this.composeTimer)
   }
   private deactivate(pageBlur = false, nextTarget: EventTarget | null = null): void {
+    if (pageBlur) this.retireVirtualCursor()
     const captured = !!(this.mouseButtons || this.touches.size || this.captured.size)
     if (this.shared) {
       this.clearTransient()
@@ -633,15 +747,23 @@ export class BrowserInput {
       packet.type === 'up' ||
       packet.type === 'wheel'
     ) {
-      if (this.shared) this.shared.pointer(packet.x, packet.y)
+      this.retireVirtualCursor()
+      if (!Number.isSafeInteger(this.cursorState.physicalSequence + 1)) {
+        this.error(new Error('Physical pointer sequence exhausted'))
+        return
+      }
+      const sequence = ++this.cursorState.physicalSequence
+      packet = { ...packet, pointerSequence: sequence }
+      if (this.shared) this.shared.pointer(packet.x, packet.y, sequence)
       else {
         const epoch = this.epoch
         // Physical observation must bypass a packet waiting on TJS/event delivery.
-        void this.sendPointer(packet.x, packet.y).catch((error) => {
+        void this.sendPointer(packet.x, packet.y, sequence).catch((error) => {
           if (!this.disposed && epoch === this.epoch) this.error(error)
         })
       }
     }
+    if (packet.type === 'leave' || packet.type === 'cancel') this.retireVirtualCursor()
     if (this.shared) {
       this.shared.enqueue(packet)
       return
@@ -692,6 +814,7 @@ export class BrowserInput {
     this.queue = []
     clearTimeout(this.composeTimer)
     this.text.remove()
+    this.removeVirtualMarker()
     this.pressed.clear()
     this.touches.clear()
   }

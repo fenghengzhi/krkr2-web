@@ -1,5 +1,11 @@
 # 插件以外的实现进度
 
+2026-10-05 下一批实施 [075 Layer 光标写入](decisions/075-layer-script-cursor.md)：原 KAG 键盘链接导航确实写 `cursorX/cursorY`，候选补齐每层暂存 X、Y 提交、setCursorPos、可见虚拟光标、既有鼠标事件路径与真实输入接管；协议候选升 24，新增原 KAG 键盘探针，兼容库存预期 96 项。尚未执行该候选。
+
+准备 075 时仅查询一次 [37227951808](https://github.com/fenghengzhi/krkr2-web/actions/runs/37227951808)：当时仍 **in_progress／conclusion=null**，Node 和两份 WebKit 常规分片尚在运行，不再连续轮询。该快照已发布的 15 份 ZIP 已全部取回、核对 GitHub digest 并归档；它们不是整个运行的完整归档。已完成 Chromium／Firefox 常规报告各 **632 通过、2 失败**，四项都在帮助测试的多行表达式填入单行输入框后、提交前失败；本批仅把同一表达式整理成单行，保留原断言。兼容 Chromium／WebKit 各 **30/30**，Firefox **29/30**，后者原 KAG Help Asyncify 在第一阶段截图超时，仍独立保留。此记录不代表整批通过，余下终态及产物需后续取回。
+
+旧 `36455312915` 的全部 14 份原始 ZIP 和 `37162952459` 的 build-logs ZIP 已补回，均与 GitHub artifact digest 一致；完整产物分别保留在各 run 目录的 `recovered-artifacts/`，原 Markdown 摘要与失败/未报告状态保持。旧 Node 超时的静态检查尚未证明卡点；加强 selector 的已有双错断言，不宣称修复产品缺陷。WebKit Vocoder 旧 trace 显示大 PCM 回传延迟污染终点观察，候选将终点 inspect 移至 PCM 序列化前，保留 0.75 秒输入、1.5 秒上限和全部比例断言，见 [068 追加记录](decisions/068-phase-vocoder.md)。
+
 最新待核验批次：[Full test suite 37227951808](https://github.com/fenghengzhi/krkr2-web/actions/runs/37227951808)，精确提交 `a0ec1b9d7abc11a9abf6b82a31889b5aa1ce5edc`。2026-10-05 已推送 074、上一批夹具修正及整批兼容工作流接线，首次查询仅确认 push 创建运行，当时 **in_progress／conclusion=null**；没有查询实时作业或宣称通过。下一批前取回终态、全部原始 artifacts、Node 进程记录、两份 WebKit 分片及三浏览器兼容报告；兼容库存 **90 项**仅表示预期范围。默认 SSH 22 连接被关闭后，通过校验既有 GitHub 主机密钥的 SSH 443 完成推送。
 
 2026-10-05：整体目标仍是完成插件以外的 KRKR2 Web 模拟器。当前候选已接通 [074 Web 帮助文档链路](decisions/074-web-help-plan.md)：native 包装、VFS 实际文本、Worker 确认、非模态面板和 Stop 清理；协议 **23**、`nativeHelp:1`。还没有该候选的执行结果，完整目标没有完成。下一批完整 Tests 将同时运行原 KAG／旧 ABI 兼容矩阵并复用同次构建，结果下次取回，不实时监控。

@@ -1,6 +1,6 @@
 import type { InputPacket, InputView } from '../../engine/ports/input.ts'
 import type { WindowView } from '../../engine/scene/window.ts'
-import { BrowserInput, virtualKey, type BrowserInputHooks } from './browser.ts'
+import { BrowserInput, virtualKey, type BrowserCursorState, type BrowserInputHooks } from './browser.ts'
 
 interface SurfaceInput {
   readonly id: number
@@ -42,11 +42,12 @@ export class BrowserInputCoordinator {
   private closed = false
   private generation = 0
   private focusVersion = 0
+  private readonly cursorStates = new Map<number, BrowserCursorState>()
 
   constructor(
     private readonly send: (packet: InputPacket) => Promise<void>,
     private readonly sendKeys: (keys: number[]) => Promise<void>,
-    private readonly sendPointer: (x: number, y: number, windowId: number) => Promise<void> | void,
+    private readonly sendPointer: (x: number, y: number, windowId: number, sequence?: number) => Promise<void> | void,
     private readonly error: (error: unknown) => void,
     private readonly options: BrowserInputCoordinatorOptions = {},
   ) {
@@ -157,14 +158,14 @@ export class BrowserInputCoordinator {
       enqueue: (packet) => {
         if (current()) this.enqueue(surface, packet)
       },
-      pointer: (x, y) => {
+      pointer: (x, y, sequence) => {
         if (!current()) return
         const generation = this.generation,
           revision = surface.revision
         try {
           // Physical cursor reads must keep working while an earlier TJS callback
           // awaits input, storage, or a timer; they do not enter the script queue.
-          void Promise.resolve(this.sendPointer(x, y, windowId)).catch((error) => {
+          void Promise.resolve(this.sendPointer(x, y, windowId, sequence)).catch((error) => {
             if (
               this.current(surface) &&
               generation === this.generation &&
@@ -236,13 +237,19 @@ export class BrowserInputCoordinator {
         return true
       },
     }
+    let cursorState = this.cursorStates.get(windowId)
+    if (!cursorState) {
+      cursorState = { physicalSequence: 0, highestRevision: 0, retiredRevision: 0 }
+      this.cursorStates.set(windowId, cursorState)
+    }
     const input = new BrowserInput(
       canvas,
       this.send,
       this.sendKeys,
-      async (x, y) => this.sendPointer(x, y, windowId),
+      async (x, y, sequence) => this.sendPointer(x, y, windowId, sequence),
       this.error,
       hooks,
+      cursorState,
     )
     surface = {
       id: windowId,
@@ -501,5 +508,6 @@ export class BrowserInputCoordinator {
     for (const surface of [...this.surfaces.values()]) this.remove(surface)
     this.views.clear()
     this.inputs.clear()
+    this.cursorStates.clear()
   }
 }

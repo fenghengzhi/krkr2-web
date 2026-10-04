@@ -46,6 +46,12 @@ class Layer {
     var left=int(args[0]),top=int(args[1]);
     __host("Layer.setAttentionPos",id,left,top);
   }
+  function setCursorPos(args*) {
+    var id=__host("Layer.identity",this);
+    if(args.count<2)throw new global.Exception("Layer.setCursorPos requires at least two arguments");
+    var x=int(args[0]),y=int(args[1]);
+    __host("Layer.setCursorPos",id,x,y);
+  }
   function setMode(){__host("Input.mode",__id,1);}
   function removeMode(){__host("Input.mode",__id,0);}
   function releaseCapture(){__host("Input.release",__id);}
@@ -263,6 +269,10 @@ class Layer {
   }`,
     )
     .join('\n')}
-  ${['isPrimary', 'nodeVisible', 'cursorX', 'cursorY'].map((name) => `property ${name} {getter(){return __host("Layer.get",__id,"${name}");}}`).join('\n')}
+  ${['cursorX', 'cursorY'].map((name) => `property ${name} {
+    getter(){return __host("Layer.get",__id,"${name}");}
+    setter(value){__host("Layer.set",__id,"${name}",int(value));}
+  }`).join('\n')}
+  ${['isPrimary', 'nodeVisible'].map((name) => `property ${name} {getter(){return __host("Layer.get",__id,"${name}");}}`).join('\n')}
 }
 `

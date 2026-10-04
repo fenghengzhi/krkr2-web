@@ -41,6 +41,8 @@ export interface LayerState {
   hitType: number
   hitThreshold: number
   cursor: number
+  /** cursorX writes only this native-style work value; cursorY submits it. */
+  cursorXWork: number
   name: string
   hint: string
   showParentHint: boolean
@@ -202,6 +204,7 @@ export class LayerTree {
         hitType: 0,
         hitThreshold: parent ? 16 : 0,
         cursor: 0,
+        cursorXWork: 0,
         name: '',
         hint: '',
         showParentHint: true,

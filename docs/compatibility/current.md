@@ -1,5 +1,7 @@
 # 当前实现范围
 
+075 开发候选新增 [Layer 脚本光标写入](../decisions/075-layer-script-cursor.md)，用于原 KAG 键盘链接导航。页面内可见虚拟光标、正常 hover 事件和真实鼠标接管正在整合，协议候选 24；尚未验证，整体非插件范围未完成。074 的运行在下一批首次取回时仍有作业未结束，已完成部分有失败；完整状态见 [实现进度](../non-plugin-progress.md)。以下历史已验证版本保持原边界。
+
 开发候选状态（2026-10-05）：058–074 非插件功能继续在 `codex/migrated-window-attention` 集成，最新包含 [Web 文本帮助](../decisions/074-web-help-plan.md)，协议 23、`nativeHelp:1`。上一批 [37163692990](https://github.com/fenghengzhi/krkr2-web/actions/runs/37163692990) cancelled 且有失败、Node 未报告范围，当前候选不能称为完整验证或合入 main。下一批完整 Tests 纳入同次构建的原 KAG 兼容验收；进度与未解决项见 [非插件实现进度](../non-plugin-progress.md)。下面的已验证组合属于原先版本。
 
 当前已验证组合包含协作式 `MenuItem.popup`、Window 隐藏关闭查询校准、Layer.drawText／Font 参数与空操作语义，以及 crossfade／universal 的 opaque 定点像素核。菜单保留 TJS 调用栈并允许 Timer 和子模态工作，选中通知在返回后投递；原版 SDK 已确认单独 N 标志仍通知，仅 R 抑制。会话协议 **11**、TJS ABI **5**、字体 ABI **2**，内核提供 `nativeReleaseState: 1`。 实现与边界见 [052](../decisions/052-modal-scopes.md)、[056](../decisions/056-layer-text-semantics.md)、[057](../decisions/057-opaque-transition-kernels.md)。
