@@ -182,7 +182,7 @@ jobs:
       - name: Run Node tests
         run: |
           ulimit -c unlimited
-          node --import tsx --test \
+          node --import tsx --import ./scripts/record-node-test-process.mjs --test \
             --test-reporter=spec --test-reporter-destination=stdout \
             --test-reporter=tap --test-reporter-destination=out/ci/node.tap \
             tests/conformance/*.test.ts tests/integration/*.test.ts 2>&1 | tee out/ci/node.log
@@ -467,10 +467,19 @@ jobs:
             out/verification/vm-console/
           retention-days: 14
 
+  compatibility:
+    name: Original KAG and release compatibility
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    needs: build
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/compatibility.yml
+
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime]
+    needs: [build, node, browser, native-activity, runtime, compatibility]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

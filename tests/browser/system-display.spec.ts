@@ -104,10 +104,10 @@ test.describe('native System display through public Players and actual Session W
             .poll(() => readSystemDisplay(page, 0))
             .toBe(systemDisplayExpected(resizedFullscreen))
           expect(await readSystemDisplay(page, 1)).toBe(initialSecond)
-          // The fixture deliberately leaves host exit actions unhandled: when a
-          // second Window takes fullscreen, the first Window's script flag stays
-          // true even though its host surface is suppressed. Geometry must follow
-          // the actually presented fullscreen surface, including the final exit.
+          // Session transfers fullscreen ownership when the second Window
+          // requests it, clearing the first Window's flag without a host exit
+          // action. Geometry must follow that owner and return to the desktop
+          // after the second Window exits fullscreen.
           // Session.evaluate uses TJS expression mode. Keep the statement list
           // inside a called function and retain the second Window on global.
           await page.evaluate(() =>
@@ -120,6 +120,13 @@ test.describe('native System display through public Players and actual Session W
               '#system-display-player-0 .game-window-fullscreen[aria-label="Display secondary"]',
             ),
           ).toHaveCount(1)
+          expect(
+            await page.evaluate(() =>
+              window.systemDisplayEmbeddings![0]!.player.session.evaluate(
+                '[sdWindow.fullScreen,sdSecondWindow.fullScreen].join("|")',
+              ),
+            ),
+          ).toBe('0|1')
           await expect
             .poll(() => readSystemDisplay(page, 0))
             .toBe(systemDisplayExpected(resizedFullscreen))
@@ -137,7 +144,7 @@ test.describe('native System display through public Players and actual Session W
                 '[sdWindow.fullScreen,sdSecondWindow.fullScreen].join("|")',
               ),
             ),
-          ).toBe('1|0')
+          ).toBe('0|0')
           await expect
             .poll(() => readSystemDisplay(page, 0))
             .toBe(systemDisplayExpected(resizedFirst))

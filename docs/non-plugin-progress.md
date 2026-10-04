@@ -1,5 +1,11 @@
 # 插件以外的实现进度
 
+2026-10-05：整体目标仍是完成插件以外的 KRKR2 Web 模拟器。当前候选已接通 [074 Web 帮助文档链路](decisions/074-web-help-plan.md)：native 包装、VFS 实际文本、Worker 确认、非模态面板和 Stop 清理；协议 **23**、`nativeHelp:1`。还没有该候选的执行结果，完整目标没有完成。下一批完整 Tests 将同时运行原 KAG／旧 ABI 兼容矩阵并复用同次构建，结果下次取回，不实时监控。
+
+已取回 [37163692990 @ ce6ea52](https://github.com/fenghengzhi/krkr2-web/actions/runs/37163692990) 的终态 **cancelled**，All tests **failure**。Node 仅送达 **936 通过、2 失败**，随后 20 分钟超时，剩余范围未报告；常规浏览器 **1852 通过、26 失败**，library 57、PWA 59、可信生命周期 7 均通过，直接运行时 6 个结果组无失败。15 份原 artifact ZIP 全部保留并与 GitHub digest 一致，详细摘要和原 trace 在 `out/verification/github-actions/37163692990/root-summary.md`。本批静态修正 Array 二进制读取器、已有双大小写文件夹具、全屏接管预期；Node 取消卡点、WebKit Vocoder 时间边界和 Clipboard 启动存储异常仍未闭合。增加被动 Node 进程/文件开始与退出记录，不增加超时或放宽断言。
+
+后续仍需取回并修复整批失败、补齐当前未报告与原 KAG 覆盖、收回更早历史归档缺口，以及继续其余系统／图形 API、音视频行为差异与流式资源支持。下面保留此前记录；其中“待核验”或“下一实施项”是当时状态，以本段更新为准。
+
 当前待核验批次：[37163692990](https://github.com/fenghengzhi/krkr2-web/actions/runs/37163692990)，精确提交 `ce6ea52ae6ad9300b7651e756126d4bcc72d4e2c`。073 及上一轮类型修正已整批推送，首次确认时为 in_progress／conclusion=null，不实时监控，不记为通过。下一实施项为 [074 Web 帮助链路](decisions/074-web-help-plan.md)；该文档只是计划，没有实现或验证声明。插件以外的整体目标仍未完成。
 
 2026-10-04 下一批接续 [073](decisions/073-storage-write-targets.md)：显式 UPDATE 必须命中已有目标，预检返回实际名称并由 native writer 绑定；普通 WRITE 不搜索 autoPath，保留直接目标大小写；尾部合并不再重新搜索。`nativeTextStreams` 候选能力升至 **2**，ABI 5／协议 22 保持。新增源码／字节码、浏览器持久重载、旧能力拒绝定义均未执行，不能称为已验证。Web 帮助链路已确认 `getLocalName`／`shellExecute` 两个入口仍缺失；原 KAG 默认隐藏 Help 菜单，既有兼容测试不能证明它们已实现。

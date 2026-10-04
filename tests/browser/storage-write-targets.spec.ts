@@ -30,7 +30,7 @@ if(!count){
   ["R"].save("text.dat","utf-8");
 }
 if([].load("Data/Text.dat","o010")[0]!="T")throw "bound text did not persist";
-if(Dictionary.loadStruct("Data/Binary.dat")[0]!="B")throw "bound binary did not persist";
+if([].loadStruct("Data/Binary.dat")[0]!="B")throw "bound binary did not persist";
 count++;[count].save("savedata/target-count.txt","utf-8");
 Debug.message("write-targets:ready:"+count);
 `
@@ -54,6 +54,8 @@ for (const backend of ['asyncify', 'jspi'] as const)
             : 'Scripts.execStorage("write-targets.tjs");'),
           textFile('write-targets.tjs', program),
         ]
+      let primaryFailure: unknown
+      let failed = false
       try {
         for (const count of [1, 2]) {
           await page.locator('#files').setInputFiles(input)
@@ -80,6 +82,10 @@ for (const backend of ['asyncify', 'jspi'] as const)
         }
         expect(backups[1]!.gameId).toBe(backups[0]!.gameId)
         expect(setup.workers).toHaveLength(2)
+      } catch (error) {
+        failed = true
+        primaryFailure = error
+        throw error
       } finally {
         await info.attach('write-targets-persistent-exports', {
           body: JSON.stringify(backups), contentType: 'application/json',
@@ -87,6 +93,16 @@ for (const backend of ['asyncify', 'jspi'] as const)
         await info.attach('write-targets-worker-logs', {
           body: await page.locator('#logs').innerText(), contentType: 'text/plain',
         })
-        await stopSystemPage(page, setup.errors)
+        try {
+          await stopSystemPage(page, setup.errors)
+        } catch (cleanupFailure) {
+          if (failed)
+            throw new AggregateError(
+              [primaryFailure, cleanupFailure],
+              'Storage target assertion and cleanup both failed',
+              { cause: primaryFailure },
+            )
+          throw cleanupFailure
+        }
       }
     })

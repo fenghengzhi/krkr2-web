@@ -18,6 +18,7 @@ import { copySystemDisplayMetrics } from '../engine/system/display.ts'
 import { PortAudioBackend } from '../backends/audio/port-backend.ts'
 import { PortVideoBackend } from '../backends/video/port-backend.ts'
 import { PortClipboardBackend } from '../backends/clipboard/port-backend.ts'
+import { PortHelpBackend } from '../backends/help/port-backend.ts'
 import type { InitializeRequest, SessionEvent } from '../protocol/session.ts'
 import { fontManifestFile } from './build-info.ts'
 import { loadFontKernel } from '../backends/text/freetype/module.ts'
@@ -61,6 +62,7 @@ export function createSession(request: InitializeRequest): EngineSession {
     clipboard: request.clipboard
       ? new PortClipboardBackend(request.clipboard, request.generation)
       : undefined,
+    help: request.help ? new PortHelpBackend(request.help, request.generation) : undefined,
     event: (event) => {
       const message: SessionEvent = {
         ...event,
@@ -94,6 +96,8 @@ export function createSession(request: InitializeRequest): EngineSession {
           throw new Error('WASM manifest is missing native Storages support')
         if (manifest.capabilities?.nativeTextStreams !== 2)
           throw new Error('WASM manifest is missing native text stream support')
+        if (manifest.capabilities?.nativeHelp !== 1)
+          throw new Error('WASM manifest is missing native help support')
         const supportsJspi = 'Suspending' in WebAssembly && 'promising' in WebAssembly
         const variant: WasmVariant =
           request.backend === 'auto'

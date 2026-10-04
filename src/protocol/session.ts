@@ -7,7 +7,7 @@ import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import type { PadAck, PadMessage, PadFontData } from './pad.ts'
 import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
-export const PROTOCOL_VERSION = 22
+export const PROTOCOL_VERSION = 23
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -39,6 +39,8 @@ export interface InitializeRequest {
   video: MessagePort
   /** A distinct channel keeps clipboard requests independent of a suspended script RPC. */
   clipboard?: MessagePort
+  /** Help presentation ACKs are independent of a suspended script RPC. */
+  help?: MessagePort
   activity: ActivityState
 }
 export type SessionEvent = EngineEvent & { generation: number; sequence: number }

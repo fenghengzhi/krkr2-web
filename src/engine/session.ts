@@ -4,6 +4,8 @@ import type { PadAck, PadMessage, PadPresentation, PadFontData } from '../protoc
 import { bootstrap } from './tvp/bootstrap.ts'
 import { clipboardClass } from './tvp/clipboard.ts'
 import { assertClipboardText, unavailableClipboard, type ClipboardPort } from './ports/clipboard.ts'
+import { unavailableHelp, type HelpPort } from './ports/help.ts'
+import { getWebLocalName, openHelpDocument } from './system/help.ts'
 import { ScriptTextEncoding } from './script/text-encoding.ts'
 import { debugBridge } from './tvp/debug.ts'
 import { DebugLog } from './diagnostics/log.ts'
@@ -201,6 +203,7 @@ export interface SessionDependencies {
   audio?: AudioBackend
   video?: VideoBackend
   clipboard?: ClipboardPort
+  help?: HelpPort
   arguments?: ReadonlyMap<string, string>
   fillRandomBytes?: (bytes: Uint8Array<ArrayBuffer>) => void
   now: () => number
@@ -215,6 +218,8 @@ export class EngineSession {
   private readonly systemColors: SystemColors
   private readonly clipboard: ClipboardPort
   private clipboardClosed = false
+  private readonly help: HelpPort
+  private helpClosed = false
   private readonly textEncoding = new ScriptTextEncoding()
   private readonly fontCatalog: FontCatalog
   private padFonts = new Map<string, NamedFontFace[]>()
@@ -359,6 +364,7 @@ export class EngineSession {
       deps.systemDisplay,
     )
     this.clipboard = deps.clipboard ?? unavailableClipboard()
+    this.help = deps.help ?? unavailableHelp()
     this.fonts = new FontService(
       (name) => this.resolveResource(name),
       deps.graphics,
@@ -411,6 +417,7 @@ export class EngineSession {
       for (const cleanup of [
         () => this.pads?.dispose(),
         () => this.closeClipboard(),
+        () => this.closeHelp(),
         () => this.modalLoop?.dispose(),
         () => this.menus.dismiss(undefined, undefined, 'unavailable'),
         () => this.fontSelection.cancel(),
@@ -2715,6 +2722,7 @@ export class EngineSession {
       // resources. Cache the outcome so a retry never disposes a device twice.
       await attempt(() => this.appLocks.close())
       await attempt(() => this.closeClipboard())
+      await attempt(() => this.closeHelp())
       await attempt(async () => {
         while (this.cancellationWork.size) await Promise.all([...this.cancellationWork])
         if (this.cancellationErrors.length) {
@@ -2862,6 +2870,11 @@ export class EngineSession {
     if (this.clipboardClosed) return
     this.clipboardClosed = true
     this.clipboard.close()
+  }
+  private closeHelp(): void {
+    if (this.helpClosed) return
+    this.helpClosed = true
+    this.help.close()
   }
 
   private async clipboardCall<T>(operation: () => Promise<T>): Promise<T> {
@@ -3346,6 +3359,17 @@ export class EngineSession {
           }
           throw error
         }
+        break
+      case 'System.shellExecute':
+        value = BigInt(await openHelpDocument(text(0), text(1), {
+          find: (name) => this.findResource(name),
+          decode: (bytes) => this.deps.readText(bytes, '', this.textEncoding.codec),
+          host: this.help,
+          control: this.control,
+        }))
+        break
+      case 'Storages.getLocalName':
+        value = getWebLocalName(text(0))
         break
       case 'Storages.getFullPath':
         value = getFullStoragePath(text(0))

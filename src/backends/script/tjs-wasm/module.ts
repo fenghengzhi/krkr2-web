@@ -61,6 +61,8 @@ export interface WasmManifest {
     nativeStorages?: number
     /** Distinct, suspendable text writer preflight before native allocation. */
     nativeTextStreams?: number
+    /** Native getLocalName and shellExecute call/conversion policies. */
+    nativeHelp?: number
     /** True native Pad instance construction, receiver checks and properties. */
     nativePad?: number
     nativePhaseVocoder?: number

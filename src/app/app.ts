@@ -12,6 +12,7 @@ import type { MenuSnapshot } from '../engine/scene/menus.ts'
 import { createGameFonts } from './game-fonts.ts'
 import { createGameDialogs } from './game-dialogs.ts'
 import { createGameClipboard } from './game-clipboard.ts'
+import { createGameHelp } from './game-help.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import { createGameLibrary } from './game-library.ts'
 import { createOfflinePanel } from './offline.ts'
@@ -94,6 +95,7 @@ export function mountApp(root: HTMLDivElement): void {
   let systemDialogSelecting = false
   let gameDialogs: ReturnType<typeof createGameDialogs> | undefined
   let gameClipboard: ReturnType<typeof createGameClipboard> | undefined
+  let gameHelp: ReturnType<typeof createGameHelp> | undefined
   let clipboardSelecting = false
   const clearMenus = () => {
     for (const menus of gameMenus.values()) menus.dispose()
@@ -226,15 +228,22 @@ export function mountApp(root: HTMLDivElement): void {
     if (stopping) return stopping
     const previous = player,
       previousClipboard = gameClipboard,
+      previousHelp = gameHelp,
       cleanupErrors: unknown[] = []
     stopRequested = true
     gameClipboard = undefined
+    gameHelp = undefined
     clipboardSelecting = false
     try {
       previousClipboard?.dispose()
     } catch (error) {
       // A presentation failure must not prevent canceling the Worker which
       // is still waiting for that presentation's clipboard response.
+      cleanupErrors.push(error)
+    }
+    try {
+      previousHelp?.dispose()
+    } catch (error) {
       cleanupErrors.push(error)
     }
     busy = true
@@ -248,7 +257,7 @@ export function mountApp(root: HTMLDivElement): void {
         }
         if (cleanupErrors.length === 1) throw cleanupErrors[0]
         if (cleanupErrors.length)
-          throw new AggregateError(cleanupErrors, 'Game and clipboard cleanup failed')
+          throw new AggregateError(cleanupErrors, 'Game host cleanup failed')
         generation++
         player = undefined
         snapshot = undefined
@@ -400,6 +409,12 @@ export function mountApp(root: HTMLDivElement): void {
           },
           ownsClipboardFocus: (target) =>
             current === generation && !!gameClipboard?.ownsFocus(target),
+          onHelpDocument(document) {
+            if (document && (current !== generation || !gameHelp || stopRequested))
+              throw new Error('Help presentation is not available')
+            if (current === generation) gameHelp?.show(document)
+          },
+          ownsHelpFocus: (target) => current === generation && !!gameHelp?.ownsFocus(target),
           onSurfaceAttach(surface) {
             if (current !== generation) return
             if (!el('stage').querySelector('#game-menus')) surface.menu.id = 'game-menus'
@@ -428,6 +443,7 @@ export function mountApp(root: HTMLDivElement): void {
       )
       launchPlayer = instance
       player = instance
+      gameHelp = createGameHelp(el('stage').parentElement!)
       gameDialogs = createGameDialogs({
         choose: (id, value) => {
           if (
@@ -514,6 +530,8 @@ export function mountApp(root: HTMLDivElement): void {
           player = undefined
           gameClipboard?.dispose()
           gameClipboard = undefined
+          gameHelp?.dispose()
+          gameHelp = undefined
           clipboardSelecting = false
           gameDialogs?.dispose()
           gameDialogs = undefined

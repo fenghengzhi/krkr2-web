@@ -1,0 +1,61 @@
+.game-help {
+  position: relative;
+  width: calc(100% - 32px);
+  max-height: min(640px, 80dvh);
+  margin: 16px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid #607d90;
+  border-radius: 12px;
+  background: #13202c;
+  color: #e8edf4;
+  box-shadow: 0 8px 24px #0004;
+  text-align: left;
+}
+.game-help-title {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+.game-help-path {
+  flex-shrink: 0;
+  margin: 0;
+  color: #b8c9d9;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.game-help-text {
+  min-height: 2em;
+  max-height: min(440px, 55dvh);
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: #0c151f;
+  color: inherit;
+  font: 14px / 1.6 ui-monospace, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.game-help-close {
+  align-self: flex-end;
+  flex-shrink: 0;
+}
+/* Fullscreen game windows are fixed above the desktop. Keep their nonmodal
+   help above that surface; normal playback keeps help in the page's flow. */
+.stage.game-desktop-fullscreen ~ .game-help,
+.stage.window-fullscreen:not(.game-desktop) ~ .game-help {
+  position: fixed;
+  z-index: 1050;
+  top: max(64px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 80px);
+  margin: 0;
+}

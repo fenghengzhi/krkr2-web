@@ -4,6 +4,10 @@
 
 推送分支、创建/更新 PR 或手动运行 **Tests** 工作流都会启动验证。工作流定义见 [test.yml](../.github/workflows/test.yml)。
 
+2026-10-05 起，完整 Tests 在成功 build 后同时调用 [KAG 兼容工作流](../.github/workflows/compatibility.yml)，直接复用当前 run 的 `test-build`。All tests 要求原 KAG、帮助菜单和旧 ABI 离线升级矩阵成功；手动兼容入口仍可指定 `build-run` 并检查来源一致。此接线为本批候选，尚待首次 Actions 执行。工作流复用方式依据 [GitHub 官方文档](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)。
+
+验证按较大批次提交，不实时轮询；下次批次前取回上次终态及原始产物。最近取回的 [37163692990](https://github.com/fenghengzhi/krkr2-web/actions/runs/37163692990) 为 cancelled／汇总 failure：Node 936 通过、2 失败、剩余未报告；常规浏览器 1852 通过、26 失败。全部 15 份 ZIP 已归档，详细独立失败和报告计数见 `out/verification/github-actions/37163692990/root-summary.md`。新 Node 命令被动记录各进程的 PID、文件及开始/退出时间，帮助后续识别卡住的文件，不改变测试顺序或超时。历史通过记录均有各自版本边界，不代表当前候选已验证。
+
 手动设置 `node-only=true` 可独立执行构建、类型检查和 Node 套件，供完整浏览器回归仍在运行时定位问题。该入口使用独立队列，运行名称明确标为 Node diagnostic；浏览器、直接运行时和 All tests 汇总均跳过，因此它的成功只表示 Node 诊断成功，不能用于完整回归报告。正常推送和默认手动运行仍执行全部套件。
 
 ```sh

@@ -93,7 +93,7 @@ attempt("missing-binary","bo0",true);attempt("missing-append-offset","utf-8ao0",
         try {
           assert.deepEqual(filesWithoutCode(reloaded.exportSaves()).map(({ path }) => path).sort(), paths.slice().sort())
           assert.equal(await reloaded.evaluate('[].load("game://./data/TEXT.DAT","o010")[0]'), 'Q')
-          assert.equal(await reloaded.evaluate('Dictionary.loadStruct("data/binary.DAT")[0]'), 'Q')
+          assert.equal(await reloaded.evaluate('[].loadStruct("data/binary.DAT")[0]'), 'Q')
         } finally {
           await reloaded.stop()
         }

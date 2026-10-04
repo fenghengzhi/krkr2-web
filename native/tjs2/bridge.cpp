@@ -674,6 +674,32 @@ public:
     }
 };
 
+// getLocalName differs from the older lexical methods: an unused result skips
+// both conversion and host work, after the native argument-count check.
+class StorageLocalName final : public tTJSNativeClassMethod {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit StorageLocalName(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        if(count < 1) return TJS_E_BADPARAMCOUNT;
+        if(!result) return TJS_S_OK;
+        const ttstr name = *args[0];
+        tTJSVariant value(name);
+        tTJSVariant* input = &value;
+        constexpr auto operation = u"Storages.getLocalName";
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 1, &input));
+        if(!reply) TJS_eTJSError(u"Storages.getLocalName returned no response");
+        resolveReply(vm, *reply, result);
+        return TJS_S_OK;
+    }
+};
+
 // Unlike the path-only methods, selectFile always runs, even for a discarded
 // result. Keep the original options object and every getter/conversion on this
 // suspendable native stack; the host only sees copied primitive values.
@@ -924,6 +950,36 @@ public:
         std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 0, nullptr));
         if(!reply) TJS_eTJSError(u"System.createUUID returned no response");
         resolveReply(vm, *reply, result);
+        return TJS_S_OK;
+    }
+};
+
+// Preserve the original native conversion order even when the caller discards
+// the result. The Web host presents a document; this wrapper never runs an OS
+// command and does not reinterpret its integer acceptance result as a boolean.
+class SystemShellExecute final : public tTJSNativeClassMethod {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit SystemShellExecute(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        if(count < 1) return TJS_E_BADPARAMCOUNT;
+        const ttstr target = *args[0];
+        const ttstr parameters = count > 1 ? ttstr(*args[1]) : ttstr();
+        tTJSVariant values[] = { tTJSVariant(target), tTJSVariant(parameters) };
+        tTJSVariant* input[] = { &values[0], &values[1] };
+        constexpr auto operation = u"System.shellExecute";
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 2, input));
+        if(!reply) TJS_eTJSError(u"System.shellExecute returned no response");
+        tTJSVariant accepted;
+        resolveReply(vm, *reply, &accepted);
+        if(accepted.Type() != tvtInteger) TJS_eTJSError(u"System.shellExecute returned an invalid result");
+        if(result) *result = accepted;
         return TJS_S_OK;
     }
 };
@@ -1558,10 +1614,14 @@ API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix
         object->RegisterNCM(u"hasFormat", new ClipboardHasFormat(vm), u"Clipboard", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"asText", new ClipboardText(vm), u"Clipboard", nitProperty, TJS_STATICMEMBER);
     }
-    if(system) object->RegisterNCM(u"createUUID", new SystemUuid(vm), u"System", nitMethod, TJS_STATICMEMBER);
+    if(system) {
+        object->RegisterNCM(u"createUUID", new SystemUuid(vm), u"System", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"shellExecute", new SystemShellExecute(vm), u"System", nitMethod, TJS_STATICMEMBER);
+    }
     if(storages) {
         for(const auto& policy : storageMethodPolicies)
             object->RegisterNCM(policy.name, new StorageMethod(vm, policy), u"Storages", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"getLocalName", new StorageLocalName(vm), u"Storages", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"selectFile", new StorageSelectFile(vm), u"Storages", nitMethod, TJS_STATICMEMBER);
     }
     *value = tTJSVariant(object.get(), object.get());

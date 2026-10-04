@@ -1,6 +1,13 @@
 name: KAG and release compatibility
 
 on:
+  workflow_call:
+    inputs:
+      build-run:
+        description: Leave empty to reuse test-build from the calling workflow run
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       build-run:
@@ -76,6 +83,9 @@ jobs:
       - name: Original KAG Save As and Open with persistent virtual files
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/storage-selector-kag.ts out/verification/compatibility 2>&1 | tee out/ci/kag-storage-selector.log
+      - name: Original KAG Help menu, text presentation and session cleanup
+        if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
+        run: bash scripts/ci-browser.sh node --import tsx tests/probes/help-kag.ts out/verification/compatibility 2>&1 | tee out/ci/kag-help.log
       - name: TJS ABI 1 to current release offline update
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/system-abi-pwa.ts out/verification/compatibility out/verification/compatibility-baselines/tjs-abi1 2>&1 | tee out/ci/tjs-abi1.log
@@ -91,6 +101,9 @@ jobs:
       - name: TJS ABI 4 to current release with native Scripts compilation
         if: ${{ !cancelled() && steps.graphics.outcome == 'success' }}
         run: bash scripts/ci-browser.sh node --import tsx tests/probes/system-abi-pwa.ts out/verification/compatibility out/verification/compatibility-baselines/tjs-abi4 scripts 2>&1 | tee out/ci/tjs-abi4.log
+      - name: Record current compatibility inventory and missing results
+        if: always()
+        run: node tests/probes/compatibility-inventory.mjs out/verification/compatibility "${{ matrix.browser }}" 2>&1 | tee out/ci/compatibility-inventory.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

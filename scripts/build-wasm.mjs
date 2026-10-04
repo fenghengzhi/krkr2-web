@@ -110,6 +110,7 @@ manifest.capabilities = {
   nativeSystem: 2,
   nativeStorages: 2,
   nativeTextStreams: 2,
+  nativeHelp: 1,
   nativePad: 1,
   nativePhaseVocoder: 1,
 }

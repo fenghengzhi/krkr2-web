@@ -202,7 +202,8 @@ export function createGameMenus(
   }
   const keydown = (event: KeyboardEvent) => {
     if (disposed || modal) return
-    if (event.target instanceof Element && event.target.closest('.game-clipboard')) return
+    if (event.target instanceof Element && event.target.closest('.game-clipboard, .game-help'))
+      return
     if (event.isComposing || event.keyCode === 229) return
     if (event.key === 'Escape') {
       // A script can show a popup on a window which did not own keyboard

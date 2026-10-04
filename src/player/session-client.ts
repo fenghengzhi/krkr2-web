@@ -67,6 +67,7 @@ export class SessionClient {
     clipboard?: MessagePort,
     dataPath?: string,
     systemColors?: readonly number[],
+    help?: MessagePort,
   ) {
     const request = {
       version: PROTOCOL_VERSION,
@@ -80,6 +81,7 @@ export class SessionClient {
       audio,
       video,
       clipboard,
+      help,
       dataPath,
       systemColors,
       systemDisplay: this.systemDisplay?.metrics,
@@ -94,6 +96,7 @@ export class SessionClient {
         audio,
         video,
         ...(clipboard ? [clipboard] : []),
+        ...(help ? [help] : []),
       ]),
     )
     this.initialized = true

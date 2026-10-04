@@ -3,6 +3,8 @@ import { systemDisplayProperties } from '../system/display.ts'
 
 // The bodies stay in TJS so dialogs keep their existing request/exception stack.
 // Native registration supplies static flags, receiver checks and call policies.
+// createUUID and shellExecute are registered directly by the native factory;
+// shellExecute keeps ordered TJS conversions even when its result is discarded.
 const methods = [
   [
     'getArgument',

@@ -132,6 +132,8 @@ const api: SessionApi = {
     if (request.version !== PROTOCOL_VERSION) throw new Error('Worker protocol mismatch')
     if (request.clipboard !== undefined && !(request.clipboard instanceof MessagePort))
       throw new Error('Invalid clipboard channel')
+    if (request.help !== undefined && !(request.help instanceof MessagePort))
+      throw new Error('Invalid help channel')
     if (!prepared || request.gameId !== gameId)
       throw new Error('Prepare the game sources before initializing')
     session = createSession(request)

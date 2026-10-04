@@ -395,6 +395,14 @@ var invalidAutopathComplete=true;
   })
 
   test(`Storages preserves exact case identities and reports ambiguous folded lookup (${mode})`, async () => {
+    // Preserve two exact identities that were already present in persistence.
+    // A second differently cased WRITE to a unique target now binds that target
+    // instead of creating a new case-only save under the 073 stream contract.
+    const saveStore = new MemorySaveStore()
+    await saveStore.commit([
+      { path: 'Slot.txt', bytes: Buffer.from('upper initial') },
+      { path: 'slot.txt', bytes: Buffer.from('lower initial') },
+    ])
     const { session } = await fixture(
       binary,
       `
@@ -426,6 +434,7 @@ demand([].load("game://./Slot.txt")[0],"upper save","exact save read survives am
 var caseComplete=true;
 `,
       { 'Scene.tjs': '"upper"', 'scene.tjs': '"lower"', 'Unique.tjs': '"unique"' },
+      { saveStore },
     )
     try {
       assert.equal(await session.evaluate('caseComplete'), '1')
