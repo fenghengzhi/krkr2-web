@@ -82,7 +82,36 @@ namespace TJS {
 #define TJS_SELECT_OBJTHIS(__closure__, __override__)                          \
     ((__closure__).ObjThis ? (__closure__).ObjThis : (__override__))
 
+    class tTJSDispatch;
+
+    // Identity observation is distinct from resource invalidation. It owns no
+    // reference and remains attached through explicit invalidate and a
+    // BeforeDestruction callback that legitimately acquires another reference.
+    // Signals run only after actual deletion is committed. As with resource
+    // observers, callbacks must not execute TJS or release the observed object;
+    // they may detach/delete any observer, including themselves.
+    class tTJSObjectIdentityObserver {
+        friend class tTJSDispatch;
+        tTJSDispatch *Owner = nullptr;
+        tTJSObjectIdentityObserver *Previous = nullptr;
+        tTJSObjectIdentityObserver *Next = nullptr;
+        void (*Notify)(void *) noexcept;
+        void *Context;
+
+    public:
+        tTJSObjectIdentityObserver(void (*notify)(void *) noexcept, void *context) noexcept;
+        ~tTJSObjectIdentityObserver();
+        tTJSObjectIdentityObserver(const tTJSObjectIdentityObserver &) = delete;
+        tTJSObjectIdentityObserver &operator=(const tTJSObjectIdentityObserver &) = delete;
+        tTJSObjectIdentityObserver(tTJSObjectIdentityObserver &&) = delete;
+        tTJSObjectIdentityObserver &operator=(tTJSObjectIdentityObserver &&) = delete;
+        // Rejection leaves an existing observation unchanged.
+        bool Attach(tTJSDispatch *owner) noexcept;
+        void Detach() noexcept;
+    };
+
     class tTJSDispatch : public iTJSDispatch2 {
+        friend class tTJSObjectIdentityObserver;
         virtual void BeforeDestruction() {}
 
         bool BeforeDestructionCalled;
@@ -91,6 +120,8 @@ namespace TJS {
     private:
         tjs_uint RefCount;
         tTJSDispatch* NextDestruction = nullptr;
+        tTJSObjectIdentityObserver *IdentityObservers = nullptr;
+        bool IdentityClosed = false;
 
     public:
         tTJSDispatch();
@@ -104,8 +135,14 @@ namespace TJS {
 
         tjs_uint Release() override;
 
+        [[nodiscard]] bool IsIdentityAlive() const noexcept { return !IdentityClosed; }
+
     protected:
         tjs_uint GetRefCount() { return RefCount; }
+        // Release closes immediately before delete, while the dynamic object
+        // still exists. Destructors also call this for direct/failed construction
+        // cleanup before releasing members which could reenter the host.
+        void CloseIdentityObservers() noexcept;
 
     public:
         tjs_error FuncCall(tjs_uint32 flag, const tjs_char *membername,

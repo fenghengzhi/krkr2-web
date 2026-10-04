@@ -11,6 +11,7 @@ import {
   type HostContext,
   type HostReply,
   type ScriptObject,
+  type ScriptObjectIdentity,
   type ScriptWeakObject,
   type ScriptValue,
   type ScriptRuntime,
@@ -30,6 +31,8 @@ export class InputService {
       sourceValid?: () => boolean
       sourceWindow?: ScriptObject | ScriptWeakObject
       pending?: IteratorResult<InputStep, InputValue>
+      acknowledgement?: boolean
+      identities: Map<number, ScriptObjectIdentity>
       unwinding: boolean
     }
   >()
@@ -76,6 +79,7 @@ export class InputService {
       guard,
       sourceValid,
       sourceWindow: this.window(controller.sourceWindowId),
+      identities: new Map(),
       unwinding: false,
     })
     return { kind: 'invoke', callback: this.pump, args: [BigInt(token), this.ownership] }
@@ -114,12 +118,19 @@ export class InputService {
       if (isScriptObject(result)) runtime.release(result)
     }
   }
-  private step(token: number, unwind: boolean): ScriptValue {
+  private revokeIdentities(identities: Map<number, ScriptObjectIdentity>): void {
+    for (const [layer, identity] of identities) {
+      identities.delete(layer)
+      this.objects.unobserveIdentity!(identity)
+    }
+  }
+  private step(token: number, unwind: boolean, acknowledgement?: boolean): ScriptValue {
     const record = this.operations.get(token)
     if (!record) {
       if (unwind) return scriptRecord({ done: 1n })
       throw new Error('Input operation has ended')
     }
+    if (acknowledgement !== undefined) record.acknowledgement = acknowledgement
     if (
       (unwind ||
         (record.guard !== 'none' && record.ownershipEpoch !== record.controller.ownershipEpoch) ||
@@ -128,6 +139,8 @@ export class InputService {
       !record.unwinding
     ) {
       record.unwinding = true
+      record.acknowledgement = undefined
+      this.revokeIdentities(record.identities)
       record.pending = record.operation.return(undefined)
     }
     for (let guard = 0; guard < 100000; guard++) {
@@ -139,8 +152,15 @@ export class InputService {
           key: ownership.key,
           target: ownership.layer ? (this.layer(ownership.layer) ?? null) : null,
         })
-      const next = record.pending ?? record.operation.next()
-      record.pending = undefined
+      let next: IteratorResult<InputStep, InputValue>
+      if (record.pending) {
+        next = record.pending
+        record.pending = undefined
+      } else {
+        const acquired = record.acknowledgement
+        record.acknowledgement = undefined
+        next = record.operation.next(acquired)
+      }
       // An imperative reset/release can enqueue ownership before yielding a
       // callback or returning. Deliver those releases before resolving targets.
       if (this.controllers.ownershipPending) {
@@ -149,6 +169,7 @@ export class InputService {
       }
       if (next.done) {
         this.operations.delete(token)
+        this.revokeIdentities(record.identities)
         return scriptRecord({ done: 1n, value: this.value(next.value) })
       }
       const event = next.value
@@ -165,7 +186,10 @@ export class InputService {
           done: 0n,
           ownership: 1n,
           key: event.key,
-          target: event.layer ? (this.layer(event.layer) ?? null) : null,
+          target: event.identity
+            ? (record.identities.get(event.layer) ?? null)
+            : event.layer ? (this.layer(event.layer) ?? null) : null,
+          ...(event.identity ? { acquire: 1n } : {}),
           ...(event.sourceKey ? { sourceKey: event.sourceKey } : {}),
         })
       }
@@ -183,6 +207,16 @@ export class InputService {
       // Generic rendering/cleanup generators retain their own lifecycle guards.
       const target = event.target ? this.eventLayer(event.target) : record.sourceWindow
       if (!target || (event.target && !record.controller.layers.has(event.target))) continue
+      if (event.target && event.method === 'onMouseDown' && !record.identities.has(event.target)) {
+        // Production runtimes require native identity support. The optional
+        // HostContext method only permits the existing live-only unit adapters;
+        // without it, a retired target can never be acquired through fallback.
+        const identity = this.objects.observeIdentity?.(target)
+        if (identity) {
+          try { record.identities.set(event.target, identity) }
+          catch (error) { this.objects.unobserveIdentity!(identity); throw error }
+        }
+      }
       return scriptRecord({
         done: 0n,
         ownership: 0n,
@@ -212,7 +246,8 @@ export class InputService {
       return reply(undefined)
     }
     if (name === 'Input.unwind' || name === 'Input.abort') return reply(this.step(number(0), true))
-    if (name === 'Input.resume') return reply(this.step(number(0), false))
+    if (name === 'Input.resume')
+      return reply(this.step(number(0), false, args[1] === undefined ? undefined : args[1] === 1n))
     if (name === 'Input.synchronize') return this.start(this.controllers.synchronize())
     const id = number(0)
     const controller =
@@ -279,9 +314,11 @@ export class InputService {
   dispose(): void {
     // Session shutdown no longer runs script. Finish JS generator bookkeeping
     // and release the one Dictionary; VM destruction owns terminal reclamation.
-    for (const { operation } of this.operations.values()) {
-      let next = operation.return(undefined)
-      for (let guard = 0; !next.done && guard < 4096; guard++) next = operation.next()
+    for (const { operation, identities } of this.operations.values()) {
+      try {
+        let next = operation.return(undefined)
+        for (let guard = 0; !next.done && guard < 4096; guard++) next = operation.next()
+      } finally { this.revokeIdentities(identities) }
     }
     this.operations.clear()
     if (this.ownership) this.objects.release(this.ownership)

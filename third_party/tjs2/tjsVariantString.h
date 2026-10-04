@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <atomic>
+#include <cstdint>
+#include <limits>
 
 namespace TJS {
     tjs_uint TJSGetStringHeapAllocationCount();
@@ -162,26 +164,43 @@ namespace TJS {
 
         void Append(const tjs_char *str, tjs_int applen) {
             // assume this != nullptr
-            tjs_int orglen = Length;
-            tjs_int newlen = Length += applen;
+            const tjs_int orglen = Length;
+            if(applen < 0 || applen > std::numeric_limits<tjs_int>::max() - orglen - 1)
+                TJSThrowStringAllocError();
+            const tjs_int newlen = orglen + applen;
             if(LongString) {
-                // still long string
-                LongString = TJSVS_realloc(LongString, newlen + 1);
-                TJS_strcpy(LongString + orglen, str);
-                return;
+                // The source may be this string, including an interior suffix.
+                // Reallocation can move and free its buffer, so retain an
+                // offset before allocation and resolve it against the new one.
+                const auto begin = reinterpret_cast<std::uintptr_t>(LongString);
+                const auto source = reinterpret_cast<std::uintptr_t>(str);
+                const bool internal = source >= begin &&
+                    source - begin <= static_cast<std::size_t>(orglen) * sizeof(tjs_char);
+                auto *replacement = TJSVS_realloc(LongString, newlen + 1);
+                if(internal) str = replacement + (source - begin) / sizeof(tjs_char);
+                std::memmove(replacement + orglen, str,
+                             static_cast<std::size_t>(applen) * sizeof(tjs_char));
+                replacement[newlen] = 0;
+                LongString = replacement;
             } else {
                 if(newlen <= TJS_VS_SHORT_LEN) {
-                    // still short string
-                    TJS_strcpy(ShortString + orglen, str);
-                    return;
+                    // Copy the known length before writing the terminator:
+                    // strcpy on s += s overwrites the source's terminating NUL.
+                    std::memmove(ShortString + orglen, str,
+                                 static_cast<std::size_t>(applen) * sizeof(tjs_char));
+                    ShortString[newlen] = 0;
+                } else {
+                    auto *replacement = TJSVS_malloc(newlen + 1);
+                    std::memcpy(replacement, ShortString,
+                                static_cast<std::size_t>(orglen) * sizeof(tjs_char));
+                    std::memmove(replacement + orglen, str,
+                                 static_cast<std::size_t>(applen) * sizeof(tjs_char));
+                    replacement[newlen] = 0;
+                    LongString = replacement;
                 }
-                // becomes a long string
-                tjs_char *newbuf = TJSVS_malloc(newlen + 1);
-                TJS_strcpy(newbuf, ShortString);
-                TJS_strcpy(newbuf + orglen, str);
-                LongString = newbuf;
-                return;
             }
+            // Allocation failure leaves both the old content and length intact.
+            Length = newlen;
         }
 
         TJS_CONST_METHOD_DEF(

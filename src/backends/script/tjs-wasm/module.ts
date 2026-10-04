@@ -14,6 +14,8 @@ export interface NativeModule {
 
 export interface ModuleOptions {
   objectInvalidated?: (vm: number, token: number) => void
+  /** Destruction-only identity revocation; no script or object release here. */
+  objectDestroyed?: (vm: number, token: number) => void
   locateFile?: (name: string) => string
   wasmBinary?: Uint8Array
   hostCall: (
@@ -49,6 +51,8 @@ export interface WasmManifest {
     executionBudgets?: number
     objectFinalization?: number
     hostObjectLifetime?: number
+    /** Non-owning identity observation survives invalidate until actual deletion. */
+    objectIdentity?: number
     soundObjectLifetime?: number
     videoObjectLifetime?: number
     dependentRevocation?: number

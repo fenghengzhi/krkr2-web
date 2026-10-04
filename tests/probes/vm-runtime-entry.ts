@@ -26,6 +26,7 @@ import { exerciseWindowLifetime } from '../helpers/window-lifetime-runtime.ts'
 import { exerciseMenuActions } from '../helpers/menu-actions.ts'
 import { exerciseNativeBrand } from '../helpers/native-brand.ts'
 import { exerciseWeakReturn, weakReturnCases } from '../helpers/weak-return.ts'
+import { exerciseObjectIdentity, objectIdentityCases } from '../helpers/object-identity.ts'
 import { dependentLifetimeCases, exerciseDependentLifetime } from '../helpers/dependent-lifetime.ts'
 import {
   dependentRevocationCases,
@@ -204,7 +205,8 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     windowOwnership = [],
     menuActions = [],
     nativeBrands = [],
-    weakReturns = []
+    weakReturns = [],
+    objectIdentities = []
   for (const binary of [false, true])
     soundOwnership.push(await exerciseSoundLifetime(factory, wasmBinary, backend, binary))
   for (const binary of [false, true])
@@ -216,6 +218,10 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
   for (const debug of [false, true])
     for (const binary of [false, true])
       nativeBrands.push(await exerciseNativeBrand(factory, wasmBinary, backend, debug, binary))
+  for (const debug of [false, true])
+    for (const binary of [false, true])
+      for (const name of objectIdentityCases)
+        objectIdentities.push(await exerciseObjectIdentity(factory, wasmBinary, backend, name, debug, binary))
   for (const debug of [false, true])
     for (const binary of [false, true])
       for (const name of weakReturnCases)
@@ -266,6 +272,7 @@ export async function exerciseRuntime(backend: 'asyncify' | 'jspi') {
     menuActions,
     nativeBrands,
     weakReturns,
+    objectIdentities,
     executionBudgets: {
       checks: [
         await exerciseExecutionBudget(factory, wasmBinary, backend, false),

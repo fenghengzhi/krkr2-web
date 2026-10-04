@@ -7,6 +7,7 @@ import {
   type HostReply,
   type ScriptObject,
   type ScriptWeakObject,
+  type ScriptObjectIdentity,
   type ScriptDependent,
   type ScriptRuntime,
   type ScriptValue,
@@ -31,6 +32,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
   private flushing?: Promise<void>
   private consoleOutput: ConsoleHandler | null = null
   private readonly owners = new Map<number, () => void>()
+  private readonly objectIdentities = new Set<number>()
   private ownerFailure?: Error
 
   private constructor(
@@ -62,6 +64,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       shouldCancel: () => runtime.control.cancelled,
       onYield: () => runtime.control.wait(),
       objectInvalidated: (vm, token) => runtime.objectInvalidated(vm, token),
+      objectDestroyed: (vm, token) => runtime.objectDestroyed(vm, token),
       queueWrite: (name, nameLength, mode, modeLength, data, length, text) => {
         runtime.pendingWrites.push({
           name: runtime.readText(name, nameLength),
@@ -75,6 +78,13 @@ export class TjsWasmRuntime implements ScriptRuntime {
     if (runtime.call('krkr_abi_version') !== 5) throw new Error('TJS WASM ABI mismatch')
     if (typeof runtime.module._krkr_release_draining !== 'function')
       throw new Error('TJS WASM is missing native release-state support')
+    for (const name of [
+      'krkr_identity_observe', 'krkr_identity_observe_owner', 'krkr_identity_observe_failed',
+      'krkr_identity_alive', 'krkr_identity_upgrade', 'krkr_identity_upgrade_failed',
+      'krkr_value_set_identity', 'krkr_identity_unobserve', 'krkr_identity_count',
+    ])
+      if (typeof runtime.module[`_${name}`] !== 'function')
+        throw new Error(`TJS WASM is missing destruction-only object identity support: ${name}`)
     runtime.vm = runtime.call('krkr_create', Number(options.debugMode === true))
     if (!runtime.vm) throw new Error('TJS VM initialization failed')
     return runtime
@@ -320,6 +330,10 @@ export class TjsWasmRuntime implements ScriptRuntime {
       this.assertAlive()
       this.assertWeakOwner(value)
       this.call('krkr_value_set_owner', this.vm, pointer, value.id)
+    } else if (value.type === 'object-identity') {
+      this.assertAlive()
+      this.assertIdentity(value)
+      this.call('krkr_value_set_identity', this.vm, pointer, value.id)
     } else if (value.type === 'array' || value.type === 'dictionary') {
       this.call('krkr_value_set_container', pointer, Number(value.type === 'array'))
       const entries = value.type === 'array' ? value.items.entries() : Object.entries(value.entries)
@@ -383,6 +397,63 @@ export class TjsWasmRuntime implements ScriptRuntime {
     if (this.disposed) return
     this.owners.delete(owner.id)
     this.call('krkr_owner_unobserve', this.vm, owner.id)
+  }
+  observeIdentity(owner: ScriptObject | ScriptWeakObject): ScriptObjectIdentity | undefined {
+    this.assertAlive()
+    if (owner.type === 'weak-object') {
+      this.assertWeakOwner(owner)
+      if (!this.owners.has(owner.id)) return undefined
+    } else this.assertObject(owner)
+    const id = this.call(
+      owner.type === 'weak-object' ? 'krkr_identity_observe_owner' : 'krkr_identity_observe',
+      this.vm, owner.id,
+    )
+    if (!id) {
+      if (this.call('krkr_identity_observe_failed', this.vm))
+        throw new Error('TJS object identity observation allocation or token budget failed')
+      return undefined
+    }
+    try {
+      this.objectIdentities.add(id)
+    } catch (error) {
+      this.call('krkr_identity_unobserve', this.vm, id)
+      throw error
+    }
+    return { type: 'object-identity', id, runtime: this.identity }
+  }
+  identityAlive(identity: ScriptObjectIdentity): boolean {
+    this.assertIdentity(identity)
+    return !this.disposed && !this.disposing && this.objectIdentities.has(identity.id) &&
+      this.call('krkr_identity_alive', this.vm, identity.id) !== 0
+  }
+  upgradeIdentity(identity: ScriptObjectIdentity): ScriptObject | undefined {
+    this.assertIdentity(identity)
+    if (this.disposed || this.disposing || !this.objectIdentities.has(identity.id)) return undefined
+    const id = this.call('krkr_identity_upgrade', this.vm, identity.id)
+    if (!id && this.call('krkr_identity_upgrade_failed', this.vm))
+      throw new Error('TJS object identity upgrade allocation failed')
+    return id ? { type: 'object', id, runtime: this.identity } : undefined
+  }
+  unobserveIdentity(identity: ScriptObjectIdentity): void {
+    this.assertIdentity(identity)
+    if (this.disposed) return
+    this.objectIdentities.delete(identity.id)
+    this.call('krkr_identity_unobserve', this.vm, identity.id)
+  }
+  private assertIdentity(identity: ScriptObjectIdentity): void {
+    if (identity.runtime !== this.identity)
+      throw new Error('Object identity belongs to a different TJS runtime')
+  }
+  private objectDestroyed(vm: number, token: number): void {
+    // No user callback, release or script execution at this native noexcept
+    // boundary. Deletion was already committed before the first signal.
+    try {
+      if (vm !== this.vm) throw new Error('Object destruction VM identity mismatch')
+      this.objectIdentities.delete(token)
+      this.call('krkr_identity_unobserve', vm, token)
+    } catch (error) {
+      this.ownerFailure ??= error instanceof Error ? error : new Error(String(error))
+    }
   }
   registerNativeLifetime(
     owner: ScriptObject,
@@ -633,6 +704,9 @@ export class TjsWasmRuntime implements ScriptRuntime {
         retain: (object) => this.retain(object),
         release: (object) => this.release(object),
         snapshot: (object) => this.snapshot(object),
+        observeIdentity: (owner) => this.observeIdentity(owner),
+        identityAlive: (identity) => this.identityAlive(identity),
+        unobserveIdentity: (identity) => this.unobserveIdentity(identity),
       }
       if (operation === 'Storages.selectFileAbort') {
         // Native may need to revoke a selector whose continuation never entered.
@@ -815,6 +889,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       memoryBytes: this.module.HEAPU8.byteLength,
       backend: this.variant,
       weakOwners: this.call('krkr_owner_count', this.vm),
+      objectIdentities: this.call('krkr_identity_count', this.vm),
       scriptObjects: this.call('krkr_native_lifetime_stat', 4),
       pendingHandles: this.call('krkr_pending_handle_count', this.vm),
       drainingReleased: this.call('krkr_release_draining', this.vm) !== 0,
@@ -847,6 +922,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       this.call('krkr_destroy', this.vm)
     } finally {
       this.owners.clear()
+      this.objectIdentities.clear()
       this.consoleOutput = null
       this.vm = 0
       this.disposed = true

@@ -32,6 +32,9 @@ export interface InputOwnershipStep {
   /** Copy an existing VM-owned reference after native invalidation retired
    * its tree/weak registration. This does not create a host-side retain. */
   sourceKey?: string
+  /** Resolve this operation's destruction-only identity in the VM. Acquisition
+   * is committed only after the pump acknowledges a non-null assigned value. */
+  identity?: boolean
 }
 export interface InputInvocation {
   kind: 'invoke'
@@ -107,6 +110,21 @@ export class InputController {
   }
   private *own(role: string, id: number, manager: number, sourceKey?: string): InputOperation {
     yield this.ownership(role, id, manager, sourceKey)
+    return undefined
+  }
+  private *captureIdentity(id: number, manager: number): InputOperation {
+    let committed = false
+    try {
+      const acquired = yield { ...this.ownership('capture', id, manager), identity: true }
+      if (acquired === true) {
+        this.capture = id
+        committed = true
+      }
+    } finally {
+      // An expired identity, a failed VM assignment, or cancellation before its
+      // acknowledgement must not leave either side holding a partial capture.
+      if (!committed) yield* this.dropOwner('capture', id)
+    }
     return undefined
   }
   private *dropOwner(role: string, id?: number): InputOperation {
@@ -897,6 +915,7 @@ export class InputController {
       const target = yield* this.target(p.x, p.y)
       this.released = false
       if (target) {
+        const manager = this.ownerManager('capture', target)
         if (this.layers.has(target))
           yield {
             target,
@@ -909,9 +928,11 @@ export class InputController {
         if (this.capture !== target) {
           yield* this.releaseMouseCapture()
           if (epoch !== this.epoch || ownershipEpoch !== this.ownershipEpoch) return undefined
-          if (!noCapture && this.layers.has(target)) {
-            this.capture = target
-            yield* this.own('capture', target, this.manager(target))
+          if (!noCapture) {
+            if (this.layers.has(target)) {
+              this.capture = target
+              yield* this.own('capture', target, this.manager(target))
+            } else yield* this.captureIdentity(target, manager)
           }
         }
         // Native PrimaryMouseDown hides the hint after the callback and

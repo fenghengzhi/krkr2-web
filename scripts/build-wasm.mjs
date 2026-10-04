@@ -100,6 +100,7 @@ manifest.capabilities = {
   executionBudgets: 1,
   objectFinalization: 1,
   hostObjectLifetime: 1,
+  objectIdentity: 1,
   soundObjectLifetime: 1,
   videoObjectLifetime: 1,
   dependentRevocation: 1,

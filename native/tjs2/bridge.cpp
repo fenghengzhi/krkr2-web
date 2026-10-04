@@ -62,6 +62,20 @@ struct WeakOwner {
     static void Expired(void* context) noexcept;
 };
 
+// Unlike WeakOwner, this record survives successful script/native invalidation.
+// Neither record owns its instance. The separate destruction observer prevents
+// a retired Layer's resource registration from changing operation identity.
+struct ObjectIdentity {
+    Vm* vm;
+    unsigned id;
+    tTJSCustomObject* owner;
+    bool boundContext;
+    tTJSObjectIdentityObserver observer;
+    ObjectIdentity(Vm* vm, unsigned id, tTJSCustomObject* owner, bool boundContext)
+        : vm(vm), id(id), owner(owner), boundContext(boundContext), observer(Expired, this) {}
+    static void Expired(void* context) noexcept;
+};
+
 // The owner is observed, while the dependent has an independent native lease.
 // Notifications only mark work; invalidation can run script and belongs in a
 // normal host/VM boundary, never in the observer's noexcept callback.
@@ -97,6 +111,10 @@ struct Vm {
     std::map<unsigned, std::unique_ptr<WeakOwner>> owners;
     unsigned nextOwner = 1;
     bool ownerUpgradeFailed = false;
+    std::map<unsigned, std::unique_ptr<ObjectIdentity>> identities;
+    unsigned nextIdentity = 1;
+    bool identityObserveFailed = false;
+    bool identityUpgradeFailed = false;
     unsigned nextDependent = 1;
     std::map<unsigned, std::unique_ptr<DependentOwner>> dependents;
     std::set<tTJSVariant*> nativeStates; // non-owning; native instances/delegates own the variants
@@ -112,6 +130,13 @@ struct Vm {
             ~ShutdownScope() { shuttingDown = previous; }
         } shutdown{previousShutdown};
         if(engine) engine->SetConsoleOutput(nullptr);
+        // Terminal VM retirement closes all identities before any roots or
+        // resources are released. Signals only remove metadata, never TJS work.
+        while(!identities.empty()) {
+            const auto id = identities.begin()->first;
+            ObjectIdentity::Expired(identities.begin()->second.get());
+            identities.erase(id);
+        }
         // Revoke host registrations before dropping the VM's remaining roots.
         // The synchronous signal only detaches host state, never executes TJS.
         while(!owners.empty()) {
@@ -198,6 +223,19 @@ void WeakOwner::Expired(void* context) noexcept {
     const auto id = record->id;
     // JavaScript may synchronously erase this record. Do not touch it again.
     owner_invalidated(vm, id);
+}
+
+EM_JS(void, object_destroyed, (Vm* vm, unsigned id), {
+    Module['objectDestroyed']?.(vm, id);
+});
+void ObjectIdentity::Expired(void* context) noexcept {
+    auto* record = static_cast<ObjectIdentity*>(context);
+    record->observer.Detach();
+    record->owner = nullptr;
+    auto* vm = record->vm;
+    const auto id = record->id;
+    // Runtime erases this record synchronously. Do not read it after the signal.
+    object_destroyed(vm, id);
 }
 
 #if KRKR_ASYNCIFY
@@ -1858,6 +1896,82 @@ API void krkr_value_set_owner(Vm* vm, tTJSVariant* value, unsigned token) {
 API int krkr_owner_upgrade_failed(Vm* vm) { return vm->ownerUpgradeFailed; }
 API void krkr_owner_unobserve(Vm* vm, unsigned token) { vm->owners.erase(token); }
 API unsigned krkr_owner_count(Vm* vm) { return vm->owners.size(); }
+
+static unsigned observeIdentity(Vm* vm, tTJSCustomObject* owner, bool boundContext) {
+    if(shuttingDown || !owner || !owner->IsIdentityAlive() ||
+        dynamic_cast<tTJSInterCodeContext*>(owner) || dynamic_cast<tTJSNativeClass*>(owner)) return 0;
+    // An expired/unsuitable instance is not an allocation failure. Exhausting
+    // the bounded token table is, and must not silently turn into missed input.
+    if(!vm->nextIdentity || vm->identities.size() >= 4096) {
+        vm->identityObserveFailed = true;
+        return 0;
+    }
+    KrkrCompilerScope observationPhase(12);
+    try {
+        const auto id = vm->nextIdentity++;
+        auto record = std::make_unique<ObjectIdentity>(vm, id, owner, boundContext);
+        if(!record->observer.Attach(owner)) return 0;
+        vm->identities.emplace(id, std::move(record));
+        return id;
+    } catch(...) {
+        vm->identityObserveFailed = true;
+        return 0;
+    }
+}
+API unsigned krkr_identity_observe(Vm* vm, unsigned handle) {
+    vm->identityObserveFailed = false;
+    if(shuttingDown || vm->released.count(handle)) return 0;
+    auto found = vm->handles.find(handle);
+    if(found == vm->handles.end() || found->second.Type() != tvtObject) return 0;
+    const auto closure = found->second.AsObjectClosureNoAddRef();
+    if(closure.ObjThis && closure.ObjThis != closure.Object) return 0;
+    return observeIdentity(vm, dynamic_cast<tTJSCustomObject*>(closure.Object), closure.ObjThis != nullptr);
+}
+API unsigned krkr_identity_observe_owner(Vm* vm, unsigned token) {
+    vm->identityObserveFailed = false;
+    if(shuttingDown) return 0;
+    auto found = vm->owners.find(token);
+    if(found == vm->owners.end()) return 0;
+    const auto& record = *found->second;
+    // Observe directly without even a temporary strong handle. The resource
+    // token must still be valid here; only the new identity survives invalidate.
+    if(!record.owner || !record.owner->IsLifetimeValid()) return 0;
+    return observeIdentity(vm, record.owner, record.boundContext);
+}
+API int krkr_identity_observe_failed(Vm* vm) { return vm->identityObserveFailed; }
+API int krkr_identity_alive(Vm* vm, unsigned token) {
+    if(shuttingDown) return 0;
+    auto found = vm->identities.find(token);
+    return found != vm->identities.end() && found->second->owner &&
+        found->second->owner->IsIdentityAlive();
+}
+API unsigned krkr_identity_upgrade(Vm* vm, unsigned token) {
+    vm->identityUpgradeFailed = false;
+    if(!krkr_identity_alive(vm, token)) return 0;
+    const auto& record = *vm->identities.find(token)->second;
+    KrkrCompilerScope upgradePhase(13);
+    try {
+        tTJSVariant value(record.owner, record.boundContext ? record.owner : nullptr);
+        return krkr_value_pin(vm, &value);
+    } catch(...) {
+        vm->identityUpgradeFailed = true;
+        return 0;
+    }
+}
+API int krkr_identity_upgrade_failed(Vm* vm) { return vm->identityUpgradeFailed; }
+API void krkr_value_set_identity(Vm* vm, tTJSVariant* value, unsigned token) {
+    if(krkr_identity_alive(vm, token)) {
+        const auto& record = *vm->identities.find(token)->second;
+        // Own the instance in the actual native reply, not an extra host handle.
+        // Invalid instances remain invalid; this restores no members/resources.
+        *value = tTJSVariant(record.owner, record.boundContext ? record.owner : nullptr);
+        return;
+    }
+    *value = tTJSVariant(static_cast<iTJSDispatch2*>(nullptr));
+}
+API void krkr_identity_unobserve(Vm* vm, unsigned token) { vm->identities.erase(token); }
+API unsigned krkr_identity_count(Vm* vm) { return vm->identities.size(); }
+
 static tTJSCustomObject* lifetimeInstance(Vm* vm, unsigned handle) {
     if(vm->released.count(handle)) return nullptr;
     auto found = vm->handles.find(handle);

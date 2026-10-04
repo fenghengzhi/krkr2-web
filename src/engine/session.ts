@@ -2797,6 +2797,7 @@ export class EngineSession {
     dependents: number
     pendingInvalidations: number
     weakOwners: number
+    objectIdentities: number
     scriptObjects: number
     pendingHandles: number
   } {
@@ -2822,6 +2823,7 @@ export class EngineSession {
       dependents: runtime?.dependents ?? 0,
       pendingInvalidations: runtime?.pendingInvalidations ?? 0,
       weakOwners: runtime?.weakOwners ?? 0,
+      objectIdentities: runtime?.objectIdentities ?? 0,
       scriptObjects: runtime?.scriptObjects ?? 0,
       pendingHandles: runtime?.pendingHandles ?? 0,
     }

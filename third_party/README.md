@@ -11,6 +11,9 @@ The project builds these sources directly. It does not link libraries from the n
 
 Local changes to the TJS snapshot:
 
+- `tjsVariantString.h` copies appends by explicit length, rebinds an internal source offset after long-buffer relocation, and publishes the new length only after allocation succeeds. This fixes self/substring append alias corruption exposed by the real selector boundary fixture's `value += value`; hosted native header and source/bytecode regressions cover short/long transitions, forced relocation and allocation failure without changing the original string.
+- `tjsObject.cpp/h` add non-owning identity observers distinct from resource invalidation observers. Identity survives explicit invalidate and legitimate finalizer resurrection, closes before actual deletion or VM retirement, and cannot revive a destroyed instance. The bridge exposes separately gated identity tokens for operation-scoped input capture; [decision 078](../docs/decisions/078-object-identity.md) records the ownership contract and hosted validation still required.
+
 1. `tjsString.h` and `tjsConfig.cpp` include the specific Boost UTF conversion header instead of all Boost.Locale. No Boost binary library is required.
 2. `tjsInterCodeExec.cpp` calls `krkr_vm_checkpoint` at instruction dispatch for cooperative scheduling and cancellation.
    Stack tracing in debug mode records owned instruction offsets before checkpoints instead of pointers to C++ stack locals. `tjsDebug.cpp/h` preserve native frame order and try-block collapsing without retaining an unwound Asyncify stack address. Deleting-object warnings are inside the frame cleanup boundary; `tjsError.cpp` preserves primary exceptions if debug output observers fail.

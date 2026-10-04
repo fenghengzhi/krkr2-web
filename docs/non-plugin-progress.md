@@ -1,5 +1,13 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [078 原生对象身份](decisions/078-object-identity.md)：补齐首次 down 回调 self-invalidate 后、对象尚未真正析构时的 capture 取得路径；独立 native identity 不拥有对象、不延长回调引用，也不改变资源 WeakObject 在 invalidate 时失效的合同。输入泵在 VM 实际赋值成功后确认 capture，并在完成、异常、Window 退休和 Stop 时撤销临时 identity。会话协议仍为 **25**、TJS ABI **5**、字体 ABI **2**；新增强制能力 `objectIdentity:1`。另修复真实文件选择器边界用例暴露的字符串自追加别名错误。源码、字节码、三浏览器及独立分配失败诊断定义已接入完整托管批次，尚未执行，不是通过记录。整体非插件目标仍 active，CUR／ANI、剩余图形／系统及音视频兼容继续在范围内。
+
+对 [077／37233070087](https://github.com/fenghengzhi/krkr2-web/actions/runs/37233070087) 本轮只取一次快照：仍为 **in_progress／conclusion=null**，Node 未结束，Firefox 常规作业已 **failure**；其余已结束作业为 success，但本次没有下载报告或换算用例数量。清单有 17 份产物且尚无 node-results，原快照保存在 `out/verification/github-actions/37233070087/`。完整终态、原 ZIP 和 Firefox 具体失败留待下一批取回，不继续轮询；此状态不能算整批通过。
+
+本轮补取 [076／37231345437](https://github.com/fenghengzhi/krkr2-web/actions/runs/37231345437) 终态 **cancelled**，汇总 All tests **failure**；18 份原 ZIP 已全部核对 digest，此前部分证据保留。新 execution-order 记录确认 Node 独立用例 **2606 通过、7 失败／2613**，但没有 reporter finish，不能当作完整终态库存；TAP 仅送达 **1011 通过、2 失败**，两种口径不能相加。selector 的 bounded source 用例先在 `vm.execute` 报 WASM memory access out of bounds，随后 dispose 无终态；静态源码确认 `value += value` 的重叠 NUL 拷贝和扩容后旧指针风险，本批按显式长度拷贝并在搬移后恢复内部偏移，分配失败保留原字符串。原 selector 测试不绕开该算法。另修正已证实的 save 字符串布尔转换、TJS real 零格式和大小写歧义存储夹具；原失败继续保留。
+
+076 常规浏览器 **1940 通过、10 失败／1950**；compatibility **96/96**、library **57/57**、PWA **59/59**、trusted **7/7**。Firefox 的七项 cursor／hint 失败尚未闭合，WebKit 的媒体位置、多窗口启动和 trace 启动失败也分别保留。Node 的 layer-neutral-color 原生 SIGTRAP 回溯涉及 V8 的 Wasm code allocation 回收，不能据此归因于 selector 的线性内存越界。原始归档与终态索引保存在 `out/verification/github-actions/37231345437/`；本批新增的测试及修订仍需新的 GitHub-hosted 结果。
+
 最新待核验批次：[Full test suite 37233070087](https://github.com/fenghengzhi/krkr2-web/actions/runs/37233070087)，精确提交 `567da391e9172c38c1683b9b897899b2fd42f78d`。077 的事件顺序、共享绘制几何、捕获引用与主 manager 选择已整批推送；首次查询仅确认创建和提交身份，当时 **in_progress／conclusion=null**，未取实时作业结果。下批补取 076 尚未报告的 Node／常规浏览器和本批执行证据。完整非插件目标保持 active；原版 self-invalidate 后首次 capture 的寿命身份、CUR／ANI 等仍是后续要求。
 
 2026-10-05 准备 [077 鼠标事件与绘制几何](decisions/077-mouse-manager-geometry.md)：按固定原版分开 Window 回调、PaintBox 整数快照、DrawDevice 投影和 manager 事件；修正 down 额外 move、up 尾部坐标、capture 释放时点及失效目标路由。画面、cursor、attention 和 touch 统一使用取整后的显示矩形，鼠标按原版整数转换，touch 保留实数。主图层交换后按稳定 manager 注册顺序选择显示对象。协议候选升 **25**；新增和调整的验收定义尚未执行，完整非插件目标仍 active。

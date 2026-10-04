@@ -30,6 +30,7 @@ try {
   const worker = await readFile('dist/sw.js', 'utf8')
   release = JSON.parse(worker.slice('self.__KRKR_SHELL__='.length, worker.indexOf(';\n')))
   assert.equal(wasm.capabilities?.nativeHelp, 1)
+  assert.equal(wasm.capabilities?.objectIdentity, 1)
 } catch (error) {
   evidenceErrors.push('Current build provenance: ' + String(error))
 }

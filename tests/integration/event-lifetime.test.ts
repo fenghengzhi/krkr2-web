@@ -548,6 +548,7 @@ function createOwner(){global.owner=new EventOwner();}
             dependents: 0,
             pendingInvalidations: 0,
             weakOwners: 0,
+            objectIdentities: 0,
             scriptObjects: 0,
             pendingHandles: 0,
           })

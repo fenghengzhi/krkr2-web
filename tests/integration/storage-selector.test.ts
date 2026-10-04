@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { headless } from '../helpers/headless.ts'
 import { observeNative } from '../helpers/bytecode-lifetime.ts'
+import { MemorySaveStore } from '../../src/engine/ports/saves.ts'
 import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import type { ModuleFactory, WasmManifest } from '../../src/backends/script/tjs-wasm/module.ts'
 import type { EngineEvent, EngineSession, SessionDependencies } from '../../src/engine/session.ts'
@@ -556,10 +557,16 @@ function run(){var result=Storages.selectFile(params);return result+"|"+params.n
   })
 
   test(`${mode}: ambiguous folded mounted and save names require an exact existing spelling`, async () => {
+    // Seed distinct persisted identities: a second case-only WRITE resolves
+    // the existing target and therefore cannot create this ambiguous pair.
+    const saveStore = new MemorySaveStore()
+    await saveStore.commit([
+      { path: 'savedata/Slot.txt', bytes: new TextEncoder().encode('upper save\n') },
+      { path: 'savedata/slot.txt', bytes: new TextEncoder().encode('lower save\n') },
+    ])
     const f = await fixture(
       binary,
       String.raw`
-["upper save"].save("savedata/Slot.txt");["lower save"].save("savedata/slot.txt");
 ["unique save"].save("Saved/a.txt");["other save"].save("saved/b.txt");
 function run(){var params=%[title:"Case mounted"];
   Storages.selectFile(params);var first=Scripts.evalStorage(params.name);
@@ -570,6 +577,8 @@ function run(){var params=%[title:"Case mounted"];
   params.title="Unique save";params.name="game://./SAVED/a.txt";Storages.selectFile(params);
   return first+"|"+second+"|"+third+"|"+params.name+"|"+[].load(params.name)[0];}
 `,
+      {},
+      { saveStore },
     )
     try {
       const opening = f.open(),

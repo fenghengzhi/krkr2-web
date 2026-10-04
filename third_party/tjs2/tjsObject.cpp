@@ -98,6 +98,45 @@ namespace TJS {
     //---------------------------------------------------------------------------
     // tTJSDispatch
     //---------------------------------------------------------------------------
+    tTJSObjectIdentityObserver::tTJSObjectIdentityObserver(
+        void (*notify)(void *) noexcept, void *context) noexcept
+        : Notify(notify), Context(context) {}
+
+    tTJSObjectIdentityObserver::~tTJSObjectIdentityObserver() { Detach(); }
+
+    bool tTJSObjectIdentityObserver::Attach(tTJSDispatch *owner) noexcept {
+        if(!owner || owner->IdentityClosed) return false;
+        if(Owner == owner) return true;
+        Detach();
+        Owner = owner;
+        Next = owner->IdentityObservers;
+        if(Next) Next->Previous = this;
+        owner->IdentityObservers = this;
+        return true;
+    }
+
+    void tTJSObjectIdentityObserver::Detach() noexcept {
+        if(!Owner) return;
+        if(Previous) Previous->Next = Next;
+        else Owner->IdentityObservers = Next;
+        if(Next) Next->Previous = Previous;
+        Owner = nullptr;
+        Previous = Next = nullptr;
+    }
+
+    void tTJSDispatch::CloseIdentityObservers() noexcept {
+        // Every token sees closed before the first signal. A signal can remove
+        // any remaining record; reload the intrusive head after each callback.
+        IdentityClosed = true;
+        while(IdentityObservers) {
+            auto *observer = IdentityObservers;
+            auto notify = observer->Notify;
+            auto *context = observer->Context;
+            observer->Detach();
+            if(notify) notify(context);
+        }
+    }
+
     tTJSDispatch::tTJSDispatch() {
         ++LiveDispatchObjects;
         BeforeDestructionCalled = false;
@@ -109,6 +148,7 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     tTJSDispatch::~tTJSDispatch() {
+        CloseIdentityObservers();
         --LiveDispatchObjects;
         // Also handles a native method/property constructor that failed after
         // debug registration, before its derived destructor could run.
@@ -157,7 +197,12 @@ namespace TJS {
         // throws. A finalizer can resurrect the object by adding a new owner.
         const auto remaining = RefCount - 1;
         if(primary) cleanup.suppress();
-        if(!remaining) delete this;
+        if(!remaining) {
+            // BeforeDestruction may resurrect this object. Do not close at its
+            // entry or while a deferred release still owns the final reference.
+            CloseIdentityObservers();
+            delete this;
+        }
         else RefCount = remaining;
         --DestructionDepth;
         if(!DestructionDepth && !DrainingDestructions) {
@@ -458,6 +503,7 @@ namespace TJS {
 
     //---------------------------------------------------------------------------
     tTJSCustomObject::~tTJSCustomObject() {
+        CloseIdentityObservers();
         // An implicit finalizer or partially constructed object's cleanup may
         // have failed before the normal invalidation boundary. Actual deletion
         // must revoke every remaining observation, including during shutdown.

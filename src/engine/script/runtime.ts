@@ -13,6 +13,26 @@ export interface ScriptWeakObject {
   readonly runtime: number
 }
 
+/** A non-owning native identity token. Explicit script invalidation does not
+ * expire it; actual destruction, revocation or VM disposal does. Resolving
+ * the token never makes an invalid object callable again. */
+export interface ScriptObjectIdentity {
+  readonly type: 'object-identity'
+  readonly id: number
+  readonly runtime: number
+}
+
+export interface HostObjectIdentity {
+  /** Observe a still-existing instance without retaining it. A resource weak
+   * token must still resolve when observation begins; expired input returns
+   * undefined, while native allocation failures are errors. */
+  observeIdentity(owner: ScriptObject | ScriptWeakObject): ScriptObjectIdentity | undefined
+  identityAlive(identity: ScriptObjectIdentity): boolean
+  unobserveIdentity(identity: ScriptObjectIdentity): void
+  /** Caller owns this independent strong lease and must release it. */
+  upgradeIdentity(identity: ScriptObjectIdentity): ScriptObject | undefined
+}
+
 /** A revocable native ownership edge, scoped to one VM. */
 export interface ScriptDependent {
   readonly type: 'dependent'
@@ -76,6 +96,7 @@ export type ScriptValue =
   | Uint8Array
   | ScriptObject
   | ScriptWeakObject
+  | ScriptObjectIdentity
   | ScriptRecord
   | ScriptList
   | ScriptProxy
@@ -113,6 +134,11 @@ export interface HostContext {
   /** Explicit, bounded copy of native Array/Dictionary data, without invoking properties.
    * Arbitrary script objects and cyclic data are rejected; normal values retain identity. */
   snapshot(object: ScriptObject): ScriptRecord | ScriptList
+  /** Present on production native runtimes; optional for explicit host-only
+   * fixtures which do not model destruction-only identities. */
+  observeIdentity?: HostObjectIdentity['observeIdentity']
+  identityAlive?: HostObjectIdentity['identityAlive']
+  unobserveIdentity?: HostObjectIdentity['unobserveIdentity']
 }
 
 export type HostHandler = (
@@ -123,6 +149,10 @@ export type HostHandler = (
 export type ConsoleHandler = (text: string) => HostReply | Promise<HostReply>
 
 export interface ScriptRuntime extends HostContext, HostObjectLifetime {
+  observeIdentity: HostObjectIdentity['observeIdentity']
+  identityAlive: HostObjectIdentity['identityAlive']
+  unobserveIdentity: HostObjectIdentity['unobserveIdentity']
+  upgradeIdentity: HostObjectIdentity['upgradeIdentity']
   /** Version read from the loaded native TJS kernel, not an emulated SDK version. */
   readonly languageVersion?: string
   /** Attach a native instance without retaining its owner. Its host operation
@@ -162,6 +192,7 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
     memoryBytes: number
     backend: string
     weakOwners: number
+    objectIdentities: number
     scriptObjects: number
     pendingHandles: number
     /** Native finalizer/dependent release is still on the current VM stack. */

@@ -145,7 +145,7 @@ var other=new WaveSoundBuffer(null);other.filters.add(phase);other.open("tone.wa
         assert.equal(await harness.session.evaluate('rejected'), '4')
         assert.equal(
           await harness.session.evaluate('stored.join(",")'),
-          '0,unload,-1,unload,0,unload,100,unload',
+          '+0.0,unload,-1,unload,+0.0,unload,100,unload',
         )
         assert.equal(await harness.session.evaluate('sound.status+","+other.status'), 'unload,play')
         assert.equal(

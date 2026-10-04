@@ -14,7 +14,7 @@ function __krkrInputApplyStep(step,ownership){
     }
     else if(step.target===null)delete ownership[step.key];
     else ownership[step.key]=step.target;
-    return;
+    return step.acquire ? (step.target!==null ? 1 : 0) : void;
   }
   if(step.direct){step.target(step.args*);return;}
   if(!System.eventDisabled){
@@ -36,12 +36,13 @@ function __krkrInputUnwind(token,ownership){
   }
 }
 function __krkrInputPump(token,ownership){
-  var step=void;
+  var step=void,acknowledgement=void;
   try{
     while(true){
-      step=__host("Input.resume",token);
+      step=__host("Input.resume",token,acknowledgement);
+      acknowledgement=void;
       if(step.done)return step.value;
-      __krkrInputApplyStep(step,ownership);
+      acknowledgement=__krkrInputApplyStep(step,ownership);
       // Native immediate-event temporaries end before the manager resumes.
       // In particular, do not keep the previous target alive across __host.
       __krkrInputClearStep(step);

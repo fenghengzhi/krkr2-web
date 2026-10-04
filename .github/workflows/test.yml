@@ -65,6 +65,11 @@ jobs:
         if: steps.kernels.outputs.cache-hit != 'true'
         with:
           version: '6.0.9'
+      - name: Check native string append aliases and allocation failures
+        run: |
+          c++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ithird_party/tjs2 tests/native/string-append.cpp -o out/ci/string-append-native
+          out/ci/string-append-native 2>&1 | tee out/ci/string-append-native.log
       - name: Build Asyncify, JSPI and font kernels
         if: steps.kernels.outputs.cache-hit != 'true'
         run: |
@@ -480,7 +485,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -497,3 +502,8 @@ jobs:
                   summary.write(f"| {name} | {job['result']} |\n")
           sys.exit(0 if all(job['result'] == 'success' for job in results.values()) else 1)
           PY
+
+  identity-allocations:
+    name: Native object identity allocation failures
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    uses: ./.github/workflows/object-identity-allocations.yml

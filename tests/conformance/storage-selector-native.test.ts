@@ -277,7 +277,8 @@ var state=[first,second,empty.name===void,explicit.name===void,explicit.filterIn
       assert.equal(await vm.execute('state', '', true), '0|0|1|1|4294967295')
       assert.deepEqual(calls, [
         { operation: 'Storages.selectFile', args: defaults },
-        { operation: 'Storages.selectFile', args: [4294967295n, '', '', '', 0n, '', 1n, ''] },
+        // TJS numeric parsing recognizes the literal string "true" as one.
+        { operation: 'Storages.selectFile', args: [4294967295n, '', '', '', 1n, '', 1n, ''] },
         { operation: 'Storages.selectFile', args: [2n, '', '', undefined, 1n, undefined, 1n] },
       ])
     } finally {

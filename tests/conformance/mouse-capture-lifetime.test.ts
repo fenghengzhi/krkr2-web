@@ -13,6 +13,8 @@ import {
   type ScriptWeakObject,
 } from '../../src/engine/script/runtime.ts'
 import { headless } from '../helpers/headless.ts'
+import { readScript } from '../../src/backends/files/text-codecs.ts'
+import type { SessionDependencies } from '../../src/engine/session.ts'
 
 // Fixed KRKR2 dec49af9 / 2.32stable:
 // LayerManager.cpp 356–379 saves ReleaseCaptureCalled after the callback,
@@ -228,4 +230,194 @@ for (const binary of [false, true]) {
       }
     })
   }
+}
+
+const identitySource = String.raw`
+System.exitOnWindowClose=false;
+var trace=[],caught=[];
+System.exceptionHandler=function(error){caught.add(error.message);return true;};
+var win=new Window();win.setInnerSize(160,80);win.visible=true;
+var root=new Layer(win,null);root.setSize(160,80);root.fillRect(0,0,160,80,0xff203040);
+root.onMouseDown=function(){trace.add("root-down");};
+root.onMouseUp=function(){trace.add("root-up");};
+root.onMouseEnter=function(){trace.add("root-enter");};
+root.onMouseMove=function(){trace.add("root-move");};
+class IdentityDownLayer extends Layer {
+  function IdentityDownLayer(){
+    super.Layer(global.win,global.root);setSize(30,30);
+    fillRect(0,0,30,30,0xffffffff);visible=true;
+  }
+  function finalize(){global.trace.add("upper-final");}
+  function onMouseDown(){
+    global.trace.add("upper-down");
+    if(global.identityMode=="drop"){
+      delete global.upper;
+      global.trace.add("upper-return");
+      return;
+    }
+    invalidate this;
+    global.trace.add("upper-invalid");
+    if(global.identityMode=="release")global.root.releaseCapture();
+    if(global.identityMode=="throw")throw new global.Exception("identity-down-fault");
+    if(global.identityMode=="retire-window"){
+      invalidate global.win;delete global.win;delete global.root;
+    }
+    if(global.identityMode=="stop")Scripts.evalStorage("hold-identity.tjs");
+    global.trace.add("upper-return");
+  }
+  function onMouseMove(){global.trace.add("invalid-move");}
+  function onMouseUp(){global.trace.add("invalid-up");}
+}
+var upper=new IdentityDownLayer();
+function events(){return trace.join("|");}
+function errors(){return caught.join("|");}
+function reset(){trace.clear();}
+function dropInvalidOwner(){delete global.upper;}
+`
+
+async function identityFixture(binary: boolean, mode: string, overrides: Partial<SessionDependencies> = {}) {
+  const f = await headless({
+    'startup.tjs': '',
+    'capture-identity.tjs': `var identityMode=${JSON.stringify(mode)};\n${identitySource}`,
+    'hold-identity.tjs': 'hold-capture-identity',
+  }, overrides)
+  try {
+    await f.session.start()
+    if (binary) {
+      await f.session.evaluate('Scripts.compileStorage("capture-identity.tjs","savedata/capture-identity.cjs",false,true,false)')
+      await f.session.evaluate('Scripts.execStorage("savedata/capture-identity.cjs")')
+    } else await f.session.evaluate('Scripts.execStorage("capture-identity.tjs")')
+    const windowId = Number(await f.session.evaluate('win.__windowId'))
+    await f.session.idle()
+    assert.equal(f.session.inspectOwnership().objectIdentities, 0)
+    return {
+      ...f, windowId,
+      async mouse(type: 'down' | 'move' | 'up', shift = type === 'down' ? 8 : 0) {
+        await f.session.input({ type, windowId, x: 5, y: 5, shift, button: 0, clicks: 0 })
+        await f.session.idle()
+        assert.equal(f.session.inspectOwnership().objectIdentities, 0,
+          'Input operation identities end even when a VM capture slot survives')
+      },
+    }
+  } catch (error) {
+    try { await f.session.stop() }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Identity fixture startup and cleanup failed') }
+    throw error
+  }
+}
+
+async function finishIdentityFixture(f: Awaited<ReturnType<typeof identityFixture>>, failures: unknown[]) {
+  try {
+    await f.session.stop()
+    assert.equal(f.session.snapshot().handles, 0)
+    assert.equal(f.session.snapshot().bitmapBytes, 0)
+    assert(Object.values(f.session.inspectOwnership()).every((value) => value === 0))
+  } catch (cleanup) {
+    if (failures.length) throw new AggregateError([...failures, cleanup], 'Identity scenario and cleanup failed')
+    throw cleanup
+  }
+}
+
+for (const binary of [false, true]) {
+  const mode = binary ? 'bytecode' : 'source'
+
+  test(`${mode}: first down self-invalidation acquires an externally alive Owner without retaining an identity token`, { timeout: 60000 }, async () => {
+    const f = await identityFixture(binary, 'capture'), failures: unknown[] = []
+    try {
+      await f.mouse('down')
+      assert.equal(await f.session.evaluate('events()'), 'upper-down|upper-final|upper-invalid|upper-return')
+      assert.equal(f.session.inspectOwnership().layerSources, 1)
+      await f.session.evaluate('dropInvalidOwner()')
+      await f.session.evaluate('reset()')
+      await f.mouse('down')
+      await f.mouse('move', 8)
+      assert.equal(await f.session.evaluate('events()'), '', 'The new capture owns the invalid object after its external reference is gone')
+      await f.mouse('up')
+      assert.equal(await f.session.evaluate('events()'), 'root-enter')
+      await f.session.evaluate('reset()')
+      await f.mouse('down')
+      assert.equal(await f.session.evaluate('events()'), 'root-down')
+    } catch (error) { failures.push(error); throw error }
+    finally { await finishIdentityFixture(f, failures) }
+  })
+
+  test(`${mode}: dropping the last callback reference finalizes before a new capture can be acquired`, { timeout: 60000 }, async () => {
+    const f = await identityFixture(binary, 'drop'), failures: unknown[] = []
+    try {
+      await f.mouse('down')
+      assert.equal(await f.session.evaluate('events()'), 'upper-down|upper-return|upper-final',
+        'Weak observation must not extend the callback temporary into capture acquisition')
+      assert.equal(f.session.inspectOwnership().layerSources, 1)
+      await f.session.evaluate('reset()')
+      await f.mouse('move')
+      assert.equal(await f.session.evaluate('events()'), 'root-enter|root-move',
+        'A null VM acquisition cannot leave a nonzero numeric capture')
+    } catch (error) { failures.push(error); throw error }
+    finally { await finishIdentityFixture(f, failures) }
+  })
+
+  for (const action of ['release', 'throw'] as const) {
+    test(`${mode}: self-invalidating down ${action === 'release' ? 'respects releaseCapture' : 'does not acquire after a callback exception'}`, { timeout: 60000 }, async () => {
+      const f = await identityFixture(binary, action), failures: unknown[] = []
+      try {
+        await f.mouse('down')
+        assert.equal(await f.session.evaluate('events()'), action === 'release'
+          ? 'upper-down|upper-final|upper-invalid|upper-return'
+          : 'upper-down|upper-final|upper-invalid')
+        assert.equal(await f.session.evaluate('errors()'), action === 'throw' ? 'identity-down-fault' : '')
+        assert.equal(f.session.inspectOwnership().layerSources, 1)
+        await f.session.evaluate('reset()')
+        await f.mouse('move')
+        assert.equal(await f.session.evaluate('events()'), 'root-enter|root-move')
+      } catch (error) { failures.push(error); throw error }
+      finally { await finishIdentityFixture(f, failures) }
+    })
+  }
+
+  test(`${mode}: Window retirement during self-invalidating down revokes the operation identity`, { timeout: 60000 }, async () => {
+    const f = await identityFixture(binary, 'retire-window'), failures: unknown[] = []
+    try {
+      await f.mouse('down')
+      assert.equal(await f.session.evaluate('events()'), 'upper-down|upper-final|upper-invalid|upper-return')
+      assert.equal(f.session.inspectOwnership().windowSources, 0)
+      assert.equal(f.session.inspectOwnership().layerSources, 0)
+      await f.session.evaluate('reset()')
+      await f.mouse('move')
+      assert.equal(await f.session.evaluate('events()'), '')
+    } catch (error) { failures.push(error); throw error }
+    finally { await finishIdentityFixture(f, failures) }
+  })
+
+  test(`${mode}: Stop during a suspended invalidating down releases its operation identity`, { timeout: 60000 }, async () => {
+    let entered!: () => void, release!: (source: string) => void
+    const ready = new Promise<void>((resolve) => { entered = resolve }),
+      held = new Promise<string>((resolve) => { release = resolve }),
+      f = await identityFixture(binary, 'stop', {
+        async decodeScript(bytes, streamMode, encoding) {
+          const source = await readScript(bytes, streamMode, encoding)
+          if (source === 'hold-capture-identity') { entered(); return held }
+          return source
+        },
+      }), failures: unknown[] = []
+    let outcome: Promise<unknown> | undefined
+    try {
+      outcome = f.mouse('down').then(() => undefined, (error: unknown) => error)
+      await ready
+      assert.equal(f.session.inspectOwnership().objectIdentities, 1,
+        'Only the currently suspended down operation observes the invalid object identity')
+      assert.equal(f.session.inspectOwnership().layerSources, 1)
+      const stopping = f.session.stop()
+      release('0')
+      await stopping
+      const error = await outcome
+      assert(error instanceof Error && error.name === 'AbortError')
+      assert.equal(f.session.snapshot().state, 'stopped')
+      assert.equal(f.session.inspectOwnership().objectIdentities, 0)
+    } catch (error) { failures.push(error); throw error }
+    finally {
+      release('0')
+      await outcome
+      await finishIdentityFixture(f, failures)
+    }
+  })
 }
