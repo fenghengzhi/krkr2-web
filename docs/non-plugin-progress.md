@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37240240034](https://github.com/fenghengzhi/krkr2-web/actions/runs/37240240034)，精确提交 `669fe105cbe4eed1523ca899a07e1f0cbbc10b20`。081 加载策略、逐帧选择／缩放、Worker 类型图修复和 81 份 Windows 严格参考已整批推送。首次唯一查询只确认创建与提交身份，当时 **in_progress／conclusion=null**，没有检查实时作业结果。下一轮补取 080 尚缺终态与 JSPI 产物，再回收本批完整证据；已知候选边界和历史失败保持原记录，整体非插件目标仍 active，未合入旧 main，未本地执行验证。
+
 2026-10-05 准备 [081 光标文件加载、选图与缩放](decisions/081-cursor-native-loading.md)：Session 将完整 CUR/ANI 原格式解码交给固定 32×32／32 位／96 DPI 加载策略，逐帧选图、缩放热点与像素后才缓存／发布；多图目录不再由页面直接报告未支持。协议升 **27**，TJS ABI **5**、字体 ABI **2** 不变。新 12 个加载定义、真实 Session 共 20 个定义、浏览器加载呈现与实际非整数 CSS 背景对照随完整批次执行。32 位平滑缩放仍是逐字节待校准候选，目录一般排序、先选再解码、高位热点和零 rate 墙钟等缺口继续保留；新增独立加载比较及 81 份 Windows 参考，不能缩小必比范围来取得通过。
 
 本轮对 [080／37238793190](https://github.com/fenghengzhi/krkr2-web/actions/runs/37238793190) 只取一次固定快照：**in_progress／conclusion=null**，4 份已发布原 ZIP 全部核对 SHA-256 与大小。两套 Windows 各 **57 份完整观察、170/170 限定比较匹配**；另各 1,372 个未比较 draw 与 7 个接受差异不能算全面通过。Build 出现 13 条 cursor.ts DOM 类型缺失，静态定位为漏排 Worker include；本批补 `tsconfig.worker.json` 的 DOM 文件 exclude，不放开 Worker lib。Node／浏览器／兼容等全部 skipped，080 应用与新增回归没有执行结果。Asyncify allocator **60/60**；JSPI 当时仍运行，终态与后续产物下轮补取。原快照及产物在 `out/verification/github-actions/37238793190/081-snapshot-summary.md`，未轮询。
