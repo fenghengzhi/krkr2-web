@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { inflateSync } from 'node:zlib'
 import { decodeCursor, compositeCursor } from '../../src/formats/cursor/index.ts'
+import { loadCursorBytes, loadedCursorHotspot } from '../../src/formats/cursor/load.ts'
 import { decodePng } from '../../src/formats/image/png.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -50,14 +51,20 @@ function finish<T>(work: Generator<void, T>): T {
   for (;;) { const step = work.next(); if (step.done) return step.value }
 }
 const results: Record<string, unknown>[] = []
-let failures = 0, compared = 0, unscaledMatches = 0
-let status: 'running' | 'passed' | 'failed' = 'running'
+let failures = 0, compared = 0, unscaledMatches = 0, separateLoadScope = 0
+let status: 'running' | 'passed' | 'partial' | 'failed' = 'running'
 const save = () => writeFileSync(file('portable-comparison.json'), JSON.stringify({
   schema: 1, sourceCommit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,
   observationSha256: createHash('sha256').update(bytes).digest('hex'),
-  scope: 'Unscaled DI_NORMAL RGB against the same CUR/ANI bytes; scaled and ambiguous selection remain observations',
-  status, fixtures: results, failures, compared, unscaledMatches,
+  scope: 'Complete raw-directory decoding and unscaled DI_NORMAL RGB; hotspot metadata passes through native conversion. Select-before-decode acceptance is covered by the separate required load comparison',
+  status, fixtures: results, failures, compared, unscaledMatches, separateLoadScope,
 }, null, 2) + '\n')
+const png = async (payload: Uint8Array) => {
+  const parser = decodePng(payload)
+  assert(parser)
+  const plan = finish(parser), expanded = inflateSync(plan.compressed, { maxOutputLength: plan.expandedLength })
+  return finish(plan.decode(expanded))
+}
 save()
 for (const fixture of native.fixtures) {
   const raw = readFileSync(file(fixture.file)),
@@ -68,12 +75,7 @@ for (const fixture of native.fixtures) {
   results.push(record)
   save()
   try {
-    const asset = await decodeCursor(raw, { png: async (payload) => {
-      const parser = decodePng(payload)
-      assert(parser)
-      const plan = finish(parser), expanded = inflateSync(plan.compressed, { maxOutputLength: plan.expandedLength })
-      return finish(plan.decode(expanded))
-    } })
+    const asset = await decodeCursor(raw, { png })
     record.asset = {
       kind: asset.kind, sequence: asset.sequence, rates: asset.rates,
       durationJiffies: asset.durationJiffies, decodedBytes: asset.decodedBytes,
@@ -140,9 +142,11 @@ for (const fixture of native.fixtures) {
                 y: Math.floor(pixel / draw.canvasWidth), observed: rgb, expected: wanted })
             }
           }
+          const loadedHotspot = loadedCursorHotspot(image)
           comparisons.push({ index, differentPixels, maximumChannelDifference, firstDifferences,
+            rawHotspot: image.hotspot, loadedHotspot,
             hotspotCompared: hotspotComparable,
-            hotspotMatches: hotspotComparable ? image.hotspot.x === info.hotspot.x && image.hotspot.y === info.hotspot.y : null })
+            hotspotMatches: hotspotComparable ? loadedHotspot.x === info.hotspot.x && loadedHotspot.y === info.hotspot.y : null })
         }
         row.candidates = comparisons
         if (frame.images.length !== 1) { row.reason = 'Multiple source images: selection policy is not inferred from the closest pixel result'; continue }
@@ -157,12 +161,25 @@ for (const fixture of native.fixtures) {
     record.status = record.asset ? 'comparison-error'
       : fixture.loaded ? 'native-accepted-portable-rejected' : 'both-rejected'
     record.error = error instanceof Error ? { message: error.message, stack: error.stack } : String(error)
-    // These are candidate semantics. Preserve every rejection for review; a
-    // native-accepted fixture cannot silently disappear from a green result.
-    if (fixture.loaded) failures++
+    if (fixture.loaded && !record.asset) {
+      // The generic API intentionally validates every directory candidate.
+      // File loading instead selects before decoding. Preserve this rejection
+      // as partial raw evidence, and require the separate loading gate to
+      // verify its actual acceptance, selected pixels and hotspot.
+      try {
+        const loaded = await loadCursorBytes(raw, { png })
+        record.status = 'full-directory-rejected-load-accepted'
+        record.loadedFrameCount = loaded.frames.length
+        record.reason = 'This is not a raw decoding match; see the required load-comparison.json'
+        separateLoadScope++
+      } catch (loadError) {
+        record.loadError = loadError instanceof Error ? { message: loadError.message, stack: loadError.stack } : String(loadError)
+        failures++
+      }
+    } else if (fixture.loaded) failures++
   } finally { save() }
 }
-status = failures || !compared ? 'failed' : 'passed'
+status = failures || !compared ? 'failed' : separateLoadScope ? 'partial' : 'passed'
 save()
 assert(compared > 0, 'No unscaled single-candidate native pixels were compared')
 assert.equal(failures, 0, 'Native cursor comparison found candidate differences; see portable-comparison.json')

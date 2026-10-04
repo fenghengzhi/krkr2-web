@@ -5,8 +5,8 @@ import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { decodeCursor, compositeCursor, type CursorAsset } from '../../src/formats/cursor/index.ts'
-import { loadCursorAsset, windowsDesktopCursorProfile } from '../../src/formats/cursor/load.ts'
+import { compositeCursor, type CursorAsset } from '../../src/formats/cursor/index.ts'
+import { loadCursorBytes, windowsDesktopCursorProfile } from '../../src/formats/cursor/load.ts'
 import { decodePng } from '../../src/formats/image/png.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -26,12 +26,15 @@ interface NativeDraw {
   backgroundRGB: number; canvasWidth: number; canvasHeight: number; stride: number
   ok: boolean; pixelsFile: string
 }
+interface NativeFrameInfo {
+  available: boolean; ok?: boolean; rateJiffies?: number; steps?: number; info?: NativeInfo
+}
 const native = JSON.parse(bytes.toString()) as {
   schema: number; sourceCommit: string; completed: boolean; cleanupFailed: boolean
   expectedFixtures: number; observedFixtures: number
   platform: { systemCursor: { width: number; height: number }; displayBitsPerPixel: number; dpi: { x: number; y: number } }
   fixtures: { id: string; file: string; loaded: boolean; info?: NativeInfo; ani?: { steps: number }
-    steps: { step: number; frameInfo?: { available: boolean; ok?: boolean; info?: NativeInfo }; draws: NativeDraw[] }[] }[]
+    steps: { step: number; frameInfo?: NativeFrameInfo; draws: NativeDraw[] }[] }[]
 }
 assert.equal(native.schema, 1)
 assert.equal(native.completed, true)
@@ -53,7 +56,7 @@ let status: 'running' | 'passed' | 'failed' = 'running'
 const save = () => writeFileSync(file('load-comparison.json'), JSON.stringify({
   schema: 1, sourceCommit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,
   observationSha256: createHash('sha256').update(bytes).digest('hex'), profile: windowsDesktopCursorProfile,
-  scope: 'File-load acceptance and natural-size DI_NORMAL RGB/hotspot after native-profile selection and scaling; not wall-clock playback',
+  scope: 'File-load acceptance, natural-size DI_NORMAL RGB/hotspot, and observed ANI step/rate/duration metadata after native-profile selection and scaling; not wall-clock playback',
   status, failures, compared, matches, uncompared, fixtures: results,
 }, null, 2) + '\n')
 save()
@@ -66,13 +69,12 @@ for (const fixture of native.fixtures) {
   save()
   let asset: CursorAsset
   try {
-    const source = await decodeCursor(raw, { png: async (payload) => {
+    asset = await loadCursorBytes(raw, { png: async (payload) => {
       const parser = decodePng(payload)
       assert(parser)
       const plan = finish(parser), expanded = inflateSync(plan.compressed, { maxOutputLength: plan.expandedLength })
       return finish(plan.decode(expanded))
     } })
-    asset = await loadCursorAsset(source)
   } catch (error) {
     record.status = fixture.loaded ? 'native-accepted-portable-rejected' : 'both-rejected'
     record.error = error instanceof Error ? { message: error.message, stack: error.stack } : String(error)
@@ -88,7 +90,8 @@ for (const fixture of native.fixtures) {
   }
   try {
     record.status = 'loaded'
-    record.asset = { sequence: asset.sequence, rates: asset.rates, decodedBytes: asset.decodedBytes,
+    record.asset = { sequence: asset.sequence, rates: asset.rates, durationJiffies: asset.durationJiffies,
+      decodedBytes: asset.decodedBytes,
       frames: asset.frames.map((frame) => frame.images.map(({ width, height, hotspot, depth, encoding, mode }) =>
         ({ width, height, hotspot, depth, encoding, mode }))) }
     const draws = record.draws as Record<string, unknown>[], expectedSteps = fixture.ani?.steps ?? 1,
@@ -99,6 +102,60 @@ for (const fixture of native.fixtures) {
     if (asset.sequence.length !== expectedSteps) {
       record.stepCountMismatch = { expected: expectedSteps, actual: asset.sequence.length }
       failures++
+    }
+    if (fixture.ani) {
+      const before = failures, timingSteps: Record<string, unknown>[] = [], nativeRates: number[] = [],
+        timing: Record<string, unknown> = {
+          status: 'comparing', expectedSteps, portableKind: asset.kind,
+          portableRates: asset.rates, portableDurationJiffies: asset.durationJiffies,
+          steps: timingSteps,
+          scope: 'GetCursorFrameInfo metadata only; zero rates are compared unchanged, not interpreted as a wall-clock playback policy',
+        }
+      record.timing = timing
+      if (asset.kind !== 'ani') { timing.kindMismatch = true; failures++ }
+      if (asset.rates.length !== expectedSteps) {
+        timing.rateCountMismatch = { expected: expectedSteps, actual: asset.rates.length }
+        failures++
+      }
+      for (let index = 0; index < expectedSteps; index++) {
+        const references = fixture.steps.filter((step) => step.step === index),
+          row: Record<string, unknown> = { step: index, portableRateJiffies: asset.rates[index] }
+        timingSteps.push(row)
+        if (references.length !== 1) {
+          row.status = 'missing-reference'
+          row.reason = 'Exactly one native query is required for each in-range ANI step'
+          row.referenceCount = references.length
+          failures++
+          continue
+        }
+        const info = references[0]!.frameInfo, rate = info?.rateJiffies, steps = info?.steps
+        row.native = { available: info?.available, ok: info?.ok, rateJiffies: rate, steps,
+          frameInfoOk: info?.info?.ok }
+        if (!info || info.available !== true || info.ok !== true || info.info?.ok !== true ||
+            typeof rate !== 'number' || !Number.isSafeInteger(rate) || rate < 0 || rate > 0xffffffff ||
+            typeof steps !== 'number' || !Number.isSafeInteger(steps) || steps < 1 || steps > 0xffffffff) {
+          row.status = 'missing-reference'
+          row.reason = 'Successful native ANI frame capture with valid rate and step metadata is required'
+          failures++
+          continue
+        }
+        nativeRates.push(rate)
+        row.rateMatches = asset.rates[index] === rate
+        row.stepsMatch = steps === expectedSteps
+        if (!row.rateMatches || !row.stepsMatch) { row.status = 'mismatch'; failures++ }
+        else row.status = 'matched'
+      }
+      if (nativeRates.length === expectedSteps) {
+        const duration = nativeRates.reduce((sum, rate) => sum + rate, 0)
+        timing.nativeRates = nativeRates
+        timing.nativeDurationJiffies = duration
+        timing.durationMatches = asset.durationJiffies === duration
+        if (!timing.durationMatches) failures++
+      } else {
+        timing.durationMatches = null
+        timing.durationReason = 'The native duration cannot be compared without every required step rate'
+      }
+      timing.status = failures === before ? 'matched' : 'failed'
     }
     for (const step of fixture.steps) for (const draw of step.draws) {
       const row: Record<string, unknown> = { step: step.step, pixelsFile: draw.pixelsFile, status: 'uncompared' }

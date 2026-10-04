@@ -77,9 +77,43 @@ test('custom cursor retries an uncommitted backdrop, uses an explicit second ima
   })).toEqual([48, 32])
   await page.evaluate(() => window.cursorCompositionFixture.writeOutside(1, 5, 4, 5))
   await expect(marker).toHaveCSS('clip-path', 'inset(3px 0px 0px 3px)')
+  await page.evaluate(() => window.cursorCompositionFixture.writeSigned(1, 6, 4))
+  expect(await marker.evaluate((node) => {
+    const marker = node.getBoundingClientRect(), canvas = document.querySelector('#cursor-surface-1')!.getBoundingClientRect()
+    return [marker.left - canvas.left, marker.top - canvas.top]
+  })).toEqual([51, 31]) // pointer (48,32) minus signed hotspot (-3,1).
+  await page.evaluate(() => window.cursorCompositionFixture.writeSigned(1, 7, 4, 60, 47))
+  await expect(marker).toHaveCSS('clip-path', 'inset(0px 3px 5px 0px)')
+  await page.evaluate(() => window.cursorCompositionFixture.writeSigned(1, 8, 5))
+  expect(await marker.evaluate((node) => {
+    const marker = node.getBoundingClientRect(), canvas = document.querySelector('#cursor-surface-1')!.getBoundingClientRect()
+    return [marker.left - canvas.left, marker.top - canvas.top,
+      (node as HTMLCanvasElement).width, (node as HTMLCanvasElement).height]
+  })).toEqual([48, 32799, 8, 8]) // The image is clipped away; storage is still 8x8.
+  expect(await page.evaluate(() => window.cursorCompositionFixture.inspect().hotspots.filter(({ id }) => id === 4 || id === 5)))
+    .toEqual([{ id: 4, hotspot: { x: 4294967293, y: 1 } },
+      { id: 5, hotspot: { x: 0, y: 4294934529 } }])
   await page.evaluate(() => window.cursorCompositionFixture.retireAssets())
   await expect(marker).toHaveCount(0)
   await expect(page.locator('#cursor-surface-1')).toHaveCSS('cursor', 'default')
+})
+
+test('single-step ANI with native zero duration presents a static cursor while multi-step zero rates remain explicit', async ({ page }) => {
+  await page.evaluate(() => {
+    window.cursorCompositionFixture.paint(1, '#123456')
+    window.cursorCompositionFixture.writeStatic(1, 1)
+  })
+  const marker = page.locator('#cursor-host-1 .game-custom-cursor')
+  await expect(marker).toBeVisible()
+  expect(await marker.evaluate((node) => [...(node as HTMLCanvasElement).getContext('2d')!
+    .getImageData(4, 4, 1, 1).data])).toEqual([237, 203, 169, 255])
+  expect(await page.evaluate(() => window.cursorCompositionFixture.staticTimeline())).toEqual({
+    kind: 'ani', sequence: [0], rates: [0], durationJiffies: 0,
+    dynamicError: 'Error: Custom cursor zero-rate animation timing is not calibrated',
+  })
+  await page.evaluate(() => window.cursorCompositionFixture.paint(1, '#204060'))
+  await expect.poll(() => marker.evaluate((node) => [...(node as HTMLCanvasElement).getContext('2d')!
+    .getImageData(4, 4, 1, 1).data])).toEqual([223, 191, 159, 255])
 })
 
 test('physical takeover, stale snapshots, two Windows and replacement epochs use one input stream', async ({ page }) => {

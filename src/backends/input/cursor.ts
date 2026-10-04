@@ -17,13 +17,15 @@ export function selectCursorAsset(
   source: CursorAsset,
   select: (frame: CursorFrame, index: number) => number,
 ): SelectedCursorAsset {
-  if (source.kind === 'ani' && source.rates.some((rate) => rate === 0))
+  // A single display step is static even when native loading reports rate 0.
+  // Multiple steps still need a calibrated zero-rate playback policy.
+  if (source.kind === 'ani' && source.sequence.length > 1 && source.rates.some((rate) => rate === 0))
     throw new Error('Custom cursor zero-rate animation timing is not calibrated')
   if (!source.frames.length || source.frames.length > cursorLimits.frames ||
       !source.sequence.length || source.sequence.length > cursorLimits.steps ||
       source.sequence.length !== source.rates.length ||
       source.sequence.some((value) => !Number.isSafeInteger(value) || value < 0 || value >= source.frames.length) ||
-      source.rates.some((value) => !Number.isSafeInteger(value) || value <= 0) ||
+      source.rates.some((value) => !Number.isSafeInteger(value) || value < 0) ||
       source.rates.reduce((sum, value) => sum + value, 0) !== source.durationJiffies ||
       source.durationJiffies > cursorLimits.durationJiffies ||
       (source.kind !== 'cur' && source.kind !== 'ani'))
@@ -240,7 +242,10 @@ export class BrowserCursorPresenter {
       }
       const step = cursorStep(asset.asset, Math.max(0, time - this.started)),
         image = asset.selected[asset.asset.sequence[step]!]!,
-        left = Math.round(position.x - image.hotspot.x), top = Math.round(position.y - image.hotspot.y),
+        // ICONINFO exposes DWORDs, including wrapped negative coordinates.
+        // Preserve that metadata; only the placement operation is signed.
+        left = Math.round(position.x - (image.hotspot.x | 0)),
+        top = Math.round(position.y - (image.hotspot.y | 0)),
         result = composeCursorBackdrop(this.context, this.canvas, scene, image, left, top),
         plane = scene.plane.getBoundingClientRect(),
         sx = plane.width / scene.plane.clientWidth, sy = plane.height / scene.plane.clientHeight

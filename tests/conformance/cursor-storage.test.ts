@@ -1,5 +1,6 @@
 import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
+import { setImmediate as nextTurn } from 'node:timers/promises'
 import {
   CursorStorage, maximumCursorCacheBytes, maximumCursorCacheEntries, maximumCursorSourceBytes,
   maximumCursorPendingSourceBytes,
@@ -400,4 +401,266 @@ test('cursor cache decoded-byte ceiling rejects the new asset without evicting o
   assert.equal(storage.get(6), undefined)
   storage.dispose()
   assert.deepEqual(storage.snapshot(), empty)
+})
+
+test('cursor decoding has one active workspace and follows ready-source order without blocking parallel reads', async () => {
+  const firstRead = deferred<Uint8Array>(), reads = [deferred<void>(), deferred<void>(), deferred<void>()],
+    starts = [deferred<void>(), deferred<void>(), deferred<void>()],
+    releases = [deferred<void>(), deferred<void>(), deferred<void>()], order: number[] = []
+  let active = 0, peak = 0
+  const storage = new CursorStorage((name) => {
+    const value = Number(name)
+    return { name, size: 1, read: async () => {
+      reads[value - 1]!.resolve()
+      return value === 1 ? firstRead.promise : Uint8Array.of(value)
+    } }
+  }, async (bytes) => {
+    const value = bytes[0]!
+    active++
+    peak = Math.max(peak, active)
+    order.push(value)
+    starts[value - 1]!.resolve()
+    try { await releases[value - 1]!.promise; return asset(value) }
+    finally { active-- }
+  }, () => {}, () => {})
+  const pending = [storage.load('1', alive), storage.load('2', alive), storage.load('3', alive)],
+    settled = Promise.allSettled(pending)
+  try {
+    await Promise.all(reads.map((read) => read.promise))
+    await starts[1]!.promise
+    await nextTurn()
+    assert.deepEqual(order, [2])
+    assert.equal(storage.snapshot().cursorCachePending, 3)
+    firstRead.resolve(Uint8Array.of(1))
+    await nextTurn()
+    assert.deepEqual(order, [2], 'Ready jobs must not expand while another decoder is held')
+    releases[1]!.resolve()
+    await starts[2]!.promise
+    assert.deepEqual(order, [2, 3], 'The earlier slow read does not overtake an already ready source')
+    releases[2]!.resolve()
+    await starts[0]!.promise
+    releases[0]!.resolve()
+    assert.deepEqual(await Promise.all(pending), [4, 2, 3])
+    assert.equal(peak, 1)
+    assert.equal(active, 0)
+    assert.equal(storage.snapshot().cursorCachePending, 0)
+  } finally {
+    firstRead.resolve(Uint8Array.of(1))
+    for (const release of releases) release.resolve()
+    storage.dispose()
+    await settled
+  }
+})
+
+test('queued cursor work skips retired owners while retaining live and newly joined readers of the same path', async () => {
+  const started = deferred<void>(), release = deferred<void>(), order: number[] = []
+  let expired = true, sharedOld = true
+  const storage = new CursorStorage((name) => resource(name.startsWith('shared') ? 'shared' : name,
+    name === 'active' ? 1 : name === 'expired' ? 2 : 3), async (bytes) => {
+    order.push(bytes[0]!)
+    if (bytes[0] === 1) { started.resolve(); await release.promise }
+    return asset(bytes[0])
+  }, () => {}, () => {})
+  const active = storage.load('active', alive), dead = assert.rejects(storage.load('expired', () => expired), /caller has expired/),
+    old = assert.rejects(storage.load('shared-old', () => sharedOld), /caller has expired/)
+  const settled = Promise.allSettled([active, dead, old])
+  let joined: Promise<number> | undefined
+  try {
+    await started.promise
+    await nextTurn()
+    expired = sharedOld = false
+    joined = storage.load('shared-new', alive)
+    // Observe its rejection immediately too, without changing the assertion.
+    void joined.catch(() => {})
+    await nextTurn()
+    release.resolve()
+    assert.equal(await active, 2)
+    await Promise.all([dead, old])
+    assert.equal(await joined, 3)
+    assert.deepEqual(order, [1, 3])
+    assert.deepEqual(storage.snapshot(), { cursorCacheEntries: 2, cursorCacheBytes: 10, cursorCachePending: 0 })
+  } finally {
+    release.resolve()
+    storage.dispose()
+    await settled
+    await joined?.catch(() => {})
+  }
+})
+
+test('a queued reader validity exception stays with its caller and cannot cancel another shared owner', async () => {
+  const started = deferred<void>(), release = deferred<void>(), failure = new Error('owner-validity-fault')
+  let failOwner = false, sharedDecodes = 0
+  const storage = new CursorStorage((name) => resource(name === 'active' ? name : 'shared', name === 'active' ? 1 : 2),
+    async (bytes) => {
+      if (bytes[0] === 1) { started.resolve(); await release.promise }
+      else sharedDecodes++
+      return asset(bytes[0])
+    }, () => {}, () => {})
+  const active = storage.load('active', alive), broken = assert.rejects(storage.load('broken', () => {
+    if (failOwner) throw failure
+    return true
+  }), (error) => error === failure), healthy = storage.load('healthy', alive),
+    settled = Promise.allSettled([active, broken, healthy])
+  try {
+    await started.promise
+    await nextTurn()
+    failOwner = true
+    release.resolve()
+    await broken
+    assert.equal(await active, 2)
+    assert.equal(await healthy, 3)
+    assert.equal(sharedDecodes, 1)
+    assert.equal(storage.snapshot().cursorCachePending, 0)
+  } finally { release.resolve(); storage.dispose(); await settled }
+})
+
+test('cursor disposal settles unfinished reads, queued work and active callers before external work returns', async () => {
+  for (const outcome of ['resolve', 'reject'] as const) {
+    const started = deferred<void>(), read = deferred<Uint8Array>(), decode = deferred<CursorAsset>(),
+      readStarted = deferred<void>(), queuedRead = deferred<void>(), order: number[] = []
+    let publications = 0, terminal = 0, latePixelsRead = 0
+    const storage = new CursorStorage((name) => name === 'reading'
+      ? { name, size: 1, read: () => { readStarted.resolve(); return read.promise } }
+      : { name, size: 1, read: async () => {
+        if (name === 'queued') queuedRead.resolve()
+        return Uint8Array.of(name === 'active' ? 1 : 2)
+      } }, (bytes) => { order.push(bytes[0]!); started.resolve(); return decode.promise },
+    () => {}, () => { publications++ })
+    const pending = ['active', 'queued', 'reading'].map((name) => storage.load(name, alive)),
+      settled = Promise.allSettled(pending)
+    for (const operation of pending) void operation.then(() => { terminal++ }, () => { terminal++ })
+    try {
+      await Promise.all([started.promise, queuedRead.promise, readStarted.promise])
+      await nextTurn()
+      assert.deepEqual(order, [1])
+      storage.dispose()
+      await nextTurn()
+      assert.equal(terminal, 3, 'Stop cannot wait for an external read or decoder to settle')
+      for (const result of await settled) {
+        assert.equal(result.status, 'rejected')
+        if (result.status === 'rejected') assert.match(String(result.reason), /disposed/)
+      }
+      assert.deepEqual(storage.snapshot(), empty)
+      if (outcome === 'resolve') {
+        const late = asset()
+        Object.defineProperty(late, 'frames', { get() { latePixelsRead++; return [] } })
+        decode.resolve(late)
+        read.resolve(Uint8Array.of(3))
+      } else {
+        decode.reject(new Error('late-decode-fault'))
+        read.reject(new Error('late-read-fault'))
+      }
+      await nextTurn()
+      assert.equal(latePixelsRead, 0)
+      assert.equal(publications, 0)
+      assert.deepEqual(order, [1], 'A late active completion must never start retired queued work')
+      assert.deepEqual(storage.snapshot(), empty)
+    } finally {
+      storage.dispose()
+      read.resolve(Uint8Array.of(3))
+      decode.resolve(asset())
+      await settled
+    }
+  }
+})
+
+test('cursor decode reentry shares its installed flight and a failure releases the next ready job', async () => {
+  const failure = new Error('decode-entry-fault'), order: number[] = []
+  let storage!: CursorStorage, alias: Promise<number> | undefined, next: Promise<number> | undefined
+  storage = new CursorStorage((name) => resource(name === 'next' ? 'next' : 'first', name === 'next' ? 2 : 1),
+    (bytes) => {
+      order.push(bytes[0]!)
+      if (bytes[0] === 1) {
+        alias = storage.load('alias', alive)
+        next = storage.load('next', alive)
+        void alias.catch(() => {})
+        void next.catch(() => {})
+        throw failure
+      }
+      return Promise.resolve(asset(bytes[0]))
+    }, () => {}, () => {})
+  try {
+    await assert.rejects(storage.load('first', alive), (error) => error === failure)
+    assert(alias)
+    assert(next)
+    await assert.rejects(alias, (error) => error === failure)
+    assert.equal(await next, 2)
+    assert.deepEqual(order, [1, 2])
+    assert.deepEqual(storage.snapshot(), { cursorCacheEntries: 1, cursorCacheBytes: 5, cursorCachePending: 0 })
+  } finally {
+    storage.dispose()
+    await Promise.allSettled([alias, next])
+  }
+})
+
+test('scheduler cancellation drains queued cursor callers and a later retry starts with a free permit', async () => {
+  const started = deferred<void>(), release = deferred<void>(), cancellation = new Error('queue-cancelled'),
+    order: number[] = []
+  let cancelled = false
+  const storage = new CursorStorage((name) => resource(name, name === 'active' ? 1 : 2), async (bytes) => {
+    order.push(bytes[0]!)
+    if (bytes[0] === 1) { started.resolve(); await release.promise }
+    return asset(bytes[0])
+  }, () => { if (cancelled) throw cancellation }, () => {})
+  const active = assert.rejects(storage.load('active', alive), (error) => error === cancellation),
+    queued = assert.rejects(storage.load('queued', alive), (error) => error === cancellation),
+    settled = Promise.allSettled([active, queued])
+  try {
+    await started.promise
+    await nextTurn()
+    cancelled = true
+    release.resolve()
+    await Promise.all([active, queued])
+    assert.deepEqual(order, [1])
+    assert.deepEqual(storage.snapshot(), empty)
+    cancelled = false
+    assert.equal(await storage.load('retry', alive), 2)
+    assert.deepEqual(order, [1, 2])
+  } finally { release.resolve(); storage.dispose(); await settled }
+})
+
+test('a new valid caller cannot inherit an expired queued flight before its old readers unwind', async () => {
+  const started = deferred<void>(), release = deferred<void>(), joined = deferred<void>(), order: number[] = []
+  let expire = false, queued = false, reads = 0, fresh: Promise<number> | undefined
+  const storage = new CursorStorage((name) => ({
+    name, size: 1, read: async () => {
+      if (name === 'retry') reads++
+      return Uint8Array.of(name === 'active' ? 1 : 2)
+    },
+  }), async (bytes) => {
+    order.push(bytes[0]!)
+    if (bytes[0] === 1) { started.resolve(); await release.promise }
+    return asset(bytes[0])
+  }, () => {}, () => {})
+  const active = storage.load('active', alive), old = assert.rejects(storage.load('retry', () => {
+    if (!expire) return true
+    if (!queued) {
+      queued = true
+      queueMicrotask(() => {
+        fresh = storage.load('retry', alive)
+        void fresh.catch(() => {})
+        joined.resolve()
+      })
+    }
+    return false
+  }), /caller has expired/), settled = Promise.allSettled([active, old])
+  try {
+    await started.promise
+    await nextTurn()
+    expire = true
+    release.resolve()
+    await joined.promise
+    await old
+    assert(fresh)
+    assert.equal(await fresh, 3)
+    assert.equal(await active, 2)
+    assert.equal(reads, 2, 'The new owner resolves and reads a new flight')
+    assert.deepEqual(order, [1, 2], 'The expired flight never expands its pixels')
+    assert.deepEqual(storage.snapshot(), { cursorCacheEntries: 2, cursorCacheBytes: 10, cursorCachePending: 0 })
+  } finally {
+    release.resolve()
+    storage.dispose()
+    await settled
+    await fresh?.catch(() => {})
+  }
 })

@@ -56,6 +56,16 @@ export interface CursorDecodeOptions {
   /** Callers can reduce, but cannot increase, the format's resource budgets. */
   limits?: Partial<CursorLimits>
 }
+/** Directory facts available before decoding pixel payloads. A zero depth
+ * means the bounded header peek could not establish one; choosing that entry
+ * still performs the full validation and never falls back to another image. */
+export interface CursorDirectoryEntry {
+  index: number
+  width: number
+  height: number
+  depth: number
+}
+export type CursorDirectorySelector = (entries: readonly CursorDirectoryEntry[]) => number
 interface Budget { pixels: number; images: number; limits: Readonly<CursorLimits> }
 function fail(message: string): never { throw new Error(`Cursor: ${message}`) }
 function view(bytes: Uint8Array) { return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength) }
@@ -181,14 +191,35 @@ async function dib(bytes: Uint8Array, width: number, height: number, options: Cu
     mode: alpha ? 'alpha' as const : 'and-xor' as const }
 }
 
-async function frame(bytes: Uint8Array, budget: Budget, options: CursorDecodeOptions, embedded: boolean): Promise<CursorFrame> {
+function directoryDepth(bytes: Uint8Array, offset: number, length: number, directoryEnd: number): number {
+  if (offset < directoryEnd || offset >= bytes.length || length < 4) return 0
+  const payload = bytes.subarray(offset, offset + Math.min(length, bytes.length - offset)), p = view(payload)
+  if (payload.length < 4) return 0
+  if (payload.length >= 8 && payload[0] === 137 && tag(payload, 1) === 'PNG\r') return 32
+  const size = p.getUint32(0, true)
+  if (size === 12 && payload.length >= 12) return p.getUint16(10, true)
+  if (size >= 40 && payload.length >= 16) return p.getUint16(14, true)
+  return 0
+}
+async function frame(bytes: Uint8Array, budget: Budget, options: CursorDecodeOptions, embedded: boolean,
+  select?: CursorDirectorySelector): Promise<CursorFrame> {
   range(bytes, 0, 6)
   const h = view(bytes), type = h.getUint16(2, true), count = h.getUint16(4, true)
   if (h.getUint16(0, true) || (type !== 2 && !(embedded && type === 1))) fail('invalid CUR directory')
   if (!count || count > budget.limits.imagesPerFrame) fail('image directory budget exceeded')
   range(bytes, 6, count * 16)
+  let indices = Array.from({ length: count }, (_, i) => i)
+  if (select) {
+    const entries = indices.map((index) => {
+      const at = 6 + index * 16
+      return { index, width: bytes[at] || 256, height: bytes[at + 1] || 256,
+        depth: directoryDepth(bytes, h.getUint32(at + 12, true), h.getUint32(at + 8, true), 6 + count * 16) }
+    }), selected = select(entries)
+    if (!Number.isSafeInteger(selected) || selected < 0 || selected >= count) fail('invalid selected directory index')
+    indices = [selected]
+  }
   const images: CursorImage[] = []
-  for (let i = 0; i < count; i++) {
+  for (const i of indices) {
     await options.checkpoint?.()
     const at = 6 + i * 16, width = bytes[at] || 256, height = bytes[at + 1] || 256,
       length = h.getUint32(at + 8, true), offset = h.getUint32(at + 12, true)
@@ -197,8 +228,8 @@ async function frame(bytes: Uint8Array, budget: Budget, options: CursorDecodeOpt
       hotspot = type === 2
         ? { x: h.getUint16(at + 4, true), y: h.getUint16(at + 6, true) }
         : { x: width >>> 1, y: height >>> 1 }
-    // CUR hotspots are unsigned 16-bit coordinates, not bounded by the image.
-    // The hosted Win32 reference preserves an outside hotspot verbatim.
+    // Retain raw unsigned 16-bit hotspots, including coordinates outside the
+    // image. The separate loading policy applies native SHORT/DWORD scaling.
     charge(budget, width, height)
     if (payload[0] === 137 && tag(payload, 1) === 'PNG\r') {
       range(payload, 0, 33)
@@ -229,7 +260,8 @@ function chunks(bytes: Uint8Array): Chunk[] {
   }
   return result
 }
-async function animated(bytes: Uint8Array, budget: Budget, options: CursorDecodeOptions): Promise<Omit<CursorAsset, 'sourceBytes' | 'decodedBytes' | 'imageCount'>> {
+async function animated(bytes: Uint8Array, budget: Budget, options: CursorDecodeOptions,
+  select?: CursorDirectorySelector): Promise<Omit<CursorAsset, 'sourceBytes' | 'decodedBytes' | 'imageCount'>> {
   range(bytes, 0, 12)
   if (tag(bytes, 8) !== 'ACON' || view(bytes).getUint32(4, true) !== bytes.length - 8) fail('invalid ANI RIFF container')
   const top = chunks(bytes.subarray(12)), unique = (name: string) => {
@@ -259,7 +291,7 @@ async function animated(bytes: Uint8Array, budget: Budget, options: CursorDecode
   const encoded = chunks(lists[0]!.bytes.subarray(4)).filter((chunk) => chunk.name === 'icon')
   if (encoded.length !== count) fail('ANI frame count differs from frame list')
   const frames: CursorFrame[] = []
-  for (const encodedFrame of encoded) frames.push(await frame(encodedFrame.bytes, budget, options, true))
+  for (const encodedFrame of encoded) frames.push(await frame(encodedFrame.bytes, budget, options, true, select))
   return { kind: 'ani', frames, sequence, rates, durationJiffies,
     animation: { width: h.getUint32(12, true), height: h.getUint32(16, true),
       depth: h.getUint32(20, true), planes: h.getUint32(24, true), flags } }
@@ -267,7 +299,8 @@ async function animated(bytes: Uint8Array, budget: Budget, options: CursorDecode
 
 /** Parse the complete asset before publishing it. The source is snapshotted
  * before any asynchronous decoder/checkpoint can let the caller mutate it. */
-export async function decodeCursor(input: Uint8Array, options: CursorDecodeOptions): Promise<CursorAsset> {
+async function decode(input: Uint8Array, options: CursorDecodeOptions,
+  select?: CursorDirectorySelector): Promise<CursorAsset> {
   const limits = { ...cursorLimits, ...options.limits }
   for (const key of Object.keys(cursorLimits) as (keyof typeof cursorLimits)[])
     if (!Number.isSafeInteger(limits[key]) || limits[key] <= 0 || limits[key] > cursorLimits[key])
@@ -276,17 +309,31 @@ export async function decodeCursor(input: Uint8Array, options: CursorDecodeOptio
   const bytes = new Uint8Array(input), budget: Budget = { pixels: 0, images: 0, limits }
   await options.checkpoint?.()
   const asset = tag(bytes, 0) === 'RIFF'
-    ? await animated(bytes, budget, options)
-    : { kind: 'cur' as const, frames: [await frame(bytes, budget, options, false)],
+    ? await animated(bytes, budget, options, select)
+    : { kind: 'cur' as const, frames: [await frame(bytes, budget, options, false, select)],
       sequence: [0], rates: [1], durationJiffies: 1 }
   return { ...asset, sourceBytes: bytes.length, decodedBytes: budget.pixels * 5, imageCount: budget.images }
+}
+
+/** Decode every directory entry. Malformed unselected alternatives still fail
+ * here: callers inspecting complete source assets keep the original contract. */
+export function decodeCursor(input: Uint8Array, options: CursorDecodeOptions): Promise<CursorAsset> {
+  return decode(input, options)
+}
+/** Decode one explicitly selected entry per CUR/ANI frame. Source bytes are
+ * snapshotted and bounded as a whole; pixel budgets charge selected payloads. */
+export function decodeCursorSelection(input: Uint8Array, options: CursorDecodeOptions,
+  select: CursorDirectorySelector): Promise<CursorAsset> {
+  return decode(input, options, select)
 }
 
 /** A clock value never drops or duplicates an ANI step; rates remain exact
  * integer sixtieths of a second until this final presentation calculation. */
 export function cursorStep(asset: CursorAsset, elapsedMilliseconds: number): number {
   if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds < 0) fail('invalid animation time')
-  if (asset.kind === 'cur') return 0
+  // A single displayed step never advances, even if its native loaded rate
+  // is zero. This makes no timing choice for a multi-step zero-rate animation.
+  if (asset.kind === 'cur' || asset.sequence.length === 1) return 0
   if (asset.rates.some((rate) => rate === 0)) fail('ANI zero-rate playback timing is not calibrated')
   // Keep integer ratios. Modulo by a fractional millisecond cycle first can
   // put an exact 50 ms boundary below 1 jiffy for a two-jiffy animation.

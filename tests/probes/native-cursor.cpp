@@ -329,6 +329,16 @@ std::vector<Fixture> fixtures() {
     }
     { Image i; i.width = i.height = 48; i.hotX = 23; i.hotY = 17; i.header = 0; i.encoding = "png-rgba"; i.alphaMode = 3; i.payload = png(48, 48, 3); add("png-scale-48x48", {i}, "scaling"); }
     { Image i; i.width = i.height = 256; i.hotX = 191; i.hotY = 203; i.alphaMode = 3; add("dib-alpha-scale-256", {i}, "scaling"); }
+    for (unsigned size : {64u, 96u}) {
+        Image i; i.width = i.height = size; i.hotX = size / 3; i.hotY = size / 4; i.alphaMode = 3;
+        add("dib-alpha-scale-" + std::to_string(size), {i}, "scaling");
+        i.header = 0; i.encoding = "png-rgba"; i.payload = png(size, size, 3);
+        add("png-alpha-scale-" + std::to_string(size), {i}, "scaling");
+    }
+    for (unsigned bpp : {1u, 32u}) {
+        Image i; i.width = i.height = 256; i.hotX = 191; i.hotY = 203; i.bpp = bpp;
+        add("dib-mask-scale-256-" + std::to_string(bpp), {i}, "scaling");
+    }
     Image a; a.tag = 1; a.hotX = 2; a.hotY = 3;
     Image b = a; b.tag = 2; b.hotX = 7; b.hotY = 11;
     Image c = a; c.tag = 3; c.hotX = 17; c.hotY = 23;

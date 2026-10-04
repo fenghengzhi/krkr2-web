@@ -1,4 +1,5 @@
-import { cursorLimits, type CursorAsset, type CursorImage } from './index.ts'
+import { cursorLimits, decodeCursorSelection, type CursorAsset, type CursorImage,
+  type CursorDecodeOptions, type CursorDirectoryEntry } from './index.ts'
 
 export interface CursorLoadProfile {
   width: number
@@ -20,25 +21,25 @@ function profileValue(profile: CursorLoadProfile): CursorLoadProfile {
     fail('only the 32x32, 32-bit, 96-DPI desktop profile is supported')
   return copy
 }
-function imageDimensions(image: CursorImage): void {
+function imageDimensions(image: Pick<CursorImage, 'width' | 'height' | 'depth'>): void {
   if (!image || !Number.isSafeInteger(image.width) || !Number.isSafeInteger(image.height) ||
       image.width < 1 || image.width > 256 || image.height < 1 || image.height > 256 ||
-      !Number.isSafeInteger(image.depth) || image.depth < 1 || image.depth > 32)
+      !Number.isSafeInteger(image.depth) || image.depth < 0 || image.depth > 65535)
     fail('invalid image dimensions or depth')
 }
-function select(images: readonly CursorImage[], profile: CursorLoadProfile): CursorImage {
+function select<T extends Pick<CursorImage, 'width' | 'height' | 'depth'>>(images: readonly T[], profile: CursorLoadProfile): T {
   if (!images.length || images.length > cursorLimits.imagesPerFrame) fail('invalid image directory')
-  let selected: CursorImage | undefined, best: number[] | undefined
+  let selected: T | undefined, best: number[] | undefined
   for (const image of images) {
     imageDimensions(image)
     // File loading is not the resource-directory API's documented preference
-    // for smaller images: both observed directory orders select 48 over 16
-    // for a 32-pixel request. Equal geometry/depth keeps the first directory
-    // entry. Crossed rectangular dimensions remain under the strict native
-    // comparison gate rather than being inferred from just the square cases.
+    // for smaller images: both directory orders select 48 over 16. The crossed
+    // rectangle fixtures select 48x40/40x48 before closer 32x16/16x32 entries.
+    // Prefer the group that covers both target dimensions before distance;
+    // equal geometry/depth ranks preserve the original directory order.
     const distance = Math.abs(image.width - profile.width) + Math.abs(image.height - profile.height),
       below = image.width < profile.width || image.height < profile.height,
-      rank = [distance, Number(below), -image.width * image.height,
+      rank = [Number(below), distance, -image.width * image.height,
         image.depth > profile.depth ? 1 : 0,
         image.depth > profile.depth ? image.depth : -image.depth]
     if (!best || rank.some((value, index) => value < best![index]! &&
@@ -51,7 +52,8 @@ function select(images: readonly CursorImage[], profile: CursorLoadProfile): Cur
 }
 function snapshot(image: CursorImage): CursorImage {
   const pixels = image.width * image.height
-  if (!(image.data instanceof Uint8Array) || !(image.andMask instanceof Uint8Array) ||
+  if (image.depth < 1 || image.depth > 32 ||
+      !(image.data instanceof Uint8Array) || !(image.andMask instanceof Uint8Array) ||
       image.data.length !== pixels * 4 || image.andMask.length !== pixels ||
       (image.mode !== 'alpha' && image.mode !== 'and-xor') ||
       (image.encoding !== 'dib' && image.encoding !== 'png') ||
@@ -67,21 +69,50 @@ function snapshot(image: CursorImage): CursorImage {
 function nearest(at: number, source: number, target: number): number {
   return Math.min(source - 1, Math.floor((at + 0.5) * source / target))
 }
+/** File loading narrows the directory hotspot to signed SHORT, rounds the
+ * scaled value by truncating after +0.5 (also for negatives), and stores a
+ * signed SHORT result in ICONINFO's DWORD fields. Preserve that unsigned API
+ * value; presentation interprets it as signed when positioning the raster. */
+export function loadedCursorHotspot(
+  image: Pick<CursorImage, 'width' | 'height' | 'hotspot' | 'icon'>,
+  profile: CursorLoadProfile = windowsDesktopCursorProfile,
+): { x: number; y: number } {
+  const target = profileValue(profile)
+  if (!Number.isSafeInteger(image.width) || !Number.isSafeInteger(image.height) ||
+      image.width < 1 || image.width > 256 || image.height < 1 || image.height > 256 ||
+      !image.hotspot || !Number.isSafeInteger(image.hotspot.x) || !Number.isSafeInteger(image.hotspot.y) ||
+      image.hotspot.x < 0 || image.hotspot.x > 65535 || image.hotspot.y < 0 || image.hotspot.y > 65535)
+    fail('invalid source hotspot')
+  if (image.icon) return { x: target.width >>> 1, y: target.height >>> 1 }
+  const scale = (value: number, source: number, destination: number) => {
+    const signed = value << 16 >> 16, rounded = Math.trunc(signed * destination / source + 0.5)
+    return (rounded << 16 >> 16) >>> 0
+  }
+  return { x: scale(image.hotspot.x, image.width, target.width),
+    y: scale(image.hotspot.y, image.height, target.height) }
+}
 async function resize(image: CursorImage, profile: CursorLoadProfile, options: CursorLoadOptions): Promise<CursorImage> {
   const width = profile.width, height = profile.height,
-    hotspot = image.icon ? { x: width >>> 1, y: height >>> 1 } : {
-      x: Math.round(image.hotspot.x * width / image.width),
-      y: Math.round(image.hotspot.y * height / image.height),
-    }
+    hotspot = loadedCursorHotspot(image, profile)
   if (image.width === width && image.height === height) return { ...image, hotspot }
   const data = new Uint8Array(width * height * 4), andMask = new Uint8Array(width * height),
+    // Both PNG and DIB 256-to-32 references point-sample, whereas their
+    // 48-to-32 references smooth. Use an integer-reduction fast-path candidate
+    // independently of encoding; other reduction factors stay in the strict
+    // native gate until the additional size matrix establishes the boundary.
     pointSample = image.depth < 32 ||
-      (image.encoding === 'png' && image.width >= width && image.height >= height)
-  for (let y = 0; y < height; y++) {
-    const nearY = nearest(y, image.height, height),
-      sy = height === 1 ? 0 : y * (image.height - 1) / (height - 1),
-      y0 = Math.floor(sy), y1 = Math.min(image.height - 1, y0 + 1), fy = sy - y0
-    for (let x = 0; x < width; x++) {
+      (image.width >= width && image.height >= height &&
+        image.width % width === 0 && image.height % height === 0)
+  const stepX = (image.width - 1) / (width - 1), stepY = (image.height - 1) / (height - 1)
+  let positionY = 0
+  for (let row = 0; row < height; row++, positionY += stepY) {
+    // Native planes originate from bottom-up DIB memory. Keep its traversal
+    // and incremental coordinates even though our public plane is top-down.
+    const y = height - 1 - row, nearY = nearest(y, image.height, height),
+      sy = Math.min(image.height - 1, positionY), baseY = Math.floor(sy),
+      y0 = image.height - 1 - baseY, y1 = Math.max(0, y0 - 1), fy = sy - baseY
+    let positionX = 0
+    for (let x = 0; x < width; x++, positionX += stepX) {
       const target = y * width + x, nearX = nearest(x, image.width, width),
         source = nearY * image.width + nearX
       // Boolean AND remains a separate plane. Color interpolation must never
@@ -90,32 +121,32 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
       if (pointSample) {
         data.set(image.data.subarray(source * 4, source * 4 + 4), target * 4)
       } else {
-        // General 32-bit smooth-scaling candidate. Hosted 13x9 and 48x48
-        // observations establish smoothing and endpoint behavior, but expose
-        // additional byte quantization not yet reproduced here. Keep every
-        // frame and compare every output pixel in the native loading gate;
-        // neither a claimed match nor a first-frame fallback is justified.
-        const sx = width === 1 ? 0 : x * (image.width - 1) / (width - 1),
+        // 081's raw color planes distinguish the axis order and byte stages:
+        // an exact source row sums its horizontal terms before truncating;
+        // other rows truncate each horizontal term before the vertical sum.
+        // Retain strict full-plane/native drawing comparisons: floating-point
+        // edge coordinates beyond these observed cases remain under review.
+        const sx = Math.min(image.width - 1, positionX),
           x0 = Math.floor(sx), x1 = Math.min(image.width - 1, x0 + 1), fx = sx - x0
         for (let channel = 0; channel < 4; channel++) {
-          const top = image.data[(y0 * image.width + x0) * 4 + channel]! * (1 - fx) +
-              image.data[(y0 * image.width + x1) * 4 + channel]! * fx,
-            bottom = image.data[(y1 * image.width + x0) * 4 + channel]! * (1 - fx) +
-              image.data[(y1 * image.width + x1) * 4 + channel]! * fx
-          data[target * 4 + channel] = Math.floor(top * (1 - fy) + bottom * fy)
+          const a = image.data[(y0 * image.width + x0) * 4 + channel]! * (1 - fx),
+            b = image.data[(y0 * image.width + x1) * 4 + channel]! * fx,
+            c = image.data[(y1 * image.width + x0) * 4 + channel]! * (1 - fx),
+            d = image.data[(y1 * image.width + x1) * 4 + channel]! * fx
+          data[target * 4 + channel] = fy === 0 ? Math.floor(a + b)
+            : Math.floor((Math.floor(a) + Math.floor(b)) * (1 - fy) +
+                (Math.floor(c) + Math.floor(d)) * fy)
         }
         if (image.mode === 'and-xor') data[target * 4 + 3] = 255
       }
     }
-    if ((y & 7) === 7) await options.checkpoint?.()
+    if ((row & 7) === 7) await options.checkpoint?.()
   }
   return { ...image, width, height, hotspot, data, andMask }
 }
 
 /** Apply the fixed desktop file-loading policy to a complete decoded asset.
- * The raw decoder deliberately retains every image; currently it therefore
- * rejects a corrupt unselected image before this policy runs. Matching native
- * select-before-decode acceptance still requires a directory-level loader.
+ * Use loadCursorBytes when acceptance must match selection before decoding.
  * Smooth scaling and unobserved ranking ties remain explicit candidates whose
  * native comparison failures must not be dropped or relabeled as passes. */
 export async function loadCursorAsset(
@@ -134,6 +165,10 @@ export async function loadCursorAsset(
       source.durationJiffies > cursorLimits.durationJiffies ||
       !Number.isSafeInteger(source.sourceBytes) || source.sourceBytes < 1 || source.sourceBytes > cursorLimits.sourceBytes)
     fail('invalid decoded asset')
+  // 081's ani-single reference loads one encoded frame/step (default rate 9)
+  // as a static cursor with native rate 0. Do not extend that observation to
+  // multiple encoded frames or multiple steps; the raw decoder keeps its rate.
+  const staticAni = source.kind === 'ani' && source.frames.length === 1 && source.sequence.length === 1
   let pixels = 0
   const selected = source.frames.map((frame) => {
     if (!Array.isArray(frame.images)) fail('invalid frame directory')
@@ -143,7 +178,8 @@ export async function loadCursorAsset(
     return snapshot(image)
   }), metadata = {
     kind: source.kind, sourceBytes: source.sourceBytes,
-    sequence: [...source.sequence], rates: [...source.rates], durationJiffies: source.durationJiffies,
+    sequence: [...source.sequence], rates: staticAni ? [0] : [...source.rates],
+    durationJiffies: staticAni ? 0 : source.durationJiffies,
     ...(source.animation ? { animation: { ...source.animation } } : {}),
   }, frames: CursorAsset['frames'] = []
   // Selection, source planes and metadata are snapshotted before suspension.
@@ -154,4 +190,17 @@ export async function loadCursorAsset(
   }
   return { ...metadata, frames, imageCount: frames.length,
     decodedBytes: frames.length * target.width * target.height * 5 }
+}
+
+/** Load complete CUR/ANI bytes, choosing one entry per frame before pixel
+ * decoding. An invalid selected entry fails; no lower-ranked fallback occurs.
+ * decodeCursor remains the separate full-directory inspection API. */
+export async function loadCursorBytes(
+  input: Uint8Array,
+  options: CursorDecodeOptions,
+  profile: CursorLoadProfile = windowsDesktopCursorProfile,
+): Promise<CursorAsset> {
+  const target = profileValue(profile), source = await decodeCursorSelection(input, options,
+    (entries: readonly CursorDirectoryEntry[]) => select(entries, target).index)
+  return loadCursorAsset(source, target, { checkpoint: options.checkpoint })
 }

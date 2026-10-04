@@ -35,8 +35,8 @@ import {
 } from './storage/public-path.ts'
 import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
 import { CursorStorage } from './storage/cursors.ts'
-import { decodeCursor, type CursorAsset } from '../formats/cursor/index.ts'
-import { loadCursorAsset, windowsDesktopCursorProfile } from '../formats/cursor/load.ts'
+import type { CursorAsset } from '../formats/cursor/index.ts'
+import { loadCursorBytes, windowsDesktopCursorProfile } from '../formats/cursor/load.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree, type LayerState } from './scene/layers.ts'
 import { drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
@@ -3084,12 +3084,11 @@ export class EngineSession {
         deadline = this.deps.now() + 8
       }
     }
-    const source = await decodeCursor(bytes, {
+    // Select the directory entry before decoding it. Malformed alternatives
+    // that the native loader does not select must not break a valid cursor.
+    return loadCursorBytes(bytes, {
       png: (payload) => this.decodeImage(payload), checkpoint,
-    })
-    // The cached object models LoadCursorFromFile's selected, resized handle;
-    // raw format decoding remains separate for independent native comparisons.
-    return loadCursorAsset(source, windowsDesktopCursorProfile, { checkpoint })
+    }, windowsDesktopCursorProfile)
   }
   private async yieldGraphics(): Promise<void> {
     await new Promise<void>((resolve) => {

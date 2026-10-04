@@ -16,6 +16,7 @@ export function createCursorCompositionFixture() {
     source: CursorAsset = { kind: 'cur', frames: [{ images: [wrong, chosen] }],
       sequence: [0], rates: [1], durationJiffies: 1, sourceBytes: 1, decodedBytes: 640, imageCount: 2 },
     selected = selectCursorAsset(source, () => 1), outside = image(0xffffff, 255),
+    negative = image(0xffffff, 255), highY = image(0xffffff, 255),
     assets = new Map([[2, selected]]),
     errors: string[] = [], packets: InputPacket[] = [],
     pointers: { windowId: number; x: number; y: number; sequence?: number }[] = [],
@@ -30,6 +31,17 @@ export function createCursorCompositionFixture() {
   outside.hotspot = { x: 11, y: 13 }
   assets.set(3, selectCursorAsset({ ...source, frames: [{ images: [outside] }],
     imageCount: 1, decodedBytes: 320 }, () => 0))
+  // Loaded ICONINFO values from the fixed native high-bit hotspot fixtures.
+  // The host-core bitmap remains small; file-load scaling is tested separately.
+  negative.hotspot = { x: 4294967293, y: 1 }
+  highY.hotspot = { x: 0, y: 4294934529 }
+  for (const [id, candidate] of [[4, negative], [5, highY]] as const)
+    assets.set(id, selectCursorAsset({ ...source, frames: [{ images: [candidate] }],
+      imageCount: 1, decodedBytes: 320 }, () => 0))
+  const staticAnimation: CursorAsset = { ...source, kind: 'ani',
+    frames: [{ images: [image(0xffffff, 255)] }], sequence: [0], rates: [0], durationJiffies: 0,
+    imageCount: 1, decodedBytes: 320 }
+  assets.set(6, selectCursorAsset(staticAnimation, () => 0))
   window.addEventListener('mousemove', (event) => {
     if (!(event.target instanceof HTMLCanvasElement)) return
     const id = Number(event.target.id.match(/^cursor-surface-(\d+)$/)?.[1])
@@ -83,6 +95,21 @@ export function createCursorCompositionFixture() {
     },
     writeOutside(id: number, revision: number, x = 24, y = 16) {
       input.setInput(id, { ...state({ x, y, revision, basePhysicalSequence: 0 }), cursor: 3 })
+    },
+    writeSigned(id: number, revision: number, cursor: 4 | 5, x = 24, y = 16) {
+      input.setInput(id, { ...state({ x, y, revision, basePhysicalSequence: 0 }), cursor })
+    },
+    writeStatic(id: number, revision: number) {
+      input.setInput(id, { ...state({ x: 24, y: 16, revision, basePhysicalSequence: 0 }), cursor: 6 })
+    },
+    staticTimeline() {
+      const loaded = assets.get(6)!.asset
+      let dynamicError: string | undefined
+      try {
+        selectCursorAsset({ ...staticAnimation, sequence: [0, 0], rates: [0, 0] }, () => 0)
+      } catch (error) { dynamicError = String(error) }
+      return { kind: loaded.kind, sequence: [...loaded.sequence], rates: [...loaded.rates],
+        durationJiffies: loaded.durationJiffies, dynamicError }
     },
     pixelated(id: number) {
       const canvas = surfaces.get(id)!.canvas, context = canvas.getContext('2d')!
@@ -141,7 +168,8 @@ export function createCursorCompositionFixture() {
     },
     detach(id: number, epoch: number) { input.detach(id, epoch) },
     retireAssets() { assets.clear(); input.refreshCursors() },
-    inspect: () => ({ errors: [...errors], packets: [...packets], pointers: [...pointers], observed: [...observed] }),
+    inspect: () => ({ errors: [...errors], packets: [...packets], pointers: [...pointers], observed: [...observed],
+      hotspots: [...assets].map(([id, asset]) => ({ id, hotspot: { ...asset.selected[0]!.hotspot } })) }),
     close() {
       abort.abort()
       input.close()

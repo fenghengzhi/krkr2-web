@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [082 光标选择顺序与解码预算](decisions/082-cursor-selection-decode-budget.md)：Session 改为先选目录项再解码，修订矩形选图和 signed SHORT／DWORD 热点，页面以有符号坐标放置；存储改为并发读取、单个活动解码，并补齐 Stop 早结算、共享调用者和失败 flight 重入清理。补上 ANI 每步 rate／steps／总时长的原生严格比较，并校准一帧一步 ANI 的静态加载元数据。光标加载／存储／真实 Session 分别新增 12／7／6 个定义，总计 24／23／26 个，browser host 从 3 增为 4 个／浏览器，全部待托管执行。Windows 参考扩为 87 份，另加 128 组原生 color-plane 缩放诊断；完整平滑量化及 mask 行差仍未闭合，严格加载比较继续保留失败。协议 27、TJS ABI 5、字体 ABI 2 不变，整体非插件目标仍 active。后续明确功能缺口包括长音频流式播放、真实手柄输入和视频多音轨，见本批决策末尾。
+
+本批已补齐 [080／37238793190](https://github.com/fenghengzhi/krkr2-web/actions/runs/37238793190) 的 **completed／failure**：5/5 ZIP 大小及 SHA-256 匹配，allocator **120/120**；原 build 13 条 DOM 错误、最终 gate failure 和 Node／浏览器等 skipped 保留。对 [081／37240240034](https://github.com/fenghengzhi/krkr2-web/actions/runs/37240240034) 只取一次快照，仍 **in_progress／conclusion=null**：5/5 已发布 ZIP 核对通过，build success、trusted **7/7**，两 Windows failure，其余 18 个 job 当时仍运行且尚无用例报告。两系统各 81/81 份原生观察；每系统 raw 为 173 比较／170 匹配／3 mismatch／2 接受差异，load 为 284／236／48／2，另各有 1,729／1,618 个未比较 draw。原始失败、快照及后续待回收边界分别保存在两个运行目录的 `082-final-summary.md`／`082-snapshot-summary.md`，没有实时轮询或本地执行验证。
+
 最新待核验批次：[Full test suite 37240240034](https://github.com/fenghengzhi/krkr2-web/actions/runs/37240240034)，精确提交 `669fe105cbe4eed1523ca899a07e1f0cbbc10b20`。081 加载策略、逐帧选择／缩放、Worker 类型图修复和 81 份 Windows 严格参考已整批推送。首次唯一查询只确认创建与提交身份，当时 **in_progress／conclusion=null**，没有检查实时作业结果。下一轮补取 080 尚缺终态与 JSPI 产物，再回收本批完整证据；已知候选边界和历史失败保持原记录，整体非插件目标仍 active，未合入旧 main，未本地执行验证。
 
 2026-10-05 准备 [081 光标文件加载、选图与缩放](decisions/081-cursor-native-loading.md)：Session 将完整 CUR/ANI 原格式解码交给固定 32×32／32 位／96 DPI 加载策略，逐帧选图、缩放热点与像素后才缓存／发布；多图目录不再由页面直接报告未支持。协议升 **27**，TJS ABI **5**、字体 ABI **2** 不变。新 12 个加载定义、真实 Session 共 20 个定义、浏览器加载呈现与实际非整数 CSS 背景对照随完整批次执行。32 位平滑缩放仍是逐字节待校准候选，目录一般排序、先选再解码、高位热点和零 rate 墙钟等缺口继续保留；新增独立加载比较及 81 份 Windows 参考，不能缩小必比范围来取得通过。

@@ -472,6 +472,172 @@ function loadAnimation(){child.cursor="choices.ani";return child.cursor;}
     })
   })
 
+  test(`${mode}: a one-frame one-step ANI loads as a static native timeline and remains assignable`, async () => {
+    const animation = animatedCursor([
+      cursorFile([directoryImage(32, 32, [0, 255, 255], [2, 3])]),
+    ], { defaultRate: 9 })
+    await withFixture(binary, String.raw`
+function loadSingle(){child.cursor="single.ani";return child.cursor;}
+function reuseSingle(){other.cursor=child.cursor;return other.cursor;}
+`, { 'single.ani': animation }, async (f) => {
+      await f.move()
+      assert.equal(await f.run('loadSingle'), '2')
+      assert.equal(f.view().cursor, 2)
+      assert.deepEqual(f.definitions().map((event) => event.id), [2])
+      const asset = f.definitions()[0]!.asset
+      assert.equal(asset.kind, 'ani')
+      assert.deepEqual(asset.sequence, [0])
+      // 081 observations on both Windows runners report rate 0 / steps 1
+      // for the one-frame ANI whose source header has default rate 9.
+      assert.deepEqual(asset.rates, [0])
+      assert.equal(asset.durationJiffies, 0)
+      assert.equal(asset.frames.length, 1)
+      assert.equal(asset.frames[0]!.images.length, 1)
+      loadedSolid(asset.frames[0]!.images[0]!, [0, 255, 255, 255], { x: 2, y: 3 })
+      assert.equal(asset.sourceBytes, animation.length)
+      assert.equal(asset.imageCount, 1)
+      assert.equal(asset.decodedBytes, loadedImageBytes)
+      assert.equal(await f.run('reuseSingle'), '2')
+      await f.move(120, 20)
+      assert.equal(f.view().cursor, 2)
+      assert.deepEqual(f.definitions().map((event) => event.id), [2])
+      assert.equal(f.session.snapshot().cursorCacheEntries, 1)
+      assert.equal(f.session.snapshot().cursorCacheBytes, loadedImageBytes)
+      assert.equal(f.session.snapshot().cursorCachePending, 0)
+    })
+  })
+
+  test(`${mode}: CUR and ANI ignore damaged unselected alternatives but never fall back from a damaged selected image`, async () => {
+    const small = directoryImage(16, 32, [255, 0, 0]),
+      exact = directoryImage(32, 32, [0, 255, 0]),
+      brokenSmall = { ...small, payload: small.payload.subarray(0, 40) },
+      brokenExact = { ...exact, payload: exact.payload.subarray(0, 40) },
+      goodForward = cursorFile([brokenSmall, exact]),
+      goodReverse = cursorFile([exact, brokenSmall]),
+      badForward = cursorFile([brokenExact, small]),
+      badReverse = cursorFile([small, brokenExact]),
+      blue = cursorFile([directoryImage(32, 32, [0, 0, 255])]),
+      goodAniForward = animatedCursor([goodForward, blue], { sequence: [1, 0, 1], rates: [2, 3, 4] }),
+      goodAniReverse = animatedCursor([goodReverse, blue], { sequence: [1, 0, 1], rates: [2, 3, 4] }),
+      files = {
+        'unselected-forward.cur': goodForward,
+        'unselected-reverse.cur': goodReverse,
+        'unselected-forward.ani': goodAniForward,
+        'unselected-reverse.ani': goodAniReverse,
+        'selected-forward.cur': badForward,
+        'selected-reverse.cur': badReverse,
+        // A complete first frame must not publish a partially loaded ANI if
+        // the selected image in its second frame is damaged.
+        'selected-forward.ani': animatedCursor([blue, badForward]),
+        'selected-reverse.ani': animatedCursor([blue, badReverse]),
+        'after.cur': cursorFile([directoryImage(32, 32, [255, 255, 0])]),
+      }
+    await withFixture(binary, String.raw`
+function unselected(){
+  var names=["unselected-forward.cur","unselected-reverse.cur","unselected-forward.ani","unselected-reverse.ani"],ids=[];
+  for(var i=0;i<names.count;i++){child.cursor=names[i];ids.add(child.cursor);}
+  return ids.join(",");
+}
+function selected(){
+  var names=["selected-forward.cur","selected-reverse.cur","selected-forward.ani","selected-reverse.ani"],states=[];
+  for(var i=0;i<names.count;i++){
+    if(!Storages.isExistentStorage(names[i]))throw new Exception("missing cursor fixture: "+names[i]);
+    try{child.cursor=names[i];states.add("accepted|"+child.cursor);}
+    catch(error){states.add("caught|"+child.cursor);}
+  }
+  return states.join(",");
+}
+function afterwards(){child.cursor="after.cur";return child.cursor;}
+`, files, async (f) => {
+      await f.move()
+      assert.equal(await f.run('unselected'), '2,3,4,5')
+      assert.equal(f.view().cursor, 5)
+      const definitions = f.definitions()
+      assert.deepEqual(definitions.map((event) => event.id), [2, 3, 4, 5])
+      for (const index of [0, 1]) {
+        const asset = definitions[index]!.asset
+        assert.equal(asset.kind, 'cur')
+        assert.deepEqual(asset.frames.map((frame) => frame.images.length), [1])
+        loadedSolid(asset.frames[0]!.images[0]!, [0, 255, 0, 255])
+      }
+      for (const index of [2, 3]) {
+        const asset = definitions[index]!.asset
+        assert.equal(asset.kind, 'ani')
+        assert.deepEqual(asset.frames.map((frame) => frame.images.length), [1, 1])
+        loadedSolid(asset.frames[0]!.images[0]!, [0, 255, 0, 255])
+        loadedSolid(asset.frames[1]!.images[0]!, [0, 0, 255, 255])
+        assert.deepEqual(asset.sequence, [1, 0, 1])
+        assert.deepEqual(asset.rates, [2, 3, 4])
+        assert.equal(asset.imageCount, 2)
+        assert.equal(asset.decodedBytes, 2 * loadedImageBytes)
+      }
+      assert.deepEqual(definitions.map((event) => event.asset.sourceBytes), [
+        goodForward.length, goodReverse.length, goodAniForward.length, goodAniReverse.length,
+      ])
+      assert.equal(await f.run('selected'), 'caught|5,caught|5,caught|5,caught|5')
+      assert.equal(f.view().cursor, 5)
+      assert.deepEqual(f.definitions().map((event) => event.id), [2, 3, 4, 5])
+      assert.equal(f.session.snapshot().cursorCacheEntries, 4)
+      assert.equal(f.session.snapshot().cursorCacheBytes, 6 * loadedImageBytes)
+      assert.equal(f.session.snapshot().cursorCachePending, 0)
+      assert.equal(await f.run('afterwards'), '6')
+      assert.equal(f.view().cursor, 6)
+      assert.deepEqual(f.definitions().map((event) => event.id), [2, 3, 4, 5, 6])
+      loadedSolid(f.definitions()[4]!.asset.frames[0]!.images[0]!, [255, 255, 0, 255])
+      assert.equal(f.session.snapshot().cursorCacheEntries, 5)
+      assert.equal(f.session.snapshot().cursorCacheBytes, 7 * loadedImageBytes)
+      assert.equal(f.session.snapshot().cursorCachePending, 0)
+    })
+  })
+
+  test(`${mode}: CUR and ANI events retain native DWORD hotspots without enlarging their loaded pixel planes`, async () => {
+    const natural = cursorFile([directoryImage(32, 32, [0, 255, 0], [65535, 32768])]),
+      small = cursorFile([{
+        width: 8, height: 4, hotspot: [65535, 32768],
+        payload: cursorDib({ width: 8, height: 4, depth: 32,
+          xorRows: Array.from({ length: 4 }, () => Array.from({ length: 8 }, () => [0, 0, 0, 255]).flat()) }),
+      }]),
+      animation = animatedCursor([natural, small], { sequence: [1, 0, 1], rates: [3, 6, 9] })
+    await withFixture(binary, String.raw`
+function natural(){child.cursor="wide-natural.cur";return child.cursor;}
+function small(){child.cursor="wide-small.cur";return child.cursor;}
+function animated(){child.cursor="wide.ani";return child.cursor;}
+`, { 'wide-natural.cur': natural, 'wide-small.cur': small, 'wide.ani': animation }, async (f) => {
+      assert.equal(await f.run('natural'), '2')
+      assert.equal(await f.run('small'), '3')
+      assert.equal(await f.run('animated'), '4')
+      const definitions = f.definitions(),
+        // Literal DWORD results recorded by 081 GetIconInfo observations.
+        // Neither the decoder nor the loading policy computes these expectations.
+        naturalHotspot = { x: 0, y: 4294934529 },
+        smallHotspot = { x: 4294967293, y: 1 },
+        expectedHotspots = [[naturalHotspot], [smallHotspot], [naturalHotspot, smallHotspot]]
+      assert.deepEqual(definitions.map((event) => event.id), [2, 3, 4])
+      assert.deepEqual(definitions.map((event) => event.asset.sourceBytes), [natural.length, small.length, animation.length])
+      for (let index = 0; index < definitions.length; index++) {
+        const asset = definitions[index]!.asset, expected = expectedHotspots[index]!
+        assert.equal(asset.frames.length, expected.length)
+        assert.equal(asset.imageCount, expected.length)
+        assert.equal(asset.decodedBytes, expected.length * loadedImageBytes)
+        for (let frame = 0; frame < expected.length; frame++) {
+          assert.equal(asset.frames[frame]!.images.length, 1)
+          const image = asset.frames[frame]!.images[0]!
+          assert.deepEqual(image.hotspot, expected[frame])
+          assert.equal(image.width, 32)
+          assert.equal(image.height, 32)
+          assert.equal(image.data.byteLength, 4096)
+          assert.equal(image.andMask.byteLength, 1024)
+        }
+      }
+      loadedSolid(definitions[0]!.asset.frames[0]!.images[0]!, [0, 255, 0, 255], naturalHotspot)
+      assert.deepEqual(definitions[2]!.asset.sequence, [1, 0, 1])
+      assert.deepEqual(definitions[2]!.asset.rates, [3, 6, 9])
+      assert.equal(f.session.snapshot().cursorCacheEntries, 3)
+      assert.equal(f.session.snapshot().cursorCacheBytes, 4 * loadedImageBytes)
+      assert.equal(f.session.snapshot().cursorCachePending, 0)
+    })
+  })
+
   for (const outcome of ['resolve', 'reject'] as const) {
     test(`${mode}: Stop clears cursor assets before suspended PNG inflate can ${outcome} late`, async () => {
       const blocked = gate(), lateError = new Error('late cursor inflate failure')

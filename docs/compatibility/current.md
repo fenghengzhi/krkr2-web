@@ -1,5 +1,7 @@
 # 当前实现范围
 
+082 开发候选接入 [光标选择顺序、原生热点与解码并发边界](../decisions/082-cursor-selection-decode-budget.md)：先选再解码、矩形排序、DWORD 热点及单个活动解码流程，协议 **27**、TJS ABI **5**、字体 ABI **2** 不变。081 快照已证明 build success、可信生命周期 7/7；两 Windows 严格加载比较各有 48 个 draw mismatch 和 2 个接受差异，其他应用用例当时尚未报告。082 修订尚待托管验证，平滑缩放／mask、零 rate 时间策略与整体非插件范围仍未完成。完整证据、原始失败和后续状态以 [实现进度](../non-plugin-progress.md) 为准；以下保留历史阶段记录。
+
 081 开发候选正在 `codex/migrated-window-attention` 接入 [光标原生文件加载](../decisions/081-cursor-native-loading.md)：固定桌面配置的逐帧选图、32×32 缩放、热点及完整 ANI 保留，协议 **27**、TJS ABI **5**、字体 ABI **2**。32 位平滑量化、完整目录接受语义和零 rate 计时仍未闭合，未合入 main。080 的 Windows 限定比较各 170/170，但应用 build 类型检查失败使 Node／浏览器测试 skipped；不能将其写成应用验证通过。最新候选、历史证据与完整非插件缺口以 [实现进度](../non-plugin-progress.md) 为准；下文保留各历史阶段当时的边界。
 
 075 开发候选新增 [Layer 脚本光标写入](../decisions/075-layer-script-cursor.md)，用于原 KAG 键盘链接导航。页面内可见虚拟光标、正常 hover 事件和真实鼠标接管正在整合，协议候选 24；尚未验证，整体非插件范围未完成。074 的运行在下一批首次取回时仍有作业未结束，已完成部分有失败；完整状态见 [实现进度](../non-plugin-progress.md)。以下历史已验证版本保持原边界。
