@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37236286963](https://github.com/fenghengzhi/krkr2-web/actions/runs/37236286963)，精确提交 `ae42bf93fddc6c0bada0483bb3556a4629a1a855`。079 格式候选、Windows 原生对照、Firefox display 隔离和几何夹具修订已整批推送；首次唯一查询确认创建与提交身份，当时 **pending／conclusion=null**，没有检查实时作业或当作已执行。下一批先补取 078 的完整终态／后续产物，再取回本批全部证据；失败、取消及未比较范围继续保留。协议 25、TJS ABI 5、字体 ABI 2 不变，完整非插件目标仍 active，未合入旧 main。
+
 2026-10-05 准备 [079 CUR／ANI 格式与参考证据](decisions/079-cursor-format-reference.md)：新增有界多图 CUR 和完整逐步 ANI 资产解码、热点、RGBA／AND-XOR 两种操作及整数比例动画采样；新增 23 个格式验收定义，以及 Windows 2022／2025 上 47 份独立二进制夹具的 User32 加载／离屏像素对照。所有定义尚未运行，字符串 cursor 的 Session 资源缓存和浏览器实际呈现仍未接入，自定义光标及整体非插件目标均未完成。并修正 077 的公开 transition／绘制坐标夹具；Firefox 改为每个 headed display 一个 worker、常规测试分两台 host，并新增被动输入时间线，不放宽断言或时限。
 
 本轮已完整回收 [077／37233070087](https://github.com/fenghengzhi/krkr2-web/actions/runs/37233070087)：终态 **failure**，Node **cancelled**，18 份原 ZIP 的 SHA-256 与大小全部一致。Node execution 已报告 **2645 通过、8 失败／2653**，缺 reporter finish；TAP 仅 **1047 通过、2 失败**、无最终 plan，二者不能相加。新增明确失败为 source／bytecode 几何夹具调用不存在的脚本 exchange，以及一个旧客户区坐标；其余五项是 078 已修订的 selector／Vocoder／存储夹具，不能追认旧结果通过。selector 仍在 execute call 115 越界后进入 dispose 117 而未返回。常规浏览器 **1958 通过、4 失败／1962**，四项均在 Firefox cursor／hint；compatibility **96/96**、library **57/57**、PWA **59/59**、trusted **7/7**。完整索引和原 trace 在 `out/verification/github-actions/37233070087/final-summary.md`；额外保留的 079／080 快照没有覆盖此前证据，080 仅为归档避重前缀。
