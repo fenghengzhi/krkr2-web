@@ -1,8 +1,10 @@
 # 075 — Layer 光标写入与 KAG 键盘链接导航
 
-状态：实施候选，尚未执行验证。所有构建、类型检查、VM、Node 和浏览器检查只在 GitHub-hosted Actions 运行。074 的运行与本切片分开记录；没有用前批次的测试数量证明新行为。
+状态：已实施并取得部分托管验证结果，整批尚未收齐。所有构建、类型检查、VM、Node 和浏览器检查只在 GitHub-hosted Actions 运行。074 的运行与本切片分开记录；没有用前批次的测试数量证明新行为。
 
-候选已随 `d4bfabb593a598d8999da74dfe5467f512910555` 推送至 [37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481)。首次查询时 in_progress，只确认运行创建；尚未取回执行结果，下面的用例定义不是通过记录。
+准备 076 时只回收一次 [37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481)：当时仍 in_progress，Node 及两份 WebKit 常规分片未结束。已发布的 15 份 ZIP 均取回并核对 digest。Chromium／Firefox 常规各 **642/642** 通过；三浏览器兼容 **95 通过、1 失败／96**，其中本切片的原 KAG 键盘链接导航六项全部通过。唯一已报告兼容失败是 Firefox JSPI 的旧 Help 首次打开截图超时 5 秒，原始错误和 trace 保留，不是 cursor 用例失败。Node 和 WebKit 常规仍未取回，不能据部分通过宣称本切片或整批全部完成。新候选 076 不属于上述运行。证据保留于 `out/verification/github-actions/37229833481/`。
+
+候选随 `d4bfabb593a598d8999da74dfe5467f512910555` 推送至 [37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481)。首次查询时 in_progress，只确认运行创建；该历史快照保留，后续收到的结果见上一段。
 
 ## 实际缺失链路与固定来源
 

@@ -331,9 +331,15 @@ for (const interruptAt of ['ownership', 'search'])
 
 test('a structural change finishes its action but cannot reacquire hover after Window removal', () => {
   const f = fixture()
-  f.ca.point = { x: 1, y: 1 }
+  // ForceMouseRecheck uses the last delivered primary sample, not an assigned
+  // physical point. Establish it while the tree cannot yet receive hover.
+  f.layers.get(f.a).visible = false
+  f.drain(f.service.packet({ type: 'move', windowId: 101, x: 1, y: 1, shift: 0, button: 0, clicks: 0 }))
   let changed = 0
-  const operation = f.service.change(() => changed++, f.ca)
+  const operation = f.service.change(() => {
+    changed++
+    f.layers.get(f.a).visible = true
+  }, f.ca)
   let reachedEnter = false
   for (let n = 0; n < 20; n++) {
     const step = f.next(operation)

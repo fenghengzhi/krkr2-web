@@ -265,7 +265,7 @@ class Layer {
     .map(
       (name) => `property ${name} {
     getter(){return __host("Layer.get",__id,"${name}");}
-    setter(value){__host("Layer.set",__id,"${name}",${name === 'useAttention' ? 'int(!!value)' : `${name === 'name' || name === 'hint' ? 'string' : 'int'}(value)`});}
+    setter(value){__host("Layer.set",__id,"${name}",${name === 'useAttention' || name === 'showParentHint' ? 'int(!!value)' : `${name === 'name' || name === 'hint' ? 'string' : 'int'}(value)`});}
   }`,
     )
     .join('\n')}

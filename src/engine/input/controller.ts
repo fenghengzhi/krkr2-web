@@ -52,6 +52,12 @@ export class InputController {
   point = { x: -1, y: -1 }
   shift = 0
   private mouseAt = { x: -1, y: -1 }
+  // Native manager notifications hit-test the last delivered primary integer
+  // sample, independently of later Window transforms or physical observations.
+  private lastMousePrimary = { x: -1, y: -1 }
+  private currentCursor = 0
+  private currentHint = ''
+  private notifyingHintOrCursor = false
   private mouseDepth = 0
   private hitDepth = 0
   private hitChoice = new Map<number, boolean>()
@@ -534,7 +540,55 @@ export class InputController {
   private *target(x: number, y: number): Generator<InputCall, number, unknown> {
     return this.capture && this.attached(this.capture) ? this.capture : yield* this.hit(x, y)
   }
-  private *mouseMove(x: number, y: number, shift: number, force = false): InputOperation {
+  private activeCursor(id: number): number {
+    let layer = this.layers.get(id)
+    while (layer.cursor === 0 && layer.parent) layer = this.layers.get(layer.parent)
+    return layer.cursor
+  }
+  private activeHint(id: number): string {
+    let layer = this.layers.get(id)
+    // showParentHint chooses the parent even when this Layer's own hint is
+    // nonempty. An explicit hint setter disables that inheritance.
+    while (layer.showParentHint && layer.parent) layer = this.layers.get(layer.parent)
+    return layer.hint
+  }
+  private *notifyHintOrCursor(
+    id: number,
+    value: { cursor: number } | { hint: string },
+  ): InputOperation {
+    if (this.notifyingHintOrCursor || !this.attached(id)) return undefined
+    const epoch = this.epoch
+    this.notifyingHintOrCursor = true
+    try {
+      const target = this.capture ||
+        (yield* this.hit(this.lastMousePrimary.x, this.lastMousePrimary.y))
+      if (epoch !== this.epoch || target !== id) return undefined
+      // The native setter samples its value before Notify calls onHitTest.
+      // Reentrant setters mutate properties but cannot replace this sample.
+      if ('cursor' in value) this.currentCursor = value.cursor
+      else this.currentHint = value.hint
+    } finally {
+      this.notifyingHintOrCursor = false
+    }
+    return undefined
+  }
+  *setCursor(id: number, value: number): InputOperation {
+    this.layers.set(id, 'cursor', value)
+    yield* this.notifyHintOrCursor(id, { cursor: this.activeCursor(id) })
+    return undefined
+  }
+  *setHint(id: number, value: string): InputOperation {
+    this.layers.set(id, 'hint', value)
+    yield* this.notifyHintOrCursor(id, { hint: value })
+    return undefined
+  }
+  private *mouseMove(
+    x: number,
+    y: number,
+    shift: number,
+    force = false,
+    primaryOverride?: { x: number; y: number },
+  ): InputOperation {
     const epoch = this.epoch
     this.mouseDepth++
     try {
@@ -542,7 +596,8 @@ export class InputController {
       this.mouseAt = { x, y }
       this.point = { x, y }
       this.shift = shift
-      const p = this.primary()
+      const p = primaryOverride ?? this.primary()
+      this.lastMousePrimary = { x: Math.trunc(p.x) || 0, y: Math.trunc(p.y) || 0 }
       let target = yield* this.target(p.x, p.y)
       if (epoch !== this.epoch) return undefined
       if (this.hover !== target) {
@@ -552,17 +607,33 @@ export class InputController {
         target = yield* this.target(p.x, p.y)
         if (epoch !== this.epoch) return undefined
         if (target) {
-          yield { target, method: 'onMouseEnter', args: [] }
-          if (epoch !== this.epoch) return undefined
-          const next = yield* this.target(p.x, p.y)
-          if (epoch !== this.epoch) return undefined
-          if (target !== next) {
-            if (this.layers.has(target)) yield { target, method: 'onMouseLeave', args: [] }
+          this.notifyingHintOrCursor = true
+          try {
+            yield { target, method: 'onMouseEnter', args: [] }
             if (epoch !== this.epoch) return undefined
-            target = next
-            if (target) yield { target, method: 'onMouseEnter', args: [] }
+            const next = yield* this.target(p.x, p.y)
             if (epoch !== this.epoch) return undefined
+            if (target !== next) {
+              if (this.layers.has(target)) yield { target, method: 'onMouseLeave', args: [] }
+              if (epoch !== this.epoch) return undefined
+              target = next
+              if (target) yield { target, method: 'onMouseEnter', args: [] }
+              if (epoch !== this.epoch) return undefined
+            }
+            // Commit only after enter and its one recheck complete. Rendering
+            // and same-target moves must never re-sample the parent chain.
+            if (target && this.attached(target)) {
+              const cursor = this.activeCursor(target), hint = this.activeHint(target)
+              this.currentCursor = cursor
+              this.currentHint = hint
+            }
+          } finally {
+            this.notifyingHintOrCursor = false
           }
+        }
+        if (!target) {
+          this.currentCursor = 0
+          this.currentHint = ''
         }
         // Keep the previous hover owned across leave/enter and hit rechecks.
         // Clear it before Release so finalizers observe an empty old slot.
@@ -587,7 +658,10 @@ export class InputController {
   }
   private *recheckPointer(): InputOperation {
     if (!this.mouseDepth && !this.hitDepth)
-      yield* this.mouseMove(this.point.x, this.point.y, this.shift)
+      // A native ForceMouseRecheck reuses LastMouseMove primary coordinates.
+      // Both hit testing and notifications retain that sample after a later
+      // Window transform. Native rechecks also use zero modifier flags.
+      yield* this.mouseMove(this.point.x, this.point.y, 0, false, this.lastMousePrimary)
     return undefined
   }
   *defaultKey(id: number, kind: string, key: string | number, shift = 0): InputOperation {
@@ -804,6 +878,9 @@ export class InputController {
           this.capture = target
           yield* this.own('capture', target, this.manager(target))
         }
+        // Native PrimaryMouseDown hides the hint after the callback and
+        // capture acquisition. A throwing callback never reaches this write.
+        this.currentHint = ''
       } else this.release()
       return
     }
@@ -834,14 +911,7 @@ export class InputController {
     }
   }
   view(): InputView {
-    const layer = this.layers.has(this.hover) ? this.layers.get(this.hover) : undefined,
-      focus = this.layers.has(this.focused) ? this.layers.get(this.focused) : undefined
-    let hint = layer?.hint ?? '',
-      source = layer
-    while (!hint && source?.showParentHint && source.parent) {
-      source = this.layers.get(source.parent)
-      hint = source.hint
-    }
+    const focus = this.layers.has(this.focused) ? this.layers.get(this.focused) : undefined
     // A view may discard retired samples, but never search ancestry or refresh
     // a still-live one. This also covers exceptional invalidation cleanup.
     if (
@@ -863,8 +933,8 @@ export class InputController {
           }
         : null
     return {
-      cursor: layer?.cursor ?? 0,
-      hint,
+      cursor: this.currentCursor,
+      hint: this.currentHint,
       focused: this.focused,
       attention,
       attentionX: attention?.x ?? 0,
@@ -882,6 +952,10 @@ export class InputController {
     this.owners.clear()
     this.modal = []
     this.capture = this.hover = this.focused = 0
+    this.currentCursor = 0
+    this.currentHint = ''
+    this.notifyingHintOrCursor = false
+    this.lastMousePrimary = { x: -1, y: -1 }
     this.focusRevision++
     this.attention = null
     this.focusLock = false

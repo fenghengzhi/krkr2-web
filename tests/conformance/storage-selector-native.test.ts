@@ -1,6 +1,7 @@
 import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
@@ -12,13 +13,81 @@ import {
   type ScriptValue,
 } from '../../src/engine/script/runtime.ts'
 
-const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
+// Hosted TAP is buffered per file. Preserve passive call boundaries separately
+// so a cancelled process can identify its last entered case and native call.
+// This does not cancel the VM, change test order, or extend the test timeout.
+const caseName = new AsyncLocalStorage<string>(),
+  evidenceDirectory = resolve('out/ci/node-test-boundaries'),
+  evidenceFile = resolve(evidenceDirectory, `storage-selector-native-${process.pid}.jsonl`)
+let recordBoundaries = process.env.GITHUB_ACTIONS === 'true'
+let nextCall = 0
+function stopRecording(error: unknown) {
+  recordBoundaries = false
+  // Evidence failure must never become a host error or replace the tested one.
+  try { process.stderr.write(`Storage selector boundary journal unavailable: ${String(error)}\n`) }
+  catch { /* The original operation still owns its result. */ }
+}
+if (recordBoundaries) {
+  try { mkdirSync(evidenceDirectory, { recursive: true }) }
+  catch (error) { stopRecording(error) }
+}
+function record(event: string, detail: Record<string, unknown> = {}) {
+  if (!recordBoundaries) return
+  try {
+    appendFileSync(evidenceFile, JSON.stringify({
+      event, at: new Date().toISOString(), pid: process.pid,
+      test: caseName.getStore() ?? null, ...detail,
+    }) + '\n')
+  } catch (error) { stopRecording(error) }
+}
+function traced<T>(operation: string, work: () => Promise<T>, detail: Record<string, unknown> = {}): Promise<T> {
+  if (!recordBoundaries) return work()
+  const call = ++nextCall
+  record('before', { call, operation, ...detail })
+  return (async () => {
+    try {
+      const value = await work()
+      record('settled', { call, operation, outcome: 'returned' })
+      return value
+    } catch (error) {
+      record('settled', { call, operation, outcome: 'threw', error: String(error) })
+      throw error
+    }
+  })()
+}
+function observeRuntime(vm: TjsWasmRuntime) {
+  if (!recordBoundaries) return vm
+  const execute = vm.execute.bind(vm), compile = vm.compile.bind(vm), collect = vm.collect.bind(vm)
+  vm.execute = (...args) => traced('execute', () => execute(...args), {
+    source: typeof args[0] === 'string' ? args[0].slice(0, 160) : '<bytecode>',
+    length: args[0].length, name: args[1] ?? 'script.tjs', expression: args[2] ?? false,
+  })
+  vm.compile = (...args) => traced('compile', () => compile(...args), {
+    length: args[0].length, name: args[1] ?? 'script.tjs', expression: args[2] ?? false,
+  })
+  vm.collect = () => traced('collect', collect)
+  return vm
+}
+const test = (name: string, run: () => Promise<void>) => {
+  if (!recordBoundaries) return nodeTest(name, { timeout: 60000 }, run)
+  return nodeTest(name, { timeout: 60000 }, (context) => caseName.run(name, async () => {
+      record('test-start')
+      const abort = () => record('test-signal-aborted', { reason: String(context.signal.reason) })
+      context.signal.addEventListener('abort', abort, { once: true })
+      try { await run() }
+      finally {
+        context.signal.removeEventListener('abort', abort)
+        record('test-settled')
+      }
+    }),
+  )
+}
 const directory = resolve('.generated/wasm')
 const manifest: WasmManifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8'))
 const assets = manifest.variants.asyncify!
-const { default: factory } = (await import(
+const { default: factory } = (await traced('module-import', () => import(
   pathToFileURL(resolve(directory, assets.mjs.file)).href
-)) as { default: ModuleFactory }
+))) as { default: ModuleFactory }
 const wasmBinary = new Uint8Array(readFileSync(resolve(directory, assets.wasm.file)))
 const defaults: ScriptValue[] = [0n, '', '', undefined, 0n, undefined, 0n]
 
@@ -33,77 +102,81 @@ async function boundary(answer: ScriptValue = undefined) {
   const faults: { selection?: string; abort?: string; invokeAbort?: boolean } = {}
   let callback: ScriptObject | undefined
   let selected = answer
-  const vm = await TjsWasmRuntime.create(
+  const vm = observeRuntime(await traced('create', () => TjsWasmRuntime.create(
     factory,
     async (operation, args, context): Promise<HostReply> => {
-      if (operation === 'Factory')
-        return {
-          kind: 'value',
-          value: {
-            type: 'class',
-            namespace: 'Storages',
-            className: 'Storages',
-            id: 0,
-            properties: [],
-          },
+      const call = ++nextCall
+      record('host-enter', { call, operation, count: args.length })
+      try {
+        if (operation === 'Factory')
+          return {
+            kind: 'value',
+            value: {
+              type: 'class',
+              namespace: 'Storages',
+              className: 'Storages',
+              id: 0,
+              properties: [],
+            },
+          }
+        if (operation === 'Capture') {
+          assert(isScriptObject(args[0]))
+          if (callback) context.release(callback)
+          callback = context.retain(args[0])
+          return { kind: 'value', value: undefined }
         }
-      if (operation === 'Capture') {
-        assert(isScriptObject(args[0]))
-        if (callback) context.release(callback)
-        callback = context.retain(args[0])
-        return { kind: 'value', value: undefined }
-      }
-      if (operation === 'Storages.selectFileAbort') {
-        assert.equal(args.length, 1)
-        const identity = args[0]
-        assert(typeof identity === 'bigint')
-        assert(identities.includes(identity), 'Only the exact opened request may be aborted')
-        assert(!aborted.includes(identity), 'Each native request attempts cleanup once')
-        aborted.push(identity)
-        open.delete(identity)
-        lifecycle.push(`abort:${identity}`)
-        if (faults.abort) throw new Error(faults.abort)
-        if (faults.invokeAbort) {
-          assert(callback)
-          return { kind: 'invoke', callback, args: [] }
+        if (operation === 'Storages.selectFileAbort') {
+          assert.equal(args.length, 1)
+          const identity = args[0]
+          assert(typeof identity === 'bigint')
+          assert(identities.includes(identity), 'Only the exact opened request may be aborted')
+          assert(!aborted.includes(identity), 'Each native request attempts cleanup once')
+          aborted.push(identity)
+          open.delete(identity)
+          lifecycle.push(`abort:${identity}`)
+          if (faults.abort) throw new Error(faults.abort)
+          if (faults.invokeAbort) {
+            assert(callback)
+            return { kind: 'invoke', callback, args: [] }
+          }
+          return { kind: 'value', value: undefined }
         }
-        return { kind: 'value', value: undefined }
-      }
-      if (operation === 'Storages.selectFile') {
-        const identity = args[0]
-        assert(typeof identity === 'bigint')
-        assert(identity > 0n && identity <= BigInt(Number.MAX_SAFE_INTEGER))
-        assert(identity > (identities.at(-1) ?? 0n), 'Request IDs increase across class factories')
-        identities.push(identity)
-        open.add(identity)
-        lifecycle.push(`select:${identity}`)
-        args = args.slice(1)
-      }
-      calls.push({ operation, args: [...args] })
-      if (operation === 'Trace') {
-        lifecycle.push(`trace:${String(args[0])}`)
-        return { kind: 'value', value: undefined }
-      }
-      if (operation === 'Answer') return { kind: 'value', value: selected }
-      if (operation === 'Storages.selectFilePath') {
-        assert.equal(args.length, 1)
-        assert(typeof args[0] === 'string')
-        if (args[0] === 'reject-path') throw new Error('selector-path-rejected')
-        return {
-          kind: 'value',
-          value: args[0].startsWith('game://./') ? args[0] : `game://./${args[0]}`,
+        if (operation === 'Storages.selectFile') {
+          const identity = args[0]
+          assert(typeof identity === 'bigint')
+          assert(identity > 0n && identity <= BigInt(Number.MAX_SAFE_INTEGER))
+          assert(identity > (identities.at(-1) ?? 0n), 'Request IDs increase across class factories')
+          identities.push(identity)
+          open.add(identity)
+          lifecycle.push(`select:${identity}`)
+          args = args.slice(1)
         }
-      }
-      assert.equal(operation, 'Storages.selectFile')
-      assert(
-        args.every((value) => value === undefined || ['bigint', 'string'].includes(typeof value)),
-      )
-      await Promise.resolve()
-      if (faults.selection) throw new Error(faults.selection)
-      return callback ? { kind: 'invoke', callback, args: [] } : { kind: 'value', value: selected }
+        calls.push({ operation, args: [...args] })
+        if (operation === 'Trace') {
+          lifecycle.push(`trace:${String(args[0])}`)
+          return { kind: 'value', value: undefined }
+        }
+        if (operation === 'Answer') return { kind: 'value', value: selected }
+        if (operation === 'Storages.selectFilePath') {
+          assert.equal(args.length, 1)
+          assert(typeof args[0] === 'string')
+          if (args[0] === 'reject-path') throw new Error('selector-path-rejected')
+          return {
+            kind: 'value',
+            value: args[0].startsWith('game://./') ? args[0] : `game://./${args[0]}`,
+          }
+        }
+        assert.equal(operation, 'Storages.selectFile')
+        assert(
+          args.every((value) => value === undefined || ['bigint', 'string'].includes(typeof value)),
+        )
+        await Promise.resolve()
+        if (faults.selection) throw new Error(faults.selection)
+        return callback ? { kind: 'invoke', callback, args: [] } : { kind: 'value', value: selected }
+      } finally { record('host-settled', { call, operation }) }
     },
     { wasmBinary },
-  )
+  )))
   return {
     vm,
     calls,
@@ -123,7 +196,10 @@ async function boundary(answer: ScriptValue = undefined) {
       callback = undefined
     },
     dispose() {
-      vm.dispose()
+      const call = ++nextCall
+      record('before', { call, operation: 'dispose' })
+      try { vm.dispose() }
+      finally { record('settled', { call, operation: 'dispose' }) }
     },
   }
 }

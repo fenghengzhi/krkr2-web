@@ -430,6 +430,7 @@ export class LayerTree {
     const layer = this.get(id)
     if (['name', 'hint'].includes(name)) {
       layer[name as 'name'] = String(value)
+      if (name === 'hint') layer.showParentHint = false
       return
     }
     if (typeof value !== 'number' || !Number.isSafeInteger(value))

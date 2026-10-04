@@ -1,5 +1,13 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [076 stock cursor／hint 通知语义](decisions/076-layer-cursor-hint.md)：候选补齐数值光标继承、提示继承开关、原版通知时点、共享重入保护、异常恢复及缩放后的旧主坐标重查。新增真实 VM 源码／字节码和浏览器验收定义，尚未执行。自定义 CUR／ANI、完整鼠标入口顺序等仍在范围内，整体非插件目标保持 active；协议 24、TJS ABI 5、字体 ABI 2 不变。
+
+准备本批时已补取 [074／37227951808](https://github.com/fenghengzhi/krkr2-web/actions/runs/37227951808) 终态 **failure**，18 份原 artifact ZIP 均核对 digest 并保留。Node 超过 20 分钟被取消，已送达 **967 通过、2 失败**，没有最终 plan；进程记录确认 `storage-selector-native.test.ts` 是唯一未退出文件，具体用例仍未知。另有 `integration/phase-vocoder.test.ts` 与 `integration/storage-selector.test.ts` 以 code 1 退出，但具体用例被前序文件的 TAP 缓冲阻挡，不能补造失败数量。常规浏览器 **1894 通过、8 失败／1902**；兼容 **89 通过、1 失败／90**。最终摘要、原错误、部分快照与全部归档分别保留在 `out/verification/github-actions/37227951808/`。
+
+074 的两个已报告 Node 帮助失败已确定为 statement 模式调用缺少分号，本批保持丢弃结果语义并补分号。六个浏览器帮助夹具失败和两个 WebKit Vocoder 时间失败继续保留，075 修订的结果单独回收。selector 的根因尚未证明；本批增加仅在 Actions 使用的被动用例／VM／host 调用阶段 JSONL，不改变原 60 秒用例预算或 20 分钟作业上限。
+
+本批对 [075／37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481) 仅回收一次：当时仍 **in_progress**，Node 和两份 WebKit 常规分片待结束，未再轮询。已有 15 份 ZIP 全部核对 digest；Chromium／Firefox 常规各 **642/642** 通过，兼容 **95 通过、1 失败／96**，新增原 KAG 键盘光标六项全部通过。失败仍是 Firefox Help 首次打开截图超时，本次为 JSPI；完整阶段未完成，保留失败。Node、WebKit 常规和整批终态下一批补取，不能用当前结果宣称整批通过。本批另接入 Node 第三个 execution-order reporter，以保存被前序挂起文件阻挡的实际完成事件及错误；spec/TAP、并发和超时保持。
+
 最新待核验批次：[Full test suite 37229833481](https://github.com/fenghengzhi/krkr2-web/actions/runs/37229833481)，精确提交 `d4bfabb593a598d8999da74dfe5467f512910555`。075、音频观测顺序及帮助控制台夹具修正已推送；首次查询仅确认创建和提交身份，当时 **in_progress／conclusion=null**，未检查实时作业。后续准备批次时先补取 074 的未决终态/缺失产物，再取回本批完整结果；失败、取消和未报告继续独立保留。整体非插件目标仍 active，未合入旧 main。
 
 2026-10-05 下一批实施 [075 Layer 光标写入](decisions/075-layer-script-cursor.md)：原 KAG 键盘链接导航确实写 `cursorX/cursorY`，候选补齐每层暂存 X、Y 提交、setCursorPos、可见虚拟光标、既有鼠标事件路径与真实输入接管；协议候选升 24，新增原 KAG 键盘探针，兼容库存预期 96 项。尚未执行该候选。

@@ -185,6 +185,7 @@ jobs:
           node --import tsx --import ./scripts/record-node-test-process.mjs --test \
             --test-reporter=spec --test-reporter-destination=stdout \
             --test-reporter=tap --test-reporter-destination=out/ci/node.tap \
+            --test-reporter=./scripts/record-node-test-events.mjs --test-reporter-destination=stdout \
             tests/conformance/*.test.ts tests/integration/*.test.ts 2>&1 | tee out/ci/node.log
       - name: Record backtraces for any terminated Node process
         if: always()

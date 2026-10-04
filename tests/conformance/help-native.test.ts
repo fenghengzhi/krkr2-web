@@ -221,7 +221,7 @@ function discardAgain(){System.shellExecute("again.txt");}
       assert.equal(await vm.execute('openAgain()', '', true), 9007199254740993n)
       answer('1')
       await assert.rejects(vm.execute('openAgain()', '', true), /System.shellExecute returned an invalid result/)
-      await assert.rejects(vm.execute('discardAgain()'), /System.shellExecute returned an invalid result/)
+      await assert.rejects(vm.execute('discardAgain();'), /System.shellExecute returned an invalid result/)
       answer(1n)
       assert.equal(await vm.execute('openAgain()', '', true), 1n)
       assert.equal(calls.length, 9)

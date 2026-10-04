@@ -3931,6 +3931,21 @@ export class EngineSession {
         break
       }
       case 'Layer.set':
+        if (text(1) === 'cursor' || text(1) === 'hint') {
+          const id = number(0), controller = this.inputControllers.forLayer(id)
+          return this.inputs!.start(
+            text(1) === 'cursor'
+              ? controller.setCursor(id, clipInteger(2))
+              : controller.setHint(id, text(2)),
+            controller,
+          )
+        }
+        if (text(1) === 'showParentHint') {
+          // Native SetShowParentHint only stores the flag. It does not notify
+          // the Window or cause an input recheck, even for the hovered Layer.
+          this.layers.set(number(0), 'showParentHint', number(2))
+          break
+        }
         if (text(1) === 'cursorX' || text(1) === 'cursorY') {
           const id = number(0), coordinate = clipInteger(2), layer = this.layers.get(id)
           if (text(1) === 'cursorX') layer.cursorXWork = coordinate
