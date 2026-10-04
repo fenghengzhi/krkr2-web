@@ -1,5 +1,11 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [079 CUR／ANI 格式与参考证据](decisions/079-cursor-format-reference.md)：新增有界多图 CUR 和完整逐步 ANI 资产解码、热点、RGBA／AND-XOR 两种操作及整数比例动画采样；新增 23 个格式验收定义，以及 Windows 2022／2025 上 47 份独立二进制夹具的 User32 加载／离屏像素对照。所有定义尚未运行，字符串 cursor 的 Session 资源缓存和浏览器实际呈现仍未接入，自定义光标及整体非插件目标均未完成。并修正 077 的公开 transition／绘制坐标夹具；Firefox 改为每个 headed display 一个 worker、常规测试分两台 host，并新增被动输入时间线，不放宽断言或时限。
+
+本轮已完整回收 [077／37233070087](https://github.com/fenghengzhi/krkr2-web/actions/runs/37233070087)：终态 **failure**，Node **cancelled**，18 份原 ZIP 的 SHA-256 与大小全部一致。Node execution 已报告 **2645 通过、8 失败／2653**，缺 reporter finish；TAP 仅 **1047 通过、2 失败**、无最终 plan，二者不能相加。新增明确失败为 source／bytecode 几何夹具调用不存在的脚本 exchange，以及一个旧客户区坐标；其余五项是 078 已修订的 selector／Vocoder／存储夹具，不能追认旧结果通过。selector 仍在 execute call 115 越界后进入 dispose 117 而未返回。常规浏览器 **1958 通过、4 失败／1962**，四项均在 Firefox cursor／hint；compatibility **96/96**、library **57/57**、PWA **59/59**、trusted **7/7**。完整索引和原 trace 在 `out/verification/github-actions/37233070087/final-summary.md`；额外保留的 079／080 快照没有覆盖此前证据，080 仅为归档避重前缀。
+
+对 [078／37234602267](https://github.com/fenghengzhi/krkr2-web/actions/runs/37234602267) 本轮只回收一次快照及当时产物：仍 **in_progress／conclusion=null**，build 未结束；两个 identity allocator 作业分别 **60/60**，合计 **120/120** 已报告通过，2 份原 ZIP 的 SHA-256 与大小全部一致。这是独立分配诊断的结果，不覆盖 Node、浏览器、兼容性和最终 gate；不继续轮询。下一批仍须补取该运行完整终态和全部后续产物。
+
 最新待核验批次：[Full test suite 37234602267](https://github.com/fenghengzhi/krkr2-web/actions/runs/37234602267)，精确提交 `05bb6552fa0d5f05a242596092ecb9efc670ad8c`。078 的对象身份、输入 capture、自追加字符串及诊断工作流已整批推送；唯一首次查询只确认运行创建和提交身份，当时 **in_progress／conclusion=null**，未查询实时作业结果。下一批补取 077 的完整终态与全部原 ZIP，再取回本批执行证据；失败、取消与未报告保持独立。整体目标仍是完成插件以外的 KRKR2 Web 模拟器，尚未完成，也未合入旧 main。
 
 2026-10-05 准备 [078 原生对象身份](decisions/078-object-identity.md)：补齐首次 down 回调 self-invalidate 后、对象尚未真正析构时的 capture 取得路径；独立 native identity 不拥有对象、不延长回调引用，也不改变资源 WeakObject 在 invalidate 时失效的合同。输入泵在 VM 实际赋值成功后确认 capture，并在完成、异常、Window 退休和 Stop 时撤销临时 identity。会话协议仍为 **25**、TJS ABI **5**、字体 ABI **2**；新增强制能力 `objectIdentity:1`。另修复真实文件选择器边界用例暴露的字符串自追加别名错误。源码、字节码、三浏览器及独立分配失败诊断定义已接入完整托管批次，尚未执行，不是通过记录。整体非插件目标仍 active，CUR／ANI、剩余图形／系统及音视频兼容继续在范围内。

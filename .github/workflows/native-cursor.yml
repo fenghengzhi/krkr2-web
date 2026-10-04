@@ -1,0 +1,165 @@
+name: Native Windows cursor reference
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cursor-reference:
+    name: CUR and ANI / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compile and observe User32 with an offscreen DC
+        env:
+          PROBE_RUNNER_LABEL: ${{ matrix.os }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:GITHUB_WORKSPACE 'out/ci/native-cursor'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $status = [ordered]@{
+            schema = 1; state = 'not-executed'; stage = 'setup'
+            sourceCommit = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID; runAttempt = $env:GITHUB_RUN_ATTEMPT
+            runner = $env:PROBE_RUNNER_LABEL; imageOS = $env:ImageOS; imageVersion = $env:ImageVersion
+            scope = 'User32 file load and offscreen draw; not original KRKR or VCL'
+            globalInputUsed = $false; wallClockAnimationMeasured = $false
+            startedAt = [DateTime]::UtcNow.ToString('o'); finishedAt = $null
+            compilerExitCode = $null; processId = $null; exitCode = $null
+            processDeadlineMs = 180000; error = $null; cleanupError = $null
+          }
+          $statusPath = Join-Path $output 'status.json'
+          $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          $process = $null
+          try {
+            if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
+              throw 'Cursor reference execution requires a GitHub-hosted Windows runner.'
+            }
+            $source = Join-Path $env:GITHUB_WORKSPACE 'tests/probes/native-cursor.cpp'
+            Copy-Item -LiteralPath $source -Destination (Join-Path $output 'native-cursor.cpp')
+            $status.stage = 'compiler-setup'
+            $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+            if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio discovery tool is missing.' }
+            & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json -utf8 1> (Join-Path $output 'vswhere.json') 2> (Join-Path $output 'vswhere.stderr.log')
+            if ($LASTEXITCODE -ne 0) { throw "vswhere failed with exit code $LASTEXITCODE." }
+            $instances = @(Get-Content -LiteralPath (Join-Path $output 'vswhere.json') -Raw | ConvertFrom-Json)
+            if ($instances.Count -ne 1) { throw 'Expected one complete Visual Studio C++ installation.' }
+            $vcvars = Join-Path $instances[0].installationPath 'VC/Auxiliary/Build/vcvars64.bat'
+            if (-not (Test-Path -LiteralPath $vcvars)) { throw 'vcvars64.bat is missing from the selected installation.' }
+            $executable = Join-Path $output 'native-cursor.exe'
+            $object = Join-Path $output 'native-cursor.obj'
+            $compile = Join-Path $output 'compile.cmd'
+            @(
+              '@echo off'
+              ('call "{0}"' -f $vcvars)
+              'if errorlevel 1 exit /b %errorlevel%'
+              ('cl /nologo /Bv /std:c++17 /EHsc /W4 /utf-8 /DUNICODE /D_UNICODE "{0}" /Fe"{1}" /Fo"{2}" /link user32.lib gdi32.lib' -f $source, $executable, $object)
+              'exit /b %errorlevel%'
+            ) | Set-Content -Encoding ascii $compile
+            $status.stage = 'compile'
+            & cmd.exe /d /c ('"{0}"' -f $compile) 2>&1 | Tee-Object -FilePath (Join-Path $output 'compiler.log')
+            $status.compilerExitCode = $LASTEXITCODE
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $executable)) { throw 'Native cursor probe compilation failed.' }
+            $status.stage = 'observe'
+            $start = @{
+              FilePath = $executable; ArgumentList = ('"{0}"' -f $output); WorkingDirectory = $output; PassThru = $true
+              RedirectStandardOutput = Join-Path $output 'stdout.log'
+              RedirectStandardError = Join-Path $output 'stderr.log'
+            }
+            $process = Start-Process @start
+            $status.processId = $process.Id; $status.state = 'running'
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+            if (-not $process.WaitForExit($status.processDeadlineMs)) {
+              $status.state = 'timed-out'
+              throw 'The owned cursor probe exceeded its 180-second deadline; partial observations are retained.'
+            }
+            $status.exitCode = $process.ExitCode
+            if ($process.ExitCode -ne 0) { throw "Native cursor probe exited with code $($process.ExitCode)." }
+            $status.stage = 'evidence'
+            $observations = Get-Content -LiteralPath (Join-Path $output 'observations.json') -Raw | ConvertFrom-Json
+            if ($observations.schema -ne 1 -or $observations.completed -ne $true -or
+                $observations.globalInputUsed -ne $false -or $observations.wallClockAnimationMeasured -ne $false -or
+                $observations.observedFixtures -ne $observations.expectedFixtures -or
+                $observations.fixtures.Count -ne $observations.expectedFixtures -or
+                $observations.expectedFixtures -ne 47 -or $observations.sourceCommit -cne $env:GITHUB_SHA) {
+              throw 'Native cursor reference output is incomplete or has an unexpected scope/commit.'
+            }
+            $ids = [Collections.Generic.HashSet[string]]::new()
+            foreach ($fixture in $observations.fixtures) {
+              if (-not $ids.Add($fixture.id)) { throw 'Duplicate cursor fixture identity.' }
+              $file = Join-Path $output $fixture.file
+              if (-not (Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -ne $fixture.bytes) {
+                throw "Missing or incomplete raw cursor fixture: $($fixture.id)"
+              }
+              if ($fixture.loaded -and $fixture.info.ok -ne $true) {
+                throw "Loaded cursor metadata was not completely observed: $($fixture.id)"
+              }
+              foreach ($step in $fixture.steps) {
+                if ($step.frameInfo.ok -eq $true -and $step.frameInfo.info.ok -ne $true) {
+                  throw "Animated frame metadata query was incomplete: $($fixture.id) step $($step.step)"
+                }
+                foreach ($draw in $step.draws) {
+                  $pixels = Join-Path $output $draw.pixelsFile
+                  if (-not (Test-Path -LiteralPath $pixels) -or
+                      (Get-Item -LiteralPath $pixels).Length -ne ($draw.stride * $draw.canvasHeight)) {
+                    throw "Missing raw BGRA pixels: $($draw.pixelsFile)"
+                  }
+                }
+              }
+            }
+            $status.state = 'observed'; $status.stage = 'complete'
+            $status.fixtureCount = $observations.expectedFixtures
+            # observed means complete API evidence, not a Web compatibility pass.
+          } catch {
+            if ($status.state -ne 'timed-out') { $status.state = 'failed' }
+            $status.error = $_.Exception.ToString()
+            throw
+          } finally {
+            if ($null -ne $process) {
+              try {
+                if (-not $process.HasExited) {
+                  # Use the held Process object only, never a stale PID/tree.
+                  $process.Kill()
+                  if (-not $process.WaitForExit(10000)) { throw 'Owned cursor probe did not terminate during cleanup.' }
+                }
+              } catch { $status.cleanupError = $_.Exception.ToString() }
+            }
+            $status.finishedAt = [DateTime]::UtcNow.ToString('o')
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - name: Compare independent decoder with the actual observed fixture bytes
+        run: node --import tsx tests/probes/cursor-compare.ts out/ci/native-cursor
+      - name: Preserve exact evidence hashes
+        if: always()
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE 'out/ci/native-cursor'
+          if (-not (Test-Path -LiteralPath $output)) { New-Item -ItemType Directory -Force $output | Out-Null }
+          $files = @(Get-ChildItem -LiteralPath $output -File | Sort-Object Name | ForEach-Object {
+            [ordered]@{ file = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+          })
+          [ordered]@{ schema = 1; sourceCommit = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID; runner = '${{ matrix.os }}'; files = $files } |
+            ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 (Join-Path $output 'manifest.json')
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: native-cursor-${{ matrix.os }}-${{ github.run_attempt }}
+          path: out/ci/native-cursor
+          if-no-files-found: error
+          retention-days: 30

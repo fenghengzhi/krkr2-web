@@ -231,6 +231,8 @@ jobs:
         exclude:
           - browser: webkit
             suite: browser
+          - browser: firefox
+            suite: browser
         include:
           - browser: chromium
             os: ubuntu-24.04
@@ -239,13 +241,29 @@ jobs:
           - browser: firefox
             os: ubuntu-24.04
             headed: '1'
-            workers: '2'
+            workers: '1'
           - browser: webkit
             os: macos-15
             headed: '0'
             workers: '1'
+          # Each headed Firefox worker owns its display on a separate runner.
+          # Keep file order and assertion deadlines; do not share a physical
+          # pointer between two headed browser processes on one Xvfb server.
+          - browser: firefox
+            suite: browser
+            os: ubuntu-24.04
+            headed: '1'
+            workers: '1'
+            shardIndex: '1'
+            shardTotal: '2'
+          - browser: firefox
+            suite: browser
+            os: ubuntu-24.04
+            headed: '1'
+            workers: '1'
+            shardIndex: '2'
+            shardTotal: '2'
           # Keep each file's existing execution order and one worker per Mac.
-          # Only the regular WebKit suite is split between hosted runners.
           - browser: webkit
             suite: browser
             os: macos-15
@@ -280,7 +298,7 @@ jobs:
           const index = process.env.KRKR_TEST_SHARD_INDEX
           const total = process.env.KRKR_TEST_SHARD_TOTAL
           if ((index || total) &&
-              (project !== 'webkit' || suite !== 'browser' ||
+              (!['webkit', 'firefox'].includes(project) || suite !== 'browser' ||
                !['1', '2'].includes(index) || total !== '2')) {
             throw new Error('Unexpected browser shard selection')
           }
@@ -294,6 +312,8 @@ jobs:
             shardIndex: index ? Number(index) : null,
             shardTotal: total ? Number(total) : null,
             workers: Number(process.env.KRKR_TEST_WORKERS),
+            headed: process.env.KRKR_TEST_HEADED === '1',
+            displayIsolation: process.env.KRKR_TEST_HEADED === '1' ? 'one-worker-per-hosted-display' : 'headless',
             build: JSON.parse(readFileSync('out/ci/build-info.json', 'utf8')),
           }, null, 2) + '\n')
           JS
@@ -485,7 +505,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -507,3 +527,8 @@ jobs:
     name: Native object identity allocation failures
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     uses: ./.github/workflows/object-identity-allocations.yml
+
+  cursor-reference:
+    name: Native CUR and ANI reference comparison
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    uses: ./.github/workflows/native-cursor.yml

@@ -24,7 +24,11 @@ function addSecondary(){
 function tiny(){child.parent=null;root.setSize(1,1);win.setLayerPos(0,0);win.setZoom(1,65536);root.setCursorPos(1,1);return [root.cursorX,root.cursorY].join(",");}
 function swapPrimary(){
   global.replacement=new Layer(win,root);replacement.setSize(75,77);replacement.fillRect(0,0,75,77,0xff406080);
-  root.exchange(replacement,false);
+  // Exchange is a native internal operation, exposed through transition
+  // completion. Keep matching image sizes while testing different Layer sizes.
+  replacement.setImageSize(101,103);
+  root.beginTransition("crossfade",false,replacement,%[time:1000,selfupdate:true]);
+  root.stopTransition();
   return win.primaryLayer===replacement;
 }
 function moveReplacement(){replacement.setCursorPos(20,20);return [replacement.cursorX,replacement.cursorY].join(",");}

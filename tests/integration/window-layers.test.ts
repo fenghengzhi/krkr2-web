@@ -48,7 +48,9 @@ var clicked="";child.onClick=function(x,y){clicked=x+","+y;};
   try {
     await session.start()
     await session.idle()
-    await session.click(9, 12)
+    // PaintBox origin is MulDiv(layerPos,zoom)=(6,8). Child-local (1,1)
+    // is primary (3,4), hence client (12,16) after the 2x projection.
+    await session.click(12, 16)
     assert.equal(await session.evaluate('clicked'), '1,1')
     assert.equal(await session.evaluate('child.cursorX+","+child.cursorY'), '1,1')
     assert.equal(await session.evaluate('child.imageWidth+","+child.width'), '8,2')

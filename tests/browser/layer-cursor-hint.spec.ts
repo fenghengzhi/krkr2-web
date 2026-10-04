@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 
 const source = String.raw`
@@ -42,6 +42,34 @@ interface StockCursorEvidence {
   move: number
   up: number
   commands: Record<string, number>
+  timeline: StockCursorObservation[]
+  dropped: number
+}
+interface StockCursorObservation {
+  index: number
+  at: number
+  wallTime: number
+  source: 'dom' | 'session'
+  type: string
+  generation?: number
+  sequence?: number
+  windowId?: number
+  text?: string
+  cursor?: number
+  hint?: string
+  focusedLayer?: number
+  virtualRevision?: number | null
+  basePhysicalSequence?: number
+  target?: string
+  relatedTarget?: string
+  activeElement?: string
+  documentFocused?: boolean
+  visibility?: string
+  trusted?: boolean
+  clientX?: number
+  clientY?: number
+  buttons?: number
+  bounds?: { x: number; y: number; width: number; height: number }
 }
 declare global {
   interface Window { stockCursorEvidence: StockCursorEvidence }
@@ -52,17 +80,73 @@ declare global {
 async function observePresentation(page: Page) {
   await page.addInitScript(() => {
     const NativeChannel = MessageChannel,
-      evidence: StockCursorEvidence = { state: 0, move: 0, up: 0, commands: {} }
+      evidence: StockCursorEvidence = { state: 0, move: 0, up: 0, commands: {}, timeline: [], dropped: 0 }
     window.stockCursorEvidence = evidence
+    let index = 0
+    const record = (entry: Omit<StockCursorObservation, 'index' | 'at' | 'wallTime'>) => {
+      const item = { ...entry, index: ++index, at: performance.now(), wallTime: Date.now() }
+      if (evidence.timeline.length < 4096) evidence.timeline.push(item)
+      else evidence.dropped++
+    }
+    const name = (target: EventTarget | null): string => {
+      if (target === window) return 'window'
+      if (target === document) return 'document'
+      if (!(target instanceof Element)) return target === null ? 'null' : 'other'
+      const owner = target.closest('[data-window-id]')?.getAttribute('data-window-id')
+      return `${target.tagName.toLowerCase()}${target.id ? `#${target.id}` : ''}${target.classList.length ? `.${[...target.classList].join('.')}` : ''}${owner ? `[window=${owner}]` : ''}`
+    }
+    const observeDOM = (event: Event) => {
+      // Observe only. Do not focus, preventDefault, change pointer ownership,
+      // or synthesize a compensating move after a native boundary event.
+      const canvas = document.querySelector<HTMLCanvasElement>('canvas[data-window-id]')
+      if (!canvas) return
+      const mouse = event instanceof MouseEvent ? event : undefined,
+        related = event instanceof MouseEvent || event instanceof FocusEvent ? event.relatedTarget : null,
+        bounds = /leave|out|blur|visibilitychange/.test(event.type) ? canvas.getBoundingClientRect() : undefined
+      record({
+        source: 'dom', type: event.type, target: name(event.target), relatedTarget: name(related),
+        activeElement: name(document.activeElement), documentFocused: document.hasFocus(),
+        visibility: document.visibilityState, trusted: event.isTrusted,
+        ...(mouse ? { clientX: mouse.clientX, clientY: mouse.clientY, buttons: mouse.buttons } : {}),
+        ...(bounds ? { bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } } : {}),
+      })
+    }
+    for (const type of [
+      'mouseenter', 'mouseleave', 'mousemove', 'mousedown', 'mouseup',
+      'pointerenter', 'pointerleave', 'pointerover', 'pointerout', 'pointermove', 'pointerdown', 'pointerup',
+      'focusin', 'focusout', 'visibilitychange',
+    ]) document.addEventListener(type, observeDOM, { capture: true, passive: true })
+    window.addEventListener('focus', observeDOM, { passive: true })
+    window.addEventListener('blur', observeDOM, { passive: true })
     window.MessageChannel = new Proxy(NativeChannel, {
       construct(target, args, newTarget) {
         const channel = Reflect.construct(target, args, newTarget) as MessageChannel
         channel.port1.addEventListener('message', (event: MessageEvent<unknown>) => {
           if (!event.data || typeof event.data !== 'object') return
-          const message = event.data as { generation?: number; sequence?: number; type?: string; text?: string }
+          const message = event.data as {
+            generation?: number; sequence?: number; windowId?: number; type?: string; text?: string
+            input?: {
+              cursor?: number; hint?: string; focused?: number
+              virtualCursor?: { revision: number; basePhysicalSequence: number } | null
+            }
+          }
           if (!Number.isSafeInteger(message.generation) || !Number.isSafeInteger(message.sequence)) return
-          if (message.type === 'state') evidence.state = message.sequence!
+          if (message.type === 'state') {
+            evidence.state = message.sequence!
+            record({ source: 'session', type: message.type, generation: message.generation, sequence: message.sequence })
+          }
+          if (message.type === 'window-input') record({
+            source: 'session', type: message.type, generation: message.generation,
+            sequence: message.sequence, windowId: message.windowId,
+            cursor: message.input?.cursor, hint: message.input?.hint, focusedLayer: message.input?.focused,
+            virtualRevision: message.input?.virtualCursor?.revision ?? null,
+            basePhysicalSequence: message.input?.virtualCursor?.basePhysicalSequence,
+          })
           if (message.type !== 'log' || typeof message.text !== 'string') return
+          if (message.text.startsWith('stock-')) record({
+            source: 'session', type: message.type, generation: message.generation,
+            sequence: message.sequence, text: message.text,
+          })
           if (message.text.startsWith('stock-command:')) evidence.commands[message.text] = message.sequence!
           if (message.text.startsWith('stock-move:')) evidence.move = message.sequence!
           if (message.text.startsWith('stock-up:')) evidence.up = message.sequence!
@@ -106,6 +190,24 @@ async function preserveCleanup(primary: unknown[], cleanup: () => Promise<void>)
     if (primary.length) throw new AggregateError([...primary, error], 'Stock cursor/hint scenario and cleanup failed')
     throw error
   }
+}
+
+async function finishWithEvidence(page: Page, info: TestInfo, name: string, cleanup: (() => Promise<void>)[]) {
+  const failures: unknown[] = []
+  // Retain the failure boundary before cleanup changes the game. Evidence
+  // collection failure must still permit mouse release and real Stop cleanup.
+  try {
+    await info.attach(name, {
+      contentType: 'application/json',
+      body: JSON.stringify(await page.evaluate(() => window.stockCursorEvidence)),
+    })
+  } catch (error) { failures.push(error) }
+  for (const action of cleanup) {
+    try { await action() }
+    catch (error) { failures.push(error) }
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) throw new AggregateError(failures, 'Stock input evidence and cleanup failed')
 }
 
 for (const backend of ['asyncify', 'jspi']) {
@@ -164,7 +266,9 @@ for (const backend of ['asyncify', 'jspi']) {
           body: JSON.stringify({ backend, binary, revision, physical: 'text', storedChildCursor: 0 }),
         })
       } catch (error) { primary.push(error); throw error }
-      finally { await preserveCleanup(primary, () => game.stop()) }
+      finally { await preserveCleanup(primary, () => finishWithEvidence(
+        page, info, 'stock-cursor-passive-input-timeline', [() => game.stop()],
+      )) }
     })
 
     test(`${variant}: hint assignment and showParentHint preserve native inheritance and refresh timing`, async ({ page }, info) => {
@@ -233,10 +337,11 @@ for (const backend of ['asyncify', 'jspi']) {
           body: JSON.stringify({ backend, binary, localHint: 'own next', showParentHint: true, presentedHint: 'root hint' }),
         })
       } catch (error) { primary.push(error); throw error }
-      finally { await preserveCleanup(primary, async () => {
-        if (pressed) await page.mouse.up()
-        await game.stop()
-      }) }
+      finally { await preserveCleanup(primary, () => finishWithEvidence(
+        page, info, 'stock-hint-passive-input-timeline', [
+          ...(pressed ? [() => page.mouse.up()] : []), () => game.stop(),
+        ],
+      )) }
     })
   }
 }
