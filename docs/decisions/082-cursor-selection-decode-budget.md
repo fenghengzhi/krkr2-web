@@ -2,6 +2,8 @@
 
 状态：开发候选，尚未取得本批 GitHub-hosted 执行结果。完整非插件目标保持 active；全部可执行验证交给 GitHub-hosted Actions，以大批次提交，下次工作时回收结果，不实时轮询。会话协议 **27**、TJS ABI **5**、字体 ABI **2** 不变。
 
+已整批推送提交 `0679f6725efe9b69d6747ddd8d0026d13b89384a`，对应 [Full test suite 37242235256](https://github.com/fenghengzhi/krkr2-web/actions/runs/37242235256)。首次唯一查询为 **in_progress／conclusion=null**，仅确认创建及提交绑定；原响应保存于 `out/verification/github-actions/37242235256/initial-run-discovery.json`，未检查实时作业。本条文档记录使用 `[skip ci]`，不新增验证结果。
+
 ## 已回收证据
 
 本批只各取一次固定 run/jobs/artifacts 快照，并取回清单当时已有的全部产物。
