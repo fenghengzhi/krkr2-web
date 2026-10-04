@@ -7,6 +7,12 @@ export interface CursorImage extends Pixels {
   depth: number
   encoding: 'dib' | 'png'
   mode: 'alpha' | 'and-xor'
+  /** Preserve format facts for the native loading policy without making the
+   * generic parser reject a structurally decodable image. */
+  dibHeaderSize?: number
+  topDown?: boolean
+  /** Embedded ICO frames use the loaded image center, not CUR hotspot scaling. */
+  icon?: boolean
   /** One byte per pixel, either 0 or 255; retained even for alpha images. */
   andMask: Uint8Array
 }
@@ -171,6 +177,7 @@ async function dib(bytes: Uint8Array, width: number, height: number, options: Cu
   if (hasMask && bytes.length !== offset + maskLength) fail('extra DIB pixel data')
   if (!alpha) for (let at = 3; at < data.length; at += 4) data[at] = 255
   return { width, height, data, andMask, depth, encoding: 'dib' as const,
+    dibHeaderSize: size, topDown: doubled < 0,
     mode: alpha ? 'alpha' as const : 'and-xor' as const }
 }
 
@@ -203,8 +210,8 @@ async function frame(bytes: Uint8Array, budget: Budget, options: CursorDecodeOpt
       if (decoded.width !== width || decoded.height !== height || decoded.data.length !== width * height * 4)
         fail('PNG decoder returned inconsistent pixels')
       images.push({ width, height, data: new Uint8Array(decoded.data), andMask: new Uint8Array(width * height),
-        depth: 32, encoding: 'png', mode: 'alpha', hotspot })
-    } else images.push({ ...await dib(payload, width, height, options), hotspot })
+        depth: 32, encoding: 'png', mode: 'alpha', hotspot, icon: type === 1 })
+    } else images.push({ ...await dib(payload, width, height, options), hotspot, icon: type === 1 })
   }
   return { images }
 }

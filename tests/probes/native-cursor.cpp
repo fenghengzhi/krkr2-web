@@ -277,6 +277,8 @@ std::vector<Fixture> fixtures() {
     { Image i; i.topDown = true; add("dib-top-down", {i}, "characterization"); }
     { Image i; i.alphaMode = 1; i.omitMask = true; add("dib-alpha-no-mask", {i}, "characterization"); }
     { Image i; i.hotX = 33; i.hotY = 40; add("hotspot-outside", {i}, "characterization"); }
+    { Image i; i.hotX = 65535; i.hotY = 32768; add("hotspot-wide-natural", {i}, "characterization"); }
+    { Image i; i.width = 8; i.height = 4; i.bpp = 24; i.hotX = 65535; i.hotY = 32768; add("hotspot-wide-small", {i}, "characterization"); }
     for (unsigned mode : {0u, 1u, 2u}) {
         Image i; i.encoding = mode == 2 ? "png-indexed-trns" : mode == 1 ? "png-rgb" : "png-rgba";
         i.header = 0; i.bpp = mode == 2 ? 8 : mode == 1 ? 24 : 32; i.payload = png(32, 32, mode);
@@ -295,6 +297,38 @@ std::vector<Fixture> fixtures() {
     std::reverse(withoutExact.begin(), withoutExact.end()); add("multi-without-exact-reversed", withoutExact, "selection");
     Image tieA, tieB; tieA.tag = 3; tieA.hotX = 4; tieB.tag = 9; tieB.hotX = 23;
     add("multi-equal-tie", {tieA, tieB}, "selection"); add("multi-equal-tie-reversed", {tieB, tieA}, "selection");
+    // Keep dimension, depth, directory order and malformed alternatives
+    // independent. A file loader need not share resource-directory selection.
+    auto selectionPair = [&](const std::string& id, std::vector<Image> images) {
+        add(id, images, "selection"); std::reverse(images.begin(), images.end());
+        add(id + "-reversed", images, "selection");
+    };
+    std::vector<Image> smallOnly, largeOnly, rectangles;
+    for (unsigned size : {16u, 24u}) { Image i; i.width = i.height = size; i.tag = size / 8; i.hotX = size / 3; smallOnly.push_back(i); }
+    for (unsigned size : {48u, 64u}) { Image i; i.width = i.height = size; i.tag = size / 8; i.hotX = size / 3; largeOnly.push_back(i); }
+    for (unsigned n = 0; n < 4; n++) {
+        Image i; i.width = n == 0 ? 32 : n == 1 ? 16 : n == 2 ? 48 : 40;
+        i.height = n == 0 ? 16 : n == 1 ? 32 : n == 2 ? 40 : 48;
+        i.tag = n + 1; i.hotX = n * 3; rectangles.push_back(i);
+    }
+    selectionPair("multi-small-only", smallOnly); selectionPair("multi-large-only", largeOnly);
+    selectionPair("multi-crossed-rectangles", rectangles);
+    Image exactMono, smallColor; exactMono.bpp = 1; smallColor.width = smallColor.height = 16; smallColor.tag = 3;
+    selectionPair("multi-size-before-depth", {exactMono, smallColor});
+    Image validExact, brokenSmall; brokenSmall.width = brokenSmall.height = 16; brokenSmall.payload = {0, 0, 0, 0};
+    selectionPair("multi-broken-smaller", {validExact, brokenSmall});
+    Image brokenExact, validSmall; brokenExact.payload = {0, 0, 0, 0}; validSmall.width = validSmall.height = 16;
+    selectionPair("multi-broken-exact", {brokenExact, validSmall});
+    for (unsigned bpp : {1u, 4u, 8u, 16u, 24u, 32u}) {
+        Image i; i.width = 13; i.height = 9; i.hotX = 12; i.hotY = 8; i.bpp = bpp;
+        add("dib-scale-13x9-" + std::to_string(bpp), {i}, "scaling");
+    }
+    for (unsigned bpp : {24u, 32u}) {
+        Image i; i.width = i.height = 48; i.hotX = 23; i.hotY = 17; i.bpp = bpp;
+        add("dib-scale-48x48-" + std::to_string(bpp), {i}, "scaling");
+    }
+    { Image i; i.width = i.height = 48; i.hotX = 23; i.hotY = 17; i.header = 0; i.encoding = "png-rgba"; i.alphaMode = 3; i.payload = png(48, 48, 3); add("png-scale-48x48", {i}, "scaling"); }
+    { Image i; i.width = i.height = 256; i.hotX = 191; i.hotY = 203; i.alphaMode = 3; add("dib-alpha-scale-256", {i}, "scaling"); }
     Image a; a.tag = 1; a.hotX = 2; a.hotY = 3;
     Image b = a; b.tag = 2; b.hotX = 7; b.hotY = 11;
     Image c = a; c.tag = 3; c.hotX = 17; c.hotY = 23;
@@ -320,6 +354,54 @@ std::vector<Fixture> fixtures() {
     return output;
 }
 
+struct BitmapPlane {
+    bool present = false, ok = false;
+    DWORD error = 0;
+    unsigned width = 0, height = 0, depth = 0, stride = 0, lines = 0;
+    std::string file;
+    std::vector<unsigned> palette;
+    std::string json() const {
+        std::ostringstream o; o << "{\"present\":" << (present ? "true" : "false")
+          << ",\"ok\":" << (ok ? "true" : "false") << ",\"error\":" << error
+          << ",\"width\":" << width << ",\"height\":" << height << ",\"depth\":" << depth
+          << ",\"stride\":" << stride << ",\"scanlines\":" << lines
+          << ",\"topDown\":true,\"file\":" << quote(file) << ",\"paletteRGB\":" << array(palette) << '}';
+        return o.str();
+    }
+};
+BitmapPlane copyPlane(const fs::path& output, const std::string& name, HBITMAP bitmap,
+    LONG width, LONG height, unsigned depth) {
+    BitmapPlane out; out.present = bitmap != nullptr;
+    if (!bitmap) return out;
+    if (width <= 0 || height <= 0 || width > 512 || height > 1024 || (depth != 1 && depth != 32)) {
+        out.error = ERROR_INVALID_DATA; return out;
+    }
+    out.width = static_cast<unsigned>(width); out.height = static_cast<unsigned>(height); out.depth = depth;
+    out.stride = ((out.width * depth + 31) / 32) * 4;
+    Bytes pixels(static_cast<size_t>(out.stride) * out.height, 0);
+    struct { BITMAPINFOHEADER header; RGBQUAD colors[2]; } information{};
+    information.header.biSize = sizeof(BITMAPINFOHEADER);
+    information.header.biWidth = width; information.header.biHeight = -height;
+    information.header.biPlanes = 1; information.header.biBitCount = static_cast<WORD>(depth);
+    information.header.biCompression = BI_RGB;
+    if (depth == 1) { information.header.biClrUsed = 2; information.colors[1] = {255, 255, 255, 0}; }
+    HDC dc = CreateCompatibleDC(nullptr);
+    if (!dc) { out.error = GetLastError(); return out; }
+    SetLastError(0);
+    const int lines = GetDIBits(dc, bitmap, 0, out.height, pixels.data(),
+        reinterpret_cast<BITMAPINFO*>(&information), DIB_RGB_COLORS);
+    out.error = lines == height ? 0 : GetLastError();
+    out.lines = lines > 0 ? static_cast<unsigned>(lines) : 0;
+    const bool deleted = DeleteDC(dc) != FALSE;
+    if (!deleted && !out.error) out.error = GetLastError();
+    out.ok = lines == height && deleted;
+    if (depth == 1) for (const auto& color : information.colors)
+        out.palette.push_back((color.rgbRed << 16) | (color.rgbGreen << 8) | color.rgbBlue);
+    out.file = name + (depth == 1 ? ".mask1" : ".bgra");
+    // Preserve partial bytes too; scanlines/ok distinguish them from evidence.
+    write(output / out.file, pixels);
+    return out;
+}
 struct CursorInfo {
     bool ok = false, icon = false;
     bool bitmapsDeleted = true;
@@ -327,16 +409,20 @@ struct CursorInfo {
     LONG width = 0, height = 0, maskWidth = 0, maskHeight = 0;
     int maskQueryBytes = 0, colorQueryBytes = 0;
     WORD bpp = 0;
+    BitmapPlane colorPlane, maskPlane;
+    bool planesCopied = false;
     std::string json() const {
         std::ostringstream o; o << "{\"ok\":" << (ok ? "true" : "false") << ",\"error\":" << error
           << ",\"fIcon\":" << (icon ? "true" : "false") << ",\"hotspot\":{\"x\":" << x << ",\"y\":" << y
           << "},\"width\":" << width << ",\"height\":" << height << ",\"colorBpp\":" << bpp
           << ",\"maskWidth\":" << maskWidth << ",\"maskHeight\":" << maskHeight
           << ",\"maskQueryBytes\":" << maskQueryBytes << ",\"colorQueryBytes\":" << colorQueryBytes
-          << ",\"bitmapsDeleted\":" << (bitmapsDeleted ? "true" : "false") << '}'; return o.str();
+          << ",\"bitmapsDeleted\":" << (bitmapsDeleted ? "true" : "false")
+          << ",\"planesCopied\":" << (planesCopied ? "true" : "false")
+          << ",\"colorPlane\":" << colorPlane.json() << ",\"maskPlane\":" << maskPlane.json() << '}'; return o.str();
     }
 };
-CursorInfo cursorInfo(HCURSOR cursor) {
+CursorInfo cursorInfo(HCURSOR cursor, const fs::path& output, const std::string& name) {
     CursorInfo out; ICONINFO info{}; SetLastError(0);
     if (!GetIconInfo(cursor, &info)) { out.error = GetLastError(); return out; }
     out.ok = true; out.icon = info.fIcon != FALSE; out.x = info.xHotspot; out.y = info.yHotspot;
@@ -352,6 +438,15 @@ CursorInfo cursorInfo(HCURSOR cursor) {
         else { out.width = color.bmWidth; out.height = color.bmHeight; out.bpp = color.bmBitsPixel; }
     } else { out.width = mask.bmWidth; out.height = mask.bmHeight / 2; }
     if (out.width <= 0 || out.height <= 0) { out.ok = false; if (!out.error) out.error = ERROR_INVALID_DATA; }
+    try {
+        out.colorPlane = copyPlane(output, name + "-color", info.hbmColor, color.bmWidth, color.bmHeight, 32);
+        out.maskPlane = copyPlane(output, name + "-mask", info.hbmMask, mask.bmWidth, mask.bmHeight, 1);
+        out.planesCopied = out.maskPlane.ok && (!out.colorPlane.present || out.colorPlane.ok);
+    } catch (...) {
+        if (info.hbmColor) DeleteObject(info.hbmColor);
+        if (info.hbmMask) DeleteObject(info.hbmMask);
+        throw;
+    }
     if (info.hbmColor && !DeleteObject(info.hbmColor)) { out.bitmapsDeleted = false; out.ok = false; out.error = GetLastError(); }
     if (info.hbmMask && !DeleteObject(info.hbmMask)) { out.bitmapsDeleted = false; out.ok = false; out.error = GetLastError(); }
     return out;
@@ -408,7 +503,7 @@ std::string observe(const fs::path& output, const Fixture& f, GetCursorFrameInfo
       << ",\"frameInfoAvailable\":" << (frameInfo ? "true" : "false");
     if (!cursor) { o << ",\"steps\":[]} "; return o.str(); }
     try {
-        const auto info = cursorInfo(cursor);
+        const auto info = cursorInfo(cursor, output, f.id + "-root");
         if (!info.bitmapsDeleted) cleanupFailed = true;
         o << ",\"info\":" << info.json() << ",\"steps\":[";
         // Include the first out-of-range step as characterization. Static
@@ -423,7 +518,7 @@ std::string observe(const fs::path& output, const Fixture& f, GetCursorFrameInfo
                 HCURSOR handle = frameInfo(cursor, 0, step, &rate, &steps);
                 const DWORD frameError = handle ? 0 : GetLastError();
                 if (handle) {
-                    frame = cursorInfo(handle);
+                    frame = cursorInfo(handle, output, f.id + "-frame-" + std::to_string(step));
                     if (!frame.bitmapsDeleted) cleanupFailed = true;
                 }
                 o << ",\"frameInfo\":{\"available\":true,\"ok\":" << (handle ? "true" : "false") << ",\"error\":" << frameError

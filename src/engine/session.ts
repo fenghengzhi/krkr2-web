@@ -36,6 +36,7 @@ import {
 import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
 import { CursorStorage } from './storage/cursors.ts'
 import { decodeCursor, type CursorAsset } from '../formats/cursor/index.ts'
+import { loadCursorAsset, windowsDesktopCursorProfile } from '../formats/cursor/load.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree, type LayerState } from './scene/layers.ts'
 import { drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
@@ -3076,16 +3077,19 @@ export class EngineSession {
   }
   private async decodeCursorAsset(bytes: Uint8Array): Promise<CursorAsset> {
     let deadline = this.deps.now() + 8
-    return decodeCursor(bytes, {
-      png: (payload) => this.decodeImage(payload),
-      checkpoint: async () => {
-        this.control.check()
-        if (this.deps.now() >= deadline) {
-          await this.yieldGraphics()
-          deadline = this.deps.now() + 8
-        }
-      },
+    const checkpoint = async () => {
+      this.control.check()
+      if (this.deps.now() >= deadline) {
+        await this.yieldGraphics()
+        deadline = this.deps.now() + 8
+      }
+    }
+    const source = await decodeCursor(bytes, {
+      png: (payload) => this.decodeImage(payload), checkpoint,
     })
+    // The cached object models LoadCursorFromFile's selected, resized handle;
+    // raw format decoding remains separate for independent native comparisons.
+    return loadCursorAsset(source, windowsDesktopCursorProfile, { checkpoint })
   }
   private async yieldGraphics(): Promise<void> {
     await new Promise<void>((resolve) => {

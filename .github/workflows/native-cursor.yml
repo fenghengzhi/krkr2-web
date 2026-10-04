@@ -24,6 +24,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Compile and observe User32 with an offscreen DC
+        id: reference
         env:
           PROBE_RUNNER_LABEL: ${{ matrix.os }}
         run: |
@@ -93,7 +94,7 @@ jobs:
                 $observations.globalInputUsed -ne $false -or $observations.wallClockAnimationMeasured -ne $false -or
                 $observations.observedFixtures -ne $observations.expectedFixtures -or
                 $observations.fixtures.Count -ne $observations.expectedFixtures -or
-                $observations.expectedFixtures -ne 57 -or $observations.sourceCommit -cne $env:GITHUB_SHA) {
+                $observations.expectedFixtures -ne 81 -or $observations.sourceCommit -cne $env:GITHUB_SHA) {
               throw 'Native cursor reference output is incomplete or has an unexpected scope/commit.'
             }
             $ids = [Collections.Generic.HashSet[string]]::new()
@@ -103,11 +104,11 @@ jobs:
               if (-not (Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -ne $fixture.bytes) {
                 throw "Missing or incomplete raw cursor fixture: $($fixture.id)"
               }
-              if ($fixture.loaded -and $fixture.info.ok -ne $true) {
+              if ($fixture.loaded -and ($fixture.info.ok -ne $true -or $fixture.info.planesCopied -ne $true)) {
                 throw "Loaded cursor metadata was not completely observed: $($fixture.id)"
               }
               foreach ($step in $fixture.steps) {
-                if ($step.frameInfo.ok -eq $true -and $step.frameInfo.info.ok -ne $true) {
+                if ($step.frameInfo.ok -eq $true -and ($step.frameInfo.info.ok -ne $true -or $step.frameInfo.info.planesCopied -ne $true)) {
                   throw "Animated frame metadata query was incomplete: $($fixture.id) step $($step.step)"
                 }
                 foreach ($draw in $step.draws) {
@@ -144,8 +145,12 @@ jobs:
           node-version: '24.19.0'
           cache: npm
       - run: npm ci
+        id: dependencies
       - name: Compare independent decoder with the actual observed fixture bytes
         run: node --import tsx tests/probes/cursor-compare.ts out/ci/native-cursor
+      - name: Compare native-profile cursor file loading and natural-size drawing
+        if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
+        run: node --import tsx tests/probes/cursor-load-compare.ts out/ci/native-cursor
       - name: Preserve exact evidence hashes
         if: always()
         run: |

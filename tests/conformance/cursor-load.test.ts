@@ -1,0 +1,217 @@
+import nodeTest from 'node:test'
+import assert from 'node:assert/strict'
+import { inflateSync } from 'node:zlib'
+import { loadCursorAsset, windowsDesktopCursorProfile } from '../../src/formats/cursor/load.ts'
+import { compositeCursor, cursorStep, decodeCursor, type CursorAsset, type CursorImage } from '../../src/formats/cursor/index.ts'
+import { decodePng } from '../../src/formats/image/png.ts'
+import { cursorDib, cursorFile, cursorPng } from '../helpers/cursor-fixtures.ts'
+
+const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
+
+// No smooth-scaling golden is manufactured from the candidate implementation.
+// Full native RGB/hotspot comparison lives in the hosted cursor loading probe.
+function image(width: number, height: number, depth = 32, red = 37,
+  hotspot: readonly [number, number] = [3, 5]): CursorImage {
+  const data = new Uint8Array(width * height * 4)
+  for (let at = 0; at < data.length; at += 4) data.set([red, 71, 113, 255], at)
+  return { width, height, depth, data, andMask: new Uint8Array(width * height),
+    hotspot: { x: hotspot[0], y: hotspot[1] }, encoding: 'dib', mode: 'and-xor',
+    dibHeaderSize: 40, topDown: false, icon: false }
+}
+function asset(images: CursorImage[][], kind: 'cur' | 'ani' = 'cur'): CursorAsset {
+  return { kind, frames: images.map((images) => ({ images })),
+    sequence: images.map((_, index) => index), rates: images.map(() => 6),
+    durationJiffies: images.length * 6, sourceBytes: 123,
+    imageCount: images.reduce((sum, frame) => sum + frame.length, 0),
+    decodedBytes: images.flat().reduce((sum, value) => sum + value.width * value.height * 5, 0) }
+}
+function finish<T>(work: Generator<void, T>): T {
+  let result = work.next()
+  while (!result.done) result = work.next()
+  return result.value
+}
+const png = async (bytes: Uint8Array) => {
+  const parser = decodePng(bytes)
+  assert(parser)
+  const plan = finish(parser)
+  return finish(plan.decode(inflateSync(plan.compressed, { maxOutputLength: plan.expandedLength })))
+}
+const loadedImage = (value: CursorAsset) => value.frames[0]!.images[0]!
+
+test('cursor load chooses the exact 32-pixel directory entry independently of source order', async () => {
+  const entries = [16, 32, 48, 64].map((size) => image(size, size, 32, size, [size / 4, size / 2]))
+  for (const list of [entries, [...entries].reverse()]) {
+    const source = asset([list]), loaded = await loadCursorAsset(source), result = loadedImage(loaded)
+    assert.equal(result.data[0], 32)
+    assert.deepEqual(result.hotspot, { x: 8, y: 16 })
+    assert.equal(result.width, 32)
+    assert.equal(result.height, 32)
+    assert.equal(loaded.imageCount, 1)
+    assert.equal(loaded.decodedBytes, 5120)
+    assert.equal(loaded.sourceBytes, 123)
+    assert.equal(source.frames[0]!.images.length, 4)
+  }
+})
+
+test('cursor load color depth precedes directory order and equal-depth ties preserve directory order', async () => {
+  const entries = [1, 4, 8, 24, 32].map((depth) => image(32, 32, depth, depth, [Math.floor(depth / 2), 5]))
+  for (const list of [entries, [...entries].reverse()]) {
+    const selected = loadedImage(await loadCursorAsset(asset([list])))
+    assert.equal(selected.depth, 32)
+    assert.deepEqual(selected.hotspot, { x: 16, y: 5 })
+  }
+  const first = image(32, 32, 32, 111, [4, 5]), second = image(32, 32, 32, 77, [23, 5])
+  for (const list of [[first, second], [second, first]]) {
+    const selected = loadedImage(await loadCursorAsset(asset([list])))
+    assert.equal(selected.data[0], list[0]!.data[0])
+    assert.deepEqual(selected.hotspot, list[0]!.hotspot)
+  }
+})
+
+test('cursor load selects the 48-pixel image over equidistant 16-pixel content', async () => {
+  const entries = [16, 48, 64].map((size) => image(size, size, 32, size / 16 * 37, [size / 4, size / 2]))
+  for (const list of [entries, [...entries].reverse()]) {
+    const selected = loadedImage(await loadCursorAsset(asset([list])))
+    // This first corner distinguishes tag3 from the 16/64-pixel candidates;
+    // their proportional hotspots alone are all (8,16) after loading.
+    assert.equal(selected.data[0], 111)
+    assert.deepEqual(selected.hotspot, { x: 8, y: 16 })
+  }
+})
+
+test('cursor load low-depth rectangular raster uses centered point samples and an independent Boolean mask', async () => {
+  const source = image(8, 4, 24, 0, [2, 1])
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 8; x++) {
+    source.data.set([37 + x * 3, 71 + y * 5, 113 + x + y, 255], (y * 8 + x) * 4)
+    source.andMask[y * 8 + x] = y >= 2 ? 255 : 0
+  }
+  const selected = loadedImage(await loadCursorAsset(asset([[source]])))
+  assert.deepEqual(selected.hotspot, { x: 8, y: 8 })
+  assert.deepEqual(Array.from({ length: 16 }, (_, x) => selected.data[x * 4]),
+    [37, 37, 37, 37, 40, 40, 40, 40, 43, 43, 43, 43, 46, 46, 46, 46])
+  assert.deepEqual(Array.from({ length: 32 }, (_, y) => selected.data[y * 32 * 4 + 1]),
+    [...Array(8).fill(71), ...Array(8).fill(76), ...Array(8).fill(81), ...Array(8).fill(86)])
+  assert.equal(selected.andMask[15 * 32], 0)
+  assert.equal(selected.andMask[16 * 32], 255)
+  assert.equal(selected.mode, 'and-xor')
+})
+
+test('cursor load nonintegral point scaling and hotspot rounding follow the native 13x9 palette case', async () => {
+  const source = image(13, 9, 4, 0, [12, 8])
+  for (let y = 0; y < 9; y++) for (let x = 0; x < 13; x++) source.data[(y * 13 + x) * 4] = x
+  const selected = loadedImage(await loadCursorAsset(asset([[source]])))
+  assert.deepEqual(selected.hotspot, { x: 30, y: 28 })
+  assert.deepEqual(Array.from({ length: 16 }, (_, x) => selected.data[x * 4]),
+    [0, 0, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 5, 5, 5, 6])
+  assert.equal(selected.data[31 * 4], 12)
+})
+
+test('cursor load PNG256 centers samples before alpha composition and scales its outside-center hotspot', async () => {
+  const pixels: number[] = []
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++)
+    pixels.push((x * 5 + 31) & 255, (y * 7 + 61) & 255, (x + y + 127) & 255,
+      x % 3 === 0 ? 0 : x % 3 === 1 ? 128 : 255)
+  const raw = cursorFile([{ width: 256, height: 256, hotspot: [191, 203], payload: cursorPng(256, 256, pixels) }]),
+    source = await decodeCursor(raw, { png }), loaded = await loadCursorAsset(source), selected = loadedImage(loaded)
+  assert.deepEqual(selected.hotspot, { x: 24, y: 25 })
+  assert.deepEqual([...selected.data.subarray(0, 12)], [51, 89, 135, 128, 91, 89, 143, 0, 131, 89, 151, 255])
+  const target = { width: 32, height: 32, data: new Uint8Array(32 * 32 * 4) }
+  compositeCursor(selected, target, 0, 0)
+  assert.deepEqual([...target.data.subarray(0, 12)], [25, 44, 67, 255, 0, 0, 0, 255, 131, 89, 151, 255])
+  assert.equal(loaded.sourceBytes, raw.length)
+  assert.equal(source.frames[0]!.images[0]!.width, 256)
+})
+
+test('cursor load keeps every ANI frame and step while the smooth scaling candidate awaits native pixel calibration', async () => {
+  const source = asset([[image(13, 9, 32, 37, [12, 8])], [image(48, 48, 32, 111, [12, 24])],
+    [image(32, 32, 32, 7, [17, 23])]], 'ani')
+  source.sequence = [2, 0, 2, 1, 0]
+  source.rates = [1, 4, 7, 2, 9]
+  source.durationJiffies = 23
+  source.animation = { width: 48, height: 64, depth: 4, planes: 1, flags: 3 }
+  const loaded = await loadCursorAsset(source)
+  assert.equal(loaded.frames.length, 3)
+  assert(loaded.frames.every((frame) => frame.images.length === 1 && frame.images[0]!.width === 32 && frame.images[0]!.height === 32))
+  assert.deepEqual(loaded.sequence, [2, 0, 2, 1, 0])
+  assert.deepEqual(loaded.rates, [1, 4, 7, 2, 9])
+  assert.deepEqual(loaded.frames.map((frame) => frame.images[0]!.hotspot), [{ x: 30, y: 28 }, { x: 8, y: 16 }, { x: 17, y: 23 }])
+  assert.deepEqual(loaded.animation, source.animation)
+  assert.equal(loaded.decodedBytes, 3 * 5120)
+  assert.equal(loaded.imageCount, 3)
+})
+
+test('cursor load retains native outside hotspots and uses the loaded center for embedded icons', async () => {
+  const cursor = image(32, 32, 32, 37, [33, 40]), icon = image(13, 9, 24, 37, [6, 4])
+  icon.icon = true
+  assert.deepEqual(loadedImage(await loadCursorAsset(asset([[cursor]]))).hotspot, { x: 33, y: 40 })
+  assert.deepEqual(loadedImage(await loadCursorAsset(asset([[icon]]))).hotspot, { x: 16, y: 16 })
+})
+
+test('cursor load native DIB policy is separate from structural decoding and checks the selected image', async () => {
+  const payload = cursorDib({ width: 1, height: 1, depth: 24, topDown: true, xorRows: [[30, 20, 10]] }),
+    decoded = await decodeCursor(cursorFile([{ width: 1, height: 1, payload }]), { png })
+  assert.equal(loadedImage(decoded).topDown, true)
+  assert.equal(loadedImage(decoded).dibHeaderSize, 40)
+  await assert.rejects(loadCursorAsset(decoded), /native file-loading policy/)
+  for (const dibHeaderSize of [52, 56, 108, 124]) {
+    const rejected = image(32, 32)
+    rejected.dibHeaderSize = dibHeaderSize
+    await assert.rejects(loadCursorAsset(asset([[rejected]])), /native file-loading policy/)
+    const unselected = image(48, 48)
+    unselected.dibHeaderSize = dibHeaderSize
+    const accepted = await loadCursorAsset(asset([[image(32, 32), unselected]]))
+    assert.equal(loadedImage(accepted).dibHeaderSize, 40)
+  }
+})
+
+test('cursor load snapshots selected planes, metadata and the profile before suspension', async () => {
+  const source = asset([[image(8, 4, 24, 37, [2, 1])]], 'ani'), profile = { ...windowsDesktopCursorProfile }
+  let resume!: () => void, entered!: () => void, calls = 0
+  const waiting = new Promise<void>((resolve) => { resume = resolve }), ready = new Promise<void>((resolve) => { entered = resolve }),
+    pending = loadCursorAsset(source, profile, { checkpoint: () => {
+      if (++calls === 1) { entered(); return waiting }
+    } })
+  try {
+    await Promise.race([ready, pending.then(() => { throw new Error('Loading ended before its checkpoint') })])
+    source.frames[0]!.images[0]!.data.fill(0)
+    source.frames[0]!.images[0]!.hotspot.x = 999
+    source.frames[0]!.images.length = 0
+    source.rates[0] = 0
+    profile.width = 1
+    resume()
+    const loaded = await pending
+    assert.equal(loadedImage(loaded).data[0], 37)
+    assert.deepEqual(loadedImage(loaded).hotspot, { x: 8, y: 8 })
+    assert.deepEqual(loaded.rates, [6])
+    assert.equal(loadedImage(loaded).data.buffer.byteLength, 4096)
+    assert.equal(loadedImage(loaded).andMask.buffer.byteLength, 1024)
+  } finally {
+    resume()
+    await pending.catch(() => {})
+  }
+})
+
+test('cursor load cooperatively cancels without publishing partial frames or mutating the source', async () => {
+  const source = asset([[image(13, 9, 32)], [image(48, 48, 32)]], 'ani'), cancelled = new Error('stop-load')
+  let calls = 0
+  await assert.rejects(loadCursorAsset(source, undefined, { checkpoint: () => {
+    if (++calls === 3) throw cancelled
+  } }), (error) => error === cancelled)
+  assert.equal(calls, 3)
+  assert.equal(source.frames[0]!.images[0]!.width, 13)
+  assert.equal(source.frames[1]!.images[0]!.width, 48)
+  assert.equal(source.frames[0]!.images[0]!.data[0], 37)
+})
+
+test('cursor load rejects uncalibrated desktop profiles and retains zero-rate assets without inventing timing', async () => {
+  const source = asset([[image(32, 32)]], 'ani')
+  for (const profile of [{ ...windowsDesktopCursorProfile, width: 64 }, { ...windowsDesktopCursorProfile, depth: 16 },
+    { ...windowsDesktopCursorProfile, dpi: 120 }])
+    await assert.rejects(loadCursorAsset(source, profile), /desktop profile/)
+  source.rates = [0]
+  source.durationJiffies = 0
+  const loaded = await loadCursorAsset(source)
+  assert.deepEqual(loaded.rates, [0])
+  assert.equal(loaded.durationJiffies, 0)
+  assert.throws(() => cursorStep(loaded, 0), /zero-rate playback timing/)
+})

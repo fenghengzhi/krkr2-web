@@ -29,6 +29,15 @@ const animationColors = [[255, 0, 0], [0, 255, 0], [0, 0, 255]] as const,
   animation = animatedCursor(animationColors.map((color, index) => solid(color, animationHotspots[index]!)), {
     sequence: animationSequence, rates: [6, 3, 9, 12],
   })
+const directoryImages = [
+  { size: 16, color: [255, 0, 255], hotspot: [4, 4] },
+  { size: 32, color: [150, 60, 190], hotspot: [11, 9] },
+  { size: 64, color: [0, 255, 255], hotspot: [16, 16] },
+].map(({ size, color, hotspot }) => ({ width: size, height: size,
+  hotspot: hotspot as [number, number], payload: cursorDib({ width: size, height: size, depth: 24,
+    xorRows: Array.from({ length: size }, () => Array.from({ length: size }, () =>
+      [color[2]!, color[1]!, color[0]!]).flat()),
+  }) }))
 const source = String.raw`
 System.exitOnWindowClose=false;
 var cursorWindow=new Window();cursorWindow.caption="Custom cursor";cursorWindow.setInnerSize(200,120);cursorWindow.visible=true;
@@ -44,10 +53,10 @@ cursorRoot.setCursorPos(60,50);
 async function pixels(marker: Locator): Promise<number[][]> {
   return marker.evaluate((node) => {
     const canvas = node as HTMLCanvasElement, context = canvas.getContext('2d')!
-    return [0, 2, 4, 6].map((x) => [...context.getImageData(x, 1, 1, 1).data])
+    return [2, 10, 18, 26].map((x) => [...context.getImageData(x, 8, 1, 1).data])
   })
 }
-async function hotspot(surface: Locator, x: number, y: number, hx = 2, hy = 1) {
+async function hotspot(surface: Locator, x: number, y: number, hx = 8, hy = 8) {
   await expect.poll(() => surface.evaluate((element, point) => {
     const canvas = element.querySelector<HTMLCanvasElement>('canvas[data-window-id]')!,
       marker = element.querySelector<HTMLCanvasElement>('.game-custom-cursor')
@@ -76,6 +85,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       { name: 'mono.cur', mimeType: 'application/octet-stream', buffer: monochrome },
       { name: 'full.ani', mimeType: 'application/octet-stream', buffer: animation },
       { name: 'colored.cur', mimeType: 'application/octet-stream', buffer: coloredXor },
+      { name: 'directory.cur', mimeType: 'application/octet-stream', buffer: cursorFile(directoryImages) },
+      { name: 'reverse.cur', mimeType: 'application/octet-stream', buffer: cursorFile([...directoryImages].reverse()) },
       { name: 'colors.mp4', mimeType: 'video/mp4', buffer: readFileSync(new URL('../fixtures/video/colors.mp4', import.meta.url)) },
     ]), surface = game.surface('Custom cursor'), marker = surface.locator('.game-custom-cursor'),
       canvas = surface.locator('canvas[data-window-id]'), primary: unknown[] = []
@@ -84,13 +95,15 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect(marker).toHaveClass(/game-virtual-cursor/)
       await expect(marker).toHaveCSS('pointer-events', 'none')
       await expect(canvas).toHaveCSS('cursor', 'none')
+      await expect(marker).toHaveAttribute('width', '32')
+      await expect(marker).toHaveAttribute('height', '32')
       await hotspot(surface, 60, 50)
       await expect.poll(() => pixels(marker)).toEqual([
         [0, 0, 0, 255], [255, 255, 255, 255], [18, 52, 86, 255], [237, 203, 169, 255],
       ])
       const committed = await marker.screenshot()
       await info.attach('committed-canvas-and-xor', { body: committed, contentType: 'image/png' })
-      expect(await screenshotPixels(page, committed, [{ x: 4, y: 1 }, { x: 6, y: 1 }]))
+      expect(await screenshotPixels(page, committed, [{ x: 18, y: 8 }, { x: 26, y: 8 }]))
         .toEqual([[18, 52, 86, 255], [237, 203, 169, 255]])
 
       // The same static CUR must resample a newly committed game frame.
@@ -140,7 +153,17 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         const frame = animationSequence[entry.step]!
         expect(entry.color).toEqual([...animationColors[frame]!, 255])
         for (let axis = 0; axis < 2; axis++)
-          expect(Math.abs(entry.hotspot[axis]! - animationHotspots[frame]![axis]!)).toBeLessThanOrEqual(0.6)
+          expect(Math.abs(entry.hotspot[axis]! - animationHotspots[frame]![axis]! * [4, 8][axis]!)).toBeLessThanOrEqual(0.6)
+      }
+
+      // File loading selects the exact native size independently of directory
+      // order. Both deliberately wrong alternatives must remain unpresented.
+      for (const name of ['directory.cur', 'reverse.cur']) {
+        await evaluate(page, `(cursorRoot.cursor="${name}",cursorRoot.setCursorPos(60,50),0)`, '0')
+        await expect.poll(() => pixels(marker)).toEqual(Array.from({ length: 4 }, () => [150, 60, 190, 255]))
+        await hotspot(surface, 60, 50, 11, 9)
+        await expect(marker).toHaveAttribute('width', '32')
+        await expect(marker).toHaveAttribute('height', '32')
       }
 
       // Compare to actual DOM composition with the cursor hidden. This covers
@@ -152,10 +175,10 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect(surface.locator('.video-mixing-bitmap')).toBeVisible()
       await canvas.scrollIntoViewIfNeeded()
       const before = (await canvas.boundingBox())!,
-        clip = { x: Math.round(before.x + before.width * 60 / 200 - 2),
-          y: Math.round(before.y + before.height * 50 / 120 - 1), width: 8, height: 4 },
+        clip = { x: Math.round(before.x + before.width * 60 / 200 - 8),
+          y: Math.round(before.y + before.height * 50 / 120 - 8), width: 32, height: 32 },
         background = await page.screenshot({ clip, scale: 'css' }),
-        backdrop = await screenshotPixels(page, background, [{ x: 4, y: 1 }, { x: 6, y: 1 }])
+        backdrop = await screenshotPixels(page, background, [{ x: 18, y: 8 }, { x: 26, y: 8 }])
       await info.attach('actual-video-backdrop', { body: background, contentType: 'image/png' })
       await evaluate(page, '(cursorRoot.cursor="mono.cur",cursorRoot.setCursorPos(60,50),0)', '0')
       await expect(marker).toBeVisible()

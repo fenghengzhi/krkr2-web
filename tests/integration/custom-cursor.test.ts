@@ -7,15 +7,47 @@ import { inflateImage } from '../../src/backends/files/blob-source.ts'
 import { MemorySaveStore } from '../../src/engine/ports/saves.ts'
 import type { EngineEvent, SessionDependencies } from '../../src/engine/session.ts'
 import type { InputView } from '../../src/engine/ports/input.ts'
+import type { CursorImage } from '../../src/formats/cursor/index.ts'
 
 const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
 type Definition = Extract<EngineEvent, { type: 'cursor-asset' }>
+// The fixed file-loading profile retains one 32x32 RGBA+AND image/frame.
+const loadedImageBytes = 5120
 
 function cur(red: number, green: number, blue: number) {
   return cursorFile([{
     width: 1, height: 1,
     payload: cursorDib({ width: 1, height: 1, depth: 24, xorRows: [[blue, green, red]] }),
   }])
+}
+
+function directoryImage(
+  size: number,
+  depth: 24 | 32,
+  [red, green, blue]: readonly [number, number, number],
+  hotspot: readonly [number, number] = [0, 0],
+) {
+  const pixel = depth === 32 ? [blue, green, red, 255] : [blue, green, red],
+    row = Array.from({ length: size }, () => pixel).flat()
+  return {
+    width: size, height: size, hotspot,
+    payload: cursorDib({ width: size, height: size, depth,
+      xorRows: Array.from({ length: size }, () => row) }),
+  }
+}
+
+function loadedSolid(
+  image: CursorImage,
+  rgba: readonly [number, number, number, number],
+  hotspot = { x: 0, y: 0 },
+) {
+  assert.equal(image.width, 32)
+  assert.equal(image.height, 32)
+  assert.deepEqual(image.hotspot, hotspot)
+  // Every output pixel is the explicitly specified solid color. This expected
+  // plane is independent of the selection and resize implementations.
+  assert.deepEqual(image.data, Uint8Array.from({ length: 4096 }, (_, at) => rgba[at % 4]!))
+  assert.deepEqual(image.andMask, new Uint8Array(1024))
 }
 
 const scene = String.raw`
@@ -137,6 +169,7 @@ for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
 
   test(`${mode}: numeric-looking cursor strings load resources while nonstrings use native int32`, async () => {
+    const numericName = cursorFile([{ width: 1, height: 1, payload: cursorPng(1, 1, [255, 0, 0, 255]) }])
     await withFixture(binary, String.raw`
 function path(){child.cursor="42";return child.cursor;}
 function numbers(){
@@ -152,7 +185,7 @@ function missingNumericPath(){
   try{child.cursor="43";}catch(error){return "caught|"+child.cursor;}
   return "missed|"+child.cursor;
 }
-`, { '42': cursorFile([{ width: 1, height: 1, payload: cursorPng(1, 1, [255, 0, 0, 255]) }]) }, async (f) => {
+`, { '42': numericName }, async (f) => {
       await f.move()
       assert.equal(await f.run('path'), '2')
       assert.equal(f.view().cursor, 2)
@@ -161,9 +194,12 @@ function missingNumericPath(){
       assert.equal(f.view().cursor, -3)
       assert.deepEqual(f.definitions().map((event) => event.id), [2])
       assert.equal(f.definitions()[0]!.asset.frames[0]!.images[0]!.encoding, 'png')
-      assert.deepEqual([...f.definitions()[0]!.asset.frames[0]!.images[0]!.data], [255, 0, 0, 255])
+      loadedSolid(f.definitions()[0]!.asset.frames[0]!.images[0]!, [255, 0, 0, 255])
+      assert.equal(f.definitions()[0]!.asset.sourceBytes, numericName.length)
+      assert.equal(f.definitions()[0]!.asset.imageCount, 1)
+      assert.equal(f.definitions()[0]!.asset.decodedBytes, loadedImageBytes)
       assert.equal(f.session.snapshot().cursorCacheEntries, 1)
-      assert.equal(f.session.snapshot().cursorCacheBytes, 5)
+      assert.equal(f.session.snapshot().cursorCacheBytes, loadedImageBytes)
       assert.equal(f.session.snapshot().cursorCachePending, 0)
     })
   })
@@ -196,15 +232,21 @@ function twin(){child.cursor="copies/Twin.cur";return child.cursor;}
       assert.equal(await f.run('twin'), '4')
       const definitions = f.definitions()
       assert.deepEqual(definitions.map((event) => event.id), [2, 3, 4])
-      assert.deepEqual([...definitions[0]!.asset.frames[0]!.images[0]!.data], [255, 0, 0, 255])
-      assert.deepEqual([...definitions[2]!.asset.frames[0]!.images[0]!.data], [255, 0, 0, 255])
+      loadedSolid(definitions[0]!.asset.frames[0]!.images[0]!, [255, 0, 0, 255])
+      loadedSolid(definitions[2]!.asset.frames[0]!.images[0]!, [255, 0, 0, 255])
+      assert.equal(definitions[0]!.asset.sourceBytes, red.length)
+      assert.equal(definitions[2]!.asset.sourceBytes, red.length)
       assert.equal(definitions[1]!.asset.kind, 'ani')
       assert.deepEqual(definitions[1]!.asset.sequence, [1, 0, 1])
       assert.deepEqual(definitions[1]!.asset.rates, [3, 6, 9])
-      assert.deepEqual([...definitions[1]!.asset.frames[0]!.images[0]!.data], [0, 255, 0, 255])
-      assert.deepEqual([...definitions[1]!.asset.frames[1]!.images[0]!.data], [0, 0, 255, 255])
+      loadedSolid(definitions[1]!.asset.frames[0]!.images[0]!, [0, 255, 0, 255])
+      loadedSolid(definitions[1]!.asset.frames[1]!.images[0]!, [0, 0, 255, 255])
+      assert.equal(definitions[1]!.asset.sourceBytes, animation.length)
+      assert.equal(definitions[1]!.asset.imageCount, 2)
+      assert.deepEqual(definitions[1]!.asset.frames.map((frame) => frame.images.length), [1, 1])
+      assert.equal(definitions[1]!.asset.decodedBytes, 2 * loadedImageBytes)
       assert.equal(f.session.snapshot().cursorCacheEntries, 3)
-      assert.equal(f.session.snapshot().cursorCacheBytes, 20)
+      assert.equal(f.session.snapshot().cursorCacheBytes, 4 * loadedImageBytes)
       assert.equal(f.session.snapshot().cursorCachePending, 0)
     })
   })
@@ -232,9 +274,9 @@ function exact(){child.cursor="savedata/Cache.cur";return child.cursor;}
       assert.equal(await f.run('removeLookup'), 'caught|2')
       assert.equal(await f.run('exact'), '2')
       assert.deepEqual(f.definitions().map((event) => event.id), [2])
-      assert.deepEqual([...f.definitions()[0]!.asset.frames[0]!.images[0]!.data], [255, 0, 0, 255])
+      loadedSolid(f.definitions()[0]!.asset.frames[0]!.images[0]!, [255, 0, 0, 255])
       assert.equal(f.session.snapshot().cursorCacheEntries, 1)
-      assert.equal(f.session.snapshot().cursorCacheBytes, 5)
+      assert.equal(f.session.snapshot().cursorCacheBytes, loadedImageBytes)
     }, { saveStore })
   })
 
@@ -269,7 +311,7 @@ function second(){child.cursor="b.cur";return child.cursor;}
       assert.equal(await f.run('second'), '3')
       assert.deepEqual(f.definitions().map((event) => event.id), [2, 3])
       assert.equal(f.session.snapshot().cursorCacheEntries, 2)
-      assert.equal(f.session.snapshot().cursorCacheBytes, 10)
+      assert.equal(f.session.snapshot().cursorCacheBytes, 2 * loadedImageBytes)
       assert.equal(f.session.snapshot().cursorCachePending, 0)
     })
   })
@@ -289,7 +331,7 @@ function reuse(){
       assert.equal(f.view().cursor, 2)
       assert.equal(await f.run('retire'), '2')
       assert.equal(f.session.snapshot().cursorCacheEntries, 1)
-      assert.equal(f.session.snapshot().cursorCacheBytes, 5)
+      assert.equal(f.session.snapshot().cursorCacheBytes, loadedImageBytes)
       assert.equal(await f.run('reuse'), '2')
       await f.move(120, 20)
       await f.move()
@@ -326,6 +368,107 @@ function childChange(){child.cursor=3;}
       assert.equal(f.view().cursor, 2)
       assert.deepEqual(f.definitions().map((event) => event.id), [2, 3, 4])
       assert.equal(f.session.snapshot().cursorCacheEntries, 3)
+      assert.equal(f.session.snapshot().cursorCacheBytes, 3 * loadedImageBytes)
+    })
+  })
+
+  test(`${mode}: loaded CUR directories choose exact size, then 32-bit depth, and retain the first complete tie`, async () => {
+    const small = directoryImage(16, 32, [255, 0, 0], [1, 2]),
+      exact = directoryImage(32, 24, [0, 255, 0], [7, 9]),
+      large = directoryImage(48, 32, [0, 0, 255], [11, 13]),
+      shallow = directoryImage(32, 24, [255, 0, 0], [1, 2]),
+      deep = directoryImage(32, 32, [0, 0, 255], [3, 4]),
+      tieRed = directoryImage(32, 32, [255, 0, 0], [5, 6]),
+      tieGreen = directoryImage(32, 32, [0, 255, 0], [8, 10]),
+      files = {
+        'size-forward.cur': cursorFile([small, exact, large]),
+        'size-reverse.cur': cursorFile([large, exact, small]),
+        'depth-forward.cur': cursorFile([shallow, deep]),
+        'depth-reverse.cur': cursorFile([deep, shallow]),
+        'tie-forward.cur': cursorFile([tieRed, tieGreen]),
+        'tie-reverse.cur': cursorFile([tieGreen, tieRed]),
+      }
+    await withFixture(binary, String.raw`
+function directories(){
+  var names=["size-forward.cur","size-reverse.cur","depth-forward.cur","depth-reverse.cur","tie-forward.cur","tie-reverse.cur"],ids=[];
+  for(var i=0;i<names.count;i++){child.cursor=names[i];ids.add(child.cursor);}
+  return ids.join(",");
+}
+`, files, async (f) => {
+      assert.equal(await f.run('directories'), '2,3,4,5,6,7')
+      const definitions = f.definitions(),
+        expected = [
+          { color: [0, 255, 0, 255], hotspot: { x: 7, y: 9 }, depth: 24, source: files['size-forward.cur'] },
+          { color: [0, 255, 0, 255], hotspot: { x: 7, y: 9 }, depth: 24, source: files['size-reverse.cur'] },
+          { color: [0, 0, 255, 255], hotspot: { x: 3, y: 4 }, depth: 32, source: files['depth-forward.cur'] },
+          { color: [0, 0, 255, 255], hotspot: { x: 3, y: 4 }, depth: 32, source: files['depth-reverse.cur'] },
+          { color: [255, 0, 0, 255], hotspot: { x: 5, y: 6 }, depth: 32, source: files['tie-forward.cur'] },
+          { color: [0, 255, 0, 255], hotspot: { x: 8, y: 10 }, depth: 32, source: files['tie-reverse.cur'] },
+        ] as const
+      assert.deepEqual(definitions.map((event) => event.id), [2, 3, 4, 5, 6, 7])
+      for (let at = 0; at < expected.length; at++) {
+        const asset = definitions[at]!.asset, reference = expected[at]!
+        assert.equal(asset.kind, 'cur')
+        assert.equal(asset.frames.length, 1)
+        assert.equal(asset.frames[0]!.images.length, 1)
+        assert.equal(asset.imageCount, 1)
+        assert.equal(asset.decodedBytes, loadedImageBytes)
+        assert.equal(asset.sourceBytes, reference.source.length)
+        const selected = asset.frames[0]!.images[0]!
+        loadedSolid(selected, reference.color, reference.hotspot)
+        assert.equal(selected.depth, reference.depth)
+      }
+      assert.equal(f.session.snapshot().cursorCacheEntries, 6)
+      assert.equal(f.session.snapshot().cursorCacheBytes, 6 * loadedImageBytes)
+      assert.equal(f.session.snapshot().cursorCachePending, 0)
+    })
+  })
+
+  test(`${mode}: loaded ANI selects each frame independently while preserving its entire repeated sequence`, async () => {
+    const frame0 = cursorFile([
+        directoryImage(16, 32, [255, 0, 0]),
+        directoryImage(32, 24, [0, 255, 0], [2, 3]),
+        directoryImage(48, 32, [0, 0, 255]),
+      ]),
+      frame1 = cursorFile([
+        directoryImage(32, 24, [255, 255, 0], [4, 5]),
+        directoryImage(32, 32, [255, 0, 255], [6, 7]),
+      ]),
+      frame2 = cursorFile([
+        directoryImage(32, 32, [0, 255, 255], [8, 9]),
+        directoryImage(32, 32, [255, 255, 255], [10, 11]),
+      ]),
+      animation = animatedCursor([frame0, frame1, frame2], {
+        sequence: [2, 0, 2, 1, 0], rates: [3, 6, 9, 12, 15],
+      })
+    await withFixture(binary, String.raw`
+function loadAnimation(){child.cursor="choices.ani";return child.cursor;}
+`, { 'choices.ani': animation }, async (f) => {
+      await f.move()
+      assert.equal(await f.run('loadAnimation'), '2')
+      assert.equal(f.view().cursor, 2)
+      assert.deepEqual(f.definitions().map((event) => event.id), [2])
+      const asset = f.definitions()[0]!.asset
+      assert.equal(asset.kind, 'ani')
+      assert.equal(asset.frames.length, 3)
+      assert.deepEqual(asset.frames.map((frame) => frame.images.length), [1, 1, 1])
+      assert.deepEqual(asset.frames.map((frame) => frame.images[0]!.depth), [24, 32, 32])
+      loadedSolid(asset.frames[0]!.images[0]!, [0, 255, 0, 255], { x: 2, y: 3 })
+      loadedSolid(asset.frames[1]!.images[0]!, [255, 0, 255, 255], { x: 6, y: 7 })
+      loadedSolid(asset.frames[2]!.images[0]!, [0, 255, 255, 255], { x: 8, y: 9 })
+      assert.deepEqual(asset.sequence, [2, 0, 2, 1, 0])
+      assert.deepEqual(asset.rates, [3, 6, 9, 12, 15])
+      assert.equal(asset.durationJiffies, 45)
+      assert.deepEqual(asset.sequence.map((index) => [...asset.frames[index]!.images[0]!.data.subarray(0, 4)]), [
+        [0, 255, 255, 255], [0, 255, 0, 255], [0, 255, 255, 255],
+        [255, 0, 255, 255], [0, 255, 0, 255],
+      ])
+      assert.equal(asset.sourceBytes, animation.length)
+      assert.equal(asset.imageCount, 3)
+      assert.equal(asset.decodedBytes, 3 * loadedImageBytes)
+      assert.equal(f.session.snapshot().cursorCacheEntries, 1)
+      assert.equal(f.session.snapshot().cursorCacheBytes, 3 * loadedImageBytes)
+      assert.equal(f.session.snapshot().cursorCachePending, 0)
     })
   })
 
@@ -342,7 +485,7 @@ function held(){child.cursor="waiting.cur";Debug.message("custom-cursor-tail");r
         const operation = observe(f.run('held'))
         await enteredGate(blocked.entered, operation)
         assert.equal(f.session.snapshot().cursorCacheEntries, 1)
-        assert.equal(f.session.snapshot().cursorCacheBytes, 5)
+        assert.equal(f.session.snapshot().cursorCacheBytes, loadedImageBytes)
         assert.equal(f.session.snapshot().cursorCachePending, 1)
         assert.deepEqual(f.definitions().map((event) => event.id), [2])
         // Stop must settle while the real inflater is still held; releasing it

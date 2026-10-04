@@ -205,14 +205,11 @@ export function createPlayer(
         // whose native playback policy has not yet been established.
         unselectedCursorAssets.set(event.id, event.asset)
         cursorAssetIds.add(event.id)
-        if (event.asset.frames.every((frame) => frame.images.length === 1)) {
-          cursorAssets.set(event.id, selectCursorAsset(event.asset, () => 0))
-          unselectedCursorAssets.delete(event.id)
-        } else {
-          // Preserve the complete definition until a verified selection policy
-          // is available. Never silently turn a directory into its first image.
-          onError(new Error('自定义光标暂不支持此文件的多图像选择。'))
-        }
+        if (!event.asset.frames.every((frame) => frame.images.length === 1))
+          throw new Error('Cursor handle contains an unresolved image selection')
+        // The Session performs native-profile selection before assigning an ID.
+        cursorAssets.set(event.id, selectCursorAsset(event.asset, () => 0))
+        unselectedCursorAssets.delete(event.id)
         input?.refreshCursors()
       } catch (error) { onError(error) }
     }

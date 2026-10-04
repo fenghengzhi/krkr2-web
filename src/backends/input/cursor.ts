@@ -39,7 +39,9 @@ export function selectCursorAsset(
         (image.mode !== 'alpha' && image.mode !== 'and-xor') ||
         !Number.isSafeInteger(image.hotspot.x) || !Number.isSafeInteger(image.hotspot.y) ||
         image.hotspot.x < 0 || image.hotspot.y < 0 ||
-        image.hotspot.x > 0xffff || image.hotspot.y > 0xffff)
+        // CUR stores uint16, but loading scales the hotspot into ICONINFO's
+        // DWORD coordinates. Presentation receives that loaded handle.
+        image.hotspot.x > 0xffffffff || image.hotspot.y > 0xffffffff)
       throw new Error('Invalid selected cursor image')
     pixels += image.width * image.height
     if (pixels > cursorLimits.pixels) throw new Error('Selected cursor image budget exceeded')

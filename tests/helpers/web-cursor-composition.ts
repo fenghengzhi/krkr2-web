@@ -93,6 +93,23 @@ export function createCursorCompositionFixture() {
       }
       input.refreshCursors()
     },
+    raster(id: number, scale: number, rendering: 'auto' | 'pixelated') {
+      // Deliberately bounded CSS-raster observation, independent of a game's
+      // cursor decoder or Windows image-size selection policy.
+      if (![1.5, 2.25].includes(scale)) throw new Error('Unexpected raster fixture scale')
+      const surface = surfaces.get(id)!, canvas = surface.canvas, context = canvas.getContext('2d')!
+      surface.root.style.width = canvas.style.width = `${64 * scale}px`
+      surface.root.style.height = canvas.style.height = `${48 * scale}px`
+      canvas.style.imageRendering = rendering
+      for (let y = 0; y < canvas.height; y++)
+        for (let x = 0; x < canvas.width; x++) {
+          // Both axes carry sharp edges and non-gray channels. Expected output
+          // is captured from the real CSS compositor, not computed from these.
+          context.fillStyle = (x + y) % 2 ? '#80a0c0' : '#204060'
+          context.fillRect(x, y, 1, 1)
+        }
+      input.refreshCursors()
+    },
     paint(id: number, color?: string) {
       const canvas = surfaces.get(id)!.canvas, context = canvas.getContext('2d')!
       context.clearRect(0, 0, canvas.width, canvas.height)

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import { build } from 'vite'
 import type { createCursorCompositionFixture } from '../helpers/web-cursor-composition.ts'
@@ -126,4 +126,75 @@ test('physical takeover, stale snapshots, two Windows and replacement epochs use
     .toEqual(evidence.pointers.map((_, index) => index + 1))
   expect(evidence.packets.filter((packet) => packet.type === 'move').map((packet) => packet.pointerSequence))
     .toEqual(evidence.pointers.map((point) => point.sequence))
+})
+
+async function screenshotRgba(page: Page, png: Buffer) {
+  return page.evaluate(async (url) => {
+    const bitmap = await createImageBitmap(await (await fetch(url)).blob()),
+      context = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')!
+    try {
+      context.drawImage(bitmap, 0, 0)
+      return { width: bitmap.width, height: bitmap.height,
+        data: [...context.getImageData(0, 0, bitmap.width, bitmap.height).data] }
+    } finally { bitmap.close() }
+  }, 'data:image/png;base64,' + png.toString('base64'))
+}
+
+test('custom cursor AND/XOR matches actual CSS canvas rasterization at noninteger scales', async ({ page }, info) => {
+  const marker = page.locator('#cursor-host-1 .game-custom-cursor'),
+    readings: { scale: number; rendering: string; computedRendering: string; devicePixelRatio: number;
+      sourceRectangle: { x: number; y: number; width: number; height: number };
+      clip: { x: number; y: number; width: number; height: number };
+      background: Awaited<ReturnType<typeof screenshotRgba>>;
+      expected: number[]; raw: number[]; screenshot: Awaited<ReturnType<typeof screenshotRgba>>;
+      rawMismatches: number; screenshotMismatches: number }[] = []
+  let revision = 200
+  for (const scale of [1.5, 2.25]) for (const rendering of ['auto', 'pixelated'] as const) {
+    await page.evaluate(({ scale, rendering }) => {
+      window.cursorCompositionFixture.suspend(true)
+      window.cursorCompositionFixture.raster(1, scale, rendering)
+    }, { scale, rendering })
+    await expect(marker).toHaveCount(0)
+    const canvas = (await page.locator('#cursor-surface-1').boundingBox())!,
+      clip = { x: Math.round(canvas.x + 24 * canvas.width / 64 - 3),
+        y: Math.round(canvas.y + 16 * canvas.height / 48 - 2), width: 8, height: 8 },
+      backgroundPng = await page.screenshot({ clip, scale: 'css' }),
+      background = await screenshotRgba(page, backgroundPng),
+      // The selected fixture is AND=255, XOR=255 in every RGB channel. This
+      // expectation uses the actual hidden-cursor page screenshot exclusively.
+      expected = background.data.map((value, index) => index % 4 === 3 ? 255 : value ^ 255)
+    await info.attach(`css-${rendering}-${scale}-background`, { body: backgroundPng, contentType: 'image/png' })
+    await page.evaluate((revision) => {
+      window.cursorCompositionFixture.suspend(false)
+      window.cursorCompositionFixture.write(1, revision)
+    }, ++revision)
+    await expect(marker).toBeVisible()
+    const raw = await marker.evaluate((node) => [...(node as HTMLCanvasElement).getContext('2d')!
+      .getImageData(0, 0, 8, 8).data]),
+      cursorPng = await page.screenshot({ clip, scale: 'css' }),
+      screenshot = await screenshotRgba(page, cursorPng)
+    await info.attach(`css-${rendering}-${scale}-cursor`, { body: cursorPng, contentType: 'image/png' })
+    readings.push({ scale, rendering, clip, sourceRectangle: canvas,
+      computedRendering: await page.locator('#cursor-surface-1').evaluate((canvas) => getComputedStyle(canvas).imageRendering),
+      devicePixelRatio: await page.evaluate(() => devicePixelRatio),
+      background, expected, raw, screenshot,
+      rawMismatches: raw.filter((value, index) => value !== expected[index]).length,
+      screenshotMismatches: screenshot.data.filter((value, index) => value !== expected[index]).length })
+  }
+  // Finish the finite matrix before asserting, preserving the other algorithms'
+  // observations even when one browser uses a different CSS sampling path.
+  await info.attach('css-raster-readings', { body: JSON.stringify({
+    scope: 'Actual CSS canvas screenshots versus cursor composition; not Windows cursor scaling',
+    userAgent: await page.evaluate(() => navigator.userAgent),
+    source: { width: 64, height: 48 }, cursor: { width: 8, height: 8 }, readings,
+  }), contentType: 'application/json' })
+  expect(readings.map((reading) => ({ scale: reading.scale, rendering: reading.rendering,
+    computedRendering: reading.computedRendering,
+    backgroundSize: [reading.background.width, reading.background.height],
+    cursorSize: [reading.screenshot.width, reading.screenshot.height],
+    rawMismatches: reading.rawMismatches, screenshotMismatches: reading.screenshotMismatches })))
+    .toEqual([1.5, 2.25].flatMap((scale) => ['auto', 'pixelated'].map((rendering) => ({
+      scale, rendering, computedRendering: rendering, backgroundSize: [8, 8], cursorSize: [8, 8],
+      rawMismatches: 0, screenshotMismatches: 0,
+    }))))
 })
