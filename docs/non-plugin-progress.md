@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37231345437](https://github.com/fenghengzhi/krkr2-web/actions/runs/37231345437)，精确提交 `3443f9fc6beaf1f1c79c60d7421587c482486d01`。076、帮助夹具分号和 Node 诊断采集已整批推送；首次查询只确认运行创建及提交绑定，当时 **in_progress／conclusion=null**。不实时监控，不记为通过。下一批先补取 075 剩余 Node／WebKit／终态，再取回本批结果；全部测试及可执行验证仅在 GitHub-hosted runners 运行。整体非插件目标仍 active，未合入旧 main。
+
 2026-10-05 准备 [076 stock cursor／hint 通知语义](decisions/076-layer-cursor-hint.md)：候选补齐数值光标继承、提示继承开关、原版通知时点、共享重入保护、异常恢复及缩放后的旧主坐标重查。新增真实 VM 源码／字节码和浏览器验收定义，尚未执行。自定义 CUR／ANI、完整鼠标入口顺序等仍在范围内，整体非插件目标保持 active；协议 24、TJS ABI 5、字体 ABI 2 不变。
 
 准备本批时已补取 [074／37227951808](https://github.com/fenghengzhi/krkr2-web/actions/runs/37227951808) 终态 **failure**，18 份原 artifact ZIP 均核对 digest 并保留。Node 超过 20 分钟被取消，已送达 **967 通过、2 失败**，没有最终 plan；进程记录确认 `storage-selector-native.test.ts` 是唯一未退出文件，具体用例仍未知。另有 `integration/phase-vocoder.test.ts` 与 `integration/storage-selector.test.ts` 以 code 1 退出，但具体用例被前序文件的 TAP 缓冲阻挡，不能补造失败数量。常规浏览器 **1894 通过、8 失败／1902**；兼容 **89 通过、1 失败／90**。最终摘要、原错误、部分快照与全部归档分别保留在 `out/verification/github-actions/37227951808/`。

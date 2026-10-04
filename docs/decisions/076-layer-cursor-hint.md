@@ -1,6 +1,8 @@
 # 076 — Layer 数值光标与提示的继承、通知时序
 
-状态：实施候选，尚未执行验证。本切片修正数值 `Layer.cursor`、`hint` 和 `showParentHint` 的呈现时序；**CUR/ANI 自定义光标加载仍未实现**。构建、类型检查、VM 和浏览器验证只在 GitHub-hosted Actions 运行。075 的结果单独记录，不作为本切片的通过证据。
+状态：实施候选，托管验证结果待回收。本切片修正数值 `Layer.cursor`、`hint` 和 `showParentHint` 的呈现时序；**CUR/ANI 自定义光标加载仍未实现**。构建、类型检查、VM 和浏览器验证只在 GitHub-hosted Actions 运行。075 的结果单独记录，不作为本切片的通过证据。
+
+候选已随 `3443f9fc6beaf1f1c79c60d7421587c482486d01` 推送至 [37231345437](https://github.com/fenghengzhi/krkr2-web/actions/runs/37231345437)。首次查询仅确认创建及提交身份，当时 in_progress；执行结果尚未取回，下批回收，不实时监控。下面的验收数量是用例定义，不能当成通过记录。
 
 ## 问题与决定
 
@@ -37,6 +39,8 @@
 暂停、窗口关闭、manager 切换和 075 虚拟光标的身份/物理接管规则继续适用。数值 cursor 的具体浏览器图形仍沿现有 CSS 映射及 075 图标，不构成 Windows 系统光标像素级一致性的证明。
 
 一个已有入口差异保留：固定 [LayerManager.h 的 NotifyMouseDown](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/LayerManager.h#L287) 直接调用 PrimaryMouseDown；现 Web down 处理先进行 mouseMove。本批浏览器先真实移动再按下，不能据此证明“没有先交付 move 的程序化 down”与原版完全一致。更广的坐标量化和输入入口对齐仍需独立校准。
+
+后续静态审计保存于 `out/verification/layer-cursor/input-order-audit.md`，已明确下一批应处理 down 的额外 move、up 无目标时的 capture 行为、up 回调改变 zoom 后仍复用原主坐标、leave 的固定主坐标及 poschanged 的坐标空间。普通浮点鼠标与 touch 路径、capture 的引用释放顺序也须按固定入口分别验证；本批不宣称这些差异已闭合。
 
 ## 待运行验收
 
