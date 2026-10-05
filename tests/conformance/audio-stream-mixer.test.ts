@@ -66,7 +66,7 @@ test('a starving stream leaves its source position and boundary labels unchanged
   assert.equal(supply(mixer, source).length, 1)
   const resumed = render(mixer)
   assert.equal(resumed.left[0], source.data[0]![0]! + 0.25)
-  assert.deepEqual(resumed.events.filter((event) => event.type === 'label').map((event) => event.label), ['first'])
+  assert.deepEqual(resumed.events.flatMap((event) => event.type === 'label' ? [event.label] : []), ['first'])
   assert.equal(mixer.snapshot(1).position, 1)
 })
 
@@ -123,7 +123,7 @@ test('a high-rate far jump waits before mixing or committing source and target l
   const resumed = render(stream), expected = render(regular)
   assert.deepEqual(resumed, expected)
   assert.equal(resumed.left[0], source.data[0]![4093])
-  assert.deepEqual(resumed.events.filter((event) => event.type === 'label').map((event) => event.label),
+  assert.deepEqual(resumed.events.flatMap((event) => event.type === 'label' ? [event.label] : []),
     [':[1]++', 'target', ':[0]++'])
   assert.equal(stream.snapshot(1).position, 12291)
   assert.deepEqual(stream.snapshot(1).flags.slice(0, 2), [1, 1])

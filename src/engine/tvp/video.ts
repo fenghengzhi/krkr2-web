@@ -17,7 +17,8 @@ class VideoOverlay {
   function cancelSegmentLoop(){__videoRun("segment",[-1,-1]);}
   function setPeriodEvent(frame=-1){periodEventFrame=frame;}
   function cancelPeriodEvent(){periodEventFrame=-1;}
-  function selectAudioStream(index){__videoRun("audioStream",[int(index)]);}
+  function selectAudioStream(args*){if(args.count<1)throw new Exception("VideoOverlay.selectAudioStream requires an index");__videoRun("audioStream",[int(args[0])]);}
+  property enabledAudioStream{getter(){return __videoRun("get",["enabledAudioStream"]);}setter(value){__videoRun("audioStream",[int(value)]);}}
   function setMixingLayer(args*){
     if(args.count<1)throw new global.Exception("VideoOverlay.setMixingLayer requires a Layer argument");
     __host("Video.mixingLayer",__videoId,args[0]);
@@ -29,6 +30,6 @@ class VideoOverlay {
   function onCallbackCommand(command,arg){if(typeof __videoWindow.action!="undefined")__videoWindow.action(%[type:"onCallbackCommand",target:this,command:command,arg:arg]);}
   ${[1, 2].map((channel) => `property layer${channel}{getter(){return __host("Video.layerGet",__videoId,${channel - 1});}setter(layer){if(layer!==null&&(!(layer instanceof "Layer")||layer.window!==__videoWindow))throw new Exception("Video layer must belong to its Window");__host("Video.layer",__videoId,${channel - 1},layer===null?null:layer.__id,layer);}}`).join('\n')}
   ${['left', 'top', 'width', 'height', 'visible', 'loop', 'mode', 'position', 'frame', 'playRate', 'audioVolume', 'audioBalance', 'periodEventFrame', 'mixingMovieAlpha', 'mixingMovieBGColor'].map((name) => `property ${name}{getter(){return __videoRun("get",["${name}"]);}setter(value){__videoRun("set",["${name}",${name === 'playRate' || name === 'mixingMovieAlpha' ? 'real' : 'int'}(value)]);}}`).join('\n')}
-  ${['status', 'originalWidth', 'originalHeight', 'fps', 'numberOfFrame', 'totalTime', 'numberOfAudioStream', 'enabledAudioStream', 'numberOfVideoStream', 'enabledVideoStream', 'segmentLoopStartFrame', 'segmentLoopEndFrame'].map((name) => `property ${name}{getter(){return __videoRun("get",["${name}"]);}}`).join('\n')}
+  ${['status', 'originalWidth', 'originalHeight', 'fps', 'numberOfFrame', 'totalTime', 'numberOfAudioStream', 'numberOfVideoStream', 'enabledVideoStream', 'segmentLoopStartFrame', 'segmentLoopEndFrame'].map((name) => `property ${name}{getter(){return __videoRun("get",["${name}"]);}}`).join('\n')}
 }
 `

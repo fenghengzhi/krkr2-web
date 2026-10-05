@@ -16,6 +16,7 @@ import type { WindowView } from '../../../engine/scene/window.ts'
 import type { VideoMessage, VideoRequest } from '../../../protocol/video.ts'
 import type { WebAudioHost } from '../../audio/web/host.ts'
 import type { CursorRasterLayer, CursorScene } from '../../input/cursor.ts'
+import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
 import {
   createVideoMixingSurface,
   releaseVideoMixingSurface,
@@ -29,6 +30,12 @@ interface Movie {
   element: HTMLVideoElement
   container: HTMLDivElement
   url: string
+  source: VideoEncodedSource
+  variant: VideoEncodedVariant
+  mime: string
+  lastSelectedIndex: number
+  presentedTime?: number
+  switching?: VideoStage
   bytes: number
   settings: VideoSettings
   status: VideoSnapshot['status']
@@ -43,6 +50,17 @@ interface Movie {
   audio: ReturnType<WebAudioHost['connectMedia']>
   surface?: OffscreenCanvas
   mixing?: VideoMixingSurface
+}
+interface VideoStage {
+  id: number
+  epoch: number
+  windowId: number
+  source: VideoEncodedSource
+  abort: AbortController
+  previous?: Movie
+  movie?: Movie
+  variant?: VideoEncodedVariant
+  disposed: boolean
 }
 interface VideoWindow {
   epoch: number
@@ -62,6 +80,8 @@ export class WebVideoHost {
     this.timeouts.setPaused(paused)
   }
   private movies = new Map<number, Movie>()
+  private readonly encoded = new VideoEncodedResources()
+  private readonly stages = new Map<number, VideoStage>()
   private mixingBytes = 0
   private closed = false
   private closing?: Promise<void>
@@ -265,6 +285,8 @@ export class WebVideoHost {
         failed = true
       }
     }
+    for (const stage of [...this.stages.values()])
+      if (stage.windowId === id) attempt(() => this.retireStage(stage))
     for (const movie of this.movies.values())
       if (movie.windowId === id) attempt(() => this.remove(movie.id))
     if (window) attempt(() => this.releaseSurface(id, window))
@@ -469,11 +491,12 @@ export class WebVideoHost {
     }
   }
   private arm(movie: Movie): void {
-    if (movie.disposed || this.isPaused || movie.status !== 'play' || movie.callback !== undefined)
+    if (movie.disposed || movie.switching || this.isPaused || movie.status !== 'play' || movie.callback !== undefined)
       return
     movie.callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
       movie.callback = undefined
-      if (movie.disposed || this.isPaused || movie.seeking || movie.status !== 'play') return
+      if (movie.disposed || movie.switching || this.isPaused || movie.seeking || movie.status !== 'play') return
+      movie.presentedTime = metadata.mediaTime * 1000
       try {
         if (this.advanceClock(movie)) return
         const s = movie.settings
@@ -486,7 +509,7 @@ export class WebVideoHost {
     })
   }
   private advanceClock(movie: Movie): boolean {
-    if (movie.disposed || this.isPaused || movie.seeking || movie.status !== 'play') return true
+    if (movie.disposed || movie.switching || this.isPaused || movie.seeking || movie.status !== 'play') return true
     const s = movie.settings,
       time = movie.element.currentTime * 1000
     // Presentation callbacks can skip or lag behind the audio/media clock.
@@ -540,7 +563,7 @@ export class WebVideoHost {
     this.emit({ type: 'error', message: error instanceof Error ? error.message : String(error) })
   }
   private play(movie: Movie): void {
-    if (movie.disposed || this.isPaused) return
+    if (movie.disposed || movie.switching || this.isPaused) return
     const epoch = movie.epoch
     this.arm(movie)
     void movie.element.play().then(
@@ -622,6 +645,43 @@ export class WebVideoHost {
       this.arm(movie)
     }
   }
+  private async seekPresented(movie: Movie, position: number): Promise<void> {
+    const timeline = movie.timeline, target = videoFrameAt(timeline!, position),
+      matches = (time: number) => videoFrameAt(timeline!, time) === target
+    if (movie.presentedTime !== undefined && matches(movie.presentedTime)) {
+      await this.seek(movie, position)
+      return
+    }
+    await new Promise<void>((resolve, reject) => {
+      let settled = false, sought = false, presented = false, callback: number | undefined
+      let cancelTimeout = () => {}
+      const done = (error?: unknown) => {
+        if (settled) return
+        settled = true
+        cancelTimeout()
+        if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback)
+        movie.abort.signal.removeEventListener('abort', cancel)
+        error ? reject(error) : resolve()
+      }, complete = () => { if (sought && presented) done() },
+        cancel = () => done(new Error('Video operation cancelled')),
+        request = () => {
+          callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
+            callback = undefined
+            if (settled) return
+            movie.presentedTime = metadata.mediaTime * 1000
+            if (matches(movie.presentedTime)) { presented = true; complete() }
+            else request()
+          })
+        }
+      movie.abort.signal.addEventListener('abort', cancel, { once: true })
+      if (movie.abort.signal.aborted) { cancel(); return }
+      cancelTimeout = this.timeouts.start(15000, () => done(new Error('Video selected track frame timed out')))
+      try {
+        request()
+        void this.seek(movie, position).then(() => { sought = true; complete() }, done)
+      } catch (error) { done(error) }
+    })
+  }
   private loadFirstFrame(movie: Movie, load: () => Promise<void>): Promise<void> {
     // loadeddata may precede the first decoded/presented image. In particular,
     // an immediate paused seek can otherwise be overwritten by that initial
@@ -650,7 +710,8 @@ export class WebVideoHost {
         done(new Error('Video first frame timed out')),
       )
       try {
-        callback = movie.element.requestVideoFrameCallback(() => {
+        callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
+          movie.presentedTime = metadata.mediaTime * 1000
           presented = true
           complete()
         })
@@ -663,13 +724,12 @@ export class WebVideoHost {
       }
     })
   }
-  private settings(movie: Movie, settings: VideoSettings): void {
+  private applySettings(movie: Movie, settings: VideoSettings): void {
     if (settings.periodEventFrame >= 0 && !movie.timeline?.times.length)
       throw new Error('This video container has no supported frame index')
-    if (settings.enabledAudioStream > 0)
-      throw new Error(
-        'Selecting alternate video audio tracks is not supported by this browser backend',
-      )
+    if (!Number.isInteger(settings.enabledAudioStream) || settings.enabledAudioStream < -1 ||
+        (settings.enabledAudioStream > 0 && (!movie.timeline || settings.enabledAudioStream >= movie.timeline.audioStreams)))
+      throw new Error('Invalid video audio stream')
     if (settings.segmentLoopEndFrame >= 0) {
       videoFrameTime(movie.timeline, settings.segmentLoopStartFrame)
       if (!movie.timeline || settings.segmentLoopEndFrame > movie.timeline.times.length)
@@ -678,11 +738,12 @@ export class WebVideoHost {
     if (settings.periodEventFrame !== movie.settings.periodEventFrame)
       movie.periodArmed =
         settings.periodEventFrame >= 0 && this.snapshot(movie).frame < settings.periodEventFrame
-    movie.settings = { ...settings }
+    movie.settings = { ...settings,
+      ...(movie.timeline?.audioStreams === 0 ? { enabledAudioStream: -1 } : {}) }
     movie.element.playbackRate = settings.playRate
     movie.element.preservesPitch = false
     movie.audio.set(
-      settings.enabledAudioStream === -1 ? 0 : settings.audioVolume,
+      movie.settings.enabledAudioStream === -1 ? 0 : settings.audioVolume,
       settings.audioBalance,
     )
     this.layout()
@@ -719,6 +780,95 @@ export class WebVideoHost {
     this.mixingBytes -= surface.bytes
     releaseVideoMixingSurface(surface)
   }
+  private stageCurrent(stage: VideoStage): void {
+    if (this.closed || stage.disposed || stage.abort.signal.aborted || this.stages.get(stage.id) !== stage ||
+        this.retiredWindows.has(stage.windowId) || (stage.previous &&
+          (this.movies.get(stage.id) !== stage.previous || stage.previous.epoch !== stage.epoch)))
+      throw new Error('Video operation was closed or superseded')
+  }
+  private retireStage(stage: VideoStage): void {
+    if (stage.disposed) return
+    stage.disposed = true
+    if (this.stages.get(stage.id) === stage) this.stages.delete(stage.id)
+    if (stage.previous?.switching === stage) stage.previous.switching = undefined
+    const errors: unknown[] = []
+    for (const release of [() => stage.abort.abort(), () => {
+      if (stage.movie) this.disposeMovie(stage.movie)
+      else {
+        try { stage.variant?.release() } finally { stage.source.release() }
+      }
+    }]) {
+      try { release() } catch (error) { errors.push(error) }
+    }
+    if (errors.length) throw errors.length === 1 ? errors[0] : new AggregateError(errors, 'Video candidate cleanup failed')
+  }
+  private createMovie(stage: VideoStage, epoch: number, settings: VideoSettings,
+    timeline: VideoTimeline | undefined, mime: string, selected: number): Movie {
+    const element = document.createElement('video')
+    element.playsInline = true
+    element.preload = 'auto'
+    element.controls = false
+    if (!stage.previous) {
+      element.dataset.videoId = String(stage.id)
+      element.dataset.windowId = String(stage.windowId)
+    }
+    let audio: Movie['audio'] | undefined, container: HTMLDivElement | undefined
+    try {
+      audio = this.audio.connectMedia(element)
+      audio.set(0, 0)
+      container = document.createElement('div')
+      container.append(element)
+      const movie: Movie = { id: stage.id, epoch, windowId: stage.windowId, element, container,
+        source: stage.source, variant: stage.variant!, url: stage.variant!.url, mime,
+        bytes: stage.source.size, lastSelectedIndex: selected, settings: { ...settings }, status: 'stop',
+        timeline, blocked: false, disposed: false, periodArmed: false, seeking: false,
+        abort: stage.abort, audio }
+      stage.movie = movie
+      return movie
+    } catch (error) {
+      // The stage still owns the source and URL when DOM/audio acquisition has
+      // not reached a Movie. Preserve the original construction failure.
+      for (const release of [() => audio?.close(), () => element.pause(), () => {
+        element.removeAttribute('src'); element.load()
+      }, () => container?.remove()]) {
+        try { release() } catch {}
+      }
+      throw error
+    }
+  }
+  private bindMovie(movie: Movie): void {
+    const element = movie.element
+    element.ontimeupdate = () => {
+      try { this.advanceClock(movie) } catch (error) { this.fail(error) }
+    }
+    element.onended = () => {
+      if (movie.disposed || movie.status !== 'play' || !element.ended) return
+      if (this.advanceClock(movie)) return
+      if (movie.settings.loop)
+        void this.seek(movie, 0).then(() => {
+          if (movie.disposed || this.movies.get(movie.id) !== movie) return
+          this.emit({ type: 'period', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie), reason: 0 })
+          this.play(movie)
+        }, (error) => { if (!movie.disposed) this.fail(error) })
+      else {
+        movie.status = 'stop'
+        this.cancelFrame(movie)
+        this.emit({ type: 'ended', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie) })
+      }
+    }
+    element.addEventListener('error', () => {
+      if (!movie.disposed)
+        this.fail(new Error(`Video playback failed: ${element.error?.message ?? element.error?.code}`))
+    }, { signal: movie.abort.signal })
+  }
+  private async loadMovie(movie: Movie): Promise<void> {
+    await this.loadFirstFrame(movie, () => this.wait(movie, 'loadeddata', () => movie.element.readyState >= 2, () => {
+      movie.element.src = movie.url
+      movie.element.load()
+    }))
+    if (!movie.element.videoWidth || movie.element.videoWidth > 4096 || movie.element.videoHeight > 4096 ||
+        !Number.isFinite(movie.element.duration)) throw new Error('Invalid video dimensions or duration')
+  }
   private async open(command: Extract<VideoCommand, { op: 'open' }>): Promise<VideoResult> {
     const windowId = command.windowId ?? 0
     if (this.retiredWindows.has(windowId)) throw new Error('Video Window is closed')
@@ -726,22 +876,14 @@ export class WebVideoHost {
       throw new Error('Invalid video Window identity')
     this.window(windowId)
     const previous = this.movies.get(command.id)
-    if (previous && command.epoch < previous.epoch) throw new Error('Video open was superseded')
+    const pending = this.stages.get(command.id)
+    if ((previous && command.epoch < previous.epoch) || (pending && command.epoch < pending.epoch))
+      throw new Error('Video open was superseded')
     this.remove(command.id)
     if (command.settings.mode === 3)
       throw new Error('Media Foundation video mode is unavailable on the Web')
-    if (
-      this.movies.size >= 16 ||
-      [...this.movies.values()].reduce((sum, movie) => sum + movie.bytes, command.bytes.length) >
-        128 * 1024 * 1024
-    )
+    if (new Set([...this.movies.keys(), ...this.stages.keys()]).size >= 16)
       throw new Error('Video resource budget exceeded')
-    const element = document.createElement('video')
-    element.playsInline = true
-    element.preload = 'auto'
-    element.controls = false
-    element.dataset.videoId = String(command.id)
-    element.dataset.windowId = String(windowId)
     const extension = command.name.split('?')[0]!.split('.').pop()?.toLowerCase(),
       mime =
         extension === 'webm'
@@ -749,138 +891,112 @@ export class WebVideoHost {
           : extension === 'mp4' || extension === 'm4v' || extension === 'mov'
             ? 'video/mp4'
             : ''
-    const url = URL.createObjectURL(
-      new Blob([command.bytes as Uint8Array<ArrayBuffer>], { type: mime }),
-    )
-    let audio: ReturnType<WebAudioHost['connectMedia']> | undefined,
-      container: HTMLDivElement | undefined,
-      owned: Movie | undefined
+    const source = this.encoded.source(command.bytes),
+      stage: VideoStage = { id: command.id, epoch: command.epoch, windowId, source, abort: new AbortController(), disposed: false },
+      selected = Math.max(0, command.settings.enabledAudioStream)
+    this.stages.set(stage.id, stage)
     try {
-      audio = this.audio.connectMedia(element)
-      container = document.createElement('div')
-      container.append(element)
-      const movie: Movie = (owned = {
-        id: command.id,
-        epoch: command.epoch,
-        windowId,
-        element,
-        container,
-        url,
-        bytes: command.bytes.length,
-        settings: { ...command.settings },
-        status: 'stop',
-        timeline: command.timeline,
-        blocked: false,
-        disposed: false,
-        periodArmed: false,
-        seeking: false,
-        abort: new AbortController(),
-        audio,
-      })
+      const variant = command.timeline && command.timeline.audioStreams > 1
+        ? await this.encoded.select(source, selected, command.timeline, mime, () => this.stageCurrent(stage))
+        : this.encoded.original(source, mime)
+      if (stage.disposed) { variant.release(); throw new Error('Video operation cancelled') }
+      stage.variant = variant
+      this.stageCurrent(stage)
+      const movie = this.createMovie(stage, command.epoch, command.settings, command.timeline, mime, selected)
       this.movies.set(movie.id, movie)
       const surface = this.windows.get(windowId)?.surface
-      if (surface) surface.plane.insertBefore(container, surface.activation)
+      if (surface) surface.plane.insertBefore(movie.container, surface.activation)
       else this.park(movie)
       this.layout(windowId)
-      element.ontimeupdate = () => {
-        try {
-          this.advanceClock(movie)
-        } catch (error) {
-          this.fail(error)
-        }
-      }
-      element.onended = () => {
-        if (movie.disposed || movie.status !== 'play' || !element.ended) return
-        if (this.advanceClock(movie)) return
-        if (movie.settings.loop)
-          void this.seek(movie, 0).then(
-            () => {
-              if (movie.disposed || this.movies.get(movie.id) !== movie) return
-              this.emit({
-                type: 'period',
-                id: movie.id,
-                epoch: movie.epoch,
-                snapshot: this.snapshot(movie),
-                reason: 0,
-              })
-              this.play(movie)
-            },
-            (error) => {
-              if (!movie.disposed) this.fail(error)
-            },
-          )
-        else {
-          movie.status = 'stop'
-          this.cancelFrame(movie)
-          this.emit({
-            type: 'ended',
-            id: movie.id,
-            epoch: movie.epoch,
-            snapshot: this.snapshot(movie),
-          })
-        }
-      }
-      await this.loadFirstFrame(movie, () =>
-        this.wait(
-          movie,
-          'loadeddata',
-          () => element.readyState >= 2,
-          () => {
-            element.src = url
-            element.load()
-          },
-        ),
-      )
-      if (this.closed || movie.disposed || this.movies.get(movie.id) !== movie)
-        throw new Error('Video open was closed or superseded')
-      if (
-        !element.videoWidth ||
-        element.videoWidth > 4096 ||
-        element.videoHeight > 4096 ||
-        !Number.isFinite(element.duration)
-      )
-        throw new Error('Invalid video dimensions or duration')
-      this.settings(movie, command.settings)
-      element.addEventListener(
-        'error',
-        () => {
-          if (!movie.disposed)
-            this.fail(
-              new Error(`Video playback failed: ${element.error?.message ?? element.error?.code}`),
-            )
-        },
-        { signal: movie.abort.signal },
-      )
+      await this.loadMovie(movie)
+      this.stageCurrent(stage)
+      this.current(movie)
+      this.applySettings(movie, command.settings)
+      this.bindMovie(movie)
+      this.stages.delete(stage.id)
       return { snapshot: this.snapshot(movie), events: [] }
     } catch (error) {
-      // A creation/presentation error remains primary. Cleanup also covers
-      // resources acquired before the Movie could enter the registry.
-      if (owned) {
-        if (this.movies.get(owned.id) === owned) this.movies.delete(owned.id)
-        try {
-          this.disposeMovie(owned)
-        } catch {}
-      } else {
-        try {
-          audio?.close()
-        } catch {}
-        try {
-          element.pause()
-        } catch {}
-        try {
-          element.removeAttribute('src')
-          element.load()
-        } catch {}
-        try {
-          container?.remove()
-        } catch {}
-        try {
-          URL.revokeObjectURL(url)
-        } catch {}
+      if (this.movies.get(stage.id) === stage.movie) this.movies.delete(stage.id)
+      try { this.retireStage(stage) } catch {}
+      try { this.layout() } catch {}
+      throw error
+    }
+  }
+  private async settings(movie: Movie, settings: VideoSettings): Promise<Movie> {
+    const index = settings.enabledAudioStream
+    if (index < 0 || index === movie.lastSelectedIndex) {
+      this.applySettings(movie, settings)
+      return movie
+    }
+    if (!Number.isSafeInteger(index) || !movie.timeline || index >= movie.timeline.audioStreams)
+      throw new Error('Invalid video audio stream')
+    const stage: VideoStage = { id: movie.id, epoch: movie.epoch, windowId: movie.windowId, previous: movie,
+      source: movie.source.retain(), abort: new AbortController(), disposed: false }
+    this.stages.set(movie.id, stage)
+    movie.switching = stage
+    let committed = false, candidate: Movie | undefined
+    try {
+      // Switching is deliberately not gapless. Freeze the authoritative media
+      // clock before preparing the candidate, so no period/loop/ended boundary
+      // or old-epoch layer frame is consumed during the asynchronous handoff.
+      movie.element.pause()
+      this.cancelFrame(movie)
+      const position = movie.element.currentTime * 1000
+      const variant = await this.encoded.select(stage.source, index, movie.timeline, movie.mime,
+        () => this.stageCurrent(stage))
+      if (stage.disposed) { variant.release(); throw new Error('Video operation cancelled') }
+      stage.variant = variant
+      this.stageCurrent(stage)
+      candidate = this.createMovie(stage, stage.epoch, settings, movie.timeline, movie.mime, index)
+      this.park(candidate)
+      await this.loadMovie(candidate)
+      this.stageCurrent(stage)
+      if (candidate.element.videoWidth !== movie.element.videoWidth || candidate.element.videoHeight !== movie.element.videoHeight ||
+          Math.abs(candidate.element.duration - movie.element.duration) > 0.001)
+        throw new Error('Selected audio track changed the video presentation timeline')
+      this.applySettings(candidate, settings)
+      await this.seekPresented(candidate, position)
+      this.stageCurrent(stage)
+      candidate.periodArmed = movie.periodArmed
+      candidate.blocked = movie.blocked
+      this.bindMovie(candidate)
+      const surface = this.windows.get(movie.windowId)?.surface
+      if (surface) surface.plane.insertBefore(candidate.container,
+        movie.container.parentElement === surface.plane ? movie.container : surface.activation)
+      else this.park(candidate)
+      if (movie.mixing) candidate.container.append(movie.mixing.canvas)
+      candidate.element.dataset.videoId = String(movie.id)
+      candidate.element.dataset.windowId = String(movie.windowId)
+      candidate.status = movie.status
+      this.movies.set(movie.id, candidate)
+      this.layout(movie.windowId)
+      candidate.mixing = movie.mixing
+      movie.mixing = undefined
+      movie.switching = undefined
+      this.stages.delete(stage.id)
+      committed = true
+      // The new graph is still paused. Retire the old graph before allowing
+      // playback, so two selected tracks can never be audible together.
+      const cleanupErrors: unknown[] = []
+      for (const complete of [() => this.disposeMovie(movie), () => this.trimParking(),
+        () => { if (candidate!.status === 'play') this.play(candidate!) }]) {
+        try { complete() } catch (error) { cleanupErrors.push(error) }
       }
-      try {
-        this.layout()
-      } catch {}
+      if (cleanupErrors.length) throw cleanupErrors.length === 1 ? cleanupErrors[0]
+        : new AggregateError(cleanupErrors, 'Video selected track was installed but old resource cleanup failed')
+      return candidate
+    } catch (error) {
+      if (!committed) {
+        if (candidate && this.movies.get(movie.id) === candidate) this.movies.set(movie.id, movie)
+        if (movie.mixing && movie.mixing.canvas.parentElement !== movie.container) {
+          try { movie.container.append(movie.mixing.canvas) } catch {}
+        }
+        try { this.retireStage(stage) } catch {}
+        if (!this.closed && !movie.disposed && this.movies.get(movie.id) === movie && !movie.switching) {
+          try { this.layout(movie.windowId) } catch {}
+          if (movie.status === 'play') this.play(movie)
+        }
+      }
       throw error
     }
   }
@@ -893,7 +1009,7 @@ export class WebVideoHost {
       this.paused = true
       let primary: unknown,
         failed = false
-      for (const id of this.movies.keys()) {
+      for (const id of new Set([...this.movies.keys(), ...this.stages.keys()])) {
         try {
           this.remove(id)
         } catch (error) {
@@ -912,16 +1028,27 @@ export class WebVideoHost {
     }
     if (command.op === 'open') return this.open(command)
     if (command.op === 'close') {
-      const movie = this.movies.get(command.id)
-      if (movie && command.epoch < movie.epoch) return { events: [] }
+      const movie = this.movies.get(command.id), stage = this.stages.get(command.id)
+      if ((movie && command.epoch < movie.epoch) || (stage && command.epoch < stage.epoch)) return { events: [] }
       this.remove(command.id)
       return { events: [] }
     }
-    const movie = this.get(command.id),
-      events: VideoEvent[] = []
+    let movie = this.get(command.id)
+    const events: VideoEvent[] = []
     if (command.epoch < movie.epoch) throw new Error('Video operation was superseded')
+    const opening = this.stages.get(movie.id)
+    if (opening && !opening.previous)
+      throw new Error('Video is still opening; only close or replacement open is available')
+    if (command.op !== 'inspect' && command.op !== 'mixing') {
+      const stage = this.stages.get(movie.id)
+      if (stage?.previous === movie) this.retireStage(stage)
+    }
     movie.epoch = command.epoch
-    if (command.op === 'set') this.settings(movie, command.settings)
+    if (command.op === 'set') {
+      const previous = movie
+      movie = await this.settings(movie, command.settings)
+      if (movie !== previous && (movie.settings.mode === 1 || movie.settings.mode === 2)) events.push(this.frame(movie))
+    }
     else if (command.op === 'mixing') this.mixing(movie, command.bitmap)
     else if (command.op === 'seek' || command.op === 'rewind') {
       const time =
@@ -930,7 +1057,8 @@ export class WebVideoHost {
             ? videoFrameTime(movie.timeline, command.frame) + 0.0001
             : command.position!
           : 0
-      await this.seek(movie, time)
+      if (movie.status !== 'play' && movie.timeline?.times.length) await this.seekPresented(movie, time)
+      else await this.seek(movie, time)
       this.current(movie, command.epoch)
       events.push(this.frame(movie))
     } else if (command.op === 'prepare') {
@@ -938,7 +1066,8 @@ export class WebVideoHost {
         movie.element.pause()
         this.cancelFrame(movie)
         movie.status = 'pause'
-        await this.seek(movie, 0)
+        if (movie.timeline?.times.length) await this.seekPresented(movie, 0)
+        else await this.seek(movie, 0)
         this.current(movie, command.epoch)
         events.push(this.frame(movie), {
           type: 'period',
@@ -964,17 +1093,20 @@ export class WebVideoHost {
     return { snapshot: this.snapshot(movie), events }
   }
   private remove(id: number): void {
+    const stage = this.stages.get(id)
     const movie = this.movies.get(id)
-    if (!movie) return
+    if (!movie && !stage) return
     this.movies.delete(id)
     let primary: unknown,
       failed = false
     try {
-      this.disposeMovie(movie)
+      if (stage) this.retireStage(stage)
     } catch (error) {
       primary = error
       failed = true
     }
+    try { if (movie) this.disposeMovie(movie) }
+    catch (error) { if (!failed) primary = error; failed = true }
     try {
       this.layout()
     } catch (error) {
@@ -1020,7 +1152,8 @@ export class WebVideoHost {
         movie.surface = undefined
       }
     })
-    attempt(() => URL.revokeObjectURL(movie.url))
+    attempt(() => movie.variant.release())
+    attempt(() => movie.source.release())
     if (failed) throw primary
   }
   close(): Promise<void> {
@@ -1039,7 +1172,7 @@ export class WebVideoHost {
           }
         }
       }
-      for (const id of this.movies.keys()) attempt(() => this.remove(id))
+      for (const id of new Set([...this.movies.keys(), ...this.stages.keys()])) attempt(() => this.remove(id))
       for (const [id, window] of this.windows) attempt(() => this.releaseSurface(id, window))
       this.windows.clear()
       this.retiredWindows.clear()

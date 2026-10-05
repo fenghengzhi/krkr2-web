@@ -102,6 +102,28 @@ for (const direction of ['top-down', 'bottom-up'] as const) {
   add('endpoint', direction, 'incremental-f64', 'incremental-f64', 'horizontal-term-floor-except-fy-zero')
 }
 assert.equal(candidates.length, 128)
+const legacyCandidateIds = candidates.map((candidate) => candidate.id),
+  precisionArithmetic = ['absolute-f64', 'incremental-f64', 'absolute-f32', 'incremental-f32'] as const,
+  precisionCombinationIds: string[] = [], precisionReusedIds: string[] = [], precisionAddedIds: string[] = []
+// The staged kernel was previously measured only with incremental binary64
+// coordinates. Complete its independent X/Y precision matrix without deleting
+// or reordering any historical candidate. Pixel arithmetic remains binary64.
+for (const direction of ['top-down', 'bottom-up'] as const)
+  for (const xArithmetic of precisionArithmetic) for (const yArithmetic of precisionArithmetic) {
+    const kernel = 'horizontal-term-floor-except-fy-zero',
+      id = `endpoint/${direction}/x-${xArithmetic}/y-${yArithmetic}/${kernel}`
+    precisionCombinationIds.push(id)
+    if (candidates.some((candidate) => candidate.id === id)) precisionReusedIds.push(id)
+    else {
+      add('endpoint', direction, xArithmetic, yArithmetic, kernel)
+      precisionAddedIds.push(id)
+    }
+  }
+assert.equal(precisionCombinationIds.length, 32)
+assert.equal(precisionReusedIds.length, 2)
+assert.equal(precisionAddedIds.length, 30)
+assert.equal(candidates.length, 158)
+assert.deepEqual(candidates.slice(0, 128).map((candidate) => candidate.id), legacyCandidateIds)
 assert.equal(new Set(candidates.map((candidate) => candidate.id)).size, candidates.length)
 
 function axis(source: number, target: number, mapping: Mapping, arithmetic: Arithmetic): number[] {
@@ -259,6 +281,13 @@ const save = () => writeFileSync(file('scaling-candidates.json'), JSON.stringify
   design: {
     mainMatrix: '2 mappings x 2 source/output row directions x 3 coordinate arithmetics x 10 kernels = 120',
     supplements: '8 endpoint candidates: 4 absolute-f32 weighted kernels across both axis orders/directions; 2 weighted-X-Y with incremental-f32 X/incremental-f64 Y; 2 double-incremental horizontal-term-floor-except-fy-zero hypotheses, one per row direction',
+    legacyPrefix: { count: 128, ids: legacyCandidateIds },
+    precisionSupplement: {
+      mapping: 'endpoint', kernel: 'horizontal-term-floor-except-fy-zero',
+      directions: ['top-down', 'bottom-up'], xArithmetic: precisionArithmetic, yArithmetic: precisionArithmetic,
+      combinations: 32, reused: 2, added: 30,
+      combinationIds: precisionCombinationIds, reusedIds: precisionReusedIds, addedIds: precisionAddedIds,
+    },
     axisRules: 'endpoint: step=(source-1)/(target-1), origin=0; center: step=source/target, origin=step/2-1/2; f32 rounds ratio, origin, and every multiply/add or accumulation; no near-integer snapping',
     directionRules: 'bottom-up starts at the bottom source/output memory row and accumulates positive Y; raw reference is independently normalized to top-down',
     kernelRules: 'weighted=(1-f)*a+f*b; lerp=a+(b-a)*f; staged floors first-axis results before second-axis blend; four-tap floors each byte*Xweight*Yweight; horizontal-term-floor-except-fy-zero floors each horizontal term before vertical weighting unless fy==0, where it floors the complete horizontal sum only; all interpolators floor final bytes; nearest rounds clamped coordinates',

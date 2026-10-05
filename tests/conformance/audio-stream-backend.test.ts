@@ -462,7 +462,7 @@ test('pool shutdown waits for a late factory and reports both decoder-close and 
       assert.deepEqual(nested.errors.map((entry: Error) => entry.message), ['decoder close failed', 'lease release failed'])
       return true
     })
-    await turn(); assert.deepEqual(order, [])
+    await turn(); assert.deepEqual([...order], [])
     factoryGate.resolve(decoder(undefined, async () => { order.push('decoder'); throw new Error('decoder close failed') }))
     await rejected; await failed
     assert.deepEqual(order, ['decoder', 'release'])

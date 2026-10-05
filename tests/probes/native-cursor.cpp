@@ -18,6 +18,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using Bytes = std::vector<std::uint8_t>;
@@ -609,14 +610,143 @@ std::string environment() {
       << ",\"height\":" << GetSystemMetrics(SM_CYCURSOR) << "},\"displayBitsPerPixel\":" << depth << ",\"dpi\":{\"x\":" << dpiX << ",\"y\":" << dpiY << "}}";
     return o.str();
 }
+
+// Separate finite-domain mask observations: no DrawIconEx, animation, or
+// portable scaler/candidate runs. Every source coordinate gets its own line
+// fixture so source support is measured, never assigned to a guessed region.
+struct MaskFootprint {
+    std::string kind;
+    char axis = 'x';
+    unsigned coordinate = 0, x = 0, y = 0, constant = 0;
+};
+bool footprintBit(const MaskFootprint& pattern, unsigned x, unsigned y, bool xorPlane) {
+    if (pattern.kind == "constant") return pattern.constant != 0;
+    if (pattern.kind == "zero-line") {
+        const char axis = xorPlane ? (pattern.axis == 'x' ? 'y' : 'x') : pattern.axis;
+        return (axis == 'x' ? x : y) != pattern.coordinate;
+    }
+    if (pattern.kind == "zero-point")
+        return !(x == (xorPlane ? pattern.y : pattern.x) && y == (xorPlane ? pattern.x : pattern.y));
+    throw std::runtime_error("Unknown footprint pattern");
+}
+Bytes footprintCursor(unsigned depth, const MaskFootprint& pattern) {
+    if (depth != 1 && depth != 32) throw std::runtime_error("Invalid footprint depth");
+    constexpr unsigned extent = 256, maskStride = 32;
+    const unsigned colorStride = extent * depth / 8;
+    Bytes payload;
+    put32(payload, 40); put32(payload, extent); put32(payload, extent * 2);
+    put16(payload, 1); put16(payload, depth); put32(payload, BI_RGB);
+    put32(payload, (colorStride + maskStride) * extent); put32(payload, 0); put32(payload, 0);
+    put32(payload, depth == 1 ? 2 : 0); put32(payload, 0);
+    if (depth == 1) { put32(payload, 0); put32(payload, 0x00ffffff); }
+    const auto colorAt = payload.size(), maskAt = colorAt + colorStride * extent;
+    payload.resize(maskAt + maskStride * extent, 0);
+    // Top-down fixture coordinates are written into independent bottom-up DIB
+    // planes. Constant non-grey RGB prevents an all-black color image from
+    // collapsing to a monochrome representation; alpha remains exactly zero.
+    for (unsigned y = 0; y < extent; y++) for (unsigned x = 0; x < extent; x++) {
+        const unsigned row = extent - 1 - y, bit = 1u << (7 - x % 8);
+        if (footprintBit(pattern, x, y, false)) payload[maskAt + row * maskStride + x / 8] |= bit;
+        if (depth == 1 && footprintBit(pattern, x, y, true)) payload[colorAt + row * colorStride + x / 8] |= bit;
+        if (depth == 32) {
+            const auto at = colorAt + row * colorStride + x * 4;
+            payload[at] = 65; payload[at + 1] = 33; payload[at + 2] = 17;
+        }
+    }
+    Image image; image.width = image.height = extent; image.bpp = depth;
+    image.hotX = image.hotY = 0; image.payload = std::move(payload);
+    return cur({image});
+}
+int observeMaskFootprints(const fs::path& output) {
+    constexpr unsigned expected = 1100;
+    const char* sha = std::getenv("GITHUB_SHA");
+    const auto platform = environment();
+    std::vector<std::string> rows;
+    unsigned failures = 0;
+    bool cleanupFailed = false;
+    std::ofstream journal(output / "mask-footprints.jsonl", std::ios::binary | std::ios::trunc);
+    if (!journal) throw std::runtime_error("Cannot open footprint journal");
+    auto save = [&](bool completed) {
+        std::ostringstream json;
+        json << "{\"schema\":1,\"scope\":\"Independent User32 raw mask support observations; no portable compatibility claim\","
+          << "\"globalInputUsed\":false,\"drawIconExUsed\":false,\"portableCandidatesUsed\":false,\"completed\":"
+          << (completed ? "true" : "false") << ",\"cleanupFailed\":" << (cleanupFailed ? "true" : "false")
+          << ",\"failures\":" << failures << ",\"sourceCommit\":" << quote(sha ? sha : "")
+          << ",\"platform\":" << platform << ",\"sourceExtent\":256,\"expectedSamples\":" << expected
+          << ",\"observedSamples\":" << rows.size()
+          << ",\"design\":{\"axisLines\":1024,\"constants\":4,\"points\":72,"
+          << "\"coordinateSpace\":\"top-down source pixels\",\"lineXor\":\"other axis, same source coordinate\","
+          << "\"pointXor\":\"transpose source x and y\",\"color32\":\"BGRA=(65,33,17,0), independent AND plane\"},\"samples\":[";
+        for (size_t n = 0; n < rows.size(); n++) { if (n) json << ','; json << rows[n]; }
+        json << "]}\n"; writeText(output / "mask-footprints.json", json.str());
+    };
+    save(false);
+    auto observeOne = [&](unsigned depth, const MaskFootprint& pattern) {
+        std::string suffix = pattern.kind + "-";
+        if (pattern.kind == "zero-line") suffix += std::string(1, pattern.axis) + "-" + std::to_string(pattern.coordinate);
+        else if (pattern.kind == "zero-point") suffix += std::to_string(pattern.x) + "-" + std::to_string(pattern.y);
+        else suffix += std::to_string(pattern.constant);
+        const std::string id = "mask-footprint-" + std::to_string(depth) + "-" + suffix, filename = id + ".cur";
+        std::cout << "BEGIN " << id << std::endl;
+        const auto bytes = footprintCursor(depth, pattern);
+        write(output / filename, bytes);
+        std::ostringstream row;
+        row << "{\"id\":" << quote(id) << ",\"file\":" << quote(filename) << ",\"bytes\":" << bytes.size()
+          << ",\"depth\":" << depth << ",\"pattern\":{\"kind\":" << quote(pattern.kind)
+          << ",\"axis\":" << quote(std::string(1, pattern.axis)) << ",\"coordinate\":" << pattern.coordinate
+          << ",\"x\":" << pattern.x << ",\"y\":" << pattern.y << ",\"constant\":" << pattern.constant << '}';
+        SetLastError(0);
+        HCURSOR cursor = LoadCursorFromFileW((output / filename).c_str());
+        const DWORD loadError = cursor ? 0 : GetLastError();
+        row << ",\"loaded\":" << (cursor ? "true" : "false") << ",\"loadError\":" << loadError;
+        if (cursor) {
+            try {
+                const auto info = cursorInfo(cursor, output, id);
+                row << ",\"info\":" << info.json();
+                if (!info.ok || !info.planesCopied) failures++;
+                if (!info.bitmapsDeleted) cleanupFailed = true;
+            } catch (...) { DestroyCursor(cursor); throw; }
+            SetLastError(0);
+            const bool destroyed = DestroyCursor(cursor) != FALSE;
+            const DWORD destroyError = destroyed ? 0 : GetLastError();
+            if (!destroyed) cleanupFailed = true;
+            row << ",\"destroyed\":" << (destroyed ? "true" : "false") << ",\"destroyError\":" << destroyError;
+        } else failures++;
+        row << '}'; rows.push_back(row.str());
+        journal << rows.back() << '\n'; journal.flush();
+        if (!journal) throw std::runtime_error("Cannot append footprint journal");
+        if (rows.size() % 16 == 0) save(false);
+        std::cout << "OBSERVED " << id << std::endl;
+    };
+    for (unsigned depth : {1u, 32u}) {
+        for (unsigned value : {0u, 1u}) {
+            MaskFootprint pattern; pattern.kind = "constant"; pattern.constant = value;
+            observeOne(depth, pattern);
+        }
+        for (char axis : {'x', 'y'}) for (unsigned coordinate = 0; coordinate < 256; coordinate++) {
+            MaskFootprint pattern; pattern.kind = "zero-line"; pattern.axis = axis; pattern.coordinate = coordinate;
+            observeOne(depth, pattern);
+        }
+        for (unsigned x : {0u, 4u, 5u, 252u, 253u, 255u}) for (unsigned y : {0u, 4u, 5u, 252u, 253u, 255u}) {
+            MaskFootprint pattern; pattern.kind = "zero-point"; pattern.x = x; pattern.y = y;
+            observeOne(depth, pattern);
+        }
+    }
+    if (rows.size() != expected) throw std::runtime_error("Footprint observation inventory changed");
+    save(true);
+    std::cout << "COMPLETE " << rows.size() << " independent mask observations; no compatibility pass claim\n";
+    return failures || cleanupFailed ? 2 : 0;
+}
 int wmain(int argc, wchar_t** argv) {
     try {
         const char* actions = std::getenv("GITHUB_ACTIONS"), *runner = std::getenv("RUNNER_ENVIRONMENT"), *os = std::getenv("RUNNER_OS");
         if (!actions || std::string(actions) != "true" || !runner || std::string(runner) != "github-hosted" || !os || std::string(os) != "Windows")
             throw std::runtime_error("This probe runs only on GitHub-hosted Windows Actions");
-        if (argc != 2) throw std::runtime_error("Expected output directory");
+        if (argc != 2 && (argc != 3 || std::wstring(argv[2]) != L"--mask-footprints"))
+            throw std::runtime_error("Expected output directory and optional --mask-footprints");
         SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
         const fs::path output = fs::absolute(argv[1]); fs::create_directories(output);
+        if (argc == 3) return observeMaskFootprints(output);
         const auto cases = fixtures(); const std::string platform = environment();
         const char* sha = std::getenv("GITHUB_SHA");
         auto frameInfo = reinterpret_cast<GetCursorFrameInfoFn>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetCursorFrameInfo"));

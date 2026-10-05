@@ -2,7 +2,7 @@ import { WebAudioHost } from '../../src/backends/audio/web/host.ts'
 import {
   defaultSoundSettings,
   emptyLoops,
-  type AudioCommand,
+  type WireAudioCommand,
   type AudioResult,
 } from '../../src/engine/ports/audio.ts'
 import type {
@@ -138,7 +138,7 @@ export async function exerciseWebAudioLifetime(name: WebAudioLifetimeCase) {
     )
   }
   const host = new WebAudioHost(channel.port2, (state) => states.push(state))
-  const request = (command: AudioCommand) => {
+  const request = (command: WireAudioCommand) => {
     const serial = next++,
       job = deferred<Reply>()
     pending.set(serial, job)

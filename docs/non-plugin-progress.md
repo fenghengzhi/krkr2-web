@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [085 视频音轨选择与原生光标采样](decisions/085-video-audio-tracks.md)：MP4 保留媒体字节和时间轴，使用真实单元素音视频时钟切换音轨；补齐原版方法／属性 setter 的 uint32 转换和越界空操作。增加真实频谱、播放／暂停位置、取消和编码资源预算验收。协议 **30**、TJS ABI **5**、字体 ABI **2**。另增 1,100 行 Windows mask footprint 观察和 158 个颜色缩放候选；当前生产光标差异仍未解决。所有新增实现尚待 GitHub-hosted 执行，整体非插件目标仍 active。
+
+085 已回收 083／084 的 **completed／failure** 终态，固定清单共 **10/10 原 ZIP** 大小和 SHA-256 核对一致。084 build 有 9 条测试类型错误，本批修订；Node／浏览器／原 KAG 等后续作业全部 skipped，流式音频和手柄改动不能记为通过。两 Windows strict 各 270/332 匹配、62 draw 差异、1,858 未比较，原失败保留。每次运行 allocator 均每后端 60/60，仅代表独立诊断。未实时轮询，未本地执行验证；详细终态见对应运行目录的 `085-final-summary.md`。
+
 最新待核验批次：[Full test suite 37267857946](https://github.com/fenghengzhi/krkr2-web/actions/runs/37267857946)，精确提交 `29be5f1d12e33696ef33601754c9bb139eb402b8`。084 的范围音频源、流式 WAV／Vorbis、Worklet 分页、缺页事务、Session 取消和 083 构建修订已整批推送；新增 87 个 Node 定义、每浏览器 2 个定义均待托管执行。首次唯一查询为 **in_progress／conclusion=null**，只确认提交身份，不实时查看作业结果。下一轮补取 083 终态并回收 084 固定快照／产物；既有失败、skipped、unreported、uncompared 记录保留。没有本地执行验证，未合入旧 main，整体非插件目标仍 active。
 
 2026-10-05 准备 [084 有界音频源与流式播放](decisions/084-streaming-audio.md)：长 WAV／Vorbis 从 Resource 范围读取，经 Worker decoder 和 AudioWorklet 有界分页输出；加入部分滤镜 hop 的缺页恢复、取消、预算与真实 Session／浏览器验收。协议 **29**，TJS ABI **5**、字体 ABI **2**。本批尚未执行，不记为通过；全量验证仍整批交 GitHub-hosted Actions，下次取回结果。整体目标是完成插件以外的 KRKR2 Web 模拟器，仍有后续任务。

@@ -125,6 +125,11 @@ jobs:
         run: npm run build 2>&1 | tee out/ci/build.log
       - name: Build offline update fixtures
         run: node scripts/build-pwa-fixtures.mjs 2>&1 | tee out/ci/pwa-build.log
+      - name: Generate shared project-owned video track fixtures
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          node scripts/generate-video-track-fixtures.mjs 2>&1 | tee out/ci/video-track-fixtures.log
       - name: Package the exact build for all test jobs
         env:
           KERNEL_CACHE_KEY: ${{ steps.kernels.outputs.cache-primary-key }}
@@ -148,7 +153,7 @@ jobs:
           tar -czf "$RUNNER_TEMP/test-build.tar.gz" \
             .generated dist out/ci/build-info.json \
             out/verification/pwa/site-a out/verification/pwa/site-b \
-            out/verification/pwa/fixture-artifacts.json
+            out/verification/pwa/fixture-artifacts.json out/verification/video-tracks
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-build

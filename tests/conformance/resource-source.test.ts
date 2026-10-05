@@ -211,7 +211,7 @@ test('large stored ZIP verifies the entire payload once in bounded blocks before
     opened = await openResourceSource(resource)
   archive.reads.length = 0
   assert.equal(opened.mode, 'range'); assert.equal(opened.bufferedBytes, 0)
-  assert.deepEqual(archive.reads, [], 'Opening a capability must not falsely report payload verification')
+  assert.deepEqual([...archive.reads], [], 'Opening a capability must not falsely report payload verification')
   const [head, tail] = await Promise.all([opened.source.read(0, 4), opened.source.read(archive.size - 1, 1)])
   assert.deepEqual([...head], [82, 73, 70, 70]); assert.deepEqual([...tail], [0x33])
   for (let offset = 0; offset < archive.size; offset += archive.block) {

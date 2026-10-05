@@ -140,20 +140,114 @@ jobs:
             $status.finishedAt = [DateTime]::UtcNow.ToString('o')
             $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
           }
+      - name: Observe each source coordinate's native mask footprint
+        id: footprints
+        if: ${{ !cancelled() && steps.reference.outcome == 'success' }}
+        env:
+          PROBE_RUNNER_LABEL: ${{ matrix.os }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:GITHUB_WORKSPACE 'out/ci/native-cursor'
+          $statusPath = Join-Path $output 'mask-footprints-status.json'
+          $status = [ordered]@{
+            schema = 1; state = 'not-executed'; stage = 'setup'
+            sourceCommit = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID; runner = $env:PROBE_RUNNER_LABEL
+            scope = 'Raw native mask support; no DrawIconEx, candidates, or compatibility-pass claim'
+            expectedSamples = 1100; observedSamples = 0; processDeadlineMs = 180000
+            startedAt = [DateTime]::UtcNow.ToString('o'); finishedAt = $null
+            processId = $null; exitCode = $null; error = $null; cleanupError = $null
+          }
+          $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          $process = $null
+          try {
+            if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
+              throw 'Mask footprint observations require GitHub-hosted Windows.'
+            }
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'tests/probes/cursor-mask-footprints.ts') -Destination $output
+            $start = @{
+              FilePath = Join-Path $output 'native-cursor.exe'
+              ArgumentList = ('"{0}" --mask-footprints' -f $output)
+              WorkingDirectory = $output; PassThru = $true
+              RedirectStandardOutput = Join-Path $output 'mask-footprints.stdout.log'
+              RedirectStandardError = Join-Path $output 'mask-footprints.stderr.log'
+            }
+            $process = Start-Process @start
+            $status.processId = $process.Id; $status.state = 'running'; $status.stage = 'observe'
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+            if (-not $process.WaitForExit($status.processDeadlineMs)) {
+              $status.state = 'timed-out'
+              throw 'Mask footprint process exceeded its 180-second deadline; raw files and journal remain evidence.'
+            }
+            $status.exitCode = $process.ExitCode
+            if ($process.ExitCode -ne 0) { throw "Mask footprint process exited with code $($process.ExitCode)." }
+            $status.stage = 'evidence'
+            $observations = Get-Content -LiteralPath (Join-Path $output 'mask-footprints.json') -Raw | ConvertFrom-Json
+            if ($observations.schema -ne 1 -or $observations.completed -ne $true -or $observations.cleanupFailed -ne $false -or
+                $observations.failures -ne 0 -or $observations.expectedSamples -ne 1100 -or
+                $observations.observedSamples -ne 1100 -or $observations.samples.Count -ne 1100 -or
+                $observations.sourceCommit -cne $env:GITHUB_SHA -or $observations.globalInputUsed -ne $false -or
+                $observations.drawIconExUsed -ne $false -or $observations.portableCandidatesUsed -ne $false) {
+              throw 'Mask footprint observations have incomplete inventory, failed cleanup, or unexpected scope.'
+            }
+            $ids = [Collections.Generic.HashSet[string]]::new()
+            foreach ($sample in $observations.samples) {
+              if (-not $ids.Add($sample.id)) { throw 'Duplicate mask footprint sample identity.' }
+              $fixture = Join-Path $output $sample.file
+              if (-not (Test-Path -LiteralPath $fixture) -or (Get-Item -LiteralPath $fixture).Length -ne $sample.bytes -or
+                  $sample.loaded -ne $true -or $sample.destroyed -ne $true -or $sample.info.ok -ne $true -or
+                  $sample.info.planesCopied -ne $true -or $sample.info.bitmapsDeleted -ne $true) {
+                throw "Incomplete footprint source or native metadata: $($sample.id)"
+              }
+              foreach ($plane in @($sample.info.maskPlane, $sample.info.colorPlane)) {
+                if ($plane.present) {
+                  $raw = Join-Path $output $plane.file
+                  if ($plane.ok -ne $true -or -not (Test-Path -LiteralPath $raw) -or
+                      (Get-Item -LiteralPath $raw).Length -ne ($plane.stride * $plane.height)) {
+                    throw "Incomplete footprint raw bitmap plane: $($sample.id)"
+                  }
+                }
+              }
+            }
+            $status.observedSamples = $observations.observedSamples
+            $status.state = 'observed'; $status.stage = 'complete'
+          } catch {
+            if ($status.state -ne 'timed-out') { $status.state = 'failed' }
+            $status.error = $_.Exception.ToString(); throw
+          } finally {
+            if ($null -ne $process) {
+              try {
+                if (-not $process.HasExited) {
+                  $process.Kill()
+                  if (-not $process.WaitForExit(10000)) { throw 'Owned footprint process did not terminate during cleanup.' }
+                }
+              } catch { $status.cleanupError = $_.Exception.ToString() }
+            }
+            $status.finishedAt = [DateTime]::UtcNow.ToString('o')
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          }
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ !cancelled() && steps.reference.outcome == 'success' }}
         with:
           node-version: '24.19.0'
           cache: npm
       - run: npm ci
         id: dependencies
+        if: ${{ !cancelled() && steps.reference.outcome == 'success' }}
+      - name: Summarize exact native mask support and point separability
+        if: ${{ !cancelled() && steps.footprints.outcome == 'success' && steps.dependencies.outcome == 'success' }}
+        timeout-minutes: 3
+        run: node --import tsx tests/probes/cursor-mask-footprints.ts out/ci/native-cursor
       - name: Compare independent decoder with the actual observed fixture bytes
+        if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
         run: node --import tsx tests/probes/cursor-compare.ts out/ci/native-cursor
       - name: Compare native-profile cursor file loading and natural-size drawing
         if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
         run: node --import tsx tests/probes/cursor-load-compare.ts out/ci/native-cursor
-      - name: Characterize bounded scaling candidates against raw native bitmap planes
+      - name: Characterize 158 bounded scaling candidates against raw native bitmap planes
         if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
-        run: node --import tsx tests/probes/cursor-scaling-candidates.ts out/ci/native-cursor
+        run: |
+          Copy-Item -LiteralPath 'tests/probes/cursor-scaling-candidates.ts' -Destination 'out/ci/native-cursor/cursor-scaling-candidates.ts'
+          node --import tsx tests/probes/cursor-scaling-candidates.ts out/ci/native-cursor
       - name: Preserve exact evidence hashes
         if: always()
         run: |

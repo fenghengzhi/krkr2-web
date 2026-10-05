@@ -223,7 +223,7 @@ test('prepare distinguishes a missing initial page from real EOF without publish
   assert.equal(chain.prepare((name) => labels.push(name)), false)
   assert.equal(chain.starved, true)
   assert.equal(chain.sourcePosition(), 0)
-  assert.deepEqual(labels, [])
+  assert.deepEqual([...labels], [])
   paging.supply()
   assert.equal(chain.canAdvance(16), true)
   assert.equal(chain.prepare((name) => labels.push(name)), true)

@@ -376,7 +376,9 @@ export class VideoService {
         windowId: video.windowId,
         name,
         bytes: await this.read(name.split('?')[0]!),
-        settings: videoSettings(video.snapshot),
+        // A newly opened native media graph starts with its default stream;
+        // a selected index from the previous file is not an open preference.
+        settings: { ...videoSettings(video.snapshot), enabledAudioStream: 0 },
       })
       video.ready = true
       callbacks.push({ name: 'onStatusChanged', args: [video.snapshot.status] })
@@ -399,7 +401,8 @@ export class VideoService {
       )
         throw new Error('This video container has no supported frame index')
       if (!(property in video.snapshot)) throw new Error(`Unsupported video property: ${property}`)
-      const result = video.snapshot[property as keyof VideoSnapshot]
+      const result = property === 'enabledAudioStream' && !video.ready
+        ? -1 : video.snapshot[property as keyof VideoSnapshot]
       value =
         typeof result === 'string'
           ? result
@@ -466,19 +469,25 @@ export class VideoService {
       if (video.ready) await apply({ op: 'set', ...identity(), settings: videoSettings(state) })
       else video.snapshot = state
     } else if (method === 'audioStream') {
-      const index = number(0)
-      if (
-        index < -1 ||
-        !Number.isInteger(index) ||
-        (video.ready && index >= video.snapshot.numberOfAudioStream)
-      )
-        throw new Error('Invalid video audio stream')
-      if (video.ready)
+      const requested = input[0]
+      if (typeof requested !== 'bigint' && (typeof requested !== 'number' || !Number.isSafeInteger(requested)))
+        throw new Error('Invalid video audio stream index')
+      // Native TJS binding narrows int64 through signed/unsigned 32-bit.
+      // The original SelectStream ignores an unavailable/out-of-range index.
+      const index = Number(BigInt.asUintN(32, typeof requested === 'bigint' ? requested : BigInt(requested)))
+      if (video.ready && index < video.snapshot.numberOfAudioStream) {
+        if (index !== video.snapshot.enabledAudioStream) {
+          // A frame already sent by the previous media graph must not restore
+          // its stream selection or layer pixels after the replacement commits.
+          this.cancelEvents(video)
+          video.snapshot.epoch = this.epoch++
+        }
         await apply({
           op: 'set',
           ...identity(),
           settings: { ...videoSettings(video.snapshot), enabledAudioStream: index },
         })
+      }
     } else throw new Error(`Unsupported VideoOverlay method: ${method}`)
     return scriptRecord({
       value,
