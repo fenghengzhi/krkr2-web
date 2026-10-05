@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37279350828](https://github.com/fenghengzhi/krkr2-web/actions/runs/37279350828)，精确提交 `7ebb8f65a9ecfffee8826b14a65dd3c739e14759`。088 同步移动、输入接线、光标 X 步长和新增原生观察已整批推送；20 个 Node、每浏览器 8 个新增定义尚待托管结果。首次唯一查询为 **in_progress／conclusion=null**，未检查实时作业。下次补取 087 终态和新增产物，再取回本批固定快照；历史失败与未报告范围保留，未运行本地验证，整体非插件目标保持 active。
+
 2026-10-05 准备 [088 同步窗口拖动与光标横向精度](decisions/088-window-begin-move.md)：接通 `Window.beginMove` 的 TJS 模态泵、真实页面拖动和生命周期回报；依据完整原生 plane 修订光标 X 比例精度，保留 13×9 差异，并追加独立色场与 User32 移动观察。协议 **33**，新增 20 个 Node、每浏览器 8 个定义尚待托管执行，整体非插件目标保持 active。
 
 088 对 087 只取一次固定快照：仍 **in_progress／conclusion=null**，22 jobs 为 6 success／2 failed／14 running；**9/9 ZIP、30,742,219 字节**全部核对大小与 SHA-256。构建成功；双 allocator 各 60/60，Chromium library／PWA／trusted 分别 19/19、20/20、7/7。主应用验收仍未报告，Windows strict 仍各 39 差异、1,858 未比较；mask 各 3,770/3,770 匹配仅覆盖对应 plane。下次补取终态和后续产物，历史记录不改写。
