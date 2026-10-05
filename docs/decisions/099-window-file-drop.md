@@ -2,6 +2,8 @@
 
 状态：开发候选，尚待 GitHub-hosted Actions 执行。整体目标仍是完成 KRKR2 Web 模拟器的插件以外功能，未完成。会话协议 **39**，TJS ABI **5**、字体 ABI **2**。
 
+实现提交 `7351c9f2b0b311fef66c8edb229a356386c9a953` 的 43 个文件已推送至 `codex/migrated-window-attention`。[完整托管验证 37340665748](https://github.com/fenghengzhi/krkr2-web/actions/runs/37340665748) 的首次唯一身份查询为 **pending／conclusion=null**；原始返回保存在 `out/verification/github-actions/37340665748/initial-run-discovery.json`。不实时查询 jobs／artifacts，下一轮先补取 098 后续结果，再回收本批固定快照。记录本段的文档提交使用 `[skip ci]`，不构成另一份验证结果。
+
 本轮从干净的 `f995ed2` 继续。上一轮 098 的 63 个文件已经提交并推送，是实际进展。本地只进行源码检查、编辑，以及历史原件的下载、哈希核对、解包和解析；所有构建、测试、类型检查、浏览器及可执行参考探针只在 GitHub-hosted runners 运行。大批次推送后，下轮取回固定结果，不实时轮询。
 
 ## 固定的历史结果
