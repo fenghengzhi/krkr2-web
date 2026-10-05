@@ -1,6 +1,8 @@
 # 097 项目目录、菜单光标与视频音频控制
 
-状态：开发候选，尚未取得本批托管执行结果。本轮从干净的 `d9e1289` 继续完整非插件目标。上一轮 096 的 26 个文件已实际提交并推送，是有效进展。项目选择接入会话协议 **37**；TJS ABI **5**、字体 ABI **2** 不变。
+状态：开发候选已推送，尚未取得本批托管执行结果。本轮从干净的 `d9e1289` 继续完整非插件目标。上一轮 096 的 26 个文件已实际提交并推送，是有效进展。项目选择接入会话协议 **37**；TJS ABI **5**、字体 ABI **2** 不变。
+
+实现提交 **`cd05a9dd73336a6467b993b96b29f529fd8e4313`**，43 个文件，已推送到 `codex/migrated-window-attention`。[Full test suite 37329111623](https://github.com/fenghengzhi/krkr2-web/actions/runs/37329111623) 的首次唯一查询确认该精确提交，当时 **in_progress／conclusion=null**；未查询实时 jobs／artifacts。原返回保存在 `out/verification/github-actions/37329111623/initial-run-discovery.json`。本批结果留待下一轮回收，文档交接提交使用 `[skip ci]`。
 
 所有测试、构建、类型检查、浏览器和可执行参考探针只在 GitHub-hosted Actions 运行。本地仅源码检查、编辑及历史原件下载、解包、哈希核对与解析。较大批次推送后，下轮取回固定结果，不实时监控；未执行、跳过、崩溃、未报告与未比较继续分别保留。
 

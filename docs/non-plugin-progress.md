@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37329111623](https://github.com/fenghengzhi/krkr2-web/actions/runs/37329111623)，精确提交 `cd05a9dd73336a6467b993b96b29f529fd8e4313`。097 的 43 个文件已整批推送，新增 **31 个 Node、每浏览器 17 个定义**。首次唯一查询为 **in_progress／conclusion=null**，只确认提交与运行身份，未实时查看 jobs／artifacts。下一轮补取 096 主应用／光标等未报告范围，再回收本批固定结果。没有本地执行验证，完整非插件目标保持 active。
+
 2026-10-05 准备 [097 项目目录、菜单光标与视频音频控制](decisions/097-project-menu-and-video-audio.md)：新增冻结项目目录与程序目录、绝对公开路径、项目独立存档身份和库恢复；菜单的默认光标覆盖与轮询门禁保持独立于脚本逻辑；视频接通原版衰减表、32 位写入转换以及固定版本 getter 行为。会话协议 **37**，TJS ABI **5**、字体 ABI **2** 不变，候选尚待托管执行，整体目标保持 active。
 
 097 固定回收 **20 个原 ZIP、46,049,353 字节**，全部 API SHA-256／大小匹配。095 终态 failure，双 Windows 光标 strict 各 60 失败、3,178 未比较。096 快照仍 in_progress，构建成功；可信生命周期 **11/11**，Node 24.19 的 default／Liftoff-only 有界 Layer 诊断共 **120 次观察正常**，不代表完整 Node 套件或历史宿主堆故障已解决。096 主应用／原 KAG／直接运行时与光标原 ZIP 尚未报告，下轮补取，不实时刷新。以下保留历史记录。
