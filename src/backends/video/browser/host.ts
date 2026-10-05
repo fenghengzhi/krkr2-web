@@ -17,6 +17,7 @@ import type { WindowView } from '../../../engine/scene/window.ts'
 import type { VideoMessage, VideoRequest } from '../../../protocol/video.ts'
 import type { WebAudioHost } from '../../audio/web/host.ts'
 import type { CursorRasterLayer, CursorScene } from '../../input/cursor.ts'
+import { selectVideoTimeline } from '../../../formats/video/mp4.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
 import { waitForClockPresentation } from './clock-seek.ts'
 import {
@@ -43,6 +44,7 @@ interface Movie {
   settings: VideoSettings
   status: VideoSnapshot['status']
   timeline?: VideoTimeline
+  mixerMetadata?: { width: number; height: number; timeline?: VideoTimeline }
   callback?: number
   inFlight?: number
   blocked: boolean
@@ -424,6 +426,12 @@ export class WebVideoHost {
     if (movie.disposed || this.movies.get(movie.id) !== movie || movie.epoch !== epoch)
       throw new Error('Video operation was closed or superseded')
   }
+  private clockTimeline(movie: Movie): VideoTimeline | undefined {
+    // The original mixer caches its renderer's initial average frame period.
+    // Overlay/layer query the connected renderer; presentation lookup always
+    // uses the active track's sample timeline separately.
+    return movie.mixerMetadata?.timeline ?? movie.timeline
+  }
   private snapshot(movie: Movie, time = movie.element.currentTime * 1000): VideoSnapshot {
     const duration = Number.isFinite(movie.element.duration) ? movie.element.duration * 1000 : 0,
       timeline = movie.timeline
@@ -433,12 +441,11 @@ export class WebVideoHost {
       id: movie.id,
       epoch: movie.epoch,
       status: movie.status,
-      ...videoClockSnapshot(timeline, time, duration),
-      originalWidth: movie.element.videoWidth,
-      originalHeight: movie.element.videoHeight,
+      ...videoClockSnapshot(this.clockTimeline(movie), time, duration),
+      originalWidth: movie.mixerMetadata?.width ?? movie.element.videoWidth,
+      originalHeight: movie.mixerMetadata?.height ?? movie.element.videoHeight,
       numberOfAudioStream: timeline?.audioStreams ?? 0,
       numberOfVideoStream: timeline?.videoStreams ?? 1,
-      enabledVideoStream: 0,
     }
   }
   private emit(event: VideoEvent, frame = false, movie?: Movie): void {
@@ -536,11 +543,12 @@ export class WebVideoHost {
       time = movie.element.currentTime * 1000
     // Segment boundaries use the media clock in both native presentation modes
     // and take precedence over that update's frame/ordinary-period delivery.
-    if (s.segmentLoopEndFrame > 0 && movie.timeline) {
-      if (videoClockFrameAt(movie.timeline, time) >= s.segmentLoopEndFrame) {
+    const clockTimeline = this.clockTimeline(movie)
+    if (s.segmentLoopEndFrame > 0 && clockTimeline) {
+      if (videoClockFrameAt(clockTimeline, time) >= s.segmentLoopEndFrame) {
         void this.seek(
           movie,
-          videoClockFrameTime(movie.timeline, Math.max(0, s.segmentLoopStartFrame), movie.element.duration * 1000),
+          videoClockFrameTime(clockTimeline, Math.max(0, s.segmentLoopStartFrame), movie.element.duration * 1000),
         ).then(
           () => {
             if (movie.disposed) return
@@ -562,7 +570,7 @@ export class WebVideoHost {
     }
     // Browser timeupdate remains a clock-based supplement when rVFC is delayed
     // or withheld. It is not evidence of a particular decoded/rendered frame.
-    if (fallbackPeriod) this.period(movie, videoClockFrameAt(movie.timeline, time))
+    if (fallbackPeriod) this.period(movie, videoClockFrameAt(clockTimeline, time))
     return false
   }
   private fail(error: unknown): void {
@@ -854,9 +862,12 @@ export class WebVideoHost {
     if (!Number.isInteger(settings.enabledAudioStream) || settings.enabledAudioStream < -1 ||
         (settings.enabledAudioStream > 0 && (!movie.timeline || settings.enabledAudioStream >= movie.timeline.audioStreams)))
       throw new Error('Invalid video audio stream')
+    if (!Number.isSafeInteger(settings.enabledVideoStream) || settings.enabledVideoStream < 0 ||
+        settings.enabledVideoStream >= (movie.timeline?.videoStreams ?? 1))
+      throw new Error('Invalid video stream')
     if (settings.segmentLoopEndFrame >= 0) {
-      videoClockFrameTime(movie.timeline, settings.segmentLoopStartFrame, movie.element.duration * 1000)
-      if (settings.segmentLoopEndFrame > videoClockFrameAt(movie.timeline, movie.element.duration * 1000))
+      videoClockFrameTime(this.clockTimeline(movie), settings.segmentLoopStartFrame, movie.element.duration * 1000)
+      if (settings.segmentLoopEndFrame > videoClockFrameAt(this.clockTimeline(movie), movie.element.duration * 1000))
         throw new Error('Video segment ends outside its frame clock')
     }
     if (settings.periodEventFrame !== movie.settings.periodEventFrame)
@@ -945,7 +956,8 @@ export class WebVideoHost {
       const movie: Movie = { id: stage.id, epoch, windowId: stage.windowId, element, container,
         source: stage.source, variant: stage.variant!, url: stage.variant!.url, mime,
         bytes: stage.source.size, lastSelectedIndex: selected, settings: { ...settings }, status: 'stop',
-        timeline, blocked: false, disposed: false, periodArmed: false, seeking: false,
+        timeline, mixerMetadata: stage.previous?.mixerMetadata,
+        blocked: false, disposed: false, periodArmed: false, seeking: false,
         abort: stage.abort, audio }
       stage.movie = movie
       return movie
@@ -992,6 +1004,8 @@ export class WebVideoHost {
     }))
     if (!movie.element.videoWidth || movie.element.videoWidth > 4096 || movie.element.videoHeight > 4096 ||
         !Number.isFinite(movie.element.duration)) throw new Error('Invalid video dimensions or duration')
+    if (movie.settings.mode === 2 && !movie.mixerMetadata)
+      movie.mixerMetadata = { width: movie.element.videoWidth, height: movie.element.videoHeight, timeline: movie.timeline }
   }
   private async open(command: Extract<VideoCommand, { op: 'open' }>): Promise<VideoResult> {
     const windowId = command.windowId ?? 0
@@ -1015,18 +1029,19 @@ export class WebVideoHost {
           : extension === 'mp4' || extension === 'm4v' || extension === 'mov'
             ? 'video/mp4'
             : ''
-    const source = this.encoded.source(command.bytes),
+    const timeline = command.timeline && selectVideoTimeline(command.timeline, command.settings.enabledVideoStream),
+      source = this.encoded.source(command.bytes),
       stage: VideoStage = { id: command.id, epoch: command.epoch, windowId, source, abort: new AbortController(), disposed: false },
       selected = Math.max(0, command.settings.enabledAudioStream)
     this.stages.set(stage.id, stage)
     try {
-      const variant = command.timeline && command.timeline.audioStreams > 1
-        ? await this.encoded.select(source, selected, command.timeline, mime, () => this.stageCurrent(stage))
+      const variant = timeline && (timeline.audioStreams > 1 || timeline.videoStreams > 1)
+        ? await this.encoded.select(source, selected, timeline, mime, () => this.stageCurrent(stage))
         : this.encoded.original(source, mime)
       if (stage.disposed) { variant.release(); throw new Error('Video operation cancelled') }
       stage.variant = variant
       this.stageCurrent(stage)
-      const movie = this.createMovie(stage, command.epoch, command.settings, command.timeline, mime, selected)
+      const movie = this.createMovie(stage, command.epoch, command.settings, timeline, mime, selected)
       this.movies.set(movie.id, movie)
       const surface = this.windows.get(windowId)?.surface
       if (surface) surface.plane.insertBefore(movie.container, surface.activation)
@@ -1047,13 +1062,16 @@ export class WebVideoHost {
     }
   }
   private async settings(movie: Movie, settings: VideoSettings): Promise<Movie> {
-    const index = settings.enabledAudioStream
-    if (index < 0 || index === movie.lastSelectedIndex) {
+    const index = settings.enabledAudioStream < 0 ? movie.lastSelectedIndex : settings.enabledAudioStream,
+      videoChanged = settings.enabledVideoStream !== movie.settings.enabledVideoStream
+    if (!videoChanged && index === movie.lastSelectedIndex) {
       this.applySettings(movie, settings)
       return movie
     }
-    if (!Number.isSafeInteger(index) || !movie.timeline || index >= movie.timeline.audioStreams)
+    if (!Number.isSafeInteger(index) || !movie.timeline ||
+        (movie.timeline.audioStreams > 0 && index >= movie.timeline.audioStreams))
       throw new Error('Invalid video audio stream')
+    const timeline = selectVideoTimeline(movie.timeline, settings.enabledVideoStream)
     const stage: VideoStage = { id: movie.id, epoch: movie.epoch, windowId: movie.windowId, previous: movie,
       source: movie.source.retain(), abort: new AbortController(), disposed: false }
     this.stages.set(movie.id, stage)
@@ -1071,24 +1089,24 @@ export class WebVideoHost {
       // Paused playback reserves both complete readbacks before allocation.
       // Decoder/GPU memory and delayed GC are separate from these buffers.
       if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > 64 * 1024 * 1024 ||
-          (!progressing && bytes * 2 > 128 * 1024 * 1024 - this.retainedFrameBytes))
+          (!progressing && !videoChanged && bytes * 2 > 128 * 1024 * 1024 - this.retainedFrameBytes))
         throw new Error('Video retained frame resource budget exceeded')
       if (movie.presentedTime === undefined) throw new Error('Video has no observed presentation')
-      if (!progressing) {
+      if (!progressing && !videoChanged) {
         this.retainedFrameBytes += reserved = bytes * 2
         retained = this.decodedPixels(movie)
       }
-      const variant = await this.encoded.select(stage.source, index, movie.timeline, movie.mime,
+      const variant = await this.encoded.select(stage.source, index, timeline, movie.mime,
         () => this.stageCurrent(stage))
       if (stage.disposed) { variant.release(); throw new Error('Video operation cancelled') }
       stage.variant = variant
       this.stageCurrent(stage)
-      candidate = this.createMovie(stage, stage.epoch, settings, movie.timeline, movie.mime, index)
+      candidate = this.createMovie(stage, stage.epoch, settings, timeline, movie.mime, index)
       this.park(candidate)
       await this.loadMovie(candidate)
       this.stageCurrent(stage)
-      if (candidate.element.videoWidth !== movie.element.videoWidth || candidate.element.videoHeight !== movie.element.videoHeight ||
-          Math.abs(candidate.element.duration - movie.element.duration) > 0.001)
+      if (!videoChanged && (candidate.element.videoWidth !== movie.element.videoWidth || candidate.element.videoHeight !== movie.element.videoHeight ||
+          Math.abs(candidate.element.duration - movie.element.duration) > 0.001))
         throw new Error('Selected audio track changed the video presentation timeline')
       this.applySettings(candidate, settings)
       if (retained) await this.seekRetainedFrame(candidate, position, retained, movie.presentedTime)
@@ -1097,8 +1115,10 @@ export class WebVideoHost {
         // clock. A new decoder seeking that clock may present its next frame;
         // comparing it to the old displayed bytes wrongly rejects the switch.
         // Require the frozen clock and this candidate's fresh presentation.
-        // Graphs paused or externally suspended when selection begins still
-        // compare every pixel. A later pause continues to block commit's play.
+        // Audio-only switches paused at transaction start still compare every
+        // pixel. A video switch intentionally changes the image and may change
+        // its dimensions/cadence. Never clamp its clock or claim the old image
+        // as a fresh selected-track presentation; an unsupported seek rolls back.
         await this.seekClockPresented(candidate, position, () => this.stageCurrent(stage))
       }
       this.stageCurrent(stage)
@@ -1202,7 +1222,7 @@ export class WebVideoHost {
       const time =
         command.op === 'seek'
           ? command.frame !== undefined
-            ? videoClockFrameTime(movie.timeline, command.frame, movie.element.duration * 1000)
+            ? videoClockFrameTime(this.clockTimeline(movie), command.frame, movie.element.duration * 1000)
             : command.position!
           : 0
       if (movie.status !== 'play' && movie.timeline?.times.length)

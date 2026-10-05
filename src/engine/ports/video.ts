@@ -1,6 +1,15 @@
 import type { Pixels } from './graphics.ts'
 export type VideoStatus = 'unload' | 'stop' | 'play' | 'pause' | 'ready'
 export type VideoMode = 0 | 1 | 2 | 3
+/** One encoded video track in original container order. */
+export interface VideoTrackTimeline {
+  id: number
+  width: number
+  height: number
+  times: number[]
+  duration: number
+  frameDuration: number
+}
 export interface VideoTimeline {
   times: number[]
   duration: number
@@ -8,6 +17,10 @@ export interface VideoTimeline {
   frameDuration: number
   audioStreams: number
   videoStreams: number
+  /** Optional only for legacy embedding-provided single-track timelines. */
+  videoTracks?: VideoTrackTimeline[]
+  /** Top-level timing fields always describe this active track. */
+  selectedVideoStream?: number
 }
 export interface VideoSettings {
   left: number
@@ -21,6 +34,7 @@ export interface VideoSettings {
   audioVolume: number
   audioBalance: number
   enabledAudioStream: number
+  enabledVideoStream: number
   segmentLoopStartFrame: number
   segmentLoopEndFrame: number
   periodEventFrame: number
@@ -40,7 +54,6 @@ export interface VideoSnapshot extends VideoSettings {
   totalTime: number
   numberOfAudioStream: number
   numberOfVideoStream: number
-  enabledVideoStream: number
 }
 /** A call-time RGB snapshot, independent of its source Layer and its mask. */
 export interface VideoMixingBitmap {
@@ -106,6 +119,7 @@ export const defaultVideoSettings = (): VideoSettings => ({
   audioVolume: 100000,
   audioBalance: 0,
   enabledAudioStream: 0,
+  enabledVideoStream: 0,
   segmentLoopStartFrame: -1,
   segmentLoopEndFrame: -1,
   periodEventFrame: -1,

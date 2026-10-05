@@ -2,6 +2,10 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+2026-10-06 准备 [103 视频流选择](decisions/103-video-stream-selection.md)：接通原版可写 `enabledVideoStream`，保留音轨、时钟和双 Layer 绑定；有界联合选择原 MP4 轨道，Mixer 保留初始尺寸／帧长缓存，Stop 拒绝迟到候选。协议 **41**、`nativeSystem:5`，TJS ABI **5**、字体 ABI **2**。新增完整画面／音频／生命周期验证仍待托管执行，整体目标保持 active。
+
+103 固定回收 **20 原 ZIP、55,265,320 字节**，全部核对匹配。101 已终态 failure，七条测试类型诊断本批修订，应用验证跳过。102 原生栈池 ASan＋UBSan 和 TSan 各六场景成功，但真实 VM／应用结果尚未报告；双 Windows 退出各 7/8，菜单仍超时；beginMove 三项前置失败均未调用 SC_MOVE。102 build 最终结果与 343 光标库存下轮再取，不实时监控。下面保留历史批次当时的状态。
+
 最新待核验批次：[Full test suite 37352789584](https://github.com/fenghengzhi/krkr2-web/actions/runs/37352789584)，精确提交 `79b7a27dd4354426bac1c17a07c31b91db513e72`。102 的 49 个文件已整批推送，新增 **29 个常规 Node、每浏览器 8 个、可信 Chromium 4 个定义**，另有同次构建的 JSPI 栈池 8 定义、双 sanitizer 原生场景和 20 个 PNG 光标样本。首次唯一查询为 **in_progress／conclusion=null**，只确认运行身份。下轮补取 101 缺失结果并回收本批固定快照，不实时监控，没有本地执行验证，完整目标保持 active。
 
 2026-10-06 准备 [102 原生栈池、系统生命周期与光标缩放边界](decisions/102-native-pool-and-system-lifecycle.md)：回收真实空闲寄存器块，补空闲／应用失活自动整理和完整无窗口启动条件；按双 Windows 的 323 样本原件修正固定 32px 光标的 66 像素分支。原版 Timer 退出夹具与 beginMove 前置同步也已修订，历史失败保留。协议 **40**、`nativeSystem:5`，TJS ABI **5**、字体 ABI **2**；候选仍待托管执行，完整目标保持 active。

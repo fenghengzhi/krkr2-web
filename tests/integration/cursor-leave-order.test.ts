@@ -63,11 +63,11 @@ for (const binary of [false,true]) {
           .find((file) => file.path === 'savedata/leave.cjs')!.bytes.subarray(0,4)), 'TJS2')
         const id = Number(await f.session.evaluate('win.__windowId')),
           input = (): InputView => {
-            const event = f.events.findLast((event) => event.type === 'window-input' && event.windowId === id)
+            const event = [...f.events].reverse().find((event) => event.type === 'window-input' && event.windowId === id)
             assert(event?.type === 'window-input')
             return event.input
           }, popup = () => {
-            const event = f.events.findLast((event) => event.type === 'window-menus')
+            const event = [...f.events].reverse().find((event) => event.type === 'window-menus')
             return event?.type === 'window-menus'
               ? event.windows.find((window) => window.windowId === id)?.menus.popup : undefined
           }

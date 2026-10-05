@@ -10,23 +10,38 @@ export interface Mp4AudioSelectionOptions {
   /** Host-injected task yield; this format module has no DOM/timer dependency. */
   yieldControl?(): void | Promise<void>
 }
+export interface Mp4TrackSelection {
+  /** Omitted categories remain intact. Indices refer to the original file. */
+  audio?: number
+  video?: number
+}
+export interface SelectedMp4Tracks {
+  bytes: Uint8Array
+  audioStreams: number
+  videoStreams: number
+  selectedAudioTrackId?: number
+  selectedVideoTrackId?: number
+}
 interface Box { kind: string; start: number; body: number; end: number }
 interface Track { id: number; handler: string; box: Box; header: Box; alternate: number; descriptions: number; samples: number; regularSamples: number }
 interface FragmentTrack { box: Box; id: number; runs: number[]; ordinal: number; firstTime?: number }
 const MAX_BOXES = 100000, MAX_SAMPLES = 1000000, MAX_BYTES = 64 * 1024 * 1024
 const padding = ['free', 'skip', 'wide']
 
-/** Select a self-contained MP4 audio track without relocating any media bytes.
+/** Select self-contained MP4 audio/video tracks without relocating media bytes.
  * Field layouts: gpac/mp4box.js v2.4.1 src/boxes/{tkhd,tfhd,trun,trex,tfra,sidx}.ts.
  * Fragment addressing follows W3C's ISO BMFF byte-stream format section 4;
  * inherited bases across removed traf boxes are deliberately unsupported.
  */
-export async function selectMp4AudioTrack(input: Uint8Array, index: number,
-  options: Mp4AudioSelectionOptions = {}): Promise<SelectedMp4Audio | undefined> {
-  if (!Number.isSafeInteger(index) || index < 0) throw new Error('MP4 audio index must be a non-negative safe integer')
+export async function selectMp4Tracks(input: Uint8Array, selection: Mp4TrackSelection,
+  options: Mp4AudioSelectionOptions = {}): Promise<SelectedMp4Tracks | undefined> {
+  const audioIndex = selection.audio, videoIndex = selection.video
+  for (const [kind, index] of [['audio', audioIndex], ['video', videoIndex]] as const)
+    if (index !== undefined && (!Number.isSafeInteger(index) || index < 0))
+      throw new Error(`MP4 ${kind} index must be a non-negative safe integer`)
   const tag = (bytes: Uint8Array, at: number) => String.fromCharCode(...bytes.subarray(at, at + 4))
   if (input.length < 8 || !['ftyp', 'moov', 'mdat', 'styp', 'moof', 'mfra', 'sidx', 'pdin', 'pssh', 'uuid', ...padding].includes(tag(input, 4))) return
-  if (input.length > MAX_BYTES) throw new Error('MP4 audio selection exceeds the 64 MiB input budget')
+  if (input.length > MAX_BYTES) throw new Error('MP4 track selection exceeds the 64 MiB input budget')
   // Snapshot before the dynamic parser import can yield to the caller.
   const bytes = Uint8Array.from(input), view = new DataView(bytes.buffer)
   const cooperate = async () => {
@@ -264,10 +279,18 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
       samples: sizeSamples, regularSamples: sizeSamples })
   }
   if (tableSamples > MAX_SAMPLES * 2) throw new Error('MP4 aggregate sample budget exceeded')
-  const audio = tracks.filter((track) => track.handler === 'soun'), selected = audio[index]
-  if (!selected) throw new Error('MP4 audio index is outside the original track range')
-  const removed = new Set(audio.filter((track) => track !== selected).map((track) => track.id))
-  for (const track of audio) if (track !== selected) free.push(track.box)
+  const audio = tracks.filter((track) => track.handler === 'soun'),
+    video = tracks.filter((track) => track.handler === 'vide'),
+    selectedAudio = audioIndex === undefined ? undefined : audio[audioIndex],
+    selectedVideo = videoIndex === undefined ? undefined : video[videoIndex]
+  if (audioIndex !== undefined && !selectedAudio) throw new Error('MP4 audio index is outside the original track range')
+  if (videoIndex !== undefined && !selectedVideo) throw new Error('MP4 video index is outside the original track range')
+  const removed = new Set<number>()
+  for (const [category, selected] of [[audio, selectedAudio], [video, selectedVideo]] as const)
+    if (selected) for (const track of category) if (track !== selected) {
+      removed.add(track.id)
+      free.push(track.box)
+    }
   const byId = new Map(tracks.map((track) => [track.id, track]))
   const mvex = one(movie, 'mvex', false), defaults = new Map<number, { size: number; duration: number }>()
   if (mvex) for (const box of children(mvex, ['trex', 'mehd'])) {
@@ -357,7 +380,7 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
       trafs.push(traf)
       unique.set(id, unique.has(id) ? null : traf)
     }
-    // A separate per-track fragment may belong entirely to a removed audio
+    // A separate per-track fragment may belong entirely to a removed media
     // track. Its whole moof can become free without moving the following mdat.
     // Keep the original map until every tfra entry has still been validated.
     if (!ordinal) free.push(moof)
@@ -433,7 +456,7 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
   // addresses/times were validated independently above and are not reused here.
   await cooperate()
   const { createFile } = await import('mp4box'), file = createFile(false)
-  file.onError = (message) => { throw new Error(`MP4 audio metadata: ${message}`) }
+  file.onError = (message) => { throw new Error(`MP4 track metadata: ${message}`) }
   // v2.4.1 appendBuffer accepts ArrayBuffer + fileStart; fromArrayBuffer would
   // silently allocate a second complete input. One private contiguous buffer
   // also avoids MultiBufferStream's overlap/concatenation copies.
@@ -456,12 +479,24 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
     if (!(committed++ % 4096)) await cooperate()
     bytes.set([102, 114, 101, 101], box.start + 4)
   }
-  bytes[selected.header.body + 3] = bytes[selected.header.body + 3]! | 3 // enabled and in-movie
-  view.setUint16(selected.alternate, 0)
+  for (const selected of [selectedAudio, selectedVideo]) if (selected) {
+    bytes[selected.header.body + 3] = bytes[selected.header.body + 3]! | 3 // enabled and in-movie
+    view.setUint16(selected.alternate, 0)
+  }
   for (const write of writes) {
     if (!(committed++ % 4096)) await cooperate()
     let value = write.value
     for (let i = write.width - 1; i >= 0; i--) { bytes[write.at + i] = value & 255; value = Math.floor(value / 256) }
   }
-  return { bytes, audioStreams: audio.length, videoStreams: tracks.filter((track) => track.handler === 'vide').length, selectedTrackId: selected.id }
+  return { bytes, audioStreams: audio.length, videoStreams: video.length,
+    ...(selectedAudio ? { selectedAudioTrackId: selectedAudio.id } : {}),
+    ...(selectedVideo ? { selectedVideoTrackId: selectedVideo.id } : {}) }
+}
+
+/** Compatibility entry point: selecting audio alone preserves all videos. */
+export async function selectMp4AudioTrack(input: Uint8Array, index: number,
+  options: Mp4AudioSelectionOptions = {}): Promise<SelectedMp4Audio | undefined> {
+  const selected = await selectMp4Tracks(input, { audio: index }, options)
+  return selected && { bytes: selected.bytes, audioStreams: selected.audioStreams,
+    videoStreams: selected.videoStreams, selectedTrackId: selected.selectedAudioTrackId! }
 }

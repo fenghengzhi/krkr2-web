@@ -10,6 +10,7 @@ $summary = [ordered]@{
   schema = 1; state = 'not-run'; runId = $env:GITHUB_RUN_ID; attempt = $env:GITHUB_RUN_ATTEMPT
   commit = $env:GITHUB_SHA; runner = $env:NATIVE_OS; scope = 'Original pinned SDK observations; not a Web equivalence verdict'
   globalInputUsed = $false; pluginsLoadedByFixture = $false; processDeadlineMs = 20000
+  menuObservation = 'timer-menu: passive timer-after interval of 500 ms, then at most one validated owned WM_CANCELMODE; other seven cases remain passive'
   sourceCommitScope = 'The distributed VCL binary is pinned independently of the static 2.32stable source commit.'
   cases = @(); error = $null
 }
@@ -18,8 +19,11 @@ try {
   Copy-Item tests/fixtures/native-reference/sdk.json (Join-Path $output 'sdk.json')
   Copy-Item tests/fixtures/native-reference/system-termination.tjs (Join-Path $output 'fixture.tjs')
   Copy-Item tests/probes/original-termination.ps1 (Join-Path $output 'driver.ps1')
+  Copy-Item tests/probes/original-termination-menu.cs (Join-Path $output 'menu-driver.cs')
   $summary.fixtureSha256 = (Get-FileHash tests/fixtures/native-reference/system-termination.tjs -Algorithm SHA256).Hash.ToLowerInvariant()
   $summary.driverSha256 = (Get-FileHash tests/probes/original-termination.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+  $summary.menuDriverSha256 = (Get-FileHash tests/probes/original-termination-menu.cs -Algorithm SHA256).Hash.ToLowerInvariant()
+  Add-Type -Path tests/probes/original-termination-menu.cs
   $archive = Join-Path $root 'sdk.zip'
   Invoke-WebRequest -Uri $pin.url -OutFile $archive
   if ((Get-Item $archive).Length -ne $pin.archiveBytes -or (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pin.archiveSha256) {
@@ -43,12 +47,13 @@ try {
     $work = Join-Path $root $scenario
     $caseOutput = Join-Path $output $scenario
     New-Item -ItemType Directory $work, $caseOutput | Out-Null
-    $status = [ordered]@{ scenario = $scenario; state = 'not-run'; timedOut = $false; exitCode = $null; elapsedMs = $null; events = @(); error = $null; cleanupError = $null }
+    $status = [ordered]@{ scenario = $scenario; state = 'not-run'; observationCondition = 'no-intervention'; timedOut = $false; exitCode = $null; elapsedMs = $null; events = @(); error = $null; cleanupError = $null }
     $process = $null
     $clock = [Diagnostics.Stopwatch]::StartNew()
     try {
       $startup = Join-Path $work 'startup.tjs'
-      [IO.File]::WriteAllText($startup, $fixture.Replace('__NATIVE_SCENARIO__', $scenario), [Text.UnicodeEncoding]::new($false, $true))
+      $token = [Guid]::NewGuid().ToString('N')
+      [IO.File]::WriteAllText($startup, $fixture.Replace('__NATIVE_SCENARIO__', $scenario).Replace('__NATIVE_TOKEN__', $token), [Text.UnicodeEncoding]::new($false, $true))
       Copy-Item $startup (Join-Path $caseOutput 'startup.tjs')
       $status.scriptSha256 = (Get-FileHash $startup -Algorithm SHA256).Hash.ToLowerInvariant()
       # Explicit project folder: current working directory alone is not an SDK
@@ -59,7 +64,13 @@ try {
         -RedirectStandardOutput (Join-Path $caseOutput 'stdout.log') -RedirectStandardError (Join-Path $caseOutput 'stderr.log')
       $status.processId = $process.Id
       $null = $process.Handle
-      if (-not $process.WaitForExit(20000)) {
+      if ($scenario -ceq 'timer-menu') {
+        $status.menuDismiss = [OriginalTerminationMenu]::Observe($process, $work, $token, $clock)
+        if ($status.menuDismiss.DismissPosted) { $status.observationCondition = 'owned-menu-dismissal-after-termination' }
+        if ($status.menuDismiss.State -ceq 'failed') { throw ('Owned popup observation failed: ' + $status.menuDismiss.Reason) }
+      }
+      $remaining = [Math]::Max(0, 20000 - [int]$clock.ElapsedMilliseconds)
+      if (-not $process.WaitForExit($remaining)) {
         $status.timedOut = $true
         throw 'Original engine exceeded the owned-process deadline; modal ordering is unobserved.'
       }
@@ -105,6 +116,9 @@ try {
   $summary.error = $_.Exception.ToString()
   throw
 } finally {
+  $summary.observedWithoutIntervention = @($summary.cases | Where-Object { $_.state -ceq 'observed' -and $_.observationCondition -ceq 'no-intervention' }).Count
+  $summary.observedAfterOwnedDismissal = @($summary.cases | Where-Object { $_.state -ceq 'observed' -and $_.observationCondition -ceq 'owned-menu-dismissal-after-termination' }).Count
+  $summary.failedScenarios = @($summary.cases | Where-Object { $_.state -ceq 'failed' }).Count
   $summary.completedAt = [DateTime]::UtcNow.ToString('o')
   $summary | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $output 'summary.json') -Encoding utf8
 }

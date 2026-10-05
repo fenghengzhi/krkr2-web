@@ -66,6 +66,7 @@ export class VideoService {
   private videos = new Map<number, Video>()
   private unsubscribe?: () => void
   private disposed = false
+  private cancelled = false
   private closes = new Set<Promise<void>>()
   private closeErrors: unknown[] = []
   constructor(
@@ -223,6 +224,7 @@ export class VideoService {
     return this.backend.command(command)
   }
   private async videoCommand(video: Video, command: VideoCommand): Promise<VideoResult> {
+    if (this.cancelled) throw new ExecutionCancelled()
     if (this.videos.get(video.id) !== video || video.detached)
       throw new Error('VideoOverlay has been invalidated or disconnected')
     if (command.op === 'open') video.resourceRequested = true
@@ -231,6 +233,7 @@ export class VideoService {
     video.inflight.add(pending)
     try {
       const result = await pending
+      if (this.cancelled) throw new ExecutionCancelled()
       if (this.videos.get(video.id) !== video || video.detached || video.snapshot.epoch !== epoch)
         throw new Error('VideoOverlay operation has been invalidated or disconnected')
       return result
@@ -260,7 +263,7 @@ export class VideoService {
       if (owned) this.objects.release(owned)
     }
     try {
-      if (this.disposed) return
+      if (this.disposed || this.cancelled) return
       if (event.type === 'error') throw new Error(event.message)
       const video = this.videos.get(event.id)
       if (!video || video.detached || video.snapshot.epoch !== event.epoch) return
@@ -540,15 +543,17 @@ export class VideoService {
       const state = { ...video.snapshot, segmentLoopStartFrame: start, segmentLoopEndFrame: end }
       if (video.ready) await apply({ op: 'set', ...identity(), settings: videoSettings(state) })
       else video.snapshot = state
-    } else if (method === 'audioStream') {
+    } else if (method === 'audioStream' || method === 'videoStream') {
+      const count = method === 'audioStream' ? video.snapshot.numberOfAudioStream : video.snapshot.numberOfVideoStream,
+        property = method === 'audioStream' ? 'enabledAudioStream' : 'enabledVideoStream'
       const requested = input[0]
       if (typeof requested !== 'bigint' && (typeof requested !== 'number' || !Number.isSafeInteger(requested)))
-        throw new Error('Invalid video audio stream index')
+        throw new Error('Invalid video stream index')
       // Native TJS binding narrows int64 through signed/unsigned 32-bit.
       // The original SelectStream ignores an unavailable/out-of-range index.
       const index = Number(BigInt.asUintN(32, typeof requested === 'bigint' ? requested : BigInt(requested)))
-      if (video.ready && index < video.snapshot.numberOfAudioStream) {
-        if (index !== video.snapshot.enabledAudioStream) {
+      if (video.ready && index < count) {
+        if (index !== video.snapshot[property]) {
           // A frame already sent by the previous media graph must not restore
           // its stream selection or layer pixels after the replacement commits.
           this.cancelEvents(video)
@@ -557,7 +562,7 @@ export class VideoService {
         await apply({
           op: 'set',
           ...identity(),
-          settings: { ...videoSettings(video.snapshot), enabledAudioStream: index },
+          settings: { ...videoSettings(video.snapshot), [property]: index },
         })
       }
     } else throw new Error(`Unsupported VideoOverlay method: ${method}`)
@@ -572,6 +577,8 @@ export class VideoService {
     if (this.backend) await this.command({ op: 'pauseAll', paused })
   }
   async cancel(): Promise<void> {
+    if (this.cancelled) return
+    this.cancelled = true
     for (const video of this.videos.values()) this.cancelEvents(video)
     if (this.backend) await this.command({ op: 'cancel' })
   }

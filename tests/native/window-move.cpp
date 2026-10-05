@@ -117,20 +117,87 @@ struct State {
 };
 // This is only the visible, enabled held-button stimulus precondition. Hidden,
 // disabled and no-activate cases retain their original no-button observations.
-bool controlledTargetReady(const State& s) {
+bool controlledTargetReady(const State& s, std::string* details = nullptr) {
     const HWND hwnd = s.window.load(), child = s.child.load();
-    GUITHREADINFO gui{sizeof(gui)}; POINT cursor{}; DWORD process = 0;
-    return hwnd && child && GetWindowThreadProcessId(hwnd, &process) == s.threadId.load() &&
-        process == GetCurrentProcessId() && GetParent(child) == hwnd &&
-        GetForegroundWindow() == hwnd && GetGUIThreadInfo(s.threadId.load(), &gui) &&
-        gui.hwndActive == hwnd && gui.hwndFocus == hwnd && gui.hwndCapture == child &&
-        GetCursorPos(&cursor) && std::abs(cursor.x - s.inputX.load()) <= 1 &&
-        std::abs(cursor.y - s.inputY.load()) <= 1 && WindowFromPoint(cursor) == child;
+    GUITHREADINFO gui{sizeof(gui)}; POINT cursor{}; DWORD process = 0, childProcess = 0, hitProcess = 0;
+    const DWORD expectedThread = s.threadId.load(), ownerThread = hwnd ? GetWindowThreadProcessId(hwnd, &process) : 0;
+    const HWND parent = child ? GetParent(child) : nullptr, foreground = GetForegroundWindow();
+    const bool guiOk = GetGUIThreadInfo(expectedThread, &gui) != FALSE, cursorOk = GetCursorPos(&cursor) != FALSE;
+    const HWND hit = cursorOk ? WindowFromPoint(cursor) : nullptr;
+    const DWORD childThread = child ? GetWindowThreadProcessId(child, &childProcess) : 0,
+        hitThread = hit ? GetWindowThreadProcessId(hit, &hitProcess) : 0;
+    const LONG targetX = s.inputX.load(), targetY = s.inputY.load();
+    const bool ownerMatches = ownerThread == expectedThread && process == GetCurrentProcessId(),
+        parentMatches = parent == hwnd, foregroundMatches = foreground == hwnd,
+        activeMatches = gui.hwndActive == hwnd, focusMatches = gui.hwndFocus == hwnd,
+        captureMatches = gui.hwndCapture == child,
+        xMatches = std::abs(cursor.x - targetX) <= 1, yMatches = std::abs(cursor.y - targetY) <= 1,
+        hitMatches = hit == child,
+        ready = hwnd && child && ownerMatches && parentMatches && foregroundMatches && guiOk &&
+            activeMatches && focusMatches && captureMatches && cursorOk && xMatches && yMatches && hitMatches;
+    if (details) {
+        std::ostringstream out;
+        out << "{\"ownedWindow\":" << handle(hwnd) << ",\"ownedChild\":" << handle(child)
+            << ",\"parent\":" << handle(parent) << ",\"ownerThread\":" << ownerThread
+            << ",\"expectedThread\":" << expectedThread << ",\"ownerProcess\":" << process
+            << ",\"childThread\":" << childThread << ",\"childProcess\":" << childProcess
+            << ",\"expectedProcess\":" << GetCurrentProcessId() << ",\"ownerMatches\":" << boolean(ownerMatches)
+            << ",\"parentMatches\":" << boolean(parentMatches) << ",\"foreground\":" << handle(foreground)
+            << ",\"foregroundMatches\":" << boolean(foregroundMatches) << ",\"guiOk\":" << boolean(guiOk)
+            << ",\"active\":" << handle(gui.hwndActive) << ",\"activeMatches\":" << boolean(activeMatches)
+            << ",\"focus\":" << handle(gui.hwndFocus) << ",\"focusMatches\":" << boolean(focusMatches)
+            << ",\"capture\":" << handle(gui.hwndCapture) << ",\"captureMatches\":" << boolean(captureMatches)
+            << ",\"cursorOk\":" << boolean(cursorOk) << ",\"cursor\":[" << cursor.x << ',' << cursor.y << ']'
+            << ",\"target\":[" << targetX << ',' << targetY << "]"
+            << ",\"xMatches\":" << boolean(xMatches) << ",\"yMatches\":" << boolean(yMatches)
+            << ",\"windowFromPoint\":" << handle(hit) << ",\"hitMatches\":" << boolean(hitMatches)
+            << ",\"hitThread\":" << hitThread << ",\"hitProcess\":" << hitProcess
+            << ",\"ready\":" << boolean(ready) << '}';
+        *details = out.str();
+    }
+    return ready;
 }
-bool deliveredAtTarget(const State& s, HWND hwnd, LPARAM lp) {
+bool deliveredAtTarget(const State& s, HWND hwnd, LPARAM lp, std::string* details = nullptr) {
     POINT point{static_cast<short>(LOWORD(lp)), static_cast<short>(HIWORD(lp))};
-    return hwnd == s.child.load() && ClientToScreen(hwnd, &point) &&
-        std::abs(point.x - s.inputX.load()) <= 1 && std::abs(point.y - s.inputY.load()) <= 1;
+    const POINT client = point;
+    const bool childMatches = hwnd == s.child.load(), converted = ClientToScreen(hwnd, &point) != FALSE,
+        xMatches = std::abs(point.x - s.inputX.load()) <= 1, yMatches = std::abs(point.y - s.inputY.load()) <= 1,
+        ready = childMatches && converted && xMatches && yMatches;
+    if (details) {
+        std::ostringstream out;
+        out << "{\"childMatches\":" << boolean(childMatches) << ",\"client\":[" << client.x << ',' << client.y
+            << "],\"clientToScreenOk\":" << boolean(converted) << ",\"screen\":[" << point.x << ',' << point.y
+            << "],\"xMatches\":" << boolean(xMatches) << ",\"yMatches\":" << boolean(yMatches)
+            << ",\"ready\":" << boolean(ready) << '}';
+        *details = out.str();
+    }
+    return ready;
+}
+bool observeInputDecision(State& s, HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
+    // Journal exactly the values used for this decision, rather than making
+    // a second set of reads that might describe a different foreground state.
+    const bool prepared = s.prepared.load(), neutralObserved = s.neutralObserved.load();
+    const LPARAM tag = GetMessageExtraInfo();
+    const bool tagMatches = tag == static_cast<LPARAM>(ControlledInputTag);
+    std::string deliveryDetails, targetDetails;
+    const bool delivered = deliveredAtTarget(s, hwnd, lp, &deliveryDetails),
+        targetReady = controlledTargetReady(s, &targetDetails), messageLeft = (wp & MK_LBUTTON) != 0;
+    const SHORT asyncLeft = GetAsyncKeyState(VK_LBUTTON), queuedLeft = GetKeyState(VK_LBUTTON);
+    const bool asyncHeld = (asyncLeft & 0x8000) != 0, queuedHeld = (queuedLeft & 0x8000) != 0,
+        neutral = message == WM_MOUSEMOVE,
+        eligible = neutral ? prepared && !neutralObserved : neutralObserved,
+        accepted = eligible && tagMatches && delivered && targetReady &&
+            (neutral ? !messageLeft && !asyncHeld && !queuedHeld : messageLeft && asyncHeld && queuedHeld);
+    std::ostringstream out;
+    out << "{\"prepared\":" << boolean(prepared) << ",\"neutralObserved\":" << boolean(neutralObserved)
+        << ",\"eligible\":" << boolean(eligible) << ",\"extraInfo\":" << quote(std::to_string(static_cast<std::uintptr_t>(tag)))
+        << ",\"expectedTag\":" << quote(std::to_string(ControlledInputTag)) << ",\"tagMatches\":" << boolean(tagMatches)
+        << ",\"delivery\":" << deliveryDetails << ",\"target\":" << targetDetails
+        << ",\"messageLeft\":" << boolean(messageLeft) << ",\"asyncLeft\":" << asyncLeft << ",\"queuedLeft\":" << queuedLeft
+        << ",\"asyncHeld\":" << boolean(asyncHeld) << ",\"queuedHeld\":" << boolean(queuedHeld)
+        << ",\"accepted\":" << boolean(accepted) << '}';
+    s.record(neutral ? "neutral-input-decision" : "left-down-input-decision", hwnd, message, wp, lp, out.str());
+    return accepted;
 }
 LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     State* state = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -153,9 +220,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
         state->record("activation-or-focus", hwnd, message, wp, lp); break;
     case WM_MOUSEMOVE:
         state->record("WM_MOUSEMOVE", hwnd, message, wp, lp);
-        if (state->prepared && !state->neutralObserved && GetMessageExtraInfo() == static_cast<LPARAM>(ControlledInputTag) &&
-            deliveredAtTarget(*state, hwnd, lp) && controlledTargetReady(*state) &&
-            !(wp & MK_LBUTTON) && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000) && !(GetKeyState(VK_LBUTTON) & 0x8000)) {
+        if (observeInputDecision(*state, hwnd, message, wp, lp)) {
             state->neutralObserved = true;
             state->record("owned-neutral-pointer-observed", hwnd, message, wp, lp);
             SetEvent(state->neutralSeen.value);
@@ -163,9 +228,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
         break;
     case WM_LBUTTONDOWN:
         state->record("WM_LBUTTONDOWN", hwnd, message, wp, lp);
-        if (state->neutralObserved && GetMessageExtraInfo() == static_cast<LPARAM>(ControlledInputTag) &&
-            deliveredAtTarget(*state, hwnd, lp) && controlledTargetReady(*state) && (wp & MK_LBUTTON) &&
-            (GetAsyncKeyState(VK_LBUTTON) & 0x8000) && (GetKeyState(VK_LBUTTON) & 0x8000)) {
+        if (observeInputDecision(*state, hwnd, message, wp, lp)) {
             state->controlledDownObserved = true;
             state->record("owned-controlled-left-observed", hwnd, message, wp, lp);
             SetEvent(state->buttonSeen.value);
@@ -289,7 +352,9 @@ bool mouse(State& s, POINT point, DWORD button, const char* phase) {
     s.record("controlled-mouse-request", nullptr, 0, 0, 0,
         "{\"x\":" + std::to_string(point.x) + ",\"y\":" + std::to_string(point.y) +
         ",\"normalizedX\":" + std::to_string(input.mi.dx) + ",\"normalizedY\":" + std::to_string(input.mi.dy) +
-        ",\"flags\":" + std::to_string(input.mi.dwFlags) + "}");
+        ",\"flags\":" + std::to_string(input.mi.dwFlags) + ",\"extraInfo\":" +
+        quote(std::to_string(input.mi.dwExtraInfo)) + ",\"ownedWindow\":" + handle(s.window.load()) +
+        ",\"ownedChild\":" + handle(s.child.load()) + "}");
     return inject(s, &input, 1, phase);
 }
 void escape(State& s) {

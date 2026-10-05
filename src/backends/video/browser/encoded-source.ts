@@ -1,5 +1,5 @@
 import type { VideoTimeline } from '../../../engine/ports/video.ts'
-import { selectMp4AudioTrack } from '../../../formats/video/mp4-audio.ts'
+import { selectMp4Tracks } from '../../../formats/video/mp4-audio.ts'
 
 export const videoEncodedLimits = Object.freeze({ sourceBytes: 128 * 1024 * 1024, ownedBytes: 256 * 1024 * 1024 })
 export interface VideoEncodedSource {
@@ -79,13 +79,16 @@ export class VideoEncodedResources {
   original(source: VideoEncodedSource, mime: string): VideoEncodedVariant { return this.blob(source.bytes, mime) }
   private async selectedBlob(source: VideoEncodedSource, index: number, timeline: VideoTimeline,
     mime: string, valid: () => void): Promise<VideoEncodedVariant> {
-    const selected = await selectMp4AudioTrack(source.bytes, index, { checkpoint: valid,
+    const video = timeline.selectedVideoStream ?? 0,
+      selected = await selectMp4Tracks(source.bytes,
+        { video, ...(timeline.audioStreams ? { audio: index } : {}) }, { checkpoint: valid,
       yieldControl: () => new Promise<void>((resolve) => { setTimeout(resolve, 0) }) })
     valid()
-    if (!selected) throw new Error('Alternate audio selection requires a supported MP4 container')
+    if (!selected) throw new Error('Alternate stream selection requires a supported MP4 container')
     if (selected.bytes.length !== source.size || selected.audioStreams !== timeline.audioStreams ||
-        selected.videoStreams !== timeline.videoStreams)
-      throw new Error('MP4 audio selection disagrees with the original video timeline')
+        selected.videoStreams !== timeline.videoStreams ||
+        (timeline.videoTracks && selected.selectedVideoTrackId !== timeline.videoTracks[video]?.id))
+      throw new Error('MP4 stream selection disagrees with the original video timeline')
     return this.blob(selected.bytes, mime)
   }
   async select(source: VideoEncodedSource, index: number, timeline: VideoTimeline,

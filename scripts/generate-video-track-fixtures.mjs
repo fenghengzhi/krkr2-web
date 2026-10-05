@@ -141,6 +141,71 @@ writeFileSync(resolve(directory, 'presentation-reference.json'), JSON.stringify(
     digits: { origin: [19, 26], spacing: 15, pixelScale: 3, color: [240, 200, 32], digitRows } },
   fixtures: presentation,
 }, null, 2) + '\n')
+
+// Independent video-stream selection sources. Append to the original fixture
+// generation rather than changing its bytes, track ordering or reference set.
+const videoRegular = resolve(directory, 'video-multitrack.mp4'),
+  videoFragmented = resolve(directory, 'video-fragmented.mp4'),
+  videoInterleaved = resolve(directory, 'video-interleaved.mp4'),
+  videoSeparate = resolve(directory, 'video-separate.mp4'),
+  videoReferences = [0, 1].map((index) => resolve(directory, `video-reference-${index}.mp4`)),
+  videoPatterns = [
+    { index: 0, width: 64, height: 48, fps: 12, frames: 72,
+      filter: 'color=c=0xe02020:s=64x48:r=12:d=6,drawbox=x=4:y=4:w=16:h=12:color=white:t=fill' },
+    { index: 1, width: 80, height: 60, fps: 10, frames: 60,
+      filter: 'color=c=0x2040e0:s=80x60:r=10:d=6,drawbox=x=56:y=40:w=16:h=12:color=yellow:t=fill' },
+  ]
+run(['-f', 'lavfi', '-i', videoPatterns[0].filter,
+  '-f', 'lavfi', '-i', videoPatterns[1].filter, '-i', regular,
+  '-map', '0:v:0', '-map', '1:v:0', '-map', '2:a',
+  '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '12', '-pix_fmt', 'yuv420p',
+  '-g:v:0', '12', '-g:v:1', '10', '-bf', '0', '-threads', '1',
+  '-c:a', 'copy', '-t', '6', '-disposition:v:0', 'default', '-disposition:v:1', '0',
+  '-movflags', '+faststart', videoRegular])
+for (const [file, flags, extra] of [
+  [videoFragmented, '+empty_moov+default_base_moof+frag_keyframe', []],
+  [videoInterleaved, '+empty_moov+default_base_moof+frag_keyframe', ['-frag_interleave', '1']],
+  [videoSeparate, '+empty_moov+default_base_moof+frag_keyframe+separate_moof', []],
+]) run(['-i', videoRegular, '-map', '0', '-c', 'copy', '-movflags', flags, ...extra, file])
+for (const [index, file] of videoReferences.entries())
+  run(['-i', videoRegular, '-map', `0:v:${index}`, '-map', '0:a', '-c', 'copy', '-movflags', '+faststart', file])
+const videoSelectionFiles = [videoRegular, videoFragmented, videoInterleaved, videoSeparate, ...videoReferences].map((file, fixtureIndex) => {
+  const bytes = readFileSync(file), sha256 = createHash('sha256').update(bytes).digest('hex'),
+    probeCommand = ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', file],
+    metadata = JSON.parse(execFileSync('ffprobe', probeCommand, { encoding: 'utf8', timeout: 30000 })),
+    videos = metadata.streams.filter((stream) => stream.codec_type === 'video'),
+    audios = metadata.streams.filter((stream) => stream.codec_type === 'audio'),
+    patterns = fixtureIndex < 4 ? videoPatterns : [videoPatterns[fixtureIndex - 4]]
+  if (videos.length !== patterns.length || audios.length !== 2 ||
+      videos.some((stream, index) => stream.codec_name !== 'h264' || stream.width !== patterns[index].width ||
+        stream.height !== patterns[index].height || stream.r_frame_rate !== patterns[index].fps + '/1') ||
+      audios.some((stream) => stream.codec_name !== 'aac' || stream.channels !== 2 || stream.sample_rate !== '48000'))
+    throw new Error(`Unexpected generated video selection inventory: ${file}`)
+  const packetCommand = ['-v', 'error', '-show_packets', '-show_data_hash', 'sha256', '-of', 'json', file],
+    packetOutput = JSON.parse(execFileSync('ffprobe', packetCommand, { encoding: 'utf8', timeout: 30000, maxBuffer: 8 * 1024 * 1024 }))
+  if (!Array.isArray(packetOutput.packets) || !packetOutput.packets.length)
+    throw new Error(`No independent video selection packet inventory: ${file}`)
+  for (const [index, stream] of videos.entries())
+    if (packetOutput.packets.filter((packet) => packet.stream_index === stream.index).length !== patterns[index].frames)
+      throw new Error(`Unexpected encoded video frame count: ${file}, track ${index}`)
+  writeFileSync(file + '.packets.json', JSON.stringify({ schema: 1, file: file.split('/').at(-1), sha256,
+    command: packetCommand, streams: metadata.streams, packets: packetOutput.packets }, null, 2) + '\n')
+  return { file: file.split('/').at(-1), bytes: bytes.length, sha256, probeCommand, metadata,
+    packetCount: packetOutput.packets.length }
+})
+const videoSelectionFrames = videoReferences.map((file, index) => {
+  const png = `video-reference-${index}.png`, decodeCommand = ['-i', file, '-map', '0:v:0',
+    '-frames:v', '1', '-pix_fmt', 'rgba', '-c:v', 'png', '-threads', '1', resolve(directory, png)]
+  run(decodeCommand)
+  const bytes = readFileSync(resolve(directory, png))
+  return { index, source: file.split('/').at(-1), png, bytes: bytes.length,
+    sha256: createHash('sha256').update(bytes).digest('hex'), decodeCommand: ['ffmpeg', ...common, ...decodeCommand] }
+})
+writeFileSync(resolve(directory, 'video-selection-reference.json'), JSON.stringify({
+  schema: 1, commit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,
+  scope: 'Two actual H.264 videos and two AAC audios; reference movies are stream copies, PNGs are independent FFmpeg decodes.',
+  patterns: videoPatterns, files: videoSelectionFiles, frames: videoSelectionFrames,
+}, null, 2) + '\n')
 const provenance = {
   commit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,
   runner: process.env.RUNNER_ENVIRONMENT,
@@ -151,6 +216,8 @@ const provenance = {
   ffmpeg: execFileSync('ffmpeg', ['-version'], { encoding: 'utf8' }), commands, files,
   presentation: { manifest: 'presentation-reference.json', fixtures: presentation.length,
     frames: presentation.reduce((sum, fixture) => sum + fixture.frames.length, 0) },
+  videoSelection: { manifest: 'video-selection-reference.json', fixtures: videoSelectionFiles.length,
+    references: videoSelectionFrames.length },
 }
 writeFileSync(resolve(directory, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n')
 console.log(JSON.stringify(files.map(({ file, bytes, sha256 }) => ({ file, bytes, sha256 })), null, 2))

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { VideoEncodedResources, videoEncodedLimits } from '../../src/backends/video/browser/encoded-source.ts'
-import { readVideoTimeline } from '../../src/formats/video/mp4.ts'
+import { readVideoTimeline, selectVideoTimeline } from '../../src/formats/video/mp4.ts'
 
 const fixture = () => new Uint8Array(readFileSync(new URL('../fixtures/video/colors-sound.mp4', import.meta.url)))
 
@@ -67,4 +67,47 @@ test('video encoded budgets reject before allocation and recover after URL const
     assert.deepEqual(resources.inspect(), { sources: 1, sourceBytes: 4, ownedBytes: 4 })
   } finally { URL.createObjectURL = create; source.release() }
   assert.equal(resources.inspect().ownedBytes, 0)
+})
+
+test('joint video/audio Blob variants retain the original inventory and release independent selections', { timeout: 30000 }, async () => {
+  const bytes = new Uint8Array(readFileSync('out/verification/video-tracks/video-interleaved.mp4')),
+    timeline = await readVideoTimeline(bytes)
+  assert.ok(timeline)
+  const resources = new VideoEncodedResources({ sourceBytes: bytes.length, ownedBytes: bytes.length * 4 }),
+    source = resources.source(bytes), active = resources.original(source, 'video/mp4')
+  try {
+    for (const video of [1, 0, 1]) {
+      const selected = await resources.select(source, 1, selectVideoTimeline(timeline, video), 'video/mp4', () => {})
+      try {
+        const selectedBytes = new Uint8Array(await (await fetch(selected.url)).arrayBuffer()),
+          actual = await readVideoTimeline(selectedBytes)
+        assert.ok(actual)
+        assert.equal(actual.audioStreams, 1); assert.equal(actual.videoStreams, 1)
+        assert.deepEqual(actual.videoTracks?.map(({ id, width, height }) => ({ id, width, height })),
+          timeline.videoTracks?.slice(video, video + 1).map(({ id, width, height }) => ({ id, width, height })))
+        assert.deepEqual(actual.times, timeline.videoTracks![video]!.times)
+        assert.equal(resources.inspect().ownedBytes, bytes.length * 3)
+      } finally { selected.release() }
+    }
+    assert.deepEqual(source.bytes, bytes)
+    assert.equal(timeline.selectedVideoStream, 0)
+    assert.equal(resources.inspect().ownedBytes, bytes.length * 2)
+  } finally { active.release(); source.release() }
+  assert.deepEqual(resources.inspect(), { sources: 0, sourceBytes: 0, ownedBytes: 0 })
+})
+
+test('a cancelled video replacement refunds its copy and preserves the active URL', { timeout: 30000 }, async () => {
+  const bytes = new Uint8Array(readFileSync('out/verification/video-tracks/video-multitrack.mp4')),
+    timeline = await readVideoTimeline(bytes)
+  assert.ok(timeline)
+  const resources = new VideoEncodedResources({ sourceBytes: bytes.length, ownedBytes: bytes.length * 4 }),
+    source = resources.source(bytes), active = resources.original(source, 'video/mp4')
+  let checks = 0
+  try {
+    await assert.rejects(resources.select(source, 1, selectVideoTimeline(timeline, 1), 'video/mp4', () => {
+      if (++checks > 2) throw new Error('video replacement expired')
+    }), /video replacement expired/)
+    assert.deepEqual(new Uint8Array(await (await fetch(active.url)).arrayBuffer()), bytes)
+    assert.deepEqual(resources.inspect(), { sources: 1, sourceBytes: bytes.length, ownedBytes: bytes.length * 2 })
+  } finally { active.release(); source.release() }
 })

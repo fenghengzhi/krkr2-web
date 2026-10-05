@@ -147,9 +147,9 @@ child.onMouseMove=function(x,y,shift){
 };
 function moveAtomic(){armed=true;child.setPos(10,10,4,4);return callbacks.count+"|"+rectangle(child);}
 `, async (f) => {
-      await f.session.input({ type: 'move', x: 2, y: 2, shift: 0 })
+      await f.session.input({ type: 'move', x: 2, y: 2, shift: 0, button: 0, clicks: 0 })
       assert.equal(await f.session.evaluate('moveAtomic()'), '0|10,10,4,4')
-      await f.session.input({ type: 'move', x: 11, y: 11, shift: 0 })
+      await f.session.input({ type: 'move', x: 11, y: 11, shift: 0, button: 0, clicks: 0 })
       assert.equal(await f.session.evaluate('callbacks.join("|")'), '10,10,4,4|20,10,3,2')
     })
   })

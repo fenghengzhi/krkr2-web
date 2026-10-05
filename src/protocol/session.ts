@@ -12,7 +12,7 @@ import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
 import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
 import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
-export const PROTOCOL_VERSION = 40
+export const PROTOCOL_VERSION = 41
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
   readonly tree: DroppedTree<Blob>

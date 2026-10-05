@@ -1,11 +1,52 @@
-import type { VideoTimeline } from '../../engine/ports/video.ts'
+import type { VideoTimeline, VideoTrackTimeline } from '../../engine/ports/video.ts'
 const MAX_SAMPLES = 1000000
+/** Retain the original catalog while projecting one selected video timeline. */
+export function selectVideoTimeline(original: VideoTimeline, index: number): VideoTimeline {
+  if (!Number.isSafeInteger(index) || index < 0 || index >= original.videoStreams)
+    throw new Error('Video stream index is outside the original track range')
+  const catalog = original.videoTracks
+  if (!catalog) {
+    if (index === 0 && original.videoStreams === 1) return { ...original, selectedVideoStream: 0 }
+    throw new Error('Video stream catalog is unavailable')
+  }
+  const selected = catalog[index]
+  if (!Array.isArray(catalog) || catalog.length !== original.videoStreams || !selected)
+    throw new Error('Video stream catalog disagrees with the original track count')
+  if (catalog.length > 256) throw new Error('Video stream catalog track budget exceeded')
+  let frames = 0
+  const ids = new Set<number>()
+  for (const track of catalog) {
+    if (!track || !Number.isSafeInteger(track.id) || track.id <= 0 || ids.has(track.id) ||
+        !Number.isInteger(track.width) || !Number.isInteger(track.height) ||
+        track.width <= 0 || track.height <= 0 || track.width > 4096 || track.height > 4096 ||
+        !Array.isArray(track.times) || !Number.isFinite(track.duration) || track.duration < 0 ||
+        !Number.isFinite(track.frameDuration) || track.frameDuration < 0 || (track.times.length && !track.frameDuration))
+      throw new Error('Invalid video stream catalog metadata')
+    ids.add(track.id)
+    if (track.times.length > MAX_SAMPLES || (frames += track.times.length) > MAX_SAMPLES * 2)
+      throw new Error('Video stream catalog frame budget exceeded')
+  }
+  for (const track of catalog) {
+    let previous = -1
+    for (const time of track.times) {
+      if (!Number.isFinite(time) || time < 0 || time < previous || time > track.duration)
+        throw new Error('Invalid video stream catalog presentation time')
+      previous = time
+    }
+  }
+  return { ...original, times: selected.times, duration: selected.duration,
+    frameDuration: selected.frameDuration, selectedVideoStream: index }
+}
 /** MP4Box supplies DTS/CTS and fragmented sample tables; this adapter applies
  * edit lists and exposes presentation order instead of decoding order. */
-export async function readVideoTimeline(bytes: Uint8Array): Promise<VideoTimeline | undefined> {
+export async function readVideoTimeline(input: Uint8Array): Promise<VideoTimeline | undefined> {
+  if (input.length < 8 || !['ftyp', 'moov', 'free', 'wide', 'mdat'].includes(
+    String.fromCharCode(...input.subarray(4, 8)))) return
+  // Own the complete source before the parser import can suspend. All video
+  // catalogs refer to this same immutable observation, not a later caller view.
+  const bytes = Uint8Array.from(input)
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const text = (at: number) => String.fromCharCode(...bytes.subarray(at, at + 4))
-  if (bytes.length < 8 || !['ftyp', 'moov', 'free', 'wide', 'mdat'].includes(text(4))) return
   let boxes = 0,
     totalSamples = 0
   const inspect = (start: number, end: number, depth = 0) => {
@@ -50,65 +91,82 @@ export async function readVideoTimeline(bytes: Uint8Array): Promise<VideoTimelin
     }
   }
   inspect(0, bytes.length)
-  const { createFile, MP4BoxBuffer } = await import('mp4box')
+  const { createFile } = await import('mp4box')
   const file = createFile(false)
   file.onError = (message) => {
     throw new Error(`MP4 metadata: ${message}`)
   }
-  file.appendBuffer(MP4BoxBuffer.fromArrayBuffer(Uint8Array.from(bytes).buffer, 0))
+  file.appendBuffer(Object.assign(bytes.buffer, { fileStart: 0, usedBytes: 0 }))
   file.flush()
-  const info = file.getInfo(),
-    track = info.videoTracks[0]
-  if (!track) return
-  const samples = file.getTrackSamplesInfo(track.id)
-  if (samples.length > MAX_SAMPLES || !track.timescale)
-    throw new Error('Invalid MP4 video sample table')
-  // AvgTimePerFrame describes the stream cadence. Empty edits and the initial
-  // composition offset can lengthen the presentation timeline without changing
-  // that cadence; edited sample count / movie duration is not its frame rate.
-  let sampleDuration = 0
-  for (const sample of samples) {
-    if (!Number.isSafeInteger(sample.duration) || sample.duration < 0)
+  const info = file.getInfo(), catalog: VideoTrackTimeline[] = [], ids = new Set<number>()
+  if (!info.videoTracks.length) return
+  if (info.videoTracks.length > 256) throw new Error('MP4 video track budget exceeded')
+  let videoSamples = 0, editedSamples = 0, editWork = 0
+  for (const track of info.videoTracks) {
+    const samples = file.getTrackSamplesInfo(track.id),
+      width = track.video?.width ?? track.track_width, height = track.video?.height ?? track.track_height
+    if (!Number.isSafeInteger(track.id) || track.id <= 0 || ids.has(track.id) ||
+        !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || width > 4096 || height > 4096)
+      throw new Error('Invalid MP4 video track identity or dimensions')
+    ids.add(track.id)
+    if (samples.length > MAX_SAMPLES || (videoSamples += samples.length) > MAX_SAMPLES * 2 ||
+        !Number.isSafeInteger(track.timescale) || track.timescale <= 0)
+      throw new Error('Invalid MP4 video sample table')
+    // AvgTimePerFrame describes the stream cadence. Empty edits and the initial
+    // composition offset can lengthen the presentation timeline without changing
+    // that cadence; edited sample count / movie duration is not its frame rate.
+    let sampleDuration = 0
+    for (const sample of samples) {
+      if (!Number.isSafeInteger(sample.duration) || sample.duration < 0 || !Number.isSafeInteger(sample.cts))
+        throw new Error('Invalid MP4 video sample duration or timestamp')
+      sampleDuration += sample.duration
+    }
+    if (!Number.isSafeInteger(sampleDuration) || (samples.length && sampleDuration <= 0))
       throw new Error('Invalid MP4 video sample duration')
-    sampleDuration += sample.duration
-  }
-  if (!Number.isSafeInteger(sampleDuration) || (samples.length && sampleDuration <= 0))
-    throw new Error('Invalid MP4 video sample duration')
-  const frameDuration = samples.length ? (sampleDuration * 1000) / track.timescale / samples.length : 0
-  const raw = samples
-    .map((sample) => ({
-      time: (sample.cts * 1000) / track.timescale,
-      end: ((sample.cts + sample.duration) * 1000) / track.timescale,
-    }))
-    .sort((a, b) => a.time - b.time)
-  const times: number[] = []
-  let duration = 0
-  if (track.edits?.length) {
-    for (const edit of track.edits) {
-      if (edit.media_rate_integer !== 1 || edit.media_rate_fraction !== 0)
-        throw new Error('MP4 edit playback rates are not supported')
-      const length = (edit.segment_duration * 1000) / info.timescale,
-        start = (edit.media_time * 1000) / track.timescale
-      if (start >= 0)
-        for (const sample of raw)
-          if (sample.end > start && sample.time < start + length)
-            times.push(duration + Math.max(0, sample.time - start))
-      duration += length
+    const frameDuration = samples.length ? (sampleDuration * 1000) / track.timescale / samples.length : 0
+    const raw = samples
+      .map((sample) => ({ time: (sample.cts * 1000) / track.timescale,
+        end: ((sample.cts + sample.duration) * 1000) / track.timescale }))
+      .sort((a, b) => a.time - b.time)
+    const times: number[] = []
+    const append = (time: number) => {
+      if (times.length >= MAX_SAMPLES || ++editedSamples > MAX_SAMPLES * 2)
+        throw new Error('MP4 edited frame count budget exceeded')
+      times.push(time)
     }
-  } else {
-    for (const sample of raw) {
-      times.push(Math.max(0, sample.time))
-      duration = Math.max(duration, sample.end)
+    let duration = 0
+    if (track.edits?.length) {
+      for (const edit of track.edits) {
+        if (edit.media_rate_integer !== 1 || edit.media_rate_fraction !== 0)
+          throw new Error('MP4 edit playback rates are not supported')
+        const length = (edit.segment_duration * 1000) / info.timescale,
+          start = (edit.media_time * 1000) / track.timescale
+        if (start >= 0)
+          for (const sample of raw) {
+            if (++editWork > MAX_SAMPLES * 8) throw new Error('MP4 edit evaluation budget exceeded')
+            if (sample.end > start && sample.time < start + length)
+              append(duration + Math.max(0, sample.time - start))
+          }
+        duration += length
+      }
+    } else {
+      for (const sample of raw) {
+        append(Math.max(0, sample.time))
+        duration = Math.max(duration, sample.end)
+      }
     }
+    if (times.some((time) => !Number.isFinite(time)) || !Number.isFinite(duration) || duration < 0)
+      throw new Error('Invalid MP4 presentation time')
+    catalog.push({ id: track.id, width, height, times, duration, frameDuration })
   }
-  if (times.some((time) => !Number.isFinite(time)) || !Number.isFinite(duration) || duration < 0)
-    throw new Error('Invalid MP4 presentation time')
-  if (times.length > MAX_SAMPLES) throw new Error('MP4 edited frame count budget exceeded')
+  const first = catalog[0]!
   return {
-    times,
-    duration,
-    frameDuration,
+    times: first.times,
+    duration: first.duration,
+    frameDuration: first.frameDuration,
     audioStreams: info.audioTracks.length,
-    videoStreams: info.videoTracks.length,
+    videoStreams: catalog.length,
+    selectedVideoStream: 0,
+    videoTracks: catalog,
   }
 }
