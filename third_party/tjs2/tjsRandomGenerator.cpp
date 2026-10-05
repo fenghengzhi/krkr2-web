@@ -52,8 +52,12 @@ namespace TJS {
                 TJSGetRandomBits128(buf);
                 TJSGetRandomBits128(buf + 16);
                 for(tjs_int i = 0; i < 32; i++)
-                    tmp[i] = buf[i] + (buf[i] << 8) + (buf[1] << 16) +
-                        (buf[i] << 24);
+                    // Preserve the original repeated byte and buf[1] term,
+                    // using unsigned shifts for bytes with the high bit set.
+                    tmp[i] = static_cast<tjs_uint32>(buf[i]) |
+                        (static_cast<tjs_uint32>(buf[i]) << 8) |
+                        (static_cast<tjs_uint32>(buf[1]) << 16) |
+                        (static_cast<tjs_uint32>(buf[i]) << 24);
 
                 if(Generator)
                     delete Generator, Generator = nullptr;
@@ -117,7 +121,16 @@ namespace TJS {
                     TJS_THROW_IF_ERROR(clo.PropGet(TJS_MEMBERMUSTEXIST,
                                                    TJS_W("next"), nullptr, &val,
                                                    nullptr));
-                    data->next = (tjs_int)val + data->state;
+                    const tjs_int next = (tjs_int)val;
+                    // int32() decrements left before refilling. Every read
+                    // before that refill must stay within the 624-word state.
+                    // Accept safe hand-written states as well as Serialize's
+                    // initial (1,0) and ordinary left+next=625 states.
+                    if(data->left < 1 || data->left > TJS_MT_N ||
+                       next < 0 || next > TJS_MT_N ||
+                       data->left - 1 > TJS_MT_N - next)
+                        TJS_eTJSError(TJSNotReconstructiveRandomizeData);
+                    data->next = data->state + next;
 
                     if(Generator)
                         delete Generator, Generator = nullptr;

@@ -1,0 +1,1739 @@
+{
+  "schema": 1,
+  "sourceRun": "37352789584",
+  "sourceCommit": "79b7a27dd4354426bac1c17a07c31b91db513e72",
+  "profile": {
+    "width": 32,
+    "height": 32,
+    "depth": 32,
+    "dpi": 96
+  },
+  "scope": "Complete top-down 80x80 RGB from native DrawIconEx flags 19, natural size 0x0, step 0 and three backgrounds. Original CUR bytes copied unchanged. No interpretation of GetIconInfo color-plane alpha representation.",
+  "excluded": "Other DrawIconEx flags, requested 48x40 scaling, animation, other profiles and browser/CSS presentation remain outside this regression; historical uncompared rows are retained in original artifacts.",
+  "observationsSha256": {
+    "native-cursor-windows-2022-1": "bc104ebaa3c275ed9f2ec30baaf1e8c179c65c86c58d7bc8be38ed8f46de1835",
+    "native-cursor-windows-2025-1": "330131d18f659a8db4a66ffd4249c07c204c974ae78e4c7e1ed3cfb6b5daa183"
+  },
+  "fixtures": [
+    {
+      "id": "png-scale-boundary-65x65-rgb",
+      "file": "png-scale-boundary-65x65-rgb.cur",
+      "sourceBytes": 12830,
+      "sourceSha256": "d5cecdb859e6e56fa3493e455515f80a3fc96319e933a457c36a0d85a7c961f4",
+      "source": {
+        "width": 65,
+        "height": 65,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 21,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x65-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "a9c7e3d65aeaffa16c66bf7f2d0cea724d7fc62e21360a08960d845c3194eed6",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "5cf744af3069b6048498d5bb11a0820d72369d029abebe211daa7038c6a4859c",
+            "native-cursor-windows-2025-1": "5cf744af3069b6048498d5bb11a0820d72369d029abebe211daa7038c6a4859c"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x65-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "4be287dea859d0b86de5c5f2d68fb09200545c2ef3e5c28226fc08e4e9bcbe38",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "10e483bb68020362e34141e0efd1f04cb645540b952faf7edc0c625e23c04319",
+            "native-cursor-windows-2025-1": "10e483bb68020362e34141e0efd1f04cb645540b952faf7edc0c625e23c04319"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x65-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "ba5168259e4223d7a9e200b80276f0cd2be7056ec018eb82acb52f00242b7554",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "5bdd7f295ff69fd0182f3358a6d596499d998a1a35a1c88cdf873a63bfa73895",
+            "native-cursor-windows-2025-1": "5bdd7f295ff69fd0182f3358a6d596499d998a1a35a1c88cdf873a63bfa73895"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-65x65-alpha",
+      "file": "png-scale-boundary-65x65-alpha.cur",
+      "sourceBytes": 17055,
+      "sourceSha256": "c4d5d1d988ccf1a5d394c4ab928bdcca15548cc3883c3c1d6c707d917a9702f3",
+      "source": {
+        "width": 65,
+        "height": 65,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 21,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x65-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "39ecfc67d0f1264ffc8ed43befeb8bdc0876f2d08d4ca6df9b3b5a96f0596c7e",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "3fd074b0bfacc27999a2fd3be90886f389982ce56d421cc9146582ab24feaf0b",
+            "native-cursor-windows-2025-1": "3fd074b0bfacc27999a2fd3be90886f389982ce56d421cc9146582ab24feaf0b"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x65-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "921ab18b51bcf1207e4487157635bf6b3f60073fde2a18291a6f7139d8d1b139",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "8c185d8eec43b6744eea765f49a79baf21105404e2dac0fb7726bcca28a4a3cd",
+            "native-cursor-windows-2025-1": "8c185d8eec43b6744eea765f49a79baf21105404e2dac0fb7726bcca28a4a3cd"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x65-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "6a037b9586e9eaf8be63c209cafedcd6d66c765c4bf15c5d9dca2c3d64692cd4",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "94ad6d57574bdeb4dc392c2e6b5b41428f5ed9acc01ae372873d510de95a1ee7",
+            "native-cursor-windows-2025-1": "94ad6d57574bdeb4dc392c2e6b5b41428f5ed9acc01ae372873d510de95a1ee7"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-65x48-rgb",
+      "file": "png-scale-boundary-65x48-rgb.cur",
+      "sourceBytes": 9498,
+      "sourceSha256": "01fc67131b5b14eaee42ecc76eb0efd5dc299066144c377e9258143a889d0699",
+      "source": {
+        "width": 65,
+        "height": 48,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 21,
+          "y": 12
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x48-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "58c2632522f6a0f8ae2e579beeffe82bd6378d4e68dbd9c4aec6ee341e8596c7",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "b89893fb88556c132fc70745425837710058800aff9c87ca462bcc9bde2536aa",
+            "native-cursor-windows-2025-1": "b89893fb88556c132fc70745425837710058800aff9c87ca462bcc9bde2536aa"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x48-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "664f63e93ad634262072e2dead5ee2111d068a3d281043236173e361ba4cbfef",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "5680444653b73beaa4a91f9f10f0661ea8a4d0d8e8a4a10d5a6f03bd5aa56111",
+            "native-cursor-windows-2025-1": "5680444653b73beaa4a91f9f10f0661ea8a4d0d8e8a4a10d5a6f03bd5aa56111"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x48-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "dc7929db423ae5f6a2507e64ff6c358ed54102b43ec8d86a0141fefe2f217101",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "ee0e09348bc06adee9752c9c9cac4bbeca994ce2edaecde7cf2c0228de6d0d90",
+            "native-cursor-windows-2025-1": "ee0e09348bc06adee9752c9c9cac4bbeca994ce2edaecde7cf2c0228de6d0d90"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-65x48-alpha",
+      "file": "png-scale-boundary-65x48-alpha.cur",
+      "sourceBytes": 12618,
+      "sourceSha256": "2a73de5ad2a92e221d9851a635c70159225ba681347a54a084717ca9d01f562c",
+      "source": {
+        "width": 65,
+        "height": 48,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 21,
+          "y": 12
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x48-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "ef638fabf9e7e8f4931ba3adad9529f3422e0f410cb2668ff155fa80f3cf0d82",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "3e5e9b6c55eecb8ab09bc20c44024af4f11289df5e0c1be90ab83c4acf64bc04",
+            "native-cursor-windows-2025-1": "3e5e9b6c55eecb8ab09bc20c44024af4f11289df5e0c1be90ab83c4acf64bc04"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x48-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "cbb6bc12b10bed151790a61c5ac30da9c41c1b7ae55dfa52ca9a8ba2243f2130",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "e29813bc9c4ff49addaa1e91a3d14d14eae544576b39b2a839431260537e0c3d",
+            "native-cursor-windows-2025-1": "e29813bc9c4ff49addaa1e91a3d14d14eae544576b39b2a839431260537e0c3d"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x48-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "714c8ca15d160763ca20faa91bbba94059f1c34b66e6faa3fc0b735042a6e14e",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "b03fdc37c6d7ec348af163facdffee4beaeb940a861b7377ddbf10aca93afe18",
+            "native-cursor-windows-2025-1": "b03fdc37c6d7ec348af163facdffee4beaeb940a861b7377ddbf10aca93afe18"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-48x65-rgb",
+      "file": "png-scale-boundary-48x65-rgb.cur",
+      "sourceBytes": 9515,
+      "sourceSha256": "94fae4d6b1d46b6dfe25dbda75fbe43e48ef7dce7b328d728bb1991a9c91a800",
+      "source": {
+        "width": 48,
+        "height": 65,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 16,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x65-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "f3d3a56e3782af3e33087c7371566df2388526cb1edd0064c9a72c7330de4a01",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "2721909ac44112cf3235edb5840f94beb44ee3d50927b8ffcf635075ef24ec1c",
+            "native-cursor-windows-2025-1": "2721909ac44112cf3235edb5840f94beb44ee3d50927b8ffcf635075ef24ec1c"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x65-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "1dc5e8327ec9fb1a8cba352fc889022c592e09d664ce71d5332273ca368e7c25",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "6d4cf88ca318dbbf60cf234336bb83a8b8f58986bdca18fc63f91bbc1aba1e8a",
+            "native-cursor-windows-2025-1": "6d4cf88ca318dbbf60cf234336bb83a8b8f58986bdca18fc63f91bbc1aba1e8a"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x65-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "d2e5b33b8a8a4e28b6a3449c7362f6f5babc58db15662743fa17d084c8b90dc0",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "970dd2b1199949466b677de659205fa193d457c3e1a9424cdb82210676b0cebd",
+            "native-cursor-windows-2025-1": "970dd2b1199949466b677de659205fa193d457c3e1a9424cdb82210676b0cebd"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-48x65-alpha",
+      "file": "png-scale-boundary-48x65-alpha.cur",
+      "sourceBytes": 12635,
+      "sourceSha256": "7ae97ea08161663fa62d8ef37f68d85f25f7f28e5854e93437e5e9faca10692b",
+      "source": {
+        "width": 48,
+        "height": 65,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 16,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x65-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "85c6fdb805ce39c77c263fab9343632ee9df8990f1c165278ad560bd6869b304",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "9c82cde6f690c69dd8f2ce360c79890d34f873b5038092e574bad909af82a9a9",
+            "native-cursor-windows-2025-1": "9c82cde6f690c69dd8f2ce360c79890d34f873b5038092e574bad909af82a9a9"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x65-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "1e8e2bed431fbd469fd8e675bba259b311b2844b57382777ce77188f7f6b1ce6",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "c4b24c81e2055bb682637ec12be79e018d1fced41bcd40c1f0fc5e1144370f58",
+            "native-cursor-windows-2025-1": "c4b24c81e2055bb682637ec12be79e018d1fced41bcd40c1f0fc5e1144370f58"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x65-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "79900fd93e64a941f27bcf97076265cf3fc3cf618b71ef96204ec804c141a4ee",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "06356565a46dd4cdd850c397aeb1c6fa7812518d45927f6c7a84699b85fe53f5",
+            "native-cursor-windows-2025-1": "06356565a46dd4cdd850c397aeb1c6fa7812518d45927f6c7a84699b85fe53f5"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-65x13-rgb",
+      "file": "png-scale-boundary-65x13-rgb.cur",
+      "sourceBytes": 2638,
+      "sourceSha256": "ed931370d60e5e1fbf0d9973e7b5bb95d8cdcaf2eae43eb06f7fea5590cd53d6",
+      "source": {
+        "width": 65,
+        "height": 13,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 21,
+          "y": 3
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 7
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x13-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "2e134000e92d5d564e9cefe5e37b64e938e194bba9289894103883c27a880f8d",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "55c20c5d2ca22d88810cdd480aabf5e18675a633c28d44558ae7b36d5fd5b4b1",
+            "native-cursor-windows-2025-1": "55c20c5d2ca22d88810cdd480aabf5e18675a633c28d44558ae7b36d5fd5b4b1"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x13-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "d3c485b060b98673fa5a6eb02ff6202e6c817b9b94cd628110e94255c45c5205",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "c94a67ef8b98e229a0caabb4045cb2ba6ebc1da7355b3a4c7eef1b08eead51ee",
+            "native-cursor-windows-2025-1": "c94a67ef8b98e229a0caabb4045cb2ba6ebc1da7355b3a4c7eef1b08eead51ee"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x13-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "753d13c836ee293e6099828360c39a28e4ba6685c204219c12dabab85f5a0038",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "89abfd3182bcf785ba4c8e93cfacf8b6c297970cb7fdb603758cae167fe90704",
+            "native-cursor-windows-2025-1": "89abfd3182bcf785ba4c8e93cfacf8b6c297970cb7fdb603758cae167fe90704"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-65x13-alpha",
+      "file": "png-scale-boundary-65x13-alpha.cur",
+      "sourceBytes": 3483,
+      "sourceSha256": "3a4868410c5e46c19cfe9aaf0ae234b3dbbe043aa18fc196a0cc9b52aefce977",
+      "source": {
+        "width": 65,
+        "height": 13,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 21,
+          "y": 3
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 7
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x13-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "36a2564a02dd9800cd47e68da85bfe46e5d0ec69491377f40d5eb8e2fdad3e44",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "eb2c5ac58c98ef42cac549fdc7ce622055d108dd1441b4254fba2728bf61600b",
+            "native-cursor-windows-2025-1": "eb2c5ac58c98ef42cac549fdc7ce622055d108dd1441b4254fba2728bf61600b"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x13-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "3a0bc5489990719749ec494fbaa2e3c9e7d746a54ffa33953b86b28f43d6927f",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "02763f7fe3af1b61dfb6192f397229ff5928251a4d370df9da95d8af66fb79ff",
+            "native-cursor-windows-2025-1": "02763f7fe3af1b61dfb6192f397229ff5928251a4d370df9da95d8af66fb79ff"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-65x13-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "22f807db3d0a36eccbe9540d8785e2ed2f3f8f636c712ef287e0106cfabcfcab",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "c7ab141f0065a6420f47bce11c963b6c0ccc0016a3217fb31acb6c9048701a39",
+            "native-cursor-windows-2025-1": "c7ab141f0065a6420f47bce11c963b6c0ccc0016a3217fb31acb6c9048701a39"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-13x65-rgb",
+      "file": "png-scale-boundary-13x65-rgb.cur",
+      "sourceBytes": 2690,
+      "sourceSha256": "f36254f0f87f5f547b64dc5dba26deb2be58ee9387d991ec256ce4bdfb15cbe4",
+      "source": {
+        "width": 13,
+        "height": 65,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 4,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x65-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "1e3b3413af5a60295d79018317536be932bcd283a4d5179b015b09016ff44c36",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "8623018e0456d6b0d6d9263fa0e40fdea915012aaefd4e56824e540daed277c3",
+            "native-cursor-windows-2025-1": "8623018e0456d6b0d6d9263fa0e40fdea915012aaefd4e56824e540daed277c3"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x65-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "5edc36c42fd753528992a744e0ec63991602de740329ffd6253274e52bc2f7f3",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "d0bb3e269a3ee938b1df533306d86f8ec8bdb5569538ec34c30734f2050ae80d",
+            "native-cursor-windows-2025-1": "d0bb3e269a3ee938b1df533306d86f8ec8bdb5569538ec34c30734f2050ae80d"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x65-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "987401138778c40ea311a5badb29a4c59ff77f7985de32755ed7d357a8bd3ec9",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "2a2bf19ee138a906c5880ffbdc80c354801132db2461f06d2bb672522f8500c3",
+            "native-cursor-windows-2025-1": "2a2bf19ee138a906c5880ffbdc80c354801132db2461f06d2bb672522f8500c3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-13x65-alpha",
+      "file": "png-scale-boundary-13x65-alpha.cur",
+      "sourceBytes": 3535,
+      "sourceSha256": "3abac1c3a5a22826f5d2803c573b98e9fd9d5ea3c094309d9e0ccc95dae500b4",
+      "source": {
+        "width": 13,
+        "height": 65,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 4,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x65-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "972d6ea1b827e371e6805902c6bf7f50113364a1f43b02157d3a9eff99f66aa5",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "228249ba91e37c12a636f7d3142351a0701c60c3d8d179006f106f0592901eca",
+            "native-cursor-windows-2025-1": "228249ba91e37c12a636f7d3142351a0701c60c3d8d179006f106f0592901eca"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x65-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "2ba77b6bd54c1d776850b93e4e79689aac8c62ecb0acd1e3d92d94be08f94924",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "89faf200292f8e286ad68426395eb7605c1dcfcbe8df30422e8c29e60c3cba9f",
+            "native-cursor-windows-2025-1": "89faf200292f8e286ad68426395eb7605c1dcfcbe8df30422e8c29e60c3cba9f"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x65-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "25c2900246b423aaf5192d8960a1a85abc0aff3de8c80ae88f78c7a53de6ff16",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "ac3ce3e73d0e46838682539041fb8779d1549d28faa0c39c7c0e1a561fad2675",
+            "native-cursor-windows-2025-1": "ac3ce3e73d0e46838682539041fb8779d1549d28faa0c39c7c0e1a561fad2675"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-66x66-rgb",
+      "file": "png-scale-boundary-66x66-rgb.cur",
+      "sourceBytes": 13224,
+      "sourceSha256": "3b282fe38ba734cd0f2535c95401e791f97d2e303f0fddc141b75d34e91608e9",
+      "source": {
+        "width": 66,
+        "height": 66,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 22,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x66-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "4a35e86a60ae430b6d9370ecd6e809bb870eeae63533db0ab4924424da889916",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "66518446bc5ec484297d7b0122984daae7d14a19141578f1f7b8bc396a388ca3",
+            "native-cursor-windows-2025-1": "66518446bc5ec484297d7b0122984daae7d14a19141578f1f7b8bc396a388ca3"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x66-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "155956e078c790f63df1b876fe57289723ec924c276e64fa54141d315d227c28",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "7a7b629c3dc09ce6a3896ff4ceee29c8a11e095b508eb1f29e758f86aa40ab96",
+            "native-cursor-windows-2025-1": "7a7b629c3dc09ce6a3896ff4ceee29c8a11e095b508eb1f29e758f86aa40ab96"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x66-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "0b199bed741207e995ae49fb19d3e667bddd8afcaff30f35a0e6a697843dba00",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "fe136fc1226db3e611aa5038b7e3e662a7e615a26926c06a7d463026045aa757",
+            "native-cursor-windows-2025-1": "fe136fc1226db3e611aa5038b7e3e662a7e615a26926c06a7d463026045aa757"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-66x66-alpha",
+      "file": "png-scale-boundary-66x66-alpha.cur",
+      "sourceBytes": 17580,
+      "sourceSha256": "897597ee4eda9238bc16e32d247ad1a93236ccaa6d275d682d2e7e91bb51e6e2",
+      "source": {
+        "width": 66,
+        "height": 66,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 22,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x66-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "3e6d1d09f79ed661120c35e33eba74f52b103f8981dbeef7d0339cbccd9a65b8",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "e40f926750597dbeb6d51e3cfa3c42e857775c8d9b2967d474909f78371b9006",
+            "native-cursor-windows-2025-1": "e40f926750597dbeb6d51e3cfa3c42e857775c8d9b2967d474909f78371b9006"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x66-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "82fae9819a14b212d2eb9e54fd660b67dd738083175060cf169803cd516f937f",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "403a5d38dac8fb30e9e94fd2705bb6e56dc42115315d9719680fd47f389a7687",
+            "native-cursor-windows-2025-1": "403a5d38dac8fb30e9e94fd2705bb6e56dc42115315d9719680fd47f389a7687"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x66-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "b598d670a51609d5baf6b83c4c4e54c5891d6c4e891ec58343942eb107f89f28",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "2e1068a7a5cc9c2a0ef83f1b833ffbc03a7d910729a75e902b038b996b70a517",
+            "native-cursor-windows-2025-1": "2e1068a7a5cc9c2a0ef83f1b833ffbc03a7d910729a75e902b038b996b70a517"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-66x48-rgb",
+      "file": "png-scale-boundary-66x48-rgb.cur",
+      "sourceBytes": 9642,
+      "sourceSha256": "0f2dcb29e5b78a4d0abf48d921fcc336fd643777cbf7fcb8b265a27272a6a2e6",
+      "source": {
+        "width": 66,
+        "height": 48,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 22,
+          "y": 12
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x48-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "803a5bc1d3c102182918d64028b0938530c16e215de7bc04f3c618872cc1da8d",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "6c4682076dbe142b0a2057c531184253e23a1764d70c3f8ff6976774ee9e8c15",
+            "native-cursor-windows-2025-1": "6c4682076dbe142b0a2057c531184253e23a1764d70c3f8ff6976774ee9e8c15"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x48-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "2c8e69a9c086946db1c24a3af397d2755819584acb568fec9bd42e6dc8060711",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "93e7a55f7723eddfc22c652d1a60503ecd500d6c02273659d5c7371c33dad5ab",
+            "native-cursor-windows-2025-1": "93e7a55f7723eddfc22c652d1a60503ecd500d6c02273659d5c7371c33dad5ab"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x48-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "3dda6509dd100119a8b3fa6860418896040c1a8e03c39c2fae254d00951b78b5",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "9a58a782c0e824d2ed9e842f4cb3c27a7829c9a8ca9f647ec888c0802c6aa01f",
+            "native-cursor-windows-2025-1": "9a58a782c0e824d2ed9e842f4cb3c27a7829c9a8ca9f647ec888c0802c6aa01f"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-66x48-alpha",
+      "file": "png-scale-boundary-66x48-alpha.cur",
+      "sourceBytes": 12810,
+      "sourceSha256": "53b7f4f2ba86302ee24b243b92ecd4751d02cab9f34b04704365348671a65386",
+      "source": {
+        "width": 66,
+        "height": 48,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 22,
+          "y": 12
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x48-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "19261f17e97d5848650905084c679ea07df7745347cd91f62034436039b9e1c4",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "ff67a7996d58d351c4c196dd104e1e26555db30745c63c5b778d4040d9ebdbe5",
+            "native-cursor-windows-2025-1": "ff67a7996d58d351c4c196dd104e1e26555db30745c63c5b778d4040d9ebdbe5"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x48-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "c01adcd1a55cbf1530fe6087ac48a0fae17057f84302d5e4562f93a22c830ba8",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "81ae3d764220b392831df0c7da7bcb30c6d200206904b9c82456cfb8a97b0b6e",
+            "native-cursor-windows-2025-1": "81ae3d764220b392831df0c7da7bcb30c6d200206904b9c82456cfb8a97b0b6e"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x48-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "8a2c72bdb58f6f4be2fe254afb0e695cc1ad42e7145259078360f5e36bbdec8e",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "e04ed8bc4ac0f3210b96f09605ef721c6647798e3fb27e694cd91d0029be8a7e",
+            "native-cursor-windows-2025-1": "e04ed8bc4ac0f3210b96f09605ef721c6647798e3fb27e694cd91d0029be8a7e"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-48x66-rgb",
+      "file": "png-scale-boundary-48x66-rgb.cur",
+      "sourceBytes": 9660,
+      "sourceSha256": "ae5e3b472afccd026778e96adbdd2d395aa45feaff4c0404429d6e6dd974bb26",
+      "source": {
+        "width": 48,
+        "height": 66,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 16,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x66-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "bb4126e65865ba82ee48f89d6674ef0752324351edd6f76029792e109317d274",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "89098179ea2814aa4452e9d6908c01f7fe81325ce42007d9a2086a39b176150a",
+            "native-cursor-windows-2025-1": "89098179ea2814aa4452e9d6908c01f7fe81325ce42007d9a2086a39b176150a"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x66-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "89f74034e2e3ba5f20f1a59e2465764ed046dbf717b1cf4a5fb8ace9d138e297",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "4af8e24e0856d015b7475460be5ea491f747a53bd7fbb7939754c3bcb62bccee",
+            "native-cursor-windows-2025-1": "4af8e24e0856d015b7475460be5ea491f747a53bd7fbb7939754c3bcb62bccee"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x66-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "921d47296722d4dde57b47b490b756393bf58e44242a4243d90d2f500191d8a7",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "9416fd06c890fe3ec35f5aa3d9df02b351766dda413d5bf11cfd1b7d5be749db",
+            "native-cursor-windows-2025-1": "9416fd06c890fe3ec35f5aa3d9df02b351766dda413d5bf11cfd1b7d5be749db"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-48x66-alpha",
+      "file": "png-scale-boundary-48x66-alpha.cur",
+      "sourceBytes": 12828,
+      "sourceSha256": "9eb7fc34bfa8f52278e27c7940cd5d8e021db4248f22fe90d050352b9e3cc00c",
+      "source": {
+        "width": 48,
+        "height": 66,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 16,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x66-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "a6de984991ce2987f551c925c3387bdb5ebf22755497dbebd7c0ba97cd652372",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "f49c151764244cab909aaef297b7d96daf6e55a77e28c322353f7a085af30e0b",
+            "native-cursor-windows-2025-1": "f49c151764244cab909aaef297b7d96daf6e55a77e28c322353f7a085af30e0b"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x66-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "cae823f5ab376d6f19dec390e95558e097cad40dfd8e4314916aaab3aaa7645a",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "b4a87597393efc562dfa82eca6c9560a67164ba67e4eac5403e45055af932333",
+            "native-cursor-windows-2025-1": "b4a87597393efc562dfa82eca6c9560a67164ba67e4eac5403e45055af932333"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-48x66-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "7fbe48354a3eae53cafaeca6ed44e998640d4cc5bb43738eb68afaa7b83b60a2",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "a6440a0703704688567375facaa2660dcac0ea749378f9092512ceda833a45bc",
+            "native-cursor-windows-2025-1": "a6440a0703704688567375facaa2660dcac0ea749378f9092512ceda833a45bc"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-66x13-rgb",
+      "file": "png-scale-boundary-66x13-rgb.cur",
+      "sourceBytes": 2677,
+      "sourceSha256": "600d5798a6b85b7bb86140a6e8f9155e2f6784cc2ddab525ba8909aca9b9a233",
+      "source": {
+        "width": 66,
+        "height": 13,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 22,
+          "y": 3
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 7
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x13-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "d4c41cce8ba8216a8f66af85cb2e94a9f9faddeeba49ca8810f988b133fd185c",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "bba31271d19287bc844df27b1a2ed285fbd6d58e596cadd86784edf8fba8acd7",
+            "native-cursor-windows-2025-1": "bba31271d19287bc844df27b1a2ed285fbd6d58e596cadd86784edf8fba8acd7"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x13-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "1e59285280d363fca1a167007052b8d10d3e78566d18868e70a61b199ef99988",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "c54c03d5c92224663c7b54c0d05919cc1d2cbce875894faf9eee0efbdbb13894",
+            "native-cursor-windows-2025-1": "c54c03d5c92224663c7b54c0d05919cc1d2cbce875894faf9eee0efbdbb13894"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x13-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "1604bcf3042d3354bd93fb7b7c8774696b183c45c9e14c8809578ddd01f70b22",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "7d2fb161fff885c5b6fba066947af2d30d19e9bf22ec28ce7a451e27eff2c946",
+            "native-cursor-windows-2025-1": "7d2fb161fff885c5b6fba066947af2d30d19e9bf22ec28ce7a451e27eff2c946"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-66x13-alpha",
+      "file": "png-scale-boundary-66x13-alpha.cur",
+      "sourceBytes": 3535,
+      "sourceSha256": "19eeb9fd05aba5002b044589d6b0d9009b4371ee8b4c7bfeeff76a26cad3fdb1",
+      "source": {
+        "width": 66,
+        "height": 13,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 22,
+          "y": 3
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 11,
+          "y": 7
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x13-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "f47ac84321599129089dae65e1a170826b0a1cfb62c35817441cb61676050811",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "8f46464800c1810434f02af81a900a9a169c427cc2ee3b2236a4373467cf655e",
+            "native-cursor-windows-2025-1": "8f46464800c1810434f02af81a900a9a169c427cc2ee3b2236a4373467cf655e"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x13-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "f0e20e5a876b320820577e1c7b734c34b80b1b677c11f8356fb3b52a3921934c",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "5bd5b6e3c7ac2969ad02d50357ca8756b2e0a7796589a88dfe78d606012b7973",
+            "native-cursor-windows-2025-1": "5bd5b6e3c7ac2969ad02d50357ca8756b2e0a7796589a88dfe78d606012b7973"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-66x13-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "120f166cdb808bef74206c4941ea1c458fe6e79868312c54fdd378deb6e17ebb",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "8d3a06a324efc40cbba4f77ff17d006f4554d2f8bf6794570a8a7969f0014258",
+            "native-cursor-windows-2025-1": "8d3a06a324efc40cbba4f77ff17d006f4554d2f8bf6794570a8a7969f0014258"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-13x66-rgb",
+      "file": "png-scale-boundary-13x66-rgb.cur",
+      "sourceBytes": 2730,
+      "sourceSha256": "fc570e481b7c35204896b058012541964903805c6b606157d8aca1c8e303212e",
+      "source": {
+        "width": 13,
+        "height": 66,
+        "pngColorType": 2,
+        "hotspot": {
+          "x": 4,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x66-rgb-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "1c36e974971b8e4cff68e9386290bd7ef783fffbf8a674a8648e6e384a491ad3",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "f727039442d7bd3326e7afb1709752cad124702e760f44d9abc76a929a2944d3",
+            "native-cursor-windows-2025-1": "f727039442d7bd3326e7afb1709752cad124702e760f44d9abc76a929a2944d3"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x66-rgb-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "4539583b15326ba3c65f43068be1dc3512dcded4962915996230a43937924eb2",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "4d4a6fe678ba3842bd9eb1387e00621c6d1cc97356c4c0f581fe56407994d9d1",
+            "native-cursor-windows-2025-1": "4d4a6fe678ba3842bd9eb1387e00621c6d1cc97356c4c0f581fe56407994d9d1"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x66-rgb-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "30bbc5bf0dd2dc40af0f5c3a5d142807e9a6858b66922e2ded3a35f69a67b6ab",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "2078024b1ad724bb9517942f2accc54afdfeaea3751a91c6f6f3d0fbc6d41205",
+            "native-cursor-windows-2025-1": "2078024b1ad724bb9517942f2accc54afdfeaea3751a91c6f6f3d0fbc6d41205"
+          }
+        }
+      ]
+    },
+    {
+      "id": "png-scale-boundary-13x66-alpha",
+      "file": "png-scale-boundary-13x66-alpha.cur",
+      "sourceBytes": 3588,
+      "sourceSha256": "20b901dbb49fc1584cd84bf5903cf6e7acf745d85d8e34d30b49bf2ce7fc1c2a",
+      "source": {
+        "width": 13,
+        "height": 66,
+        "pngColorType": 6,
+        "hotspot": {
+          "x": 4,
+          "y": 16
+        }
+      },
+      "native": {
+        "width": 32,
+        "height": 32,
+        "depth": 32,
+        "hotspot": {
+          "x": 10,
+          "y": 8
+        },
+        "fIcon": false
+      },
+      "nativeDrawCount": 18,
+      "uncomparedDrawCount": 15,
+      "draws": [
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 0,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x66-alpha-s0-f19-b0-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "594867b87896adc5ddfa20c73f08d1ae203e3585128ac9c19af9eef5a35ddcae",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "eae2fb64c21bb181db9060251450dca0077bfcb9900fb44061af0fd164ce8e1a",
+            "native-cursor-windows-2025-1": "eae2fb64c21bb181db9060251450dca0077bfcb9900fb44061af0fd164ce8e1a"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 16777215,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x66-alpha-s0-f19-b16777215-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "f567c7c99924889ac2b97e78674efc7a81e98f349e45db3c005c8881efe4a828",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "7d4c6f67ecdd6f744d1801d0ed229e9e59ce5e2e6d218dac795879ddb616bb60",
+            "native-cursor-windows-2025-1": "7d4c6f67ecdd6f744d1801d0ed229e9e59ce5e2e6d218dac795879ddb616bb60"
+          }
+        },
+        {
+          "flags": 19,
+          "drawX": 16,
+          "drawY": 16,
+          "requestedWidth": 0,
+          "requestedHeight": 0,
+          "backgroundRGB": 1193046,
+          "canvasWidth": 80,
+          "canvasHeight": 80,
+          "stride": 320,
+          "pixelsFile": "png-scale-boundary-13x66-alpha-s0-f19-b1193046-0x0.bgra",
+          "step": 0,
+          "rgbBytes": 19200,
+          "rgbSha256": "556a5e70cc6898b9836a33e509ba223a9df44a3d785226ab079bd317a32b0d8a",
+          "nativeBgraSha256": {
+            "native-cursor-windows-2022-1": "7c7b00c70ef1488a78cd51765b7f6a8605b3488ef8a2ef4ea842129a56d13e9f",
+            "native-cursor-windows-2025-1": "7c7b00c70ef1488a78cd51765b7f6a8605b3488ef8a2ef4ea842129a56d13e9f"
+          }
+        }
+      ]
+    }
+  ]
+}

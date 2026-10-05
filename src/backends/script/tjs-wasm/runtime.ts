@@ -60,6 +60,20 @@ export class TjsWasmRuntime implements ScriptRuntime {
     runtime.module = await factory({
       locateFile: options.locateFile,
       wasmBinary: options.wasmBinary,
+      randomBits: (destination, length) => {
+        if (runtime.disposed || length !== 16 || !Number.isSafeInteger(destination) ||
+            destination < 0 || destination > runtime.module.HEAPU8.length - length)
+          throw new Error('Invalid native entropy destination')
+        const crypto = globalThis.crypto
+        if (!crypto || typeof crypto.getRandomValues !== 'function')
+          throw new Error('Native entropy requires crypto.getRandomValues')
+        // Fill private storage first: a throwing provider cannot partially
+        // publish seed bytes, nor retain a view into the native stack.
+        const bytes = new Uint8Array(16)
+        if (crypto.getRandomValues(bytes) !== bytes)
+          throw new Error('Native entropy provider returned an invalid buffer')
+        runtime.module.HEAPU8.set(bytes, destination)
+      },
       hostCall: (...args) => runtime.hostCall(...args),
       shouldCancel: () => runtime.control.cancelled,
       onYield: () => runtime.control.wait(),
@@ -85,6 +99,9 @@ export class TjsWasmRuntime implements ScriptRuntime {
     ])
       if (typeof runtime.module[`_${name}`] !== 'function')
         throw new Error(`TJS WASM is missing destruction-only object identity support: ${name}`)
+    if (typeof runtime.module._krkr_random_source_version !== 'function' ||
+        runtime.call('krkr_random_source_version') !== 1)
+      throw new Error('TJS WASM is missing native random entropy support')
     runtime.vm = runtime.call('krkr_create', Number(options.debugMode === true))
     if (!runtime.vm) throw new Error('TJS VM initialization failed')
     return runtime

@@ -92,7 +92,7 @@ for (const name of names) for (const video of [0, 1]) for (const audio of [0, 1]
         // All sample tables, edit/media headers and codec bytes remain where
         // they were; only tkhd enable/alternate metadata may change.
         assert.deepEqual(chosen.bytes.subarray(track.media.start, track.media.end), source.subarray(track.media.start, track.media.end))
-        const view = new DataView(chosen.bytes.buffer)
+        const view: DataView = new DataView(chosen.bytes.buffer)
         assert.equal(chosen.bytes[track.header.body + 3]! & 3, 3)
         assert.equal(view.getUint16(track.alternate), 0)
       }
@@ -166,7 +166,7 @@ for (const name of names) test(`${name}: selecting one category preserves every 
   assert.deepEqual(tracks(audioOnly.bytes).filter((track) => track.kind === 'vide').map((track) => track.id),
     original.filter((track) => track.kind === 'vide').map((track) => track.id))
   for (const track of original) {
-    const output = track.kind === 'soun' ? videoOnly.bytes : audioOnly.bytes
+    const output: Uint8Array = track.kind === 'soun' ? videoOnly.bytes : audioOnly.bytes
     assert.deepEqual(output.subarray(track.box.start, track.box.end), source.subarray(track.box.start, track.box.end))
   }
 })

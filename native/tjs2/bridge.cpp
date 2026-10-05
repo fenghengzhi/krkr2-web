@@ -20,6 +20,7 @@
 #include "tjsInterCodeExec.h"
 #include "tjsDictionary.h"
 #include "tjsArray.h"
+#include "tjsRandomGenerator.h"
 #include "tjsNative.h"
 #include "tjsInterCodeGen.h"
 #include "tjsDebug.h"
@@ -504,6 +505,19 @@ public:
 };
 
 Vm* streamVm = nullptr; // A module is owned by one session/VM.
+// The original application installs TJSGetRandomBits128 after creating TJS.
+// Keep entropy synchronous: it must never enter a suspendable host import or
+// execute script while RandomGenerator owns its unpublished native instance.
+EM_JS(int, random_bits, (void* destination, unsigned length), {
+    try {
+        if (typeof Module['randomBits'] !== 'function') return 0;
+        Module['randomBits'](destination, length);
+        return 1;
+    } catch (_) { return 0; }
+});
+void fillRandomBits128(void* destination) {
+    if(!random_bits(destination, 16)) TJS_eTJSError(u"RandomGenerator entropy source failed");
+}
 std::unique_ptr<Reply> requestStorage(const tjs_char* operation, const ttstr& name, const ttstr& mode) {
     tTJSVariant values[] = { tTJSVariant(name), tTJSVariant(mode) };
     tTJSVariant* args[] = { &values[0], &values[1] };
@@ -1640,6 +1654,7 @@ API Vm* krkr_create(int debugMode) {
     TJSEnableDebugMode = debugMode != 0;
     TJSWarnOnExecutionOnDeletingObject = TJSEnableDebugMode;
     vm->engine = new tTJS();
+    TJSGetRandomBits128 = fillRandomBits128;
     vm->console = std::make_unique<HostConsole>(vm.get());
     streamVm = vm.get();
     TJSCreateTextStreamForRead = createTextRead;
@@ -1657,6 +1672,7 @@ extern "C" bool krkr_vm_is_shutting_down() { return shuttingDown; }
 API void krkr_destroy(Vm* vm) { delete vm; }
 API void krkr_set_console(Vm* vm, int enabled) { vm->engine->SetConsoleOutput(enabled ? vm->console.get() : nullptr); }
 API int krkr_abi_version() { return 5; }
+API int krkr_random_source_version() { return 1; }
 API Reply* krkr_execute(Vm* vm, const void* source, unsigned length, const tjs_char* name, int mode) {
     deadline = emscripten_get_now() + 8;
     return captureVm(vm, [&](tTJSVariant& value) {

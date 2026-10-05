@@ -13,6 +13,8 @@ export interface NativeModule {
 }
 
 export interface ModuleOptions {
+  /** Private synchronous entropy import; writes exactly 16 bytes or throws. */
+  randomBits: (destination: number, length: number) => void
   objectInvalidated?: (vm: number, token: number) => void
   /** Destruction-only identity revocation; no script or object release here. */
   objectDestroyed?: (vm: number, token: number) => void
@@ -62,6 +64,8 @@ export interface WasmManifest {
     nativeClipboard?: number
     /** Version 2 includes the fixed System.toActualColor method binding. */
     nativeSystem?: number
+    /** Math.RandomGenerator's default seed uses the host entropy source. */
+    nativeRandom?: number
     nativeStorages?: number
     /** Distinct, suspendable text writer preflight before native allocation. */
     nativeTextStreams?: number

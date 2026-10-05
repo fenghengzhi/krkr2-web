@@ -109,6 +109,7 @@ manifest.capabilities = {
   nativeReleaseState: 1,
   nativeClipboard: 1,
   nativeSystem: 5,
+  nativeRandom: 1,
   nativeStorages: 2,
   nativeTextStreams: 2,
   nativeHelp: 1,

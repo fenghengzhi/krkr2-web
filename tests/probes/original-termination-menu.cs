@@ -111,7 +111,8 @@ public static class OriginalTerminationMenu
             }
             uint pid;
             uint thread = GetWindowThreadProcessId(owner, out pid);
-            var caption = new StringBuilder(512), item = new StringBuilder(512);
+            var caption = new StringBuilder(512);
+            var item = new StringBuilder(512);
             GetWindowTextW(owner, caption, caption.Capacity);
             GetMenuStringW(popup, 0, item, item.Capacity, 0x400);
             var gui = new GuiInfo { Size = (uint)Marshal.SizeOf(typeof(GuiInfo)) };

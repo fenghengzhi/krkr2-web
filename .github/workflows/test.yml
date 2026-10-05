@@ -208,6 +208,16 @@ jobs:
             --test-reporter=spec --test-reporter-destination=stdout \
             --test-reporter=tap --test-reporter-destination=out/ci/variant-stack-jspi.tap \
             tests/conformance/variant-stack.test.ts 2>&1 | tee out/ci/variant-stack-jspi.log
+      - name: Check native random entropy and state through the JSPI kernel
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        env:
+          KRKR_RANDOM_VARIANT: jspi
+        run: |
+          ulimit -c unlimited
+          node --experimental-wasm-jspi --import tsx --import ./scripts/record-node-test-process.mjs --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination=out/ci/random-generator-jspi.tap \
+            tests/conformance/random-generator.test.ts 2>&1 | tee out/ci/random-generator-jspi.log
       - name: Record backtraces for any terminated Node process
         if: always()
         run: |
