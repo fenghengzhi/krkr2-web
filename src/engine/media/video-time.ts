@@ -1,4 +1,40 @@
-import type { VideoTimeline } from '../ports/video.ts'
+import type { VideoMode, VideoTimeline } from '../ports/video.ts'
+
+/** DirectShow's MEDIA_TIME public properties use the average frame period,
+ * not the index of the sample currently visible. Keep these clock conversions
+ * separate from PTS lookup and full-image identity checks below. */
+export function videoClockFrameAt(timeline: VideoTimeline | undefined, time: number): number {
+  if (!timeline || !Number.isFinite(timeline.frameDuration) || timeline.frameDuration <= 0) return -1
+  return Math.max(0, Math.trunc(time / timeline.frameDuration + 0.5))
+}
+export function videoClockSnapshot(timeline: VideoTimeline | undefined, time: number, duration: number) {
+  const frame = videoClockFrameAt(timeline, time), numberOfFrame = videoClockFrameAt(timeline, duration)
+  return {
+    position: Math.max(0, Math.trunc(time + 0.5)),
+    frame,
+    fps: frame < 0 ? 0 : 1000 / timeline!.frameDuration,
+    numberOfFrame: Math.max(0, numberOfFrame),
+    totalTime: Math.max(0, Math.trunc(duration)),
+  }
+}
+export function videoClockFrameTime(timeline: VideoTimeline | undefined, frame: number, duration: number): number {
+  if (!timeline || videoClockFrameAt(timeline, duration) < 0)
+    throw new Error('This video container has no supported frame clock')
+  if (!Number.isInteger(frame) || frame < 0 || frame >= videoClockFrameAt(timeline, duration))
+    throw new Error('Video frame is outside the stream')
+  // Native SetFrame converts AvgTimePerFrame * frame to integral 100 ns units.
+  return Math.trunc((timeline.frameDuration / 1000) * 10000000 * frame) / 10000
+}
+
+/** VideoOvlImpl's EC_UPDATE consumer preserves the layer renderer's frame
+ * within one frame of GetFrame(), correcting larger differences. Mixer mode
+ * always uses GetFrame(). The producer supplies rendererFrame separately:
+ * BufferRenderer's media sample value is not a presentation-order index. */
+export function videoClockFrameUpdate(mode: VideoMode, clockFrame: number, rendererFrame?: number): number {
+  if (mode !== 1 || rendererFrame === undefined || !Number.isSafeInteger(rendererFrame)) return clockFrame
+  return clockFrame + 1 < rendererFrame || clockFrame - 1 > rendererFrame ? clockFrame : rendererFrame
+}
+
 export function videoFrameAt(timeline: VideoTimeline, time: number): number {
   let low = 0,
     high = timeline.times.length

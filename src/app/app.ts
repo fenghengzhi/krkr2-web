@@ -317,7 +317,9 @@ export function mountApp(root: HTMLDivElement): void {
                   ? session.moveWindow(action.windowId, action.left, action.top)
                   : action.type === 'resize'
                     ? session.resizeWindow(action.windowId, action.width, action.height)
-                    : session.exitFullScreen(action.windowId)
+                    : action.type === 'geometry'
+                      ? session.refreshWindowGeometry(action.windowId)
+                      : session.exitFullScreen(action.windowId)
           void operation.catch(report)
         }
       })
@@ -435,7 +437,8 @@ export function mountApp(root: HTMLDivElement): void {
                 if (current !== generation || instance.session.isDisposed) return
                 void instance.session.menuDismiss(popup).catch(report)
               },
-              { active: () => instance.isWindowActive(surface.windowId, surface.surfaceEpoch) },
+              { active: () => instance.isWindowActive(surface.windowId, surface.surfaceEpoch),
+                windowView: () => windowViews.get(surface.windowId)?.view },
             )
             gameMenus.set(surface.windowId, menus)
             updateMenus()

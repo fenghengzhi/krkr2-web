@@ -26,7 +26,9 @@ var win=new Window();win.setInnerSize(120,80);win.setPos(10,20);win.visible=true
 win.onResize=function(){global.resizes++;};
 var rootMenu=win.menu,child=new MenuItem(win,"Child"),unattached=new MenuItem(win,"Unattached");
 rootMenu.add(child);rootMenu.visible=true;
-var restricted=[${restricted.map(([name, code]) => `%[name:${JSON.stringify(name)},run:function(){${code}}]`).join(',')}];
+// Dictionary callbacks bind this to the dictionary; use the actual global
+// Window rather than its missing "win" member (which evaluates to void).
+var restricted=[${restricted.map(([name, code]) => `%[name:${JSON.stringify(name)},run:function(){${code.replace(/\bwin\./g, 'global.win.')}}]`).join(',')}];
 function geometry(){return [win.visible,win.width,win.height,win.left,win.top,win.minWidth,win.minHeight,
   win.maxWidth,win.maxHeight,win.innerSunken,win.innerWidth,win.innerHeight,win.borderStyle,rootMenu.visible,win.fullScreen].join(",");}
 function restrictions(){
@@ -108,7 +110,7 @@ for (const binary of [false, true]) {
       await f.session.evaluate('win.fullScreen=true')
       assert.equal(await f.session.evaluate('allowed()'), 'fullscreen title,1,0,1,1,1,5,6,5,4,2,1,0,0,1')
       assert.equal(await f.session.evaluate('rootMenu.visible'), '1')
-      assert.deepEqual([f.view().width, f.view().height, f.view().left, f.view().top], [120, 80, 10, 20])
+      assert.deepEqual([f.view().width, f.view().height, f.view().left, f.view().top], [120, 80, 0, 0])
     } finally { await f.session.stop() }
   })
 
@@ -117,12 +119,12 @@ for (const binary of [false, true]) {
     try {
       await f.session.evaluate('win.fullScreen=true')
       f.session.moveWindow(f.id, 33, 44)
-      f.session.resizeWindow(f.id, 180, 130)
+      await f.session.resizeWindow(f.id, 180, 130)
       assert.deepEqual([f.view().left, f.view().top, f.view().width, f.view().height, f.view().fullScreen],
         [33, 44, 180, 130, true])
-      f.session.exitFullScreen(f.id)
+      await f.session.exitFullScreen(f.id)
       await f.exec('win.setSize(140,90);win.setInnerSize(150,100);win.setPos(25,35);win.setMinSize(20,10);win.setMaxSize(300,200);win.innerSunken=true;win.borderStyle=bsNone;rootMenu.visible=false')
-      assert.equal(await f.session.evaluate('geometry()'), '1,150,100,25,35,20,10,300,200,1,150,100,0,0,0')
+      assert.equal(await f.session.evaluate('geometry()'), '1,150,100,25,35,20,10,300,200,1,146,96,0,0,0')
       await f.exec('win.fullScreen=true;win.fullScreen=false;win.visible=false;win.visible=true')
       assert.equal(await f.session.evaluate('win.visible'), '1')
     } finally { await f.session.stop() }
@@ -140,7 +142,7 @@ for (const binary of [false, true]) {
       await f.session.idle()
       assert.equal(await f.session.evaluate('[other.visible,other.fullScreen,other.queries,isvalid other,secondaryDeaths,secondaryManagedDeaths].join(",")'), '0,1,2,1,0,0')
       assert.equal(f.session.snapshot().activeWindow, f.id)
-      f.session.exitFullScreen(id)
+      await f.session.exitFullScreen(id)
       await f.exec('other.visible=true;other.fullScreen=true;other.close()')
       assert.equal(await f.session.evaluate('[isvalid other,secondaryDeaths,secondaryManagedDeaths].join(",")'), '0,1,1')
       assert.equal(f.session.snapshot().windows!.some((window) => window.id === id), false)

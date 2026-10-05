@@ -177,7 +177,7 @@ export class VideoService {
     if (event.type === 'ended') return [{ name: 'onStatusChanged', args: ['stop'] }]
     if (event.type === 'period') return [{ name: 'onPeriod', args: [BigInt(event.reason ?? 0)] }]
     return (event.snapshot.mode === 1 || event.snapshot.mode === 2) && event.snapshot.frame >= 0
-      ? [{ name: 'onFrameUpdate', args: [BigInt(event.snapshot.frame)] }]
+      ? [{ name: 'onFrameUpdate', args: [BigInt(event.callbackFrame ?? event.snapshot.frame)] }]
       : []
   }
   private pixels(video: Video, event: VideoEvent): void {

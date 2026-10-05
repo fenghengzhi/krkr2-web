@@ -1,8 +1,14 @@
 import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
 import { layerFixture } from '../helpers/layer-lifetime.ts'
+import { lifetimeJournal, lifetimeJournalEnabled } from '../helpers/lifetime-journal.ts'
 
-const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
+const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 },
+  !lifetimeJournalEnabled ? run : async () => {
+    lifetimeJournal('definition:start', { name })
+    try { await run(); lifetimeJournal('definition:pass', { name }) }
+    catch (error) { lifetimeJournal('definition:fail', { name, error: String(error) }); throw error }
+  })
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'

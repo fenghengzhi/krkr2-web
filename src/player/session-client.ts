@@ -71,6 +71,7 @@ export class SessionClient {
     systemColors?: readonly number[],
     help?: MessagePort,
     windowMoveSupported = false,
+    geometry?: MessagePort,
   ) {
     const request = {
       version: PROTOCOL_VERSION,
@@ -86,6 +87,7 @@ export class SessionClient {
       clipboard,
       help,
       windowMoveSupported,
+      geometry,
       dataPath,
       systemColors,
       systemDisplay: this.systemDisplay?.metrics,
@@ -101,6 +103,7 @@ export class SessionClient {
         video,
         ...(clipboard ? [clipboard] : []),
         ...(help ? [help] : []),
+        ...(geometry ? [geometry] : []),
       ]),
     )
     this.initialized = true
@@ -196,6 +199,9 @@ export class SessionClient {
   }
   resizeWindow(windowId: number, width: number, height: number) {
     return this.call('resizeWindow', windowId, width, height)
+  }
+  refreshWindowGeometry(windowId: number) {
+    return this.call('refreshWindowGeometry', windowId)
   }
   async menuClick(id: number, popup?: MenuPopupIdentity): Promise<void> {
     await this.call('menuClick', id, popup)

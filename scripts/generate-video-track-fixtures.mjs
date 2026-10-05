@@ -83,7 +83,8 @@ const numberedSource = resolve(directory, 'presentation-numbered.rgb'),
   numberedRegular = resolve(directory, 'numbered-multitrack.mp4'),
   numberedFragmented = resolve(directory, 'numbered-fragmented.mp4'),
   numberedSeparate = resolve(directory, 'numbered-separate-fragments.mp4'),
-  numberedInterleaved = resolve(directory, 'numbered-interleaved.mp4')
+  numberedInterleaved = resolve(directory, 'numbered-interleaved.mp4'),
+  numberedVariable = resolve(directory, 'numbered-variable.mp4')
 writeFileSync(numberedSource, numberedRaw)
 run(['-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', '64x48', '-framerate', '12', '-i', numberedSource,
   '-i', regular, '-map', '0:v:0', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '12',
@@ -95,8 +96,16 @@ for (const [file, flags, extra] of [
   [numberedInterleaved, '+empty_moov+default_base_moof+frag_keyframe', ['-frag_interleave', '1']],
 ]) run(['-i', numberedRegular, '-map', '0', '-c', 'copy', '-movflags', flags, ...extra, file])
 
+// Alternating one/two input ticks retain every distinct numbered image while
+// making average-frame clock positions land inside actual sample intervals.
+// The original eight references remain unchanged; this is a ninth fixture.
+run(['-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', '64x48', '-framerate', '12', '-i', numberedSource,
+  '-vf', 'setpts=floor(N/2)*3+mod(N\\,2)', '-vsync', 'vfr', '-an',
+  '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '12', '-pix_fmt', 'yuv420p',
+  '-g', '12', '-bf', '0', '-threads', '1', '-movflags', '+faststart', numberedVariable])
+
 const presentation = [regular, fragmented, separate, interleaved,
-  numberedRegular, numberedFragmented, numberedSeparate, numberedInterleaved].map((file) => {
+  numberedRegular, numberedFragmented, numberedSeparate, numberedInterleaved, numberedVariable].map((file) => {
   const name = file.split('/').at(-1), frameDirectory = resolve(directory, name + '.frames'),
     bytes = readFileSync(file), sha256 = createHash('sha256').update(bytes).digest('hex'),
     probeCommand = ['-v', 'error', '-select_streams', 'v:0', '-show_streams', '-show_format', '-show_frames', '-of', 'json', file],

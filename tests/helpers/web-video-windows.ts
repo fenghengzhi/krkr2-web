@@ -214,8 +214,8 @@ export async function exerciseWebVideoWindows(name: WebVideoWindowsCase, bytes: 
       await open(101, 11)
       await open(201, 22)
       check(plane(101) !== plane(201), 'Two windows shared a video plane')
-      sameGeometry(101, [14, 9, 50, 30])
-      sameGeometry(201, [25, 14, 100, 60])
+      sameGeometry(101, [10, 6, 50, 30])
+      sameGeometry(201, [20, 12, 100, 60])
       check(
         plane(101).style.left === '17px' &&
           plane(101).style.top === '23px' &&
@@ -224,8 +224,8 @@ export async function exerciseWebVideoWindows(name: WebVideoWindowsCase, bytes: 
         'Video planes did not follow their own canvas positions',
       )
       host.setWindow({ ...firstView, visible: false, layerLeft: 28 }, 11)
-      sameGeometry(101, [24, 9, 50, 30])
-      sameGeometry(201, [25, 14, 100, 60])
+      sameGeometry(101, [10, 6, 50, 30])
+      sameGeometry(201, [20, 12, 100, 60])
       check(
         getComputedStyle(video(101)).visibility === 'hidden',
         'Hidden Window still displayed its movie',
@@ -234,6 +234,29 @@ export async function exerciseWebVideoWindows(name: WebVideoWindowsCase, bytes: 
         getComputedStyle(video(201)).visibility === 'visible',
         'Hiding one Window hid another movie',
       )
+      host.setWindow(firstView, 11)
+      // Explicit nontrivial outer/client geometry: overlay/mixer zoom uses
+      // actualZoom while its anchor ignores PaintBox scroll and Layer offset.
+      const measuredView: WindowView = { ...firstView, width: 800, height: 600,
+        layerLeft: 90, layerTop: 70, geometry: {
+          revision: 1, surfaceEpoch: 1, platform: 'dom',
+          outer: { x: 0, y: 0, width: 800, height: 600 },
+          client: { x: 20, y: 30, width: 760, height: 550 },
+          inner: { x: 20, y: 30, width: 760, height: 550 },
+          viewport: { x: 20, y: 30, width: 640, height: 360 },
+          paintBox: { x: 134, y: 120, width: 1800, height: 1200 },
+          actualZoom: { numer: 3, denom: 2 },
+          scrollbars: { horizontal: 190, vertical: 120 },
+          scroll: { x: 21, y: 15, maxX: 1295, maxY: 945 },
+        } }
+      host.setWindow(measuredView, 11)
+      sameGeometry(101, [15, 9, 75, 45])
+      await send({ op: 'set', id: 101, epoch: 1, settings: { ...settings, mode: 2 } })
+      sameGeometry(101, [15, 9, 75, 45])
+      host.setWindow({ ...measuredView, geometry: { ...measuredView.geometry!,
+        paintBox: { ...measuredView.geometry!.paintBox, x: 45, y: 60 },
+        scroll: { ...measuredView.geometry!.scroll, x: 110, y: 75 } } }, 11)
+      sameGeometry(101, [15, 9, 75, 45])
       host.setWindow(firstView, 11)
       await send({ op: 'set', id: 201, epoch: 1, settings: { ...settings, visible: false } })
       check(

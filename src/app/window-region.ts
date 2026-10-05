@@ -79,6 +79,9 @@ export class WindowRegionClip {
   }
 
   private transform(): string {
+    // Measured windows scale the complete logical outer with CSS transform.
+    // The clip resource uses pre-transform local units and scales with it once.
+    if (this.element.classList.contains('game-window-measured')) return 'scale(1 1)'
     const { width, height } = this.geometry(),
       style = this.element.ownerDocument.defaultView!.getComputedStyle(this.canvas),
       cssWidth = Number.parseFloat(style.width), cssHeight = Number.parseFloat(style.height),

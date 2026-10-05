@@ -510,7 +510,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, lifetime-runtime-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -547,3 +547,9 @@ jobs:
     name: Native Window geometry reference
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     uses: ./.github/workflows/native-window-geometry.yml
+
+  lifetime-runtime-reference:
+    name: Layer lifetime host runtime diagnosis
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    needs: build
+    uses: ./.github/workflows/layer-lifetime-runtime.yml

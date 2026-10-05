@@ -63,6 +63,18 @@ export async function readVideoTimeline(bytes: Uint8Array): Promise<VideoTimelin
   const samples = file.getTrackSamplesInfo(track.id)
   if (samples.length > MAX_SAMPLES || !track.timescale)
     throw new Error('Invalid MP4 video sample table')
+  // AvgTimePerFrame describes the stream cadence. Empty edits and the initial
+  // composition offset can lengthen the presentation timeline without changing
+  // that cadence; edited sample count / movie duration is not its frame rate.
+  let sampleDuration = 0
+  for (const sample of samples) {
+    if (!Number.isSafeInteger(sample.duration) || sample.duration < 0)
+      throw new Error('Invalid MP4 video sample duration')
+    sampleDuration += sample.duration
+  }
+  if (!Number.isSafeInteger(sampleDuration) || (samples.length && sampleDuration <= 0))
+    throw new Error('Invalid MP4 video sample duration')
+  const frameDuration = samples.length ? (sampleDuration * 1000) / track.timescale / samples.length : 0
   const raw = samples
     .map((sample) => ({
       time: (sample.cts * 1000) / track.timescale,
@@ -95,6 +107,7 @@ export async function readVideoTimeline(bytes: Uint8Array): Promise<VideoTimelin
   return {
     times,
     duration,
+    frameDuration,
     audioStreams: info.audioTracks.length,
     videoStreams: info.videoTracks.length,
   }

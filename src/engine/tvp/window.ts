@@ -99,7 +99,7 @@ class Window {
   }
   function setInnerSize(args*) {
     if(args.count<2)throw new Exception("Window.setInnerSize requires width and height");
-    __host("Window.resize",__windowId,int(args[0]),int(args[1]));
+    __host("Window.innerResize",__windowId,int(args[0]),int(args[1]));
   }
   function setSize(args*) {
     if(args.count<2)throw new Exception("Window.setSize requires width and height");
@@ -109,8 +109,14 @@ class Window {
     if(args.count<2)throw new Exception("Window.setPos requires left and top");
     __host("Window.position",__windowId,int(args[0]),int(args[1]));
   }
-  function setLayerPos(left,top) { layerLeft=left;layerTop=top; }
-  function setZoom(numer,denom) { __host("Window.zoom",__windowId,int(numer),int(denom)); }
+  function setLayerPos(args*) {
+    if(args.count<2)throw new Exception("Window.setLayerPos requires left and top");
+    __host("Window.layerPosition",__windowId,int(args[0]),int(args[1]));
+  }
+  function setZoom(args*) {
+    if(args.count<2)throw new Exception("Window.setZoom requires numerator and denominator");
+    __host("Window.zoom",__windowId,int(args[0]),int(args[1]));
+  }
   function setMinSize(args*) {
     if(args.count<2)throw new Exception("Window.setMinSize requires width and height");
     __host("Window.constraints",__windowId,"min",int(args[0]),int(args[1]));

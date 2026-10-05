@@ -19,6 +19,7 @@ import { PortAudioBackend } from '../backends/audio/port-backend.ts'
 import { PortVideoBackend } from '../backends/video/port-backend.ts'
 import { PortClipboardBackend } from '../backends/clipboard/port-backend.ts'
 import { PortHelpBackend } from '../backends/help/port-backend.ts'
+import { PortWindowGeometry } from '../backends/window/port-geometry.ts'
 import type { InitializeRequest, SessionEvent } from '../protocol/session.ts'
 import { fontManifestFile } from './build-info.ts'
 import { loadFontKernel } from '../backends/text/freetype/module.ts'
@@ -39,6 +40,9 @@ export function createSession(request: InitializeRequest): EngineSession {
     systemDisplay,
     activity: request.activity,
     windowMoveSupported: request.windowMoveSupported === true,
+    // GameWindows supplies measured DOM geometry. Legacy custom embeddings
+    // without this optional port explicitly use the unframed engine platform.
+    windowGeometry: request.geometry ? new PortWindowGeometry(request.geometry, request.generation) : undefined,
     arguments: arguments_,
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
     renderer: new WorkerWindowSurfaces(request.surfaces, request.generation),

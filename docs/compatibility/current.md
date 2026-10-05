@@ -1,5 +1,7 @@
 # 当前实现范围
 
+094 候选新增[五矩形窗口模型与媒体公开时钟](../decisions/094-window-geometry-and-media-clock.md)：outer／inner setter 分开，真实页面度量客户区与滚动条，绘图和输入采用 viewport／PaintBox，fullScreen 实际与公开 zoom 分离；视频公开 frame／fps／position 与呈现回调独立，overlay／mixer 使用独立客户区锚点。协议 **35**，尚待执行。093 仍 pending，无结果；092 部分验收还有 4 个 Node、47 个浏览器失败，双 183 光标仍有 60 strict 差异。历史堆崩溃、原生视频 seek／旧编码、fullscreen popup OS 定位及整体非插件兼容尚未完成。
+
 093 开发候选加入[共享窗口 GPU、视频画面保留与独立几何证据](../decisions/093-shared-window-gpu-and-video-handoff.md)：多窗口改用一个 Session GPU，换轨以完整 RGBA 和暂停时钟确认旧图，CSS 光标修订边缘采样，均尚待执行。091 固定快照有 2 个 Node 子项失败、11 项未报告及一处堆崩溃，浏览器已报告部分有 48 unexpected，兼容 95/96；092 尚无结果。原生失活新增 Chromium 严格场景，Firefox／WebKit OS 失活仍未验证。完整窗口模型、公开媒体时钟、原生光标差异与非插件目标继续未完成。
 
 092 开发候选加入 [全屏 Window 写入限制与拖动期间的宿主控制](../decisions/092-window-fullscreen-and-move-controls.md)：公开几何／可见性及根菜单 setter 在全屏时拒绝写入，内部退出与用户关闭保持可用；beginMove 保留游戏输入拦截并允许 App Stop。协议 **34**、TJS ABI **5**、字体 ABI **2** 不变。090 内嵌 XP3 的六个 Session、三浏览器共十二个新增场景通过，但完整运行仍有 6 个 Node、39 个浏览器和 1 个兼容性失败。091 固定清单没有应用结果。光标旧 125 样本已严格匹配，新样本仍有 27 差异；本批新增 28 个边界样本待测。完整外框／客户区、媒体时钟及非插件目标继续未完成。

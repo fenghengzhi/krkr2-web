@@ -2,6 +2,8 @@ import type { PadHost } from './pad-host.ts'
 import { SessionClient } from './session-client.ts'
 import { ClipboardChannel } from './clipboard-channel.ts'
 import { HelpChannel } from './help-channel.ts'
+import { GeometryChannel } from './geometry-channel.ts'
+import type { WindowGeometry, WindowGeometryRequest, WindowGeometryScroll } from '../engine/ports/window-geometry.ts'
 import type { HelpDocument } from '../engine/ports/help.ts'
 import type { ClipboardRequest } from '../protocol/clipboard.ts'
 import type { BackendPreference, GameInput, SessionEvent } from '../protocol/session.ts'
@@ -43,6 +45,10 @@ export interface PlayerWindowHost {
   update(windowId: number, view: WindowView, active: boolean, surfaceEpoch?: number): void
   /** Apply an immutable native pixel region to this exact live surface. */
   setRegion(windowId: number, revision: number, region: WindowRegion | null, surfaceEpoch: number): void
+  /** Omission is the legacy unframed embedding contract. The app DOM host
+   * always supplies real CSS geometry; it never uses this fallback. */
+  measureGeometry?(request: WindowGeometryRequest, surfaceEpoch: number, signal: AbortSignal): Promise<WindowGeometry>
+  subscribeGeometryScroll?(listener: (observation: WindowGeometryScroll) => void): () => void
   beginMove?(request: WindowMoveRequest, surfaceEpoch: number,
     publish: (message: WindowMoveMessage) => void, signal: AbortSignal): Promise<void>
   get(windowId: number, surfaceEpoch?: number): PlayerWindowSurface | undefined
@@ -114,6 +120,7 @@ export function createPlayer(
   const clipboardChannel = new MessageChannel()
   const helpChannel = new MessageChannel()
   const surfaceChannel = new MessageChannel()
+  const geometryChannel = new MessageChannel()
   const windows = new Map<number, WindowPresentation>()
   const inputViews = new Map<number, InputView>()
   const windowRegions = new WindowRegions()
@@ -358,6 +365,7 @@ export function createPlayer(
     options.onHelpDocument,
     onError,
   )
+  const geometry = new GeometryChannel(geometryChannel.port1, session.generation, options.windows, onError)
   input = new BrowserInputCoordinator(
     (packet) => session.input(packet),
     (keys) => session.keyState(keys),
@@ -413,6 +421,14 @@ export function createPlayer(
       if (window) video.setWindow(window.view, windowId)
       input!.refreshCursors()
       options.onSurfaceAttach?.(surface, identity)
+      if (options.windows.measureGeometry && window?.view.geometry &&
+          window.view.geometry.surfaceEpoch !== surfaceEpoch) {
+        // A replacement DOM canvas must earn its own measured epoch. Never
+        // relabel the retained geometry or its scroll authority in the page.
+        void session.refreshWindowGeometry(windowId).catch((error) => {
+          if (!stopping && surfaces?.get(windowId)?.identity.surfaceEpoch === surfaceEpoch) onError(error)
+        })
+      }
       syncDisplay()
       syncInput()
     },
@@ -435,6 +451,7 @@ export function createPlayer(
       if (surface?.content.contains(document.activeElement) && windows.has(windowId))
         focusRequest = { windowId, revision: input!.focusRevision }
       for (const action of [
+        () => geometry.detach(windowId),
         () => input!.detach(windowId, surfaceEpoch),
         () => video.detachWindow(windowId, surfaceEpoch),
         () => {
@@ -499,6 +516,7 @@ export function createPlayer(
         systemColors,
         helpChannel.port2,
         !!options.windows.beginMove,
+        options.windows.measureGeometry ? geometryChannel.port2 : undefined,
       )
       await session.mount()
       // Only ordered Session events update the host. A start RPC snapshot can
@@ -526,6 +544,7 @@ export function createPlayer(
           () => options.pads?.dispose(),
           () => options.onClipboardRequest?.(null),
           () => help.suspend(),
+          () => geometry.suspend(),
           () => retireMove(),
           () => video.setPagePaused(true),
           () => input?.close(),
@@ -559,14 +578,20 @@ export function createPlayer(
         } catch (error) {
           errors.push(error)
         }
+        try {
+          geometry.close()
+        } catch (error) {
+          errors.push(error)
+        }
         if (session.isDisposed) {
           for (const action of [
             () => pageActivity.close(),
+            () => geometry.close(),
             () => surfaces!.dispose(),
             () => options.windows.dispose(),
             () => video.close(),
             () => audio.close(),
-            ...[surfaceChannel, videoChannel, audioChannel, clipboardChannel, helpChannel].flatMap(
+            ...[surfaceChannel, videoChannel, audioChannel, clipboardChannel, helpChannel, geometryChannel].flatMap(
               (channel) => [() => channel.port1.close(), () => channel.port2.close()],
             ),
           ]) {

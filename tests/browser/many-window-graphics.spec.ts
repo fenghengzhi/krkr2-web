@@ -45,6 +45,7 @@ function createMany(slot){
   manyClicks[slot]=0;manyKeys[slot]=0;
   manyWindows[slot]=new ManySurface(slot);
   manyRoots[slot]=new ManyRoot(manyWindows[slot],slot);
+  manyWindows[slot].add(manyRoots[slot]);
   return manyWindows[slot].__windowId;
 }
 for(var i=0;i<8;i++)createMany(i);

@@ -412,8 +412,8 @@ export class BrowserInput {
       y = attention?.y ?? 0,
       font = attention?.font,
       height = Math.abs(font?.height ?? 16)
-    this.text.style.left = `${this.canvas.offsetLeft + (x * this.canvas.clientWidth) / (this.view?.width ?? 800)}px`
-    this.text.style.top = `${this.canvas.offsetTop + (y * this.canvas.clientHeight) / (this.view?.height ?? 600)}px`
+    this.text.style.left = `${this.canvas.offsetLeft + (x * this.canvas.clientWidth) / Math.max(1, this.view?.geometry?.viewport.width ?? this.view?.width ?? 800)}px`
+    this.text.style.top = `${this.canvas.offsetTop + (y * this.canvas.clientHeight) / Math.max(1, this.view?.geometry?.viewport.height ?? this.view?.height ?? 600)}px`
     // This is a CSS input hint using the focused Layer's sampled Font, not an
     // operating-system candidate-window font. Cross-Window routing retains the
     // real source textarea and its default placement instead of focusing the
@@ -457,8 +457,8 @@ export class BrowserInput {
       }
       this.cursorAppearance()
     }
-    return { windowId, ...position, scaleX: this.view.width / bounds.width,
-      scaleY: this.view.height / bounds.height,
+    return { windowId, ...position, scaleX: (this.view.geometry?.viewport.width ?? this.view.width) / bounds.width,
+      scaleY: (this.view.geometry?.viewport.height ?? this.view.height) / bounds.height,
       pointerSequence: point ? this.cursorState.physicalSequence : 0 }
   }
   private restoreCursor(): void {
@@ -489,8 +489,8 @@ export class BrowserInput {
     }
     const candidate = this.input?.virtualCursor,
       shape = cursors[this.input?.cursor ?? 0] ?? 'default',
-      width = this.view?.width ?? 800,
-      height = this.view?.height ?? 600
+      width = this.view?.geometry?.viewport.width ?? this.view?.width ?? 800,
+      height = this.view?.geometry?.viewport.height ?? this.view?.height ?? 600
     const cursor = candidate &&
       Number.isFinite(candidate.x) && Number.isFinite(candidate.y) &&
       Number.isSafeInteger(candidate.revision) &&
@@ -521,8 +521,8 @@ export class BrowserInput {
           if (this.disposed || this.suspended || this.view?.visible === false || this.view?.blocked ||
               this.view?.mouseCursorState || this.input?.cursor !== id) return undefined
           const bounds = this.canvas.getBoundingClientRect(), point = cursor
-            ? { x: bounds.left + cursor.x * bounds.width / (this.view?.width ?? 800),
-                y: bounds.top + cursor.y * bounds.height / (this.view?.height ?? 600) }
+            ? { x: bounds.left + cursor.x * bounds.width / (this.view?.geometry?.viewport.width ?? this.view?.width ?? 800),
+                y: bounds.top + cursor.y * bounds.height / (this.view?.geometry?.viewport.height ?? this.view?.height ?? 600) }
             : this.physicalCursor
           return point && { ...point, windowId: this.sourceWindowId, cursorId: id, revision: cursor?.revision }
         })
@@ -563,19 +563,24 @@ export class BrowserInput {
       // Fixed artwork only. No game string or storage name becomes SVG markup.
       const fill = shape === 'default' || shape === 'pointer' || shape === 'grab' || shape === 'help' || shape === 'progress'
         ? '#fff' : 'none'
-      marker.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="${artwork.path}" fill="${fill}" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/><path d="${artwork.path}" fill="${fill}" stroke="#101620" stroke-width="1.5" stroke-linejoin="round"/></svg>`
+      marker.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24"><path d="${artwork.path}" fill="${fill}" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/><path d="${artwork.path}" fill="${fill}" stroke="#101620" stroke-width="1.5" stroke-linejoin="round"/></svg>`
       this.markerShape = shape
     }
+    const bounds = this.canvas.getBoundingClientRect(),
+      scaleX = this.canvas.clientWidth ? bounds.width / this.canvas.clientWidth : 1,
+      scaleY = this.canvas.clientHeight ? bounds.height / this.canvas.clientHeight : 1
+    marker.style.width = `${24 / (scaleX || 1)}px`
+    marker.style.height = `${24 / (scaleY || 1)}px`
     marker.style.left = `${this.canvas.offsetLeft + cursor.x * this.canvas.clientWidth / width}px`
     marker.style.top = `${this.canvas.offsetTop + cursor.y * this.canvas.clientHeight / height}px`
-    marker.style.transform = `translate(${-artwork.x}px, ${-artwork.y}px)`
+    marker.style.transform = `translate(${-artwork.x / (scaleX || 1)}px, ${-artwork.y / (scaleY || 1)}px)`
     this.canvas.style.cursor = 'none'
   }
   private point(x: number, y: number) {
     const bounds = this.canvas.getBoundingClientRect()
     return {
-      x: ((x - bounds.left) * (this.view?.width ?? 800)) / bounds.width,
-      y: ((y - bounds.top) * (this.view?.height ?? 600)) / bounds.height,
+      x: bounds.width ? ((x - bounds.left) * (this.view?.geometry?.viewport.width ?? this.view?.width ?? 800)) / bounds.width : 0,
+      y: bounds.height ? ((y - bounds.top) * (this.view?.geometry?.viewport.height ?? this.view?.height ?? 600)) / bounds.height : 0,
     }
   }
   focus(): boolean {
@@ -673,8 +678,8 @@ export class BrowserInput {
       bounds = this.canvas.getBoundingClientRect()
     const packet = {
       ...p,
-      width: (event.width * (this.view?.width ?? 800)) / bounds.width,
-      height: (event.height * (this.view?.height ?? 600)) / bounds.height,
+      width: bounds.width ? (event.width * (this.view?.geometry?.viewport.width ?? this.view?.width ?? 800)) / bounds.width : 0,
+      height: bounds.height ? (event.height * (this.view?.geometry?.viewport.height ?? this.view?.height ?? 600)) / bounds.height : 0,
       id: event.pointerId,
     }
     if (event.type === 'pointerdown') {

@@ -1978,3 +1978,45 @@ test('Alt combinations and F10 carry system-key intent without changing physical
     f.close()
   }
 })
+
+test('measured viewport coordinates drive physical input and IME independently of outer chrome', async () => {
+  const f = fixture(), state = new WindowState()
+  try {
+    state.visible = true
+    state.width = 240; state.height = 160
+    state.layerLeft = 8; state.layerTop = 12
+    state.geometry = {
+      revision: 1, surfaceEpoch: 1, platform: 'dom',
+      outer: { x: 0, y: 0, width: 240, height: 160 },
+      client: { x: 1, y: 31, width: 238, height: 128 },
+      inner: { x: 3, y: 33, width: 234, height: 124 },
+      viewport: { x: 3, y: 33, width: 219, height: 109 },
+      paintBox: { x: 11, y: 45, width: 400, height: 300 },
+      actualZoom: { numer: 1, denom: 1 }, scrollbars: { horizontal: 15, vertical: 15 },
+      scroll: { x: 0, y: 0, maxX: 189, maxY: 203 },
+    }
+    f.a.clientWidth = 438; f.a.clientHeight = 218
+    f.a.offsetLeft = 7; f.a.offsetTop = 9
+    f.coordinator.setWindow(101, state.view())
+    f.coordinator.setInput(101, inputView({ attention: {
+      x: 60, y: 5, focusLayerId: 11, pointLayerId: 11,
+      font: { face: 'serif', height: 16, bold: false, italic: false, underline: false, strikeout: false },
+    } }))
+    f.coordinator.focus(101)
+    f.mouse(f.a, 'mousemove', 0, 120)
+    await settle()
+    const move = [...f.packets].reverse().find((packet) => packet.type === 'move')
+    assert.ok(move)
+    assert.equal(move.x, 60)
+    assert.equal(move.y, 5)
+    assert.deepEqual(move.paintBoxPoint, { x: 52, y: -7 })
+    assert.equal(f.textareas[0]!.style.left, '127px')
+    assert.equal(f.textareas[0]!.style.top, '19px')
+    state.geometry.viewport.width = 0; state.geometry.viewport.height = 0
+    f.a.clientWidth = 0; f.a.clientHeight = 0
+    f.coordinator.setWindow(101, state.view())
+    assert.equal(f.textareas[0]!.style.left, '7px')
+    assert.equal(f.textareas[0]!.style.top, '9px')
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})

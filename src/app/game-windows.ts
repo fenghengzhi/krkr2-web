@@ -2,6 +2,9 @@ import type { WindowView } from '../engine/scene/window.ts'
 import type { WindowRegion } from '../engine/scene/window-region.ts'
 import { WindowRegionClip } from './window-region.ts'
 import type { WindowMoveRequest, WindowMoveMessage } from '../engine/ports/window-move.ts'
+import type { WindowGeometry, WindowGeometryRequest, WindowGeometryScroll } from '../engine/ports/window-geometry.ts'
+import { copyWindowGeometry } from '../engine/scene/window-geometry.ts'
+import { measureWindowGeometry } from './window-geometry.ts'
 import './game-windows.css'
 
 export interface WindowHostView extends WindowView {
@@ -15,7 +18,7 @@ export interface WindowHostView extends WindowView {
 type WindowHostIdentity = { windowId: number; surfaceEpoch: number }
 export type WindowHostAction = WindowHostIdentity &
   (
-    | { type: 'activate' | 'close' | 'exitFullScreen' | 'popupHide' }
+    | { type: 'activate' | 'close' | 'exitFullScreen' | 'popupHide' | 'geometry' }
     | { type: 'move'; left: number; top: number }
     | { type: 'resize'; width: number; height: number }
   )
@@ -37,6 +40,8 @@ export interface GameWindows {
   update(windowId: number, view: WindowHostView, active: boolean, surfaceEpoch?: number): void
   /** Region events target a live surface; the player replays on replacement. */
   setRegion(windowId: number, revision: number, region: WindowRegion | null, surfaceEpoch: number): void
+  measureGeometry(request: WindowGeometryRequest, surfaceEpoch: number, signal: AbortSignal): Promise<WindowGeometry>
+  subscribeGeometryScroll(listener: (observation: WindowGeometryScroll) => void): () => void
   beginMove(request: WindowMoveRequest, surfaceEpoch: number,
     publish: (message: WindowMoveMessage) => void, signal: AbortSignal): Promise<void>
   get(windowId: number, surfaceEpoch?: number): GameWindowSurface | undefined
@@ -48,6 +53,9 @@ export interface GameWindows {
 interface WindowElement extends GameWindowSurface {
   readonly abort: AbortController
   readonly observer: ResizeObserver
+  readonly scrollbox: HTMLElement
+  readonly scrollSpace: HTMLElement
+  scrollSequence: number
   readonly body: HTMLElement
   readonly title: HTMLElement
   readonly close: HTMLButtonElement
@@ -100,6 +108,7 @@ export function createGameWindows(
     windows = new Map<number, WindowElement>(),
     epochs = new Map<number, { epoch: number; retired: boolean }>(),
     pending = new Map<number, { view: WindowHostView; active: boolean; surfaceEpoch?: number }>()
+  const scrollListeners = new Set<(observation: WindowGeometryScroll) => void>()
   let disposed = false,
     initialUsed = false,
     order = 0,
@@ -126,14 +135,31 @@ export function createGameWindows(
   const emit = (
     surface: WindowElement,
     action:
-      | { type: 'activate' | 'close' | 'exitFullScreen' | 'popupHide' }
+      | { type: 'activate' | 'close' | 'exitFullScreen' | 'popupHide' | 'geometry' }
       | { type: 'move'; left: number; top: number }
       | { type: 'resize'; width: number; height: number },
   ) => {
     if (live(surface))
       onAction({ ...action, windowId: surface.windowId, surfaceEpoch: surface.surfaceEpoch })
   }
+  const domGeometry = (surface: WindowElement) => {
+    const geometry = surface.view.geometry
+    return geometry?.platform === 'dom' && geometry.surfaceEpoch === surface.surfaceEpoch ? geometry : undefined
+  }
   const fit = (surface: WindowElement) => {
+    const geometry = domGeometry(surface)
+    if (geometry) {
+      const embedded = windows.size === 1 && surface.primary && surface.floatingScale === undefined,
+        full = fullscreen === surface,
+        width = surface.preview?.width ?? geometry.outer.width,
+        height = surface.preview?.height ?? geometry.outer.height,
+        scale = full ? 1 : surface.floatingScale ?? (embedded ? Math.min(1, stage.clientWidth / width) : 1)
+      surface.element.style.transform = `scale(${Math.max(0, scale)})`
+      surface.element.style.transformOrigin = '0 0'
+      surface.element.style.marginBottom = embedded && !full ? `${height * scale - height}px` : ''
+      surface.region.project()
+      return
+    }
     if (fullscreen !== surface) {
       surface.content.style.width = ''
     } else {
@@ -152,6 +178,8 @@ export function createGameWindows(
       geometry = surface.preview ?? view,
       embedded = windows.size === 1 && surface.primary && surface.floatingScale === undefined,
       isFullscreen = fullscreen === surface
+    const measured = domGeometry(surface)
+    element.classList.toggle('game-window-measured', !!measured)
     element.hidden = !view.visible
     element.inert = !!view.blocked
     element.setAttribute('aria-disabled', String(!!view.blocked))
@@ -177,10 +205,33 @@ export function createGameWindows(
     surface.leaveFullscreen.tabIndex = view.focusable && !view.blocked ? 0 : -1
     surface.close.disabled = !!view.blocked
     surface.leaveFullscreen.disabled = !!view.blocked
-    canvas.style.aspectRatio = `${geometry.width} / ${geometry.height}`
+    if (measured) {
+      const { client, viewport, scroll, scrollbars, paintBox } = measured,
+        box = (element: HTMLElement, x: number, y: number, width: number, height: number) => {
+          element.style.left = `${x}px`; element.style.top = `${y}px`
+          element.style.width = `${width}px`; element.style.height = `${height}px`
+        }
+      element.style.width = `${geometry.width}px`
+      element.style.height = `${geometry.height}px`
+      surface.menu.style.top = isFullscreen ? `${surface.title.parentElement!.offsetHeight}px` : ''
+      box(surface.body, client.x - element.clientLeft, client.y - element.clientTop, client.width, client.height)
+      box(surface.scrollbox, viewport.x - client.x, viewport.y - client.y,
+        viewport.width + scrollbars.vertical, viewport.height + scrollbars.horizontal)
+      surface.scrollbox.style.overflow = view.showScrollBars ? 'auto' : 'hidden'
+      surface.scrollSpace.style.width = `${Math.max(viewport.width, paintBox.x - viewport.x + scroll.x + paintBox.width)}px`
+      surface.scrollSpace.style.height = `${Math.max(viewport.height, paintBox.y - viewport.y + scroll.y + paintBox.height)}px`
+      if (surface.scrollbox.scrollLeft !== scroll.x) surface.scrollbox.scrollLeft = scroll.x
+      if (surface.scrollbox.scrollTop !== scroll.y) surface.scrollbox.scrollTop = scroll.y
+      box(surface.content, 0, 0, viewport.width, viewport.height)
+      canvas.style.aspectRatio = `${viewport.width} / ${viewport.height}`
+      surface.content.style.overflow = 'hidden'
+      element.dataset.geometryRevision = String(measured.revision)
+    } else {
+      canvas.style.aspectRatio = `${geometry.width} / ${geometry.height}`
+      surface.content.style.overflow = view.showScrollBars ? 'auto' : 'hidden'
+    }
     // Game zoom transforms layers in the renderer; responsive CSS does not
     // change logical size and must never report a Window.resize by itself.
-    surface.content.style.overflow = view.showScrollBars ? 'auto' : 'hidden'
     surface.leaveFullscreen.hidden = !isFullscreen
     // Keep the legacy exit selector unique even when several windows exist.
     surface.leaveFullscreen.classList.toggle('leave-fullscreen', isFullscreen)
@@ -264,7 +315,7 @@ export function createGameWindows(
       surface.fullscreenSuppressed = false
     } else if (!view.fullScreen) surface.fullscreenSuppressed = false
     if (active && !surface.active) surface.order = ++order
-    surface.view = { ...view }
+    surface.view = { ...view, ...(view.geometry ? { geometry: copyWindowGeometry(view.geometry) } : {}) }
     surface.active = active
     synchronize()
   }
@@ -291,7 +342,7 @@ export function createGameWindows(
       pointer = event.pointerId,
       start = { ...surface.view },
       origin = { x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop },
-      bounds = surface.canvas.getBoundingClientRect(),
+      bounds = (domGeometry(surface) ? surface.element : surface.canvas).getBoundingClientRect(),
       sx = bounds.width ? start.width / bounds.width : 1,
       sy = bounds.height ? start.height / bounds.height : 1,
       gestureAbort = new AbortController(),
@@ -424,7 +475,22 @@ export function createGameWindows(
     },
     { signal: abort.signal },
   )
+  browser.addEventListener('resize', () => {
+    if (fullscreen && live(fullscreen) && domGeometry(fullscreen))
+      emit(fullscreen, { type: 'resize', width: browser.innerWidth, height: browser.innerHeight })
+    for (const surface of windows.values()) fit(surface)
+  }, { signal: abort.signal })
   return {
+    async measureGeometry(request, surfaceEpoch, signal) {
+      const surface = windows.get(request.windowId)
+      if (!surface || !live(surface) || surface.surfaceEpoch !== surfaceEpoch)
+        throw new Error('Window geometry surface is unavailable')
+      return measureWindowGeometry(stage, request, surfaceEpoch, signal)
+    },
+    subscribeGeometryScroll(listener) {
+      scrollListeners.add(listener)
+      return () => { scrollListeners.delete(listener) }
+    },
     beginMove(request, surfaceEpoch, publish, signal) {
       const surface = windows.get(request.windowId)
       if (!surface || !live(surface) || surface.surfaceEpoch !== surfaceEpoch)
@@ -524,7 +590,7 @@ export function createGameWindows(
           surface.scriptMove = true
           moving = surface
           if (embedded) {
-            surface.floatingScale = surface.canvas.getBoundingClientRect().width / start.width || 1
+            surface.floatingScale = (domGeometry(surface) ? bounds.width : surface.canvas.getBoundingClientRect().width) / start.width || 1
             // Preserve the responsive surface's former flow extent while it
             // becomes absolute. Otherwise the desktop/page can collapse under
             // the pointer and clip the same-size window during its first move.
@@ -607,6 +673,8 @@ export function createGameWindows(
         leaveFullscreen = node('button', 'game-window-leave-fullscreen'),
         menu = node('div', 'game-window-menu'),
         body = node('div', 'game-window-body'),
+        scrollbox = node('div', 'game-window-scrollbox'),
+        scrollSpace = node('div', 'game-window-scroll-space'),
         content = node('div', 'game-window-content'),
         videoPlane = node('div', 'game-window-video-plane'),
         resize = node('div', 'game-window-resize'),
@@ -628,7 +696,9 @@ export function createGameWindows(
       resize.setAttribute('aria-hidden', 'true')
       header.append(title, leaveFullscreen, close)
       content.append(canvas, videoPlane)
-      body.append(content)
+      scrollSpace.append(content)
+      scrollbox.append(scrollSpace)
+      body.append(scrollbox)
       element.append(header, menu, body, resize)
       stage.append(element)
       const surface: WindowElement = {
@@ -640,8 +710,18 @@ export function createGameWindows(
         content,
         videoPlane,
         abort: surfaceAbort,
-        observer: new ResizeObserver(() => fit(surface)),
+        observer: new ResizeObserver(() => {
+          fit(surface)
+          const geometry = domGeometry(surface)
+          if (geometry && live(surface) && surface.view.visible && !surface.view.fullScreen &&
+              Math.min(geometry.outer.height, element.clientTop + header.offsetHeight +
+                (menu.hidden ? 0 : menu.offsetHeight)) !== geometry.client.y)
+            emit(surface, { type: 'geometry' })
+        }),
         body,
+        scrollbox,
+        scrollSpace,
+        scrollSequence: 0,
         title,
         close,
         leaveFullscreen,
@@ -655,7 +735,19 @@ export function createGameWindows(
         fullscreenSuppressed: false,
       }
       windows.set(windowId, surface)
-      surface.observer.observe(body)
+      surface.observer.observe(stage)
+      surface.observer.observe(header)
+      surface.observer.observe(menu)
+      scrollbox.addEventListener('scroll', () => {
+        const geometry = domGeometry(surface)
+        if (!live(surface) || !geometry || surface.view.blocked) return
+        const x = Math.max(0, Math.min(geometry.scroll.maxX, Math.round(scrollbox.scrollLeft))),
+          y = Math.max(0, Math.min(geometry.scroll.maxY, Math.round(scrollbox.scrollTop)))
+        if (x === geometry.scroll.x && y === geometry.scroll.y) return
+        const observation: WindowGeometryScroll = { windowId, surfaceEpoch,
+          baseRevision: geometry.revision, sequence: ++surface.scrollSequence, x, y }
+        for (const listener of [...scrollListeners]) listener(observation)
+      }, { signal: surfaceAbort.signal })
       const options = { signal: surfaceAbort.signal }
       element.addEventListener('pointerdown', (event) => {
         // Native WM_NCL/RBUTTONDOWN precedes chrome activation/dragging.
@@ -770,6 +862,7 @@ export function createGameWindows(
     dispose() {
       if (disposed) return
       disposed = true
+      scrollListeners.clear()
       abort.abort()
       for (const surface of windows.values()) remove(surface)
       pending.clear()

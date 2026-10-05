@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import type { SessionDependencies } from '../../src/engine/session.ts'
 import { headless } from './headless.ts'
 import { layerLifetimeScript } from './layer-lifetime-script.ts'
+import { lifetimeJournal, lifetimeJournalEnabled, lifetimeOperation } from './lifetime-journal.ts'
 
 export async function layerFixture(
   binary: boolean,
@@ -9,6 +10,7 @@ export async function layerFixture(
   overrides: Partial<SessionDependencies> = {},
 ) {
   let rendererCloses = 0
+  lifetimeJournal('fixture:start', { binary })
   const harness = await headless(
     { 'startup.tjs': '', 'layer-lifetime.tjs': layerLifetimeScript(extra) },
     {
@@ -22,6 +24,18 @@ export async function layerFixture(
     },
   )
   const { session } = harness
+  if (lifetimeJournalEnabled) {
+    lifetimeJournal('fixture:initialized', { binary, ownership: session.inspectOwnership() })
+    const evaluate = session.evaluate.bind(session), start = session.start.bind(session),
+      stop = session.stop.bind(session), idle = session.idle.bind(session)
+    session.evaluate = (source) => lifetimeOperation('evaluate', () => evaluate(source), { source })
+    session.start = (...args) => lifetimeOperation('start', () => start(...args))
+    session.idle = (...args) => lifetimeOperation('idle', () => idle(...args))
+    session.stop = async () => {
+      await lifetimeOperation('stop', stop)
+      lifetimeJournal('fixture:stopped', { ownership: session.inspectOwnership(), handles: session.snapshot().handles })
+    }
+  }
   const execute = (source: string) => session.evaluate(`Scripts.exec(${JSON.stringify(source)})`)
   try {
     await session.start()

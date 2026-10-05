@@ -40,7 +40,7 @@ import { loadCursorBytes, windowsDesktopCursorProfile } from '../formats/cursor/
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree, type LayerState } from './scene/layers.ts'
 import { createWindowRegion, copyWindowRegion, WindowRegions, type WindowRegion } from './scene/window-region.ts'
-import { deviceInt, drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
+import { deviceInt, deviceMulDiv, drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
 import { LayerService } from './scene/layer-objects.ts'
 import { captureVideoMixingBitmap } from './media/video-mixing.ts'
 import type { DecodedImage, GraphicsDecoder, Renderer, RendererStatus } from './ports/graphics.ts'
@@ -64,6 +64,8 @@ import { checkpointBridge } from './tvp/checkpoints.ts'
 import { ModalLoop } from './scheduler/modal-loop.ts'
 import { WindowModals } from './scene/window-modal.ts'
 import { WindowMoves } from './scene/window-move.ts'
+import type { WindowGeometry, WindowGeometryPort, WindowGeometryRequest, WindowGeometryScroll } from './ports/window-geometry.ts'
+import { HeadlessWindowGeometry, scrollWindowGeometry, validateWindowGeometry } from './scene/window-geometry.ts'
 import type { WindowMoveMessage, WindowMoveRequest } from './ports/window-move.ts'
 import type { WindowPopupMessage } from './ports/window-popup.ts'
 import { MenuModals } from './scene/menu-modal.ts'
@@ -214,6 +216,7 @@ interface WindowMouseKeys {
 export interface SessionDependencies {
   /** The page implements the matching request/reply presentation protocol. */
   windowMoveSupported?: boolean
+  windowGeometry?: WindowGeometryPort
   systemDisplay?: SystemDisplayMetrics
   systemFonts?: FontDescriptor[]
   systemColors?: readonly number[]
@@ -250,6 +253,15 @@ export interface SessionDependencies {
 }
 
 export class EngineSession {
+  private readonly windowGeometry: WindowGeometryPort
+  private nextGeometryRequest = 1
+  private readonly geometryRequests = new Map<number, number>()
+  private readonly geometrySignatures = new Map<number, string>()
+  private readonly geometryPrimaryIds = new Map<number, number>()
+  private readonly geometryScrollSequences = new Map<number, number>()
+  private readonly geometryPending = new Map<number, Promise<void>>()
+  private readonly geometryTransactions = new Map<number, Promise<void>>()
+  private detachGeometry?: () => void
   private readonly systemEnvironment: SystemEnvironment
   private readonly systemColors: SystemColors
   private readonly clipboard: ClipboardPort
@@ -409,6 +421,8 @@ export class EngineSession {
   private readonly cancellationErrors: unknown[] = []
   private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
+    this.windowGeometry = deps.windowGeometry ?? new HeadlessWindowGeometry()
+    this.detachGeometry = this.windowGeometry.subscribe((observation) => this.observeWindowScroll(observation))
     this.systemColors = new SystemColors(deps.systemColors)
     this.layers = new LayerTree(this.systemColors)
     this.inputControllers = new InputControllers(this.layers, () => this.windowId)
@@ -472,6 +486,8 @@ export class EngineSession {
       // can throw. Preserve those failures for the terminal stop result.
       this.cancelEventReceipts(new ExecutionCancelled())
       for (const cleanup of [
+        () => this.windowGeometry.dispose(),
+        () => { this.detachGeometry?.(); this.detachGeometry = undefined },
         () => this.pads?.dispose(),
         () => this.closeClipboard(),
         () => this.closeHelp(),
@@ -741,6 +757,11 @@ export class EngineSession {
           }
         },
         async (window) => {
+          this.geometryRequests.delete(window.id)
+          this.geometrySignatures.delete(window.id)
+          this.geometryPrimaryIds.delete(window.id)
+          this.geometryScrollSequences.delete(window.id)
+          this.windowGeometry.retire(window.id)
           this.windowMoves?.invalidate(window.id)
           this.clearVirtualCursors(window.id)
           this.windowRegionRequests.delete(window.id)
@@ -762,6 +783,11 @@ export class EngineSession {
           await this.videos?.flushCloses()
         },
         (window) => {
+          this.geometryRequests.delete(window.id)
+          this.geometrySignatures.delete(window.id)
+          this.geometryPrimaryIds.delete(window.id)
+          this.geometryScrollSequences.delete(window.id)
+          this.windowGeometry.retire(window.id)
           this.windowModals?.invalidate(window.id)
           this.systemEvents?.cancelSource(window)
           this.videos?.disconnectWindow(window.id)
@@ -1664,8 +1690,8 @@ export class EngineSession {
         let shift = 0
         for (const [key, flag] of [[16, 1], [18, 2], [17, 4], [1, 8], [2, 16], [4, 32], [5, 256], [6, 512]])
           if (held.has(key!)) shift |= flag!
-        const inside = point.x >= 0 && point.y >= 0 && point.x < window.state.width && point.y < window.state.height
-        const wasInside = current.x >= 0 && current.y >= 0 && current.x < window.state.width && current.y < window.state.height
+        const inside = point.x >= 0 && point.y >= 0 && point.x < window.state.viewportWidth && point.y < window.state.viewportHeight
+        const wasInside = current.x >= 0 && current.y >= 0 && current.x < window.state.viewportWidth && current.y < window.state.viewportHeight
         try {
           if (inside || controller.capture)
             admissions.push(this.acceptInput({ type: 'move', ...point, shift, button: 0, clicks: 0,
@@ -2487,7 +2513,7 @@ export class EngineSession {
         packet = { ...packet, text }
       } else if (packet.type === 'keyDown' || packet.type === 'keyUp') {
         const point = this.currentVirtualCursor(receiver.id)?.view ?? this.windowPointers.get(receiver.id),
-          inside = !!point && point.x >= 0 && point.y >= 0 && point.x < receiver.state.width && point.y < receiver.state.height,
+          inside = !!point && point.x >= 0 && point.y >= 0 && point.x < receiver.state.viewportWidth && point.y < receiver.state.viewportHeight,
           result = record.state.key(packet.type === 'keyDown', packet.key, this.deps.now(), this.physicalKeys, inside)
         if (result.consumed) return this.mouseKeyActions(receiver, result.actions)
       }
@@ -2572,9 +2598,10 @@ export class EngineSession {
       })
       .finally(() => this.postedInputPending--)
   }
-  exitFullScreen(windowId = this.windowId): void {
+  async exitFullScreen(windowId = this.windowId): Promise<void> {
     if (this.windowModals?.blocked(windowId)) return
-    this.registeredWindow(windowId)?.state.set('fullScreen', 0)
+    const window = this.registeredWindow(windowId)
+    if (window) await this.setWindowProperty(window, 'fullScreen', 0)
     this.present()
   }
   async activateWindow(windowId: number): Promise<void> {
@@ -2693,20 +2720,198 @@ export class EngineSession {
     return { status: admissions.some((entry) => entry.status === 'accepted') ? 'accepted' : 'ignored',
       completion: Promise.all(admissions.map((entry) => entry.completion)).then(() => {}) }
   }
-  resizeWindow(windowId: number, width: number, height: number): void {
+  private windowGeometrySignature(window: WindowRecord, state = window.state): string {
+    const id = this.inputControllers.get(window.id)?.root() ?? 0,
+      primary = this.layers.has(id) ? this.layers.get(id) : undefined
+    return JSON.stringify([state.width, state.height, state.innerSunken, state.borderStyle,
+      state.showScrollBars, state.fullScreen, state.layerLeft, state.layerTop,
+      state.zoomNumer, state.zoomDenom, state.minWidth, state.minHeight, state.maxWidth, state.maxHeight,
+      state.innerWidthRequest, state.innerHeightRequest, id, primary?.width ?? 0, primary?.height ?? 0,
+      this.menus.snapshot(window.id).root ?? null])
+  }
+  private measureWindowGeometry(window: WindowRecord, candidate: WindowState,
+    operation: WindowGeometryRequest['operation'], size?: WindowGeometryRequest['size'], resetScroll = false): Promise<void> {
+    const work = this.commitWindowGeometry(window, candidate, operation, size, resetScroll)
+    this.geometryTransactions.set(window.id, work)
+    void work.finally(() => {
+      if (this.geometryTransactions.get(window.id) === work) this.geometryTransactions.delete(window.id)
+    }).catch(() => {})
+    return work
+  }
+  private async commitWindowGeometry(window: WindowRecord, candidate: WindowState,
+    operation: WindowGeometryRequest['operation'], size?: WindowGeometryRequest['size'], resetScroll = false): Promise<void> {
+    this.control.check()
+    if (this.registeredWindow(window.id) !== window) throw new Error('Window geometry destination changed')
+    const requestId = this.nextGeometryRequest++
+    if (!Number.isSafeInteger(this.nextGeometryRequest)) throw new Error('Window geometry identities exhausted')
+    this.geometryRequests.set(window.id, requestId)
+    const primaryId = this.inputControllers.get(window.id)?.root() ?? 0,
+      primary = this.layers.has(primaryId) ? this.layers.get(primaryId) : undefined,
+      request: WindowGeometryRequest = { requestId, windowId: window.id, revision: requestId,
+        view: candidate.view(), menus: this.menus.snapshot(window.id),
+        primary: { width: primary?.width ?? 0, height: primary?.height ?? 0 },
+        innerRequest: { width: candidate.innerWidthRequest, height: candidate.innerHeightRequest },
+        operation, ...(size ? { size: { ...size } } : {}), resetScroll },
+      signature = this.windowGeometrySignature(window, candidate),
+      check = () => {
+        this.control.check()
+        if (this.registeredWindow(window.id) !== window || this.geometryRequests.get(window.id) !== requestId ||
+            this.windowGeometrySignature(window, candidate) !== signature)
+          throw new Error('Window geometry destination changed')
+      },
+      before = window.state.geometry, beforeFullscreen = window.state.fullScreen
+    let geometry: WindowGeometry
+    try {
+      const measured = await cancelable(this.windowGeometry.measure(request), this.control)
+      check()
+      geometry = validateWindowGeometry(request, measured)
+    } catch (error) {
+      if (this.geometryRequests.get(window.id) === requestId) {
+        if (before) this.geometryRequests.set(window.id, before.revision)
+        else this.geometryRequests.delete(window.id)
+      }
+      throw error
+    }
+    candidate.commitGeometry(geometry)
+    if (operation === 'create') {
+      candidate.innerWidthRequest = geometry.client.width
+      candidate.innerHeightRequest = geometry.client.height
+    }
+    // Geometry awaits cannot overwrite unrelated physical/key state that
+    // changed while the host measured an isolated DOM candidate.
+    for (const key of ['width', 'height', 'innerSunken', 'borderStyle', 'showScrollBars', 'fullScreen',
+      'layerLeft', 'layerTop', 'zoomNumer', 'zoomDenom', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+      'innerWidthRequest', 'innerHeightRequest', 'fullscreenRestore'] as const)
+      Object.assign(window.state, { [key]: candidate[key] })
+    if (candidate.fullScreen !== !!beforeFullscreen) {
+      window.state.left = candidate.left
+      window.state.top = candidate.top
+    }
+    window.state.commitGeometry(geometry)
+    this.geometrySignatures.set(window.id, this.windowGeometrySignature(window))
+    this.geometryPrimaryIds.set(window.id, primaryId)
+    this.geometryScrollSequences.set(window.id, 0)
+    if (before && (before.outer.width !== geometry.outer.width || before.outer.height !== geometry.outer.height ||
+        before.client.width !== geometry.client.width || before.client.height !== geometry.client.height))
+      this.queueResize(window)
+    this.dirty = true
+  }
+  private ensureWindowGeometry(window: WindowRecord): Promise<void> {
+    const transaction = this.geometryTransactions.get(window.id)
+    if (transaction) return transaction.catch(() => {}).then(() => {
+      this.control.check()
+      return this.ensureWindowGeometry(window)
+    })
+    if (this.geometrySignatures.get(window.id) === this.windowGeometrySignature(window)) return Promise.resolve()
+    const pending = this.geometryPending.get(window.id)
+    if (pending) return pending
+    const old = window.state.geometry,
+      primaryId = this.inputControllers.get(window.id)?.root() ?? 0,
+      primary = this.layers.has(primaryId) ? this.layers.get(primaryId) : undefined,
+      actual = old?.actualZoom ?? { numer: window.state.zoomNumer, denom: window.state.zoomDenom },
+      reset = !!old && (this.geometryPrimaryIds.get(window.id) !== primaryId || old.paintBox.width !== deviceMulDiv(primary?.width ?? 0, actual.numer, actual.denom) ||
+        old.paintBox.height !== deviceMulDiv(primary?.height ?? 0, actual.numer, actual.denom)),
+      work = this.measureWindowGeometry(window, window.state.copy(), old ? 'content' : 'create', undefined, reset)
+        .finally(() => { if (this.geometryPending.get(window.id) === work) this.geometryPending.delete(window.id) })
+    this.geometryPending.set(window.id, work)
+    return work
+  }
+  private async synchronizeWindowGeometry(): Promise<void> {
+    // Native release continuations still finish Layers/MenuItems after Stop
+    // closes host ports. Geometry must never block those terminal releases.
+    if (this.control.cancelled) return
+    for (const window of this.windows?.registered() ?? []) {
+      if (this.control.cancelled) return
+      await this.ensureWindowGeometry(window)
+    }
+  }
+  private observeWindowScroll(observation: WindowGeometryScroll): void {
+    const window = this.registeredWindow(observation.windowId), geometry = window?.state.geometry
+    if (!window || !geometry || this.control.cancelled || this.geometryPending.has(window.id) ||
+        observation.surfaceEpoch !== geometry.surfaceEpoch || observation.baseRevision !== geometry.revision ||
+        this.geometryRequests.get(window.id) !== geometry.revision ||
+        !Number.isSafeInteger(observation.sequence) || observation.sequence <= (this.geometryScrollSequences.get(window.id) ?? 0))
+      return
+    try {
+      const updated = scrollWindowGeometry(geometry, observation.x, observation.y)
+      this.geometryScrollSequences.set(window.id, observation.sequence)
+      window.state.commitGeometry(updated)
+      this.dirty = true
+      this.present()
+    } catch (error) {
+      this.deps.event({ type: 'log', level: 'error', text: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  async resizeWindow(windowId: number, width: number, height: number): Promise<void> {
+    // Recheck after every await: several host requests may be waiting on the
+    // same script transaction, and the first resumed request now owns the slot.
+    while (this.geometryTransactions.has(windowId))
+      await this.geometryTransactions.get(windowId)!.catch(() => {})
+    if (this.control.cancelled) return
     if (this.windowModals?.blocked(windowId)) return
     const window = this.registeredWindow(windowId)
     if (!window) return
-    window.state.resize(width, height)
-    this.queueResize(window)
-    this.dirty = true
+    const candidate = window.state.copy()
+    candidate.resize(width, height)
+    await this.measureWindowGeometry(window, candidate, 'outer', { width, height })
     this.present()
   }
-  private setWindowProperty(window: WindowRecord, property: string, value: string | number,
-    script = false): void {
-    const before = [window.state.width, window.state.height]
-    if (script) window.state.setScript(property, value)
-    else window.state.set(property, value)
+  /** A new surface needs its own measured epoch without replaying stale size
+   * values captured before an in-flight script geometry transaction. */
+  async refreshWindowGeometry(windowId: number): Promise<void> {
+    while (this.geometryTransactions.has(windowId))
+      await this.geometryTransactions.get(windowId)!.catch(() => {})
+    if (this.control.cancelled) return
+    const window = this.registeredWindow(windowId)
+    if (!window) return
+    await this.measureWindowGeometry(window, window.state.copy(), 'content')
+    this.present()
+  }
+  private async setWindowProperty(window: WindowRecord, property: string, value: string | number,
+    script = false): Promise<void> {
+    const geometryProperty = ['width', 'height', 'innerWidth', 'innerHeight', 'innerSunken', 'borderStyle',
+        'showScrollBars', 'fullScreen', 'layerLeft', 'layerTop', 'zoomNumer', 'zoomDenom',
+        'minWidth', 'minHeight', 'maxWidth', 'maxHeight'].includes(property)
+    if (geometryProperty) {
+      while (this.geometryTransactions.has(window.id))
+        await this.geometryTransactions.get(window.id)!.catch(() => {})
+      this.control.check()
+      if (this.registeredWindow(window.id) !== window) throw new Error('Window geometry destination changed')
+      if (property === 'fullScreen' && !!Number(value) && !window.state.fullScreen) {
+        // Validate before changing the previous fullscreen owner. Recopy our
+        // candidate only after those awaited transitions and queued host work.
+        const checked = window.state.copy()
+        if (script) checked.setScript(property, value)
+        else checked.set(property, value)
+        for (const other of this.windows!.registered())
+          if (other !== window && other.state.fullScreen) await this.setWindowProperty(other, 'fullScreen', 0)
+        while (this.geometryTransactions.has(window.id))
+          await this.geometryTransactions.get(window.id)!.catch(() => {})
+        this.control.check()
+        if (this.registeredWindow(window.id) !== window) throw new Error('Window geometry destination changed')
+      }
+    }
+    const before = [window.state.width, window.state.height],
+      candidate = geometryProperty ? window.state.copy() : window.state
+    if (script) candidate.setScript(property, value)
+    else candidate.set(property, value)
+    if (geometryProperty) {
+      if (property === 'fullScreen' && candidate.fullScreen !== window.state.fullScreen) {
+        if (candidate.fullScreen) {
+          candidate.fullscreenRestore = { left: window.state.left, top: window.state.top,
+            width: window.state.width, height: window.state.height, innerSunken: window.state.innerSunken }
+          candidate.left = candidate.top = 0
+          candidate.innerSunken = false
+        } else if (candidate.fullscreenRestore) {
+          Object.assign(candidate, candidate.fullscreenRestore)
+          candidate.fullscreenRestore = undefined
+        }
+      }
+      const inner = property === 'innerWidth' || property === 'innerHeight',
+        outer = property === 'width' || property === 'height',
+        size = inner || outer ? { [property === 'width' || property === 'innerWidth' ? 'width' : 'height']: Number(value) } : undefined
+      await this.measureWindowGeometry(window, candidate, inner ? 'inner' : outer ? 'outer' : 'chrome', size)
+    }
     if ((property === 'visible' && !window.state.visible) ||
         (property === 'fullScreen' && window.state.fullScreen)) this.windowMoves?.cancel(window.id)
     if (property === 'useMouseKey') {
@@ -2719,10 +2924,7 @@ export class EngineSession {
       this.refreshKeyboardRoutes()
     if (before[0] !== window.state.width || before[1] !== window.state.height)
       this.queueResize(window)
-    if (property === 'fullScreen' && window.state.fullScreen)
-      for (const other of this.windows!.registered())
-        if (other !== window && other.state.fullScreen) other.state.set('fullScreen', 0)
-    if (property === 'visible' || property === 'focusable') {
+    if (property === 'visible' || property === 'focusable' || (property === 'fullScreen' && window.state.fullScreen)) {
       if (window.state.visible && window.state.focusable)
         void this.activateWindow(window.id).catch((error) => {
           if (!this.control.cancelled) this.fail(error)
@@ -2856,15 +3058,28 @@ export class EngineSession {
       this.deps.renderer.present([], this.width, this.height)
     let complete = true
     for (const target of targets) {
-      const window = target.state,
+      const window = target.state
+      if (!window.geometry || this.geometryRequests.get(target.id) !== window.geometry.revision) {
+        complete = false
+        continue
+      }
+      if (this.geometrySignatures.get(target.id) !== this.windowGeometrySignature(target)) {
+        complete = false
+        void this.ensureWindowGeometry(target).then(() => this.present()).catch((error) => {
+          if (!this.control.cancelled && this.registeredWindow(target.id) === target) this.fail(error)
+        })
+        continue
+      }
+      const viewportWidth = Math.max(1, window.viewportWidth), viewportHeight = Math.max(1, window.viewportHeight),
         primaryId = this.inputControllers.get(target.id)?.root() ?? 0,
         primary = this.layers.has(primaryId) ? this.layers.get(primaryId) : undefined,
         geometry = drawDeviceGeometry(window, primary?.width ?? 0, primary?.height ?? 0)
       const presented = this.deps.renderer.present(
-        window.visible && primary && primary.width > 0 && primary.height > 0
+        window.visible && window.viewportWidth > 0 && window.viewportHeight > 0 &&
+          primary && primary.width > 0 && primary.height > 0
           ? this.composer.frame(
-              window.width,
-              window.height,
+              viewportWidth,
+              viewportHeight,
               geometry.x,
               geometry.y,
               geometry.width / primary.width,
@@ -2873,8 +3088,8 @@ export class EngineSession {
               primaryId,
             )
           : [],
-        window.width,
-        window.height,
+        viewportWidth,
+        viewportHeight,
         target.id,
       )
       if (presented === false) complete = false
@@ -4162,6 +4377,7 @@ export class EngineSession {
             readiness.cancel()
           }
         }
+        await this.ensureWindowGeometry(window)
         value = BigInt(window.id)
         break
       }
@@ -4224,32 +4440,38 @@ export class EngineSession {
         value = !id || window.finished ? null : (this.layerObjects!.owner(id) ?? null)
         break
       }
-      case 'Window.resize': {
+      case 'Window.resize':
+      case 'Window.innerResize': {
         const window = this.windows!.get(number(0))
-        window.state.resizeScript(number(1), number(2))
-        this.queueResize(window)
-        this.dirty = true
+        while (this.geometryTransactions.has(window.id))
+          await this.geometryTransactions.get(window.id)!.catch(() => {})
+        const candidate = window.state.copy(),
+          width = number(1), height = number(2), inner = operation === 'Window.innerResize'
+        candidate.assertWindowed()
+        if (inner) candidate.resizeInner(width, height)
+        else candidate.resize(width, height)
+        await this.measureWindowGeometry(window, candidate, inner ? 'inner' : 'outer', { width, height })
         break
       }
       case 'Window.position': {
         const window = this.windows!.get(number(0))
         window.state.assertWindowed()
-        this.setWindowProperty(window, 'left', number(1))
-        this.setWindowProperty(window, 'top', number(2))
+        await this.setWindowProperty(window, 'left', number(1))
+        await this.setWindowProperty(window, 'top', number(2))
         break
       }
       case 'Window.constraints': {
         const window = this.windows!.get(number(0)), prefix = text(1)
         if (prefix !== 'min' && prefix !== 'max') throw new Error('Invalid Window constraint kind')
         window.state.assertWindowed()
-        this.setWindowProperty(window, `${prefix}Width`, number(2))
-        this.setWindowProperty(window, `${prefix}Height`, number(3))
+        await this.setWindowProperty(window, `${prefix}Width`, number(2))
+        await this.setWindowProperty(window, `${prefix}Height`, number(3))
         break
       }
       case 'Window.userHide':
         // Form.OnCloseQueryCalled uses its own Visible field, not the public
         // Window setter. Preserve the same hide side effects without its guard.
-        this.setWindowProperty(this.windows!.get(number(0)), 'visible', 0)
+        await this.setWindowProperty(this.windows!.get(number(0)), 'visible', 0)
         break
       case 'Window.setMaskRegion': {
         const window = this.windows!.get(number(0)),
@@ -4304,22 +4526,36 @@ export class EngineSession {
         break
       }
       case 'Window.get': {
-        const field = this.windows!.get(number(0)).state[text(1) as keyof WindowState]
+        const window = this.windows!.get(number(0))
+        if (!this.control.cancelled) await this.ensureWindowGeometry(window)
+        const field = window.state[text(1) as keyof WindowState]
         if (typeof field !== 'string' && typeof field !== 'boolean' && typeof field !== 'number')
           throw new Error('Unsupported window property')
         value = typeof field === 'string' ? field : BigInt(Number(field))
         break
       }
       case 'Window.set': {
-        this.setWindowProperty(this.windows!.get(number(0)), text(1),
+        await this.setWindowProperty(this.windows!.get(number(0)), text(1),
           typeof args[2] === 'string' ? text(2) : number(2), true)
         break
       }
       case 'Window.zoom': {
         const window = this.windows!.get(number(0))
-        window.state.set('zoomNumer', number(1))
-        window.state.set('zoomDenom', number(2))
-        this.dirty = true
+        while (this.geometryTransactions.has(window.id))
+          await this.geometryTransactions.get(window.id)!.catch(() => {})
+        const candidate = window.state.copy()
+        candidate.setZoom(number(1), number(2))
+        await this.measureWindowGeometry(window, candidate, 'content')
+        break
+      }
+      case 'Window.layerPosition': {
+        const window = this.windows!.get(number(0))
+        while (this.geometryTransactions.has(window.id))
+          await this.geometryTransactions.get(window.id)!.catch(() => {})
+        const candidate = window.state.copy()
+        candidate.set('layerLeft', number(1))
+        candidate.set('layerTop', number(2))
+        await this.measureWindowGeometry(window, candidate, 'content')
         break
       }
       case 'Window.update':
@@ -4442,6 +4678,16 @@ export class EngineSession {
             typeof color === 'bigint' ? Number(BigInt.asUintN(32, color)) : number(2),
           )
           break
+        }
+        if (['width', 'height', 'imageWidth', 'imageHeight'].includes(text(1))) {
+          const id = number(0), controller = this.inputControllers.forLayer(id)
+          // These setters normally return through the Input pump, bypassing
+          // the host switch tail. Commit primary sizing/scroll before that
+          // pump rechecks hover or the calling TJS reads its cursor position.
+          this.layers.set(id, text(1), number(2))
+          this.dirty = true
+          await this.synchronizeWindowGeometry()
+          return this.inputs!.change(() => {}, controller)
         }
         return this.inputs!.change(
           () => {
@@ -5013,6 +5259,10 @@ export class EngineSession {
       default:
         throw new Error(`Unsupported host API: ${operation}`)
     }
+    if (['Layer.create', 'Layer.finish', 'Layer.abort', 'Layer.set', 'Layer.resize', 'Layer.image',
+      'Layer.resizeImage', 'Layer.assignImages', 'Menu.create', 'Menu.finish', 'Menu.abort',
+      'Menu.set', 'Menu.insert', 'Menu.remove'].includes(operation))
+      await this.synchronizeWindowGeometry()
     return { kind: 'value', value }
   }
 }

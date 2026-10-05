@@ -28,6 +28,8 @@ a.menu.add(tools);tools.add(count);
 count.onClick=function(){global.menuCount++;Debug.message("position-menu="+global.menuCount);};
 var fullscreen=new MenuItem(a,"Position fullscreen");a.menu.add(fullscreen);
 fullscreen.onClick=function(){global.a.fullScreen=true;};
+// This fixture specifies a 160x96 drawable after installing the menu chrome.
+a.setInnerSize(160,96);
 function addSecondary(){
   global.b=new PositionWindow("B",240,40);
   global.rootB=new Layer(global.b,null);global.rootB.type=ltOpaque;

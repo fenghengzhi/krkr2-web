@@ -1,4 +1,5 @@
 import type { MenuPopupIdentity, MenuSnapshot, MenuView } from '../engine/scene/menus.ts'
+import type { WindowView } from '../engine/scene/window.ts'
 
 const caption = (text: string) =>
   text
@@ -29,7 +30,7 @@ export function createGameMenus(
   canvas: () => HTMLCanvasElement | null,
   choose: (id: number, popup?: MenuPopupIdentity, shortcutEvent?: KeyboardEvent) => void,
   dismiss: (popup?: MenuPopupIdentity) => void,
-  options: { active?: () => boolean } = {},
+  options: { active?: () => boolean; windowView?: () => WindowView | undefined } = {},
 ) {
   let current: MenuSnapshot = {},
     running = false,
@@ -189,9 +190,28 @@ export function createGameMenus(
       const panel = popupPanel!
       build(panel, menu.children, menu.enabled, popup)
       panel.setAttribute('aria-label', caption(menu.caption))
-      const bounds = canvas()?.getBoundingClientRect() ?? container.getBoundingClientRect()
-      panel.style.left = `${Math.min(innerWidth - 20, Math.max(0, bounds.left + (popup.x * bounds.width) / dimensions.width))}px`
-      panel.style.top = `${Math.min(innerHeight - 20, Math.max(0, bounds.top + (popup.y * bounds.height) / dimensions.height))}px`
+      const bounds = canvas()?.getBoundingClientRect() ?? container.getBoundingClientRect(),
+        view = options.windowView?.(), geometry = view?.geometry,
+        outer = container.closest<HTMLElement>('.game-window')?.getBoundingClientRect()
+      let x = bounds.left + popup.x * bounds.width / Math.max(1, dimensions.width),
+        y = bounds.top + popup.y * bounds.height / Math.max(1, dimensions.height)
+      if (geometry?.platform === 'dom' && outer) {
+        const sx = outer.width / geometry.outer.width, sy = outer.height / geometry.outer.height
+        // KRKR2's windowed popup receives Form client coordinates, independent
+        // of sunken borders, PaintBox origin and scroll. Fullscreen instead has
+        // a separate native menu-owner Form; this page uses its visible menu
+        // container as the corresponding host origin (not a Win32 clamp claim).
+        if (view?.fullScreen && !container.hidden) {
+          const owner = container.getBoundingClientRect()
+          x = owner.left + (container.clientLeft + popup.x) * sx
+          y = owner.top + (container.clientTop + popup.y) * sy
+        } else {
+          x = outer.left + (geometry.client.x + popup.x) * sx
+          y = outer.top + (geometry.client.y + popup.y) * sy
+        }
+      }
+      panel.style.left = `${Math.min(innerWidth - 20, Math.max(0, x))}px`
+      panel.style.top = `${Math.min(innerHeight - 20, Math.max(0, y))}px`
       panel.style.transform = `translate(${popup.flags & 8 ? '-100%' : popup.flags & 4 ? '-50%' : '0'},${popup.flags & 32 ? '-100%' : popup.flags & 16 ? '-50%' : '0'})`
       if (fresh) panel.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
     } else {

@@ -134,6 +134,8 @@ const api: SessionApi = {
       throw new Error('Invalid clipboard channel')
     if (request.help !== undefined && !(request.help instanceof MessagePort))
       throw new Error('Invalid help channel')
+    if (request.geometry !== undefined && !(request.geometry instanceof MessagePort))
+      throw new Error('Invalid Window geometry channel')
     if (request.windowMoveSupported !== undefined && typeof request.windowMoveSupported !== 'boolean')
       throw new Error('Invalid Window move capability')
     if (!prepared || request.gameId !== gameId)
@@ -215,7 +217,7 @@ const api: SessionApi = {
     active().keyState(keys)
   },
   async exitFullScreen(windowId) {
-    active().exitFullScreen(windowId)
+    await active().exitFullScreen(windowId)
   },
   async activateWindow(windowId) {
     return admitInput((target) => target.acceptActivateWindow(windowId))
@@ -233,7 +235,10 @@ const api: SessionApi = {
     return admitInput((target) => target.acceptWindowPopup(message))
   },
   async resizeWindow(windowId, width, height) {
-    active().resizeWindow(windowId, width, height)
+    await active().resizeWindow(windowId, width, height)
+  },
+  async refreshWindowGeometry(windowId) {
+    await active().refreshWindowGeometry(windowId)
   },
   async menuClick(id, popup) {
     return admitInput((target) => target.acceptMenuClick(id, popup))

@@ -216,3 +216,76 @@
 .game-window-fullscreen .game-window-content {
   flex: 0 0 auto;
 }
+/* Measured windows have one logical outer box. Page fitting scales that entire
+   box, so chrome, the native scrollbars, region and input all share one scale. */
+.game-desktop .game-window.game-window-measured,
+.game-desktop .game-window.game-window-measure {
+  box-sizing: border-box;
+}
+.game-window-measured > .game-window-body {
+  position: absolute;
+  display: block;
+  min-height: 0;
+}
+.game-window-scrollbox {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 0;
+  border: none;
+  overscroll-behavior: contain;
+}
+.game-window-scroll-space {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+.game-window-measured .game-window-content {
+  position: sticky;
+  min-width: 0;
+  min-height: 0;
+  z-index: 1;
+}
+.stage.game-desktop .game-window-measured .game-window-canvas {
+  width: 100%;
+  height: 100%;
+}
+.game-window-measured.game-window-fullscreen > .game-window-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+}
+.game-window-measured.game-window-fullscreen > .game-window-menu {
+  position: absolute;
+  top: 31px;
+  left: 0;
+  right: 0;
+  z-index: 6;
+}
+.game-desktop .game-window.game-window-measure {
+  position: fixed;
+  inset: auto;
+  left: 0;
+  top: 0;
+  transform: none;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: 0;
+  box-shadow: none;
+  z-index: -1;
+}
+
+/* The sticky canvas covers the visible viewport inside the real scrollbox.
+   Native (including overlay) scrollbars keep their own hit testing above it. */
+.game-window:not(.game-window-measured):not(.game-window-measure) > .game-window-body > .game-window-scrollbox {
+  position: relative;
+  overflow: visible;
+  width: 100%;
+}
+.game-window-fullscreen:not(.game-window-measured) .game-window-scroll-space {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

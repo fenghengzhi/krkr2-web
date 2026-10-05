@@ -17,6 +17,7 @@ function deferred<T>() {
 }
 const timeline = (duration = 100): VideoTimeline => ({
   duration,
+  frameDuration: duration,
   times: [0],
   audioStreams: 0,
   videoStreams: 1,

@@ -8,6 +8,9 @@ var guarded=new Window();guarded.caption="Fullscreen contract";guarded.setInnerS
 guarded.setPos(20,24);guarded.visible=true;
 var guardedImage=new Layer(guarded,null);guardedImage.setSize(160,96);
 guardedImage.fillRect(0,0,160,96,0xff315779);
+// Native Window invalidates explicitly registered objects. A global Layer
+// reference alone is not registration in the Window's managed-object list.
+guarded.add(guardedImage);
 var secondary=null,secondaryImage=null,guardErrors=[];
 var enter=new MenuItem(guarded,"Enter fullscreen and check");guarded.menu.add(enter);
 var child=new MenuItem(guarded,"Ordinary child");guarded.menu.add(child);

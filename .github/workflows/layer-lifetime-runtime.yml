@@ -1,0 +1,66 @@
+name: Layer lifetime host runtime diagnosis
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lifetime-runtime:
+    name: Node 24.19.0 / ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [default, liftoff-only]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - name: Record exact host runtime and prepare owned core evidence
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdb
+          mkdir -p out/native-cores
+          node --version > out/ci/diagnostic-node-version.txt
+          node --v8-options > out/ci/diagnostic-v8-options.txt
+          sha256sum "$(command -v node)" > out/ci/diagnostic-node-sha256.txt
+          dpkg-query -W libc6 gdb > out/ci/diagnostic-runtime-packages.txt
+          ldd "$(command -v node)" > out/ci/diagnostic-linked-libraries.txt
+          sudo sysctl -w "kernel.core_pattern=$GITHUB_WORKSPACE/out/native-cores/core.%e.%p" > out/ci/diagnostic-core-pattern.txt
+      - name: Observe three fixed complete repetitions without changing the ordinary Node suite
+        run: |
+          ulimit -c unlimited
+          node scripts/run-layer-lifetime-diagnostic.mjs '${{ matrix.mode }}'
+      - name: Preserve any owned process cores and native backtraces
+        if: always()
+        run: |
+          mkdir -p out/ci/layer-lifetime-cores
+          if compgen -G 'out/native-cores/core.*' > /dev/null; then
+            for core in out/native-cores/core.*; do
+              name=$(basename "$core")
+              sha256sum "$core" >> out/ci/layer-lifetime-cores/core-sha256.txt
+              stat --printf='%n %s bytes\n' "$core" >> out/ci/layer-lifetime-cores/core-sizes.txt
+              timeout 120s gdb --batch -ex 'set pagination off' -ex 'info sharedlibrary' -ex 'thread apply all bt full' \
+                "$(command -v node)" "$core" > "out/ci/layer-lifetime-cores/$name.backtrace" 2>&1 || \
+                printf '%s backtrace-incomplete\n' "$name" >> out/ci/layer-lifetime-cores/incomplete.txt
+              # Preserve the actual core body this time; the old 091 package
+              # only retained its hash/backtrace. A bounded compression failure
+              # is recorded explicitly and is never a clean diagnostic result.
+              if ! timeout 180s gzip -c "$core" > "out/ci/layer-lifetime-cores/$name.gz"; then
+                printf '%s core-compression-incomplete\n' "$name" >> out/ci/layer-lifetime-cores/incomplete.txt
+              fi
+            done
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: layer-lifetime-runtime-${{ matrix.mode }}
+          path: out/ci/
+          retention-days: 14

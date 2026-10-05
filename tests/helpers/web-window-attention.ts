@@ -75,8 +75,8 @@ export async function expectAttentionAnchor(surface: Locator, x: number, y: numb
             image = canvas.getBoundingClientRect(),
             caret = text.getBoundingClientRect()
           return Math.max(
-            Math.abs(caret.x - image.x - canvas.clientWidth * point.x),
-            Math.abs(caret.y - image.y - canvas.clientHeight * point.y),
+            Math.abs(caret.x - image.x - image.width * point.x),
+            Math.abs(caret.y - image.y - image.height * point.y),
           )
         },
         { x, y },

@@ -4,6 +4,8 @@ export type VideoMode = 0 | 1 | 2 | 3
 export interface VideoTimeline {
   times: number[]
   duration: number
+  /** Mean decoded sample duration in milliseconds, before edits/CTS offsets. */
+  frameDuration: number
   audioStreams: number
   videoStreams: number
 }
@@ -77,6 +79,8 @@ export type VideoEvent =
       id: number
       epoch: number
       snapshot: VideoSnapshot
+      /** Frame-event argument, separate from the public media-clock snapshot. */
+      callbackFrame?: number
       reason?: number
       pixels?: Pixels
     }

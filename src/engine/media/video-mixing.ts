@@ -11,9 +11,10 @@ function zoomEdge(value: number, numer: number, denom: number): number {
 /** Shared by capture and presentation so fractional zoom uses the same rectangle. */
 export function videoOutputRectangle(
   settings: Pick<VideoSettings, 'left' | 'top' | 'width' | 'height'>,
-  window: Pick<WindowView, 'zoomNumer' | 'zoomDenom'>,
+  window: Pick<WindowView, 'zoomNumer' | 'zoomDenom' | 'geometry'>,
 ): { left: number; top: number; width: number; height: number } {
-  const { zoomNumer, zoomDenom } = window,
+  const zoomNumer = window.geometry?.actualZoom.numer ?? window.zoomNumer,
+    zoomDenom = window.geometry?.actualZoom.denom ?? window.zoomDenom,
     left = zoomEdge(settings.left, zoomNumer, zoomDenom),
     top = zoomEdge(settings.top, zoomNumer, zoomDenom)
   return {
@@ -28,7 +29,7 @@ export function videoOutputRectangle(
 export function captureVideoMixingBitmap(
   layer: LayerState,
   settings: VideoSettings,
-  window: Pick<WindowView, 'zoomNumer' | 'zoomDenom'>,
+  window: Pick<WindowView, 'zoomNumer' | 'zoomDenom' | 'geometry'>,
 ): VideoMixingBitmap | null {
   if (!layer.visible) return null
   const bitmap = layer.bitmap

@@ -21,8 +21,8 @@ async function expectCaret(surface: Locator, x: number, y: number) {
             image = canvas.getBoundingClientRect(),
             caret = text.getBoundingClientRect()
           return Math.max(
-            Math.abs(caret.x - image.x - canvas.clientWidth * point.x),
-            Math.abs(caret.y - image.y - canvas.clientHeight * point.y),
+            Math.abs(caret.x - image.x - image.width * point.x),
+            Math.abs(caret.y - image.y - image.height * point.y),
           )
         },
         { x, y },
@@ -58,12 +58,17 @@ for (const binary of [false, true])
     await expectCaret(a, 0.2, 0.3)
     await expectCaret(b, 0.5, 0.25)
     const original = await a.locator('canvas').boundingBox()
-    // A stylesheet changes only the DOM boxes. No input packet, Window.set,
+    // A stylesheet fits the complete logical outer box with one uniform scale.
+    // This changes only the displayed DOM boxes. No input packet, Window.set,
     // viewport event, or script evaluation can accidentally refresh the caret.
     await page.addStyleTag({
       content: `
-      .game-window[aria-label="IME A"] { width: 25vw !important; }
-      .game-window[aria-label="IME B"] { width: 30vw !important; }
+      .game-window[aria-label="IME A"] { transform: scale(.65) !important; }
+      .game-window[aria-label="IME B"] { transform: scale(.8) !important; }
+      @media (max-width: 1050px) {
+        .game-window[aria-label="IME A"] { transform: scale(.5) !important; }
+        .game-window[aria-label="IME B"] { transform: scale(.6) !important; }
+      }
     `,
     })
     await expect

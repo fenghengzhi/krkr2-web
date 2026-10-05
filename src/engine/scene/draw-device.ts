@@ -2,7 +2,7 @@ import type { Rect } from '../ports/graphics.ts'
 import type { WindowView } from './window.ts'
 
 export interface DevicePoint { x: number; y: number }
-type DrawingView = Pick<WindowView, 'layerLeft' | 'layerTop' | 'zoomNumer' | 'zoomDenom'>
+type DrawingView = Pick<WindowView, 'layerLeft' | 'layerTop' | 'zoomNumer' | 'zoomDenom' | 'geometry'>
 
 /** tjs_int at a legacy mouse/DrawDevice boundary. Raw DOM and touch samples
  * remain real-valued outside these explicit conversions. */
@@ -25,20 +25,23 @@ export function deviceMulDiv(value: number, numer: number, denom: number): numbe
 }
 
 export function drawDeviceGeometry(view: DrawingView, primaryWidth: number, primaryHeight: number): Rect {
+  const zoom = view.geometry?.actualZoom ?? { numer: view.zoomNumer, denom: view.zoomDenom },
+    scroll = view.geometry?.scroll
   return {
-    x: deviceMulDiv(view.layerLeft, view.zoomNumer, view.zoomDenom),
-    y: deviceMulDiv(view.layerTop, view.zoomNumer, view.zoomDenom),
-    width: deviceMulDiv(primaryWidth, view.zoomNumer, view.zoomDenom),
-    height: deviceMulDiv(primaryHeight, view.zoomNumer, view.zoomDenom),
+    x: deviceMulDiv(view.layerLeft, zoom.numer, zoom.denom) - (scroll?.x ?? 0),
+    y: deviceMulDiv(view.layerTop, zoom.numer, zoom.denom) - (scroll?.y ?? 0),
+    width: deviceMulDiv(primaryWidth, zoom.numer, zoom.denom),
+    height: deviceMulDiv(primaryHeight, zoom.numer, zoom.denom),
   }
 }
 
 /** Capture this before queueing/delivering the Window callback. In native VCL
  * its arguments already refer to the PaintBox that received the event. */
 export function paintBoxPoint(view: DrawingView, x: number, y: number): DevicePoint {
+  const geometry = drawDeviceGeometry(view, 0, 0)
   return {
-    x: deviceInt(deviceInt(x) - deviceMulDiv(view.layerLeft, view.zoomNumer, view.zoomDenom)),
-    y: deviceInt(deviceInt(y) - deviceMulDiv(view.layerTop, view.zoomNumer, view.zoomDenom)),
+    x: deviceInt(deviceInt(x) - geometry.x),
+    y: deviceInt(deviceInt(y) - geometry.y),
   }
 }
 

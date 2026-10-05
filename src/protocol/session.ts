@@ -9,7 +9,7 @@ import type { PadAck, PadMessage, PadFontData } from './pad.ts'
 import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
 import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
 import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
-export const PROTOCOL_VERSION = 34
+export const PROTOCOL_VERSION = 35
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -43,6 +43,8 @@ export interface InitializeRequest {
   clipboard?: MessagePort
   /** Help presentation ACKs are independent of a suspended script RPC. */
   help?: MessagePort
+  /** Independent of suspended script RPC; only acknowledged geometry commits. */
+  geometry?: MessagePort
   /** A host capable of completing the synchronous Window movement interaction. */
   windowMoveSupported?: boolean
   activity: ActivityState
@@ -77,6 +79,7 @@ export interface SessionApi {
   windowMove(message: WindowMoveMessage): Promise<boolean>
   windowPopup(message: WindowPopupMessage): Promise<InputAdmissionAck>
   resizeWindow(windowId: number, width: number, height: number): Promise<void>
+  refreshWindowGeometry(windowId: number): Promise<void>
   menuClick(id: number, popup?: MenuPopupIdentity): Promise<InputAdmissionAck>
   menuDismiss(popup?: MenuPopupIdentity): Promise<void>
   setSystemFonts(fonts: FontDescriptor[]): Promise<void>
