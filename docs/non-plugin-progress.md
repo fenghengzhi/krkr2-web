@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37296239220](https://github.com/fenghengzhi/krkr2-web/actions/runs/37296239220)，精确提交 `68abdf4716d3116e8d2834280dbc9d6c5b1f3118`。093 的 25 个文件已整批推送，首次唯一查询为 **pending／conclusion=null**；只确认身份，没有实时查询 jobs／artifacts。下次补取 091 缺失结果并回收 092／093 固定快照。未本地执行验证，整体非插件目标保持 active。
+
 2026-10-05 准备 [093 共享窗口 GPU、视频画面保留与独立几何证据](decisions/093-shared-window-gpu-and-video-handoff.md)：一个 Session 共用 GPU、各 Window 独立提交；换轨比较暂停时钟与完整 RGBA；CSS 光标增加一像素周边，以整视口字节裁剪核对。popup 真实失活迁入既有原生浏览器连接，新增双 Windows User32 几何观察。新增 9 个 Node、每浏览器 9 个定义及 4 个原生生命周期定义，几何每系统 24 配置／960 行，均尚待托管执行。协议 **34**、TJS ABI **5**、字体 ABI **2** 不变，整体非插件目标继续 active。
 
 093 固定回收：091 仍 in_progress，24 jobs 为 16 success、6 failure、2 running；092 pending，0 jobs／artifacts。**24/24 原 ZIP、266,038,696 字节**全部核对 API SHA-256／大小。091 Node 计划 **3,097 = 3,084 pass + 2 failure + 11 unreported**，另有整文件 SIGABRT／堆损坏失败；浏览器十份报告 **1,957/2,005 expected、48 unexpected**，WebKit shard 2 缺失；兼容 **95/96**、runtime **6/6**。光标 155 样本 strict **485/512**，27 失败、2,758 未比；092 的 183 样本未报告。历史失败与原始证据保留，不实时轮询。以下保留历史批次当时的状态。
