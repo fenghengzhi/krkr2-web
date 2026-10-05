@@ -1,6 +1,8 @@
 # 096 归档补丁、临时隐藏光标与视频状态生命周期
 
-状态：开发候选，尚未取得本批托管执行结果。本轮从干净的 `312416d` 继续完整非插件目标。会话协议由 35 升至 **36**，增加独立屏幕位置观察及输入元数据；TJS ABI **5**、字体 ABI **2** 不变。归档别名只在 Worker 导入后生成，不增加游戏库持久化字段。
+状态：开发候选已推送，尚未取得本批托管执行结果。本轮从干净的 `312416d` 继续完整非插件目标。会话协议由 35 升至 **36**，增加独立屏幕位置观察及输入元数据；TJS ABI **5**、字体 ABI **2** 不变。归档别名只在 Worker 导入后生成，不增加游戏库持久化字段。
+
+实现提交 **`e5b393bc56ae023df1c26ca94ee90f80136ae0eb`**，26 个文件，已推送到 `codex/migrated-window-attention`。[Full test suite 37322347188](https://github.com/fenghengzhi/krkr2-web/actions/runs/37322347188) 的首次唯一查询确认该精确提交，当时 **in_progress／conclusion=null**；没有查询实时 jobs／artifacts。原返回保存在 `out/verification/github-actions/37322347188/initial-run-discovery.json`。本批结果留待下一轮回收，文档交接提交使用 `[skip ci]`。
 
 所有测试、构建、类型检查、浏览器和原生可执行探针只在 GitHub-hosted Actions 运行。本地仅源码检查、编辑及历史原始产物的下载、解包、哈希核对与解析。按较大批次推送，下轮取回固定结果，不实时轮询；静态审阅、未执行和跳过均不计为通过。
 
