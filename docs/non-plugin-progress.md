@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37344510171](https://github.com/fenghengzhi/krkr2-web/actions/runs/37344510171)，精确提交 `2a513d4eec3b1174d7da86ec8a1625bc1b8b9592`。100 的 42 个文件已整批推送，新增 **27 个 Node、每浏览器 20 个、可信 Chromium 4 个定义及 140 个原生光标样本**。首次唯一查询为 **queued／conclusion=null**，仅确认提交与运行身份；下轮补取 098／099 缺失结果并回收本批固定快照，不实时监控，没有本地执行验证，完整目标保持 active。
+
 2026-10-06 准备 [100 应用激活事件、Layer 整组边界与回归修复](decisions/100-application-events-and-layer-bounds.md)：补齐真实应用失活／恢复的 System 回调；修正 Layer.setPos 的精确四参数和整组提交；播放中换音轨按冻结时钟及新呈现确认，暂停换轨仍比较完整像素；修正无 alpha 光标的 64→32 平均并追加 140 个原生临界样本。协议 **40**、`nativeSystem:3`，TJS ABI **5**、字体 ABI **2**。本批尚待 GitHub-hosted 执行，完整非插件目标保持 active。
 
 100 固定回收 **25 个原 ZIP、338,511,765 字节**全部匹配。098 仍 in_progress：Node **3,287/3,293 pass、6 failure**，直接 runtime **6/6**、原 KAG **96/96**。仅已报告的 Chromium／Firefox shard 1 为 **1,176 pass、81 failure／1,257**，三份主分片和 Chromium library 未报告；缺失不能计为通过。099 为 pending、0 jobs／artifacts，尚无构建或功能通过结论。历史失败、取消和未比较保留，下轮补取，不实时监控。以下保留历史批次当时的状态。
