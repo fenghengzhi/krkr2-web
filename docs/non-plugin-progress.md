@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [098 按访问打开归档与回归修复](decisions/098-lazy-archives-and-regressions.md)：归档索引改为按访问打开、64 容器成功 LRU、完整 AutoPath 重建和异步目录选择；修复窗口清理读取已退休几何，以及同步更新／宿主 Pad 的重复画面提交。协议 **38**。所有新改动尚待 GitHub-hosted Actions 验证，整体非插件目标保持 active。
+
+098 固定归档 **42 个原 ZIP、889,829,711 字节**全部核对。096 终态 failure：Node **3,194/3,226 pass，32 failure**；主浏览器 **1,962 pass、383 failure、76 未报告**；原 KAG **96/96**，直接运行时 **6/6 failure**。097 冻结快照 build success，主 Node／浏览器／兼容／runtime 未报告，不刷新实时结果。原光标严格差异、取消和历史崩溃证据全部保留。以下保留历史批次当时的状态。
+
 最新待核验批次：[Full test suite 37329111623](https://github.com/fenghengzhi/krkr2-web/actions/runs/37329111623)，精确提交 `cd05a9dd73336a6467b993b96b29f529fd8e4313`。097 的 43 个文件已整批推送，新增 **31 个 Node、每浏览器 17 个定义**。首次唯一查询为 **in_progress／conclusion=null**，只确认提交与运行身份，未实时查看 jobs／artifacts。下一轮补取 096 主应用／光标等未报告范围，再回收本批固定结果。没有本地执行验证，完整非插件目标保持 active。
 
 2026-10-05 准备 [097 项目目录、菜单光标与视频音频控制](decisions/097-project-menu-and-video-audio.md)：新增冻结项目目录与程序目录、绝对公开路径、项目独立存档身份和库恢复；菜单的默认光标覆盖与轮询门禁保持独立于脚本逻辑；视频接通原版衰减表、32 位写入转换以及固定版本 getter 行为。会话协议 **37**，TJS ABI **5**、字体 ABI **2** 不变，候选尚待托管执行，整体目标保持 active。

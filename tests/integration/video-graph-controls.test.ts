@@ -10,6 +10,8 @@ function changeGraph(){movie.playRate=2;movie.audioVolume=25000;movie.audioBalan
 function closedWrites(){movie.playRate=-200;movie.audioVolume=-999;movie.audioBalance=1234567;movie.mixingMovieAlpha=4;movie.mixingMovieBGColor=0xaabbcc;}
 `
 type Fixture = Awaited<ReturnType<typeof videoFixture>>
+// These are native real-valued getters: TJS preserves the positive zero sign.
+const closedControls = '+0.0,100000,0,+0.0,-1,-1'
 async function scenario(binary: boolean, body: (f: Fixture) => Promise<void>) {
   const f = await videoFixture(binary, source), failures: unknown[] = []
   try { await body(f) } catch (error) { failures.push(error) }
@@ -22,9 +24,9 @@ for (const binary of [false, true]) {
   const label = binary ? 'bytecode' : 'source'
   test(`${label}: unopened graph controls are no-ops while VideoOverlay retains its object preferences`, { timeout: 60000 },
     () => scenario(binary, async (f) => {
-      assert.equal(await f.session.evaluate('controls()'), '0,100000,0,0,-1,-1')
+      assert.equal(await f.session.evaluate('controls()'), closedControls)
       await f.execute('closedWrites();movie.visible=.5;movie.loop=.5;movie.setSegmentLoop(1,2);movie.setPeriodEvent(2);')
-      assert.equal(await f.session.evaluate('controls()'), '0,100000,0,0,-1,-1')
+      assert.equal(await f.session.evaluate('controls()'), closedControls)
       assert.equal(await f.session.evaluate('preferences()'), '3,4,32,24,1,1,2,1,2,2')
       assert.equal(f.video.commands.length, 0)
       await f.execute('movie.open("movie.mp4");')
@@ -38,7 +40,7 @@ for (const binary of [false, true]) {
       let graph = f.video.movies.get(f.video.onlyId())!
       assert.deepEqual([graph.playRate, graph.audioVolume, graph.audioBalance, graph.mixingMovieAlpha, graph.mixingMovieBGColor], [2, 25000, -50000, .25, 0x102030])
       await f.execute('movie.close();')
-      assert.equal(await f.session.evaluate('controls()'), '0,100000,0,0,-1,-1')
+      assert.equal(await f.session.evaluate('controls()'), closedControls)
       assert.equal(f.video.movies.size, 0)
       await f.execute('closedWrites();movie.open("movie.mp4");')
       graph = f.video.movies.get(f.video.onlyId())!
@@ -60,8 +62,11 @@ for (const binary of [false, true]) {
     () => scenario(binary, async (f) => {
       await f.execute('movie.open("movie.mp4");changeGraph();')
       f.video.failOpen = new Error('new-graph-open-failure')
-      await assert.rejects(f.execute('movie.open("movie.mp4");'), /new-graph-open-failure/)
-      assert.equal(await f.session.evaluate('controls()'), '0,100000,0,0,-1,-1')
+      assert.match(
+        await f.session.evaluate('(function(){try{movie.open("movie.mp4");}catch(e){return e.message;}return "unexpected success";})()'),
+        /new-graph-open-failure/,
+      )
+      assert.equal(await f.session.evaluate('controls()'), closedControls)
       await f.execute('closedWrites();movie.open("movie.mp4");')
       const graph = f.video.movies.get(f.video.onlyId())!
       assert.deepEqual([graph.playRate, graph.audioVolume, graph.audioBalance, graph.mixingMovieAlpha], [1, 100000, 0, 1])
@@ -70,9 +75,9 @@ for (const binary of [false, true]) {
   test(`${label}: Window disconnect exposes closed graph defaults and boolean loop conversion remains independent`, { timeout: 60000 },
     () => scenario(binary, async (f) => {
       await f.execute('movie.loop=%[];movie.open("movie.mp4");changeGraph();System.exitOnWindowClose=false;invalidate win;')
-      assert.equal(await f.session.evaluate('movie.loop+"|"+controls()'), '1|0,100000,0,0,-1,-1')
+      assert.equal(await f.session.evaluate('movie.loop+"|"+controls()'), '1|' + closedControls)
       await f.execute('closedWrites();movie.loop=null;')
-      assert.equal(await f.session.evaluate('movie.loop+"|"+controls()'), '0|0,100000,0,0,-1,-1')
+      assert.equal(await f.session.evaluate('movie.loop+"|"+controls()'), '0|' + closedControls)
       assert.equal(f.video.movies.size, 0)
       await assert.rejects(f.execute('movie.open("movie.mp4");'), /disconnected/)
     }))

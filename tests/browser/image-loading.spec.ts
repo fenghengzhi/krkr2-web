@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { imageFixture } from '../helpers/image-fixtures.ts'
@@ -68,12 +69,7 @@ Debug.message("images-ready:"+string(tags.offs_x=="12" && tags.offs_y=="-7" && t
     await expect(page.locator('#logs')).toContainText('images-ready:1')
     await expect(page.locator('canvas')).toHaveJSProperty('width', 4)
     await expect(page.locator('canvas')).toHaveJSProperty('height', 1)
-    await page.locator('canvas').evaluate((node) => {
-      const c = node as HTMLCanvasElement
-      c.style.width = `${c.width * 32}px`
-      c.style.height = `${c.height * 32}px`
-      c.style.imageRendering = 'pixelated'
-    })
+    await magnifyPixelWindow(page.locator('canvas'))
     expect(await sample(page)).toEqual([
       [0, 0, 0, 255],
       [101, 51, 26, 255],

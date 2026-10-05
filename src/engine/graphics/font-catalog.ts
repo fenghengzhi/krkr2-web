@@ -69,8 +69,8 @@ export function validateSystemFonts(input: FontDescriptor[]): FontDescriptor[] {
   })
 }
 interface CatalogDependencies {
-  files(): Resource[]
-  resolve(name: string): Resource
+  files(): Resource[] | Promise<Resource[]>
+  resolve(name: string): Resource | Promise<Resource>
   bind(fonts: Map<string, NamedFontFace[]>): void
   check(): void
   yield(): Promise<void>
@@ -83,6 +83,7 @@ export class FontCatalog {
   private metadata = new WeakMap<object, FontDescriptor[]>()
   private styles = new WeakMap<object, { bold: boolean; italic: boolean }>()
   private loading?: Promise<void>
+  private readonly fileFaces = new Map<string, object>()
   constructor(private readonly deps: CatalogDependencies) {}
   setSystem(entries: FontDescriptor[]) {
     this.system = validateSystemFonts(entries)
@@ -98,8 +99,7 @@ export class FontCatalog {
   }
   private async discover(font?: FontSpec) {
     const seen = new Set<object>()
-    const files = this.deps
-      .files()
+    const files = (await this.deps.files())
       .filter((file) => /\.(ttf|otf|ttc)$/i.test(file.name))
       .sort((a, b) => Number(a.name.includes('>')) - Number(b.name.includes('>')))
       .filter((file) => {
@@ -109,7 +109,10 @@ export class FontCatalog {
         return true
       })
     if (font?.faceIsFileName) {
-      const current = this.deps.resolve(font.face)
+      const current = await this.deps.wait(Promise.resolve(this.deps.resolve(font.face)))
+      this.fileFaces.delete(font.face)
+      this.fileFaces.set(font.face, current.cacheToken ?? current)
+      if (this.fileFaces.size > 128) this.fileFaces.delete(this.fileFaces.keys().next().value!)
       if (!files.some((file) => (file.cacheToken ?? file) === (current.cacheToken ?? current)))
         files.push(current)
     }
@@ -177,8 +180,8 @@ export class FontCatalog {
   charset(font: FontSpec): FontCharset | undefined {
     let name = font.face.toLowerCase()
     if (font.faceIsFileName) {
-      const resource = this.deps.resolve(font.face),
-        entries = resource && this.metadata.get(resource.cacheToken ?? resource)
+      const token = this.fileFaces.get(font.face),
+        entries = token && this.metadata.get(token)
       if (entries?.[0]) name = entries[0].name.toLowerCase()
     }
     return this.entries().find((entry) => entry.name.toLowerCase() === name)?.charsets?.[0]
@@ -191,5 +194,6 @@ export class FontCatalog {
     this.system = []
     this.metadata = new WeakMap()
     this.styles = new WeakMap()
+    this.fileFaces.clear()
   }
 }

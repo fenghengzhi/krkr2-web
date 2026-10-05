@@ -9,6 +9,7 @@ import { WorkerWindowSurfaces } from '../workers/window-surfaces.ts'
 import { BrowserGraphics } from '../backends/text/browser/graphics.ts'
 import { readScript, readText, writeText } from '../backends/files/text-codecs.ts'
 import { inflateImage, deflateImage } from '../backends/files/blob-source.ts'
+import { archiveReader } from '../backends/files/archive-reader.ts'
 import { IndexedDbSaveStore } from '../backends/files/indexeddb-saves.ts'
 import { WebAppLocks } from '../backends/files/web-app-locks.ts'
 import { fillWebRandomBytes } from '../backends/system/web-crypto.ts'
@@ -38,6 +39,7 @@ export function createSession(request: InitializeRequest, project?: GameProject)
   if (dataPath !== undefined) arguments_.set('-datapath', dataPath)
   let sequence = 0
   const session: EngineSession = new EngineSession({
+    archives: archiveReader,
     project: storageProject,
     systemFonts: request.systemFonts,
     systemColors,

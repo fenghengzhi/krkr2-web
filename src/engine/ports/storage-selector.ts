@@ -10,6 +10,14 @@ export interface StorageSelectorFilter {
   readonly pattern: string
 }
 
+/** One directory's canonical public names. Archive contents are opened only
+ * when this directory is requested, never by the initial root listing. */
+export interface StorageSelectorDirectory {
+  readonly name: string
+  readonly entries: readonly StorageSelectorEntry[]
+  readonly directories: readonly string[]
+}
+
 export interface StorageSelectorPresentation {
   readonly save: boolean
   readonly name: string

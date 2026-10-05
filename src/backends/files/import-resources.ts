@@ -12,13 +12,15 @@ export async function importResources(
   files: GameFile[],
   checkpoint: () => Promise<void>,
   pool?: HttpRangePool,
+  options: { lazyArchives?: boolean } = {},
 ): Promise<Resource[]> {
-  return importSources(await resolveFiles(files, checkpoint, pool), checkpoint)
+  return importSources(await resolveFiles(files, checkpoint, pool), checkpoint, options)
 }
 
 export async function importSources(
   files: SourceFile[],
   checkpoint: () => Promise<void>,
+  options: { lazyArchives?: boolean } = {},
 ): Promise<Resource[]> {
   if (files.length > 10000) throw new Error('Import exceeds 10,000 source files')
   const resources: Resource[] = [],
@@ -53,6 +55,7 @@ export async function importSources(
         return bytes
       },
     })
+    if (options.lazyArchives) continue
     const prefix = await source.read(0, Math.min(source.size, 11)),
       zipMagic =
         prefix &&

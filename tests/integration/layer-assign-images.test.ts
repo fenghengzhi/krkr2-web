@@ -166,6 +166,7 @@ var retainedGeometry=[target.left,target.top,target.width,target.height].join(",
     const { session, stop } = await fixture(
       binary,
       String.raw`
+win.setInnerSize(32,32);win.visible=true;target.visible=true;
 var paints=0;
 target.onPaint=function(){global.paints++;};
 function markPaint(){global.target.update(0,0,0,1);}

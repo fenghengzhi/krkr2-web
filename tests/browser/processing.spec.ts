@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect, type Page } from '@playwright/test'
 async function evaluate(page: Page, source: string, value: string) {
   await page.locator('#expression').fill(source)
@@ -59,13 +60,8 @@ Debug.message("processing-ready:"+string(saved.getMainPixel(0,0)==0xff && saved.
     await expect(page.locator('#logs')).toContainText('processing-ready:1')
     await expect(page.locator('canvas')).toHaveJSProperty('width', 8)
     await expect(page.locator('canvas')).toHaveJSProperty('height', 4)
-    // Isolate pixel output from the page's smooth CSS enlargement.
-    await page.locator('canvas').evaluate((node) => {
-      const canvas = node as HTMLCanvasElement
-      canvas.style.width = `${canvas.width * 16}px`
-      canvas.style.height = `${canvas.height * 16}px`
-      canvas.style.imageRendering = 'pixelated'
-    })
+    // Scale the owned Window and its clip rectangles together.
+    await magnifyPixelWindow(page.locator('canvas'))
     expect(await sample(page)).toEqual([
       [0, 0, 128, 255],
       [0, 0, 128, 255],

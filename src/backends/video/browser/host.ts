@@ -9,7 +9,7 @@ import {
   type VideoSnapshot,
   type VideoTimeline,
 } from '../../../engine/ports/video.ts'
-import { videoFrameAt, videoPresentedFrameAt, videoReportedFrameAt,
+import { videoFrameAt, videoPresentedFrameAt,
   videoClockFrameAt, videoClockFrameTime, videoClockSnapshot, videoClockFrameUpdate } from '../../../engine/media/video-time.ts'
 import { videoOutputRectangle } from '../../../engine/media/video-mixing.ts'
 import type { Pixels } from '../../../engine/ports/graphics.ts'
@@ -18,6 +18,7 @@ import type { VideoMessage, VideoRequest } from '../../../protocol/video.ts'
 import type { WebAudioHost } from '../../audio/web/host.ts'
 import type { CursorRasterLayer, CursorScene } from '../../input/cursor.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
+import { waitForClockPresentation } from './clock-seek.ts'
 import {
   createVideoMixingSurface,
   releaseVideoMixingSurface,
@@ -36,6 +37,7 @@ interface Movie {
   mime: string
   lastSelectedIndex: number
   presentedTime?: number
+  presentedFrames?: number
   switching?: VideoStage
   bytes: number
   settings: VideoSettings
@@ -501,6 +503,7 @@ export class WebVideoHost {
       movie.callback = undefined
       if (movie.disposed || movie.switching || this.isPaused || movie.seeking || movie.status !== 'play') return
       movie.presentedTime = metadata.mediaTime * 1000
+      movie.presentedFrames = metadata.presentedFrames
       try {
         if (this.advanceClock(movie, false)) return
         const s = movie.settings
@@ -660,16 +663,28 @@ export class WebVideoHost {
     }
   }
   private async seekPresented(movie: Movie, position: number, frameSeek = false): Promise<void> {
+    if (frameSeek) {
+      const epoch = movie.epoch
+      this.current(movie, epoch)
+      // A true no-op has no seek event or new compositor submission to await.
+      if (!movie.element.seeking && movie.element.readyState >= 2 &&
+          Math.abs(movie.element.currentTime * 1000 - position) <= 0.00001 &&
+          movie.presentedTime !== undefined) {
+        await this.seek(movie, position)
+        this.current(movie, epoch)
+        return
+      }
+      await waitForClockPresentation(movie.element, position, movie.presentedFrames ?? 0,
+        movie.abort.signal, () => this.current(movie, epoch), () => this.seek(movie, position),
+        (expired) => this.timeouts.start(15000, expired), (metadata) => {
+          movie.presentedTime = metadata.mediaTime * 1000
+          movie.presentedFrames = metadata.presentedFrames
+        })
+      return
+    }
     const timeline = movie.timeline,
-      // A public frame seek is truncated to 100 ns by the clock conversion.
-      // Recover a unique neighbouring PTS before requesting its presentation;
-      // arbitrary position seeks retain the ordinary sample-floor lookup.
-      target = (frameSeek ? videoPresentedFrameAt(timeline!, position) : undefined) ?? videoFrameAt(timeline!, position),
-      // Average-frame positions can lie inside a VFR sample. Firefox reports
-      // such requested positions rather than a sample's exact PTS. This is a
-      // public clock seek, not an assertion of byte-identical decoded images.
-      matches = (time: number) => (frameSeek ? videoReportedFrameAt(timeline!, time) :
-        videoPresentedFrameAt(timeline!, time)) === target
+      target = videoFrameAt(timeline!, position),
+      matches = (time: number) => videoPresentedFrameAt(timeline!, time) === target
     if (Math.abs(movie.element.currentTime * 1000 - position) <= 0.00001 &&
         movie.presentedTime !== undefined && matches(movie.presentedTime)) {
       await this.seek(movie, position)
@@ -699,6 +714,7 @@ export class WebVideoHost {
             callback = undefined
             if (settled) return
             movie.presentedTime = metadata.mediaTime * 1000
+            movie.presentedFrames = metadata.presentedFrames
             if (matches(movie.presentedTime)) { presented = true; complete() }
             else { try { request() } catch (error) { done(error) } }
           })
@@ -761,6 +777,7 @@ export class WebVideoHost {
             callback = undefined
             if (settled) return
             movie.presentedTime = metadata.mediaTime * 1000
+            movie.presentedFrames = metadata.presentedFrames
             observations.push({ phase: 'presented', time: movie.presentedTime,
               position: movie.element.currentTime * 1000, seeking: movie.element.seeking,
               readyState: movie.element.readyState })
@@ -816,6 +833,7 @@ export class WebVideoHost {
       try {
         callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
           movie.presentedTime = metadata.mediaTime * 1000
+          movie.presentedFrames = metadata.presentedFrames
           presented = true
           complete()
         })

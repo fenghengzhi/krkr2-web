@@ -1,4 +1,5 @@
-import type { Resource } from '../ports/storage.ts'
+import type { ArchiveReader, Resource } from '../ports/storage.ts'
+import { StorageResolver } from './resolver.ts'
 import { parseStoragePath, storageDirectoryPath, storageFilePath, toPublicStoragePath } from './public-path.ts'
 
 /** Host startup configuration; these are not TJS Storages properties. */
@@ -40,13 +41,14 @@ export function copyProjectSelection(value?: ProjectSelection): ProjectSelection
 /** Decide only from actual imported files/indices. Never execute an EXE or
  * search an arbitrary descendant for a startup script. A selected but broken
  * project is an error, not permission to fall back to a different game. */
-export function selectProject(resources: readonly Resource[], requested?: ProjectSelection): GameProject | undefined {
+export function selectProject(resources: readonly Resource[], requested?: ProjectSelection,
+  deferArchiveIndex = false): GameProject | undefined {
   const selection = copyProjectSelection(requested)
   if (selection.mode === 'collection') return undefined
   const files = new Map(resources.filter((file) => !file.aliasOf).map((file) => [file.name, file])),
     directories = new Set([''])
   for (const file of files.values()) {
-    if (file.archiveKind) directories.add(file.name + '>')
+    if (file.archiveKind || deferArchiveIndex && !file.name.includes('>')) directories.add(file.name + '>')
     for (let at = 0; at < file.name.length; at++)
       if (file.name[at] === '/' || file.name[at] === '>') directories.add(file.name.slice(0, at + 1))
   }
@@ -65,7 +67,7 @@ export function selectProject(resources: readonly Resource[], requested?: Projec
   const archive = (name: string): string | undefined => {
     const path = match(name, files.keys())
     if (path === undefined) return undefined
-    if (!files.get(path)!.archiveKind) throw new Error(`Selected project is not a supported archive: ${path}`)
+    if (!deferArchiveIndex && !files.get(path)!.archiveKind) throw new Error(`Selected project is not a supported archive: ${path}`)
     return path + '>'
   }
   let chosen = match(executableDirectory + 'content-data/', directories)
@@ -78,4 +80,37 @@ export function selectProject(resources: readonly Resource[], requested?: Projec
   }
   chosen ??= match(executableDirectory + 'data/', directories)
   return copyGameProject({ directory: chosen ?? executableDirectory, executableDirectory })
+}
+
+/** Native project selection tests the raw data.xp3/data.exe existence. Only
+ * the self-combined EXE step probes an XP3 mark; no archive index is opened. */
+export async function selectProjectLazy(resources: readonly Resource[], requested: ProjectSelection | undefined,
+  reader: ArchiveReader, checkpoint: () => Promise<void>): Promise<GameProject | undefined> {
+  const selection = copyProjectSelection(requested)
+  if (selection.mode === 'collection') return undefined
+  if (selection.mode === 'root' && selection.directory.includes('>') && !selection.directory.endsWith('>')) {
+    const delimiter = selection.directory.indexOf('>'),
+      root = selectProject(resources, { ...selection, directory: selection.directory.slice(0, delimiter + 1) }, true)!,
+      resolver = new StorageResolver('', false, reader, checkpoint)
+    resolver.mount([...resources])
+    try {
+      const directory = await resolver.listDirectory(root.directory + selection.directory.slice(delimiter + 1))
+      return copyGameProject({ ...root, directory: directory.name })
+    } finally { resolver.dispose() }
+  }
+  const selected = selectProject(resources, selection.mode === 'auto'
+    ? { ...selection, executable: undefined } : selection, true)!
+  if (selection.mode !== 'auto' || selection.executable === undefined) return selected
+  const fallback = selected.executableDirectory,
+    atSelfStep = selected.directory.toLowerCase() === fallback.toLowerCase() ||
+      selected.directory.toLowerCase() === (fallback + 'data/').toLowerCase()
+  if (!atSelfStep) return selected
+  const resolver = new StorageResolver()
+  resolver.mount([...resources])
+  const executable = resolver.find(parseStoragePath(selection.executable))
+  if (!executable) throw new Error('Selected executable was not imported')
+  await checkpoint()
+  const combined = await reader.probeXp3(executable, checkpoint)
+  await checkpoint()
+  return combined ? copyGameProject({ ...selected, directory: executable.name + '>' }) : selected
 }

@@ -1,5 +1,8 @@
 .stage.game-desktop {
   display: block;
+  /* A measured sole Window has a fixed logical width. The old single-canvas
+     stage's centering must not move its embedded desktop origin. */
+  place-items: start;
   overflow: auto;
   isolation: isolate;
   min-width: 0;
@@ -102,6 +105,10 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+.game-window-menu > .game-menu-group > button {
+  /* Popup rows fill their panel; top-level leaf items share a wrapping bar. */
+  width: auto;
 }
 .game-window-body,
 .game-window-content {

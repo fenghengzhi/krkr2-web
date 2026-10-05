@@ -476,6 +476,11 @@ export function mountApp(root: HTMLDivElement): void {
       player = instance
       gameHelp = createGameHelp(el('stage').parentElement!)
       gameDialogs = createGameDialogs({
+        browse: (id, directory) => {
+          if (current !== generation || instance.session.isDisposed || clipboardSelecting || stopRequested)
+            return Promise.resolve(null)
+          return instance.session.browseStorageSelector(id, directory)
+        },
         choose: (id, value) => {
           if (
             current !== generation ||

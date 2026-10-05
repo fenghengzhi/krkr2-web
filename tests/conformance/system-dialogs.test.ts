@@ -4,7 +4,7 @@ import { SystemDialogs, type SystemDialogSnapshot } from '../../src/engine/scene
 import { ModalLoop } from '../../src/engine/scheduler/modal-loop.ts'
 import { ExecutionControl } from '../../src/engine/scheduler/control.ts'
 import type { HostContext, HostReply, ScriptObject } from '../../src/engine/script/runtime.ts'
-import type { StorageSelectorPresentation } from '../../src/engine/ports/storage-selector.ts'
+import type { StorageSelectorDirectory, StorageSelectorPresentation } from '../../src/engine/ports/storage-selector.ts'
 
 const storagePresentation: StorageSelectorPresentation = {
   save: false,
@@ -15,6 +15,12 @@ const storagePresentation: StorageSelectorPresentation = {
   filterIndex: 0,
   entries: [],
   directories: ['game://./'],
+}
+
+function held<T>() {
+  let resolve!: (value: T) => void, reject!: (error: unknown) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
 }
 
 function token(reply: HostReply): number {
@@ -808,4 +814,71 @@ test('throwing Stop publication does not retain any dialog identity or prevent r
   assert.equal(f.dialogs.count, 0)
   assert.equal(f.loop.depth, 0)
   assert.equal(f.leases.size, 0)
+})
+
+test('asynchronous selector confirmation remains cancellable and a late I/O error cannot revive its scope', { timeout: 30000 }, async (t) => {
+  const f = await fixture(), pending = held<string>()
+  t.after(() => f.stop())
+  const current = token(f.dialogs.showStorageSelector(801, 'Async choice', storagePresentation, () => pending.promise)),
+    id = f.request().id, choosing = f.dialogs.respond(id, 'first')
+  assert(choosing instanceof Promise)
+  assert.equal(f.dialogs.respond(id, 'duplicate'), false)
+  assert.equal(f.dialogs.respond(id, null), true)
+  assert.equal(await choosing, false)
+  await f.result(current, undefined)
+  await f.host('Modal.end', current)
+  pending.reject(new Error('Late archive read failed'))
+  const fresh = f.show('fresh-after-selector'), request = f.request()
+  assert.equal(f.dialogs.respond(id, 'stale'), false)
+  assert.equal(f.dialogs.respond(request.id, 'fresh'), true)
+  await f.result(fresh, 'fresh')
+  await f.host('Modal.end', fresh)
+})
+
+test('asynchronous selector errors and host unavailability leave the same request retryable', { timeout: 30000 }, async (t) => {
+  const f = await fixture(), pending = held<string>()
+  t.after(() => f.stop())
+  let available = true
+  const current = token(f.dialogs.showStorageSelector(802, 'Retry choice', storagePresentation, async (value) => {
+    if (value === 'bad') throw new Error('Archive index failed')
+    return value === 'held' ? pending.promise : value
+  })), id = f.request().id
+  await assert.rejects(async () => f.dialogs.respond(id, 'bad'), /Archive index failed/)
+  assert.equal(f.request().id, id)
+  const choosing = f.dialogs.respond(id, 'held', () => available)
+  available = false
+  pending.resolve('late result')
+  assert.equal(await choosing, false)
+  assert.equal(f.request().id, id)
+  available = true
+  assert.equal(await f.dialogs.respond(id, 'accepted', () => available), true)
+  await f.result(current, 'accepted')
+  await f.host('Modal.end', current)
+})
+
+test('selector directory reads are bound to the current modal and Stop releases an unfinished browse', { timeout: 30000 }, async (t) => {
+  const f = await fixture(), pending = held<StorageSelectorDirectory>()
+  t.after(() => f.stop())
+  let reads = 0
+  const current = token(f.dialogs.showStorageSelector(803, 'Browse', storagePresentation, (value) => value,
+    async () => { reads++; return pending.promise })), id = f.request().id
+  assert.equal(await f.dialogs.browse(id + 1, 'game://./pack.zip>'), null)
+  assert.equal(reads, 0)
+  const browsing = f.dialogs.browse(id, 'game://./pack.zip>')
+  await assert.rejects(f.dialogs.browse(id, 'game://./other.zip>'), /already running/)
+  const child = f.show('covering-child'), childId = f.request().id
+  assert.equal(await f.dialogs.browse(id, 'game://./pack.zip>'), null)
+  pending.resolve({ name: 'game://./pack.zip>', entries: [], directories: ['game://./'] })
+  assert.equal(await browsing, null, 'A result for a covered parent must not replace the child UI')
+  assert.equal(f.dialogs.respond(childId, 'done'), true)
+  await f.result(child, 'done'); await f.host('Modal.end', child)
+  assert.equal(f.request().id, id)
+  assert.equal(f.dialogs.respond(id, null), true)
+  await f.result(current, undefined); await f.host('Modal.end', current)
+  const never = held<StorageSelectorDirectory>()
+  f.dialogs.showStorageSelector(804, 'Stop browse', storagePresentation, (value) => value, () => never.promise)
+  const stopped = f.dialogs.browse(f.request().id, 'game://./held.zip>')
+  f.stop()
+  assert.equal(await stopped, null)
+  never.reject(new Error('Late stopped provider failure'))
 })

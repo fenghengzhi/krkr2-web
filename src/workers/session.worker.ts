@@ -4,7 +4,8 @@ import { importSources } from '../backends/files/import-resources.ts'
 import { resolveFiles, type SourceFile } from '../backends/files/source-files.ts'
 import { HttpRangePool } from '../backends/files/http-range.ts'
 import { gameIdentity, projectIdentity } from '../player/game-identity.ts'
-import { copyProjectSelection, selectProject, type GameProject } from '../engine/storage/project.ts'
+import { copyProjectSelection, selectProjectLazy, type GameProject } from '../engine/storage/project.ts'
+import { archiveReader } from '../backends/files/archive-reader.ts'
 import type { Resource } from '../engine/ports/storage.ts'
 import { PROTOCOL_VERSION, type InputAdmissionAck, type SessionApi } from '../protocol/session.ts'
 import type { EngineSession, SessionAdmission } from '../engine/session.ts'
@@ -123,8 +124,8 @@ const api: SessionApi = {
         filesReady = libraryLease.files
         identity = libraryLease.record.gameId
         if (libraryLease.record.project) {
-          resources = await importSources(filesReady, checkpoint)
-          project = selectProject(resources, { mode: 'root', ...libraryLease.record.project })
+          resources = await importSources(filesReady, checkpoint, { lazyArchives: true })
+          project = await selectProjectLazy(resources, { mode: 'root', ...libraryLease.record.project }, archiveReader, checkpoint)
           if (await projectIdentity(libraryLease.record.sourceGameId!, project) !== identity)
             throw new Error('Library project identity mismatch; import the game again')
         }
@@ -133,8 +134,8 @@ const api: SessionApi = {
         identity = await gameIdentity(filesReady, checkpoint)
         const requested = copyProjectSelection(selection)
         if (requested.mode !== 'collection') {
-          resources = await importSources(filesReady, checkpoint)
-          project = selectProject(resources, requested)
+          resources = await importSources(filesReady, checkpoint, { lazyArchives: true })
+          project = await selectProjectLazy(resources, requested, archiveReader, checkpoint)
           identity = await projectIdentity(identity, project)
         }
       }
@@ -190,7 +191,7 @@ const api: SessionApi = {
         }
         await target.control.wait()
         target.control.check()
-      })
+      }, { lazyArchives: true })
       target.control.check()
       target.mount(resources)
       prepared = undefined
@@ -300,6 +301,9 @@ const api: SessionApi = {
   },
   async selectSystemDialog(id, value) {
     return active().selectSystemDialog(id, value)
+  },
+  async browseStorageSelector(id, directory) {
+    return active().browseStorageSelector(id, directory)
   },
   async previewFont(id, face, kind) {
     return active().previewFont(id, face, kind)

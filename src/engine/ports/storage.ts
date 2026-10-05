@@ -21,4 +21,15 @@ export interface Resource {
   readonly source?: ByteSource
   read(): Promise<Uint8Array>
 }
+export interface ArchiveIndex {
+  readonly kind: 'xp3' | 'zip'
+  readonly entries: readonly Resource[]
+}
+/** Opening is explicit and asynchronous. A raw file can exist without being
+ * a valid archive; undefined means unrecognized format, never corrupt index. */
+export interface ArchiveReader {
+  open(resource: Resource, checkpoint: () => Promise<void>): Promise<ArchiveIndex | undefined>
+  probeXp3(resource: Resource, checkpoint: () => Promise<void>): Promise<boolean>
+  probeArchive?(resource: Resource, checkpoint: () => Promise<void>): Promise<boolean>
+}
 export type Inflater = (bytes: Uint8Array, expectedLength: number) => Promise<Uint8Array>

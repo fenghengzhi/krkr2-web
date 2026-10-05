@@ -86,7 +86,7 @@ export class CursorStorage {
   private disposalError?: Error
 
   constructor(
-    private readonly find: (name: string) => Resource | undefined,
+    private readonly find: (name: string) => Resource | undefined | Promise<Resource | undefined>,
     private readonly decode: (bytes: Uint8Array) => Promise<CursorAsset>,
     private readonly check: () => void,
     private readonly publish: (id: number, asset: CursorAsset) => void,
@@ -250,7 +250,8 @@ export class CursorStorage {
 
   async load(name: string, valid: () => boolean): Promise<number> {
     this.caller(valid)
-    const resource = this.find(name)
+    const resource = await this.wait(Promise.resolve(this.find(name)))
+    this.caller(valid)
     if (!resource) fail('resource not found: ' + name)
     const path = resource.name
     if (typeof path !== 'string' || !path) fail('resource has no resolved path')

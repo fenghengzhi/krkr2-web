@@ -46,7 +46,7 @@ import { deviceInt, deviceMulDiv, drawDeviceGeometry, fromPrimary, paintBoxPoint
 import { LayerService } from './scene/layer-objects.ts'
 import { captureVideoMixingBitmap } from './media/video-mixing.ts'
 import type { DecodedImage, GraphicsDecoder, Renderer, RendererStatus } from './ports/graphics.ts'
-import type { Inflater, Resource } from './ports/storage.ts'
+import type { ArchiveReader, Inflater, Resource } from './ports/storage.ts'
 import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts'
 import { SaveOverlay } from './storage/save-overlay.ts'
 import { StorageSelector, normalizeSelectorPath } from './storage/selector.ts'
@@ -225,6 +225,7 @@ interface WindowMouseKeys {
 }
 export interface SessionDependencies {
   project?: GameProject
+  archives?: ArchiveReader
   /** The page implements the matching request/reply presentation protocol. */
   windowMoveSupported?: boolean
   windowGeometry?: WindowGeometryPort
@@ -368,6 +369,7 @@ export class EngineSession {
   private readonly abortedReceiptRounds = new Map<number, Error>()
   private readonly checkpoints = new Map<number, SessionCheckpoint>()
   private readonly windowPresentationsCompleted = new Map<number, number>()
+  private readonly windowPresentedVersions = new Map<number, number>()
   private readonly videoFrameChanges = new Map<number, number>()
   private videoFrameChange = 0
   private executing = false
@@ -437,7 +439,15 @@ export class EngineSession {
   private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
     this.project = copyGameProject(deps.project)
-    this.storage = new StorageResolver(this.project?.directory ?? '', !this.project)
+    let archiveYieldAt = deps.now() + 8, archiveSteps = 0
+    this.storage = new StorageResolver(this.project?.directory ?? '', !this.project, deps.archives,
+      async () => {
+        await this.control.wait(); this.control.check()
+        if (++archiveSteps >= 64 || deps.now() >= archiveYieldAt) {
+          await deps.yieldToHost(); this.control.check()
+          archiveSteps = 0; archiveYieldAt = deps.now() + 8
+        }
+      })
     this.windowGeometry = deps.windowGeometry ?? new HeadlessWindowGeometry()
     this.detachGeometry = this.windowGeometry.subscribe((observation) => this.observeWindowScroll(observation))
     this.systemColors = new SystemColors(deps.systemColors)
@@ -459,7 +469,8 @@ export class EngineSession {
       (work) => this.finishGraphics(work),
     )
     this.fontCatalog = new FontCatalog({
-      files: () => this.storage.list().map((file) => this.resolveResource(toPublicStoragePath(file.name))),
+      // Never enumerate unopened packages just to discover optional fonts.
+      files: () => this.storage.knownResources().map((file) => this.saves.resource(file.name) ?? file),
       resolve: (name) => this.resolveResource(name),
       bind: (fonts) => {
         this.fonts.registerNamed(fonts)
@@ -487,9 +498,10 @@ export class EngineSession {
       this.activity = { ...deps.activity }
     }
     this.pauseMediaRequestTimeouts()
-    this.saves = new SaveOverlay(deps.saveStore ?? new MemorySaveStore(), (path) =>
-      this.images.invalidate(path),
-    )
+    this.saves = new SaveOverlay(deps.saveStore ?? new MemorySaveStore(), (path) => {
+      this.images.invalidate(path)
+      this.storage.invalidateSearch()
+    })
     this.diagnostics = new DebugLog(this.saves, deps.wallNow ?? Date.now, (entry) =>
       deps.event({ type: 'log', level: entry.level, text: entry.text }),
     )
@@ -523,6 +535,7 @@ export class EngineSession {
         () => this.windowUpdates.finish(),
         () => { this.physicalScreen = undefined; this.hiddenCursorPositions.clear() },
         () => this.images.dispose(),
+        () => this.storage.dispose(),
         () => this.closeCursors(),
         () => this.closeWindowRegions(),
         () => this.fonts.dispose(),
@@ -833,6 +846,7 @@ export class EngineSession {
           this.keyboardRoutes.delete(window.id)
           this.refreshKeyboardRoutes()
           this.windowPresentationsCompleted.delete(window.id)
+          this.windowPresentedVersions.delete(window.id)
           this.videoFrameChanges.delete(window.id)
           this.deps.renderer.closeWindow?.(window.id)
           this.syncActiveWindow()
@@ -986,7 +1000,7 @@ export class EngineSession {
     this.setState('running')
     this.applyPause()
     return this.execute(async () => {
-      const resource = this.resolveResource(entry)
+      const resource = await this.resolveResource(entry)
       return this.runtime!.execute(
         await this.deps.decodeScript(await resource.read(), '', this.textEncoding.codec),
         resource.name,
@@ -1018,7 +1032,7 @@ export class EngineSession {
             [...this.redrawRequests].some((id) => !this.deferredPaint.has(id))
           )
             this.dirty = true
-          if (this.dirty && !this.systemEvents?.disabled) {
+          if ((this.dirty || this.windowUpdates.pending) && !this.systemEvents?.disabled) {
             const reply = this.inputs!.start(this.prepareFrame())
             if (reply.kind === 'invoke')
               this.discard(await this.runtime!.invoke(reply.callback, reply.args))
@@ -2185,7 +2199,7 @@ export class EngineSession {
         [...this.redrawRequests].some((layer) => !this.deferredPaint.has(layer))
       )
         this.dirty = true
-      if (!this.dirty) return empty
+      if (!this.dirty && !this.windowUpdates.pending) return empty
       checkpoint.savedPainted = this.paintedLayers
       this.paintedLayers = new Set()
       checkpoint.paintStarted = true
@@ -3188,7 +3202,7 @@ export class EngineSession {
     this.presentWindowViews()
     this.presentMenus()
     if (
-      !this.dirty ||
+      (!this.dirty && !synchronous) ||
       (this.preparingFrame && !synchronous) ||
       this.state === 'stopped' ||
       this.state === 'stopping' ||
@@ -3197,12 +3211,17 @@ export class EngineSession {
       (this.activity.state !== 'visible' && this.graphicsStatus.state !== 'restoring')
     )
       return
-    const targets = (this.windows?.registered() ?? []).filter((window) =>
-      onlyWindowId === undefined || window.id === onlyWindowId)
+    const version = this.frameWorkVersion,
+      targets = (this.windows?.registered() ?? []).filter((window) =>
+        onlyWindowId === undefined || window.id === onlyWindowId)
     if (!targets.length && !this.deps.renderer.openWindow)
       this.deps.renderer.present([], this.width, this.height)
     let complete = true
     for (const target of targets) {
+      // A synchronous native Window delivery may already have submitted these
+      // pixels. The outer publication still publishes host views and receipts,
+      // but must not present that same revision a second time.
+      if (!synchronous && this.windowPresentedVersions.get(target.id) === version) continue
       const window = target.state
       if (!window.geometry || this.geometryRequests.get(target.id) !== window.geometry.revision) {
         complete = false
@@ -3239,13 +3258,18 @@ export class EngineSession {
       )
       if (presented === false) complete = false
       else {
+        if (this.registeredWindow(target.id) === target) this.windowPresentedVersions.set(target.id, version)
         if (window.visible && this.registeredWindow(target.id) === target) this.windowPresentationsCompleted.set(
           target.id,
           (this.windowPresentationsCompleted.get(target.id) ?? 0) + 1,
         )
       }
     }
-    if (complete && onlyWindowId === undefined && !this.windowUpdates.pending) this.dirty = false
+    // Pending onPaint callbacks are separate from composed pixels. In
+    // particular, disabled game events cannot make host-only Pad operations
+    // repeatedly submit an unchanged frame. A reentrant renderer invalidation
+    // gets a newer version and remains dirty for its own publication.
+    if (complete && onlyWindowId === undefined && this.frameWorkVersion === version) this.dirty = false
     this.completeReadyReceipts()
   }
   private queueResize(window: WindowRecord): void {
@@ -3448,7 +3472,11 @@ export class EngineSession {
       return { status: 'ignored' }
     return this.pads.admit(message)
   }
-  selectSystemDialog(id: number, value: string | null): boolean {
+  private canUseSystemDialog(): boolean {
+    return !this.control.cancelled && this.state === 'running' &&
+      this.activity.state === 'visible' && !this.fontSelection.active
+  }
+  selectSystemDialog(id: number, value: string | null): boolean | Promise<boolean> {
     if (
       this.control.cancelled ||
       this.state !== 'running' ||
@@ -3456,7 +3484,11 @@ export class EngineSession {
       this.fontSelection.active
     )
       return false
-    return this.systemDialogs?.respond(id, value) ?? false
+    return this.systemDialogs?.respond(id, value, () => this.canUseSystemDialog()) ?? false
+  }
+  async browseStorageSelector(id: number, directory: string): Promise<import('./ports/storage-selector.ts').StorageSelectorDirectory | null> {
+    if (!this.canUseSystemDialog()) return null
+    return this.systemDialogs?.browse(id, directory, () => this.canUseSystemDialog()) ?? null
   }
   async previewFont(
     id: number,
@@ -3693,6 +3725,7 @@ export class EngineSession {
       await attempt(() => this.layerObjects?.dispose())
       await attempt(() => this.kag.clear())
       await attempt(() => this.windows?.dispose())
+      this.windowPresentedVersions.clear()
       this.virtualCursors.clear()
       this.mouseKeys.clear()
       this.windowRegions.clear()
@@ -3732,25 +3765,26 @@ export class EngineSession {
     this.notify()
   }
   private async readResource(name: string): Promise<Uint8Array> {
-    return this.resolveResource(name).read()
+    return (await this.resolveResource(name)).read()
   }
-  private resolveResource(name: string): Resource {
-    const resource = this.findResource(name)
+  private async resolveResource(name: string): Promise<Resource> {
+    const resource = await this.findResource(name)
     if (!resource) throw new Error(`Resource not found: ${name}`)
     return resource
   }
-  private findResource(name: string): Resource | undefined {
+  private async findResource(name: string): Promise<Resource | undefined> {
     this.materializeLogs()
-    return this.storage.lookup(name, (candidate) => this.saves.resource(candidate))
+    return this.storage.lookupAsync(name, (candidate) => this.saves.resource(candidate),
+      this.saves.list().map((file) => this.saves.resource(file.name)!))
   }
-  private resourceExists(name: string): boolean {
-    return !!this.findResource(name)
+  private async resourceExists(name: string): Promise<boolean> {
+    return !!await this.findResource(name)
   }
-  private storageWriteTarget(name: string, mode: StreamMode): string {
+  private async storageWriteTarget(name: string, mode: StreamMode): Promise<string> {
     const requested = storageWritePath(name, this.project?.directory)
     this.materializeLogs()
     if (mode.hasOffset || mode.append) {
-      const existing = this.findResource(toPublicStoragePath(requested))
+      const existing = await this.findResource(toPublicStoragePath(requested))
       if (existing) return storageWritePath(existing.name)
       // Append alone is a Web extension that may create a new file. An explicit
       // offset still selects UPDATE and requires a target, including ao0.
@@ -4216,7 +4250,7 @@ export class EngineSession {
         )
         break
       case 'Scripts.execStorage': {
-        const resource = this.resolveResource(text(0))
+        const resource = await this.resolveResource(text(0))
         return {
           kind: 'script',
           source: await this.deps.decodeScript(
@@ -4272,11 +4306,11 @@ export class EngineSession {
       case 'Storage.validateTextWrite':
         // Text mode errors belong to construction, before a stream can queue
         // bytes on destruction. Match the native mode-before-path ordering.
-        value = this.storageWriteTarget(text(0), parseTextWriterMode(text(1)))
+        value = await this.storageWriteTarget(text(0), parseTextWriterMode(text(1)))
         break
       case 'Storage.validateWrite':
         storageWritePath(text(0), this.project?.directory)
-        value = this.storageWriteTarget(text(0), parseStreamMode(text(1)))
+        value = await this.storageWriteTarget(text(0), parseStreamMode(text(1)))
         break
       case 'Storage.writeText':
       case 'Storage.writeBinary': {
@@ -4323,16 +4357,18 @@ export class EngineSession {
         break
       case 'Storages.selectFile': {
         this.materializeLogs()
-        const selector = new StorageSelector(
+        const selector = await cancelable(new StorageSelector(
           this.storage,
           this.saves,
           this.systemEnvironment.dataPath,
-        ).prepare(args.slice(1))
+        ).prepare(args.slice(1)), this.control)
+        this.control.check()
         return this.systemDialogs!.showStorageSelector(
           number(0),
           selector.caption,
           selector.presentation,
           selector.choose,
+          selector.browse,
         )
       }
       case 'Storages.selectFileAbort':
@@ -4391,10 +4427,10 @@ export class EngineSession {
         value = chopStorageExt(text(0))
         break
       case 'Storages.exists':
-        value = BigInt(this.resourceExists(text(0)))
+        value = BigInt(await this.resourceExists(text(0)))
         break
       case 'Storages.getPlacedPath': {
-        const resource = this.findResource(text(0))
+        const resource = await this.findResource(text(0))
         value = resource ? toPublicStoragePath(resource.name) : ''
         break
       }
@@ -4696,7 +4732,12 @@ export class EngineSession {
       }
       case 'Window.get': {
         const window = this.windows!.get(number(0))
-        if (!this.control.cancelled) await this.ensureWindowGeometry(window)
+        // BaseWindow invalidates registered objects before WindowImpl closes
+        // the Form. Those finalizers can still read the owner's last committed
+        // properties, even though host delivery/measurement was retired first.
+        // Reopening geometry here would abort otherwise valid native cleanup.
+        if (!this.control.cancelled && !window.closing && !window.finished)
+          await this.ensureWindowGeometry(window)
         const field = window.state[text(1) as keyof WindowState]
         if (typeof field !== 'string' && typeof field !== 'boolean' && typeof field !== 'number')
           throw new Error('Unsupported window property')
@@ -5109,7 +5150,7 @@ export class EngineSession {
         await this.fontCatalog.prepare(spec)
         await this.control.wait()
         this.control.check()
-        value = scriptList(this.fontCatalog.list(number(0), spec).map((font) => font.name))
+        value = scriptList((await this.fontCatalog.list(number(0), spec)).map((font) => font.name))
         break
       }
       case 'Font.select': {

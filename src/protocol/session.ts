@@ -9,7 +9,7 @@ import type { PadAck, PadMessage, PadFontData } from './pad.ts'
 import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
 import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
 import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
-export const PROTOCOL_VERSION = 37
+export const PROTOCOL_VERSION = 38
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -89,6 +89,7 @@ export interface SessionApi {
   setDebugVisibility(panel: DebugPanel, visible: boolean): Promise<SessionSnapshot>
   selectFont(id: number, face: string | null): Promise<void>
   selectSystemDialog(id: number, value: string | null): Promise<boolean>
+  browseStorageSelector(id: number, directory: string): Promise<import('../engine/ports/storage-selector.ts').StorageSelectorDirectory | null>
   pad(message: PadMessage): Promise<PadAck>
   padFont(generation: number, id: number, epoch: number): Promise<PadFontData | null>
   previewFont(id: number, face: string, kind?: 'sample' | 'label'): Promise<FontPreview | null>

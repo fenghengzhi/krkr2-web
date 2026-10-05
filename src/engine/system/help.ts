@@ -30,7 +30,7 @@ export async function openHelpDocument(
   target: string,
   parameters: string,
   options: {
-    find(name: string): Resource | undefined
+    find(name: string): Resource | undefined | Promise<Resource | undefined>
     decode(bytes: Uint8Array): Promise<string>
     host: HelpPort
     control: ExecutionControl
@@ -47,7 +47,7 @@ export async function openHelpDocument(
     return false
   }
   if (path.includes('>') || !/\.(txt|md|log)$/i.test(path)) return false
-  const resource = options.find(toPublicStoragePath(path))
+  const resource = await cancelable(Promise.resolve(options.find(toPublicStoragePath(path))), control)
   if (!resource || resource.name.includes('>') || resource.size > helpByteLimit) return false
   const name = toPublicStoragePath(resource.name)
   if (name.length > helpPathLimit) return false

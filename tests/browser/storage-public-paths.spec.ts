@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { expect, test, type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -205,11 +206,7 @@ for (const backend of ['asyncify', 'jspi'] as const) {
         await ready(page, 'search-ready')
         await expect(page.locator('canvas')).toHaveJSProperty('width', 1)
         await expect(page.locator('canvas')).toHaveJSProperty('height', 1)
-        await page.locator('canvas').evaluate((canvas) => {
-          canvas.style.width = '128px'
-          canvas.style.height = '128px'
-          canvas.style.imageRendering = 'pixelated'
-        })
+        await magnifyPixelWindow(page.locator('canvas'))
         expect(await centerPixel(page)).toEqual([51, 102, 153, 255])
         const backup = await exportSystemSaves(page)
         expect(backup.files.map(({ path }) => path).sort()).toEqual([

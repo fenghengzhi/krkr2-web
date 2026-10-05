@@ -1,5 +1,6 @@
 import type {
   StorageSelectorChoice,
+  StorageSelectorDirectory,
   StorageSelectorPresentation,
 } from '../engine/ports/storage-selector.ts'
 import {
@@ -10,6 +11,7 @@ import {
 } from '../engine/storage/public-path.ts'
 
 interface SelectorActions {
+  browse?(directory: string): Promise<StorageSelectorDirectory | null>
   available(): boolean
   choose(value: string): void
   status(value: string): void
@@ -91,19 +93,25 @@ export function createStorageSelectorView(
     overwriteActions = element('div'),
     replace = element('button', '覆盖'),
     back = element('button', '返回')
-  let enabled = true,
+  let enabled = true, browsing = false, disposed = false, navigation = 0,
+    listing: StorageSelectorDirectory = { name: presentation.initialDirectory,
+      entries: presentation.entries, directories: presentation.directories },
     pendingOverwrite: StorageSelectorChoice | undefined,
     submitted: StorageSelectorChoice | undefined
   root.className = 'storage-selector'
   directory.id = `storage-selector-directory-${id}`
   directoryLabel.htmlFor = directory.id
   directory.dataset.action = 'directory'
-  for (const name of presentation.directories) {
-    const option = element('option', name)
-    option.value = name
-    directory.append(option)
+  const directoryOptions = () => {
+    directory.replaceChildren()
+    for (const name of listing.directories) {
+      const option = element('option', name)
+      option.value = name
+      directory.append(option)
+    }
+    directory.value = listing.name
   }
-  directory.value = presentation.initialDirectory
+  directoryOptions()
   list.className = 'storage-selector-entries'
   list.setAttribute('role', 'group')
   list.setAttribute('aria-label', '目录内容')
@@ -147,9 +155,11 @@ export function createStorageSelectorView(
     actions.status('')
   }
   const applyEnabled = () => {
-    directory.disabled = filter.disabled = replace.disabled = back.disabled = !enabled
-    input.readOnly = !enabled
-    for (const button of list.querySelectorAll('button')) button.disabled = !enabled
+    const disabled = !enabled || browsing || disposed
+    root.setAttribute('aria-busy', String(browsing))
+    directory.disabled = filter.disabled = replace.disabled = back.disabled = disabled
+    input.readOnly = disabled
+    for (const button of list.querySelectorAll('button')) button.disabled = disabled
   }
   const effectiveName = (name: string) => {
     if (name.endsWith('.')) return name.slice(0, -1)
@@ -164,18 +174,36 @@ export function createStorageSelectorView(
     actions.status('请确认是否覆盖现有文件。')
     if (actions.available()) replace.focus({ preventScroll: true })
   }
-  const navigate = (name: string) => {
-    if (!actions.available()) return
+  const navigate = async (name: string) => {
+    if (disposed || browsing || !actions.available()) { directory.value = listing.name; return }
     clearOverwrite()
-    directory.value = name
-    render()
-    input.focus({ preventScroll: true })
+    const version = ++navigation
+    browsing = true
+    applyEnabled()
+    actions.status('正在读取目录…')
+    try {
+      const next = actions.browse ? await actions.browse(name)
+        : { name, entries: presentation.entries, directories: presentation.directories }
+      if (disposed || version !== navigation || !actions.available()) return
+      if (next) { listing = next; directoryOptions(); render() }
+      actions.status('')
+    } catch (reason) {
+      if (!disposed && version === navigation)
+        actions.status(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      if (!disposed && version === navigation) {
+        browsing = false
+        directory.value = listing.name
+        applyEnabled()
+        if (actions.available()) input.focus({ preventScroll: true })
+      }
+    }
   }
   const render = () => {
     list.replaceChildren()
     const current = directory.value,
       pattern = presentation.filters[Number(filter.value) - 1]?.pattern ?? '*'
-    for (const name of presentation.directories) {
+    for (const name of listing.directories) {
       if (name === current || name === 'game://./') continue
       const path = name.slice(0, -1)
       if (extractStoragePath(path) !== current) continue
@@ -186,13 +214,13 @@ export function createStorageSelectorView(
       button.type = 'button'
       button.className = 'storage-selector-directory'
       button.dataset.directory = name
-      button.addEventListener('click', () => navigate(name))
+      button.addEventListener('click', () => void navigate(name))
       list.append(button)
     }
     try {
       const matches = compileFilter(pattern),
         files = document.createDocumentFragment()
-      for (const entry of presentation.entries) {
+      for (const entry of listing.entries) {
         if (extractStoragePath(entry.name) !== current) continue
         const basename = extractStorageName(entry.name)
         if (!matches(basename)) continue
@@ -229,9 +257,7 @@ export function createStorageSelectorView(
     applyEnabled()
   }
   directory.addEventListener('change', () => {
-    if (!actions.available()) return
-    clearOverwrite()
-    render()
+    void navigate(directory.value)
   })
   filter.addEventListener('change', () => {
     if (!actions.available()) return
@@ -254,6 +280,7 @@ export function createStorageSelectorView(
   return {
     element: root,
     input,
+    dispose() { disposed = true; navigation++; browsing = false },
     enabled(value: boolean) {
       enabled = value
       applyEnabled()
@@ -267,7 +294,7 @@ export function createStorageSelectorView(
       return true
     },
     selection(): string | undefined {
-      if (!actions.available()) return undefined
+      if (disposed || browsing || !actions.available()) return undefined
       try {
         const raw = input.value.replaceAll('\\', '/')
         if (!raw) throw new Error('请输入文件名。')
@@ -287,7 +314,7 @@ export function createStorageSelectorView(
         // This is only the presentation snapshot. The engine repeats existence,
         // ambiguity, archive and collision checks against the current storage.
         const selectedName = effectiveName(name),
-          exists = presentation.entries.some((entry) => folded(entry.name) === folded(selectedName))
+          exists = listing.entries.some((entry) => folded(entry.name) === folded(selectedName))
         if (presentation.save && exists) {
           confirmOverwrite(choice)
           return undefined

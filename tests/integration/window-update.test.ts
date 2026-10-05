@@ -34,6 +34,35 @@ ${body}` }, {
 
 for (const binary of [false,true]) {
   const mode = binary ? 'bytecode' : 'source'
+  test(`${mode}: synchronous Window publication is not duplicated by its outer or host-only publication`, { timeout: 60000 }, async () => {
+    const f = await fixture(binary, `
+function runCase(){root.fillRect(0,0,4,2,0xff123456);win.update();Debug.message("published-once");}`)
+    try {
+      await f.run()
+      const frames = () => f.observations.filter((item) => item.kind === 'frame')
+      assert.equal(frames().length, 1)
+      assert.deepEqual(frames().map((frame) => frame.kind === 'frame' ? frame.pixel : []), [[18,52,86,255]])
+      f.session.present(); f.session.present()
+      assert.equal(frames().length, 1)
+    } finally { await f.stop() }
+  })
+  test(`${mode}: publishing disabled pixels preserves the queued onPaint until game events resume`, { timeout: 60000 }, async () => {
+    const f = await fixture(binary, `
+root.onPaint=function(){paints++;Debug.message("resumed-paint");};
+function runCase(){System.eventDisabled=true;root.update();}
+function resumePaint(){System.eventDisabled=false;}`)
+    try {
+      await f.run()
+      const frames = f.observations.filter((item) => item.kind === 'frame').length
+      assert.equal(frames, 1)
+      assert.equal(f.observations.some((item) => item.kind === 'log' && item.text === 'resumed-paint'), false)
+      f.session.present(); f.session.present()
+      assert.equal(f.observations.filter((item) => item.kind === 'frame').length, frames)
+      await f.session.evaluate('resumePaint()')
+      assert.equal(await f.session.evaluate('paints+","+int(root.callOnPaint)'), '1,0')
+      assert.equal(f.observations.filter((item) => item.kind === 'log' && item.text === 'resumed-paint').length, 1)
+    } finally { await f.stop() }
+  })
   test(`${mode}: Window.update paints and publishes pixels before the next TJS statement without inventing onPaint`, { timeout: 60000 }, async () => {
     const f = await fixture(binary, `
 root.onPaint=function(){paints++;root.fillRect(0,0,4,2,0xff112233);Debug.message("painted");};

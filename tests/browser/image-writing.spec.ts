@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -24,12 +25,7 @@ async function expectPixels(page: Page, info: TestInfo, phase: string, expected:
   try {
     await expect(page.locator('canvas')).toHaveJSProperty('width', 12)
     await expect(page.locator('canvas')).toHaveJSProperty('height', 2)
-    await page.locator('canvas').evaluate((node) => {
-      const c = node as HTMLCanvasElement
-      c.style.width = '384px'
-      c.style.height = '64px'
-      c.style.imageRendering = 'pixelated'
-    })
+    await magnifyPixelWindow(page.locator('canvas'))
     // The script log and GL ready state do not acknowledge browser composition.
     // Observe fresh displayed pixels with the existing assertion timeout. Keep
     // failed observations; do not execute script or force a redraw while waiting.

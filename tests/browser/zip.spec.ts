@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect, type Page } from '@playwright/test'
 import { zipFixture, centralRecords } from '../helpers/zip-fixtures.ts'
 
@@ -54,12 +55,7 @@ for (const backend of ['asyncify', 'jspi']) {
       await expect(page.locator('#logs')).toContainText('zip-ready:42:0')
       await expect(page.locator('canvas')).toHaveJSProperty('width', 2)
       await expect(page.locator('canvas')).toHaveJSProperty('height', 1)
-      await page.locator('canvas').evaluate((node) => {
-        const c = node as HTMLCanvasElement
-        c.style.width = '256px'
-        c.style.height = '128px'
-        c.style.imageRendering = 'pixelated'
-      })
+      await magnifyPixelWindow(page.locator('canvas'))
       const screenshot = await page.locator('canvas').screenshot()
       const pixel = await page.evaluate(
         async (url) => {

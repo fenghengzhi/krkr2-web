@@ -1,7 +1,7 @@
 import type { SystemDialogRequest } from '../ports/system-dialogs.ts'
 import type { HostReply } from '../script/runtime.ts'
 import type { ModalLoop } from '../scheduler/modal-loop.ts'
-import type { StorageSelectorPresentation } from '../ports/storage-selector.ts'
+import type { StorageSelectorDirectory, StorageSelectorPresentation } from '../ports/storage-selector.ts'
 
 export interface SystemDialogSnapshot {
   readonly request: SystemDialogRequest | null
@@ -22,7 +22,11 @@ interface Dialog {
   ready: boolean
   aborted: boolean
   value?: string
-  readonly choose?: (value: string) => string
+  readonly choose?: (value: string) => string | Promise<string>
+  readonly browse?: (directory: string) => Promise<StorageSelectorDirectory>
+  readonly waiters: Set<() => void>
+  choosing?: boolean
+  browsing?: boolean
   abandoned?: boolean
 }
 
@@ -68,7 +72,8 @@ export class SystemDialogs {
     identity: number,
     caption: string,
     selector: StorageSelectorPresentation,
-    choose: (value: string) => string,
+    choose: (value: string) => string | Promise<string>,
+    browse?: (directory: string) => Promise<StorageSelectorDirectory>,
   ): HostReply {
     if (!Number.isSafeInteger(identity) || identity <= 0)
       throw new Error('Invalid native storage selector identity')
@@ -84,13 +89,15 @@ export class SystemDialogs {
           selector,
         }),
       choose,
+      browse,
     )
   }
 
   private open(
     identity: string,
     request: (id: number) => SystemDialogRequest,
-    choose?: (value: string) => string,
+    choose?: (value: string) => string | Promise<string>,
+    browse?: (directory: string) => Promise<StorageSelectorDirectory>,
   ): HostReply {
     if (typeof identity !== 'string' || !identity || this.records.has(identity))
       throw new Error('Invalid system dialog request identity')
@@ -101,11 +108,18 @@ export class SystemDialogs {
       ready: false,
       aborted: false,
       choose,
+      browse,
+      waiters: new Set(),
     }
     this.records.set(identity, record)
     const cleanup = () => {
-      if (this.loop.stopped) this.records.clear()
-      else if (this.records.get(identity) === record) this.records.delete(identity)
+      if (this.loop.stopped) {
+        for (const current of this.records.values()) this.cancelWaiters(current)
+        this.records.clear()
+      } else if (this.records.get(identity) === record) {
+        this.cancelWaiters(record)
+        this.records.delete(identity)
+      }
       // ModalLoop publishes only after this cleanup. On Stop every request
       // identity is removed before the first external publication can reenter.
     }
@@ -146,7 +160,10 @@ export class SystemDialogs {
   present(): void {
     // A Window/Menu child can be the first scope cleaned up by Stop. Revoke
     // every dialog identity before that child's stack-change publication too.
-    if (this.loop.stopped) this.records.clear()
+    if (this.loop.stopped) {
+      for (const record of this.records.values()) this.cancelWaiters(record)
+      this.records.clear()
+    }
     this.releaseAbandoned()
     const top = this.loop.activeToken,
       active = [...this.records.values()].find(
@@ -186,7 +203,7 @@ export class SystemDialogs {
   }
 
   /** A UI response chooses a primitive result; only its own wait may end the modal frame. */
-  respond(id: number, value: string | null): boolean {
+  respond(id: number, value: string | null, available: () => boolean = () => true): boolean | Promise<boolean> {
     if (!Number.isSafeInteger(id) || id <= 0 || (value !== null && typeof value !== 'string'))
       return false
     const record = [...this.records.values()].find((entry) => entry.request.id === id),
@@ -200,20 +217,76 @@ export class SystemDialogs {
       token !== this.loop.activeToken
     )
       return false
+    if (value !== null && record.choosing) return false
     // A selector validates the current namespace before accepting a response.
     // A failed choice leaves the same modal request available for correction.
     const selected =
       value === null
         ? undefined
         : (record.choose?.(value) ?? (record.request.kind === 'input-string' ? value : undefined))
+    if (selected instanceof Promise) {
+      record.choosing = true
+      return this.wait(record, selected).then((result) => {
+        if (!result || !available() || !this.active(record)) return false
+        return this.accept(record, result.value)
+      }, (error: unknown) => {
+        if (!available() || !this.active(record)) return false
+        throw error
+      }).finally(() => { record.choosing = false })
+    }
+    return this.accept(record, selected)
+  }
+
+  private accept(record: Dialog, value: string | undefined): boolean {
     record.ready = true
-    record.value = selected
+    record.value = value
+    this.cancelWaiters(record)
     try {
       this.present()
     } finally {
       this.loop.notify()
     }
     return true
+  }
+
+  /** Direct host RPC while the script is suspended in this exact selector.
+   * Directory reads never enter the VM or retire its modal scope. */
+  async browse(id: number, directory: string, available: () => boolean = () => true): Promise<StorageSelectorDirectory | null> {
+    if (!Number.isSafeInteger(id) || id <= 0 || typeof directory !== 'string' || directory.length > 4096)
+      throw new Error('Invalid file selector directory request')
+    const record = [...this.records.values()].find((entry) => entry.request.id === id)
+    if (!record || !record.browse || !this.active(record) || !available()) return null
+    if (record.browsing) throw new Error('File selector directory read is already running')
+    record.browsing = true
+    try {
+      const result = await this.wait(record, record.browse(directory))
+      return result && available() && this.active(record) ? result.value : null
+    } catch (error) {
+      if (!available() || !this.active(record)) return null
+      throw error
+    } finally { record.browsing = false }
+  }
+
+  private active(record: Dialog): boolean {
+    const token = this.scopeToken(record)
+    return this.records.get(record.identity) === record && !record.ready && !record.aborted &&
+      token !== undefined && token === this.loop.activeToken && this.loop.isPending(token)
+  }
+
+  private cancelWaiters(record: Dialog): void {
+    for (const cancel of record.waiters) cancel()
+    record.waiters.clear()
+  }
+
+  private async wait<T>(record: Dialog, operation: Promise<T>): Promise<{ value: T } | null> {
+    let cancel!: () => void
+    const cancelled = new Promise<null>((resolve) => { cancel = () => resolve(null) })
+    record.waiters.add(cancel)
+    try {
+      // Both branches stay observed after cancellation; late I/O failures
+      // cannot become unhandled rejections or publish into a newer dialog.
+      return await Promise.race([operation.then((value) => ({ value })), cancelled])
+    } finally { record.waiters.delete(cancel) }
   }
 
   beforeWait(token: number): void {
@@ -227,6 +300,7 @@ export class SystemDialogs {
     const record = this.records.get(identity)
     if (!record || record.aborted) return false
     record.aborted = true
+    this.cancelWaiters(record)
     const token = this.scopeToken(record)
     try {
       if (token !== undefined) {

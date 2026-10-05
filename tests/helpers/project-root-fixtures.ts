@@ -5,6 +5,7 @@ import { BlobSource, inflateRaw } from '../../src/backends/files/blob-source.ts'
 import { readZip } from '../../src/formats/zip/archive.ts'
 import { xp3Fixture } from './xp3-fixtures.ts'
 import { solidBmp } from './archive-patch.ts'
+import { malformedXp3 } from './lazy-archives.ts'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const observationProgram = (name: 'A' | 'B') => `
@@ -49,10 +50,9 @@ export async function projectRootFiles(binary: boolean) {
     if (name === 'A') {
       for (const [path, value] of Object.entries(project)) files.push({ path: base + 'content-data/' + path,
         bytes: typeof value === 'string' ? Buffer.from(value) : Buffer.from(value) })
-      // Valid lower-priority index; importing every archive remains strict.
-      files.push({ path: base + 'data.xp3', bytes: xp3Fixture({
-        'startup.tjs': 'throw new Exception("content-data must precede data.xp3");',
-      }, { compressed: true }).bytes })
+      // The lower-priority raw container exists, but its index is invalid.
+      // Only an explicit member lookup or registered AutoPath may open it.
+      files.push({ path: base + 'data.xp3', bytes: Buffer.from(malformedXp3) })
     } else files.push({ path: base + 'data.xp3', bytes: xp3Fixture(project, { compressed: true, continuation: true }).bytes })
     files.push({ path: base + 'AfterInit2.tjs', bytes: Buffer.from(afterInit) },
       { path: base + 'patch.xp3', bytes: xp3Fixture({

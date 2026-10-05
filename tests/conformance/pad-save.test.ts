@@ -405,13 +405,14 @@ var padPaintCount=0;
 layer.onPaint=function(){
   global.padPaintCount++;
   Debug.message("pad-save-paint:"+global.padPaintCount);
-  if(global.padPaintCount<5)layer.update();
+  if(global.padPaintCount<9)layer.update();
 };
 layer.update();
 `,
         { now: clock.now, schedule: clock.schedule },
       ),
       painted = () => f.logs.filter((line) => line.startsWith('pad-save-paint:')),
+      paintsThrough = (count: number) => Array.from({ length: count }, (_, index) => `pad-save-paint:${index + 1}`),
       advance = async (milliseconds: number) => {
         clock.advance(milliseconds)
         // Drain only work scheduled by the actual deadline. Evaluating a TJS
@@ -420,15 +421,17 @@ layer.update();
       }
     try {
       await f.session.idle()
-      assert.deepEqual(painted(), ['pad-save-paint:1'])
+      // Native Window delivery admits two entries for a self-invalidating
+      // Window in each round; the remaining work keeps its normal deadline.
+      assert.deepEqual(painted(), paintsThrough(2))
       assert.equal(clock.pending, 1)
       const save = f.open()
       assert.equal(f.session.inspectOwnership().modalWaits, 0)
-      assert.deepEqual(painted(), ['pad-save-paint:1'], 'Opening a save does not create a VM turn')
+      assert.deepEqual(painted(), paintsThrough(2), 'Opening a save does not create a VM turn')
       await advance(15)
-      assert.deepEqual(painted(), ['pad-save-paint:1'])
+      assert.deepEqual(painted(), paintsThrough(2))
       await advance(1)
-      assert.deepEqual(painted(), ['pad-save-paint:1', 'pad-save-paint:2'])
+      assert.deepEqual(painted(), paintsThrough(4))
       assert.equal(f.request().id, save.id)
       assert.equal(f.session.inspectOwnership().modalScopes, 1)
       assert.equal(clock.pending, 1)
@@ -443,7 +446,7 @@ layer.update();
       )
       const receipt = f.request().receipt!
       await advance(16)
-      assert.deepEqual(painted(), ['pad-save-paint:1', 'pad-save-paint:2', 'pad-save-paint:3'])
+      assert.deepEqual(painted(), paintsThrough(6))
       assert.equal(f.request().receipt, receipt)
       assert.equal(
         f.session.pad({
@@ -457,18 +460,13 @@ layer.update();
       )
       assert.equal(f.session.inspectOwnership().modalScopes, 0)
       await advance(16)
-      assert.deepEqual(painted(), [
-        'pad-save-paint:1',
-        'pad-save-paint:2',
-        'pad-save-paint:3',
-        'pad-save-paint:4',
-      ])
+      assert.deepEqual(painted(), paintsThrough(8))
 
       const pausedSave = f.open()
       f.session.pause()
       assert.equal(clock.pending, 0)
       await advance(100)
-      assert.equal(painted().length, 4)
+      assert.equal(painted().length, 8)
       assert.equal(
         f.session.pad({
           ...f.identity(),
@@ -480,17 +478,11 @@ layer.update();
       assert.equal(f.session.snapshot().state, 'paused')
       assert.equal(f.session.inspectOwnership().modalScopes, 0)
       assert.equal(clock.pending, 0)
-      assert.equal(painted().length, 4, 'Host completion cannot override the game pause')
+      assert.equal(painted().length, 8, 'Host completion cannot override the game pause')
       f.session.resume()
       assert.equal(clock.pending, 1)
       await advance(0)
-      assert.deepEqual(painted(), [
-        'pad-save-paint:1',
-        'pad-save-paint:2',
-        'pad-save-paint:3',
-        'pad-save-paint:4',
-        'pad-save-paint:5',
-      ])
+      assert.deepEqual(painted(), paintsThrough(9))
       assert.equal(clock.pending, 0)
     } finally {
       await f.session.stop()

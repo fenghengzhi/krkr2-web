@@ -307,6 +307,50 @@ for (const backend of ['asyncify', 'jspi']) {
       }
     })
 
+    test(`${variant}: a corrupt lazy archive fails only its directory navigation and the same real selector can choose a valid archive`, async ({ page }, info) => {
+      const setup = await prepareSystemPage(page, backend), game = controls(page, setup.errors)
+      try {
+        await page.locator('#files').setInputFiles([
+          { name: 'broken.zip', mimeType: 'application/zip', buffer: Buffer.from([80, 75, 3, 4, 0]) },
+          { name: 'valid.zip', mimeType: 'application/zip', buffer: zipFixture() },
+          ...files(binary, prelude + String.raw`
+function selectorRun(){
+  var options=%[title:"Lazy directory recovery",initialDir:"game://./",filter:"All|*.*"];
+  selectorCheck(Storages.selectFile(options)===1,"lazy-result");
+  selectorCheck(options.name=="game://./valid.zip>シーン/value.tjs","lazy-canonical");
+  selectorCheck(Scripts.evalStorage(options.name)==42,"lazy-bytes");
+  selectorMark("lazy-return:"+options.name);selectorMark("after");
+}
+selectorMark("ready");
+`),
+        ])
+        await game.open()
+        const dialog = page.getByRole('dialog', { name: 'Lazy directory recovery', exact: true }),
+          directory = dialog.getByLabel('目录', { exact: true })
+        await expect(dialog).toBeVisible()
+        const identity = await dialog.getAttribute('data-request-id')
+        await expect(dialog.locator('[data-entry-name*="valid.zip>"]')).toHaveCount(0)
+        await directory.selectOption('game://./broken.zip>')
+        await expect(dialog.locator('.storage-selector')).toHaveAttribute('aria-busy', 'false')
+        await expect(dialog.locator('.system-dialog-status')).not.toHaveText('')
+        await expect(dialog.locator('.system-dialog-status')).not.toHaveText('正在读取目录…')
+        await expect(directory).toHaveValue('game://./')
+        await expect(dialog).toHaveAttribute('data-request-id', identity!)
+        await expect(mark(page, 'after')).toHaveCount(0)
+        await directory.selectOption('game://./valid.zip>')
+        await dialog.locator('[data-directory="game://./valid.zip>シーン/"]').click()
+        await dialog.locator('[data-entry-name="game://./valid.zip>シーン/value.tjs"]').click()
+        await dialog.getByRole('button', { name: '打开', exact: true }).click()
+        await expect(mark(page, 'lazy-return:game://./valid.zip>シーン/value.tjs')).toBeVisible()
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expect(game.owner).toHaveAttribute('data-blocked', 'false')
+      } finally {
+        await attachLogs(page, info)
+        await game.stop()
+        await expect.poll(() => setup.workers.every(({ closed }) => closed)).toBe(true)
+      }
+    })
+
     test(`${variant}: Stop retires a startup selector and its detached controls cannot answer a fresh session`, async ({
       page,
     }, info) => {

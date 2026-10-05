@@ -10,7 +10,7 @@ for (const backend of ['asyncify', 'jspi'])
       'JSPI unavailable',
     )
     const source = String.raw`
-var window=new Window();window.visible=true;window.setInnerSize(80,40);window.borderStyle=bsSingle;window.innerSunken=true;
+var window=new Window();window.visible=true;window.borderStyle=bsSingle;window.innerSunken=true;window.setInnerSize(80,40);
 var root=new Layer(window,null);root.setSize(80,40);root.fillRect(0,0,80,40,0xff0000ff);
 var child=new Layer(window,root);child.setImageSize(40,20);child.fillRect(0,0,20,20,0xffff0000);child.fillRect(20,0,20,20,0xff00ff00);child.setSize(20,20);child.setImagePos(-20,0);child.setPos(20,0);child.visible=true;
 var clicks="";child.onClick=function(x,y){clicks=x+","+y;Debug.message("viewport-click="+clicks);};
@@ -22,6 +22,8 @@ var width=root.font.getTextWidth("Hello");Debug.message("font-measured="+(width>
     await expect(page.locator('#logs')).toContainText('font-measured=1')
     await expect(page.locator('#stage')).toHaveClass(/window-sunken/)
     const canvas = page.locator('canvas')
+    await expect(canvas).toHaveJSProperty('width', 80)
+    await expect(canvas).toHaveJSProperty('height', 40)
     const sample = async (x: number, y: number) => {
       const png = await canvas.screenshot()
       return page.evaluate(

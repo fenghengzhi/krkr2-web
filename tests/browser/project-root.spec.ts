@@ -91,6 +91,12 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await page.locator('#folder').setInputFiles(directory)
       await expect(page.locator('#project-mode')).toHaveValue('auto')
       await ready(page, 'A', 'none')
+      await evaluate(page, 'Storages.isExistentStorage(System.exePath+"data.xp3")', '1')
+      await evaluate(page, '(function(){try{return Scripts.evalStorage(System.exePath+"data.xp3>startup.tjs");}catch(error){return error.message;}})()',
+        'Unsupported XP3 index compression: 7')
+      await evaluate(page, '(function(){Storages.addAutoPath(System.exePath+"data.xp3>");try{return Scripts.evalStorage("not-present-anywhere.tjs");}catch(error){return error.message;}finally{Storages.removeAutoPath(System.exePath+"data.xp3>");}})()',
+        'Unsupported XP3 index compression: 7')
+      await evaluate(page, 'projectState()', state('A', 'none'))
       await pixels(page, info, 'A', 'auto-content-data')
       await expect(page.locator('#save-library')).toBeEnabled()
       await page.locator('#library-title').fill(title('A'))

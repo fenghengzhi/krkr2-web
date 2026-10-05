@@ -34,7 +34,8 @@ interface ReferenceManifest {
 }
 
 const names = ['multitrack', 'fragmented', 'interleaved', 'separate-fragments',
-  'numbered-multitrack', 'numbered-fragmented', 'numbered-interleaved', 'numbered-separate-fragments'] as const,
+  'numbered-multitrack', 'numbered-fragmented', 'numbered-interleaved', 'numbered-separate-fragments',
+  'numbered-variable'] as const,
   directory = resolve('out/verification/video-tracks'), hash = (bytes: Uint8Array) =>
     createHash('sha256').update(bytes).digest('hex')
 

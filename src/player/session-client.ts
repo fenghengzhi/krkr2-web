@@ -227,6 +227,9 @@ export class SessionClient {
   selectSystemDialog(id: number, value: string | null) {
     return this.call('selectSystemDialog', id, value)
   }
+  browseStorageSelector(id: number, directory: string) {
+    return this.call('browseStorageSelector', id, directory)
+  }
   previewFont(id: number, face: string, kind: 'sample' | 'label' = 'sample') {
     return this.call('previewFont', id, face, kind)
   }

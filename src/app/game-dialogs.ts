@@ -1,7 +1,9 @@
 import type { SystemDialogRequest } from '../engine/ports/system-dialogs.ts'
+import type { StorageSelectorDirectory } from '../engine/ports/storage-selector.ts'
 import { createStorageSelectorView } from './storage-selector-view.ts'
 
 interface DialogActions {
+  browse?(id: number, directory: string): Promise<StorageSelectorDirectory | null>
   choose(id: number, value: string | null): Promise<unknown> | undefined
   stop(): Promise<void>
 }
@@ -207,6 +209,7 @@ export function createGameDialogs(actions: DialogActions) {
     if (request.kind === 'storage-selector') {
       dialog.classList.add('game-storage-selector')
       view.selector = createStorageSelectorView(request.id, request.selector, {
+        browse: actions.browse ? (directory) => actions.browse!(request.id, directory) : undefined,
         available: () =>
           active(view) &&
           enabled &&
@@ -216,7 +219,7 @@ export function createGameDialogs(actions: DialogActions) {
           !view.composingKey,
         choose: (value) => void choose(view, value),
         status: (value) => {
-          view.status.textContent = value
+          if (live(view)) view.status.textContent = value
         },
       })
       view.input = view.selector.input
@@ -289,7 +292,11 @@ export function createGameDialogs(actions: DialogActions) {
       if (current && next?.id === current.request.id) {
         // Request arguments are immutable, and an equal-id refresh must not
         // replace the live input or reset its selection and pending receipt.
-        for (const [id] of views) if (!retained.has(id)) views.delete(id)
+        for (const [id, retired] of views) if (!retained.has(id)) {
+          retired.selector?.dispose()
+          retired.dialog.remove()
+          views.delete(id)
+        }
         return
       }
       const hadViews = views.size > 0,
@@ -298,6 +305,7 @@ export function createGameDialogs(actions: DialogActions) {
       for (const [id, view] of views) {
         if (retained.has(id)) continue
         view.dialog.remove()
+        view.selector?.dispose()
         views.delete(id)
       }
       if (!next) {
@@ -335,7 +343,7 @@ export function createGameDialogs(actions: DialogActions) {
       const ownedFocus = hide()
       disposed = true
       document.removeEventListener('focusin', focusChanged)
-      for (const view of views.values()) view.dialog.remove()
+      for (const view of views.values()) { view.selector?.dispose(); view.dialog.remove() }
       views.clear()
       if ((ownedFocus || canRestoreHiddenFocus()) && origin && canFocus(origin))
         origin.focus({ preventScroll: true })

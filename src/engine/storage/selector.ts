@@ -1,5 +1,6 @@
 import type {
   StorageSelectorChoice,
+  StorageSelectorDirectory,
   StorageSelectorPresentation,
 } from '../ports/storage-selector.ts'
 import type { ScriptValue } from '../script/runtime.ts'
@@ -39,45 +40,22 @@ export class StorageSelector {
     private readonly dataPath: string,
   ) {}
 
-  private namespace(save: boolean) {
-    const files = new Map<string, { name: string; size: number; archive: boolean }>()
-    let units = 'game://./'.length
-    for (const file of [...this.resources.list(), ...this.saves.list()]) {
-      if (save && file.name.includes('>')) continue
-      const name = normalizeSelectorPath(file.name)
-      if (!files.has(name)) {
-        units += name.length
-        if (files.size >= maxEntries || units > maxNameUnits)
-          throw new Error('File selector listing exceeds its metadata budget')
-      }
-      files.set(name, Object.freeze({ name, size: file.size, archive: name.includes('>') }))
-    }
+  private virtualDirectories() {
     const directories = new Set<string>(['game://./'])
-    const addDirectories = (path: string) => {
-      const logical = parseStoragePath(path)
-      for (let index = 0; index < logical.length; index++) {
-        if (logical[index] !== '/' && logical[index] !== '>') continue
-        const directory = toPublicStoragePath(logical.slice(0, index + 1))
-        if (!directories.has(directory)) {
-          units += directory.length
-          if (directories.size >= maxEntries || units > maxNameUnits)
-            throw new Error('File selector listing exceeds its metadata budget')
-          directories.add(directory)
-        }
-      }
-    }
-    for (const name of files.keys()) addDirectories(name)
     // Browser saves have no mkdir operation. The configured save directory is
     // a real virtual directory even before the first file is written there.
-    addDirectories(this.dataPath)
-    return { files, directories }
+    const path = parseStoragePath(this.dataPath)
+    for (let index = 0; index < path.length; index++)
+      if (path[index] === '/') directories.add(toPublicStoragePath(path.slice(0, index + 1)))
+    return directories
   }
 
-  prepare(args: readonly ScriptValue[]): {
+  async prepare(args: readonly ScriptValue[]): Promise<{
     caption: string
     presentation: StorageSelectorPresentation
-    choose(value: string): string
-  } {
+    choose(value: string): Promise<string>
+    browse(directory: string): Promise<StorageSelectorDirectory>
+  }> {
     const text = (value: ScriptValue) => {
       if (typeof value !== 'string') throw new Error('Invalid file selector text')
       return value
@@ -123,23 +101,27 @@ export class StorageSelector {
     )
       throw new Error('File selector option exceeds 4096 characters')
     if (/[\\/>\0]/.test(extension)) throw new Error('Invalid file selector default extension')
-    const snapshot = this.namespace(save),
-      requestedName = name ? parseStoragePath(name, this.resources.currentDirectory) : '',
+    const requestedName = name ? parseStoragePath(name, this.resources.currentDirectory) : '',
       existingName =
-        requestedName && !/[/>]$/.test(requestedName)
-          ? (this.saves.resource(requestedName) ?? this.resources.find(requestedName))
+        requestedName && !/[/>]$/.test(requestedName) && (!save || !requestedName.includes('>'))
+          ? (this.saves.resource(requestedName) ?? await this.resources.findAsync(requestedName))
           : undefined,
-      directory = (value: string) => {
+      directory = async (value: string): Promise<StorageSelectorDirectory | undefined> => {
         if (!value) return undefined
         const normalized = normalizeSelectorPath(toPublicStoragePath(parseStoragePath(value, this.resources.currentDirectory)))
         const candidate = /[/>]$/.test(normalized) ? normalized : normalized + '/'
-        return this.directory(candidate, snapshot.directories)
+        if (save && candidate.includes('>')) return undefined
+        try { return await this.browse(save, candidate) }
+        catch (error) {
+          if (error instanceof Error && error.message.startsWith('Storage directory not found:')) return undefined
+          throw error
+        }
       },
       nameDirectory = name
-        ? directory(extractStoragePath(toPublicStoragePath(existingName?.name ?? requestedName)))
+        ? await directory(extractStoragePath(toPublicStoragePath(existingName?.name ?? requestedName)))
         : undefined,
-      initialDirectory = nameDirectory ?? directory(initial) ??
-        directory(toPublicStoragePath(this.resources.currentDirectory)) ?? 'game://./',
+      initialListing = nameDirectory ?? await directory(initial) ??
+        await directory(toPublicStoragePath(this.resources.currentDirectory)) ?? await this.browse(save, 'game://./'),
       rawIndex = Number(args[0]),
       filterIndex = filters.length
         ? rawIndex >= 1 && rawIndex <= filters.length
@@ -149,18 +131,54 @@ export class StorageSelector {
       presentation: StorageSelectorPresentation = Object.freeze({
         save,
         name,
-        initialDirectory,
+        initialDirectory: initialListing.name,
         defaultExtension: extension,
         filters: Object.freeze(filters),
         filterIndex,
-        entries: Object.freeze([...snapshot.files.values()]),
-        directories: Object.freeze([...snapshot.directories].sort()),
+        entries: initialListing.entries,
+        directories: initialListing.directories,
       })
     return {
       caption: args[3] === undefined ? (save ? '保存文件' : '打开文件') : text(args[3]),
       presentation,
       choose: (value) => this.choose(presentation, value),
+      browse: (value) => this.browse(save, value),
     }
+  }
+
+  private async browse(save: boolean, input: string): Promise<StorageSelectorDirectory> {
+    const path = normalizeSelectorPath(input),
+      logical = parseStoragePath(path),
+      virtual = this.virtualDirectories()
+    if (logical && !/[/>]$/.test(logical)) throw new Error('File selector directory requires a trailing delimiter')
+    if (save && logical.includes('>')) throw new Error('Archive directories are read-only')
+    const overlays = this.saves.list().map((file) => this.saves.resource(file.name)!),
+      fallback = this.directory(path, virtual)
+    let listed: Awaited<ReturnType<StorageResolver['listDirectory']>>
+    try { listed = await this.resources.listDirectory(logical, overlays) }
+    catch (error) {
+      if (!fallback || !(error instanceof Error) || !error.message.startsWith('Storage directory not found:')) throw error
+      listed = { name: parseStoragePath(fallback), entries: [], directories: [] }
+    }
+    const name = normalizeSelectorPath(listed.name),
+      entries = new Map<string, { name: string; size: number; archive: boolean }>(),
+      directories = new Set<string>(['game://./', name])
+    for (const entry of listed.entries) {
+      const publicName = normalizeSelectorPath(entry.name)
+      if (!save || !publicName.includes('>')) entries.set(publicName,
+        Object.freeze({ name: publicName, size: entry.size, archive: publicName.includes('>') }))
+    }
+    for (const entry of [...listed.directories.map(normalizeSelectorPath), ...virtual])
+      if ((!save || !entry.includes('>')) && extractStoragePath(entry.slice(0, -1)) === name) directories.add(entry)
+    // Retain navigation to ancestors without enumerating their archives.
+    const current = parseStoragePath(name)
+    for (let i = 0; i < current.length; i++)
+      if (current[i] === '/' || current[i] === '>') directories.add(toPublicStoragePath(current.slice(0, i + 1)))
+    const units = [...entries.keys(), ...directories].reduce((sum, value) => sum + value.length, 0)
+    if (entries.size > maxEntries || directories.size > maxEntries || units > maxNameUnits)
+      throw new Error('File selector listing exceeds its metadata budget')
+    return Object.freeze({ name, entries: Object.freeze([...entries.values()]),
+      directories: Object.freeze([...directories].sort()) })
   }
 
   private directory(name: string, directories: ReadonlySet<string>): string | undefined {
@@ -170,7 +188,7 @@ export class StorageSelector {
     return matches[0]
   }
 
-  private choose(request: StorageSelectorPresentation, encoded: string): string {
+  private async choose(request: StorageSelectorPresentation, encoded: string): Promise<string> {
     if (encoded.length > 8192) throw new Error('File selector choice is too large')
     const choice: unknown = JSON.parse(encoded)
     if (!choice || typeof choice !== 'object' || Array.isArray(choice))
@@ -194,15 +212,17 @@ export class StorageSelector {
     // must not make FOO/a.sav ambiguous when only Foo/a.sav actually exists.
     // Autopath fallback would silently select another directory, so use find.
     const saved = this.saves.resource(path),
-      original = saved ? undefined : this.resources.find(path),
-      existing = saved ?? original,
-      publicName = normalizeSelectorPath(existing?.name ?? path),
-      snapshot = this.namespace(request.save),
-      parent = this.directory(extractStoragePath(publicName), snapshot.directories)
+      original = saved ? undefined : await this.resources.findAsync(path),
+      publicName = normalizeSelectorPath((this.saves.resource(path) ?? saved ?? original)?.name ?? path),
+      snapshot = await this.browse(request.save, extractStoragePath(publicName)),
+      parent = snapshot.name
     if (!parent) throw new Error('选择的目录不存在。')
     path = parseStoragePath(parent + extractStorageName(publicName))
-    if (this.directory(toPublicStoragePath(path + '/'), snapshot.directories))
+    if (this.directory(toPublicStoragePath(path + '/'), new Set(snapshot.directories)))
       throw new Error('请选择文件，而不是目录。')
+    // Directory/header I/O can yield to a Timer that writes a save. Recheck
+    // the overlay after the final await before granting overwrite permission.
+    const existing = this.saves.resource(path) ?? original
     if (!request.save && !existing) throw new Error('选择的文件不存在。')
     if (request.save && existing && !overwrite) throw new Error('文件已存在，请确认覆盖。')
     const selected = normalizeSelectorPath(existing?.name ?? path)

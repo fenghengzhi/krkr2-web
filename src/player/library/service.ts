@@ -3,8 +3,9 @@ import { OpfsLibraryFiles, OpfsReadPool } from '../../backends/files/opfs-librar
 import { HttpRangePool } from '../../backends/files/http-range.ts'
 import { resolveFiles, type SourceFile } from '../../backends/files/source-files.ts'
 import { gameIdentity, projectIdentity } from '../game-identity.ts'
-import { copyGameProject, selectProject } from '../../engine/storage/project.ts'
+import { copyGameProject, selectProjectLazy } from '../../engine/storage/project.ts'
 import { importSources } from '../../backends/files/import-resources.ts'
+import { archiveReader } from '../../backends/files/archive-reader.ts'
 import type {
   LibraryGame,
   LibraryImport,
@@ -118,7 +119,8 @@ export class LibraryService {
         const sources = await resolveFiles(request.files, checkpoint, http)
         const sourceGameId = await gameIdentity(sources, checkpoint)
         const project = requestedProject
-          ? selectProject(await importSources(sources, checkpoint), { mode: 'root', ...requestedProject })
+          ? await selectProjectLazy(await importSources(sources, checkpoint, { lazyArchives: true }),
+            { mode: 'root', ...requestedProject }, archiveReader, checkpoint)
           : undefined
         const identity = await projectIdentity(sourceGameId, project)
         if (identity !== request.expectedGameId)

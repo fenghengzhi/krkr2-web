@@ -78,7 +78,10 @@ for (const binary of [false, true]) {
         assert.equal(await f.session.evaluate('Scripts.evalStorage("data.xp3>system/patch-value.tjs")'), 'base')
         assert.equal(await f.session.evaluate('Scripts.evalStorage("patch4.xp3>patch-value.tjs")'), 'patch4')
         assert.equal(await f.session.evaluate('Storages.isExistentStorage("patch4.xp3")'), '1')
-        assert.equal(await f.session.evaluate('typeof useArchiveIfExists'), 'undefined', 'The original initializer also removes its temporary helper')
+        // TJS typeof still resolves a missing bare global and throws. Catch
+        // that exact native error inside the VM; the Session must stay live.
+        assert.equal(await f.session.evaluate('(function(){try{return "present:"+useArchiveIfExists;}catch(error){return error.message;}})()'),
+          'Member "useArchiveIfExists" does not exist', 'The original initializer also removes its temporary helper')
         if (binary) assert(f.session.exportSaves().some((entry) => entry.path === 'savedata/archive-search.cjs' && Buffer.from(entry.bytes.subarray(0, 4)).toString() === 'TJS2'))
       } finally { await f.session.stop() }
       assert(Object.values(f.session.inspectOwnership()).every((value) => value === 0))

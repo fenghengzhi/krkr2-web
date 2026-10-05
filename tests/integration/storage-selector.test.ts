@@ -9,6 +9,8 @@ import { MemorySaveStore } from '../../src/engine/ports/saves.ts'
 import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import type { ModuleFactory, WasmManifest } from '../../src/backends/script/tjs-wasm/module.ts'
 import type { EngineEvent, EngineSession, SessionDependencies } from '../../src/engine/session.ts'
+import { archiveReader } from '../../src/backends/files/archive-reader.ts'
+import { zipFixture } from '../helpers/zip-fixtures.ts'
 
 const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
 type DialogEvent = Extract<EngineEvent, { type: 'system-dialog' }>
@@ -74,7 +76,8 @@ class SelectorWindow extends Window {
 async function fixture(
   binary: boolean,
   body: string,
-  options: { startup?: boolean; windows?: boolean; dataPath?: string; emptySaves?: boolean } = {},
+  options: { startup?: boolean; windows?: boolean; dataPath?: string; emptySaves?: boolean;
+    files?: Record<string, string | Uint8Array> } = {},
   overrides: Partial<SessionDependencies> = {},
 ) {
   const clock = new Clock(),
@@ -143,6 +146,7 @@ async function fixture(
       'scenario/member.tjs': '"mounted flat"',
       'pack.xp3>scenario/member.tjs': '"archive member"',
       'nested/folder/readme.txt': 'A real mounted file',
+      ...options.files,
     },
     {
       now: clock.now,
@@ -377,6 +381,60 @@ function selectAtFunctionLimit(remaining){
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
 
+  test(`${mode}: lazy selector browsing opens only the requested archive and recovers after a corrupt directory`, async () => {
+    const opened: string[] = [], f = await fixture(binary, `
+function run(){var options=%[title:"Lazy archive",initialDir:"game://./",filter:"All|*.*"];
+  var result=Storages.selectFile(options);return result+"|"+options.name+"|"+Scripts.evalStorage(options.name);}
+`, { files: { 'lazy.zip': zipFixture(), 'broken.zip': new Uint8Array([80,75,3,4,0]) } }, {
+      archives: { ...archiveReader, async open(resource, checkpoint) {
+        opened.push(resource.name); return archiveReader.open(resource, checkpoint)
+      } },
+    })
+    try {
+      const opening = f.open(), request = await f.waitSelector('Lazy archive', 1, opening)
+      assert.deepEqual(opened, [], 'Opening the root picker must not decode container indexes')
+      assert.ok(request.selector.directories.includes('game://./lazy.zip>'))
+      assert.ok(request.selector.directories.includes('game://./broken.zip>'))
+      assert.equal(await f.session.browseStorageSelector(request.id + 100, 'game://./lazy.zip>'), null)
+      assert.deepEqual(opened, [], 'A stale dialog cannot trigger archive I/O')
+      await assert.rejects(f.session.browseStorageSelector(request.id, 'game://./broken.zip>'))
+      assert.equal(f.dialog()?.id, request.id)
+      assert.equal(opening.settled(), false)
+      assert.deepEqual(opened, ['broken.zip'])
+      const archive = await f.session.browseStorageSelector(request.id, 'game://./lazy.zip>')
+      assert.ok(archive?.directories.includes('game://./lazy.zip>シーン/'))
+      const directory = await f.session.browseStorageSelector(request.id, 'game://./lazy.zip>シーン/')
+      assert.ok(directory?.entries.some((entry) => entry.name === 'game://./lazy.zip>シーン/value.tjs' && entry.archive))
+      assert.deepEqual(opened, ['broken.zip', 'lazy.zip'])
+      assert.equal(await f.choose(request, 'game://./lazy.zip>シーン/value.tjs'), true)
+      assert.equal(await f.settled(opening), '1|game://./lazy.zip>シーン/value.tjs|42')
+      assert.equal(await f.session.browseStorageSelector(request.id, 'game://./lazy.zip>'), null)
+    } finally { await f.stop() }
+  })
+
+  test(`${mode}: Stop retires a selector directory RPC before a borrowed archive read returns`, async () => {
+    let release!: () => void, entered = false
+    const held = new Promise<void>((resolve) => { release = resolve }),
+      f = await fixture(binary, 'function run(){var options=%[title:"Held directory"];return Storages.selectFile(options);}',
+        { files: { 'held.zip': zipFixture() } }, {
+          archives: { ...archiveReader, async open(resource, checkpoint) {
+            if (resource.name === 'held.zip') { entered = true; await held }
+            return archiveReader.open(resource, checkpoint)
+          } },
+        })
+    try {
+      const opening = f.open(), request = await f.waitSelector('Held directory', 1, opening),
+        browsing = f.track(f.session.browseStorageSelector(request.id, 'game://./held.zip>'))
+      await f.until(() => entered, 'borrowed archive read', opening)
+      assert.equal(browsing.settled(), false)
+      await f.stop()
+      const result = await browsing.result
+      assert.equal(result.ok, true)
+      if (result.ok) assert.equal(result.value, null)
+      assert.equal(await f.session.browseStorageSelector(request.id, 'game://./held.zip>'), null)
+    } finally { release(); await f.stop() }
+  })
+
   test(`${mode}: Storages.selectFile returns an existing mounted public name usable by Scripts.execStorage`, async () => {
     const f = await fixture(
       binary,
@@ -403,7 +461,7 @@ function run(){var result=Storages.selectFile(params);Scripts.execStorage(params
       assert.ok(
         request.selector.entries.some((entry) => entry.name === 'game://./scripts/chosen.tjs'),
       )
-      assert.equal(f.choose(request, 'game://./scripts/chosen.tjs', 1), true)
+      assert.equal(await f.choose(request, 'game://./scripts/chosen.tjs', 1), true)
       assert.equal(await f.settled(opening), '1|game://./scripts/chosen.tjs|1|42')
     } finally {
       await f.stop()
@@ -430,16 +488,16 @@ function run(){var params=%[title:"Archive",initialDir:"pack.xp3>scenario/",filt
           (entry) => entry.name === 'game://./pack.xp3>scenario/member.tjs' && entry.archive,
         ),
       )
-      for (const directory of [
-        'game://./',
-        'game://./nested/',
-        'game://./nested/folder/',
-        'game://./savedata/',
-      ])
-        assert.ok(archive.selector.directories.includes(directory), directory)
-      assert.equal(f.choose(archive, 'game://./pack.xp3>scenario/member.tjs'), true)
+      assert.ok(archive.selector.directories.includes('game://./'))
+      const root = await f.session.browseStorageSelector(archive.id, 'game://./')
+      assert.ok(root)
+      for (const directory of ['game://./nested/', 'game://./savedata/'])
+        assert.ok(root.directories.includes(directory), directory)
+      const nested = await f.session.browseStorageSelector(archive.id, 'game://./nested/')
+      assert.ok(nested?.directories.includes('game://./nested/folder/'))
+      assert.equal(await f.choose(archive, 'game://./pack.xp3>scenario/member.tjs'), true)
       const overlay = await f.waitSelector('Overlay', 1, opening)
-      assert.equal(f.choose(overlay, 'game://./scenario/member.tjs'), true)
+      assert.equal(await f.choose(overlay, 'game://./scenario/member.tjs'), true)
       assert.equal(await f.settled(opening), '1|archive member|1|saved flat')
       assert.ok(f.session.exportSaves().every((file) => !file.path.includes('>')))
     } finally {
@@ -471,7 +529,7 @@ function writeSelected(){var state=%[text:"保存・雪😀",counter:37];
       for (const directory of ['game://./', 'game://./user/', 'game://./user/custom-slots/'])
         assert.ok(request.selector.directories.includes(directory), directory)
       assert.ok(!request.selector.entries.some((entry) => entry.name.startsWith('game://./user/')))
-      assert.equal(f.choose(request, 'game://./user/custom-slots/state'), true)
+      assert.equal(await f.choose(request, 'game://./user/custom-slots/state'), true)
       assert.equal(await f.settled(opening), '1|game://./user/custom-slots/state.kdt|0')
       assert.deepEqual(f.session.exportSaves(), beforeFiles)
       assert.equal(await f.session.evaluate('writeSelected()'), '保存・雪😀|37')
@@ -544,12 +602,12 @@ function run(){var result=Storages.selectFile(params);return result+"|"+params.n
         }),
       ]
       for (const choice of invalid) {
-        assert.throws(() => f.respond(request, choice), choice)
+        await assert.rejects(async () => f.respond(request, choice), choice)
         assert.equal(f.dialog()?.id, request.id)
         assert.equal(opening.settled(), false)
         assert.deepEqual(f.dialogState()?.pendingIds, [request.id])
       }
-      assert.equal(f.choose(request, 'game://./scripts/chosen.tjs'), true)
+      assert.equal(await f.choose(request, 'game://./scripts/chosen.tjs'), true)
       assert.equal(await f.settled(opening), '1|game://./scripts/chosen.tjs')
     } finally {
       await f.stop()
@@ -583,21 +641,21 @@ function run(){var params=%[title:"Case mounted"];
     try {
       const opening = f.open(),
         mounted = await f.waitSelector('Case mounted', 1, opening)
-      assert.throws(() => f.choose(mounted, 'game://./case/FOO.tjs'), /ambiguous/i)
+      await assert.rejects(async () => f.choose(mounted, 'game://./case/FOO.tjs'), /ambiguous/i)
       assert.equal(f.dialog()?.id, mounted.id)
-      assert.equal(f.choose(mounted, 'game://./case/Foo.tjs'), true)
+      assert.equal(await f.choose(mounted, 'game://./case/Foo.tjs'), true)
       const saved = await f.waitSelector('Case save', 1, opening)
-      assert.throws(() => f.choose(saved, 'game://./savedata/SLOT.TXT'), /ambiguous/i)
+      await assert.rejects(async () => f.choose(saved, 'game://./savedata/SLOT.TXT'), /ambiguous/i)
       assert.equal(f.dialog()?.id, saved.id)
-      assert.equal(f.choose(saved, 'game://./savedata/slot.txt'), true)
+      assert.equal(await f.choose(saved, 'game://./savedata/slot.txt'), true)
       // The complete name resolves uniquely even though its directory prefix
       // has two folded matches. Do not reject before resolving the file.
       const uniqueMounted = await f.waitSelector('Unique mounted', 1, opening)
       assert.equal(uniqueMounted.selector.initialDirectory, 'game://./Fold/')
-      assert.equal(f.choose(uniqueMounted, 'game://./FOLD/a.tjs'), true)
+      assert.equal(await f.choose(uniqueMounted, 'game://./FOLD/a.tjs'), true)
       const uniqueSave = await f.waitSelector('Unique save', 1, opening)
       assert.equal(uniqueSave.selector.initialDirectory, 'game://./Saved/')
-      assert.equal(f.choose(uniqueSave, 'game://./SAVED/a.txt'), true)
+      assert.equal(await f.choose(uniqueSave, 'game://./SAVED/a.txt'), true)
       assert.equal(
         await f.settled(opening),
         'upper mounted|game://./savedata/slot.txt|lower save|game://./Fold/a.tjs|unique mounted|game://./Saved/a.txt|unique save',
@@ -620,9 +678,9 @@ function run(){var first=Storages.selectFile(params);params.title="Late overwrit
     try {
       const opening = f.open(),
         mounted = await f.waitSelector('Mounted overwrite', 1, opening)
-      assert.throws(() => f.choose(mounted, 'game://./scripts/chosen.tjs'))
+      await assert.rejects(async () => f.choose(mounted, 'game://./scripts/chosen.tjs'))
       assert.equal(f.dialog()?.id, mounted.id)
-      assert.equal(f.choose(mounted, 'game://./scripts/chosen.tjs', 1, true), true)
+      assert.equal(await f.choose(mounted, 'game://./scripts/chosen.tjs', 1, true), true)
       const late = await f.waitSelector('Late overwrite', 1, opening)
       assert.ok(!late.selector.entries.some((entry) => entry.name === 'game://./savedata/late.txt'))
       f.clock.advance(10)
@@ -631,9 +689,9 @@ function run(){var first=Storages.selectFile(params);params.title="Late overwrit
         'Timer writes save during selector',
         opening,
       )
-      assert.throws(() => f.choose(late, 'game://./savedata/late.txt'))
+      await assert.rejects(async () => f.choose(late, 'game://./savedata/late.txt'))
       assert.equal(f.dialog()?.id, late.id)
-      assert.equal(f.choose(late, 'game://./savedata/late.txt', 1, true), true)
+      assert.equal(await f.choose(late, 'game://./savedata/late.txt', 1, true), true)
       assert.equal(await f.settled(opening), '1|1|game://./savedata/late.txt')
       assert.equal(
         await f.session.evaluate('[].load("savedata/late.txt")[0]'),
@@ -665,13 +723,13 @@ function run(){var result=Storages.selectFile(params);return result+"|"+params.n
         'game://./nested/folder.',
         'game://./NESTED/FOLDER.',
       ]) {
-        assert.throws(() => f.choose(request, name, 0, true), name)
+        await assert.rejects(async () => f.choose(request, name, 0, true), name)
         assert.equal(f.dialog()?.id, request.id)
         assert.equal(opening.settled(), false)
       }
       // An explicit trailing dot suppresses the default extension; selecting
       // the name itself must still leave the persistent overlay unchanged.
-      assert.equal(f.choose(request, 'game://./savedata/plain.', 0), true)
+      assert.equal(await f.choose(request, 'game://./savedata/plain.', 0), true)
       assert.equal(await f.settled(opening), '1|game://./savedata/plain|0')
       assert.deepEqual(f.session.exportSaves(), beforeFiles)
     } finally {
@@ -697,7 +755,7 @@ function run(){var caught=false;try{Storages.selectFile(params);}catch(error){ca
     try {
       const opening = f.open(),
         request = await f.waitSelector('Writeback', 1, opening)
-      assert.equal(f.choose(request, 'game://./scripts/expression.tjs', 2), true)
+      assert.equal(await f.choose(request, 'game://./scripts/expression.tjs', 2), true)
       assert.equal(
         await f.settled(opening),
         '1|index:2,name:game://./scripts/expression.tjs|2|scripts/chosen.tjs',
@@ -734,17 +792,17 @@ function run(){var params=new Options(),result=Storages.selectFile(params);
       const opening = f.open(),
         getter = await f.waitSelector('Name getter selector', 1, opening)
       assert.deepEqual(f.dialogState()?.pendingIds, [getter.id])
-      assert.equal(f.choose(getter, 'game://./scripts/chosen.tjs'), true)
+      assert.equal(await f.choose(getter, 'game://./scripts/chosen.tjs'), true)
       const outer = await f.waitSelector('Outer selector', 1, opening)
       assert.equal(outer.selector.name, 'game://./scripts/chosen.tjs')
-      assert.equal(f.choose(outer, 'game://./scripts/expression.tjs', 2), true)
+      assert.equal(await f.choose(outer, 'game://./scripts/expression.tjs', 2), true)
       const setter = await f.waitSelector('Index setter selector', 1, opening)
       // The outer dialog's response has already released its modal scope;
       // the native C++ call still waits for the original options setter.
       assert.deepEqual(f.dialogState()?.pendingIds, [setter.id])
-      assert.equal(f.choose(outer, 'game://./scripts/chosen.tjs', 1), false)
+      assert.equal(await f.choose(outer, 'game://./scripts/chosen.tjs', 1), false)
       assert.ok(!f.logs.some((entry) => entry.startsWith('name:write:')))
-      assert.equal(f.choose(setter, 'game://./pack.xp3>scenario/member.tjs'), true)
+      assert.equal(await f.choose(setter, 'game://./pack.xp3>scenario/member.tjs'), true)
       assert.equal(await f.settled(opening), '1|2|game://./scripts/expression.tjs')
       before(f.logs, 'getter:before', 'getter:after:1')
       before(f.logs, 'getter:after:1', 'index:before:2')
@@ -776,12 +834,12 @@ function run(){var local=["kept",37],params=%[title:"Startup selector"];timer.en
       const child = await f.waitDialog('Child inform', 2, f.starting)
       assert.equal(child.kind, 'inform')
       assert.deepEqual(f.dialogState()?.pendingIds, [parent.id, child.id])
-      assert.equal(f.choose(parent, 'game://./scripts/chosen.tjs'), false)
+      assert.equal(await f.choose(parent, 'game://./scripts/chosen.tjs'), false)
       assert.equal(f.respond(child, ''), true)
       const restored = await f.waitSelector('Startup selector', 1, f.starting)
       assert.equal(restored.id, parent.id)
       assert.equal(f.respond(child, ''), false)
-      assert.equal(f.choose(restored, 'game://./scripts/chosen.tjs'), true)
+      assert.equal(await f.choose(restored, 'game://./scripts/chosen.tjs'), true)
       await f.settled(f.starting)
       before(f.logs, 'child:before', 'child:after')
       before(f.logs, 'child:after', 'parent:after:1:kept:37')
@@ -807,11 +865,11 @@ function run(){timer.enabled=true;var value=System.inputString("Parent input","P
       const child = await f.waitSelector('Child selector', 2, opening)
       assert.deepEqual(f.dialogState()?.pendingIds, [parent.id, child.id])
       assert.equal(f.respond(parent, 'too early'), false)
-      assert.equal(f.choose(child, 'game://./scripts/chosen.tjs'), true)
+      assert.equal(await f.choose(child, 'game://./scripts/chosen.tjs'), true)
       const restored = await f.waitDialog('Parent input', 1, opening)
       assert.equal(restored.id, parent.id)
       assert.equal(restored.value, 'seed')
-      assert.equal(f.choose(child, 'game://./scripts/expression.tjs'), false)
+      assert.equal(await f.choose(child, 'game://./scripts/expression.tjs'), false)
       assert.equal(f.respond(restored, 'parent value'), true)
       assert.equal(await f.settled(opening), 'parent value')
       before(f.logs, 'child:1:game://./scripts/chosen.tjs', 'parent:parent value')
@@ -867,15 +925,15 @@ function run(){var params=%[title:"Paused selector"];var result=Storages.selectF
         request = await f.waitSelector('Paused selector', 1, opening)
       f.session.pause()
       await f.until(() => f.session.snapshot().state === 'paused', 'paused selector')
-      assert.equal(f.choose(request, 'game://./scripts/chosen.tjs'), false)
+      assert.equal(await f.choose(request, 'game://./scripts/chosen.tjs'), false)
       assert.equal(f.respond(request, null), false)
       assert.equal(opening.settled(), false)
       assert.ok(!f.logs.includes('after:1'))
       f.session.resume()
       const restored = await f.waitSelector('Paused selector', 1, opening)
       assert.equal(restored.id, request.id)
-      assert.equal(f.choose(restored, 'game://./scripts/chosen.tjs'), true)
-      assert.equal(f.choose(restored, 'game://./scripts/expression.tjs'), false)
+      assert.equal(await f.choose(restored, 'game://./scripts/chosen.tjs'), true)
+      assert.equal(await f.choose(restored, 'game://./scripts/expression.tjs'), false)
       assert.equal(await f.settled(opening), '1|game://./scripts/chosen.tjs')
     } finally {
       await f.stop()
@@ -900,7 +958,7 @@ function run(){System.eventDisabled=true;timer.enabled=true;trigger.trigger();
       f.clock.advance(10)
       assert.equal(f.session.snapshot().eventDisabled, true)
       assert.ok(!f.logs.includes('trigger:delivered'))
-      assert.equal(f.choose(request, 'game://./scripts/chosen.tjs'), true)
+      assert.equal(await f.choose(request, 'game://./scripts/chosen.tjs'), true)
       assert.equal(await f.settled(opening), '1|0|0|1')
       assert.equal(
         await f.session.evaluate(
@@ -940,7 +998,7 @@ a.keyHandler=function(key){if(key==65){var params=%[title:"Stop parent"];timer.e
       assert.equal((await bounded(callback.result, 'cancel selector callback')).ok, false)
       assert.ok(!f.logs.includes('child:after-stop'))
       assert.ok(!f.logs.includes('parent:after-stop'))
-      assert.equal(f.choose(child, 'game://./scripts/chosen.tjs'), false)
+      assert.equal(await f.choose(child, 'game://./scripts/chosen.tjs'), false)
       assert.equal(f.respond(parent, null), false)
       assert.deepEqual(f.session.snapshot().windows, [])
     } finally {
@@ -1051,7 +1109,7 @@ function recover(){var params=%[title:"Recovered selector"];
       const recovering = f.open('recover()'),
         fresh = await f.waitSelector('Recovered selector', 1, recovering)
       assert.notEqual(fresh.id, rejectedRequest.id)
-      assert.equal(f.choose(fresh, 'game://./scripts/chosen.tjs'), true)
+      assert.equal(await f.choose(fresh, 'game://./scripts/chosen.tjs'), true)
       assert.equal(await f.settled(recovering), '1|game://./scripts/chosen.tjs')
       assert.deepEqual(f.session.inspectOwnership(), baseline)
       observation.assertIdle()
@@ -1114,8 +1172,8 @@ function run(){var params=%[title:"Budget parent"];timer.enabled=true;
       assert.ok(observation.caught[0]!.budget.functions > 0)
       assert.deepEqual(f.dialogState()?.pendingIds, [parent.id, fresh.id])
       assert.equal(f.respond(rejectedRequest, null), false)
-      assert.equal(f.choose(parent, 'game://./scripts/chosen.tjs'), false)
-      assert.equal(f.choose(fresh, 'game://./scripts/expression.tjs'), true)
+      assert.equal(await f.choose(parent, 'game://./scripts/chosen.tjs'), false)
+      assert.equal(await f.choose(fresh, 'game://./scripts/expression.tjs'), true)
 
       const restored = await f.waitSelector('Budget parent', 1, opening),
         restoredBudget = observation.budget()
@@ -1124,7 +1182,7 @@ function run(){var params=%[title:"Budget parent"];timer.enabled=true;
       assert.ok(f.logs.includes('child:recovered:1:game://./scripts/expression.tjs'))
       for (const field of ['depth', 'bytes', 'functions', 'tries', 'delegations'] as const)
         assert.equal(restoredBudget[field], parentBudget[field], `Restored parent ${field}`)
-      assert.equal(f.choose(restored, 'game://./scripts/chosen.tjs'), true)
+      assert.equal(await f.choose(restored, 'game://./scripts/chosen.tjs'), true)
       assert.equal(await f.settled(opening), '1|game://./scripts/chosen.tjs')
       observation.assertIdle()
     } finally {

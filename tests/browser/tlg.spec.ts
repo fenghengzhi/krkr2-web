@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect, type Page } from '@playwright/test'
 import { tlgFixture, tlgSds, tlgTags, tlgU32 } from '../helpers/tlg-fixtures.ts'
 
@@ -95,12 +96,7 @@ var tick=0,completed=0;five.onTransitionCompleted=function(dest,src){completed++
     await expect(page.locator('#logs')).toContainText('tlg-ready:1')
     await expect(page.locator('canvas')).toHaveJSProperty('width', 8)
     await expect(page.locator('canvas')).toHaveJSProperty('height', 4)
-    await page.locator('canvas').evaluate((node) => {
-      const canvas = node as HTMLCanvasElement
-      canvas.style.width = `${canvas.width * 16}px`
-      canvas.style.height = `${canvas.height * 16}px`
-      canvas.style.imageRendering = 'pixelated'
-    })
+    await magnifyPixelWindow(page.locator('canvas'))
     expect(await sample(page)).toEqual([
       [202, 53, 17, 255],
       [101, 27, 9, 255],

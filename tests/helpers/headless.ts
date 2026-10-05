@@ -9,6 +9,7 @@ import {
 import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import { readScript, readText, writeText } from '../../src/backends/files/text-codecs.ts'
 import { inflateImage, deflateImage } from '../../src/backends/files/blob-source.ts'
+import { archiveReader } from '../../src/backends/files/archive-reader.ts'
 import type { ModuleFactory, WasmManifest } from '../../src/backends/script/tjs-wasm/module.ts'
 
 const directory = resolve('.generated/wasm')
@@ -26,6 +27,7 @@ export async function headless(
   const logs: string[] = []
   const events: EngineEvent[] = []
   const session = new EngineSession({
+    archives: archiveReader,
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
     inflateImage,
     deflateImage,

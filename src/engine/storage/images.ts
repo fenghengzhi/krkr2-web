@@ -43,7 +43,7 @@ interface ImageScheduler {
 export class ImageLoader {
   private readonly cache: ImageCache
   constructor(
-    private readonly find: (name: string) => Resource | undefined,
+    private readonly find: (name: string) => Resource | undefined | Promise<Resource | undefined>,
     decode: (bytes: Uint8Array) => Promise<DecodedImage>,
     private readonly finish: <T>(work: Generator<void, T>) => Promise<T>,
     private readonly scheduler: ImageScheduler,
@@ -84,13 +84,13 @@ export class ImageLoader {
         this.scheduler.check()
         if (!budget.remaining || (timeout && this.scheduler.now() - start >= timeout)) break
         try {
-          await this.cache.warm(this.resolve(name), budget)
+          await this.cache.warm(await this.resolve(name), budget)
           for (const [suffix, prefer] of [
             ['_m', true],
             ['_p', false],
           ] as const) {
             if (!budget.remaining) break
-            const resource = this.companion(name, suffix, prefer)
+            const resource = await this.companion(name, suffix, prefer)
             if (resource) await this.cache.warm(resource, budget)
           }
         } catch {
@@ -112,46 +112,46 @@ export class ImageLoader {
       index = base.lastIndexOf('.')
     return index < 0 ? '' : base.slice(index)
   }
-  findImage(name: string): Resource | undefined {
-    const exact = this.find(name)
+  async findImage(name: string): Promise<Resource | undefined> {
+    const exact = await this.find(name)
     if (exact) return exact
     if (!this.extension(name))
       for (const ext of imageExtensions) {
-        const resource = this.find(name + ext)
+        const resource = await this.find(name + ext)
         if (resource) return resource
       }
     return undefined
   }
-  resolve(name: string): Resource {
-    const resource = this.findImage(name)
+  async resolve(name: string): Promise<Resource> {
+    const resource = await this.findImage(name)
     if (!resource) throw new Error(`Image resource not found: ${name}`)
     return resource
   }
-  private companion(name: string, suffix: string, preferExtension: boolean): Resource | undefined {
+  private async companion(name: string, suffix: string, preferExtension: boolean): Promise<Resource | undefined> {
     const ext = this.extension(name),
       stem = ext ? name.slice(0, -ext.length) : name
     if (ext && preferExtension) {
-      const same = this.find(stem + suffix + ext)
+      const same = await this.find(stem + suffix + ext)
       if (same) return same
     }
     // Companions use registered extensions, and can come from later auto paths.
     for (const extension of imageExtensions) {
-      const resource = this.find(stem + suffix + extension)
+      const resource = await this.find(stem + suffix + extension)
       if (resource) return resource
     }
     return undefined
   }
   async rule(name: string): Promise<DecodedImage> {
-    return this.cache.read(this.resolve(name))
+    return this.cache.read(await this.resolve(name))
   }
   async load(name: string, key: number): Promise<LoadedImage> {
     validateColorKey(key)
     const image = await this.rule(name)
     await this.finish(applyImageKey(image, key))
-    const mask = this.companion(name, '_m', true)
+    const mask = await this.companion(name, '_m', true)
     if (mask) await this.finish(applyImageMask(image, await this.cache.read(mask)))
     await this.finish(matteImage(image, key))
-    const province = this.companion(name, '_p', false)
+    const province = await this.companion(name, '_p', false)
     if (!province) return { image }
     try {
       return {

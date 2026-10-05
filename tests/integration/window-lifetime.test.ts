@@ -1,6 +1,8 @@
 import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
 import { windowFixture, videoGate } from '../helpers/window-lifetime.ts'
+import { HeadlessWindowGeometry } from '../../src/engine/scene/window-geometry.ts'
+import type { WindowGeometryRequest } from '../../src/engine/ports/window-geometry.ts'
 const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
 
 for (const binary of [false, true]) {
@@ -59,6 +61,43 @@ for (const binary of [false, true]) {
         'original:42:1,1,1,0',
       )
       assert.equal(f.session.inspectOwnership().windowSources, 0)
+      await f.execute('delete global.item;delete global.win;')
+      await f.restored()
+    } finally {
+      await f.session.stop()
+    }
+  })
+  test(`${mode}: managed cleanup reads committed geometry without reopening the retired host`, async () => {
+    const geometry = new class extends HeadlessWindowGeometry {
+      requests = 0
+      retiredIds = new Set<number>()
+      override async measure(request: WindowGeometryRequest) {
+        assert.equal(this.retiredIds.has(request.windowId), false, 'Retired Window was measured again')
+        this.requests++
+        return super.measure(request)
+      }
+      override retire(id: number) { this.retiredIds.add(id); super.retire(id) }
+    }()
+    const f = await windowFixture(binary, `
+class ReadClosingGeometry {
+  var owner;
+  function ReadClosingGeometry(window){owner=window;}
+  function finalize(){
+    trace=owner.caption+":"+owner.width+","+owner.height+","+owner.innerWidth+","+owner.innerHeight+
+      ":"+owner.zoomNumer+"/"+owner.zoomDenom+":"+owner.visible+":"+int(isvalid owner);
+    managedFinalized++;
+  }
+}
+`, { windowGeometry: geometry })
+    try {
+      await f.execute('makeWindow();win.setSize(321,245);win.innerSunken=true;win.setZoom(3,2);win.visible=true;var item=new ReadClosingGeometry(win);win.add(item);')
+      const requests = geometry.requests
+      assert(requests > 0, 'Live Window must use the measurement backend')
+      await f.execute('invalidate win;')
+      assert.equal(await f.session.evaluate('trace'), 'original:321,245,317,241:3/2:1:1')
+      assert.equal(await f.session.evaluate('managedFinalized+","+int(isvalid item)+","+int(isvalid win)'), '1,0,0')
+      assert.equal(geometry.requests, requests, 'Cleanup must retain the committed geometry')
+      assert.deepEqual(f.logs, [], 'Cleanup must not swallow a geometry error')
       await f.execute('delete global.item;delete global.win;')
       await f.restored()
     } finally {

@@ -128,6 +128,10 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       expectWindowedGeometry(before, true)
       await surface.getByRole('button', { name: 'Enter geometry fullscreen', exact: true }).click()
       await expect(surface).toHaveClass(/game-window-fullscreen/)
+      // Window-view and rendered-frame messages travel independently. Keep
+      // the exact backing contract, but wait for its actual frame delivery.
+      await expect(surface.locator('canvas[data-window-id]')).toHaveJSProperty('width', 1200)
+      await expect(surface.locator('canvas[data-window-id]')).toHaveJSProperty('height', 900)
       const full = await readWindowGeometry(surface)
       records.push({ phase: 'fullscreen', ...full })
       expectGeometryRect(full.geometry.outer, { x: 0, y: 0, width: 1280, height: 900 })

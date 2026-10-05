@@ -63,7 +63,7 @@ movie.open("sound.mp4");movie.play();
       expect(observed.media.rate).toBe(2); expect(observed.media.opacity).toBe('0.25')
       expect(observed.media.background).toBe('rgb(16, 32, 48)')
       await evaluate(page, '(function(){movie.playRate=0;movie.playRate=-1;return movie.playRate;})()', '2')
-      await evaluate(page, '(function(){movie.close();return [movie.status,movie.playRate,movie.audioVolume,movie.audioBalance,movie.mixingMovieAlpha,movie.enabledAudioStream,movie.enabledVideoStream].join(",");})()', 'unload,0,100000,0,0,-1,-1')
+      await evaluate(page, '(function(){movie.close();return [movie.status,movie.playRate,movie.audioVolume,movie.audioBalance,movie.mixingMovieAlpha,movie.enabledAudioStream,movie.enabledVideoStream].join(",");})()', 'unload,+0.0,100000,0,+0.0,-1,-1')
       await expect(page.locator('video')).toHaveCount(0)
       const audio = await observeVideoAudio(page)
       expect(audio.graphs).toHaveLength(0); expect(audio.liveUrls).toBe(0)

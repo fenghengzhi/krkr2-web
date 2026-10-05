@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect } from '@playwright/test'
 
 for (const backend of ['asyncify', 'jspi']) {
@@ -31,12 +32,7 @@ System.graphicCacheLimit=gcsAuto;Debug.message("cache-ready:"+string(isolated &&
     await expect(page.locator('#logs')).toContainText('cache-ready:1')
     await expect(page.locator('canvas')).toHaveJSProperty('width', 4)
     await expect(page.locator('canvas')).toHaveJSProperty('height', 1)
-    await page.locator('canvas').evaluate((node) => {
-      const c = node as HTMLCanvasElement
-      c.style.width = '256px'
-      c.style.height = '64px'
-      c.style.imageRendering = 'pixelated'
-    })
+    await magnifyPixelWindow(page.locator('canvas'))
     const screenshot = await page.locator('canvas').screenshot()
     const pixels = await page.evaluate(
       async (url) => {

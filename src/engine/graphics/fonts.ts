@@ -56,7 +56,7 @@ export class FontService {
   private disposed = false
   private waiters = new Set<() => void>()
   constructor(
-    private readonly resolve: (name: string) => Resource,
+    private readonly resolve: (name: string) => Resource | Promise<Resource>,
     private readonly graphics: GraphicsDecoder,
     private readonly finish: Finish,
   ) {}
@@ -103,7 +103,7 @@ export class FontService {
   async map(spec: FontSpec, name: string): Promise<void> {
     this.check()
     const key = fontKey(spec),
-      resource = this.resolve(name),
+      resource = await this.wait(Promise.resolve(this.resolve(name))),
       token = resource.cacheToken ?? resource,
       old = this.mappings.get(key)
     let source = this.sources.get(token)
@@ -144,7 +144,7 @@ export class FontService {
       named = !spec.faceIsFileName
         ? variants?.reduce((best, face) => (cost(face) < cost(best) ? face : best))
         : undefined
-    const resource = spec.faceIsFileName ? this.resolve(spec.face) : named?.resource
+    const resource = spec.faceIsFileName ? await this.wait(Promise.resolve(this.resolve(spec.face))) : named?.resource
     if (!resource) return spec
     if (!this.graphics.loadFont) throw new Error('Font file loading requires a font backend')
     const token = resource.cacheToken ?? resource

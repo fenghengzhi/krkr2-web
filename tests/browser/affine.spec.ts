@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect } from '@playwright/test'
 
 for (const backend of ['asyncify', 'jspi']) {
@@ -32,14 +33,8 @@ Debug.message("affine-ready:"+string(saved.getMaskPixel(14,0)==0 && saved.getMas
     await expect(page.locator('#logs')).toContainText('affine-ready:1')
     await expect(page.locator('canvas')).toHaveJSProperty('width', 20)
     await expect(page.locator('canvas')).toHaveJSProperty('height', 8)
-    // Use integer pixel blocks for this adjacent-single-pixel fixture. This
-    // removes CSS interpolation and screenshot clipping at fractional edges.
-    await page.locator('canvas').evaluate((node) => {
-      const canvas = node as HTMLCanvasElement
-      canvas.style.width = `${canvas.width * 8}px`
-      canvas.style.height = `${canvas.height * 8}px`
-      canvas.style.imageRendering = 'pixelated'
-    })
+    // Scale the owned Window and its clip rectangles together.
+    await magnifyPixelWindow(page.locator('canvas'))
     const samples = [
       [4, 1],
       [4, 2],

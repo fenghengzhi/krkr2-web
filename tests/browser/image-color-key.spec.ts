@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
 import {
@@ -11,12 +12,7 @@ async function pixels(page: Page, info: TestInfo, height: number) {
   const canvas = page.locator('canvas')
   await expect(canvas).toHaveJSProperty('width', 2)
   await expect(canvas).toHaveJSProperty('height', height)
-  await canvas.evaluate((node) => {
-    const surface = node as HTMLCanvasElement
-    surface.style.width = `${surface.width * 16}px`
-    surface.style.height = `${surface.height * 16}px`
-    surface.style.imageRendering = 'pixelated'
-  })
+  await magnifyPixelWindow(canvas)
   const png = await canvas.screenshot()
   await info.attach('image-color-key-canvas', { body: png, contentType: 'image/png' })
   return page.evaluate(

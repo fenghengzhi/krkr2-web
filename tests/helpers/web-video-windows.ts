@@ -320,7 +320,7 @@ export async function exerciseWebVideoWindows(name: WebVideoWindowsCase, bytes: 
         video(101) === element && element.isConnected,
         'Attachment failed to mount the existing video',
       )
-      sameGeometry(101, [14, 9, 50, 30])
+      sameGeometry(101, [10, 6, 50, 30])
       check(
         audio.size === 1 && createdUrls === 1 && !closedAudio.length,
         'Attachment recreated a movie resource',
@@ -344,7 +344,7 @@ export async function exerciseWebVideoWindows(name: WebVideoWindowsCase, bytes: 
       host.attachWindow(11, 2, secondCanvas)
       check(video(101) === element && element.src === source, 'Reattach replaced the decoded video')
       check(element.currentTime === 0.75 && element.paused, 'Reattach changed native paused state')
-      sameGeometry(101, [8.75, 5, 31.25, 16.666666666666668])
+      sameGeometry(101, [6.25, 10 / 3, 31.25, 16.666666666666668])
       // Isolate autoplay permission from the host's logical play state and lifecycle calls.
       let plays = 0,
         pauses = 0

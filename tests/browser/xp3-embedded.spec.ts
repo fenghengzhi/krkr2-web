@@ -1,3 +1,4 @@
+import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import type { Page, TestInfo } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { test, expect } from '../helpers/library-browser.ts'
@@ -44,10 +45,7 @@ async function pixelsOnScreen(page: Page, info: TestInfo, phase: string): Promis
   let screenshot: Buffer | undefined
   await expect(canvas).toHaveJSProperty('width', 4)
   await expect(canvas).toHaveJSProperty('height', 2)
-  await canvas.evaluate((node) => {
-    const canvas = node as HTMLCanvasElement
-    canvas.style.width = '256px'; canvas.style.height = '128px'; canvas.style.imageRendering = 'pixelated'
-  })
+  await magnifyPixelWindow(canvas)
   await canvas.scrollIntoViewIfNeeded()
   try {
     await expect.poll(async () => {

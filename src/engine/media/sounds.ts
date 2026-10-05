@@ -52,7 +52,7 @@ export class SoundService {
     private readonly objects: ScriptRuntime,
     private readonly backend: AudioBackend | undefined,
     private readonly read: (name: string) => Promise<Uint8Array>,
-    private readonly exists: (name: string) => boolean,
+    private readonly exists: (name: string) => boolean | Promise<boolean>,
     private readonly text: (bytes: Uint8Array) => Promise<string>,
     private readonly dispatch: (
       callback: ScriptObject,
@@ -64,7 +64,7 @@ export class SoundService {
     private readonly error: (error: unknown) => void,
     private readonly cancelQueued: (source: object) => void = () => {},
     private readonly resourceSource?: {
-      resolve(name: string): Resource
+      resolve(name: string): Resource | Promise<Resource>
       checkpoint(): void | Promise<void>
     },
   ) {
@@ -409,9 +409,9 @@ export class SoundService {
       let sourceLease: AudioSourceLease | undefined
       try {
         const sli = name + '.sli'
-        loops = this.exists(sli) ? parseSli(await this.text(await this.read(sli))) : emptyLoops()
+        loops = await this.exists(sli) ? parseSli(await this.text(await this.read(sli))) : emptyLoops()
         if (sound.kind === 'wave' && this.backend?.streaming && this.sources && this.resourceSource) {
-          sourceLease = await this.sources.open(this.resourceSource.resolve(name),
+          sourceLease = await this.sources.open(await this.resourceSource.resolve(name),
             () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound)
           await apply({ op: 'openSource', id: sound.id, kind: sound.kind,
             source: sourceLease.source, bufferedBytes: sourceLease.bufferedBytes,
