@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pointerPixel } from '../helpers/pointer-pixel.ts'
 
 for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: image viewport, zoom, glyphs and window appearance render in the browser`, async ({
@@ -44,12 +45,8 @@ var width=root.font.getTextWidth("Hello");Debug.message("font-measured="+(width>
     }
     expect(await sample(0.375, 0.25)).toEqual([0, 255, 0, 255])
     expect(await sample(0.125, 0.25)).toEqual([0, 0, 255, 255])
-    const bounds = await canvas.boundingBox()
-    // Use the center of a logical pixel: device/CSS coordinate rounding at an
-    // exact pixel boundary is not a test of the engine's hit coordinates.
-    await canvas.click({
-      position: { x: (bounds!.width * 30.5) / 80, y: (bounds!.height * 10.5) / 40 },
-    })
+    const point = await pointerPixel(canvas, 30, 10)
+    await page.mouse.click(point.x, point.y)
     await expect(page.locator('#logs')).toContainText('viewport-click=10,10')
     await page
       .locator('#expression')

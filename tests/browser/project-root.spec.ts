@@ -94,7 +94,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await evaluate(page, 'Storages.isExistentStorage(System.exePath+"data.xp3")', '1')
       await evaluate(page, '(function(){try{return Scripts.evalStorage(System.exePath+"data.xp3>startup.tjs");}catch(error){return error.message;}})()',
         'Unsupported XP3 index compression: 7')
-      await evaluate(page, '(function(){Storages.addAutoPath(System.exePath+"data.xp3>");try{return Scripts.evalStorage("not-present-anywhere.tjs");}catch(error){return error.message;}finally{Storages.removeAutoPath(System.exePath+"data.xp3>");}})()',
+      await evaluate(page, '(function(){Storages.addAutoPath(System.exePath+"data.xp3>");var result;try{result=Scripts.evalStorage("not-present-anywhere.tjs");}catch(error){result=error.message;}Storages.removeAutoPath(System.exePath+"data.xp3>");return result;})()',
         'Unsupported XP3 index compression: 7')
       await evaluate(page, 'projectState()', state('A', 'none'))
       await pixels(page, info, 'A', 'auto-content-data')

@@ -235,7 +235,7 @@ for (const backend of ['asyncify', 'jspi']) {
     })
   }
 
-  test(`${backend}: production loader rejects missing and old nativeSystem while retaining nativeClipboard and recovers with the version 2 kernel`, async ({
+  test(`${backend}: production loader rejects missing and old nativeSystem while retaining nativeClipboard and recovers with the version 3 kernel`, async ({
     page,
   }, info) => {
     const setup = await prepareSystemPage(page, backend),
@@ -245,7 +245,7 @@ for (const backend of ['asyncify', 'jspi']) {
       matchManifest = (url: URL) => url.pathname === manifestPath,
       intercepted: { url: string; original: WasmManifest; served: WasmManifest }[] = [],
       routeErrors: string[] = []
-    let suppliedVersion: 1 | undefined
+    let suppliedVersion: 1 | 2 | undefined
     await page.context().route(matchManifest, async (route) => {
       try {
         const response = await route.fetch(),
@@ -254,9 +254,9 @@ for (const backend of ['asyncify', 'jspi']) {
           throw new Error('The served WASM manifest differs from this exact hosted build')
         const original = JSON.parse(bytes.toString('utf8')) as WasmManifest,
           served = structuredClone(original)
-        if (served.capabilities?.nativeSystem !== 2 || served.capabilities.nativeClipboard !== 1)
+        if (served.capabilities?.nativeSystem !== 3 || served.capabilities.nativeClipboard !== 1)
           throw new Error(
-            'The real hosted manifest must provide nativeSystem=2 and nativeClipboard=1',
+            'The real hosted manifest must provide nativeSystem=3 and nativeClipboard=1',
           )
         if (suppliedVersion === undefined) delete served.capabilities.nativeSystem
         else served.capabilities.nativeSystem = suppliedVersion
@@ -268,7 +268,7 @@ for (const backend of ['asyncify', 'jspi']) {
       }
     })
     try {
-      for (const version of [undefined, 1] as const) {
+      for (const [attempt, version] of ([undefined, 1, 2] as const).entries()) {
         suppliedVersion = version
         await page
           .locator('#files')
@@ -289,13 +289,13 @@ for (const backend of ['asyncify', 'jspi']) {
         await expect(page.locator('.game-clipboard')).toHaveCount(0)
         await expect
           .poll(() => setup.workers.map((entry) => entry.closed))
-          .toEqual(version === undefined ? [true] : [true, true])
+          .toEqual(Array.from({ length: attempt + 1 }, () => true))
         expect(routeErrors).toEqual([])
-        expect(intercepted).toHaveLength(version === undefined ? 1 : 2)
+        expect(intercepted).toHaveLength(attempt + 1)
         const rejected = intercepted.at(-1)!
         expect({
           ...rejected.served,
-          capabilities: { ...rejected.served.capabilities, nativeSystem: 2 },
+          capabilities: { ...rejected.served.capabilities, nativeSystem: 3 },
         }).toEqual(rejected.original)
         expect(rejected.served.capabilities?.nativeSystem).toBe(version)
         expect(rejected.served.capabilities?.nativeClipboard).toBe(1)
@@ -325,7 +325,7 @@ for (const backend of ['asyncify', 'jspi']) {
       ).slice((systemPrefix + 'manifest-recovered:').length)
       expect(recovered).toMatch(uuidPattern)
       await expect(page.locator('#runtime-info')).toContainText(backend.toUpperCase())
-      expect(setup.workers).toHaveLength(3)
+      expect(setup.workers).toHaveLength(4)
       expect(setup.errors).toEqual([])
     } finally {
       await info.attach('missing-native-system-manifest-intervention', {

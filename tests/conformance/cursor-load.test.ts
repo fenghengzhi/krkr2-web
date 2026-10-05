@@ -639,3 +639,35 @@ test('cursor alpha half-size DIB and PNG match complete native color planes', as
     assert.deepEqual([...loaded.data.subarray(0, 4)], encoding === 'dib' ? [38, 73, 114, 32] : [33, 64, 128, 32])
   }
 })
+
+test('half-size asymmetric color uses the same native average with and without alpha', async () => {
+  // 097 / 37329111623, both Windows 2022 and 2025, scale-policy-64x64
+  // GetIconInfo planes. RGB hashes and first pixels are taken from those raw
+  // BGRA artifacts, not calculated by a candidate scaler. The independent
+  // alpha field also distinguishes straight-channel from premultiplied math.
+  for (const alpha of [false, true]) {
+    const rows = Array.from({ length: 64 }, (_, row) => {
+      const y = 63 - row
+      return Array.from({ length: 64 }, (_, x) => [
+        (127 * x + 61 * y + 113) & 255, (73 * x + 11 * y + 91) & 255,
+        (17 * x + 37 * y + 3) & 255, alpha ? (x + y * 64) & 255 : 0,
+      ]).flat()
+    }), raw = cursorFile([{ width: 64, height: 64, hotspot: [21, 16],
+      payload: cursorDib({ width: 64, height: 64, depth: 32, xorRows: rows,
+        andRows: Array.from({ length: 64 }, (_, row) => row < 32 ? Array(8).fill(255) : []),
+      }) }]), result = loadedImage(await loadCursorBytes(raw, { png })),
+      rgb = result.data.filter((_, at) => at % 4 !== 3)
+    assert.equal(result.mode, alpha ? 'alpha' : 'and-xor')
+    assert.deepEqual(result.hotspot, { x: 11, y: 8 })
+    assert.deepEqual([...rgb.subarray(0, 12)], [30, 133, 143, 64, 151, 141, 98, 169, 139, 132, 59, 137])
+    assert.equal(createHash('sha256').update(rgb).digest('hex'),
+      '069b2017e68a3a64202ae3a7bd3f88aca2e0fdf3eba26ae4de1647b3767eca25')
+    if (alpha) assert.equal(createHash('sha256').update(result.data).digest('hex'),
+      '37e4f2d4529319889d515730955999c9b07ab44d3abe1aa708c900c708d5e0e0')
+    else {
+      assert(result.data.every((value, at) => at % 4 !== 3 || value === 255))
+      assert(result.andMask.subarray(0, 16 * 32).every((value) => value === 0))
+      assert(result.andMask.subarray(16 * 32).every((value) => value === 255))
+    }
+  }
+})

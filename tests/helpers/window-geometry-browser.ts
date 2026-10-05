@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test'
+import { pointerPixel } from './pointer-pixel.ts'
 
 export interface GeometryRect { x: number; y: number; width: number; height: number }
 interface GeometryEvidence {
@@ -117,12 +118,7 @@ export function expectWindowedGeometry(reading: GeometryReading, sunken: boolean
 
 export async function clickViewport(page: Page, surface: Locator, x: number, y: number): Promise<void> {
   const canvas = surface.locator('canvas[data-window-id]')
-  await canvas.scrollIntoViewIfNeeded()
-  const point = await canvas.evaluate((node, point) => {
-    const canvas = node as HTMLCanvasElement, box = canvas.getBoundingClientRect()
-    return { x: box.x + (point.x + 0.25) * box.width / canvas.width,
-      y: box.y + (point.y + 0.25) * box.height / canvas.height }
-  }, { x, y })
+  const point = await pointerPixel(canvas, x, y)
   await page.mouse.click(point.x, point.y)
 }
 

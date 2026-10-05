@@ -121,14 +121,17 @@ test('stopping a pending selection releases its suspended VM and emits a closed 
   assert.equal(closed, 1)
   assert.equal(session.snapshot().handles, 0)
 })
-test('metadata discovery deduplicates pending work and cancels stalled reads', async () => {
+test('metadata discovery deduplicates pending work and cancels stalled reads', { timeout: 30000 }, async () => {
   let reads = 0,
-    done!: (bytes: Uint8Array) => void
+    done: ((bytes: Uint8Array) => void) | undefined,
+    entered!: () => void
+  const started = new Promise<void>((resolve) => { entered = resolve })
   const resource = {
     name: 'font.ttf',
     size: 1,
     read: () => {
       reads++
+      entered()
       return new Promise<Uint8Array>((resolve) => (done = resolve))
     },
   }
@@ -144,14 +147,34 @@ test('metadata discovery deduplicates pending work and cancels stalled reads', a
     })
   const a = catalog.prepare(),
     b = catalog.prepare(),
-    failed = [assert.rejects(a, /cancelled/), assert.rejects(b, /cancelled/)]
-  assert.equal(reads, 1)
-  control.cancel()
-  await Promise.all(failed)
-  done(new Uint8Array(1))
-  assert.deepEqual(catalog.entries(), genericFonts)
-  assert.deepEqual(filterFonts([{ name: 'Unknown', source: 'system' }], 1, undefined), [])
-  assert.deepEqual(filterFonts([{ name: 'Unknown', source: 'system' }], 8, undefined), [])
+    failed = [assert.rejects(a, /cancelled/), assert.rejects(b, /cancelled/)],
+    settled = Promise.allSettled(failed), failures: unknown[] = []
+  let deadline: ReturnType<typeof setTimeout> | undefined
+  try {
+    // Resource enumeration can be asynchronous. Observe the actual read entry
+    // instead of assuming prepare() reaches it before its first await.
+    await Promise.race([started, settled.then(() => { throw new Error('Catalog ended before its file read') }),
+      new Promise<never>((_, reject) => {
+        deadline = setTimeout(() => reject(new Error('Catalog did not enter its file read')), 10000)
+      })])
+    clearTimeout(deadline)
+    assert.equal(reads, 1)
+    control.cancel()
+    await Promise.all(failed)
+    assert.deepEqual(catalog.entries(), genericFonts)
+    done!(new Uint8Array(1))
+    await Promise.resolve()
+    assert.deepEqual(catalog.entries(), genericFonts, 'Late bytes cannot publish canceled metadata')
+    assert.deepEqual(filterFonts([{ name: 'Unknown', source: 'system' }], 1, undefined), [])
+    assert.deepEqual(filterFonts([{ name: 'Unknown', source: 'system' }], 8, undefined), [])
+  } catch (error) { failures.push(error) }
+  finally {
+    clearTimeout(deadline)
+    control.cancel()
+    done?.(new Uint8Array(1))
+    for (const result of await settled) if (result.status === 'rejected') failures.push(result.reason)
+  }
+  if (failures.length) throw new AggregateError(failures, 'Font discovery or cleanup failed', { cause: failures[0] })
 })
 test('catalog binds each family style once, prioritizes active files and skips corrupt metadata once', async () => {
   const regular = await fixture('latin.ttf'),

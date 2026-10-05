@@ -524,6 +524,10 @@ export class SystemEvents {
     }
     throw new Error(`Unsupported system event operation: ${operation}`)
   }
+  application(active: boolean): HostReply {
+    return this.pump && !this.disposed
+      ? { kind: 'invoke', callback: this.pump, args: [0n, active ? 1n : 0n] } : empty()
+  }
   report(message: string, handled: boolean): void {
     if (!handled) this.setDisabled(true)
     this.error(message, handled)

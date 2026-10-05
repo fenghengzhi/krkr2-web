@@ -370,6 +370,32 @@ export class LayerTree {
     layer.width = width
     layer.height = height
   }
+  position(id: number, left: number, top: number): boolean {
+    const layer = this.get(id)
+    if (layer.primary && (left !== 0 || top !== 0)) throw new Error('The primary layer cannot move')
+    if (layer.left === left && layer.top === top) return false
+    layer.left = left
+    layer.top = top
+    return true
+  }
+  bounds(id: number, left: number, top: number, width: number, height: number): boolean {
+    // Native InternalSetBounds rejects negative extents and primary movement
+    // before changing either coordinate. Keep the Web dimension budget at
+    // that same boundary; never dispatch the public property setters here.
+    dimension(width)
+    dimension(height)
+    const layer = this.get(id)
+    if (layer.primary && (left !== 0 || top !== 0)) throw new Error('The primary layer cannot move')
+    if (layer.left === left && layer.top === top && layer.width === width && layer.height === height)
+      return false
+    // There are no script callbacks between the native rectangle writes.
+    // Prepare the owned Web image growth first so allocation/budget failure
+    // cannot leave a partly published rectangle.
+    this.resize(id, width, height)
+    layer.left = left
+    layer.top = top
+    return true
+  }
   resizeImage(id: number, width: number, height: number): void {
     const layer = this.get(id)
     this.bitmap(id)

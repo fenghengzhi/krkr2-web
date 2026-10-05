@@ -2,6 +2,7 @@ import type { EngineEvent, SessionSnapshot } from '../engine/session.ts'
 import type { SaveFile } from '../engine/ports/saves.ts'
 import type { InputPacket } from '../engine/ports/input.ts'
 import type { ActivityState } from '../engine/ports/activity.ts'
+import type { ApplicationActivation } from '../engine/ports/application.ts'
 import type { FontDescriptor, FontPreview } from '../engine/ports/fonts.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
@@ -11,7 +12,7 @@ import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
 import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
 import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
-export const PROTOCOL_VERSION = 39
+export const PROTOCOL_VERSION = 40
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
   readonly tree: DroppedTree<Blob>
@@ -54,6 +55,7 @@ export interface InitializeRequest {
   /** A host capable of completing the synchronous Window movement interaction. */
   windowMoveSupported?: boolean
   activity: ActivityState
+  application?: ApplicationActivation
 }
 export type SessionEvent = EngineEvent & { generation: number; sequence: number }
 /** Admission acknowledges validation/queueing, not completion of TJS callbacks.
@@ -71,6 +73,7 @@ export interface SessionApi {
   resume(): Promise<SessionSnapshot>
   retryGraphics(): Promise<SessionSnapshot>
   setActivity(activity: ActivityState): Promise<SessionSnapshot>
+  applicationActivation(generation: number, value: ApplicationActivation): Promise<InputAdmissionAck>
   /** Legacy programmatic helpers retain callback-completion semantics. */
   click(x: number, y: number): Promise<void>
   pointerMove(x: number, y: number): Promise<void>

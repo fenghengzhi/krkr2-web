@@ -117,7 +117,13 @@ for (const name of names) test(`observe independent video clock, callback and co
             latest = { mediaTime: metadata.mediaTime, presentedFrames: metadata.presentedFrames,
               presentationTime: metadata.presentationTime, expectedDisplayTime: metadata.expectedDisplayTime,
               width: metadata.width, height: metadata.height, processingDuration: metadata.processingDuration ?? null }
-            record('requestVideoFrameCallback'); capture(stage + '/callback'); arrived()
+            record('requestVideoFrameCallback')
+            // 098 Chromium observations deliver the compositor callback while
+            // readyState is still HAVE_METADATA. Preserve that event, then
+            // capture full pixels once the separate decoded-data gate opens.
+            if (video.readyState >= 2) capture(stage + '/callback')
+            else record('callback-pixels-await-loadeddata')
+            arrived()
           })
         }, cancelFrame = () => {
           if (frameRequest !== undefined) video.cancelVideoFrameCallback(frameRequest)
@@ -131,14 +137,18 @@ for (const name of names) test(`observe independent video clock, callback and co
         if (live.delete(video)) retired++
       }
       const ready = await new Promise<boolean>((resolve) => {
-        let ended = false
+        let ended = false, presented = false
         const finish = (value: boolean) => {
           if (ended) return
-          ended = true; clearTimeout(timer); video.removeEventListener('error', failed); cancelFrame(); resolve(value)
-        }, failed = () => finish(false), timer = setTimeout(() => finish(false), 5000)
+          ended = true; clearTimeout(timer); video.removeEventListener('error', failed)
+          video.removeEventListener('loadeddata', complete); video.removeEventListener('canplay', complete)
+          cancelFrame(); resolve(value)
+        }, complete = () => { if (presented && video.readyState >= 2) finish(true) },
+          failed = () => finish(false), timer = setTimeout(() => finish(false), 5000)
         video.addEventListener('error', failed, { once: true })
+        video.addEventListener('loadeddata', complete); video.addEventListener('canplay', complete)
         try {
-          requestFrame('initial', () => finish(video.readyState >= 2))
+          requestFrame('initial', () => { presented = true; complete() })
           video.src = url; video.load()
         } catch (error) { failures.push(String(error)); finish(false) }
       })
@@ -154,14 +164,21 @@ for (const name of names) test(`observe independent video clock, callback and co
             if (ended) return
             ended = true; clearTimeout(timer); cancelFrame()
             if (sameTimeFrame !== undefined) cancelAnimationFrame(sameTimeFrame)
-            video.removeEventListener('seeked', seeked); video.removeEventListener('error', failed); resolve(value)
+            video.removeEventListener('seeked', seeked); video.removeEventListener('loadeddata', complete)
+            video.removeEventListener('error', failed); resolve(value)
           }, complete = () => {
+            if (video.seeking || video.readyState < 2) return
             if (sought && presented) finish('seeked-and-presented')
-            else if (sameTime && !video.seeking && latest && sameTimeFrame === undefined)
-              sameTimeFrame = requestAnimationFrame(() => finish(presented ? 'same-time-presented' : 'same-time-existing-frame'))
+            else if (sameTime && latest && sameTimeFrame === undefined)
+              sameTimeFrame = requestAnimationFrame(() => {
+                sameTimeFrame = undefined
+                if (!video.seeking && video.readyState >= 2)
+                  finish(presented ? 'same-time-presented' : 'same-time-existing-frame')
+              })
           }, seeked = () => { sought = true; complete() }, failed = () => finish('media-error'),
             timer = setTimeout(() => finish('timed-out'), 4000)
           video.addEventListener('seeked', seeked); video.addEventListener('error', failed, { once: true })
+          video.addEventListener('loadeddata', complete)
           try {
             requestFrame(request.name, () => { presented = true; complete() })
             record('seek-request:' + request.time); video.currentTime = request.time; complete()
@@ -221,6 +238,10 @@ for (const name of names) test(`observe independent video clock, callback and co
   expect(result.failures).toEqual([])
   expect(result.droppedEvents).toBe(0)
   expect(result.steps).toHaveLength(requests.length * 2)
+  // Every initial decoder and every requested seek still owes a complete
+  // settled image, even when its earlier compositor callback had no data yet.
+  expect(result.captures.filter((capture) => !capture.stage.endsWith('/callback')))
+    .toHaveLength(requests.length * 2 + requests.length + 1)
   expect(result.captures.every((capture) => capture.error === null)).toBe(true)
   expect(result.steps.some((step) => step.status === 'media-error' || step.status === 'exception')).toBe(false)
   expect(result.retired).toBe(result.created)

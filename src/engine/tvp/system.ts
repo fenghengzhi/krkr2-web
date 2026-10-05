@@ -1,6 +1,7 @@
 /** Keep nested callback execution inside TJS; queue and registry live in TypeScript. */
 export const systemEventsBridge = String.raw`
-function __krkrSystemEventPump(token){
+function __krkrMakeSystemEventPump(application){return function(token,activation=void){
+  if(activation!==void){application(activation);return;}
   try{
     while(true){
       var available=__host("System.eventNext",token);
@@ -47,7 +48,8 @@ function __krkrSystemEventPump(token){
     __host("System.eventEnd",token);throw error;
   }
   __host("System.eventEnd",token);
-}
-__host("System.bindEvents",__krkrSystemEventPump);
-delete global.__krkrSystemEventPump;
+};}
+__host("System.bindEvents",__krkrMakeSystemEventPump(System.__applicationEvent));
+delete System.__applicationEvent;
+delete global.__krkrMakeSystemEventPump;
 `

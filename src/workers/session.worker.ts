@@ -68,16 +68,16 @@ function admitInput(accept: (target: EngineSession) => SessionAdmission): InputA
   }
   return observeInputAdmission(target, admission)
 }
-function observeInputAdmission(target: EngineSession, admission: SessionAdmission): InputAdmissionAck {
+function observeInputAdmission(target: EngineSession, admission: SessionAdmission, reserved = true): InputAdmissionAck {
   // The page owns only the admission ACK. Keep the slot and the captured
   // Session until this particular callback operation settles, including when
   // a newer UI action or shutdown has overtaken its acknowledgment.
   void admission.completion.then(
     () => {
-      pendingClicks--
+      if (reserved) pendingClicks--
     },
     (error: unknown) => {
-      pendingClicks--
+      if (reserved) pendingClicks--
       if (target.control.cancelled) return
       try {
         target.fail(error)
@@ -229,6 +229,13 @@ const api: SessionApi = {
     active().setActivity(activity)
     syncFrames()
     return active().snapshot()
+  },
+  async applicationActivation(requestGeneration, value) {
+    if (requestGeneration !== generation) return { status: 'ignored' }
+    // This is one replacing application source, independent of the physical
+    // input queue. Its own event/receipt budgets and settlement still apply.
+    const target = active()
+    return observeInputAdmission(target, target.acceptApplicationActivation(value), false)
   },
   async click(x, y) {
     await completeInput((target) => target.click(x, y))

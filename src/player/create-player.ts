@@ -16,6 +16,7 @@ import type { CursorAsset } from '../formats/cursor/index.ts'
 import { BrowserWindowSurfaces } from './window-surfaces.ts'
 import { attachWindowFileDrop } from './window-file-drop.ts'
 import { PageActivityMonitor } from './page-activity.ts'
+import { PageApplicationMonitor } from './page-application.ts'
 import { activityPaused, initialActivity } from '../engine/ports/activity.ts'
 import type { InputView } from '../engine/ports/input.ts'
 import type { WindowPresentation, WindowView } from '../engine/scene/window.ts'
@@ -496,6 +497,9 @@ export function createPlayer(
       if (errors.length) throw new AggregateError(errors, 'Window host cleanup failed')
     },
   })
+  const pageApplication = new PageApplicationMonitor((value) => {
+    void session.setApplicationActivation(value).catch(onError)
+  })
   const pageActivity = new PageActivityMonitor((state) => {
     activity = state
     const paused = activityPaused(state)
@@ -619,6 +623,7 @@ export function createPlayer(
         if (session.isDisposed) {
           for (const action of [
             () => pageActivity.close(),
+            () => pageApplication.close(),
             () => geometry.close(),
             () => surfaces!.dispose(),
             () => options.windows.dispose(),

@@ -106,15 +106,16 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
     monochrome = image.encoding === 'dib' && image.depth === 1 && image.mode === 'and-xor'
   if (image.width === width && image.height === height) return { ...image, hotspot }
   const data = new Uint8Array(width * height * 4), andMask = new Uint8Array(width * height),
-    // 082's complete DIB/PNG alpha color planes establish a centered 2x2
-    // average for 64x64 -> 32x32 in this profile. Keep the observation bounded:
-    // it does not select a unique native kernel for other ratios or modes.
-    halfSizeAlpha = image.depth === 32 && image.mode === 'alpha' &&
+    // 082's alpha planes and 097's independent zero-alpha asymmetric plane
+    // both establish a centered 2x2 average for 64x64 -> 32x32. The color
+    // reduction does not depend on whether alpha or AND/XOR draws the result;
+    // the Boolean mask retains its separate native support below.
+    halfSizeColor = image.depth === 32 &&
       image.width === width * 2 && image.height === height * 2,
     // Both PNG and DIB 256-to-32 references point-sample, whereas their
     // 48-to-32 references smooth. 96-to-32 center positions are exact integers
     // and do not distinguish nearest from bilinear. Other integer reductions
-    // remain candidates in the strict gate; 64-to-32 alpha is handled above.
+    // remain candidates in the strict gate; 64-to-32 color is handled above.
     pointSample = image.depth < 32 ||
       (image.width >= width && image.height >= height &&
         image.width % width === 0 && image.height % height === 0)
@@ -156,7 +157,7 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
           data[target * 4 + channel] = xor
         }
         data[target * 4 + 3] = 255
-      } else if (halfSizeAlpha) {
+      } else if (halfSizeColor) {
         const from = (y * 2 * image.width + x * 2) * 4, nextRow = from + image.width * 4
         for (let channel = 0; channel < 4; channel++)
           data[target * 4 + channel] = Math.floor((image.data[from + channel]! +

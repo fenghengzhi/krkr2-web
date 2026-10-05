@@ -1022,6 +1022,49 @@ public:
     }
 };
 
+// Private bootstrap callback: lookup and invocation follow fixed SystemIntf's
+// TVPFireOnApplicationActivateEvent. The bootstrap removes the temporary member.
+class SystemApplicationEvent final : public tTJSNativeClassMethod {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit SystemApplicationEvent(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(count < 1) return TJS_E_BADPARAMCOUNT;
+        if(result) result->Clear();
+        krkr::ExecutionFrame delegation(2);
+        auto global = vm->engine->GetGlobalNoAddRef();
+        if(!global) return TJS_S_OK;
+        const bool active = args[0]->operator bool();
+        tTJSVariant system, handler;
+        tTJSVariantClosure callback;
+        try {
+            const auto status = global->PropGet(TJS_MEMBERMUSTEXIST, u"System", nullptr, &system, global);
+            if(TJS_FAILED(status) || system.Type() != tvtObject) return TJS_S_OK;
+            auto object = system.AsObjectClosureNoAddRef();
+            if(!object.Object) return TJS_S_OK;
+            object.PropGet(TJS_MEMBERMUSTEXIST, active ? u"onActivate" : u"onDeactivate", nullptr, &handler, nullptr);
+            if(handler.Type() != tvtObject) return TJS_S_OK;
+            callback = handler.AsObjectClosureNoAddRef();
+        } catch(const eTJS& error) {
+            tTJSVariant message(ttstr(u"Error in retrieving System.onActivate/onDeactivate : ") + error.GetMessage());
+            tTJSVariant* input[] = { &message };
+            constexpr auto operation = u"System.applicationReadError";
+            std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 1, input));
+            if(!reply) TJS_eTJSError(u"Application event logging returned no response");
+            resolveReply(vm, *reply, nullptr);
+            return TJS_S_OK;
+        }
+        // Deliberately outside the lookup catch: callback exceptions belong to
+        // the ordinary event exception handler, and bound objthis is preserved.
+        if(callback.Object) callback.FuncCall(0, nullptr, nullptr, nullptr, 0, nullptr, nullptr);
+        return TJS_S_OK;
+    }
+};
+
 tjs_error clipboardHost(Vm* vm, const tjs_char* operation, tTJSVariant* result,
                         tTJSVariant* input = nullptr) {
     if(shuttingDown) return TJS_E_INVALIDOBJECT;
@@ -1655,6 +1698,7 @@ API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix
     if(system) {
         object->RegisterNCM(u"createUUID", new SystemUuid(vm), u"System", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"shellExecute", new SystemShellExecute(vm), u"System", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"__applicationEvent", new SystemApplicationEvent(vm), u"System", nitMethod, TJS_STATICMEMBER);
     }
     if(storages) {
         for(const auto& policy : storageMethodPolicies)

@@ -250,7 +250,12 @@ export class CursorStorage {
 
   async load(name: string, valid: () => boolean): Promise<number> {
     this.caller(valid)
-    const resource = await this.wait(Promise.resolve(this.find(name)))
+    const found = this.find(name), pending = found as Promise<Resource | undefined> | undefined,
+      // A synchronous resolver already supplies the canonical identity. Join
+      // its flight before returning to a reentrant decoder, which may throw
+      // and retire that flight before an artificial await would resume us.
+      resource = typeof pending?.then === 'function'
+        ? await this.wait(pending) : found as Resource | undefined
     this.caller(valid)
     if (!resource) fail('resource not found: ' + name)
     const path = resource.name

@@ -45,6 +45,7 @@ export function createSession(request: InitializeRequest, project?: GameProject)
     systemColors,
     systemDisplay,
     activity: request.activity,
+    application: request.application,
     windowMoveSupported: request.windowMoveSupported === true,
     // GameWindows supplies measured DOM geometry. Legacy custom embeddings
     // without this optional port explicitly use the unframed engine platform.
@@ -103,7 +104,7 @@ export function createSession(request: InitializeRequest, project?: GameProject)
           throw new Error('WASM manifest is missing native Pad support')
         if (manifest.capabilities?.nativePhaseVocoder !== 1)
           throw new Error('WASM manifest is missing native PhaseVocoder support')
-        if (manifest.capabilities?.nativeSystem !== 2)
+        if (manifest.capabilities?.nativeSystem !== 3)
           throw new Error('WASM manifest is missing native System support')
         if (manifest.capabilities?.nativeStorages !== 2)
           throw new Error('WASM manifest is missing native Storages support')

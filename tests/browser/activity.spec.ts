@@ -7,6 +7,7 @@ import {
   activityFile,
 } from '../helpers/activity-browser.ts'
 import { evaluate } from '../helpers/browser-expression.ts'
+import { pointerPixel } from '../helpers/pointer-pixel.ts'
 import { injectGpu, gpuWorker, loseGpu, restoreGpu, gpuStats } from '../helpers/gpu-browser.ts'
 
 for (const backend of ['asyncify', 'jspi']) {
@@ -63,9 +64,11 @@ for (const backend of ['asyncify', 'jspi']) {
   }) => {
     await injectActivity(page)
     await loadActivity(page, backend)
-    const canvas = page.locator('canvas'),
-      bounds = (await canvas.boundingBox())!
-    await page.mouse.move(bounds.x + 10, bounds.y + 10)
+    const canvas = page.locator('canvas')
+    await expect(canvas).toHaveJSProperty('width', 8)
+    await expect(canvas).toHaveJSProperty('height', 4)
+    const point = await pointerPixel(canvas, 4, 2)
+    await page.mouse.move(point.x, point.y)
     await page.mouse.down()
     // DOM focus precedes the queued TJS onMouseDown/root.focus callback. Hiding
     // before it runs correctly discards that packet, leaving no text recipient.
@@ -103,7 +106,8 @@ for (const backend of ['asyncify', 'jspi']) {
     await evaluate(page, 'committed=="新" || committed=="a新"', '1')
     await evaluate(page, 'System.getKeyState(65)||System.getKeyState(1)', '0')
     await evaluate(page, 'clicks', '0')
-    await canvas.click({ position: { x: 10, y: 10 } })
+    const returnedPoint = await pointerPixel(canvas, 4, 2)
+    await page.mouse.click(returnedPoint.x, returnedPoint.y)
     await expect(page.locator('#logs')).toContainText('activity-click=1')
     await page.locator('#stop').click()
   })

@@ -98,7 +98,17 @@ class Layer {
   function setSize(width,height) { __host("Layer.resize",__id,int(width),int(height)); }
   function setImageSize(width,height) { __host("Layer.resizeImage",__id,int(width),int(height)); }
   function setSizeToImageSize() { setSize(imageWidth,imageHeight); }
-  function setPos(left,top,width=void,height=void) { this.left=left;this.top=top;if(width!==void&&height!==void)setSize(width,height); }
+  function setPos(args*) {
+    var id=global.__host("Layer.identity",this);
+    if(args.count<2)throw new global.Exception("Layer.setPos requires at least two arguments");
+    var left=int(args[0]),top=int(args[1]);
+    // The fixed native overload requires exactly four arguments. Additional
+    // arguments are evaluated by TJS but their sizes are not converted.
+    if(args.count==4 && args[2]!==void && args[3]!==void) {
+      var width=int(args[2]),height=int(args[3]);
+      global.__host("Layer.bounds",id,left,top,width,height);
+    } else global.__host("Layer.position",id,left,top);
+  }
   function setImagePos(left,top) { __host("Layer.imagePos",__id,int(left),int(top)); }
   function setClip(args*) {
     if(args.count==0)__host("Layer.clip",__id);

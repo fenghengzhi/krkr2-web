@@ -255,7 +255,10 @@ export class StorageResolver {
     overlayResources: readonly Resource[] = []): Promise<Resource | undefined> {
     this.check()
     const direct = parseStoragePath(path, this.currentDirectory)
-    if (!direct) return undefined
+    // File existence/placement cannot open an archive directory. Its trailing
+    // delimiter already proves it is not a file, including missing or corrupt
+    // packages; directory enumeration still validates the actual archive.
+    if (!direct || /[/>]$/.test(direct)) return undefined
     const current = await this.findAsync(direct, overlay)
     this.check()
     if (current) return current

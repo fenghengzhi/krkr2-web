@@ -73,6 +73,7 @@ import type { WindowGeometry, WindowGeometryPort, WindowGeometryRequest, WindowG
 import { HeadlessWindowGeometry, scrollWindowGeometry, validateWindowGeometry } from './scene/window-geometry.ts'
 import type { WindowMoveMessage, WindowMoveRequest } from './ports/window-move.ts'
 import type { WindowPopupMessage } from './ports/window-popup.ts'
+import { initialApplicationActivation, validateApplicationActivation, type ApplicationActivation } from './ports/application.ts'
 import { MenuModals } from './scene/menu-modal.ts'
 import { SystemDialogs, type SystemDialogSnapshot } from './scene/system-dialogs.ts'
 import { modalBridge } from './tvp/modal.ts'
@@ -236,6 +237,7 @@ export interface SessionDependencies {
   systemFonts?: FontDescriptor[]
   systemColors?: readonly number[]
   activity?: ActivityState
+  application?: ApplicationActivation
   createRuntime: (
     handler: HostHandler,
     control: ExecutionControl,
@@ -395,6 +397,8 @@ export class EngineSession {
   private snapshotRevision = 0
   private activity = initialActivity()
   private applicationActive = true
+  private applicationActivation = initialApplicationActivation()
+  private readonly applicationEventSource = {}
   private graphicsStatus: RendererStatus = { state: 'ready', generation: 0 }
   private detachRenderer?: () => void
   private window = new WindowState()
@@ -445,7 +449,21 @@ export class EngineSession {
   private readonly cancellationErrors: unknown[] = []
   private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
+    if (deps.application) {
+      validateApplicationActivation(deps.application)
+      this.applicationActivation = { ...deps.application }
+    }
     this.project = copyGameProject(deps.project)
+    // Reject invalid configuration before clocks or subscribed host resources
+    // are consulted. A failed constructor has no disposal owner yet.
+    this.systemColors = new SystemColors(deps.systemColors)
+    this.systemArguments = new Map(deps.arguments)
+    this.systemEnvironment = new SystemEnvironment(
+      this.systemArguments,
+      deps.fillRandomBytes,
+      deps.systemDisplay,
+      this.project,
+    )
     let archiveYieldAt = deps.now() + 8, archiveSteps = 0
     this.storage = new StorageResolver(this.project?.directory ?? '', !this.project, deps.archives,
       async () => {
@@ -457,17 +475,9 @@ export class EngineSession {
       })
     this.windowGeometry = deps.windowGeometry ?? new HeadlessWindowGeometry()
     this.detachGeometry = this.windowGeometry.subscribe((observation) => this.observeWindowScroll(observation))
-    this.systemColors = new SystemColors(deps.systemColors)
     this.layers = new LayerTree(this.systemColors)
     this.inputControllers = new InputControllers(this.layers, () => this.windowId)
     this.composer = new SceneComposer(this.layers, (id) => this.transitions?.frame(id))
-    this.systemArguments = new Map(deps.arguments)
-    this.systemEnvironment = new SystemEnvironment(
-      this.systemArguments,
-      deps.fillRandomBytes,
-      deps.systemDisplay,
-      this.project,
-    )
     this.clipboard = deps.clipboard ?? unavailableClipboard()
     this.help = deps.help ?? unavailableHelp()
     this.fonts = new FontService(
@@ -1534,6 +1544,22 @@ export class EngineSession {
     this.applyPause()
     this.armRedraw()
     this.notify()
+  }
+  /** Mirrors the single Application/Tag REMOVE_POST native input source.
+   * Current application facts are independent of popup-close notifications.
+   * SystemImpl explicitly permits repeated delivered states; there is no
+   * last-delivered/WasActive latch beyond the current-state delivery guard. */
+  acceptApplicationActivation(value: ApplicationActivation): SessionAdmission {
+    validateApplicationActivation(value)
+    if (this.control.cancelled || value.sequence <= this.applicationActivation.sequence ||
+        ['stopping', 'stopped', 'failed'].includes(this.state)) return ignoredAdmission()
+    const active = value.active
+    this.applicationActivation = { ...value }
+    if (!['running', 'paused'].includes(this.state)) return ignoredAdmission()
+    return this.acceptEvent(() => this.systemEvents!.application(active), {
+      source: this.applicationEventSource, replace: true, priority: 1, discardable: false,
+      valid: () => !this.control.cancelled && this.applicationActivation.active === active,
+    })
   }
   private pauseMediaRequestTimeouts(): void {
     const paused = this.activity.state === 'frozen' || this.activity.state === 'away'
@@ -4199,6 +4225,11 @@ export class EngineSession {
       if (typeof args[0] !== 'string') throw new Error('System.getArgument requires an option name')
       return { kind: 'value', value: this.systemArguments.get(args[0]) }
     }
+    if (operation === 'System.applicationReadError') {
+      if (typeof args[0] !== 'string') throw new Error('Invalid application event lookup diagnostic')
+      this.log(args[0])
+      return { kind: 'value', value: undefined }
+    }
     if (
       operation === 'System.bindEvents' ||
       [
@@ -5054,6 +5085,21 @@ export class EngineSession {
         this.dirty = true
         break
       }
+      case 'Layer.position':
+      case 'Layer.bounds': {
+        const id = number(0), previousWindow = this.layerWindow(id),
+          changed = operation === 'Layer.bounds'
+            ? this.layers.bounds(id, clipInteger(1), clipInteger(2), clipInteger(3), clipInteger(4))
+            : this.layers.position(id, clipInteger(1), clipInteger(2))
+        if (changed) {
+          if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+          this.invalidateLayer(id)
+        }
+        // SetPosition/SetBounds notify visual geometry, not ForceMouseRecheck.
+        // A later real pointer/recheck observes the complete rectangle; there
+        // is no callback between the two coordinates or before final sizing.
+        break
+      }
       case 'Layer.resize': {
         const id = number(0), layer = this.layers.get(id), width = number(1), height = number(2),
           changed = layer.width !== width || layer.height !== height, previousWindow = this.layerWindow(id)
@@ -5612,7 +5658,7 @@ export class EngineSession {
       default:
         throw new Error(`Unsupported host API: ${operation}`)
     }
-    if (['Layer.create', 'Layer.finish', 'Layer.abort', 'Layer.set', 'Layer.resize', 'Layer.image',
+    if (['Layer.create', 'Layer.finish', 'Layer.abort', 'Layer.set', 'Layer.resize', 'Layer.bounds', 'Layer.image',
       'Layer.resizeImage', 'Layer.assignImages', 'Menu.create', 'Menu.finish', 'Menu.abort',
       'Menu.set', 'Menu.insert', 'Menu.remove'].includes(operation))
       await this.synchronizeWindowGeometry()

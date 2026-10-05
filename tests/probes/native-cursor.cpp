@@ -495,6 +495,17 @@ std::vector<Fixture> fixtures() {
     addScalePolicy(80, 80, true);
     addScalePolicy(127, 255, true);
     if (output.size() != 183) throw std::runtime_error("Scale policy fixture inventory is incomplete");
+    // 097's native planes still smooth at 65, but point-sample at 80 even
+    // when the other axis enlarges. Observe every intervening integer on
+    // either axis, a square, and a mixed enlargement, in both alpha modes.
+    // These are independent source fields; no expected Web pixels are used.
+    // Preserve all 183 historical fixture identities, ordering and bytes.
+    for (unsigned extent = 66; extent < 80; extent++) {
+        for (const auto shape : {std::pair<unsigned, unsigned>{extent, extent},
+            {extent, 48}, {48, extent}, {extent, 13}, {13, extent}})
+            for (bool alpha : {false, true}) addScalePolicy(shape.first, shape.second, alpha);
+    }
+    if (output.size() != 323) throw std::runtime_error("Dense scale boundary fixture inventory is incomplete");
     return output;
 }
 

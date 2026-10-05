@@ -12,6 +12,7 @@ import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import { wasmManifestFile } from './build-info.ts'
 import { initialActivity, type ActivityState } from '../engine/ports/activity.ts'
+import { initialApplicationActivation, type ApplicationActivation } from '../engine/ports/application.ts'
 import {
   PROTOCOL_VERSION,
   type BackendPreference,
@@ -29,6 +30,7 @@ export class SessionClient {
   private disposed = false
   private initialized = false
   private activity = initialActivity()
+  private application = initialApplicationActivation()
   private systemFonts: FontDescriptor[] = []
   private systemDisplay?: SystemDisplayUpdate
   constructor(onEvent: (event: SessionEvent) => void) {
@@ -93,6 +95,7 @@ export class SessionClient {
       systemColors,
       systemDisplay: this.systemDisplay?.metrics,
       activity: this.activity,
+      application: this.application,
       systemFonts: this.systemFonts,
     }
     const snapshot = await this.call(
@@ -113,6 +116,8 @@ export class SessionClient {
     if (this.systemDisplay) await this.call('setSystemDisplay', this.generation, this.systemDisplay)
     if (this.systemFonts !== request.systemFonts)
       await this.call('setSystemFonts', this.systemFonts)
+    if (this.application.sequence > request.application.sequence)
+      await this.call('applicationActivation', this.generation, this.application)
     if (this.activity.sequence > request.activity.sequence)
       return this.call('setActivity', this.activity)
     return snapshot
@@ -121,6 +126,11 @@ export class SessionClient {
     if (this.disposed) return Promise.resolve()
     this.activity = { ...activity }
     return this.initialized ? this.call('setActivity', this.activity) : Promise.resolve()
+  }
+  setApplicationActivation(value: ApplicationActivation): Promise<unknown> {
+    if (this.disposed || value.sequence <= this.application.sequence) return Promise.resolve()
+    this.application = { ...value }
+    return this.initialized ? this.call('applicationActivation', this.generation, this.application) : Promise.resolve()
   }
   setSystemDisplay(update: SystemDisplayUpdate): Promise<void> {
     if (this.disposed) return Promise.resolve()
