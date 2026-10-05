@@ -1,6 +1,8 @@
 # 098 按访问打开归档与回归修复
 
-状态：开发候选，尚待本批 GitHub-hosted Actions 执行。整体目标仍是完成 KRKR2 Web 模拟器的插件以外功能，并未完成。会话协议 **38**，TJS ABI **5**、字体 ABI **2**。
+状态：开发候选已推送，尚待本批 GitHub-hosted Actions 执行。整体目标仍是完成 KRKR2 Web 模拟器的插件以外功能，并未完成。会话协议 **38**，TJS ABI **5**、字体 ABI **2**。
+
+实现提交 **`a9e3f97802392a374a9d07e5f5c6887fc30521a1`**，63 个文件，已推送到 `codex/migrated-window-attention`。[Full test suite 37335381893](https://github.com/fenghengzhi/krkr2-web/actions/runs/37335381893) 的首次唯一查询确认该精确提交，当时 **pending／conclusion=null**；未实时读取 jobs／artifacts。原返回保存在 `out/verification/github-actions/37335381893/initial-run-discovery.json`。本批结果留待下一轮回收，文档交接提交使用 `[skip ci]`。
 
 本轮从 `e4a5fd1` 继续。所有构建、测试、类型检查、浏览器和可执行参考探针仅在 GitHub-hosted runners 运行；本地只检查和编辑源码，以及下载、解包、核对、解析历史原件。较大批次推送后，下轮取回结果，不实时监控。
 
