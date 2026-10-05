@@ -67,6 +67,7 @@ std::string colorPatternDefinition(const std::string& name) {
     if (name == "x-axis") return "RGBA=((17*x+3)%256,(73*x+91)%256,(127*x+113)%256,0)";
     if (name == "y-axis") return "RGBA=((17*y+3)%256,(73*y+91)%256,(127*y+113)%256,0)";
     if (name == "xy-asymmetric") return "RGBA=((17*x+37*y+3)%256,(73*x+11*y+91)%256,(127*x+61*y+113)%256,0)";
+    if (name == "xy-asymmetric-alpha") return "RGBA=((17*x+37*y+3)%256,(73*x+11*y+91)%256,(127*x+61*y+113)%256,(x+y*width)%256)";
     if (name == "checker") return "RGBA=(255*(x%2),255*(y%2),255*((x+y)%2),0)";
     if (name == "impulses") return "RGBA=(255*[x==1&&y==1],255*[x==floor(width/2)&&y==floor(height/2)],255*[x==width-2&&y==height-2],0)";
     throw std::runtime_error("Unknown color-plane fixture pattern: " + name);
@@ -75,7 +76,7 @@ struct ColorChannels { unsigned r, g, b; };
 ColorChannels colorPatternValue(const std::string& name, unsigned x, unsigned y, unsigned width, unsigned height) {
     if (name == "x-axis") return {(17 * x + 3) & 255, (73 * x + 91) & 255, (127 * x + 113) & 255};
     if (name == "y-axis") return {(17 * y + 3) & 255, (73 * y + 91) & 255, (127 * y + 113) & 255};
-    if (name == "xy-asymmetric") return {(17 * x + 37 * y + 3) & 255,
+    if (name == "xy-asymmetric" || name == "xy-asymmetric-alpha") return {(17 * x + 37 * y + 3) & 255,
         (73 * x + 11 * y + 91) & 255, (127 * x + 61 * y + 113) & 255};
     if (name == "checker") return {255 * (x % 2), 255 * (y % 2), 255 * ((x + y) % 2)};
     if (name == "impulses") return {x == 1 && y == 1 ? 255u : 0u,
@@ -129,9 +130,11 @@ Bytes dib(const Image& i) {
     if (!i.bitPattern.empty() && (i.width != 256 || i.height != 256 ||
         (i.bpp != 1 && i.bpp != 32) || i.alphaMode != 0 || i.omitMask))
         throw std::runtime_error("Named bit-plane patterns require complete 256x256 monochrome or zero-alpha DIBs");
+    const bool namedAlpha = i.colorPattern == "xy-asymmetric-alpha";
     if (!i.colorPattern.empty() && (i.width < 3 || i.height < 3 || i.bpp != 32 ||
-        i.header != 40 || i.compression != BI_RGB || i.alphaMode != 0 || i.topDown || i.omitMask || !i.bitPattern.empty()))
-        throw std::runtime_error("Named color patterns require complete bottom-up 32bpp zero-alpha INFO DIBs");
+        i.header != 40 || i.compression != BI_RGB || i.alphaMode != (namedAlpha ? 3u : 0u) ||
+        i.topDown || i.omitMask || !i.bitPattern.empty()))
+        throw std::runtime_error("Named color patterns require complete bottom-up 32bpp INFO DIBs with their declared alpha rule");
     const unsigned palette = i.bpp <= 8 ? 1u << i.bpp : 0,
         xorStride = ((i.width * i.bpp + 31) / 32) * 4,
         andStride = ((i.width + 31) / 32) * 4;
@@ -470,6 +473,28 @@ std::vector<Fixture> fixtures() {
         }
     }
     if (output.size() != 155) throw std::runtime_error("Color holdout fixture inventory is incomplete");
+    // 092 observes the branch boundary, not another interpolation candidate.
+    // 090's 80x80/127x255 fields match centered point samples, but do not
+    // identify an any-axis/both-axis threshold or alpha-dependent policy.
+    // Preserve all prior 155 fixtures. Use the same asymmetric RGB field for
+    // both modes so a change of alpha cannot be confused with another image.
+    auto addScalePolicy = [&](unsigned width, unsigned height, bool alpha) {
+        Image i; i.width = width; i.height = height; i.hotX = width / 3; i.hotY = height / 4;
+        i.alphaMode = alpha ? 3 : 0;
+        i.colorPattern = alpha ? "xy-asymmetric-alpha" : "xy-asymmetric";
+        add("scale-policy-" + std::to_string(width) + "x" + std::to_string(height) +
+            (alpha ? "-alpha" : "-zero-alpha"), {i}, "scaling");
+    };
+    // Nine geometries straddle the exact 2:1 ratio on each axis separately.
+    for (unsigned width : {63u, 64u, 65u}) for (unsigned height : {63u, 64u, 65u})
+        for (bool alpha : {false, true}) addScalePolicy(width, height, alpha);
+    // Distinguish a large reduction paired with a small reduction/enlargement.
+    for (const auto shape : {std::pair<unsigned, unsigned>{80, 48}, {48, 80}, {80, 13}, {13, 80}})
+        for (bool alpha : {false, true}) addScalePolicy(shape.first, shape.second, alpha);
+    // Existing zero-alpha fields cover these geometries; add their alpha pair.
+    addScalePolicy(80, 80, true);
+    addScalePolicy(127, 255, true);
+    if (output.size() != 183) throw std::runtime_error("Scale policy fixture inventory is incomplete");
     return output;
 }
 

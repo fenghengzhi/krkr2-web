@@ -95,15 +95,30 @@ class Window {
     if(!canClose)return;
     var window=this;
     if(__host("Window.isMain",__windowId)) invalidate window;
-    else window.visible=false;
+    else __host("Window.userHide",__windowId);
   }
-  function setInnerSize(width,height) { __host("Window.resize",__windowId,int(width),int(height)); }
-  function setSize(width,height) { setInnerSize(width,height); }
-  function setPos(left,top) { this.left=left;this.top=top; }
+  function setInnerSize(args*) {
+    if(args.count<2)throw new Exception("Window.setInnerSize requires width and height");
+    __host("Window.resize",__windowId,int(args[0]),int(args[1]));
+  }
+  function setSize(args*) {
+    if(args.count<2)throw new Exception("Window.setSize requires width and height");
+    __host("Window.resize",__windowId,int(args[0]),int(args[1]));
+  }
+  function setPos(args*) {
+    if(args.count<2)throw new Exception("Window.setPos requires left and top");
+    __host("Window.position",__windowId,int(args[0]),int(args[1]));
+  }
   function setLayerPos(left,top) { layerLeft=left;layerTop=top; }
   function setZoom(numer,denom) { __host("Window.zoom",__windowId,int(numer),int(denom)); }
-  function setMinSize(width,height) { minWidth=width;minHeight=height; }
-  function setMaxSize(width,height) { maxWidth=width;maxHeight=height; }
+  function setMinSize(args*) {
+    if(args.count<2)throw new Exception("Window.setMinSize requires width and height");
+    __host("Window.constraints",__windowId,"min",int(args[0]),int(args[1]));
+  }
+  function setMaxSize(args*) {
+    if(args.count<2)throw new Exception("Window.setMaxSize requires width and height");
+    __host("Window.constraints",__windowId,"max",int(args[0]),int(args[1]));
+  }
   function update(type=utNormal) { __host("Window.update",__windowId); }
   function hideMouseCursor() { mouseCursorState=mcsTempHidden; }
   function setMaskRegion(threshold=void) { __host("Window.setMaskRegion",__windowId,threshold===void?1:int(threshold)); }

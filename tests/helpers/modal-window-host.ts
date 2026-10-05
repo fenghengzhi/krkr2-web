@@ -5,6 +5,7 @@ import {
 } from '../../src/app/game-windows.ts'
 import { WindowState } from '../../src/engine/scene/window.ts'
 import type { WindowMoveMessage } from '../../src/engine/ports/window-move.ts'
+import { createGameMenus } from '../../src/app/game-menus.ts'
 
 function observePointerCapture(target: HTMLElement) {
   const limit = 96,
@@ -259,6 +260,7 @@ export function installModalWindowHost() {
   }
   const moves = new Map<number, { abort: AbortController; messages: WindowMoveMessage[];
     settled: boolean; error?: string }>()
+  const menus = new Map<number, ReturnType<typeof createGameMenus>>(), menuSelections: number[] = []
   let nextMove = 1
   return {
     update(windowId: number, changes: Partial<WindowHostView>) {
@@ -270,6 +272,18 @@ export function installModalWindowHost() {
     clearActions: () => {
       actions.length = 0
     },
+    openPopup(windowId: number) {
+      menus.get(windowId)?.dispose()
+      const current = surface(windowId), item = (id: number, caption: string) => ({
+        id, caption, enabled: true, visible: true, checked: false, radio: false, shortcut: '', children: [],
+      }), root = { ...item(100, 'Move popup'), children: [item(101, 'Choose held game popup')] },
+        menu = createGameMenus(current.element.querySelector<HTMLElement>('.game-window-menu')!,
+          () => current.canvas, (id) => menuSelections.push(id), () => {})
+      menus.set(windowId, menu)
+      menu.state(true, requiredView(windowId).width, requiredView(windowId).height)
+      menu.update({ root, popup: { windowId, requestId: 1, id: 100, x: 0, y: 0, flags: 0 } })
+    },
+    menuSelections: () => [...menuSelections],
     observePointerCapture(windowId: number, kind: 'move' | 'resize') {
       const target = surface(windowId).element.querySelector<HTMLElement>(
         kind === 'move' ? '.game-window-header' : '.game-window-resize',
@@ -327,6 +341,8 @@ export function installModalWindowHost() {
     },
     dispose() {
       for (const move of moves.values()) move.abort.abort()
+      for (const menu of menus.values()) menu.dispose()
+      menus.clear()
       windows.dispose()
       stage.remove()
     },

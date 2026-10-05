@@ -94,7 +94,7 @@ jobs:
                 $observations.globalInputUsed -ne $false -or $observations.wallClockAnimationMeasured -ne $false -or
                 $observations.observedFixtures -ne $observations.expectedFixtures -or
                 $observations.fixtures.Count -ne $observations.expectedFixtures -or
-                $observations.expectedFixtures -ne 155 -or $observations.sourceCommit -cne $env:GITHUB_SHA) {
+                $observations.expectedFixtures -ne 183 -or $observations.sourceCommit -cne $env:GITHUB_SHA) {
               throw 'Native cursor reference output is incomplete or has an unexpected scope/commit.'
             }
             $ids = [Collections.Generic.HashSet[string]]::new()

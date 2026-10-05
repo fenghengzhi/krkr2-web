@@ -2702,6 +2702,47 @@ export class EngineSession {
     this.dirty = true
     this.present()
   }
+  private setWindowProperty(window: WindowRecord, property: string, value: string | number,
+    script = false): void {
+    const before = [window.state.width, window.state.height]
+    if (script) window.state.setScript(property, value)
+    else window.state.set(property, value)
+    if ((property === 'visible' && !window.state.visible) ||
+        (property === 'fullScreen' && window.state.fullScreen)) this.windowMoves?.cancel(window.id)
+    if (property === 'useMouseKey') {
+      const record = this.windowMouseKeys(window)
+      this.observeAdmission(this.mouseKeyActions(window,
+        record.state.configure(window.state.useMouseKey, this.deps.now())))
+    }
+    if (property === 'visible' && !window.state.visible) this.clearVirtualCursors(window.id)
+    if (property === 'visible' || property === 'focusable' || property === 'trapKey')
+      this.refreshKeyboardRoutes()
+    if (before[0] !== window.state.width || before[1] !== window.state.height)
+      this.queueResize(window)
+    if (property === 'fullScreen' && window.state.fullScreen)
+      for (const other of this.windows!.registered())
+        if (other !== window && other.state.fullScreen) other.state.set('fullScreen', 0)
+    if (property === 'visible' || property === 'focusable') {
+      if (window.state.visible && window.state.focusable)
+        void this.activateWindow(window.id).catch((error) => {
+          if (!this.control.cancelled) this.fail(error)
+        })
+      else {
+        this.menus.dismiss(window.id, undefined, 'unavailable')
+        void this.input({ type: 'deactivate', windowId: window.id }, false).catch(() => {})
+        if (!this.windows!.active) {
+          const next = this.windows!.registered()
+            .reverse()
+            .find((candidate) => candidate.state.visible && candidate.state.focusable)
+          if (next)
+            void this.activateWindow(next.id).catch((error) => {
+              if (!this.control.cancelled) this.fail(error)
+            })
+        }
+      }
+    }
+    this.dirty = true
+  }
   async closeWindow(windowId: number): Promise<void> {
     await this.acceptCloseWindow(windowId).completion
   }
@@ -4046,8 +4087,8 @@ export class EngineSession {
         break
       }
       case 'Menu.set':
-        this.menus.set(
-          this.menuItems!.get(args[0]).view,
+        this.menuItems!.set(
+          args[0],
           text(1),
           typeof args[2] === 'string' ? text(2) : number(2),
         )
@@ -4185,11 +4226,31 @@ export class EngineSession {
       }
       case 'Window.resize': {
         const window = this.windows!.get(number(0))
-        window.state.resize(number(1), number(2))
+        window.state.resizeScript(number(1), number(2))
         this.queueResize(window)
         this.dirty = true
         break
       }
+      case 'Window.position': {
+        const window = this.windows!.get(number(0))
+        window.state.assertWindowed()
+        this.setWindowProperty(window, 'left', number(1))
+        this.setWindowProperty(window, 'top', number(2))
+        break
+      }
+      case 'Window.constraints': {
+        const window = this.windows!.get(number(0)), prefix = text(1)
+        if (prefix !== 'min' && prefix !== 'max') throw new Error('Invalid Window constraint kind')
+        window.state.assertWindowed()
+        this.setWindowProperty(window, `${prefix}Width`, number(2))
+        this.setWindowProperty(window, `${prefix}Height`, number(3))
+        break
+      }
+      case 'Window.userHide':
+        // Form.OnCloseQueryCalled uses its own Visible field, not the public
+        // Window setter. Preserve the same hide side effects without its guard.
+        this.setWindowProperty(this.windows!.get(number(0)), 'visible', 0)
+        break
       case 'Window.setMaskRegion': {
         const window = this.windows!.get(number(0)),
           primary = this.inputControllers.get(window.id)?.root() ?? 0
@@ -4250,45 +4311,8 @@ export class EngineSession {
         break
       }
       case 'Window.set': {
-        const window = this.windows!.get(number(0)),
-          before = [window.state.width, window.state.height],
-          property = text(1)
-        window.state.set(text(1), typeof args[2] === 'string' ? text(2) : number(2))
-        if ((property === 'visible' && !window.state.visible) ||
-            (property === 'fullScreen' && window.state.fullScreen)) this.windowMoves?.cancel(window.id)
-        if (property === 'useMouseKey') {
-          const record = this.windowMouseKeys(window)
-          this.observeAdmission(this.mouseKeyActions(window,
-            record.state.configure(window.state.useMouseKey, this.deps.now())))
-        }
-        if (property === 'visible' && !window.state.visible) this.clearVirtualCursors(window.id)
-        if (property === 'visible' || property === 'focusable' || property === 'trapKey')
-          this.refreshKeyboardRoutes()
-        if (before[0] !== window.state.width || before[1] !== window.state.height)
-          this.queueResize(window)
-        if (property === 'fullScreen' && window.state.fullScreen)
-          for (const other of this.windows!.registered())
-            if (other !== window && other.state.fullScreen) other.state.set('fullScreen', 0)
-        if (property === 'visible' || property === 'focusable') {
-          if (window.state.visible && window.state.focusable)
-            void this.activateWindow(window.id).catch((error) => {
-              if (!this.control.cancelled) this.fail(error)
-            })
-          else {
-            this.menus.dismiss(window.id, undefined, 'unavailable')
-            void this.input({ type: 'deactivate', windowId: window.id }, false).catch(() => {})
-            if (!this.windows!.active) {
-              const next = this.windows!.registered()
-                .reverse()
-                .find((candidate) => candidate.state.visible && candidate.state.focusable)
-              if (next)
-                void this.activateWindow(next.id).catch((error) => {
-                  if (!this.control.cancelled) this.fail(error)
-                })
-            }
-          }
-        }
-        this.dirty = true
+        this.setWindowProperty(this.windows!.get(number(0)), text(1),
+          typeof args[2] === 'string' ? text(2) : number(2), true)
         break
       }
       case 'Window.zoom': {

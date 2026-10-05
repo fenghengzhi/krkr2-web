@@ -108,6 +108,13 @@ export class MenuService {
   state(value: ScriptValue): ScriptWeakObject {
     return this.get(value).state
   }
+  set(value: ScriptValue, property: string, next: string | number): void {
+    const item = this.get(value)
+    // Only a native root MenuItem forwards visibility to the Window menu bar.
+    // Children and unattached menus retain their ordinary visibility setter.
+    if (property === 'visible' && item.window) item.window.state.assertWindowed()
+    this.tree.set(item.view, property, next)
+  }
   relation(value: ScriptValue, relation: string): ScriptValue {
     let item = this.get(value)
     if (relation === 'window')

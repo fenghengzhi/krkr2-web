@@ -568,10 +568,20 @@ export function createGameWindows(
             // bubbles through us but does not revoke the host move's capture.
             if (event.target === surface.element && event.pointerId === observed.id) finish(false)
           }, options)
-          // These compatibility events follow pointer events separately. Never
-          // let the OS-style move loop turn them into game mouse callbacks.
-          for (const type of ['mousedown', 'mousemove', 'mouseup', 'click', 'dblclick', 'keyup'])
-            browser.addEventListener(type, consume, options)
+          // These compatibility events follow pointer events separately. Keep
+          // them out of game callbacks, while allowing an external host control
+          // (including an accessibility/programmatic Stop click) to cancel the
+          // suspended script through the application's normal handler.
+          for (const type of ['mousedown', 'mousemove', 'mouseup', 'click', 'dblclick'])
+            browser.addEventListener(type, (event) => {
+              const popup = event.target instanceof Element
+                ? event.target.closest<HTMLElement>('.game-menu-overlay[data-window-id][data-request-id]') : null,
+                owner = popup ? windows.get(Number(popup.dataset.windowId)) : undefined
+              // Owned popups are mounted on body to escape stage clipping.
+              if ((event.target instanceof Node && stage.contains(event.target)) || (owner && live(owner)))
+                consume(event)
+            }, options)
+          browser.addEventListener('keyup', consume, options)
           if (observed.buttons) surface.element.setPointerCapture(observed.id)
           preview()
         } catch (error) { finish(false, false, error) }

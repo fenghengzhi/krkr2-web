@@ -71,6 +71,21 @@ export class WindowState implements WindowView {
   get innerHeight(): number {
     return this.height
   }
+  /** Public KRKR2 setters reject even no-op assignments in fullscreen.
+   * Host placement, rollback and native close still use set()/resize(). */
+  assertWindowed(): void {
+    if (this.fullScreen) throw new Error('Window property cannot be changed in fullscreen')
+  }
+  setScript(property: string, value: string | number): void {
+    if (['visible', 'width', 'height', 'left', 'top', 'minWidth', 'minHeight',
+      'maxWidth', 'maxHeight', 'innerSunken', 'innerWidth', 'innerHeight', 'borderStyle'].includes(property))
+      this.assertWindowed()
+    this.set(property, value)
+  }
+  resizeScript(width: number, height: number): void {
+    this.assertWindowed()
+    this.resize(width, height)
+  }
   set(property: string, value: string | number): void {
     if (property === 'caption') this.caption = String(value)
     else {

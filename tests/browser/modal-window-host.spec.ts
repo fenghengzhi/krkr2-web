@@ -146,6 +146,67 @@ test('beginMove distinguishes released descendant capture from loss of its own r
   }
 })
 
+test('a held beginMove suppresses game clicks while an external host control can abort it', async ({ page }, info) => {
+  const errors = await launch(page), canvas = page.locator(`${first} canvas`), failures: unknown[] = []
+  await page.evaluate(() => {
+    window.modalWindowHost.update(11, { borderStyle: 2 })
+    window.modalWindowCapture = window.modalWindowHost.observeCanvasPointerCapture(11)
+    document.querySelector<HTMLCanvasElement>('.game-window[data-window-id="11"] canvas')!
+      .addEventListener('pointerdown', (event) => {
+        (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId)
+      })
+    const stop = document.querySelector<HTMLButtonElement>('#before-windows')!
+    stop.dataset.calls = '0'
+    stop.addEventListener('click', () => {
+      stop.dataset.calls = String(Number(stop.dataset.calls) + 1)
+      window.modalWindowHost.dispose()
+    })
+  })
+  try {
+    await canvas.scrollIntoViewIfNeeded()
+    const bounds = await canvas.boundingBox()
+    if (!bounds) throw new Error('Move canvas is missing')
+    await page.mouse.move(bounds.x + 30, bounds.y + 30)
+    await page.mouse.down()
+    await page.mouse.move(bounds.x + 31, bounds.y + 31)
+    const requestId = await page.evaluate(() => {
+      const pointerId = window.modalWindowCapture.snapshot().pointerId
+      if (pointerId === undefined) throw new Error('No real held pointer')
+      window.modalWindowHost.clearActions()
+      return window.modalWindowHost.beginScriptMove(11, pointerId)
+    })
+    await expect(page.locator(first)).toHaveClass(/game-window-dragging/)
+    // DOM control activation avoids releasing the held drag pointer. The
+    // game control remains suppressed; the external app control must run.
+    await page.locator(`${first} .game-window-close`).evaluate((element) => (element as HTMLButtonElement).click())
+    expect(await page.evaluate(() => window.modalWindowHost.actions())).toEqual([])
+    await page.evaluate(() => window.modalWindowHost.openPopup(11))
+    const popup = page.locator('.game-menu-overlay[data-window-id="11"][data-request-id="1"]')
+    expect(await popup.evaluate((element) => element.parentElement === document.body)).toBe(true)
+    await popup.getByRole('button', { name: 'Choose held game popup', exact: true })
+      .evaluate((element) => (element as HTMLButtonElement).click())
+    expect(await page.evaluate(() => window.modalWindowHost.menuSelections())).toEqual([])
+    expect(await page.evaluate((id) => window.modalWindowHost.scriptMove(id).settled, requestId)).toBe(false)
+    await page.locator('#before-windows').evaluate((element) => (element as HTMLButtonElement).click())
+    await expect(page.locator('#before-windows')).toHaveAttribute('data-calls', '1')
+    await expect.poll(() => page.evaluate((id) => window.modalWindowHost.scriptMove(id).settled, requestId)).toBe(true)
+    const result = await page.evaluate((id) => window.modalWindowHost.scriptMove(id), requestId)
+    expect(result.error).toBeUndefined()
+    expect(result.messages.filter((message) => message.type !== 'update')).toEqual([])
+    await expect(page.locator('.game-window,.game-window-flow-space,.game-menu-overlay')).toHaveCount(0)
+    expect(errors).toEqual([])
+  } catch (error) { failures.push(error) }
+  try { await page.mouse.up() } catch (error) { failures.push(error) }
+  try {
+    await info.attach('begin-move-host-control', { contentType: 'application/json',
+      body: JSON.stringify(await page.evaluate(() => window.modalWindowCapture.snapshot()), null, 2) })
+  } catch (error) { failures.push(error) }
+  try { await page.evaluate(() => window.modalWindowCapture.restore()) } catch (error) { failures.push(error) }
+  try { await page.evaluate(() => window.modalWindowHost.dispose()) } catch (error) { failures.push(error) }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) throw new AggregateError(failures, 'Host control scenario and cleanup failed', { cause: failures[0] })
+})
+
 test('modal blocking preserves Window visibility and focusability while excluding its DOM from focus', async ({
   page,
 }) => {
