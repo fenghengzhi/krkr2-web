@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37282816379](https://github.com/fenghengzhi/krkr2-web/actions/runs/37282816379)，精确提交 `34c91a0093706c3e4bb0cbf417d41db45abfe434`。089 的 32 个文件已整批推送，新增 8 个 Node、每浏览器 4 个定义仍待托管结果。首次唯一查询为 **in_progress／conclusion=null**，只确认提交绑定，没有实时监控 jobs／artifacts。下次补取 088 终态和新增产物，再回收本批固定快照；整体非插件目标继续 active，未本地执行验证，未合入旧 main。
+
 2026-10-05 准备 [089 托管回归修订与原生边界校准](decisions/089-hosted-regression-repairs.md)：修订分片 MP4 的 FFmpeg 首样本索引兼容、测试多语句入口、流式 PCM 交付观测、无左键窗口移动、光标 Y 比例精度与真实输入夹具。协议 **33**、TJS ABI **5**、字体 ABI **2** 不变；本批候选尚待托管执行，整体目标仍是完成插件以外的 KRKR2 Web 模拟器。
 
 089 已补取 087 **completed／failure**：Node **3,007 通过、29 失败／3,036**，浏览器共 43 unexpected，兼容 **94/96**。23 份 ZIP 全部核对。088 本次固定快照仍 **in_progress**，8 jobs 成功、2 光标失败、14 运行中；11 份 ZIP 全部核对，Node／主浏览器／KAG 等未报告。两运行合计 **34/34 ZIP、290,355,537 字节**，历史失败与旧快照均保留。088 两 Windows 的 beginMove 各七项观察完整，但不代表应用实现通过；下一批补取未报告结果，不实时轮询。
