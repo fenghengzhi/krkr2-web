@@ -2,6 +2,8 @@
 
 状态：开发候选，尚未取得本批执行结果。整体目标仍是完成插件以外的 KRKR2 Web 模拟器。会话协议升至 **34**，TJS ABI **5**、字体 ABI **2** 不变。所有可执行验证只在 GitHub-hosted Actions 进行；较大批次推送后，下次工作时回收固定快照，不实时监控。
 
+已整批推送 **24 个文件**，精确提交 `e054e6b48ca12c47e1c18b31373d16f3a02ec1bf`，对应 [Full test suite 37289840732](https://github.com/fenghengzhi/krkr2-web/actions/runs/37289840732)。首次唯一查询只确认运行与提交身份，当时 **queued／conclusion=null**；没有查询实时 jobs／artifacts。原响应保存为 `out/verification/github-actions/37289840732/initial-run-discovery.json`。本段以 `[skip ci]` 文档提交保存；下次先补取 090 终态和新增产物，再回收本批固定快照，当前没有通过结论。
+
 上一实现批次 090 完成源码、测试、提交与运行身份保存，属于实际进展。随后回答整体目标的对话没有改变实现状态；本次重新检查工作树后继续完成 091 的窗口功能、历史失败修订和独立媒体取证。
 
 ## 固定快照与历史结果
