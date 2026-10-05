@@ -20,6 +20,13 @@ function __krkrWindowInvalidate(window,id) {
 class Window {
   var __windowId, __windowMenu=null, __windowObjects, __windowKeys, __windowClosing=false, __windowCanClose=false, __windowUserClosing=false;
   function Window() {
+    if(!__host("Input.padConfigured")) {
+      var padMode=__host("System.getArgument","-joypad"),
+          padDelay=__host("System.getArgument","-paddelay"),
+          padInterval=__host("System.getArgument","-padinterval");
+      __host("Input.configurePad",int(padMode===void || padMode==="dinput"),
+        int(padDelay===void ? 500 : padDelay),int(padInterval===void ? 30 : padInterval));
+    }
     __windowObjects=[];__windowKeys=[];
     __windowId=__host("Window.create",this,__krkrWindowInvalidate);
     __host("Input.synchronize");

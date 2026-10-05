@@ -2,6 +2,8 @@ import type { InputPacket, InputView } from '../../engine/ports/input.ts'
 import type { WindowView } from '../../engine/scene/window.ts'
 import { BrowserInput, virtualKey, type BrowserCursorState, type BrowserInputHooks } from './browser.ts'
 import type { CursorScene, SelectedCursorAsset } from './cursor.ts'
+import { BrowserGamepad, type BrowserGamepadSource } from './gamepad-browser.ts'
+import type { GamepadSample } from './gamepad.ts'
 
 interface SurfaceInput {
   readonly id: number
@@ -20,6 +22,8 @@ interface QueuedInput {
 }
 
 export interface BrowserInputCoordinatorOptions {
+  /** Omit for the real browser Gamepad API. false disables device sampling. */
+  gamepad?: BrowserGamepadSource | false
   /** Temporary page controls such as owned menu popups preserve Window focus. */
   isTransientFocus?(target: EventTarget | null): boolean
   cursor?: {
@@ -35,6 +39,9 @@ export class BrowserInputCoordinator {
   private readonly views = new Map<number, WindowView>()
   private readonly inputs = new Map<number, InputView>()
   private readonly pressed = new Set<number>()
+  private readonly padKeys = new Set<number>()
+  private readonly gamepad: BrowserGamepad
+  private gamepadEnabled = true
   private readonly physicalOwners = new Map<number, number>()
   private readonly hostKeys = new Set<number>()
   private readonly hostKeyEvents = new WeakSet<KeyboardEvent>()
@@ -133,6 +140,9 @@ export class BrowserInputCoordinator {
       },
       { signal: this.abort.signal },
     )
+    this.gamepad = new BrowserGamepad((sample) => this.observeGamepad(sample), this.error, options.gamepad)
+    document.addEventListener('visibilitychange', () => this.syncGamepad(), { signal: this.abort.signal })
+    window.addEventListener('focus', () => this.syncGamepad(), { signal: this.abort.signal })
   }
 
   get focusRevision(): number {
@@ -385,11 +395,17 @@ export class BrowserInputCoordinator {
     if (this.closed) return
     this.inputs.set(windowId, view)
     this.surfaces.get(windowId)?.input.setInput(view, windowId)
+    if (view.gamepad) {
+      this.gamepadEnabled = view.gamepad.enabled
+      this.gamepad.setRepeat(view.gamepad.delay, view.gamepad.interval)
+      this.syncGamepad()
+    }
   }
 
   setSuspended(suspended: boolean): void {
     if (this.closed || suspended === this.suspended) return
     this.suspended = suspended
+    this.gamepad.setSuspended(suspended)
     if (suspended) {
       this.generation++
       this.queue = []
@@ -399,6 +415,7 @@ export class BrowserInputCoordinator {
     }
     for (const surface of this.surfaces.values())
       surface.input.setSuspended(suspended || !surface.visible || surface.blocked)
+    this.syncGamepad()
   }
 
   private current(surface: SurfaceInput): boolean {
@@ -407,7 +424,10 @@ export class BrowserInputCoordinator {
 
   private observeFocus(target: EventTarget | null): void {
     if (this.closed || this.suspended) return
-    if (this.options.isTransientFocus?.(target)) return
+    if (this.options.isTransientFocus?.(target)) {
+      this.gamepad.setActive(false)
+      return
+    }
     const surface = [...this.surfaces.values()].find(
       (surface) =>
         surface.visible &&
@@ -421,7 +441,10 @@ export class BrowserInputCoordinator {
 
   private setActive(surface: SurfaceInput | undefined): void {
     const previous = this.active
-    if (surface === previous) return
+    if (surface === previous) { this.syncGamepad(); return }
+    // Release against the old Window before switching routes. Like native
+    // suspended polling, a held key must become neutral before readmission.
+    this.gamepad.setActive(false)
     this.active = surface
     if (previous) {
       if (this.mouseOwner === previous) this.mouseOwner = undefined
@@ -432,9 +455,37 @@ export class BrowserInputCoordinator {
       surface.input.setWindowActive(true)
       this.enqueue(surface, { type: 'activate' })
     }
+    this.syncGamepad()
+  }
+
+  private syncGamepad(): void {
+    const surface = this.active
+    this.gamepad.setActive(!!(this.gamepadEnabled && surface && this.current(surface) && !this.suspended &&
+      surface.visible && surface.focusable && !surface.blocked && !document.hidden &&
+      (typeof document.hasFocus !== 'function' || document.hasFocus()) &&
+      surface.input.ownsFocus(document.activeElement)))
+  }
+  private observeGamepad(sample: GamepadSample): void {
+    if (this.closed) return
+    this.padKeys.clear()
+    for (const key of sample.keys) this.padKeys.add(key)
+    // Physical state bypasses a blocked script callback just like keyboard
+    // observation; the ordered script events still use the common queue.
+    this.keys()
+    const surface = this.active
+    if (!surface || !this.current(surface) || this.suspended) return
+    const route = this.inputs.get(surface.id)?.keyboardRoute
+    let shift = 0
+    for (const [key, flag] of [[16, 1], [18, 2], [17, 4], [1, 8], [2, 16], [4, 32], [5, 256], [6, 512]])
+      if (this.pressed.has(key!)) shift |= flag!
+    for (const event of sample.events)
+      this.enqueue(surface, { type: event.type, key: event.key, shift: shift | (event.repeat ? 128 : 0),
+        ...(route ? { keyboardRouteRevision: route.revision,
+          ...(route.inputRevision !== undefined ? { keyboardInputRevision: route.inputRevision } : {}) } : {}) })
   }
 
   private remove(surface: SurfaceInput): void {
+    if (this.active === surface) this.gamepad.setActive(false)
     this.surfaces.delete(surface.id)
     this.queue = this.queue.filter((entry) => entry.surface !== surface)
     if (this.active === surface) this.active = undefined
@@ -446,12 +497,13 @@ export class BrowserInputCoordinator {
     if (this.closed) return
     this.hostKeys.clear()
     this.pressed.clear()
+    this.padKeys.clear()
     this.physicalOwners.clear()
     this.keys()
   }
 
   private keys(): void {
-    const keys = [...this.pressed].sort((a, b) => a - b),
+    const keys = [...new Set([...this.pressed, ...this.padKeys])].sort((a, b) => a - b),
       signature = keys.join(',')
     if (signature === this.publishedKeys) return
     this.publishedKeys = signature
@@ -519,6 +571,7 @@ export class BrowserInputCoordinator {
     if (this.closed) return
     this.setSuspended(true)
     this.closed = true
+    this.gamepad.close()
     this.abort.abort()
     for (const surface of [...this.surfaces.values()]) this.remove(surface)
     this.views.clear()

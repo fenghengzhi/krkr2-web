@@ -96,10 +96,15 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
     hotspot = loadedCursorHotspot(image, profile)
   if (image.width === width && image.height === height) return { ...image, hotspot }
   const data = new Uint8Array(width * height * 4), andMask = new Uint8Array(width * height),
+    // 082's complete DIB/PNG alpha color planes establish a centered 2x2
+    // average for 64x64 -> 32x32 in this profile. Keep the observation bounded:
+    // it does not select a unique native kernel for other ratios or modes.
+    halfSizeAlpha = image.depth === 32 && image.mode === 'alpha' &&
+      image.width === width * 2 && image.height === height * 2,
     // Both PNG and DIB 256-to-32 references point-sample, whereas their
-    // 48-to-32 references smooth. Use an integer-reduction fast-path candidate
-    // independently of encoding; other reduction factors stay in the strict
-    // native gate until the additional size matrix establishes the boundary.
+    // 48-to-32 references smooth. 96-to-32 center positions are exact integers
+    // and do not distinguish nearest from bilinear. Other integer reductions
+    // remain candidates in the strict gate; 64-to-32 alpha is handled above.
     pointSample = image.depth < 32 ||
       (image.width >= width && image.height >= height &&
         image.width % width === 0 && image.height % height === 0)
@@ -118,7 +123,13 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
       // Boolean AND remains a separate plane. Color interpolation must never
       // turn inversion into alpha transparency or interpolate the mask values.
       andMask[target] = image.andMask[source]!
-      if (pointSample) {
+      if (halfSizeAlpha) {
+        const from = (y * 2 * image.width + x * 2) * 4, nextRow = from + image.width * 4
+        for (let channel = 0; channel < 4; channel++)
+          data[target * 4 + channel] = Math.floor((image.data[from + channel]! +
+            image.data[from + 4 + channel]! + image.data[nextRow + channel]! +
+            image.data[nextRow + 4 + channel]!) / 4)
+      } else if (pointSample) {
         data.set(image.data.subarray(source * 4, source * 4 + 4), target * 4)
       } else {
         // 081's raw color planes distinguish the axis order and byte stages:

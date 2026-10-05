@@ -1,5 +1,7 @@
 # 当前实现范围
 
+083 开发候选接入 [真实 Gamepad 与按键查询](../decisions/083-gamepad-key-state.md)：生产 navigator 采样、逐键 neutral／重复、会话输入路由、`getKeyState` 第二参数和按下记录；协议 **28**、TJS ABI **5**、字体 ABI **2**。本批尚未执行。081 的光标 Node 定义已有通过报告，但整批仍失败；082 固定快照的文件接受与 ANI 时间元数据已匹配，像素缩放仍有严格失败，常规应用结果当时尚未报告。最新状态以 [实现进度](../non-plugin-progress.md) 为准；完整非插件目标、实际硬件映射／时序、长音频和多音轨等范围尚未完成。
+
 082 开发候选接入 [光标选择顺序、原生热点与解码并发边界](../decisions/082-cursor-selection-decode-budget.md)：先选再解码、矩形排序、DWORD 热点及单个活动解码流程，协议 **27**、TJS ABI **5**、字体 ABI **2** 不变。081 快照已证明 build success、可信生命周期 7/7；两 Windows 严格加载比较各有 48 个 draw mismatch 和 2 个接受差异，其他应用用例当时尚未报告。082 修订尚待托管验证，平滑缩放／mask、零 rate 时间策略与整体非插件范围仍未完成。完整证据、原始失败和后续状态以 [实现进度](../non-plugin-progress.md) 为准；以下保留历史阶段记录。
 
 081 开发候选正在 `codex/migrated-window-attention` 接入 [光标原生文件加载](../decisions/081-cursor-native-loading.md)：固定桌面配置的逐帧选图、32×32 缩放、热点及完整 ANI 保留，协议 **27**、TJS ABI **5**、字体 ABI **2**。32 位平滑量化、完整目录接受语义和零 rate 计时仍未闭合，未合入 main。080 的 Windows 限定比较各 170/170，但应用 build 类型检查失败使 Node／浏览器测试 skipped；不能将其写成应用验证通过。最新候选、历史证据与完整非插件缺口以 [实现进度](../non-plugin-progress.md) 为准；下文保留各历史阶段当时的边界。

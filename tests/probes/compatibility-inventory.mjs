@@ -127,11 +127,61 @@ for (const { name, keys } of series) {
                 'first-link-highlight', 'second-link-highlight', 'previous-link-highlight',
                 'tab-link-highlight', 'enter-runs-original-link-target',
                 'physical-pointer-takes-over', 'stop-releases-marker-and-worker',
+                'pad-reloaded-original-links-and-observed-neutral',
+                'pad-first-link-highlight', 'pad-second-link-highlight',
+                'pad-previous-link-highlight', 'pad-return-second-link-highlight',
+                'pad-confirm-runs-original-link-target',
+                'pad-original-mainwindow-and-messagelayer-methods-retained',
               ]) assert(detail.steps.includes(step), `Missing KAG cursor stage: ${step}`)
               assert.equal(detail.workers.length, 1)
               assert(detail.workers[0].closed)
-              for (const stage of ['first-link-highlight', 'second-link-highlight', 'previous-link-highlight', 'tab-link-highlight', 'entered-second-target', 'physical-takeover', 'stopped'])
+              for (const stage of ['first-link-highlight', 'second-link-highlight', 'previous-link-highlight',
+                'tab-link-highlight', 'entered-second-target', 'physical-takeover', 'stopped',
+                'pad-neutral-ready', 'pad-first-link-highlight', 'pad-second-link-highlight',
+                'pad-previous-link-highlight', 'pad-return-second-link-highlight', 'pad-entered-second-target',
+                'pad-first-link-canvas', 'pad-second-link-canvas'])
                 await nonempty(`${name}/${browser}-${result.key}/${stage}.png`)
+              const boundary = 'Injected navigator.getGamepads device snapshots; not physical hardware measurements'
+              assert.equal(detail.gamepadBoundary, boundary)
+              assert.equal(detail.hardwareMeasured, false)
+              assert.deepEqual(detail.padMapping, {
+                source: 'system/MainWindow.tjs:638-644',
+                sourceSha256: '8f850acfd1c87b77bb37c792e9f80630f4a15f9c5bd0d9aafce5ce59cfedcea7',
+                left: { axis: -1, virtualKey: 437, mappedKey: 37 },
+                right: { axis: 1, virtualKey: 439, mappedKey: 39 },
+                confirm: { button: 0, virtualKey: 448, mappedKey: 13 },
+              })
+              assert.equal(detail.deviceTrace, 'device-samples.json')
+              const device = await json(artifact(`${name}/${browser}-${result.key}/${detail.deviceTrace}`))
+              assert.equal(device.boundary, boundary)
+              assert.equal(device.hardwareMeasured, false)
+              assert.equal(device.installed, true)
+              assert.equal(device.dropped, 0)
+              assert.equal(device.reads, detail.deviceReads)
+              assert(device.reads > 0 && device.samples.length === device.reads)
+              assert(device.samples.every((sample, index) => sample.read === index + 1 &&
+                Number.isFinite(sample.at) && (index === 0 || sample.at >= device.samples[index - 1].at)))
+              assert(device.samples.filter((sample) => sample.focusedGameSurface).every((sample) =>
+                sample.documentFocused === true && /^\d+$/.test(sample.activeElement?.windowId ?? '') &&
+                (sample.activeElement.tag === 'CANVAS' || (sample.activeElement.tag === 'TEXTAREA' &&
+                  sample.activeElement.className.split(/\s+/).includes('game-text-input')))),
+                'Focused game samples must retain their canvas/text-input and Window identity')
+              assert(device.samples.some((sample) => sample.phase === 'pad-initial-neutral' &&
+                sample.neutral && sample.focusedGameSurface), 'The real sampler must observe neutral after game-surface focus')
+              for (const [phase, axis, buttons] of [
+                ['pad-first-link-highlight', 1, []], ['pad-second-link-highlight', 1, []],
+                ['pad-previous-link-highlight', -1, []], ['pad-return-second-link-highlight', 1, []],
+                ['pad-confirm-target', 0, [0]],
+              ]) {
+                const pressed = device.samples.find((sample) => sample.phase === phase && sample.focusedGameSurface)
+                assert(pressed && !pressed.neutral, `Missing sampled pad input: ${phase}`)
+                assert.deepEqual(pressed.axes, [axis, 0])
+                assert.deepEqual(pressed.pressedButtons, buttons)
+                assert(device.samples.some((sample) => sample.phase === `${phase}:neutral-before` &&
+                  sample.neutral && sample.focusedGameSurface && sample.read < pressed.read), `No prior neutral sample: ${phase}`)
+                assert(device.samples.some((sample) => sample.phase === `${phase}:neutral-after` &&
+                  sample.neutral && sample.focusedGameSurface && sample.read > pressed.read), `No release sample: ${phase}`)
+              }
             }
           }
         } else if (name === 'kag') {

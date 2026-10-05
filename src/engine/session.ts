@@ -107,6 +107,7 @@ import { VideoService } from './media/videos.ts'
 import { videoClass } from './tvp/video.ts'
 import { InputControllers } from './input/controllers.ts'
 import { InputService } from './input/service.ts'
+import { ObservedKeyState } from './input/key-state.ts'
 import { inputBridge } from './tvp/input.ts'
 import type { InputPacket, InputView, VirtualCursor } from './ports/input.ts'
 import { SceneComposer } from './scene/composer.ts'
@@ -281,6 +282,7 @@ export class EngineSession {
   }
   private inputs?: InputService
   private inputView = ''
+  private gamepadSettings?: NonNullable<InputView['gamepad']>
   private readonly windowInputViews = new Map<number, string>()
   private readonly keyboardRoutes = new Map<
     number,
@@ -359,7 +361,8 @@ export class EngineSession {
   private readonly physicalPointerSequences = new Map<number, number>()
   private readonly virtualCursors = new Map<number, VirtualCursorState>()
   private nextVirtualCursorRevision = 1
-  private physicalKeys = new Set<number>()
+  private readonly keyStates = new ObservedKeyState()
+  private get physicalKeys(): ReadonlySet<number> { return this.keyStates.current }
   private readonly fonts: FontService
   private sceneDirty = true
   private get dirty(): boolean {
@@ -800,7 +803,7 @@ export class EngineSession {
             for (const window of this.windows!.registered()) this.systemEvents!.cancelSource(window)
           }
           this.inputControllers.releaseCaptures()
-          this.physicalKeys.clear()
+          this.keyStates.release()
           this.menus.dismiss(undefined, undefined, 'unavailable')
           this.present()
         },
@@ -819,7 +822,7 @@ export class EngineSession {
           this.clearVirtualCursors()
           for (const window of this.windows!.registered()) this.systemEvents!.cancelSource(window)
           this.inputControllers.releaseCaptures()
-          this.physicalKeys.clear()
+          this.keyStates.release()
           this.menus.dismiss(undefined, undefined, 'unavailable')
           this.present()
         },
@@ -1301,7 +1304,7 @@ export class EngineSession {
       this.events?.pause(true)
     if (previous.state === 'visible' && activity.state !== 'visible') {
       this.clearVirtualCursors()
-      this.physicalKeys.clear()
+      this.keyStates.release()
       for (const window of this.windows?.registered() ?? []) window.inputActive = false
       this.inputControllers.resetTransient()
       this.menus.dismiss(undefined, undefined, 'unavailable')
@@ -1338,7 +1341,7 @@ export class EngineSession {
     if (paused === (this.state === 'paused')) return
     if (paused) {
       this.clearVirtualCursors()
-      this.physicalKeys.clear()
+      this.keyStates.release()
       for (const window of this.windows?.registered() ?? []) window.inputActive = false
       this.inputControllers.resetTransient()
       this.menus.dismiss(undefined, undefined, 'unavailable')
@@ -1546,7 +1549,11 @@ export class EngineSession {
   keyState(keys: number[]): void {
     if (keys.length > 256 || keys.some((key) => !Number.isInteger(key) || key < 0 || key > 65535))
       throw new Error('Invalid keyboard state')
-    this.physicalKeys = new Set(this.activity.state === 'visible' ? keys : [])
+    if (this.control.cancelled || ['stopping', 'stopped', 'failed'].includes(this.state)) return
+    // Browser suspension reaches the host asynchronously. A late nonempty
+    // snapshot cannot restore held keys or create presses while paused.
+    if (this.activity.state === 'visible' && this.state !== 'paused') this.keyStates.replace(keys)
+    else this.keyStates.release()
     for (const controller of this.inputControllers.values())
       controller.keys = new Set(this.physicalKeys)
   }
@@ -2201,7 +2208,7 @@ export class EngineSession {
     }
     if (this.state !== 'running' && (packet.type === 'cancel' || packet.type === 'deactivate'))
       controller.resetTransient()
-    if (observe) {
+    if (observe && this.state === 'running') {
       // A logical Window losing focus releases its local roles, not the
       // physical keys held elsewhere in the page. Restore the shared snapshot
       // before applying the next packet's key/shift changes.
@@ -2209,7 +2216,7 @@ export class EngineSession {
         controller.keys = new Set(this.physicalKeys)
       controller.observe(packet)
       if (packet.type !== 'cancel' && packet.type !== 'deactivate') {
-        this.physicalKeys = new Set(controller.keys)
+        this.keyStates.replace(controller.keys)
         for (const other of this.inputControllers.values())
           if (other !== controller) other.keys = new Set(this.physicalKeys)
       }
@@ -2461,6 +2468,7 @@ export class EngineSession {
       const cursor = this.currentVirtualCursor(window.id),
         input: InputView = {
           ...view, keyboardRoute: this.keyboardRoute(window),
+          ...(this.gamepadSettings ? { gamepad: { ...this.gamepadSettings } } : {}),
           virtualCursor: cursor ? { ...cursor.view } : null,
         }
       const serialized = JSON.stringify(input)
@@ -2473,6 +2481,7 @@ export class EngineSession {
       cursor = active ? this.currentVirtualCursor(active.id) : undefined,
       input: InputView = {
         ...this.inputController.view(),
+        ...(this.gamepadSettings ? { gamepad: { ...this.gamepadSettings } } : {}),
         ...(active ? { keyboardRoute: this.keyboardRoute(active) } : {}),
         virtualCursor: cursor ? { ...cursor.view } : null,
       },
@@ -2883,6 +2892,7 @@ export class EngineSession {
   }
   private setState(state: SessionState): void {
     this.state = state
+    if (state === 'stopping' || state === 'stopped' || state === 'failed') this.keyStates.reset()
     if (state !== 'running') this.clearVirtualCursors()
     this.notify()
   }
@@ -3297,10 +3307,32 @@ export class EngineSession {
       operation !== 'Debug.visible'
     )
       return this.debug!.host(operation, args)
+    if (operation === 'Input.padConfigured')
+      return { kind: 'value', value: this.gamepadSettings ? 1n : 0n }
+    if (operation === 'Input.configurePad' || operation === 'Input.padRepeat') {
+      const integer = (index: number) => {
+        const value = args[index]
+        if (typeof value !== 'bigint') throw new Error('Invalid gamepad timing argument')
+        return Number(BigInt.asIntN(32, value))
+      }
+      if (operation === 'Input.configurePad') {
+        if (!this.gamepadSettings)
+          this.gamepadSettings = { enabled: args[0] === 1n, delay: integer(1), interval: integer(2) }
+      } else if (this.gamepadSettings) {
+        if (args[0] === '-paddelay') this.gamepadSettings.delay = integer(1)
+        else if (args[0] === '-padinterval') this.gamepadSettings.interval = integer(1)
+        else throw new Error('Unknown gamepad repeat argument')
+      }
+      this.presentInputViews()
+      return { kind: 'value', value: undefined }
+    }
     if (operation.startsWith('KAG.'))
       return { kind: 'value', value: await this.kag.host(operation, args, context) }
     if (operation === 'Input.get' && args[1] === 'keyState')
-      return { kind: 'value', value: this.physicalKeys.has(Number(args[0])) ? 1n : 0n }
+      return { kind: 'value', value: this.keyStates.query(
+        typeof args[0] === 'bigint' ? args[0] : Number(args[0]),
+        args[2] === undefined || !!Number(args[2]),
+      ) ? 1n : 0n }
     if (operation.startsWith('Input.')) return this.inputs!.host(operation, args, context)
     if (operation.startsWith('Transition.')) return this.transitions!.host(operation, args)
     if (operation.startsWith('Sound.') || operation.startsWith('PhaseVocoder.'))

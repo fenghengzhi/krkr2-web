@@ -1,5 +1,6 @@
 import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { inflateSync } from 'node:zlib'
 import { loadCursorAsset, loadCursorBytes, loadedCursorHotspot, windowsDesktopCursorProfile } from '../../src/formats/cursor/load.ts'
 import { compositeCursor, cursorStep, decodeCursor, type CursorAsset, type CursorImage } from '../../src/formats/cursor/index.ts'
@@ -388,5 +389,37 @@ test('cursor smooth scaling keeps the byte stages observed in native raw color p
   ] as const) {
     const at = (y * 32 + x) * 4
     assert.deepEqual([...loaded.data.subarray(at, at + 4)], rgba, `native pixel (${x},${y})`)
+  }
+})
+
+test('cursor alpha half-size DIB and PNG match complete native color planes', async () => {
+  // 082 run 37242235256: both Windows artifacts contain identical natural
+  // color planes. Literal hashes are of the archived top-down BGRA bytes
+  // after swapping B/R only, not of any candidate or production resize output.
+  // The independent fixture-authoring formulas are from native-cursor.cpp.
+  for (const [encoding, expected] of [
+    ['dib', 'a221eea5720cd4ccf8e91304e30ff155cb818729e31bb9563b66939d4f0126ba'],
+    ['png', '27ce1637f9c0cccda0f1fb37de3dde58977edd5746e9668e75bc8ff7fa50256f'],
+  ] as const) {
+    const pixels: number[] = [], rows: number[][] = []
+    for (let y = 0; y < 64; y++) {
+      const row: number[] = []
+      for (let x = 0; x < 64; x++) {
+        const r = encoding === 'dib' ? (37 + x * 3) & 255 : (31 + x * 5) & 255,
+          g = encoding === 'dib' ? (71 + y * 5) & 255 : (61 + y * 7) & 255,
+          b = ((encoding === 'dib' ? 113 : 127) + x + y) & 255, a = (x + y * 64) & 255
+        pixels.push(r, g, b, a)
+        row.push(b, g, r, a)
+      }
+      rows.push(row)
+    }
+    const payload = encoding === 'dib'
+      ? cursorDib({ width: 64, height: 64, depth: 32, xorRows: rows }) : cursorPng(64, 64, pixels),
+      loaded = loadedImage(await loadCursorBytes(cursorFile([{ width: 64, height: 64,
+        hotspot: [21, 16], payload }]), { png }))
+    assert.equal(loaded.mode, 'alpha')
+    assert.deepEqual(loaded.hotspot, { x: 11, y: 8 })
+    assert.equal(createHash('sha256').update(loaded.data).digest('hex'), expected, encoding)
+    assert.deepEqual([...loaded.data.subarray(0, 4)], encoding === 'dib' ? [38, 73, 114, 32] : [33, 64, 128, 32])
   }
 })

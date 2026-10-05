@@ -56,8 +56,26 @@ struct Image {
     unsigned header = 40, compression = BI_RGB, alphaMode = 0, tag = 1;
     bool topDown = false, omitMask = false;
     std::string encoding = "dib";
+    // Empty preserves the original half-plane AND/XOR fixture. Named patterns
+    // below are generated in source coordinates independently of Web scaling.
+    std::string bitPattern;
     Bytes payload;
 };
+std::string bitPatternDefinition(const std::string& name) {
+    if (name == "multi-edge") return "(3<=x<9)||(63<=x<129)||(193<=x<251)";
+    if (name == "isolated-one") return "(x%32==floor(y/32))&&(y%32==floor(x/32))";
+    if (name == "isolated-zero") return "!((x%32==floor(y/32))&&(y%32==floor(x/32)))";
+    if (name == "checkerboard") return "((x+y)%2)==1";
+    throw std::runtime_error("Unknown bit-plane fixture pattern: " + name);
+}
+bool bitPatternValue(const std::string& name, unsigned x, unsigned y) {
+    if (name == "multi-edge") return (x >= 3 && x < 9) || (x >= 63 && x < 129) || (x >= 193 && x < 251);
+    if (name == "checkerboard") return ((x + y) & 1) != 0;
+    const bool isolated = (x % 32 == y / 32) && (y % 32 == x / 32);
+    if (name == "isolated-one") return isolated;
+    if (name == "isolated-zero") return !isolated;
+    throw std::runtime_error("Unknown bit-plane fixture pattern: " + name);
+}
 std::string imageJson(const Image& i) {
     std::ostringstream o;
     o << "{\"width\":" << i.width << ",\"height\":" << i.height
@@ -65,7 +83,14 @@ std::string imageJson(const Image& i) {
       << ",\"encoding\":" << quote(i.encoding) << ",\"headerBytes\":" << i.header
       << ",\"compression\":" << i.compression << ",\"alphaMode\":" << i.alphaMode
       << ",\"tag\":" << i.tag << ",\"topDown\":" << (i.topDown ? "true" : "false")
-      << ",\"omitMask\":" << (i.omitMask ? "true" : "false") << '}';
+      << ",\"omitMask\":" << (i.omitMask ? "true" : "false");
+    if (!i.bitPattern.empty()) {
+        o << ",\"bitPlanePattern\":{\"id\":" << quote(i.bitPattern)
+          << ",\"coordinateSpace\":\"top-down 256x256 source pixels\",\"baseFunction\":"
+          << quote(bitPatternDefinition(i.bitPattern))
+          << ",\"and\":\"F(x,y)\",\"monochromeXor\":\"F(y,255-x)\"}";
+    }
+    o << '}';
     return o.str();
 }
 std::string imagesJson(const std::vector<Image>& images) {
@@ -74,6 +99,9 @@ std::string imagesJson(const std::vector<Image>& images) {
     o << ']'; return o.str();
 }
 Bytes dib(const Image& i) {
+    if (!i.bitPattern.empty() && (i.width != 256 || i.height != 256 ||
+        (i.bpp != 1 && i.bpp != 32) || i.alphaMode != 0 || i.omitMask))
+        throw std::runtime_error("Named bit-plane patterns require complete 256x256 monochrome or zero-alpha DIBs");
     const unsigned palette = i.bpp <= 8 ? 1u << i.bpp : 0,
         xorStride = ((i.width * i.bpp + 31) / 32) * 4,
         andStride = ((i.width + 31) / 32) * 4;
@@ -115,7 +143,11 @@ Bytes dib(const Image& i) {
         for (unsigned x = 0; x < i.width; x++) {
             const auto at = xorAt + row * xorStride;
             const unsigned index = ((x >= i.width / 2) ? 1 : 0) + ((y >= i.height / 2) ? 2 : 0);
-            if (i.bpp == 1) b[at + x / 8] |= (index & 1) << (7 - x % 8);
+            if (i.bpp == 1) {
+                const unsigned bit = i.bitPattern.empty() ? index & 1
+                    : static_cast<unsigned>(bitPatternValue(i.bitPattern, y, 255 - x));
+                b[at + x / 8] |= bit << (7 - x % 8);
+            }
             else if (i.bpp == 4) b[at + x / 2] |= ((x + y * 3 + i.tag) & 15) << ((1 - x % 2) * 4);
             else if (i.bpp == 8) b[at + x] = (x + y * 3 + i.tag) & 255;
             else {
@@ -143,9 +175,10 @@ Bytes dib(const Image& i) {
         const auto andAt = b.size(); b.resize(andAt + andStride * i.height, 0);
         for (unsigned y = 0; y < i.height; y++) for (unsigned x = 0; x < i.width; x++) {
             const unsigned row = i.topDown ? y : i.height - 1 - y;
-            // Top half AND=0; bottom half AND=1. With the monochrome XOR
-            // left/right split, all four Boolean mask combinations are present.
-            if (y >= i.height / 2) b[andAt + row * andStride + x / 8] |= 1 << (7 - x % 8);
+            // The default half-plane fixture covers all four AND/XOR cases.
+            // Named patterns retain their independent source-coordinate bits.
+            const bool bit = i.bitPattern.empty() ? y >= i.height / 2 : bitPatternValue(i.bitPattern, x, y);
+            if (bit) b[andAt + row * andStride + x / 8] |= 1 << (7 - x % 8);
         }
     }
     return b;
@@ -338,6 +371,17 @@ std::vector<Fixture> fixtures() {
     for (unsigned bpp : {1u, 32u}) {
         Image i; i.width = i.height = 256; i.hotX = 191; i.hotY = 203; i.bpp = bpp;
         add("dib-mask-scale-256-" + std::to_string(bpp), {i}, "scaling");
+    }
+    // Distinguish nearest sampling, Boolean shrink, and shifted boundaries.
+    // The isolated lattice has one pixel per 32x32 cell, exercising each of
+    // the eight phases of the 256-to-32 reduction. Monochrome XOR rotates the
+    // pattern independently; 32-bit color keeps the original gradient/alpha=0.
+    for (unsigned bpp : {1u, 32u}) {
+        for (const char* pattern : {"multi-edge", "isolated-one", "isolated-zero", "checkerboard"}) {
+            Image i; i.width = i.height = 256; i.hotX = 191; i.hotY = 203; i.bpp = bpp;
+            i.bitPattern = pattern;
+            add("dib-mask-" + i.bitPattern + "-256-" + std::to_string(bpp), {i}, "scaling");
+        }
     }
     Image a; a.tag = 1; a.hotX = 2; a.hotY = 3;
     Image b = a; b.tag = 2; b.hotX = 7; b.hotY = 11;

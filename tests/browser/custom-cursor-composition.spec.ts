@@ -101,8 +101,17 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect.poll(() => pixels(marker)).toEqual([
         [0, 0, 0, 255], [255, 255, 255, 255], [18, 52, 86, 255], [237, 203, 169, 255],
       ])
-      const committed = await marker.screenshot()
+      // Samples below are CSS-pixel coordinates. Device-scale screenshots on
+      // macOS can be 64x64 for this 32x32 marker, addressing different stripes.
+      const committed = await marker.screenshot({ scale: 'css' })
       await info.attach('committed-canvas-and-xor', { body: committed, contentType: 'image/png' })
+      await info.attach('committed-canvas-geometry', { contentType: 'application/json',
+        body: JSON.stringify(await marker.evaluate((node) => {
+          const marker = node as HTMLCanvasElement, rect = marker.getBoundingClientRect()
+          return { screenshotScale: 'css', devicePixelRatio,
+            bitmap: { width: marker.width, height: marker.height },
+            rectangle: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } }
+        })) })
       expect(await screenshotPixels(page, committed, [{ x: 18, y: 8 }, { x: 26, y: 8 }]))
         .toEqual([[18, 52, 86, 255], [237, 203, 169, 255]])
 
@@ -112,10 +121,43 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         [0, 0, 0, 255], [255, 255, 255, 255], [36, 104, 172, 255], [219, 151, 83, 255],
       ])
       await canvas.scrollIntoViewIfNeeded()
-      const box = (await canvas.boundingBox())!
-      await page.mouse.move(box.x + box.width * 80 / 200, box.y + box.height * 70 / 120)
+      const box = (await canvas.boundingBox())!, requested = {
+        x: box.x + box.width * 80 / 200, y: box.y + box.height * 70 / 120,
+      }
+      // Observe the browser's actual input coordinates independently of the
+      // presenter. MouseEvent may quantize a fractional automation request;
+      // its client point, rather than that request, is the physical hotspot.
+      await canvas.evaluate((node) => {
+        node.addEventListener('mousemove', (event) => {
+          const mouse = event as MouseEvent, target = node as HTMLCanvasElement,
+            rect = target.getBoundingClientRect()
+          target.dataset.cursorObservedMouse = JSON.stringify({
+            x: mouse.clientX, y: mouse.clientY, trusted: mouse.isTrusted,
+            timeStamp: mouse.timeStamp, devicePixelRatio, scrollX, scrollY,
+            rectangle: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+          })
+        }, { once: true, capture: true, passive: true })
+      })
+      await page.mouse.move(requested.x, requested.y)
+      const observedMouse = await canvas.evaluate((node) => {
+        const value = (node as HTMLElement).dataset.cursorObservedMouse
+        delete (node as HTMLElement).dataset.cursorObservedMouse
+        if (!value) throw new Error('The requested physical move did not reach the canvas')
+        return JSON.parse(value) as { x: number; y: number; trusted: boolean; timeStamp: number;
+          devicePixelRatio: number; scrollX: number; scrollY: number;
+          rectangle: { left: number; top: number; width: number; height: number } }
+      })
       await expect(marker).not.toHaveClass(/game-virtual-cursor/)
-      await hotspot(surface, 80, 70)
+      await info.attach('physical-cursor-observation', { contentType: 'application/json',
+        body: JSON.stringify({ requested, observedMouse, marker: await marker.evaluate((node) => {
+          const rect = node.getBoundingClientRect()
+          return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+        }) }) })
+      expect(observedMouse.trusted).toBe(true)
+      await expect.poll(() => marker.evaluate((node, point) => {
+        const rect = node.getBoundingClientRect()
+        return Math.max(Math.abs(rect.left + 8 - point.x), Math.abs(rect.top + 8 - point.y))
+      }, observedMouse)).toBeLessThanOrEqual(0.6)
       expect(await marker.evaluate((node) => {
         const rect = node.getBoundingClientRect()
         return document.elementFromPoint(rect.left + 2, rect.top + 1)?.matches('canvas[data-window-id]')
@@ -189,7 +231,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           Math.abs(current[3]![channel]! - (255 - backdrop[1]![channel]!)),
         ]))
       }).toBeLessThanOrEqual(3)
-      await info.attach('actual-video-and-xor', { body: await marker.screenshot(), contentType: 'image/png' })
+      await info.attach('actual-video-and-xor', { body: await marker.screenshot({ scale: 'css' }), contentType: 'image/png' })
 
       // Pause/hidden/leave must consume the virtual position; resume does not
       // resurrect it. A new script write or real mouse sample can present again.

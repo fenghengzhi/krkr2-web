@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { BrowserInputCoordinator } from '../../src/backends/input/coordinator.ts'
 import type { InputPacket, InputView } from '../../src/engine/ports/input.ts'
 import { WindowState } from '../../src/engine/scene/window.ts'
+import type { BrowserGamepadSource } from '../../src/backends/input/gamepad-browser.ts'
+import { gamepadSource } from '../helpers/gamepad-source.ts'
 
 // This fixture exercises event observation and asynchronous scheduling, not browser
 // layout or trusted pointer capture. Those remain covered by browser acceptance.
@@ -158,6 +160,7 @@ function fixture(
   send?: (packet: InputPacket) => Promise<void>,
   scope = false,
   transient?: (target: EventTarget | null) => boolean,
+  gamepad: BrowserGamepadSource | false = false,
 ) {
   const env = dom(),
     packets: InputPacket[] = [],
@@ -176,7 +179,7 @@ function fixture(
         pointers.push([x, y, id])
       },
       (error) => errors.push(error),
-      { isTransientFocus: transient },
+      { isTransientFocus: transient, gamepad },
     ),
     a = env.canvas(),
     b = env.canvas(),
@@ -213,6 +216,139 @@ function fixture(
     },
   }
 }
+
+test('gamepad shares the ordered Window queue while released physical keys bypass a blocked callback', async () => {
+  const clock = gamepadSource(), waiting = deferred(),
+    f = fixture(async (packet) => {
+      if (packet.type === 'keyDown' && packet.key === 0x1c0) await waiting.promise
+    }, false, undefined, clock.source)
+  try {
+    clock.pad()
+    f.coordinator.setInput(101, inputView({ keyboardRoute: { windowId: 101, revision: 10, inputRevision: 20, focused: 11, imeMode: 1 } }))
+    f.a.focus()
+    await settle()
+    f.key(f.textareas[0]!, 'a')
+    await settle()
+    clock.pad([0])
+    clock.tick(50)
+    assert.deepEqual(f.keys.at(-1), [65, 0x1c0])
+    assert.deepEqual(f.packets.at(-1), { type: 'keyDown', key: 0x1c0, shift: 0,
+      windowId: 101, keyboardRouteRevision: 10, keyboardInputRevision: 20 })
+    clock.pad()
+    clock.tick(100)
+    assert.deepEqual(f.keys.at(-1), [65])
+    assert.equal(f.packets.filter((packet) => packet.type === 'keyUp' && packet.key === 0x1c0).length, 0)
+    waiting.resolve()
+    await settle()
+    assert.equal(f.packets.filter((packet) => packet.type === 'keyUp' && packet.key === 0x1c0).length, 1)
+    assert(!f.packets.some((packet) => (packet.type === 'keyDown' || packet.type === 'keyUp') && packet.key === 0x1df))
+    assert.deepEqual(f.errors, [])
+  } finally { waiting.resolve(); await settle(); f.close() }
+})
+
+test('gamepad focus handoff releases the old Window and requires a fresh press on the new Window', async () => {
+  const clock = gamepadSource(), f = fixture(undefined, false, undefined, clock.source)
+  try {
+    clock.pad()
+    f.a.focus()
+    await settle()
+    clock.pad([1])
+    clock.tick(50)
+    await settle()
+    f.b.focus()
+    await settle()
+    clock.tick(100)
+    await settle()
+    const events = () => f.packets.filter((packet) => packet.type === 'keyDown' || packet.type === 'keyUp')
+      .map((packet) => [packet.type, packet.windowId, packet.key])
+    assert.deepEqual(events(), [['keyDown', 101, 0x1c1], ['keyUp', 101, 0x1c1]])
+    assert.deepEqual(f.keys.at(-1), [])
+    clock.pad()
+    clock.tick(150)
+    clock.pad([1])
+    clock.tick(200)
+    await settle()
+    assert.deepEqual(events().at(-1), ['keyDown', 202, 0x1c1])
+    clock.disconnect()
+    clock.tick(250)
+    await settle()
+    assert.deepEqual(events().at(-1), ['keyUp', 202, 0x1c1])
+    assert.deepEqual(f.keys.at(-1), [])
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
+
+test('transient menu focus suspends gamepad admission without deactivating the game Window', async () => {
+  const clock = gamepadSource()
+  let menu: EventTarget | undefined
+  const f = fixture(undefined, true, (target) => target === menu, clock.source)
+  try {
+    clock.pad()
+    f.a.focus()
+    await settle()
+    clock.pad([0])
+    clock.tick(50)
+    await settle()
+    const control = f.canvas()
+    menu = control
+    control.focus()
+    await settle()
+    assert.equal(f.coordinator.isActive(101), true)
+    assert.deepEqual(f.keys.at(-1), [])
+    assert(!f.packets.some((packet) => packet.type === 'deactivate'))
+    f.a.focus()
+    clock.tick(100)
+    await settle()
+    assert.equal(f.packets.filter((packet) => packet.type === 'keyDown').length, 1)
+    clock.pad()
+    clock.tick(150)
+    clock.pad([0])
+    clock.tick(200)
+    await settle()
+    assert.equal(f.packets.filter((packet) => packet.type === 'keyDown').length, 2)
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
+
+test('gamepad settings, modal exclusion and close clear physical state without reviving a retired surface', async () => {
+  const clock = gamepadSource(), f = fixture(undefined, false, undefined, clock.source)
+  try {
+    clock.pad()
+    f.coordinator.setInput(101, inputView({ gamepad: { enabled: true, delay: 0, interval: 50 } }))
+    f.a.focus()
+    await settle()
+    clock.pad([0])
+    clock.tick(50)
+    clock.tick(100)
+    await settle()
+    assert(f.packets.some((packet) => packet.type === 'keyDown' && packet.key === 0x1c0 && (packet.shift & 128)))
+    f.coordinator.setInput(101, inputView({ gamepad: { enabled: false, delay: 0, interval: 50 } }))
+    await settle()
+    assert.deepEqual(f.keys.at(-1), [])
+    const count = f.packets.length
+    clock.tick(150)
+    await settle()
+    assert.equal(f.packets.length, count)
+    f.coordinator.setInput(101, inputView({ gamepad: { enabled: true, delay: 0, interval: 50 } }))
+    clock.pad()
+    clock.tick(200)
+    clock.pad([0])
+    clock.tick(250)
+    await settle()
+    f.coordinator.setWindow(101, { ...new WindowState(), visible: true, blocked: true })
+    assert.deepEqual(f.keys.at(-1), [])
+    assert.equal(f.coordinator.focus(101), false)
+    const stale = clock.captured()
+    f.coordinator.close()
+    const afterClose = f.packets.length
+    for (const callback of stale) callback()
+    clock.tick(300)
+    await settle()
+    assert.equal(f.packets.length, afterClose)
+    assert.equal(clock.pending, 0)
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
 
 test('all surfaces enqueue in DOM order while physical observations bypass a waiting callback', async () => {
   const waiting = deferred(),

@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [083 Gamepad 与按键查询](decisions/083-gamepad-key-state.md)：接入真实 navigator 设备采样、原版逐键 neutral／分组重复、Window 队列和物理状态；补齐 `System.getKeyState` 第二参数与按下记录消费，首次 joypad 配置和动态重复参数使用 TJS 转换。协议升 **28**，TJS ABI **5**、字体 ABI **2** 不变。新增纯状态机 25、采样驱动 4、协调器 4、真实 TJS 查询 12、参数 6 个定义，以及每浏览器 4 个手柄定义；原 KAG cursor 的 6 个 case 扩展 Pad 阶段。全部待 GitHub-hosted 执行，非硬件实测，整体非插件目标仍 active。
+
+083 已回收 [081／37240240034](https://github.com/fenghengzhi/krkr2-web/actions/runs/37240240034) **failure**：23/23 原 ZIP 核对通过；Node 报告 2770 pass／2 进程失败，SIGTRAP／SIGABRT 后未报告部分保留；光标 format／load／storage／Session 分别 28／12／16／20 全部报告通过。常规浏览器 14 失败，其中 13 项光标及 1 项 WebKit 启动超时。对 [082／37242235256](https://github.com/fenghengzhi/krkr2-web/actions/runs/37242235256) 只取一次快照，仍 in_progress，9/9 ZIP 核对通过，Node 和常规浏览器等 14 项作业当时仍运行。两 Windows 87 份观察中 strict 各 258/308 匹配、50 draw 差异、0 接受差异，11 份 ANI 时间元数据匹配；raw 173/173 仍是 partial，未比较范围继续保留。原始证据与下一步修订边界见 083 决策及运行目录的 `083-final-summary.md`／`083-snapshot-summary.md`。
+
 最新待核验批次：[Full test suite 37242235256](https://github.com/fenghengzhi/krkr2-web/actions/runs/37242235256)，精确提交 `0679f6725efe9b69d6747ddd8d0026d13b89384a`。082 的选择后解码、热点、单帧 ANI、解码队列和 87 份 Windows 参考已整批推送。首次唯一查询只确认创建与提交身份，当时 **in_progress／conclusion=null**，没有查询实时作业结果。下一批补取 081 完整终态与全部后续产物，再回收本批固定快照；原失败与未比较范围继续保留。未本地执行验证，未合入旧 main，完整非插件目标保持 active。
 
 2026-10-05 准备 [082 光标选择顺序与解码预算](decisions/082-cursor-selection-decode-budget.md)：Session 改为先选目录项再解码，修订矩形选图和 signed SHORT／DWORD 热点，页面以有符号坐标放置；存储改为并发读取、单个活动解码，并补齐 Stop 早结算、共享调用者和失败 flight 重入清理。补上 ANI 每步 rate／steps／总时长的原生严格比较，并校准一帧一步 ANI 的静态加载元数据。光标加载／存储／真实 Session 分别新增 12／7／6 个定义，总计 24／23／26 个，browser host 从 3 增为 4 个／浏览器，全部待托管执行。Windows 参考扩为 87 份，另加 128 组原生 color-plane 缩放诊断；完整平滑量化及 mask 行差仍未闭合，严格加载比较继续保留失败。协议 27、TJS ABI 5、字体 ABI 2 不变，整体非插件目标仍 active。后续明确功能缺口包括长音频流式播放、真实手柄输入和视频多音轨，见本批决策末尾。

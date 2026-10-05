@@ -62,6 +62,9 @@ export interface VirtualCursor {
   basePhysicalSequence: number
 }
 export interface InputView {
+  /** Session settings interpreted by TJS; joypad enablement is fixed at the
+   * first Window, while repeat timing follows later argument changes. */
+  gamepad?: { enabled: boolean; delay: number; interval: number }
   cursor: number
   hint: string
   focused: number

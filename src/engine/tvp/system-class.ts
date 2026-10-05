@@ -14,7 +14,12 @@ const methods = [
   [
     'setArgument',
     2,
-    String.raw`function(name,value) { global.__host("System.setArgument",string(name),string(value)); }`,
+    String.raw`function(name,value) {
+    var n=string(name),v=string(value);
+    global.__host("System.setArgument",n,v);
+    if((n=="-paddelay" || n=="-padinterval") && global.__host("Input.padConfigured"))
+      global.__host("Input.padRepeat",n,int(v));
+  }`,
   ],
   [
     'addContinuousHandler',
@@ -32,7 +37,10 @@ const methods = [
   [
     'getKeyState',
     1,
-    String.raw`function(key,async=true) { return global.__host("Input.get",int(key),"keyState"); }`,
+    String.raw`function(args*) {
+    var key=int(args[0]),current=args.count<2 ? true : !!args[1];
+    return global.__host("Input.get",key,"keyState",current);
+  }`,
   ],
   ['getTickCount', 0x100, String.raw`function() { return global.__host("System.tick"); }`],
   ['clearGraphicCache', 0, String.raw`function() { global.__host("System.clearGraphicCache"); }`],
