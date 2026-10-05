@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37285720064](https://github.com/fenghengzhi/krkr2-web/actions/runs/37285720064)，精确提交 `9859a266ad69f8d77cc2aef0439b07d9859e6384`。090 的 21 个文件已整批推送，新增 17 个 Node、每浏览器 5 个定义仍待托管执行。首次唯一查询为 **in_progress／conclusion=null**，没有实时查询 jobs／artifacts。下次补取 089 终态和新增产物，再回收本批固定快照；未本地执行验证，未合入旧 main，整体非插件目标继续 active。
+
 2026-10-05 准备 [090 EXE 内嵌 XP3、原生光标与窗口捕获](decisions/090-embedded-xp3-native-cursor.md)：按原版 MZ／16 字节对齐扫描接入内嵌 XP3 的实际游戏加载、范围源和存档流程；依据两 Windows 的 41 个完整平面修订通用 Q16 步长；修正子画布捕获丢失误取消窗口移动。新增 17 个 Node、每浏览器 5 个定义尚待托管执行，协议 **33**、TJS ABI **5**、字体 ABI **2** 不变，完整非插件目标保持 active。
 
 090 固定回收 088 终态 **failure**：Node **3,023/3,056**、33 失败；浏览器 66 unexpected，兼容 **94/96**。089 快照仍 **in_progress**，8 jobs 成功、2 光标失败、14 运行；build 成功，应用范围未报告。两运行 **36/36 原 ZIP、344,446,513 字节**均核对 API SHA-256／大小，原失败与快照保留，未实时轮询。下次补取 089 终态和后续产物。
