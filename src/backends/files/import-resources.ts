@@ -73,8 +73,9 @@ export async function importSources(
           : []
     for (const entry of entries) {
       await checkpoint()
-      add(entry)
-      add({ ...entry, name: name + '>' + entry.name })
+      const canonical = name + '>' + entry.name
+      add({ ...entry, aliasOf: canonical })
+      add({ ...entry, name: canonical })
     }
   }
   await checkpoint()

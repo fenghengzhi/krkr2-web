@@ -1,4 +1,4 @@
-import type { InputPacket, InputView } from '../../engine/ports/input.ts'
+import type { InputPacket, InputView, PhysicalPointerScreen } from '../../engine/ports/input.ts'
 import type { WindowPopupMessage } from '../../engine/ports/window-popup.ts'
 import type { WindowView } from '../../engine/scene/window.ts'
 import { BrowserInput, virtualKey, type BrowserCursorState, type BrowserInputHooks } from './browser.ts'
@@ -25,6 +25,8 @@ interface QueuedInput {
 }
 
 export interface BrowserInputCoordinatorOptions {
+  /** Observe the global screen point without moving any Window-local cursor. */
+  screenPointer?(screen: PhysicalPointerScreen): Promise<void> | void
   /** Omit for the real browser Gamepad API. false disables device sampling. */
   gamepad?: BrowserGamepadSource | false
   /** A monotonic clock boundary; default uses the browser animation clock. */
@@ -52,6 +54,8 @@ export class BrowserInputCoordinator {
   private readonly gamepad: BrowserGamepad
   private readonly mouseKeyTicker: MouseKeyTicker
   private pagePointer?: { x: number; y: number }
+  private pageScreen?: PhysicalPointerScreen
+  private readonly eventScreens = new WeakMap<MouseEvent, PhysicalPointerScreen>()
   private pointerObservation = 0
   private readonly mouseKeyObservations = new Map<number, number>()
   private gamepadEnabled = true
@@ -76,7 +80,7 @@ export class BrowserInputCoordinator {
   constructor(
     private readonly send: (packet: InputPacket) => Promise<void>,
     private readonly sendKeys: (keys: number[]) => Promise<void>,
-    private readonly sendPointer: (x: number, y: number, windowId: number, sequence?: number) => Promise<void> | void,
+    private readonly sendPointer: (x: number, y: number, windowId: number, sequence?: number, screen?: PhysicalPointerScreen) => Promise<void> | void,
     private readonly error: (error: unknown) => void,
     private readonly options: BrowserInputCoordinatorOptions = {},
   ) {
@@ -89,8 +93,25 @@ export class BrowserInputCoordinator {
     for (const type of ['mousemove', 'mousedown', 'mouseup', 'wheel'] as const)
       window.addEventListener(type, (event) => {
         if (this.closed || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return
+        if (!Number.isSafeInteger(this.pointerObservation + 1)) {
+          this.error(new Error('Physical screen observation identity exhausted')); return
+        }
         this.pagePointer = { x: event.clientX, y: event.clientY }
         this.pointerObservation++
+        const restore = type === 'mousemove' ? this.screenRestoreSurface(event) : undefined,
+          screen: PhysicalPointerScreen | undefined = Number.isFinite(event.screenX) && Number.isFinite(event.screenY)
+            ? { x: event.screenX, y: event.screenY, sequence: this.pointerObservation,
+                ...(restore ? { restoreWindowId: restore.id } : {}) } : undefined
+        this.pageScreen = screen
+        if (screen) this.eventScreens.set(event, screen)
+        if (screen && !this.suspended) {
+          const generation = this.generation
+          try {
+            void Promise.resolve(this.options.screenPointer?.({ ...screen })).catch((error) => {
+              if (!this.closed && generation === this.generation) this.error(error)
+            })
+          } catch (error) { this.error(error) }
+        }
         if (type === 'mousedown' && !this.suspended && !this.hostMoving) {
           const source = this.popupSource(event.target)
           if (!source) this.options.windowPopup?.({ type: 'application', active: false })
@@ -107,7 +128,7 @@ export class BrowserInputCoordinator {
         // of waiting for a later keyboard packet or a delayed Worker view.
         for (const [id, surface] of this.surfaces) {
           if (!this.views.get(id)?.useMouseKey || !surface.visible || surface.blocked || this.suspended) continue
-          try { surface.input.mouseKeyObservation(id, this.pagePointer, true) }
+          try { surface.input.mouseKeyObservation(id, this.pagePointer, true, screen) }
           catch (error) { this.error(error) }
           this.mouseKeyObservations.set(id, this.pointerObservation)
         }
@@ -251,7 +272,11 @@ export class BrowserInputCoordinator {
       enqueue: (packet) => {
         if (current()) this.enqueue(surface, packet)
       },
-      pointer: (x, y, sequence) => {
+      screen: (event) => {
+        const observation = this.eventScreens.get(event)
+        return observation ? { ...observation } : undefined
+      },
+      pointer: (x, y, sequence, screen) => {
         if (!current()) return
         this.mouseKeyObservations.set(windowId, this.pointerObservation)
         const generation = this.generation,
@@ -259,7 +284,7 @@ export class BrowserInputCoordinator {
         try {
           // Physical cursor reads must keep working while an earlier TJS callback
           // awaits input, storage, or a timer; they do not enter the script queue.
-          void Promise.resolve(this.sendPointer(x, y, windowId, sequence)).catch((error) => {
+          void Promise.resolve(this.sendPointer(x, y, windowId, sequence, screen)).catch((error) => {
             if (
               this.current(surface) &&
               generation === this.generation &&
@@ -341,7 +366,7 @@ export class BrowserInputCoordinator {
       canvas,
       this.send,
       this.sendKeys,
-      async (x, y, sequence) => this.sendPointer(x, y, windowId, sequence),
+      async (x, y, sequence, screen) => this.sendPointer(x, y, windowId, sequence, screen),
       this.error,
       hooks,
       cursorState,
@@ -541,6 +566,24 @@ export class BrowserInputCoordinator {
       surface.visible && !surface.blocked && (surface.id === menuWindow || surface.input.ownsFocus(target) ||
         (node && !!surface.focusRoot?.contains(target as Node))))
   }
+  private screenRestoreSurface(event: MouseEvent): SurfaceInput | undefined {
+    if (this.suspended || this.hostMoving || this.options.isTransientFocus?.(event.target)) return undefined
+    const eligible = (surface: SurfaceInput) => this.current(surface) && surface.visible && !surface.blocked
+    if (this.mouseOwner && eligible(this.mouseOwner)) return this.mouseOwner
+    return [...this.surfaces.values()].find((surface) => {
+      if (!eligible(surface)) return false
+      const geometry = this.views.get(surface.id)?.geometry, root = surface.focusRoot
+      if (!root || geometry?.platform !== 'dom') return surface.input.ownsFocus(event.target)
+      if (!event.target || (typeof Node !== 'undefined' && !(event.target instanceof Node)) ||
+          !root.contains(event.target as Node)) return false
+      const bounds = root.getBoundingClientRect(), sx = bounds.width / geometry.outer.width,
+        sy = bounds.height / geometry.outer.height, client = geometry.client
+      return sx > 0 && sy > 0 && event.clientX >= bounds.left + client.x * sx &&
+        event.clientX < bounds.left + (client.x + client.width) * sx &&
+        event.clientY >= bounds.top + client.y * sy &&
+        event.clientY < bounds.top + (client.y + client.height) * sy
+    })
+  }
 
   private setActive(surface: SurfaceInput | undefined): void {
     const previous = this.active
@@ -660,7 +703,7 @@ export class BrowserInputCoordinator {
         target = this.surfaces.get(targetId)
       if (target && this.views.get(targetId)?.useMouseKey) {
         const observation = target.input.mouseKeyObservation(targetId, this.pagePointer,
-          this.mouseKeyObservations.get(targetId) !== this.pointerObservation)
+          this.mouseKeyObservations.get(targetId) !== this.pointerObservation, this.pageScreen)
         this.mouseKeyObservations.set(targetId, this.pointerObservation)
         if (observation) packet = { ...packet, mouseKeyObservation: observation }
       }

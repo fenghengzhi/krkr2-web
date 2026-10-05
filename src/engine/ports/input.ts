@@ -1,3 +1,13 @@
+/** One DOM MouseEvent's screen position, independent of any Window projection.
+ * Sequence is page/session-wide and shared by its observation RPC and packet. */
+export interface PhysicalPointerScreen {
+  x: number
+  y: number
+  sequence: number
+  /** Only a mousemove delivered to this Window's client/capture can restore
+   * temp-hidden state. Buttons, wheels and page-only observations omit it. */
+  restoreWindowId?: number
+}
 export interface MouseKeyObservation {
   /** Keyboard receiver, which can differ from the focused source Window. */
   windowId: number
@@ -8,6 +18,7 @@ export interface MouseKeyObservation {
   scaleY: number
   /** Zero means that the page has not observed a real pointer yet. */
   pointerSequence: number
+  physicalScreen?: PhysicalPointerScreen
 }
 export type InputPacket = {
   windowId?: number
@@ -19,6 +30,7 @@ export type InputPacket = {
    * increasing within a Window across surface replacement; absent for legacy
    * embedding input and script-posted events. */
   pointerSequence?: number
+  physicalScreen?: PhysicalPointerScreen
   /** Legacy mouse integer coordinates relative to the PaintBox at event
    * capture/admission time. Raw x/y remain Window client observation values.
    * Window callbacks must not reinterpret this point after a queued zoom or

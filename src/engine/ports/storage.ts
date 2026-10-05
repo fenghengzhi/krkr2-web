@@ -7,6 +7,10 @@ export interface ByteSource {
 export interface Resource {
   readonly name: string
   readonly size: number
+  /** Import-only compatibility alias for an archive member. This is not a
+   * loose file: normal paths and registered auto paths take precedence, and
+   * successful lookup returns the canonical archive resource/identity. */
+  readonly aliasOf?: string
   /** Identity of these immutable bytes, without retaining the resource's input buffer. */
   readonly cacheToken?: object
   /** Optional immutable byte source. Opening this capability does not imply

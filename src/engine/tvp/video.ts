@@ -30,7 +30,7 @@ class VideoOverlay {
   function onCallbackCommand(command,arg){if(typeof __videoWindow.action!="undefined")__videoWindow.action(%[type:"onCallbackCommand",target:this,command:command,arg:arg]);}
   ${[1, 2].map((channel) => `property layer${channel}{getter(){return __host("Video.layerGet",__videoId,${channel - 1});}setter(layer){__host("Video.layer",__videoId,${channel - 1},layer);}}`).join('\n')}
   ${['left', 'top', 'width', 'height', 'visible'].map((name) => `property ${name}{getter(){return __videoRun("get",["${name}"]);}setter(value){__host("Video.geometry",__videoId,"${name}",int(${name === 'visible' ? '!!value' : 'value'}));}}`).join('\n')}
-  ${['loop', 'mode', 'position', 'frame', 'playRate', 'audioVolume', 'audioBalance', 'periodEventFrame', 'mixingMovieAlpha', 'mixingMovieBGColor'].map((name) => `property ${name}{getter(){return __videoRun("get",["${name}"]);}setter(value){__videoRun("set",["${name}",${name === 'playRate' || name === 'mixingMovieAlpha' ? 'real' : 'int'}(value)]);}}`).join('\n')}
+  ${['loop', 'mode', 'position', 'frame', 'playRate', 'audioVolume', 'audioBalance', 'periodEventFrame', 'mixingMovieAlpha', 'mixingMovieBGColor'].map((name) => `property ${name}{getter(){return __videoRun("get",["${name}"]);}setter(value){__videoRun("set",["${name}",${name === 'playRate' || name === 'mixingMovieAlpha' ? 'real' : 'int'}(${name === 'loop' ? '!!value' : 'value'})]);}}`).join('\n')}
   ${['status', 'originalWidth', 'originalHeight', 'fps', 'numberOfFrame', 'totalTime', 'numberOfAudioStream', 'numberOfVideoStream', 'enabledVideoStream', 'segmentLoopStartFrame', 'segmentLoopEndFrame'].map((name) => `property ${name}{getter(){return __videoRun("get",["${name}"]);}}`).join('\n')}
 }
 `

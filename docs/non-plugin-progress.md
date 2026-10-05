@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [096 归档补丁、临时隐藏光标与视频状态生命周期](decisions/096-archive-cursor-and-video-state.md)：归档裸别名退出真实文件命名空间，原 KAG 的补丁自动路径、规范资源身份和存档覆盖接通；临时隐藏光标用真实屏幕位置及客户区移动恢复；视频图控制在关闭／重开时重置，对象矩形、可见性和循环保留。修复 095 两处 Layer 记录窗口字段类型错误。协议 **36**，TJS ABI **5**、字体 ABI **2** 不变。所有本批候选尚待托管执行，整体目标仍 active。
+
+096 固定回收 **16 原 ZIP、36,296,641 字节**，全部 API SHA-256／大小匹配。094 终态 failure（6 success、4 failure、6 skipped），双 Windows 光标 strict 各 **536/596 matched、60 failure、3,178 uncompared**。095 快照仍 in_progress（6 success、1 build failure、2 cursor running、6 skipped），光标原 ZIP 尚缺。094／095 Node、浏览器、原 KAG 与堆诊断均因构建失败未执行；修复类型错误不等于功能已通过。下轮补取缺失结果，不实时监控。以下保留历史批次当时的记录。
+
 最新待核验批次：[Full test suite 37318168828](https://github.com/fenghengzhi/krkr2-web/actions/runs/37318168828)，精确提交 `d287d06e9c6abdc6224a55a8f03b5b62710bfbe2`。095 的 22 个文件已整批推送，新增 **40 个 Node、每浏览器 12 个定义**。首次唯一查询为 **in_progress／conclusion=null**，只确认运行身份，没有实时查询 jobs／artifacts。下一轮补取 094 终态及光标原 ZIP，再回收本批固定结果；未本地执行验证，整体非插件目标保持 active。
 
 2026-10-05 准备 [095 同步窗口更新与视频图层路由](decisions/095-window-update-and-video-layers.md)：普通／显式更新共用有序窗口队列，补 onResize 默认 action；视频 layer 几何直接作用真实图层，支持原版跨窗绑定与可见性回调重入；修正播放中 seek 等待时钟过度严格及 KAG 手柄夹具持键过久。修复 094 六条测试类型错误。本批尚待 GitHub-hosted 执行，协议 **35**、TJS ABI **5**、字体 ABI **2** 不变，整体目标仍 active。

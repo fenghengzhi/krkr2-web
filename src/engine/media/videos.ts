@@ -50,6 +50,15 @@ export const videoSettings = (state: VideoSnapshot): VideoSettings =>
   Object.fromEntries(
     Object.keys(defaultVideoSettings()).map((key) => [key, state[key as keyof VideoSettings]]),
   ) as unknown as VideoSettings
+/** Native VideoOverlay owns these fields across Close/Open. Rate, mixer and
+ * audio controls belong to the media graph, which Open constructs afresh. */
+const videoObjectSettings = (state: VideoSnapshot) => ({
+  left: state.left, top: state.top, width: state.width, height: state.height,
+  visible: state.visible, loop: state.loop, mode: state.mode,
+  segmentLoopStartFrame: state.segmentLoopStartFrame, segmentLoopEndFrame: state.segmentLoopEndFrame,
+  periodEventFrame: state.periodEventFrame,
+})
+const graphSettings = new Set(['playRate', 'audioVolume', 'audioBalance', 'mixingMovieAlpha', 'mixingMovieBGColor'])
 export class VideoService {
   private next = 1
   private epoch = 1
@@ -130,7 +139,7 @@ export class VideoService {
     video.ready = false
     video.snapshot = {
       ...emptyVideoSnapshot(video.id, this.epoch++),
-      ...videoSettings(video.snapshot),
+      ...videoObjectSettings(video.snapshot),
     }
     this.queueClose(video)
   }
@@ -418,7 +427,7 @@ export class VideoService {
       video.ready = false
       video.snapshot = {
         ...emptyVideoSnapshot(video.id, video.snapshot.epoch),
-        ...videoSettings(video.snapshot),
+        ...videoObjectSettings(video.snapshot),
       }
       if (previous !== 'unload') callbacks.push({ name: 'onStatusChanged', args: ['unload'] })
     } else if (method === 'open') {
@@ -432,9 +441,9 @@ export class VideoService {
         windowId: video.windowId,
         name,
         bytes: await this.read(name.split('?')[0]!),
-        // A newly opened native media graph starts with its default stream;
-        // a selected index from the previous file is not an open preference.
-        settings: { ...videoSettings(video.snapshot), enabledAudioStream: 0 },
+        // Native graph controls are not preferences carried across files.
+        // Only the containing VideoOverlay's object fields survive reopening.
+        settings: { ...defaultVideoSettings(), ...videoObjectSettings(video.snapshot) },
       })
       video.ready = true
       callbacks.push({ name: 'onStatusChanged', args: [video.snapshot.status] })
@@ -457,8 +466,9 @@ export class VideoService {
       )
         throw new Error('This video container has no supported frame index')
       if (!(property in video.snapshot)) throw new Error(`Unsupported video property: ${property}`)
-      const result = property === 'enabledAudioStream' && !video.ready
-        ? -1 : video.snapshot[property as keyof VideoSnapshot]
+      const result = !video.ready && (property === 'enabledAudioStream' || property === 'enabledVideoStream')
+        ? -1 : !video.ready && (property === 'playRate' || property === 'mixingMovieAlpha')
+          ? 0 : video.snapshot[property as keyof VideoSnapshot]
       value =
         typeof result === 'string'
           ? result
@@ -467,8 +477,12 @@ export class VideoService {
             ? result
             : BigInt(Number(result))
     } else if (method === 'set') {
-      const property = text(0),
-        setting = number(1)
+      const property = text(0)
+      // The TJS binding has already performed its numeric conversion. Native
+      // setters return before talking to or validating an absent media graph.
+      if (!video.ready && graphSettings.has(property))
+        return scriptRecord({ value, callbacks: scriptList([]) })
+      const setting = number(1)
       if (property === 'position' || property === 'frame') {
         if (video.ready) {
           this.cancelEvents(video)
@@ -487,7 +501,9 @@ export class VideoService {
           state.mode = setting as 0
         } else if (property === 'loop') state.loop = !!setting
         else if (property === 'playRate') {
-          if (setting <= 0 || setting > 16) throw new Error('Video playback rate must be in (0,16]')
+          // Fixed dsmovie SetPlayRate only calls SetRate for a positive value.
+          if (setting <= 0) return scriptRecord({ value, callbacks: scriptList([]) })
+          if (setting > 16) throw new Error('Video playback rate exceeds the supported maximum of 16')
           state.playRate = setting
         } else if (property === 'audioVolume')
           state.audioVolume = Math.max(0, Math.min(100000, setting))

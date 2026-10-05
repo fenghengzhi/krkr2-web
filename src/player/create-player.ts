@@ -369,9 +369,10 @@ export function createPlayer(
   input = new BrowserInputCoordinator(
     (packet) => session.input(packet),
     (keys) => session.keyState(keys),
-    (x, y, windowId, sequence) => session.pointerState(x, y, windowId, sequence),
+    (x, y, windowId, sequence, screen) => session.pointerState(x, y, windowId, sequence, screen),
     onError,
     {
+      screenPointer: (screen) => { if (!stopping) return session.screenPointerState(screen) },
       windowPopup: (message) => { if (!stopping) void session.windowPopup(message).catch(onError) },
       popupWindow: (target) => {
         if (!(target instanceof Element)) return

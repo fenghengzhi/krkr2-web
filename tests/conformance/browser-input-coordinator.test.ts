@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { BrowserInputCoordinator } from '../../src/backends/input/coordinator.ts'
-import type { InputPacket, InputView } from '../../src/engine/ports/input.ts'
+import type { InputPacket, InputView, PhysicalPointerScreen } from '../../src/engine/ports/input.ts'
 import { WindowState } from '../../src/engine/scene/window.ts'
 import type { BrowserGamepadSource } from '../../src/backends/input/gamepad-browser.ts'
 import { gamepadSource } from '../helpers/gamepad-source.ts'
@@ -133,6 +133,48 @@ function dom() {
 }
 
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+test('one captured screen fact is copied to global observation, pointer RPC and packet with a move-only restore target', { timeout: 30000 }, async () => {
+  const env = dom(), canvas = env.canvas(), packets: InputPacket[] = [],
+    screens: PhysicalPointerScreen[] = [], pointers: { sequence?: number; screen?: PhysicalPointerScreen }[] = [], errors: unknown[] = [],
+    coordinator = new BrowserInputCoordinator(async (packet) => { packets.push(packet) }, async () => {},
+      (_x, _y, _id, sequence, screen) => { pointers.push({ sequence, screen: screen && { ...screen } }) },
+      (error) => errors.push(error), { gamepad: false, screenPointer(screen) {
+        screens.push({ ...screen })
+        screen.x = 999 // A receiver must not mutate the event's later packet copy.
+      } })
+  const mouse = (type: 'mousemove' | 'mousedown' | 'mouseup' | 'wheel', buttons: number) => {
+    const event = new Event(type, { cancelable: true })
+    Object.assign(event, { clientX: 40, clientY: 20, screenX: -300, screenY: 200, buttons, button: 0,
+      detail: 1, shiftKey: false, ctrlKey: false, altKey: false, deltaY: 1, deltaMode: 0 })
+    Object.defineProperty(event, 'target', { value: canvas })
+    // Mirror browser capture-before-target order; this harness does not claim
+    // trusted OS input. The browser suite separately records real MouseEvents.
+    env.page.dispatchEvent(event)
+    canvas.dispatchEvent(event)
+  }
+  try {
+    coordinator.attach(101, 1, canvas as unknown as HTMLCanvasElement)
+    coordinator.setWindow(101, { ...new WindowState().view(), visible: true })
+    coordinator.setInput(101, inputView())
+    canvas.focus(); await settle()
+    for (const [type, buttons] of [['mousemove',0],['mousedown',1],['mouseup',0],['wheel',0]] as const) mouse(type, buttons)
+    await settle()
+    assert.deepEqual(screens, [
+      { x: -300, y: 200, sequence: 1, restoreWindowId: 101 },
+      { x: -300, y: 200, sequence: 2 }, { x: -300, y: 200, sequence: 3 }, { x: -300, y: 200, sequence: 4 },
+    ])
+    const mousePackets = packets.filter((packet) => ['move','down','up','wheel'].includes(packet.type))
+    assert.deepEqual(mousePackets.map((packet) => packet.physicalScreen), screens)
+    assert.deepEqual(pointers.map((pointer) => pointer.screen), screens)
+    assert.deepEqual(mousePackets.map((packet) => packet.pointerSequence), pointers.map((pointer) => pointer.sequence))
+    coordinator.detach(101, 1)
+    mouse('mousemove', 0); await settle()
+    assert.deepEqual(screens.at(-1), { x: -300, y: 200, sequence: 5 })
+    assert.equal(pointers.length, 4)
+    assert.deepEqual(errors, [])
+  } finally { coordinator.close(); env.restore() }
+})
 
 function deferred() {
   let resolve!: () => void, reject!: (error: unknown) => void

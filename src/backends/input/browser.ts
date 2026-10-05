@@ -1,4 +1,4 @@
-import type { InputPacket, InputView, MouseKeyObservation } from '../../engine/ports/input.ts'
+import type { InputPacket, InputView, MouseKeyObservation, PhysicalPointerScreen } from '../../engine/ports/input.ts'
 import type { WindowView } from '../../engine/scene/window.ts'
 import { paintBoxPoint } from '../../engine/scene/draw-device.ts'
 import { BrowserCursorPresenter, type BrowserCursorOptions, type CursorPosition } from './cursor.ts'
@@ -100,7 +100,8 @@ export function shiftState(
 /** Shared page input is scheduled at DOM observation time, before any VM await. */
 export interface BrowserInputHooks {
   enqueue(packet: InputPacket): void
-  pointer(x: number, y: number, sequence: number): void
+  pointer(x: number, y: number, sequence: number, screen?: PhysicalPointerScreen): void
+  screen?(event: MouseEvent): PhysicalPointerScreen | undefined
   modifiers(shift: number, pointer: boolean): void
   key(key: number, down: boolean): void
   activate(): boolean
@@ -169,7 +170,7 @@ export class BrowserInput {
     private readonly canvas: HTMLCanvasElement,
     private readonly sendPacket: (packet: InputPacket) => Promise<void>,
     private readonly sendKeys: (keys: number[]) => Promise<void>,
-    private readonly sendPointer: (x: number, y: number, sequence?: number) => Promise<void>,
+    private readonly sendPointer: (x: number, y: number, sequence?: number, screen?: PhysicalPointerScreen) => Promise<void>,
     private readonly error: (error: unknown) => void,
     private readonly shared?: BrowserInputHooks,
     private readonly cursorState: BrowserCursorState = {
@@ -252,7 +253,7 @@ export class BrowserInput {
           -event.deltaY *
             (event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? this.canvas.clientHeight : 1),
         )
-        this.push({ type: 'wheel', ...p, shift: shiftState(event), delta })
+        this.push({ type: 'wheel', ...p, shift: shiftState(event), delta, ...this.screenEvent(event) })
       },
       { ...options, passive: false },
     )
@@ -437,7 +438,7 @@ export class BrowserInput {
   /** Map one real page pointer observation to this keyboard receiver. A
    * trap-key receiver need not be the canvas under the physical pointer. */
   mouseKeyObservation(windowId: number, point: { x: number; y: number } | undefined,
-    newlyObserved: boolean): MouseKeyObservation | undefined {
+    newlyObserved: boolean, screen?: PhysicalPointerScreen): MouseKeyObservation | undefined {
     if (this.disposed || this.suspended || !this.view) return undefined
     const bounds = this.canvas.getBoundingClientRect()
     if (!(bounds.width > 0 && bounds.height > 0)) return undefined
@@ -448,10 +449,10 @@ export class BrowserInput {
       this.retireVirtualCursor()
       this.physicalCursor = { ...point }
       const sequence = ++this.cursorState.physicalSequence
-      if (this.shared) this.shared.pointer(position.x, position.y, sequence)
+      if (this.shared) this.shared.pointer(position.x, position.y, sequence, screen)
       else {
         const epoch = this.epoch
-        void this.sendPointer(position.x, position.y, sequence).catch((error) => {
+        void this.sendPointer(position.x, position.y, sequence, screen).catch((error) => {
           if (!this.disposed && epoch === this.epoch) this.error(error)
         })
       }
@@ -459,7 +460,8 @@ export class BrowserInput {
     }
     return { windowId, ...position, scaleX: (this.view.geometry?.viewport.width ?? this.view.width) / bounds.width,
       scaleY: (this.view.geometry?.viewport.height ?? this.view.height) / bounds.height,
-      pointerSequence: point ? this.cursorState.physicalSequence : 0 }
+      pointerSequence: point ? this.cursorState.physicalSequence : 0,
+      ...(point && screen ? { physicalScreen: { ...screen } } : {}) }
   }
   private restoreCursor(): void {
     this.canvas.style.cursor = this.view?.mouseCursorState || this.virtualMarker || this.customCursor?.visible
@@ -630,6 +632,10 @@ export class BrowserInput {
       shift & mask! ? this.pressed.add(key!) : this.pressed.delete(key!)
     this.keys()
   }
+  private screenEvent(event: MouseEvent): Pick<InputPacket, 'physicalScreen'> {
+    const screen = this.shared?.screen?.(event)
+    return screen ? { physicalScreen: screen } : {}
+  }
   private mouse(event: MouseEvent, type: 'down' | 'move' | 'up'): void {
     if (this.suspended || this.disposed || this.hostMoving) return
     if (this.shared && !this.shared.mouse(type, event.buttons)) return
@@ -650,6 +656,7 @@ export class BrowserInput {
       button,
       shift,
       clicks: type === 'up' ? (this.clicks.get(button) ?? 0) : 0,
+      ...this.screenEvent(event),
     })
     if (type === 'up') {
       this.mouseButtons = event.buttons
@@ -869,11 +876,11 @@ export class BrowserInput {
         ...(this.view ? { paintBoxPoint: paintBoxPoint(this.view, packet.x, packet.y) } : {}),
       }
       this.cursorAppearance()
-      if (this.shared) this.shared.pointer(packet.x, packet.y, sequence)
+      if (this.shared) this.shared.pointer(packet.x, packet.y, sequence, packet.physicalScreen)
       else {
         const epoch = this.epoch
         // Physical observation must bypass a packet waiting on TJS/event delivery.
-        void this.sendPointer(packet.x, packet.y, sequence).catch((error) => {
+        void this.sendPointer(packet.x, packet.y, sequence, packet.physicalScreen).catch((error) => {
           if (!this.disposed && epoch === this.epoch) this.error(error)
         })
       }

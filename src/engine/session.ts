@@ -117,7 +117,7 @@ import { InputService } from './input/service.ts'
 import { ObservedKeyState } from './input/key-state.ts'
 import { MouseKeyState, type MouseKeyAction } from './input/mouse-key.ts'
 import { inputBridge } from './tvp/input.ts'
-import type { InputPacket, InputView, VirtualCursor } from './ports/input.ts'
+import type { InputPacket, InputView, VirtualCursor, PhysicalPointerScreen } from './ports/input.ts'
 import { SceneComposer } from './scene/composer.ts'
 import { SceneTransitions } from './scene/transitions.ts'
 import { decodeBmp } from '../formats/image/bmp.ts'
@@ -198,6 +198,13 @@ export type EngineEvent =
   | { type: 'font-selection'; request: FontSelectionRequest | null }
   | ({ type: 'system-dialog' } & SystemDialogSnapshot)
   | { type: 'log'; level: 'info' | 'error'; text: string }
+function copyPhysicalScreen(screen: PhysicalPointerScreen): PhysicalPointerScreen {
+  if (!screen || !Number.isSafeInteger(screen.sequence) || screen.sequence < 1 ||
+      [screen.x, screen.y].some((n) => !Number.isFinite(n) || n < -0x80000000 || n > 0x7fffffff) ||
+      (screen.restoreWindowId !== undefined && (!Number.isSafeInteger(screen.restoreWindowId) || screen.restoreWindowId < 1)))
+    throw new Error('Invalid physical screen observation')
+  return { ...screen, x: Math.trunc(screen.x), y: Math.trunc(screen.y) }
+}
 interface VirtualCursorState {
   view: VirtualCursor
   /** Keyboard emulation owns a Window cursor, including a Window without a
@@ -393,6 +400,8 @@ export class EngineSession {
   private windowRevision = -1
   private postedInputPending = 0
   private readonly windowPointers = new Map<number, { x: number; y: number }>()
+  private physicalScreen?: PhysicalPointerScreen
+  private readonly hiddenCursorPositions = new Map<number, { kind: 'screen' | 'viewport'; x: number; y: number }>()
   private readonly physicalPointerSequences = new Map<number, number>()
   private readonly virtualCursors = new Map<number, VirtualCursorState>()
   private readonly mouseKeys = new Map<number, WindowMouseKeys>()
@@ -505,6 +514,7 @@ export class EngineSession {
         () => this.transitions?.dispose(),
         () => this.composer.clear(),
         () => this.windowUpdates.finish(),
+        () => { this.physicalScreen = undefined; this.hiddenCursorPositions.clear() },
         () => this.images.dispose(),
         () => this.closeCursors(),
         () => this.closeWindowRegions(),
@@ -766,6 +776,7 @@ export class EngineSession {
           }
         },
         async (window) => {
+          this.hiddenCursorPositions.delete(window.id)
           this.windowUpdates.remove(window.id)
           this.geometryRequests.delete(window.id)
           this.geometrySignatures.delete(window.id)
@@ -805,6 +816,7 @@ export class EngineSession {
           this.menuItems?.disconnectWindow(window)
           this.inputControllers.remove(window.id)
           this.windowPointers.delete(window.id)
+          this.hiddenCursorPositions.delete(window.id)
           this.physicalPointerSequences.delete(window.id)
           this.virtualCursors.delete(window.id)
           this.mouseKeys.delete(window.id)
@@ -924,14 +936,14 @@ export class EngineSession {
           this.redrawRequests.delete(layer.id)
           this.deferredPaint.delete(layer.id)
           this.systemEvents?.cancelSource(layer)
-          this.invalidateWindow(layer.windowId)
+          this.invalidateWindow(layer.window.id)
         },
         (layer) => {
           this.redrawRequests.delete(layer.id)
           this.deferredPaint.delete(layer.id)
           this.systemEvents?.cancelSource(layer)
           this.transitions?.drop(layer.id)
-          this.invalidateWindow(layer.windowId)
+          this.invalidateWindow(layer.window.id)
         },
       )
       this.discard(await this.runtime.execute(tvpConstants, 'krkr2-web/constants.tjs'))
@@ -1586,7 +1598,32 @@ export class EngineSession {
     window.state.revision++
     this.dirty = true
   }
-  pointerState(x: number, y: number, windowId = this.windowId, pointerSequence?: number): void {
+  /** Screen observation is independent of a delayed Window input admission.
+   * A replay cannot restore a cursor hidden after that same physical sample. */
+  screenPointerState(screen: PhysicalPointerScreen): void {
+    const next = copyPhysicalScreen(screen)
+    if (this.state !== 'running' || this.activity.state !== 'visible' || this.control.cancelled ||
+        screen.sequence <= (this.physicalScreen?.sequence ?? 0)) return
+    this.physicalScreen = next
+    if (next.restoreWindowId === undefined) return
+    const window = this.registeredWindow(next.restoreWindowId)
+    if (!window || !window.state.visible || this.windowModals?.blocked(window.id) || window.state.mouseCursorState !== 1) return
+    const baseline = this.hiddenCursorPositions.get(window.id)
+    if (!baseline || baseline.kind !== 'screen') {
+      // Before the page has observed a screen position, the hide-time OS
+      // coordinate is unknowable. Establish it without inventing movement.
+      this.hiddenCursorPositions.set(window.id, { kind: 'screen', x: next.x, y: next.y })
+    } else if (baseline.x !== next.x || baseline.y !== next.y) this.restoreTemporaryCursor(window)
+  }
+  private restoreTemporaryCursor(window: WindowRecord): void {
+    if (window.state.mouseCursorState !== 1) return
+    this.hiddenCursorPositions.delete(window.id)
+    window.state.set('mouseCursorState', 0)
+    this.presentWindowViews()
+  }
+  pointerState(x: number, y: number, windowId = this.windowId, pointerSequence?: number,
+    physicalScreen?: PhysicalPointerScreen): void {
+    const screen = physicalScreen && copyPhysicalScreen(physicalScreen)
     if (
       [x, y].some((value) => !Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER)
     )
@@ -1604,7 +1641,15 @@ export class EngineSession {
       this.physicalPointerSequences.set(windowId, pointerSequence)
     }
     this.windowPointers.set(windowId, { x, y })
-    if (window.state.mouseCursorState === 1) window.state.set('mouseCursorState', 0)
+    if (screen) this.screenPointerState(screen)
+    else if (window.state.mouseCursorState === 1) {
+      // Legacy injected input has only its own unframed coordinate domain;
+      // it must never reinterpret an established real screen baseline.
+      const baseline = this.hiddenCursorPositions.get(windowId), point = { x: Math.trunc(x), y: Math.trunc(y) }
+      if (!baseline) this.hiddenCursorPositions.set(windowId, { kind: 'viewport', ...point })
+      else if (baseline.kind === 'viewport' && (baseline.x !== point.x || baseline.y !== point.y))
+        this.restoreTemporaryCursor(window)
+    }
     // Observation remains independent of script delivery. The packet carrying
     // this same sample must not retire a newer script write a second time.
     this.clearVirtualCursors(windowId)
@@ -1726,7 +1771,7 @@ export class EngineSession {
       else this.virtualCursors.delete(window.id)
       throw error
     }
-    if (state.mouseCursorState === 1) state.set('mouseCursorState', 0)
+    this.restoreTemporaryCursor(window)
     this.presentInputViews()
   }
   private windowMouseKeys(window: WindowRecord): WindowMouseKeys {
@@ -1780,7 +1825,7 @@ export class EngineSession {
           record.move = previousMove
           throw error
         }
-        if (window.state.mouseCursorState === 1) window.state.set('mouseCursorState', 0)
+        this.restoreTemporaryCursor(window)
         this.presentInputViews()
       } else {
         // InternalKeyDown/Up uses ScrollBox-relative integers directly as
@@ -2518,7 +2563,7 @@ export class EngineSession {
       (observe || packet.pointerSequence !== undefined) &&
       (packet.type === 'down' || packet.type === 'move' ||
         packet.type === 'up' || packet.type === 'wheel')
-    ) this.pointerState(packet.x, packet.y, windowId, packet.pointerSequence)
+    ) this.pointerState(packet.x, packet.y, windowId, packet.pointerSequence, packet.physicalScreen)
     if (this.state !== 'running') return ignoredAdmission()
     if (this.stalePointerMove(packet, windowId)) return ignoredAdmission()
     if (packet.type === 'activate' || packet.type === 'down' || packet.type === 'keyDown')
@@ -2570,7 +2615,7 @@ export class EngineSession {
         record.scaleX = sample.scaleX
         record.scaleY = sample.scaleY
         if (sample.pointerSequence) {
-          this.pointerState(sample.x, sample.y, receiver.id, sample.pointerSequence)
+          this.pointerState(sample.x, sample.y, receiver.id, sample.pointerSequence, sample.physicalScreen)
           // A stationary physical pointer has new client coordinates after
           // the Window moves or its CSS size changes. Refresh that projection
           // without pretending a new physical movement superseded a live
@@ -2971,9 +3016,18 @@ export class EngineSession {
       }
     }
     const before = [window.state.width, window.state.height], wasVisible = window.state.visible,
+      previousCursorState = window.state.mouseCursorState,
       candidate = geometryProperty ? window.state.copy() : window.state
     if (script) candidate.setScript(property, value)
     else candidate.set(property, value)
+    if (property === 'mouseCursorState' && window.state.mouseCursorState !== previousCursorState) {
+      this.hiddenCursorPositions.delete(window.id)
+      if (window.state.mouseCursorState === 1) {
+        const screen = this.physicalScreen, point = screen ?? this.windowPointers.get(window.id)
+        if (point) this.hiddenCursorPositions.set(window.id, { kind: screen ? 'screen' : 'viewport',
+          x: Math.trunc(point.x), y: Math.trunc(point.y) })
+      }
+    }
     if (geometryProperty) {
       if (property === 'fullScreen' && candidate.fullScreen !== window.state.fullScreen) {
         if (candidate.fullScreen) {
@@ -3110,19 +3164,22 @@ export class EngineSession {
       this.deps.event({ type: 'input', input })
     }
   }
-  present(onlyWindowId?: number, synchronous = false): void {
-    this.presentInputViews()
+  private presentWindowViews(): void {
     const windows = this.windowPresentations(),
       windowViews = JSON.stringify(windows)
     if (this.windowsView !== windowViews) {
       this.windowsView = windowViews
       this.deps.event({ type: 'windows', windows })
     }
-    this.presentMenus()
     if (this.windowRevision !== this.window.revision) {
       this.windowRevision = this.window.revision
       this.deps.event({ type: 'window', window: this.window.view() })
     }
+  }
+  present(onlyWindowId?: number, synchronous = false): void {
+    this.presentInputViews()
+    this.presentWindowViews()
+    this.presentMenus()
     if (
       !this.dirty ||
       (this.preparingFrame && !synchronous) ||
@@ -3676,13 +3733,7 @@ export class EngineSession {
   }
   private findResource(name: string): Resource | undefined {
     this.materializeLogs()
-    for (const candidate of this.storage.candidates(name)) {
-      const saved = this.saves.resource(candidate)
-      if (saved) return saved
-      const original = this.storage.find(candidate)
-      if (original) return original
-    }
-    return undefined
+    return this.storage.lookup(name, (candidate) => this.saves.resource(candidate))
   }
   private resourceExists(name: string): boolean {
     return !!this.findResource(name)

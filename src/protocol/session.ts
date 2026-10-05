@@ -9,7 +9,7 @@ import type { PadAck, PadMessage, PadFontData } from './pad.ts'
 import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
 import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
 import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
-export const PROTOCOL_VERSION = 35
+export const PROTOCOL_VERSION = 36
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -68,7 +68,9 @@ export interface SessionApi {
   /** Legacy programmatic helpers retain callback-completion semantics. */
   click(x: number, y: number): Promise<void>
   pointerMove(x: number, y: number): Promise<void>
-  pointerState(x: number, y: number, windowId?: number, pointerSequence?: number): Promise<void>
+  pointerState(x: number, y: number, windowId?: number, pointerSequence?: number,
+    physicalScreen?: import('../engine/ports/input.ts').PhysicalPointerScreen): Promise<void>
+  screenPointerState(screen: import('../engine/ports/input.ts').PhysicalPointerScreen): Promise<void>
   /** Resolve immediately after admission so browser input can continue queueing. */
   input(packet: InputPacket): Promise<InputAdmissionAck>
   keyState(keys: number[]): Promise<void>

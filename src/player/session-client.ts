@@ -5,7 +5,7 @@ import { copySystemDisplayUpdate, type SystemDisplayUpdate } from '../engine/sys
 import { createRpcClient, type RpcClient } from 'vite-plugin-worker-rpc/runtime'
 import { transfer } from 'vite-plugin-worker-rpc/client'
 import type { SaveFile } from '../engine/ports/saves.ts'
-import type { InputPacket } from '../engine/ports/input.ts'
+import type { InputPacket, PhysicalPointerScreen } from '../engine/ports/input.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
@@ -165,9 +165,13 @@ export class SessionClient {
   pointerMove(x: number, y: number) {
     return this.call('pointerMove', x, y)
   }
-  pointerState(x: number, y: number, windowId?: number, pointerSequence?: number) {
+  pointerState(x: number, y: number, windowId?: number, pointerSequence?: number, physicalScreen?: PhysicalPointerScreen) {
     if (!this.initialized) return Promise.resolve()
-    return this.call('pointerState', x, y, windowId, pointerSequence)
+    return this.call('pointerState', x, y, windowId, pointerSequence, physicalScreen)
+  }
+  screenPointerState(screen: PhysicalPointerScreen) {
+    if (!this.initialized) return Promise.resolve()
+    return this.call('screenPointerState', screen)
   }
   /** Browser send queues await admission only; callback completion stays in the Worker. */
   async input(packet: InputPacket): Promise<void> {
