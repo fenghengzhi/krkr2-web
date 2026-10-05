@@ -206,17 +206,25 @@ function runCase(){
     try { await f.run(); assert.equal(await f.session.evaluate('seen'), '1,0') }
     finally { await f.stop(); assert.equal(scheduled.size, 0) }
   })
-  test(`${mode}: zero-size mutations expose the old visible area while size no-ops leave an unposted paint pending`, { timeout: 60000 }, async () => {
+  test(`${mode}: zero-size bounds, rejected empty-image shrink and missing images expose the old area while no-ops leave paint pending`, { timeout: 60000 }, async () => {
     const f = await fixture(binary, `
 var other=new Window();other.visible=true;other.setInnerSize(4,2);
 var otherRoot=new Layer(other,null);other.add(otherRoot);otherRoot.setSize(4,2);
-var child=new Layer(win,root),empty=new Layer(win,null);child.visible=true;empty.setImageSize(0,1);
+System.assignMessage("TVPCannotCreateEmptyLayerImage","window-update:empty-image");
+var child=new Layer(win,root),empty=new Layer(win,null);child.visible=true;empty.hasImage=false;
 root.onPaint=function(){paints++;};
 function checkShrink(method){
- child.setSize(1,1);child.setImageSize(1,1);win.update();paints=0;root.callOnPaint=true;
+ child.hasImage=true;child.setSize(1,1);child.setImageSize(1,1);child.setClip(0,0,1,1);
+ child.setMainPixel(0,0,0x123456);child.setMaskPixel(0,0,191);win.update();paints=0;root.callOnPaint=true;
  if(method==0)child.setSize(1,1);else if(method==1)child.setImageSize(1,1);else child.assignImages(child);
  other.update();var before=paints;
- if(method==0)child.setSize(0,1);else if(method==1)child.setImageSize(0,1);else child.assignImages(empty);
+ if(method==0)child.setSize(0,1);else if(method==1){
+  var caught="";try{child.setImageSize(0,1);}catch(error){caught=error.message;}
+  if(caught!=="window-update:empty-image" || !child.hasImage || child.imageWidth!=1 || child.imageHeight!=1 ||
+     child.width!=0 || child.height!=1 || child.clipLeft!=0 || child.clipTop!=0 || child.clipWidth!=1 || child.clipHeight!=1 ||
+     child.getMainPixel(0,0)!=0x123456 || child.getMaskPixel(0,0)!=191)
+   throw "empty image rejection must retain bitmap and clip after the native display shrink";
+ }else child.assignImages(empty);
  other.update();return before+","+paints;
 }
 function runCase(){seen=checkShrink(0)+"|"+checkShrink(1)+"|"+checkShrink(2);}`)

@@ -6,6 +6,7 @@ import { importResources } from '../../src/backends/files/import-resources.ts'
 import { MemorySaveStore } from '../../src/engine/ports/saves.ts'
 
 const program = String.raw`
+System.assignMessage("TVPCannotWriteToArchive","archive-search:readonly");
 var patchWindow=new Window();patchWindow.setInnerSize(4,3);
 var patchRoot=new Layer(patchWindow,null);patchRoot.setSize(4,3);
 var patchImage=new Layer(patchWindow,patchRoot);
@@ -22,10 +23,10 @@ function denyArchiveUpdates(){
  var denied=0,modes=["utf-8a","utf-8o0"];
  for(var j=0;j<modes.count;j++){
   try{["corrupt"].save("patch-value.tjs",modes[j]);}
-  catch(error){if(error.message.indexOf("read-only")<0)throw error;denied++;}
+  catch(error){if(error.message!=="archive-search:readonly")throw error;denied++;}
  }
  try{["corrupt"].save("patch2.xp3>patch-value.tjs","utf-8");}
- catch(error){if(error.message.indexOf("read-only")<0)throw error;denied++;}
+ catch(error){if(error.message!=="archive-search:readonly")throw error;denied++;}
  return denied;
 }
 function createLooseOverlay(){

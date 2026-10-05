@@ -48,6 +48,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: mkdir -p out/ci
+      - name: Check pinned native TVP message catalog
+        run: python3 scripts/generate-tvp-messages.py --check 2>&1 | tee out/ci/tvp-message-catalog.log
       - name: Restore kernels built from the same native sources
         id: kernels
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -55,7 +57,7 @@ jobs:
           path: |
             .generated
             public/licenses/freetype
-          key: kernels-v1-${{ runner.os }}-${{ runner.arch }}-emsdk-6.0.9-${{ hashFiles('native/**', 'third_party/**', 'scripts/build-wasm.mjs', 'scripts/build-fonts.mjs') }}
+          key: kernels-v1-${{ runner.os }}-${{ runner.arch }}-emsdk-6.0.9-${{ hashFiles('native/**', 'third_party/**', 'scripts/build-wasm.mjs', 'scripts/build-fonts.mjs', 'scripts/generate-tvp-messages.py') }}
       - name: Install native build tools
         if: steps.kernels.outputs.cache-hit != 'true'
         run: |
@@ -218,6 +220,16 @@ jobs:
             --test-reporter=spec --test-reporter-destination=stdout \
             --test-reporter=tap --test-reporter-destination=out/ci/random-generator-jspi.tap \
             tests/conformance/random-generator.test.ts 2>&1 | tee out/ci/random-generator-jspi.log
+      - name: Check native TVP messages through the JSPI kernel
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        env:
+          KRKR_MESSAGES_VARIANT: jspi
+        run: |
+          ulimit -c unlimited
+          node --experimental-wasm-jspi --import tsx --import ./scripts/record-node-test-process.mjs --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination=out/ci/tvp-messages-jspi.tap \
+            tests/conformance/tvp-messages.test.ts 2>&1 | tee out/ci/tvp-messages-jspi.log
       - name: Record backtraces for any terminated Node process
         if: always()
         run: |

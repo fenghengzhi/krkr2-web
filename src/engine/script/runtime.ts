@@ -1,3 +1,5 @@
+import type { TvpMessage } from '../system/tvp-error.ts'
+
 export interface ScriptObject {
   readonly type: 'object'
   readonly id: number
@@ -129,6 +131,9 @@ export type HostReply =
     }
 
 export interface HostContext {
+  /** Pure native holder formatting; never invokes TJS or drains releases.
+   * Optional only for explicit host-only fixtures without a native runtime. */
+  formatTvpMessage?(message: TvpMessage): string
   retain(object: ScriptObject): ScriptObject
   release(object: ScriptObject): void
   /** Explicit, bounded copy of native Array/Dictionary data, without invoking properties.
@@ -213,8 +218,9 @@ export class ScriptError extends Error {
     readonly source = '',
     readonly line = 0,
     readonly trace = '',
+    options?: ErrorOptions,
   ) {
-    super(message)
+    super(message, options)
   }
 }
 

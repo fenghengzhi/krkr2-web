@@ -4,6 +4,9 @@ import { headless } from '../helpers/headless.ts'
 import type { GraphicsDecoder } from '../../src/engine/ports/graphics.ts'
 
 const setup = String.raw`
+System.assignMessage("TVPNotDrawableLayerType","text-contract:no-image");
+System.assignMessage("TVPNotDrawableFaceType","text-contract:face:%1");
+System.assignMessage("TVPNegativeOpacityNotSupportedOnThisFace","text-contract:negative-addalpha");
 var win=new Window(),layer=new Layer(win,null);
 layer.type=ltAlpha;layer.face=dfAlpha;layer.setImageSize(16,16);
 layer.font.height=12;
@@ -285,7 +288,7 @@ var restoredIdentity=(isvalid font)+","+(font===layer.font);
         try {
           const errors = (await run.session.evaluate('errors.join("|")')).split('|')
           assert.equal(errors.length, queries.length)
-          for (const error of errors) assert.match(error, /This layer has no drawable image/)
+          for (const error of errors) assert.equal(error, 'text-contract:no-image')
           assert.equal(await run.session.evaluate('properties'), 'contract.ttf,1,12,0,1,1,1,1')
           probe.assertUntouched()
           probe.open()
@@ -345,12 +348,12 @@ var drawn=[layer.getMainPixel(0,0),layer.getMaskPixel(0,0),
         const imageErrors = (await run.session.evaluate('imageErrors.join("|")')).split('|'),
           faceErrors = (await run.session.evaluate('faceErrors.join("|")')).split('|')
         assert.equal(imageErrors.length, 3)
-        for (const error of imageErrors) assert.match(error, /This layer has no drawable image/)
+        for (const error of imageErrors) assert.equal(error, 'text-contract:no-image')
         assert.equal(faceErrors.length, 9)
         for (const error of faceErrors.slice(0, 6))
-          assert.match(error, /Text drawing requires dfAlpha, dfOpaque or dfAddAlpha/)
+          assert.equal(error, 'text-contract:face:drawText')
         for (const error of faceErrors.slice(6))
-          assert.match(error, /Negative text opacity is not supported on dfAddAlpha/)
+          assert.equal(error, 'text-contract:negative-addalpha')
         assert.equal(await run.session.evaluate('absentModified'), '0')
         assert.equal(await run.session.evaluate('unchanged'), `${0x123456},87,0`)
         probe.assertUntouched()
@@ -411,9 +414,9 @@ var added=[layer.getMainPixel(1,0),layer.getMaskPixel(1,0)].join(",");
           await run.session.evaluate('states.join("|")'),
           Array(7).fill(`${0x123456},87,0`).join('|'),
         )
-        assert.match(
+        assert.equal(
           await run.session.evaluate('errors[0]'),
-          /Negative text opacity is not supported on dfAddAlpha/,
+          'text-contract:negative-addalpha',
         )
         probe.assertUntouched()
         probe.open()

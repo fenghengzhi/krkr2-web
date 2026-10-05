@@ -1,3 +1,5 @@
+import { TvpError } from '../system/tvp-error.ts'
+
 export interface MenuView {
   id: number
   caption: string
@@ -189,7 +191,7 @@ export class MenuTree {
     const parent = this.get(parentId),
       item = this.get(id)
     const index = parent.children.indexOf(id)
-    if (index < 0) throw new Error('MenuItem is not a child of this parent')
+    if (index < 0) throw new TvpError('TVPNotChildMenuItem', [], 'MenuItem is not a child of this parent')
     this.dismissSubtree(id)
     parent.children.splice(index, 1)
     item.parent = 0

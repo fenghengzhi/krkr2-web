@@ -10,6 +10,7 @@ import { binaryValue } from '../helpers/binary-scripts.ts'
 
 const seed = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 const program = `
+System.assignMessage("TVPCannotOpenStorage","browser-write-targets:missing:%1");
 var count=0;
 if(Storages.isExistentStorage("savedata/target-count.txt"))count=int([].load("savedata/target-count.txt")[0]);
 if(!count){
@@ -19,7 +20,7 @@ if(!count){
 }
 Storages.addAutoPath("Data/");
 var blocked=0;
-try{["must-not-write"].save("missing.txt","o0");}catch(e){if(e.message.indexOf("Update target not found:")>=0)blocked++;}
+try{["must-not-write"].save("missing.txt","o0");}catch(e){if(e.message==="browser-write-targets:missing:missing.txt")blocked++;}
 if(blocked!=1)throw "UPDATE must fail at the save call";
 if(Storages.isExistentStorage("missing.txt"))throw "UPDATE created a missing target";
 if(!count){

@@ -1,0 +1,7 @@
+# Preserve the pinned original message/license bytes, including CRLF and CP932.
+native/tjs2/messages/MsgIntf.h -text
+native/tjs2/messages/MsgImpl.h -text
+native/tjs2/messages/LICENSE.original.txt -text
+# These generated sources are compared byte-for-byte by the hosted build.
+native/tjs2/include/TvpMessages.generated.inc text eol=lf
+src/engine/system/tvp-message-ids.ts text eol=lf

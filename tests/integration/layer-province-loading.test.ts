@@ -80,6 +80,7 @@ async function fixture(binary: boolean, graphics?: GraphicsDecoder) {
       'pending.bin': 'province-decoder-gate',
       'province-loading.tjs': String.raw`
 System.exitOnWindowClose=false;
+System.assignMessage("TVPProvinceSizeMismatch","province-loading:size:%1");
 var win=new Window();win.setInnerSize(2,2);
 var root=new Layer(win,null),layer=new Layer(win,root);
 root.setSize(2,2);root.setImageSize(2,2);
@@ -279,14 +280,15 @@ for (const binary of [false, true]) {
   for (const [name, message] of [
     ['missing.png', /Image resource not found/],
     ['invalid.bmp', /Truncated BMP header/],
-    ['oversized.bmp', /Province image size mismatch/],
+    ['oversized.bmp', 'province-loading:size:oversized.bmp'],
   ] as const) {
     test(`${mode}: ${name} province-load failure removes the old plane while preserving main, mask and clip`, async () => {
       const f = await fixture(binary)
       try {
         await f.load(name)
         assert.equal(await f.session.evaluate('loadResult'), 'failed')
-        assert.match(await f.session.evaluate('loadError'), message)
+        if (typeof message === 'string') assert.equal(await f.session.evaluate('loadError'), message)
+        else assert.match(await f.session.evaluate('loadError'), message)
         assert.equal(await f.session.evaluate('provinceValues()'), '0,0,0,0,0,0')
         assert.equal(await f.session.evaluate('int(layer.imageModified)'), '1')
         assert.equal(f.layers.get(f.id).province, undefined)

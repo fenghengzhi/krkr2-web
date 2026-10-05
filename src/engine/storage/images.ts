@@ -1,6 +1,7 @@
 import type { DecodedImage } from '../ports/graphics.ts'
 import type { Resource } from '../ports/storage.ts'
 import { ImageCache, type PreloadBudget } from './image-cache.ts'
+import { toPublicStoragePath } from './public-path.ts'
 import {
   applyImageKey,
   applyImageMask,
@@ -158,7 +159,7 @@ export class ImageLoader {
       return {
         image,
         province: await this.finish(
-          provincePixels(await this.cache.read(province), image.width, image.height),
+          provincePixels(await this.cache.read(province), image.width, image.height, toPublicStoragePath(province.name)),
         ),
       }
     } catch (cause) {
@@ -166,6 +167,6 @@ export class ImageLoader {
     }
   }
   async province(name: string, width: number, height: number): Promise<Uint8Array> {
-    return this.finish(provincePixels(await this.rule(name), width, height))
+    return this.finish(provincePixels(await this.rule(name), width, height, name))
   }
 }

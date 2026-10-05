@@ -4,6 +4,7 @@ import { blendPixel, blendOpacity, validateBlend } from './blend.ts'
 import type { AffineRaster } from './affine.ts'
 import { gammaTable, type GammaChannel } from './gamma.ts'
 import { convertAlpha, grayscale } from './processing.ts'
+import { TvpError } from '../system/tvp-error.ts'
 
 export const intersect = (a: Rect, b: Rect): Rect => {
   const x = Math.max(a.x, b.x),
@@ -25,9 +26,9 @@ const byte = (value: number) => Math.max(0, Math.min(255, Math.trunc(value)))
 /** Layer.DrawText selects its face before the bitmap clamps opacity. */
 export function textOpacity(face: number, value: number): number {
   if (face !== 0 && face !== 1 && face !== 4)
-    throw new Error('Text drawing requires dfAlpha, dfOpaque or dfAddAlpha')
+    throw new TvpError('TVPNotDrawableFaceType', ['drawText'], 'Text drawing requires dfAlpha, dfOpaque or dfAddAlpha')
   if (face === 4 && value < 0)
-    throw new Error('Negative text opacity is not supported on dfAddAlpha')
+    throw new TvpError('TVPNegativeOpacityNotSupportedOnThisFace', [], 'Negative text opacity is not supported on dfAddAlpha')
   return Math.max(face === 0 ? -255 : 0, Math.min(255, Math.trunc(value)))
 }
 

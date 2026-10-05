@@ -1,5 +1,6 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { StorageArchives, type OpenArchive } from './archives.ts'
+import { TvpError } from '../system/tvp-error.ts'
 
 import { normalizeResourcePath, parseStoragePath, storageDirectoryPath } from './public-path.ts'
 
@@ -131,14 +132,14 @@ export class StorageResolver {
   resolve(path: string): Resource {
     const resource = this.lookup(path)
     if (resource) return resource
-    throw new Error(`Resource not found: ${path}`)
+    throw new TvpError('TVPCannotFindStorage', [path], `Resource not found: ${path}`)
   }
   exists(path: string): boolean {
     try {
       this.resolve(path)
       return true
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith('Resource not found:')) return false
+      if (error instanceof TvpError && error.tvpMessage.id === 'TVPCannotFindStorage') return false
       throw error
     }
   }
@@ -179,7 +180,7 @@ export class StorageResolver {
     if (delimiter < 0) return undefined
     const name = logical.slice(0, delimiter), member = logical.slice(delimiter + 1),
       raw = overlay?.(name) ?? this.find(name)
-    if (!raw) throw new Error(`Archive resource not found: ${name}`)
+    if (!raw) throw new TvpError('TVPCannotOpenStorage', [name], `Archive resource not found: ${name}`)
     const index = await this.archives.open(raw)
     this.check()
     if (!index) throw new Error(`Unsupported archive: ${name}`)
@@ -270,7 +271,7 @@ export class StorageResolver {
   }
   async resolveAsync(path: string, overlay?: (name: string) => Resource | undefined): Promise<Resource> {
     const found = await this.lookupAsync(path, overlay)
-    if (!found) throw new Error(`Resource not found: ${path}`)
+    if (!found) throw new TvpError('TVPCannotFindStorage', [path], `Resource not found: ${path}`)
     return found
   }
   private async directoryEntries(path: string, overlay?: (name: string) => Resource | undefined,
@@ -288,7 +289,7 @@ export class StorageResolver {
     const name = path.slice(0, delimiter), raw = overlay?.(name) ?? this.find(name)
     // Explicit pre-mounted member fixtures remain usable without a container.
     if (!raw && direct.length) return direct
-    if (!raw) throw new Error(`Archive resource not found: ${name}`)
+    if (!raw) throw new TvpError('TVPCannotOpenStorage', [name], `Archive resource not found: ${name}`)
     const index = await this.archives.open(raw)
     if (!index) throw new Error(`Unsupported archive: ${name}`)
     return matches([...index.entries.values()])

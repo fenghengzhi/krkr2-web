@@ -917,7 +917,7 @@ namespace TJS {
     //---------------------------------------------------------------------------
     void tTJSBinaryStream::ReadBuffer(void *buffer, tjs_uint read_size) {
         if(Read(buffer, read_size) != read_size) {
-            TJS_eTJSError(TVPGetMessageByLocale("err_read_error"));
+            TJS_eTJSError(TJSReadError);
         }
     }
 
@@ -1021,8 +1021,7 @@ namespace TJS {
                       }
                       try {
                           if(actual != read_size)
-                              TJS_eTJSError(
-                                  TVPGetMessageByLocale("err_read_error"));
+                              TJS_eTJSError(TJSReadError);
                           if(completion)
                               completion(nullptr);
                       } catch(...) {

@@ -1,0 +1,25 @@
+{
+  "commit": "dec49af97e174d31059c3ccd7efc700ba3c6b788",
+  "files": [
+    {
+      "file": "MsgIntf.h",
+      "source": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/msg/MsgIntf.h",
+      "bytes": 17968,
+      "sha256": "7a4b3889294eeac3604b647482b104a5c5bf57de2af402c2877cbd16eb442ec8",
+      "encoding": "CP932"
+    },
+    {
+      "file": "MsgImpl.h",
+      "source": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/msg/win32/MsgImpl.h",
+      "bytes": 5603,
+      "sha256": "6934f7358bee8fb71cb0ca1b1fa05452dab84f1949b82819a00dae473a3fcf15",
+      "encoding": "CP932"
+    }
+  ],
+  "license": {
+    "file": "LICENSE.original.txt",
+    "source": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/license.txt",
+    "bytes": 8007,
+    "sha256": "4a0c74dbfe7e67739cee1254363029a999facf68983fdb27e40ef6d0141ba461"
+  }
+}

@@ -21,6 +21,7 @@ const restricted = [
 ]
 const source = String.raw`
 System.exitOnWindowClose=false;
+System.assignMessage("TVPInvalidPropertyInFullScreen","window-fullscreen:guard");
 var resizes=0,secondaryDeaths=0,secondaryManagedDeaths=0,other=null;
 var win=new Window();win.setInnerSize(120,80);win.setPos(10,20);win.visible=true;
 win.onResize=function(){global.resizes++;};
@@ -96,7 +97,7 @@ for (const binary of [false, true]) {
       assert.equal(result.length, restricted.length)
       for (let i = 0; i < result.length; i++) {
         assert(result[i]!.startsWith(`${restricted[i]![0]}:1:`), result[i])
-        assert.match(result[i]!, /fullscreen/)
+        assert.equal(result[i], `${restricted[i]![0]}:1:window-fullscreen:guard`)
       }
       assert.deepEqual(f.view(), before)
       assert.equal(await f.session.evaluate('resizes'), '0')
@@ -171,7 +172,7 @@ for (const binary of [false, true]) {
       assert.equal(errors.length, methods.length)
       for (let i = 0; i < errors.length; i++) {
         assert(errors[i]!.includes(`Window.${methods[i]![0]} requires`), errors[i])
-        assert.doesNotMatch(errors[i]!, /fullscreen/)
+        assert.notEqual(errors[i], 'window-fullscreen:guard')
       }
       assert.deepEqual(f.view(), before)
     } finally { await f.session.stop() }

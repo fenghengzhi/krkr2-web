@@ -1,5 +1,6 @@
 import type { WindowGeometry } from '../ports/window-geometry.ts'
 import { copyWindowGeometry } from './window-geometry.ts'
+import { TvpError } from '../system/tvp-error.ts'
 
 export interface WindowView {
   width: number
@@ -84,7 +85,7 @@ export class WindowState implements WindowView {
   /** Public KRKR2 setters reject even no-op assignments in fullscreen.
    * Host placement, rollback and native close still use set()/resize(). */
   assertWindowed(): void {
-    if (this.fullScreen) throw new Error('Window property cannot be changed in fullscreen')
+    if (this.fullScreen) throw new TvpError('TVPInvalidPropertyInFullScreen', [], 'Window property cannot be changed in fullscreen')
   }
   setScript(property: string, value: string | number): void {
     if (['visible', 'width', 'height', 'left', 'top', 'minWidth', 'minHeight',

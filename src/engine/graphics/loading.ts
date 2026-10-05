@@ -1,4 +1,5 @@
 import type { DecodedImage, Pixels } from '../ports/graphics.ts'
+import { TvpError } from '../system/tvp-error.ts'
 
 export const noColorKey = 0x1fffffff
 export function validateColorKey(key: number): void {
@@ -41,7 +42,7 @@ export function* applyImageKey(image: DecodedImage, key: number): Generator<void
 }
 export function* applyImageMask(image: Pixels, mask: Pixels): Generator<void, void> {
   if (image.width !== mask.width || image.height !== mask.height)
-    throw new Error('Companion mask size mismatch')
+    throw new TvpError('TVPMaskSizeMismatch', [], 'Companion mask size mismatch')
   for (let at = 0; at < image.data.length; at += 4) {
     image.data[at + 3] =
       (54 * mask.data[at]! + 183 * mask.data[at + 1]! + 19 * mask.data[at + 2]!) >>> 8
@@ -64,11 +65,15 @@ export function* provincePixels(
   image: DecodedImage,
   width: number,
   height: number,
+  name?: string,
 ): Generator<void, Uint8Array> {
   if (!image.indices && !image.grayscale)
     throw new Error('Province images require a palette or grayscale source')
   // Native province loads request the main image's size and tile smaller sources.
-  if (image.width > width || image.height > height) throw new Error('Province image size mismatch')
+  if (image.width > width || image.height > height) {
+    if (name !== undefined) throw new TvpError('TVPProvinceSizeMismatch', [name], 'Province image size mismatch')
+    throw new Error('Province image size mismatch')
+  }
   const result = new Uint8Array(width * height)
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {

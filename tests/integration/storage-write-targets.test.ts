@@ -53,11 +53,11 @@ for (const binary of [false, true]) {
   test(`${execution}: missing UPDATE fails at stream construction and does not create shadow saves`, async () => {
     const f = await fixture(binary, [])
     try {
-      await f.run(`var caught=0;
+      await f.run(`System.assignMessage("TVPCannotOpenStorage","write-targets:missing:%1");var caught=0;
 function attempt(path,mode,isBinary){
   var returned=false,failed=false;
   try{if(isBinary)["Q"].saveStruct(path,mode);else ["Q"].save(path,mode);returned=true;}
-  catch(e){failed=e.message.indexOf("Update target not found:")>=0;}
+  catch(e){failed=e.message==="write-targets:missing:"+path;}
   if(returned || !failed)throw "UPDATE was not rejected at its save call";
   caught++;
 }
@@ -132,8 +132,8 @@ attempt("missing-binary","bo0",true);attempt("missing-append-offset","utf-8ao0",
     try {
       await f.run(`Storages.addAutoPath("First/");Storages.addAutoPath("Last/");
 ["D"].save("direct.DAT","utf-8o0");["L"].save("target.DAT","utf-8o0");
-Storages.addAutoPath("pack.xp3>");var blocked=0;
-try{["bad"].save("member.dat","o0");}catch(e){if(e.message.indexOf("Archive storage is read-only")>=0)blocked++;}
+Storages.addAutoPath("pack.xp3>");System.assignMessage("TVPCannotWriteToArchive","write-targets:archive-readonly");var blocked=0;
+try{["bad"].save("member.dat","o0");}catch(e){if(e.message==="write-targets:archive-readonly")blocked++;}
 if(blocked!=1)throw "archive UPDATE must fail before queueing";`)
       assert.equal(await f.session.evaluate('blocked'), '1')
       assert.deepEqual(f.files().map(({ path }) => path).sort(), ['Direct.dat', 'First/Target.dat', 'Last/Direct.dat', 'Last/Target.dat'])

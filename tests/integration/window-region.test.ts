@@ -5,6 +5,9 @@ import type { EngineEvent, SessionDependencies } from '../../src/engine/session.
 
 const source = String.raw`
 System.exitOnWindowClose=false;
+System.assignMessage("TVPCannotSetPrimaryInvisible","window-region:primary-opaque");
+System.assignMessage("TVPNotDrawableLayerType","window-region:no-image");
+System.assignMessage("TVPWindowHasNoLayer","window-region:no-primary");
 var win=new Window();win.setInnerSize(20,20);win.visible=true;
 var root=new Layer(win,null);root.setSize(4,3);root.setImageSize(4,3);
 root.fillRect(0,0,4,3,0x00ffffff);
@@ -56,7 +59,7 @@ win.setZoom(3,2);win.setLayerPos(5,7);win.setInnerSize(30,40);
         'The 2x2 display remains inside the 4x3 image while its origin differs')
       // Native SetOpacity rejects a non-opaque primary Layer. Catch that
       // separate public-property error without faulting this region scenario.
-      assert.match(await f.caught('root.opacity=0'), /primary layer must remain opaque/)
+      assert.equal(await f.caught('root.opacity=0'), 'window-region:primary-opaque')
       assert.equal(await f.session.evaluate('root.opacity+","+win.layerLeft+","+win.layerTop'), '255,5,7')
       assert.equal(f.session.snapshot().state, 'running')
       assert.equal(f.regions().length, 1, 'Bitmap and geometry changes do not recreate an installed native region')
@@ -99,10 +102,10 @@ win.setZoom(3,2);win.setLayerPos(5,7);win.setInnerSize(30,40);
     try {
       await f.execute('win.setMaskRegion();var blank=new Window();blank.visible=true;')
       const previous = f.regions().at(-1)!, count = f.regions().length
-      assert.match(await f.caught('blank.setMaskRegion()'), /primary Layer/)
+      assert.equal(await f.caught('blank.setMaskRegion()'), 'window-region:no-primary')
       await f.execute('blank.removeMaskRegion();root.hasImage=false;')
       assert.equal(await f.session.evaluate('root.hasImage'), '0')
-      assert.match(await f.caught('win.setMaskRegion()'), /drawable image/)
+      assert.equal(await f.caught('win.setMaskRegion()'), 'window-region:no-image')
       assert.equal(f.regions().length, count)
       assert.deepEqual([...f.regions().at(-1)!.region!.rectangles], [...previous.region!.rectangles])
       // Image operations construct >65,536 distinct native runs without a
@@ -126,7 +129,7 @@ for(var y=2;y<257;y++)root.copyRect(0,y,root,0,y%2,512,1);
       await f.execute('win.setMaskRegion();invalidate root;')
       const first = f.regions().at(-1)!
       assert(first.region)
-      assert.match(await f.caught('win.setMaskRegion()'), /primary Layer/)
+      assert.equal(await f.caught('win.setMaskRegion()'), 'window-region:no-primary')
       assert.equal(f.regions().length, 1)
       await f.execute('win.removeMaskRegion();invalidate win;')
       assert.equal(f.regions().at(-1)!.region, null)

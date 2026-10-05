@@ -1,3 +1,5 @@
+import { TvpError } from '../system/tvp-error.ts'
+
 /** Public game storage addresses are names in one session, never network URLs. */
 const publicRoot = 'game://./'
 const scheme = /^[a-z][a-z0-9+.-]*:/i
@@ -26,7 +28,8 @@ function relativeInput(input: string): string {
   const slashes = input.replaceAll('\\', '/')
   if (/^game:\/\/\.\//i.test(slashes)) return slashes.slice(publicRoot.length)
   if (/^game:\/\/\//i.test(slashes)) return slashes.slice('game:///'.length)
-  if (scheme.test(slashes)) throw new Error(`Unsupported storage media: ${input}`)
+  if (scheme.test(slashes)) throw new TvpError('TVPUnsupportedMediaName',
+    [slashes.slice(0, slashes.indexOf(':')).toLowerCase()], `Unsupported storage media: ${input}`)
   if (slashes.startsWith('//./')) return slashes.slice(4)
   if (slashes.startsWith('///')) return slashes.slice(3)
   if (slashes.startsWith('//')) throw new Error(`Unsupported storage domain: ${input}`)
@@ -76,14 +79,14 @@ export function storageFilePath(input: string, currentDirectory = ''): string {
 
 /** Registration checks the caller's delimiter before any normalization. */
 export function storageDirectoryPath(input: string, currentDirectory = ''): string {
-  if (!/[\\/>]$/.test(input)) throw new Error('Missing storage directory delimiter at end')
+  if (!/[\\/>]$/.test(input)) throw new TvpError('TVPMissingPathDelimiterAtLast', [], 'Missing storage directory delimiter at end')
   const path = parseStoragePath(input, currentDirectory)
   return path && !/[/>]$/.test(path) ? path + '/' : path
 }
 
 export function storageWritePath(input: string, currentDirectory = ''): string {
   const path = storageFilePath(input, currentDirectory)
-  if (path.includes('>')) throw new Error('Archive storage is read-only')
+  if (path.includes('>')) throw new TvpError('TVPCannotWriteToArchive', [], 'Archive storage is read-only')
   return path
 }
 

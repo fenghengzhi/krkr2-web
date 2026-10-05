@@ -1,5 +1,7 @@
 # 当前实现范围
 
+105 候选补 [原生 TVP 消息与真实异常消费者](../decisions/105-native-tvp-message-consumers.md)，固定原版 138 个 holder 与六个 CONST，迁移已核对的实际错误分支并保留纯格式化和失败原因；新增 `nativeMessages:1`，协议仍 **41**。按原版证据，pending terminate 不会自动关闭 popup，真实关闭后才结束外层执行，Stop 仍立即取消。103 光标 strict 固定范围各 1076/1076、5578 未比较，应用因构建失败跳过；104 应用与光标仍未报告，Win2022 beginMove 有一项调用前标签失败。新增候选没有通过结论，所有消息消费者、历史回归和整体非插件目标仍待完成。以下保留历史状态。
+
 104 候选补 [RandomGenerator 宿主熵与恢复边界](../decisions/104-native-random-and-cursor-evidence.md)，新增 `nativeRandom:1`，协议仍 **41**。102 双 Windows 固定 32px 光标严格比较各 1076/1076，通过范围以对应 profile 为限，5578 未比较保留；103 beginMove 双系统各 7/7。两批应用仍因构建失败未执行，本批修两处 TS 推断和 C# 编译错误，新增候选尚待验证。完整 TVP 消息映射、历史回归与完整非插件目标仍未完成。以下保留历史状态。
 
 103 候选接通 [视频流选择](../decisions/103-video-stream-selection.md)：`enabledVideoStream` 实际选择 MP4 视频组，保留已选音轨、冻结时钟、双 Layer 归属和 Mixer 初始元数据；Stop 防止迟到结果修改画面。协议 **41**、`nativeSystem:5`。101 构建七条诊断本批修订，应用未执行；102 已取回原生栈池双 sanitizer 成功报告，应用／343 光标结果未报告，菜单退出及窗口输入仍有失败。候选未验证，完整非插件目标未完成。以下保留历史状态。

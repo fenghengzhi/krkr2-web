@@ -87,7 +87,7 @@ test('a missing startup script reports a useful error and allows recovery', asyn
     mimeType: 'text/plain',
     buffer: Buffer.from('not a game'),
   })
-  await expect(page.locator('#logs')).toContainText('Resource not found: startup.tjs')
+  await expect(page.locator('#logs')).toContainText('ストレージ startup.tjs が見つかりません')
   await expect(page.locator('#choose-files')).toBeEnabled()
 })
 

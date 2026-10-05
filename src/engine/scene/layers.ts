@@ -4,6 +4,7 @@ import { Bitmap, dimension, intersect, textOpacity } from '../graphics/bitmap.ts
 import { ProvincePlane } from '../graphics/province.ts'
 import { imageTypes, autoFace, neutralColor } from '../graphics/blend.ts'
 import { SystemColors } from '../graphics/system-colors.ts'
+import { TvpError } from '../system/tvp-error.ts'
 
 export interface LayerState {
   windowId: number
@@ -254,7 +255,12 @@ export class LayerTree {
   }
   bitmap(id: number): Bitmap {
     const bitmap = this.get(id).bitmap
-    if (!bitmap) throw new Error('This layer has no drawable image')
+    if (!bitmap) throw new TvpError('TVPNotDrawableLayerType', [], 'This layer has no drawable image')
+    return bitmap
+  }
+  sourceBitmap(id: number): Bitmap {
+    const bitmap = this.get(id).bitmap
+    if (!bitmap) throw new TvpError('TVPSourceLayerHasNoImage', [], 'This layer has no drawable image')
     return bitmap
   }
   private budget(extra: number): void {
@@ -372,7 +378,7 @@ export class LayerTree {
   }
   position(id: number, left: number, top: number): boolean {
     const layer = this.get(id)
-    if (layer.primary && (left !== 0 || top !== 0)) throw new Error('The primary layer cannot move')
+    if (layer.primary && (left !== 0 || top !== 0)) throw new TvpError('TVPCannotMovePrimary', [], 'The primary layer cannot move')
     if (layer.left === left && layer.top === top) return false
     layer.left = left
     layer.top = top
@@ -385,7 +391,7 @@ export class LayerTree {
     dimension(width)
     dimension(height)
     const layer = this.get(id)
-    if (layer.primary && (left !== 0 || top !== 0)) throw new Error('The primary layer cannot move')
+    if (layer.primary && (left !== 0 || top !== 0)) throw new TvpError('TVPCannotMovePrimary', [], 'The primary layer cannot move')
     if (layer.left === left && layer.top === top && layer.width === width && layer.height === height)
       return false
     // There are no script callbacks between the native rectangle writes.
@@ -397,8 +403,20 @@ export class LayerTree {
     return true
   }
   resizeImage(id: number, width: number, height: number): void {
-    const layer = this.get(id)
-    this.bitmap(id)
+    const layer = this.get(id), bitmap = this.bitmap(id)
+    dimension(width)
+    dimension(height)
+    if (bitmap.width === width && bitmap.height === height) return
+    if (!width || !height) {
+      // Native InternalSetImageSize changes the display rectangle and offsets
+      // before ChangeImageSize rejects an empty bitmap. Preserve those visible
+      // effects while retaining the old image, province, clip and modified flag.
+      layer.width = Math.min(layer.width, width)
+      layer.height = Math.min(layer.height, height)
+      layer.imageLeft = Math.max(layer.imageLeft, layer.width - width)
+      layer.imageTop = Math.max(layer.imageTop, layer.height - height)
+      throw new TvpError('TVPCannotCreateEmptyLayerImage', [], 'A layer image cannot be empty')
+    }
     this.resizeBitmap(layer, width, height)
     layer.width = Math.min(layer.width, width)
     layer.height = Math.min(layer.height, height)
@@ -416,7 +434,7 @@ export class LayerTree {
       left + bitmap.width < layer.width ||
       top + bitmap.height < layer.height
     )
-      throw new Error('Image offset must keep the display rectangle inside the image')
+      throw new TvpError('TVPInvalidImagePosition', [], 'Image offset must keep the display rectangle inside the image')
     layer.imageLeft = left
     layer.imageTop = top
   }
@@ -481,13 +499,13 @@ export class LayerTree {
         name === 'imageTop' ? value : layer.imageTop,
       )
     else if (name === 'left' || name === 'top') {
-      if (layer.primary && value !== 0) throw new Error('The primary layer cannot move')
+      if (layer.primary && value !== 0) throw new TvpError('TVPCannotMovePrimary', [], 'The primary layer cannot move')
       layer[name] = value
     } else if (name === 'visible') {
-      if (layer.primary && !value) throw new Error('The primary layer must remain visible')
+      if (layer.primary && !value) throw new TvpError('TVPCannotSetPrimaryInvisible', [], 'The primary layer must remain visible')
       layer.visible = !!value
     } else if (name === 'opacity') {
-      if (layer.primary && value !== 255) throw new Error('The primary layer must remain opaque')
+      if (layer.primary && value !== 255) throw new TvpError('TVPCannotSetPrimaryInvisible', [], 'The primary layer must remain opaque')
       layer.opacity = Math.max(0, Math.min(255, value))
     } else if (name === 'type') {
       if (layer.type === value) return
@@ -500,7 +518,7 @@ export class LayerTree {
       layer.neutralColor = color
     } else if (name === 'hasImage') {
       if (value && !imageTypes.has(layer.type))
-        throw new Error('This layer type cannot own an image')
+        throw new TvpError('TVPLayerCannotHaveImage', [], 'This layer type cannot own an image')
       if (value) this.allocateImage(layer)
       else this.releaseImages(id)
     } else if (name === 'order' || name === 'absolute') this.order(id, value, name === 'absolute')
@@ -550,9 +568,10 @@ export class LayerTree {
   }
   validateParent(id: number, parent: number): void {
     const layer = this.get(id)
+    if (parent === id) throw new TvpError('TVPCannotSetParentSelf', [], 'A Layer cannot be its own parent')
     if (layer.primary) throw new Error('The primary layer cannot be reparented')
     if (parent && this.get(parent).managerId !== layer.managerId)
-      throw new Error('Cannot move a Layer under another primary layer')
+      throw new TvpError('TVPCannotMoveToUnderOtherPrimaryLayer', [], 'Cannot move a Layer under another primary layer')
     for (
       let item = parent ? this.get(parent) : undefined, depth = 0;
       item;
@@ -580,7 +599,7 @@ export class LayerTree {
   }
   order(id: number, index: number, absolute = false): void {
     const layer = this.get(id)
-    if (!layer.parent) throw new Error('This layer has no siblings')
+    if (!layer.parent) throw new TvpError('TVPCannotMovePrimaryOrSiblingless', [], 'This layer has no siblings')
     const parent = this.get(layer.parent)
     const previous = [...parent.children]
     this.set(parent.id, 'absoluteOrderMode', Number(absolute))
@@ -596,9 +615,10 @@ export class LayerTree {
   move(id: number, other: number, before: boolean): void {
     const layer = this.get(id),
       sibling = this.get(other)
-    if (!layer.parent || layer.parent !== sibling.parent)
-      throw new Error('Layer ordering requires siblings')
-    if (id === other) return
+    if (!layer.parent || this.get(layer.parent).children.length <= 1)
+      throw new TvpError('TVPCannotMovePrimaryOrSiblingless', [], 'This layer has no siblings')
+    if (id === other || layer.parent !== sibling.parent)
+      throw new TvpError('TVPCannotMoveNextToSelfOrNotSiblings', [], 'Layer ordering requires distinct siblings')
     const children = this.get(layer.parent).children,
       from = children.indexOf(id),
       target = children.indexOf(other)
@@ -848,7 +868,7 @@ export class LayerTree {
       return true
     }
     const dest = this.bitmap(id)
-    if (dest.copy(this.bitmap(source), left, top, rect, face, layer.holdAlpha))
+    if (dest.copy(this.sourceBitmap(source), left, top, rect, face, layer.holdAlpha))
       layer.imageModified = true
     // Native requests an update for this destination even when the source
     // bitmap clips the actual transfer to empty. This is not imageModified.

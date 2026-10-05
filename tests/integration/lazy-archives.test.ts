@@ -59,7 +59,8 @@ Storages.removeAutoPath("/bad.xp3>");
 demand(Scripts.evalStorage("value.tjs"),"good","remove failed registration");
 var win=new Window();win.setInnerSize(4,3);var root=new Layer(win,null);win.add(root);root.setSize(4,3);var image=new Layer(win,root);
 image.loadImages("pixel.bmp");demand(image.getMainPixel(1,1),0x778899,"actual indexed bitmap");
-var denied=0;try{["overwrite"].save("value.tjs","utf-8o0");}catch(error){if(error.message.indexOf("read-only")<0)throw error;denied++;}
+System.assignMessage("TVPCannotWriteToArchive","lazy-archives:readonly");
+var denied=0;try{["overwrite"].save("value.tjs","utf-8o0");}catch(error){if(error.message!=="lazy-archives:readonly")throw error;denied++;}
 demand(denied,1,"UPDATE binds archive readonly path");
 demand(Storages.getPlacedPath("value.tjs"),"game://./good.xp3>value.tjs","canonical identity");
 var complete=true;

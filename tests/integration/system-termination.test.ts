@@ -5,6 +5,7 @@ import { readText } from '../../src/backends/files/text-codecs.ts'
 import { MemorySaveStore, type SaveFile } from '../../src/engine/ports/saves.ts'
 import type { SessionDependencies } from '../../src/engine/session.ts'
 import type { Resource } from '../../src/engine/ports/storage.ts'
+import type { MenuPopup } from '../../src/engine/scene/menus.ts'
 
 const base = String.raw`
 System.exitOnWindowClose=false;
@@ -42,6 +43,78 @@ function gate() {
 function clean(f: Awaited<ReturnType<typeof fixture>>) {
   assert.equal(f.session.snapshot().state, 'stopped')
   assert(Object.values(f.session.inspectOwnership()).every((value) => value === 0))
+}
+
+class MenuClock {
+  time = 0
+  readonly tasks = new Set<{ at: number; callback(): void }>()
+  now = () => this.time
+  schedule = (callback: () => void, delay: number) => {
+    const task = { at: this.time + delay, callback }
+    this.tasks.add(task)
+    return () => { this.tasks.delete(task) }
+  }
+  advance(milliseconds: number) {
+    this.time += milliseconds
+    for (const task of [...this.tasks])
+      if (task.at <= this.time && this.tasks.delete(task)) task.callback()
+  }
+}
+const menuProgram = String.raw`
+var owner=new Window();owner.visible=true;
+var group=new MenuItem(owner,"Pending termination menu");owner.menu.add(group);group.add(new MenuItem(owner,"Keep waiting"));
+function quitTick(){quitTimer.enabled=false;mark("timer-before");System.terminate();mark("timer-after");heldTimer.enabled=true;}
+function heldTick(){heldTimer.enabled=false;mark("pending-menu-500");}
+var quitTimer=new Timer(global,"quitTick");quitTimer.enabled=false;quitTimer.interval=100;
+var heldTimer=new Timer(global,"heldTick");heldTimer.enabled=false;heldTimer.interval=500;
+function runMenu(){mark("popup-before");quitTimer.enabled=true;group.popup(0,20,30);mark("popup-after");}
+`
+async function menuFixture(binary: boolean) {
+  const clock = new MenuClock()
+  const f = await fixture(binary, menuProgram, { now: clock.now, schedule: clock.schedule })
+  let settled = false
+  let failed = false
+  let failure: unknown
+  const opening = f.exec('runMenu()')
+  const result = opening.then(
+    (value) => { settled = true; return { ok: true as const, value } },
+    (error: unknown) => { settled = true; failed = true; failure = error; return { ok: false as const, error } },
+  )
+  const popup = (): MenuPopup | undefined => {
+    const event = [...f.events].reverse().find((entry) => entry.type === 'window-menus')
+    return event?.type === 'window-menus' ? event.windows.find((window) => window.menus.popup)?.menus.popup : undefined
+  }
+  const wait = async (condition: () => boolean) => {
+    await until(() => {
+      if (failed) throw failure
+      if (settled) throw new Error('Menu ended before its required observation: ' + f.trace().join('|'))
+      return condition()
+    })
+  }
+  return { ...f, clock, opening, result, popup, wait, settled: () => settled }
+}
+async function pendingMenu(binary: boolean, body: (f: Awaited<ReturnType<typeof menuFixture>>, popup: MenuPopup) => Promise<void>) {
+  const f = await menuFixture(binary), errors: unknown[] = []
+  try {
+    await f.wait(() => !!f.popup() && f.session.inspectOwnership().modalWaits === 1)
+    const popup = f.popup()!
+    f.clock.advance(100)
+    await f.wait(() => f.trace().includes('timer-after') && f.session.inspectOwnership().modalWaits === 1)
+    f.clock.advance(499)
+    assert.deepEqual(f.trace(), ['popup-before', 'timer-before', 'timer-after'])
+    f.clock.advance(1)
+    await f.wait(() => f.trace().includes('pending-menu-500') && f.session.inspectOwnership().modalWaits === 1)
+    assert.deepEqual(f.trace(), ['popup-before', 'timer-before', 'timer-after', 'pending-menu-500'])
+    assert.equal(f.session.snapshot().state, 'running')
+    assert.equal(f.session.inspectOwnership().modalScopes, 1)
+    assert.equal(f.settled(), false)
+    assert.deepEqual(f.popup(), popup)
+    await body(f, popup)
+  } catch (error) { errors.push(error) }
+  try { await f.session.stop() } catch (error) { errors.push(error) }
+  try { await f.result; clean(f); assert.equal(f.clock.tasks.size, 0) } catch (error) { errors.push(error) }
+  if (errors.length === 1) throw errors[0]
+  if (errors.length) throw new AggregateError(errors, 'Pending-menu termination and cleanup failed', { cause: errors[0] })
 }
 
 for (const binary of [false, true]) {
@@ -96,17 +169,42 @@ for (const binary of [false, true]) {
       clean(f)
     } finally { held.release(); await result; await f.session.stop() }
   })
-  test(`${mode}: pending termination ends each existing modal continuation through its normal canceled result`, { timeout: 60000 }, async () => {
+  test(`${mode}: pending termination ends application dialog and Window continuations through their normal canceled result`, { timeout: 60000 }, async () => {
     // Source proves posted Application.Terminate versus synchronous exit. The
     // pinned SDK companion records the VCL/Win32 loop return ordering separately.
-    for (const call of ['System.inform("end")', 'System.inputString("end","body","initial")', 'hidden.showModal()', 'group.popup(0,0,0)']) {
+    for (const call of ['System.inform("end")', 'System.inputString("end","body","initial")', 'hidden.showModal()']) {
       const f = await fixture(binary, `var owner=new Window();owner.visible=true;var hidden=new Window();var group=new MenuItem(owner,"group");owner.menu.add(group);group.add(new MenuItem(owner,"item"));function run(){System.terminate();var result=${call};mark("after-modal:"+int(result===void)+":"+int(result===0));}`)
       try {
         await f.exec('run()'); await f.session.stop()
-        assert.deepEqual(f.trace(), [call.startsWith('group.') ? 'after-modal:0:1' : 'after-modal:1:0'])
+        assert.deepEqual(f.trace(), ['after-modal:1:0'])
         clean(f)
       } finally { await f.session.stop() }
     }
+  })
+  test(`${mode}: timer termination leaves a real popup waiting for 500ms before an explicit menu dismissal unwinds the outer entry`, { timeout: 60000 }, async () => {
+    await pendingMenu(binary, async (f, popup) => {
+      f.session.menuDismiss({ windowId: popup.windowId, requestId: popup.requestId })
+      const result = await f.result
+      if (!result.ok) throw result.error
+      await until(() => f.session.snapshot().state === 'stopped')
+      assert.deepEqual(f.trace(), ['popup-before', 'timer-before', 'timer-after', 'pending-menu-500', 'popup-after'])
+      clean(f)
+    })
+  })
+  test(`${mode}: external Stop cancels a menu with pending termination and ignores its late dismissal`, { timeout: 60000 }, async () => {
+    await pendingMenu(binary, async (f, popup) => {
+      await f.session.stop()
+      await f.result
+      clean(f)
+      const trace = f.trace()
+      assert.deepEqual(trace, ['popup-before', 'timer-before', 'timer-after', 'pending-menu-500'])
+      f.session.menuDismiss({ windowId: popup.windowId, requestId: popup.requestId })
+      f.clock.advance(1000)
+      await Promise.resolve()
+      assert.deepEqual(f.trace(), trace)
+      clean(f)
+      assert.equal(f.clock.tasks.size, 0)
+    })
   })
   test(`${mode}: termination preserves the current event round paint tail but cancels subsequent admissions`, { timeout: 60000 }, async () => {
     const f = await fixture(binary, String.raw`

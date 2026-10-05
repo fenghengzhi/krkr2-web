@@ -7,6 +7,7 @@ import {
 } from '../ports/help.ts'
 import { ExecutionControl } from '../scheduler/control.ts'
 import { cancelable } from '../scheduler/cancelable.ts'
+import { TvpError } from './tvp-error.ts'
 import {
   extractStorageName,
   parseStoragePath,
@@ -18,7 +19,7 @@ import {
  * frozen current directory but never performs an auto-path search. */
 export function getWebLocalName(input: string, currentDirectory = ''): string {
   const path = parseStoragePath(input, currentDirectory)
-  if (path.includes('>')) throw new Error('Archive members do not have a local name')
+  if (path.includes('>')) throw new TvpError('TVPCannotGetLocalName', [input], 'Archive members do not have a local name')
   const name = toPublicStoragePath(path)
   if (name.length > helpPathLimit) throw new Error('Local storage name exceeds 4096 characters')
   return name

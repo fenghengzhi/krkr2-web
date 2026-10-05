@@ -29,6 +29,7 @@
 #include "ExecutionBudget.h"
 #include "WebHost.h"
 #include "NativeOwnership.h"
+#include "TvpMessages.h"
 
 using namespace TJS;
 namespace TJS {
@@ -43,7 +44,7 @@ unsigned TJSGetLiveDispatchObjects();
 namespace {
 bool shuttingDown = false;
 struct Reply {
-    int kind = 0; // value, error, invoke, source, bytecode
+    int kind = 0; // value, error, invoke, source, bytecode; 10 = typed TVP error
     tTJSVariant value;
     std::vector<tTJSVariant> args;
     ttstr name;
@@ -52,6 +53,24 @@ struct Reply {
     tTJSVariant context;
     bool expression = false;
 };
+
+ttstr formatTvpReply(const Reply& reply) {
+    if(reply.kind != 10 || reply.args.size() > 2)
+        TJS_eTJSError(u"Invalid typed TVP message arguments");
+    ttstr parameters[2];
+    for(std::size_t i = 0; i < reply.args.size(); ++i) {
+        // Only primitive strings cross this private boundary. Formatting must
+        // never execute a conversion/getter on a suspended script object.
+        if(reply.args[i].Type() != tvtString)
+            TJS_eTJSError(u"Invalid typed TVP message parameter");
+        parameters[i] = reply.args[i];
+    }
+    return krkr::formatTvpMessage(reply.name.c_str(), parameters, reply.args.size());
+}
+void throwReplyError(const Reply& reply) {
+    if(reply.kind == 1) TJS_eTJSError(ttstr(reply.value));
+    if(reply.kind == 10) TJS_eTJSError(formatTvpReply(reply));
+}
 
 struct Vm;
 struct WeakOwner {
@@ -332,7 +351,7 @@ Reply* dispatch_host(Vm* vm, const tjs_char* name, unsigned length, int count, t
             reply.reset(dispatch_host_raw(vm, name, length, count, args));
         }
         krkr_vm_check_cancellation();
-        if(reply && reply->kind == 1) TJS_eTJSError(ttstr(reply->value));
+        if(reply) throwReplyError(*reply);
     } catch(...) {
         auto primary = std::current_exception();
         cleanup.suppress();
@@ -420,7 +439,7 @@ void loadBinary(Vm* vm, const tjs_uint8* bytes, std::size_t length,
 }
 
 void resolveReply(Vm* vm, Reply& reply, tTJSVariant* result) {
-    if(reply.kind == 1) TJS_eTJSError(ttstr(reply.value));
+    throwReplyError(reply);
     if(reply.kind == 2 || reply.kind == 7 || reply.kind == 9) {
         krkr::ExecutionFrame delegation(2);
         if(reply.args.size() > 1000000) throw krkr::ExecutionLimitError(u"VM call exceeds 1000000 arguments");
@@ -523,7 +542,7 @@ std::unique_ptr<Reply> requestStorage(const tjs_char* operation, const ttstr& na
     tTJSVariant* args[] = { &values[0], &values[1] };
     std::unique_ptr<Reply> reply(dispatch_host(streamVm, operation, TJS_strlen(operation), 2, args));
     if(!reply) TJS_eTJSError(u"No storage response");
-    if(reply->kind == 1) TJS_eTJSError(ttstr(reply->value));
+    throwReplyError(*reply);
     return reply;
 }
 // Closing a native binary stream is a C++ destructor and cannot await or throw.
@@ -1654,6 +1673,7 @@ API Vm* krkr_create(int debugMode) {
     TJSEnableDebugMode = debugMode != 0;
     TJSWarnOnExecutionOnDeletingObject = TJSEnableDebugMode;
     vm->engine = new tTJS();
+    krkr::initializeTvpMessages();
     TJSGetRandomBits128 = fillRandomBits128;
     vm->console = std::make_unique<HostConsole>(vm.get());
     streamVm = vm.get();
@@ -1673,6 +1693,23 @@ API void krkr_destroy(Vm* vm) { delete vm; }
 API void krkr_set_console(Vm* vm, int enabled) { vm->engine->SetConsoleOutput(enabled ? vm->console.get() : nullptr); }
 API int krkr_abi_version() { return 5; }
 API int krkr_random_source_version() { return 1; }
+API int krkr_native_messages_version() { return 1; }
+// No VM entry, release drain or CleanupErrors scope: this may be called by a
+// host logger while a script import is suspended, without consuming its errors.
+API Reply* krkr_format_tvp_message(const Reply* request) {
+    auto reply = std::make_unique<Reply>();
+    try {
+        if(!request) TJS_eTJSError(u"Missing typed TVP message");
+        reply->value = formatTvpReply(*request);
+    } catch(const eTJS& error) {
+        reply->kind = 1;
+        reply->value = error.GetMessage();
+    } catch(const std::exception& error) {
+        reply->kind = 1;
+        reply->value = ttstr(error.what());
+    }
+    return reply.release();
+}
 API Reply* krkr_execute(Vm* vm, const void* source, unsigned length, const tjs_char* name, int mode) {
     deadline = emscripten_get_now() + 8;
     return captureVm(vm, [&](tTJSVariant& value) {

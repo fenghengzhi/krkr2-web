@@ -141,6 +141,7 @@ for (const backend of ['asyncify', 'jspi']) {
     await expect(page.locator('#stop')).toBeDisabled({ timeout: 1800 })
     await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
     await expect(page.locator('#logs')).not.toContainText('Resource not found: startup.tjs')
+    await expect(page.locator('#logs')).not.toContainText('ストレージ startup.tjs が見つかりません')
     await expect(page.locator('html')).toHaveAttribute('data-zip-mount-published', 'false')
   })
 }

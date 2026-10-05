@@ -3,6 +3,7 @@ import { evaluate } from '../helpers/browser-expression.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 
 const source = String.raw`
+System.assignMessage("TVPInvalidPropertyInFullScreen","browser-fullscreen:guard");
 System.exitOnWindowClose=false;
 var guarded=new Window();guarded.caption="Fullscreen contract";guarded.setInnerSize(160,96);
 guarded.setPos(20,24);guarded.visible=true;
@@ -30,7 +31,7 @@ function fullscreenCheck(){
   for(var i=0;i<operations.count;i++){
     try{Scripts.exec(operations[i]);throw "fullscreen operation was accepted: "+operations[i];}
     catch(error){
-      if(typeof error!="Object" || error.message===void)throw error;
+      if(typeof error!="Object" || error.message!=="browser-fullscreen:guard")throw error;
       global.guardErrors.add(string(error.message));
     }
     if(before!=guardedGeometry())throw "rejected fullscreen operation changed window state";

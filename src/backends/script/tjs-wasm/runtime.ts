@@ -17,6 +17,7 @@ import {
   type ScriptList,
 } from '../../../engine/script/runtime.ts'
 import { ExecutionControl } from '../../../engine/scheduler/control.ts'
+import { TvpError, type TvpMessage } from '../../../engine/system/tvp-error.ts'
 import type { ModuleFactory, ModuleOptions, NativeModule } from './module.ts'
 
 let nextRuntime = 1
@@ -102,6 +103,10 @@ export class TjsWasmRuntime implements ScriptRuntime {
     if (typeof runtime.module._krkr_random_source_version !== 'function' ||
         runtime.call('krkr_random_source_version') !== 1)
       throw new Error('TJS WASM is missing native random entropy support')
+    if (typeof runtime.module._krkr_native_messages_version !== 'function' ||
+        runtime.call('krkr_native_messages_version') !== 1 ||
+        typeof runtime.module._krkr_format_tvp_message !== 'function')
+      throw new Error('TJS WASM is missing native TVP message support')
     runtime.vm = runtime.call('krkr_create', Number(options.debugMode === true))
     if (!runtime.vm) throw new Error('TJS VM initialization failed')
     return runtime
@@ -706,6 +711,61 @@ export class TjsWasmRuntime implements ScriptRuntime {
       throw error
     }
   }
+  private buildTvpMessage(message: TvpMessage): number {
+    const { id, args } = message
+    if (typeof id !== 'string' || !id || id.length > 128 || id.includes('\0') ||
+        !Array.isArray(args) || args.length > 2 || args.some((value) => typeof value !== 'string'))
+      throw new Error('Invalid typed TVP message')
+    const pointer = this.call('krkr_reply_new', 10)
+    try {
+      const name = this.textPointer(id)
+      try { this.call('krkr_reply_name', pointer, name) }
+      finally { this.call('free', name) }
+      for (const value of args) this.writeValue(this.call('krkr_reply_arg', pointer), value)
+      return pointer
+    } catch (error) {
+      this.call('krkr_reply_delete', pointer)
+      throw error
+    }
+  }
+  private formatTvpMessageText(message: TvpMessage): string {
+    const request = this.buildTvpMessage(message)
+    try {
+      const value = this.consumeReply(this.call('krkr_format_tvp_message', request))
+      if (typeof value !== 'string') throw new Error('Invalid native TVP message result')
+      return value
+    } finally { this.call('krkr_reply_delete', request) }
+  }
+  formatTvpMessage(message: TvpMessage): string {
+    this.assertAlive(true)
+    return this.formatTvpMessageText(message)
+  }
+  private materializeError(error: unknown): unknown {
+    // This pure formatter is also safe after krkr_destroy: the module's holder
+    // catalog survives its VM, and no VM pointer/handle is consulted here.
+    if (error instanceof TvpError) {
+      try {
+        return new ScriptError(this.formatTvpMessageText(error.tvpMessage), '', 0, '', { cause: error })
+      } catch (formatting) {
+        // A translated holder can itself exceed the formatting budget. Keep
+        // that failure visible together with the original operation descriptor.
+        return new AggregateError([error, formatting],
+          formatting instanceof Error ? formatting.message : String(formatting), { cause: error })
+      }
+    }
+    return error
+  }
+  private buildErrorReply(error: unknown): number {
+    if (error instanceof TvpError) return this.buildTvpMessage(error.tvpMessage)
+    const pointer = this.call('krkr_reply_new', 1)
+    try {
+      this.writeValue(this.call('krkr_reply_value', pointer), error instanceof Error ? error.message : String(error))
+      return pointer
+    } catch (failure) {
+      this.call('krkr_reply_delete', pointer)
+      throw failure
+    }
+  }
   private async hostCall(
     vm: number,
     name: number,
@@ -718,6 +778,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       if (vm !== this.vm) throw new Error('VM identity mismatch')
       const operation = this.readText(name, length)
       const context: HostContext = {
+        formatTvpMessage: (message) => this.formatTvpMessage(message),
         retain: (object) => this.retain(object),
         release: (object) => this.release(object),
         snapshot: (object) => this.snapshot(object),
@@ -744,7 +805,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
         return this.buildReply(reply)
       }
       this.checkOwnerFailure()
-      await this.flush()
+      await this.flushWrites()
       await this.control.wait()
       this.control.check()
       const values = Array.from({ length: count }, (_, i) =>
@@ -761,12 +822,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
     } catch (error) {
       // Errors resume TJS catch/finally blocks too; cancellation releases this wait.
       await this.control.wait()
-      const pointer = this.call('krkr_reply_new', 1)
-      this.writeValue(
-        this.call('krkr_reply_value', pointer),
-        error instanceof Error ? error.message : String(error),
-      )
-      return pointer
+      return this.buildErrorReply(error)
     } finally {
       for (const object of temporary) this.release(object)
     }
@@ -831,7 +887,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       this.ownerFailure = undefined // retain the primary execution/host error
       if (isScriptObject(result)) this.release(result)
       this.control.check()
-      throw error
+      throw this.materializeError(error)
     } finally {
       this.busy = false
     }
@@ -915,6 +971,9 @@ export class TjsWasmRuntime implements ScriptRuntime {
     }
   }
   flush(): Promise<void> {
+    return this.flushWrites().catch((error) => { throw this.materializeError(error) })
+  }
+  private flushWrites(): Promise<void> {
     if (this.flushing) return this.flushing
     this.flushing = (async () => {
       while (this.pendingWrites.length) {
@@ -945,6 +1004,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       this.disposed = true
       this.disposing = false
     }
-    this.checkOwnerFailure()
+    try { this.checkOwnerFailure() }
+    catch (error) { throw this.materializeError(error) }
   }
 }

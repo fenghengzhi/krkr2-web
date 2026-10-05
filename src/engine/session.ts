@@ -7,6 +7,8 @@ import { assertClipboardText, unavailableClipboard, type ClipboardPort } from '.
 import { unavailableHelp, type HelpPort } from './ports/help.ts'
 import { getWebLocalName, openHelpDocument } from './system/help.ts'
 import { SystemMaintenance } from './system/maintenance.ts'
+import { TvpError } from './system/tvp-error.ts'
+import type { TvpMessageId } from './system/tvp-message-ids.ts'
 import { ScriptTextEncoding } from './script/text-encoding.ts'
 import { debugBridge } from './tvp/debug.ts'
 import { DebugLog } from './diagnostics/log.ts'
@@ -1280,7 +1282,7 @@ export class EngineSession {
       }).catch(() => {})
   }
   private recordFailure(error: unknown): void {
-    const text = error instanceof Error ? error.message : String(error)
+    const text = this.errorText(error)
     try {
       const bounded =
         text.length <= 256 * 1024 ? text : text.slice(0, 256 * 1024 - 10) + '…[日志截断]'
@@ -1292,7 +1294,7 @@ export class EngineSession {
     }
   }
   private async recordScriptFailure(error: unknown): Promise<void> {
-    const text = error instanceof Error ? error.message : String(error),
+    const text = this.errorText(error),
       bounded = text.length <= 256 * 1024 ? text : text.slice(0, 256 * 1024 - 10) + '…[日志截断]'
     let entry
     try {
@@ -1323,8 +1325,20 @@ export class EngineSession {
     this.deps.event({
       type: 'log',
       level: 'error',
-      text: `日志或存档写入失败：${String(error)}；已有数据仍可导出，停止时可重试提交。`,
+      text: `日志或存档写入失败：${this.errorText(error)}；已有数据仍可导出，停止时可重试提交。`,
     })
+  }
+  private errorText(error: unknown): string {
+    if (error instanceof TvpError && this.runtime?.formatTvpMessage) {
+      try { return this.runtime.formatTvpMessage(error.tvpMessage) }
+      catch (formatError) {
+        // Logging must retain both failures without replacing the operation's
+        // original error or entering script to obtain a translated message.
+        const detail = formatError instanceof Error ? formatError.message : String(formatError)
+        return `${error.message}; TVP message formatting failed: ${detail}`
+      }
+    }
+    return error instanceof Error ? error.message : String(error)
   }
   private async flushFiles(native = true, forceDiagnostics = false): Promise<void> {
     let failed = false,
@@ -3955,11 +3969,11 @@ export class EngineSession {
     return names
   }
   private async readResource(name: string): Promise<Uint8Array> {
-    return (await this.resolveResource(name)).read()
+    return (await this.resolveResource(name, 'TVPCannotOpenStorage')).read()
   }
-  private async resolveResource(name: string): Promise<Resource> {
+  private async resolveResource(name: string, missing: TvpMessageId = 'TVPCannotFindStorage'): Promise<Resource> {
     const resource = await this.findResource(name)
-    if (!resource) throw new Error(`Resource not found: ${name}`)
+    if (!resource) throw new TvpError(missing, [name], `Resource not found: ${name}`)
     return resource
   }
   private async findResource(name: string): Promise<Resource | undefined> {
@@ -3983,7 +3997,7 @@ export class EngineSession {
       }
       // Append alone is a Web extension that may create a new file. An explicit
       // offset still selects UPDATE and requires a target, including ao0.
-      if (mode.hasOffset) throw new Error(`Update target not found: ${name}`)
+      if (mode.hasOffset) throw new TvpError('TVPCannotOpenStorage', [name], `Update target not found: ${name}`)
     } else {
       // Ordinary WRITE does not search auto paths, but must keep the spelling
       // of a direct existing target instead of creating a case-only shadow.
@@ -4199,11 +4213,13 @@ export class EngineSession {
     if (operation.startsWith('Modal.')) {
       if (!this.modalLoop) throw new Error('Modal dispatcher is unavailable')
       if (operation === 'Modal.wait' && this.terminateRequested) {
-        // Quit ends the innermost message loop through its ordinary canceled
-        // result. Keep the request pending while enclosing TJS scopes unwind;
+        // Posted quit ends application modal loops, but does not dismiss the
+        // native TrackPopupMenuEx loop. Keep menu waits and the quit request
+        // alive until a real menu result or lifecycle cancellation unwinds it.
         // System.exit instead cancels the VM immediately and never returns.
         const token = Number(args[0])
-        if (token === this.modalLoop.activeToken) this.modalLoop.cancel(token, 'application-termination')
+        if (token === this.modalLoop.activeToken && this.modalLoop.info(token)?.kind !== 'menu')
+          this.modalLoop.cancel(token, 'application-termination')
       }
       return this.modalLoop.host(operation, args)
     }
@@ -4580,7 +4596,7 @@ export class EngineSession {
           // through a possibly changed auto-path list during serialization.
           const existing = this.saves.resource(path) ?? this.storage.find(path)
           if (existing) original = await existing.read()
-          else if (parsed.hasOffset) throw new Error(`Update target not found: ${path}`)
+          else if (parsed.hasOffset) throw new TvpError('TVPCannotOpenStorage', [path], `Update target not found: ${path}`)
           const position = parsed.append ? original.length : parsed.offset,
             length = Math.max(original.length, position + encoded.length)
           if (length > 64 * 1024 * 1024) throw new Error('Save file exceeds 64 MiB budget')
@@ -4933,7 +4949,7 @@ export class EngineSession {
         const window = this.windows!.get(number(0)),
           primary = this.inputControllers.get(window.id)?.root() ?? 0
         if (window.closing || window.finished) throw new Error('Window has been invalidated')
-        if (!primary) throw new Error('Window has no primary Layer')
+        if (!primary) throw new TvpError('TVPWindowHasNoLayer', [], 'Window has no primary Layer')
         const pixels = this.layers.bitmap(primary).pixels,
           request = this.nextWindowRegionRequest++
         if (!Number.isSafeInteger(this.nextWindowRegionRequest)) throw new Error('Window region request identity exhausted')
@@ -5150,14 +5166,21 @@ export class EngineSession {
         }
         if (['width', 'height', 'imageWidth', 'imageHeight'].includes(text(1))) {
           const id = number(0), controller = this.inputControllers.forLayer(id),
-            before = this.layers.property(id, text(1)), previousWindow = this.layerWindow(id)
+            before = this.layers.property(id, text(1)), previousWindow = this.layerWindow(id),
+            layer = this.layers.get(id), oldWidth = layer.width, oldHeight = layer.height,
+            oldImageLeft = layer.imageLeft, oldImageTop = layer.imageTop
           // These setters normally return through the Input pump, bypassing
           // the host switch tail. Commit primary sizing/scroll before that
           // pump rechecks hover or the calling TJS reads its cursor position.
-          this.layers.set(id, text(1), number(2))
-          if (before !== this.layers.property(id, text(1))) {
-            if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
-            this.invalidateLayer(id)
+          try { this.layers.set(id, text(1), number(2)) }
+          finally {
+            // An empty image request may already have shrunk the display
+            // rectangle before throwing, while the image property is unchanged.
+            if (before !== this.layers.property(id, text(1)) || layer.width !== oldWidth ||
+                layer.height !== oldHeight || layer.imageLeft !== oldImageLeft || layer.imageTop !== oldImageTop) {
+              if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+              this.invalidateLayer(id)
+            }
           }
           await this.synchronizeWindowGeometry()
           return this.inputs!.change(() => {}, controller)
@@ -5437,11 +5460,19 @@ export class EngineSession {
       }
       case 'Layer.resizeImage': {
         const id = number(0), bitmap = this.layers.bitmap(id), width = number(1), height = number(2),
-          changed = bitmap.width !== width || bitmap.height !== height, previousWindow = this.layerWindow(id)
-        this.layers.resizeImage(id, width, height)
-        if (changed) {
-          if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
-          this.invalidateLayer(id)
+          changed = bitmap.width !== width || bitmap.height !== height, previousWindow = this.layerWindow(id),
+          layer = this.layers.get(id), oldWidth = layer.width, oldHeight = layer.height,
+          oldImageLeft = layer.imageLeft, oldImageTop = layer.imageTop
+        let completed = false
+        try {
+          this.layers.resizeImage(id, width, height)
+          completed = true
+        } finally {
+          if ((completed && changed) || layer.width !== oldWidth || layer.height !== oldHeight ||
+              layer.imageLeft !== oldImageLeft || layer.imageTop !== oldImageTop) {
+            if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+            this.invalidateLayer(id)
+          }
         }
         break
       }
@@ -5509,7 +5540,7 @@ export class EngineSession {
         // Native PiledCopy rejects either missing main image before Complete
         // can run onPaint. A callback cannot repair an invalid copy request.
         const destination = this.layers.bitmap(id)
-        this.layers.bitmap(source)
+        this.layers.sourceBitmap(source)
         // ClipDestPointAndSrcRect precedes native Complete. An empty target
         // leaves its source's pending paint untouched; the source drawing clip
         // does not participate in this preflight.
@@ -5562,7 +5593,7 @@ export class EngineSession {
           this.layers
             .bitmap(id)
             .operate(
-              this.layers.bitmap(source).pixels,
+              this.layers.sourceBitmap(source).pixels,
               number(1),
               number(2),
               { x: number(4), y: number(5), width: number(6), height: number(7) },
@@ -5592,7 +5623,7 @@ export class EngineSession {
             throw new Error('stretchPile and stretchBlend require dfAlpha or dfOpaque')
         }
         const output = stretchPixels(
-          this.layers.bitmap(number(5)).pixels,
+          this.layers.sourceBitmap(number(5)).pixels,
           { x: number(1), y: number(2), width: number(3), height: number(4) },
           { x: number(6), y: number(7), width: number(8), height: number(9) },
           bitmap.clip,
@@ -5640,7 +5671,7 @@ export class EngineSession {
           throw new Error('affinePile and affineBlend require dfAlpha or dfOpaque')
         const raster = await this.finishGraphics(
           affinePixels(
-            this.layers.bitmap(source).pixels,
+            this.layers.sourceBitmap(source).pixels,
             { x: number(2), y: number(3), width: number(4), height: number(5) },
             !!number(6),
             [number(7), number(8), number(9), number(10), number(11), number(12)],
