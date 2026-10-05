@@ -113,7 +113,7 @@ function assertRetired(f: Awaited<ReturnType<typeof fixture>>, id: number): void
   assert.equal(f.session.snapshot().state, 'running')
   assert.equal(f.video.movies.size, 0)
   assert.deepEqual(f.video.closedIds, [id])
-  assert.equal(f.clock.tasks.size, 0)
+  assert.equal(f.clock.tasks.size, 1, 'Retiring video leaves only the live Session maintenance watch')
 }
 
 for (const binary of [false, true]) {

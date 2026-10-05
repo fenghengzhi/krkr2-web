@@ -113,7 +113,7 @@ root.update();
         assert.equal(f.a().length, 2 + 2 * Math.floor(time / 16), `A at ${time}ms`)
         assert.equal(f.b().length, time / 8, `B at ${time}ms`)
       }
-      assert.equal(f.timer.pending, 0)
+      assert.equal(f.timer.pending, 1)
     } finally {
       await f.stop()
     }
@@ -156,10 +156,10 @@ root.update();
       await f.session.idle()
       assert.deepEqual(f.a(), ['fair-a:1', 'fair-a:2', 'fair-a:3'])
       assert.deepEqual(f.b(), ['fair-b:entered', 'fair-b:returned'])
-      assert.equal(f.timer.pending, 1)
+      assert.equal(f.timer.pending, 2)
       await f.advance(16)
       assert.deepEqual(f.a(), ['fair-a:1', 'fair-a:2', 'fair-a:3', 'fair-a:4'])
-      assert.equal(f.timer.pending, 0)
+      assert.equal(f.timer.pending, 1)
     } finally {
       blocker.release()
       await operation?.catch(() => {})
@@ -179,12 +179,12 @@ other.onPaint=function(){bPaints++;Debug.message("fair-b:"+bPaints);root.update(
       await f.execute('other.update();')
       assert.deepEqual(f.a(), ['fair-a:1'])
       assert.deepEqual(f.b(), ['fair-b:1'])
-      assert.equal(f.timer.pending, 0)
+      assert.equal(f.timer.pending, 1)
       await f.advance(15)
       assert.deepEqual(f.a(), ['fair-a:1'])
       await f.advance(1)
       assert.deepEqual(f.a(), ['fair-a:1'])
-      assert.equal(f.timer.pending, 0)
+      assert.equal(f.timer.pending, 1)
     } finally {
       await f.stop()
     }

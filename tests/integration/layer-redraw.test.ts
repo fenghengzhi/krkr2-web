@@ -17,6 +17,7 @@ function frameClock() {
       }
     },
     get pending() {
+      // Include the real 50 ms System watch alongside any delayed paint.
       return tasks.size
     },
     advance(milliseconds: number) {
@@ -95,7 +96,7 @@ root.update();root.update(0,0,1,1);root.update(0,0,1,1,"ignored");
     try {
       assert.deepEqual(painted(), ['paint:1,1,1,0'])
       assert.equal(await session.evaluate('root.getMainPixel(0,0)'), String(0x123456))
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
       await execute('root.update();root.callOnPaint=false;')
       assert.deepEqual(painted(), ['paint:1,1,1,0'])
       await execute('root.update();')
@@ -118,7 +119,7 @@ root.update();root.update(0,0,1,1);root.update(0,0,1,1,"ignored");
         })()`),
         '3,0',
       )
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
     } finally {
       await stop()
     }
@@ -138,7 +139,7 @@ child.onPaint=function(){paints++;child.fillRect(0,0,4,4,0xff123456);Debug.messa
         await execute(`child.update(${args});`)
         assert.deepEqual(painted(), [])
         assert.equal(await session.evaluate('int(child.callOnPaint)'), '1')
-        assert.equal(clock.pending, 0)
+        assert.equal(clock.pending, 1)
       }
       // Only the overlapping part reaches the primary tree. Its argument is
       // in display coordinates, independent of the drawing clip and bitmap.
@@ -180,15 +181,15 @@ var copiedPixel=snapshot.getMainPixel(0,0);
     )
     try {
       assert.deepEqual(painted(), ['paint:1,0', 'paint:2,0', 'paint:3,0'])
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       await advance(15)
       assert.deepEqual(painted(), ['paint:1,0', 'paint:2,0', 'paint:3,0'])
       await advance(1)
       assert.deepEqual(painted(), ['paint:1,0', 'paint:2,0', 'paint:3,0', 'paint:4,0', 'paint:5,0'])
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       await advance()
       assert.deepEqual(painted(), ['paint:1,0', 'paint:2,0', 'paint:3,0', 'paint:4,0', 'paint:5,0', 'paint:6,0', 'paint:7,0'])
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
       assert.equal(
         await session.evaluate('copiedPixel+","+maxDepth+","+int(root.callOnPaint)'),
         '1,1,0',
@@ -213,29 +214,29 @@ root.update();
       await advance(1000)
       assert.deepEqual(painted(), ['paint:1', 'paint:2'])
       session.resume()
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       await advance()
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4'])
       await execute('System.eventDisabled=true;')
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
       await advance(1000)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4'])
       await execute('System.eventDisabled=false;')
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4'])
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       // Re-enabling events drains a synchronous round, even when already
       // enabled. An overdue self-update still belongs to its scheduled wake.
       await execute('System.eventDisabled=false;')
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4'])
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       await advance(0)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4', 'paint:5', 'paint:6'])
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       await advance(15)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4', 'paint:5', 'paint:6'])
       await advance(1)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4', 'paint:5', 'paint:6', 'paint:7', 'paint:8'])
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
     } finally {
       await stop()
     }
@@ -257,7 +258,7 @@ root.update();snapshot.piledCopy(1,0,root,0,0,1,1);
         await session.evaluate('snapshot.getMainPixel(0,0)+","+snapshot.getMainPixel(1,0)'),
         '1,2',
       )
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
     } finally {
       await stop()
     }
@@ -273,10 +274,10 @@ System.eventDisabled=true;root.update();
     )
     try {
       assert.deepEqual(painted(), [])
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
       await execute('System.eventDisabled=false;')
       assert.deepEqual(painted(), ['paint:1'])
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
     } finally {
       await stop()
     }
@@ -296,17 +297,17 @@ var child=new PaintedLayer(win,root);child.update();
     )
     try {
       assert.deepEqual(painted(), ['paint:child', 'paint:child'])
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       await execute('delete global.child;')
       assert.deepEqual(painted(), ['paint:child', 'paint:child', 'paint:finalized'])
       assert.equal(session.snapshot().layers, 1)
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
       await advance()
       assert.deepEqual(painted(), ['paint:child', 'paint:child', 'paint:finalized'])
       await execute(
         'root.onPaint=function(){Debug.message("paint:root");root.update();};root.update();',
       )
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
     } finally {
       await stop()
     }
@@ -327,7 +328,7 @@ root.update();
     try {
       assert.deepEqual(painted(), ['paint:invalidated'])
       assert.equal(session.snapshot().layers, 0)
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
       assert.equal(await session.evaluate('isvalid root'), '0')
     } finally {
       await stop()
@@ -370,7 +371,7 @@ root.onPaint=function(){
       const rejected = assert.rejects(operation, /paint-failure/)
       await Promise.race([entered, operation])
       assert.deepEqual(painted(), ['paint:entered'])
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
       release()
       await rejected
       assert.deepEqual(painted(), ['paint:entered', 'paint:resumed'])
@@ -415,22 +416,22 @@ root.update();
     )
     try {
       assert.deepEqual(painted(), ['paint:1', 'paint:2'])
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       const operation = execute('root.update();')
       await Promise.race([entered, operation])
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3'])
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
       // Advance only the clock while the VM is intentionally suspended.
       clock.advance(16)
       release()
       await operation
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:resumed', 'paint:4'])
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       await advance(15)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:resumed', 'paint:4'])
       await advance(1)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:resumed', 'paint:4', 'paint:5'])
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
     } finally {
       release()
       await stop()
@@ -475,12 +476,12 @@ root.update();
       await session.idle()
       assert.equal(session.snapshot().state, 'running')
       assert.deepEqual(painted(), ['paint:1', 'paint:2'])
-      assert.equal(clock.pending, 0)
-      session.setActivity({ sequence: 2, state: 'visible', pauseWhenHidden: false })
       assert.equal(clock.pending, 1)
+      session.setActivity({ sequence: 2, state: 'visible', pauseWhenHidden: false })
+      assert.equal(clock.pending, 2)
       await advance()
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4'])
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
     } finally {
       release()
       await stop()
@@ -525,12 +526,12 @@ root.update();
       await operation
       await session.idle()
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4'])
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       await advance(15)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4'])
       await advance(1)
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3', 'paint:4', 'paint:5'])
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1)
     } finally {
       release()
       await stop()

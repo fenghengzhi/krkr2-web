@@ -1,6 +1,6 @@
 // Fixed SDK observations. Each scenario has a separate owned process; no
 // input is injected and no candidate ordering is used as a completion oracle.
-var nativeRows=[],nativeScenario="__NATIVE_SCENARIO__";
+var nativeRows=[],nativeScenario="__NATIVE_SCENARIO__",nativeWindow,nativeHidden,nativeTimer,nativeMenu;
 function nativeRecord(text){nativeRows.add(text);nativeRows.save("native-events.txt");}
 System.exceptionHandler=function(error){nativeRecord("error:"+error.message);System.exit();return true;};
 System.exitOnWindowClose=false;
@@ -15,9 +15,9 @@ if(nativeScenario=="plain-terminate"){
 }else if(nativeScenario=="plain-exit"){
   nativeExit();nativeRecord("startup-after");
 }else{
-  var nativeWindow=new Window();nativeWindow.caption="KRKR2 termination "+nativeScenario;nativeWindow.setInnerSize(320,240);nativeWindow.visible=true;
-  var nativeHidden=new Window();nativeHidden.caption="KRKR2 termination modal";
-  var nativeTimer=new Timer(global,"nativeTick");nativeTimer.enabled=false;nativeTimer.interval=100;
+  nativeWindow=new Window();nativeWindow.caption="KRKR2 termination "+nativeScenario;nativeWindow.setInnerSize(320,240);nativeWindow.visible=true;
+  nativeHidden=new Window();nativeHidden.caption="KRKR2 termination modal";
+  nativeTimer=new Timer(global,"nativeTick");nativeTimer.enabled=false;nativeTimer.interval=100;
   if(nativeScenario=="timer-terminate"){
     nativeTimer.enabled=true;nativeRecord("startup-waiting");
   }else if(nativeScenario=="terminate-before-modal"){
@@ -28,7 +28,7 @@ if(nativeScenario=="plain-terminate"){
     else if(nativeScenario=="timer-inform")System.inform("Termination observation",nativeWindow.caption);
     else if(nativeScenario=="timer-input")System.inputString(nativeWindow.caption,"Termination observation","initial");
     else if(nativeScenario=="timer-menu"){
-      var nativeMenu=new MenuItem(nativeWindow,"Termination popup");nativeWindow.menu.add(nativeMenu);nativeMenu.add(new MenuItem(nativeWindow,"Item"));
+      nativeMenu=new MenuItem(nativeWindow,"Termination popup");nativeWindow.menu.add(nativeMenu);nativeMenu.add(new MenuItem(nativeWindow,"Item"));
       nativeMenu.popup(0,20,30);
     }else throw new Exception("Unknown termination scenario");
     nativeRecord("modal-after");

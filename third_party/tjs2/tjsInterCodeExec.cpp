@@ -24,6 +24,7 @@
 #include "tjsOctPack.h"
 #include "tjsGlobalStringMap.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <csignal>
 #include <set>
@@ -644,155 +645,11 @@ namespace TJS {
 //---------------------------------------------------------------------------
 // tTJSVariantArrayStack
 //---------------------------------------------------------------------------
-// TODO: adjust TJS_VA_ONE_ALLOC_MIN
-#define TJS_VA_ONE_ALLOC_MAX 1024
-#define TJS_COMPACT_FREQ 10000
-    static tjs_int TJSCompactVariantArrayMagic = 0;
-    static std::mutex TJSVariantArrayStackMutex;
-    static std::set<tTJSVariantArrayStack *> TJSVariantArrayStacks;
+#include "tjsVariantArrayStack.inc"
 
-    //---------------------------------------------------------------------------
-    tTJSVariantArrayStack::tTJSVariantArrayStack() {
-        NumArraysAllocated = NumArraysUsing = 0;
-        Arrays = nullptr;
-        Current = nullptr;
-        OperationDisabledCount = 0;
-        CompactVariantArrayMagic = TJSCompactVariantArrayMagic;
-        std::lock_guard<std::mutex> lk(TJSVariantArrayStackMutex);
-        TJSVariantArrayStacks.insert(this);
-    }
-
-    //---------------------------------------------------------------------------
-    tTJSVariantArrayStack::~tTJSVariantArrayStack() {
-        OperationDisabledCount++;
-        tjs_int i;
-        for(i = 0; i < NumArraysAllocated; i++) {
-            delete[] Arrays[i].Array;
-        }
-        TJS_free(Arrays), Arrays = nullptr;
-        std::lock_guard<std::mutex> lk(TJSVariantArrayStackMutex);
-        TJSVariantArrayStacks.erase(this);
-    }
-
-    //---------------------------------------------------------------------------
-    void tTJSVariantArrayStack::IncreaseVariantArray(tjs_int num) {
-        if(NumArraysUsing == NumArraysAllocated) {
-            // Do not publish counts or discard the old descriptor table until
-            // both allocations succeed. Existing register pointers stay valid.
-            auto values = std::make_unique<tTJSVariant[]>(num);
-            auto* next = static_cast<tVariantArray*>(TJS_realloc(
-                Arrays, sizeof(tVariantArray) * (NumArraysUsing + 1)));
-            if(!next) TJS_eTJSError(TJSInsufficientMem);
-            Arrays = next;
-            Arrays[NumArraysUsing].Array = values.release();
-            Arrays[NumArraysUsing].Allocated = num;
-            ++NumArraysAllocated;
-        }
-        Current = Arrays + NumArraysUsing;
-        Current->Using = 0;
-        ++NumArraysUsing;
-    }
-
-    //---------------------------------------------------------------------------
-    void tTJSVariantArrayStack::DecreaseVariantArray() {
-        // decrease array block
-        NumArraysUsing--;
-        if(NumArraysUsing == 0)
-            Current = nullptr;
-        else
-            Current = Arrays + NumArraysUsing - 1;
-    }
-
-    //---------------------------------------------------------------------------
-    void tTJSVariantArrayStack::InternalCompact() {
-        // minimize variant array block
-        OperationDisabledCount++;
-        try {
-            while(NumArraysAllocated > NumArraysUsing) {
-                NumArraysAllocated--;
-                delete[] Arrays[NumArraysAllocated].Array;
-            }
-
-            if(Current) {
-                for(tjs_int i = Current->Using; i < Current->Allocated; i++)
-                    Current->Array[i].Clear();
-            }
-
-            if(NumArraysUsing == 0) {
-                if(Arrays)
-                    TJS_free(Arrays), Arrays = nullptr;
-                Current = nullptr;
-            } else {
-                tVariantArray *arraytmp = (tVariantArray *)TJS_realloc(
-                    Arrays, sizeof(tVariantArray) * (NumArraysUsing));
-                if(arraytmp != nullptr) {
-                    Arrays = arraytmp;
-                } else if(NumArraysUsing > 0) {
-                    TJS_eTJSError(TJSInternalError);
-                }
-
-                Current = Arrays + NumArraysUsing - 1;
-            }
-        } catch(...) {
-            OperationDisabledCount--;
-            throw;
-        }
-        OperationDisabledCount--;
-    }
-
-    //---------------------------------------------------------------------------
-    inline tTJSVariant *tTJSVariantArrayStack::Allocate(tjs_int num) {
-        //		tTJSCSH csh(CS);
-
-        if(!OperationDisabledCount && num < TJS_VA_ONE_ALLOC_MAX) {
-            if(!Current || Current->Using + num > Current->Allocated) {
-                IncreaseVariantArray(TJS_VA_ONE_ALLOC_MAX);
-            }
-            tTJSVariant *ret = Current->Array + Current->Using;
-            Current->Using += num;
-            return ret;
-        } else {
-            return new tTJSVariant[num];
-        }
-    }
-
-    //---------------------------------------------------------------------------
-    inline void tTJSVariantArrayStack::Deallocate(tjs_int num, tTJSVariant *ptr) {
-        // Keep this frame registered while values are cleared: a finalizer can
-        // suspend or reenter TJS and allocate another frame above this one.
-        std::exception_ptr failure;
-        for(tjs_int i = 0; i < num; ++i) {
-            try { ptr[i].Clear(); }
-            catch(...) { if(!failure) failure = std::current_exception(); }
-        }
-        if(!OperationDisabledCount && num < TJS_VA_ONE_ALLOC_MAX) {
-            Current->Using -= num;
-            if(Current->Using == 0) DecreaseVariantArray();
-        } else {
-            delete[] ptr; // Every element is now void, including throwing Clear.
-        }
-        if(!OperationDisabledCount && CompactVariantArrayMagic != TJSCompactVariantArrayMagic) {
-            try { Compact(); CompactVariantArrayMagic = TJSCompactVariantArrayMagic; }
-            catch(...) { if(!failure) failure = std::current_exception(); }
-        }
-        if(failure) std::rethrow_exception(failure);
-    }
-
-    //---------------------------------------------------------------------------
-    // static tjs_int TJSVariantArrayStackRefCount = 0;
-    //---------------------------------------------------------------------------
+    // The fixed engine used one global pool. This port owns one pool per tTJS.
     void tTJSInterCodeContext::TJSVariantArrayStackAddRef() {}
-
-    //---------------------------------------------------------------------------
     void tTJSInterCodeContext::TJSVariantArrayStackRelease() {}
-
-    //---------------------------------------------------------------------------
-    void TJSVariantArrayStackCompact() { TJSCompactVariantArrayMagic++; }
-
-    //---------------------------------------------------------------------------
-    void TJSVariantArrayStackCompactNow() {}
-    //---------------------------------------------------------------------------
-    //---------------------------------------------------------------------------
 
     //---------------------------------------------------------------------------
     // tTJSInterCodeContext ( class definitions are in

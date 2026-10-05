@@ -303,7 +303,12 @@ test('page suspension removes queued timer ticks while preserving the next remai
     await pending
     await session.idle()
     assert.equal(await session.evaluate('ticks'), '0')
-    assert.equal(Math.min(...[...tasks].map((task) => task.at)), 1200)
+    assert.deepEqual([...tasks].map((task) => task.at).sort((a, b) => a - b), [1150, 1200])
+    now = 1150
+    for (const task of [...tasks])
+      if (task.at <= now && tasks.delete(task)) task.callback()
+    await session.idle()
+    assert.equal(await session.evaluate('ticks'), '0', 'Maintenance must not deliver the user Timer early')
     now = 1200
     for (const task of [...tasks])
       if (task.at <= now) {

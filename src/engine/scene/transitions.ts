@@ -49,6 +49,9 @@ export class SceneTransitions {
   get active(): boolean {
     return this.states.size > 0
   }
+  get continuousActive(): boolean {
+    return [...this.states.values()].some((state) => !state.selfupdate)
+  }
   windowIds(): number[] {
     return [...new Set([...this.states.values()].flatMap((state) =>
       this.layers.has(state.destination) ? [this.layers.get(state.destination).windowId] : []))]

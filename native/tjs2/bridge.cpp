@@ -17,6 +17,7 @@
 #include "tjsObject.h"
 #include "tjsError.h"
 #include "tjsMessage.h"
+#include "tjsInterCodeExec.h"
 #include "tjsDictionary.h"
 #include "tjsArray.h"
 #include "tjsNative.h"
@@ -917,7 +918,7 @@ constexpr SystemMethodPolicy systemMethodPolicies[] = {
     {u"inform", 1}, {u"inputString", 3}, {u"toActualColor", 1 | 0x100}
 };
 constexpr const tjs_char* systemPropertyNames[] = {
-    u"eventDisabled", u"graphicCacheLimit", u"exitOnWindowClose", u"title"
+    u"eventDisabled", u"graphicCacheLimit", u"exitOnWindowClose", u"title", u"exitOnNoWindowStartup"
 };
 class SystemDelegate {
     Vm* vm;
@@ -1025,8 +1026,8 @@ public:
 
 // Run the engine's native collection hook on this TJS call stack. Calling the
 // external collect export from a suspended host import would reenter the VM.
-// This vendored engine reclaims free string blocks; its immediate stack-pool
-// hook is currently empty, so do not claim that active register pools shrink.
+// Completely unused register blocks and free string blocks can be reclaimed;
+// the addresses and values of all active or suspended registers stay intact.
 class SystemCompact final : public tTJSNativeClassMethod {
     Vm* vm;
     static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
@@ -1614,6 +1615,18 @@ API unsigned krkr_native_lifetime_stat(unsigned field) {
 }
 API unsigned krkr_vm_script_blocks(Vm* vm) { return vm->engine->GetScriptBlockCount(); }
 API unsigned krkr_vm_script_contexts(Vm* vm) { return vm->engine->GetScriptContextCount(); }
+// Read-only private diagnostics. Snapshotting counts neither executes TJS nor
+// retains objects; active registers may belong to a suspended native frame.
+API unsigned krkr_vm_variant_stack_stat(Vm* vm, unsigned field) {
+    const auto state = vm->engine->GetVariantArrayStack()->Inspect();
+    switch(field) {
+        case 0: return state.AllocatedBlocks;
+        case 1: return state.UsingBlocks;
+        case 2: return state.AllocatedSlots;
+        case 3: return state.UsingSlots;
+        default: return 0;
+    }
+}
 extern "C" void krkr_compiler_checkpoint() {
     if(!compilerPhase || shuttingDown || emscripten_get_now() < deadline) return;
     if(yield_host(compilerPhase)) throw krkr::ExecutionCancelled{};

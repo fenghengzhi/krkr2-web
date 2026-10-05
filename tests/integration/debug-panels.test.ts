@@ -6,6 +6,7 @@ test('Debug native panel classes keep identity, static members and read-only acc
   const { session, logs } = await headless({
     'startup.tjs': `
 var consoleObject=Debug.console,controllerObject=Debug.controller,denied=0;
+System.exitOnNoWindowStartup=false; // This no-Window diagnostic explicitly remains interactive.
 try{Debug.console=%[];}catch(e){denied++;}
 try{Debug.controller=null;}catch(e){denied++;}
 var consoleInstance=new Debug.console(),controllerInstance=new Debug.controller();

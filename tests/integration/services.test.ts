@@ -181,7 +181,7 @@ test('Timer capacity, zero interval, pause/resume and invalidation preserve even
     await session.idle()
     assert.equal(await session.evaluate('ticks'), '3')
     await session.evaluate('(function(){invalidate timer;return 0;})()')
-    assert.equal(clock.tasks.size, 0)
+    assert.equal(clock.tasks.size, 1, 'Only the live Session maintenance watch remains')
   } finally {
     await session.stop()
   }

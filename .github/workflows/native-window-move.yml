@@ -36,7 +36,7 @@ jobs:
             runner = $env:PROBE_RUNNER_LABEL; imageOS = $env:ImageOS; imageVersion = $env:ImageVersion
             scope = 'Owned HWND User32 synchronous SC_MOVE+2; controlled OS input, not physical hardware or VCL/Layer capture'
             globalInputUsed = $true; controlledSendInput = $true; physicalHardwareClaim = $false
-            expectedCases = 7; observedCases = 0; processDeadlineMs = 120000
+            expectedCases = 7; recordedCases = 0; observedCases = 0; failedCases = 0; processDeadlineMs = 120000
             startedAt = [DateTime]::UtcNow.ToString('o'); finishedAt = $null
             compilerExitCode = $null; processId = $null; exitCode = $null
             error = $null; cleanupError = $null
@@ -82,9 +82,16 @@ jobs:
               throw 'Owned beginMove process exceeded 120 seconds; partial journals remain evidence, not a native negative result.'
             }
             $status.exitCode = $process.ExitCode
+            $observationPath = Join-Path $output 'observations.json'
+            if (Test-Path -LiteralPath $observationPath) {
+              $observations = Get-Content -LiteralPath $observationPath -Raw | ConvertFrom-Json
+              $status.recordedCases = @($observations.cases).Count
+              $status.observedCases = @($observations.cases | Where-Object { $_.status -ceq 'observed' }).Count
+              $status.failedCases = @($observations.cases | Where-Object { $_.status -ceq 'failed' }).Count
+            }
             if ($process.ExitCode -ne 0) { throw "Window move reference exited with code $($process.ExitCode)." }
             $status.stage = 'evidence'
-            $observations = Get-Content -LiteralPath (Join-Path $output 'observations.json') -Raw | ConvertFrom-Json
+            $observations = Get-Content -LiteralPath $observationPath -Raw | ConvertFrom-Json
             if ($observations.schema -ne 1 -or $observations.completed -ne $true -or $observations.classCleanupConfirmed -ne $true -or
                 $observations.sourceCommit -cne $env:GITHUB_SHA -or $observations.expectedCases -ne 7 -or
                 $observations.observedCases -ne 7 -or $observations.cases.Count -ne 7 -or
@@ -106,6 +113,33 @@ jobs:
               if (@($events | Where-Object { $_.phase -eq 'before-synchronous-SendMessage' -and $_.wParam -eq '61458' -and $_.lParam -eq '0' }).Count -ne 1 -or
                   @($events | Where-Object { $_.phase -eq 'after-synchronous-SendMessage' }).Count -ne 1) {
                 throw "The exact synchronous SC_MOVE+2 call is not fully recorded: $($case.id)"
+              }
+              if ($case.leftButton) {
+                if ($case.inputPrepared -ne $true -or $case.neutralPointerObserved -ne $true -or
+                    $case.controlledLeftObserved -ne $true -or $case.leftDownInjections -ne 1) {
+                  throw "Held-button preconditions were not observed exactly once: $($case.id)"
+                }
+                $phases = @('prepare-controlled-input', 'owned-neutral-pointer-observed', 'controlled-left-down', 'owned-controlled-left-observed', 'before-synchronous-SendMessage')
+                $sequence = -1
+                foreach ($phase in $phases) {
+                  $records = @($events | Where-Object { $_.phase -ceq $phase })
+                  if ($records.Count -ne 1) { throw "Missing or repeated input precondition $phase for $($case.id)" }
+                  # SendInput may dispatch its target message before the calling
+                  # thread records its return. Order the down request, not return.
+                  $next = $records[0].sequence
+                  if ($phase -ceq 'controlled-left-down') {
+                    $requests = @($events | Where-Object { $_.phase -ceq 'controlled-mouse-request' -and ($_.details.flags -band 2) -ne 0 })
+                    if ($requests.Count -ne 1 -or $records[0].details.sent -ne 1 -or $records[0].details.requested -ne 1) {
+                      throw "The single controlled left down was not inserted: $($case.id)"
+                    }
+                    $next = $requests[0].sequence
+                  }
+                  if ($next -le $sequence) { throw "Input prerequisite order is invalid: $($case.id) $phase" }
+                  $sequence = $next
+                }
+              } elseif ($case.leftDownInjections -ne 0 -or $case.inputPrepared -ne $false -or
+                        $case.neutralPointerObserved -ne $false -or $case.controlledLeftObserved -ne $false) {
+                throw "A no-button scenario received held-button preparation: $($case.id)"
               }
             }
             $status.observedCases = 7; $status.state = 'observed'; $status.stage = 'complete'

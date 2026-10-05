@@ -506,6 +506,23 @@ std::vector<Fixture> fixtures() {
             for (bool alpha : {false, true}) addScalePolicy(shape.first, shape.second, alpha);
     }
     if (output.size() != 323) throw std::runtime_error("Dense scale boundary fixture inventory is incomplete");
+    // The dense boundary above is independently observed DIB data. Keep its
+    // 323 identities/bytes and add PNG holdouts on both sides before claiming
+    // that decoding a different encoding follows the same 65/66 scale branch.
+    for (unsigned extent : {65u, 66u}) {
+        for (const auto shape : {std::pair<unsigned, unsigned>{extent, extent},
+            {extent, 48}, {48, extent}, {extent, 13}, {13, extent}}) {
+            for (unsigned mode : {1u, 3u}) {
+                Image i; i.width = shape.first; i.height = shape.second;
+                i.hotX = i.width / 3; i.hotY = i.height / 4;
+                i.encoding = "png"; i.alphaMode = mode == 3 ? 3 : 0;
+                i.payload = png(i.width, i.height, mode);
+                add("png-scale-boundary-" + std::to_string(i.width) + "x" + std::to_string(i.height) +
+                    (mode == 3 ? "-alpha" : "-rgb"), {i}, "scaling");
+            }
+        }
+    }
+    if (output.size() != 343) throw std::runtime_error("PNG scale boundary holdout inventory is incomplete");
     return output;
 }
 

@@ -118,7 +118,7 @@ Debug.message("focus-game-ready");
       name: 'startup.tjs',
       mimeType: 'text/plain',
       buffer: Buffer.from(
-        'Debug.console.visible=false;Debug.controller.visible=false;Debug.message("hidden-startup");',
+        'System.exitOnNoWindowStartup=false;Debug.console.visible=false;Debug.controller.visible=false;Debug.message("hidden-startup");',
       ),
     })
     await expect(page.locator('#status')).toHaveText('运行中')

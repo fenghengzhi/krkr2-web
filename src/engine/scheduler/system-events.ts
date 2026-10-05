@@ -84,6 +84,8 @@ export class SystemEvents {
   private nextContinuous = 0
   private cancelWake?: () => void
   private frequency = 0
+  private externalContinuous = false
+  private externalRemovalPending = false
   private readonly pendingListeners = new Set<() => void>()
   private readonly admissionReservations = new Set<object>()
 
@@ -94,6 +96,24 @@ export class SystemEvents {
     private readonly changed: () => void,
     private readonly error: (message: string, handled: boolean) => void,
   ) {}
+
+  /** The native flag ends only after a continuous pass removes tombstones. */
+  get continuousActive(): boolean {
+    return this.entries.length > 0 || this.externalContinuous || this.externalRemovalPending
+  }
+  /** Layer transitions already have a frame clock. Only their final removed
+   * hook needs a cleanup pass through the same continuous event dispatcher. */
+  setExternalContinuous(active: boolean): void {
+    if (this.disposed || active === this.externalContinuous) return
+    this.externalContinuous = active
+    if (!active) {
+      this.externalRemovalPending = true
+      if (!this.entries.length && !this.cancelWake && !this.continuousPending)
+        this.nextContinuous = this.clock.now()
+      this.armContinuous()
+    }
+    this.notifyPending()
+  }
 
   /** Readiness for a fresh nested round, without taking jobs or invoking user predicates. */
   hasDispatchableWork(): boolean {
@@ -409,6 +429,7 @@ export class SystemEvents {
     // Compact only after walking the live list, so self-removal and appends do
     // not shift the index or suppress a newly registered callback in this pass.
     if (round.emptyContinuous) this.entries = this.entries.filter((entry) => entry.callback)
+    this.externalRemovalPending = false
     if (!this.entries.length) {
       this.cancelWake?.()
       this.cancelWake = undefined
@@ -586,7 +607,7 @@ export class SystemEvents {
     if (
       this.disposed ||
       this.paused ||
-      !this.entries.length ||
+      (!this.entries.length && !this.externalRemovalPending) ||
       this.cancelWake ||
       this.continuousPending
     )
@@ -629,6 +650,8 @@ export class SystemEvents {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.externalContinuous = false
+    this.externalRemovalPending = false
     this.admissionReservations.clear()
     this.cancelWake?.()
     this.cancelWake = undefined

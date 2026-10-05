@@ -424,7 +424,7 @@ layer.update();
       // Native Window delivery admits two entries for a self-invalidating
       // Window in each round; the remaining work keeps its normal deadline.
       assert.deepEqual(painted(), paintsThrough(2))
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2, 'Frame deadline plus Session maintenance watch')
       const save = f.open()
       assert.equal(f.session.inspectOwnership().modalWaits, 0)
       assert.deepEqual(painted(), paintsThrough(2), 'Opening a save does not create a VM turn')
@@ -434,7 +434,7 @@ layer.update();
       assert.deepEqual(painted(), paintsThrough(4))
       assert.equal(f.request().id, save.id)
       assert.equal(f.session.inspectOwnership().modalScopes, 1)
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       assert.equal(
         f.session.pad({
           ...f.identity(),
@@ -480,10 +480,10 @@ layer.update();
       assert.equal(clock.pending, 0)
       assert.equal(painted().length, 8, 'Host completion cannot override the game pause')
       f.session.resume()
-      assert.equal(clock.pending, 1)
+      assert.equal(clock.pending, 2)
       await advance(0)
       assert.deepEqual(painted(), paintsThrough(9))
-      assert.equal(clock.pending, 0)
+      assert.equal(clock.pending, 1, 'Only maintenance remains after the final paint')
     } finally {
       await f.session.stop()
     }

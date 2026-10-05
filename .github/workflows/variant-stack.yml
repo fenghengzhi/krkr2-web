@@ -1,0 +1,61 @@
+name: Native variant stack compaction
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  variant-stack:
+    name: Variant stack / ${{ matrix.sanitizer }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address-undefined, thread]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record the exact hosted compiler and source
+        run: |
+          mkdir -p out/ci/variant-stack
+          git rev-parse HEAD > out/ci/variant-stack/commit.txt
+          c++ --version > out/ci/variant-stack/compiler.txt
+          uname -a > out/ci/variant-stack/kernel.txt
+          sha256sum third_party/tjs2/tjsVariantArrayStack.inc tests/native/variant-stack.cpp > out/ci/variant-stack/sources.sha256
+      - name: Build the production pool with instrumented variant and allocator hooks
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+        run: |
+          sanitizer=address,undefined
+          if [[ "$SANITIZER" == thread ]]; then sanitizer=thread; fi
+          c++ -std=c++17 -O1 -g -pthread -fsanitize="$sanitizer" -fno-omit-frame-pointer \
+            -Ithird_party/tjs2 tests/native/variant-stack.cpp -o out/ci/variant-stack/probe \
+            2>&1 | tee out/ci/variant-stack/build.log
+      - name: Run the bounded allocation, reentry and concurrency checks
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=5s 60s out/ci/variant-stack/probe 2>&1 | tee out/ci/variant-stack/run.log
+          pipeline_status=("${PIPESTATUS[@]}")
+          probe_status=${pipeline_status[0]}
+          printf '%s\n' "$probe_status" > out/ci/variant-stack/exit-code.txt
+          if [[ "${pipeline_status[1]}" -ne 0 ]]; then exit "${pipeline_status[1]}"; fi
+          exit "$probe_status"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: variant-stack-${{ matrix.sanitizer }}-${{ github.run_attempt }}
+          path: out/ci/variant-stack
+          if-no-files-found: error
+          retention-days: 30

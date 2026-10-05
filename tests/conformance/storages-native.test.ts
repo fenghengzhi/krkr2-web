@@ -81,7 +81,7 @@ async function fixture(binary: boolean, source: string) {
 test('native Storages capability coexists with native System version 4 and Clipboard support', async () => {
   assert.equal(manifest.abi, 5)
   assert.equal(manifest.capabilities?.nativeStorages, 2)
-  assert.equal(manifest.capabilities?.nativeSystem, 4)
+  assert.equal(manifest.capabilities?.nativeSystem, 5)
   assert.equal(manifest.capabilities?.nativeClipboard, 1)
 })
 

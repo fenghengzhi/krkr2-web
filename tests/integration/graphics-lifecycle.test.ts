@@ -45,7 +45,7 @@ var clicks=0;root.onClick=function(){clicks++;};
 test('graphics recovery preserves automatic transition phase and its completion callback', async () => {
   const surface = new Surface()
   let now = 0
-  const scheduled = new Set<() => void>()
+  const scheduled = new Set<{ at: number; callback: () => void }>()
   const { session } = await headless(
     {
       'startup.tjs':
@@ -60,23 +60,22 @@ front.onTransitionCompleted=function(){completed++;};front.beginTransition("cros
     {
       renderer: surface,
       now: () => now,
-      schedule(callback) {
-        scheduled.add(callback)
+      schedule(callback, delay) {
+        const task = { at: now + delay, callback }
+        scheduled.add(task)
         return () => {
-          scheduled.delete(callback)
+          scheduled.delete(task)
         }
       },
     },
   )
   const advance = async (value: number) => {
     now = value
-    const callback = scheduled.values().next().value
-    if (callback) {
-      scheduled.delete(callback)
-      callback()
-      await session.idle()
-      await new Promise((resolve) => setTimeout(resolve, 0))
+    for (const task of [...scheduled].sort((a, b) => a.at - b.at)) {
+      if (task.at <= now && scheduled.delete(task)) task.callback()
     }
+    await session.idle()
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
   try {
     await session.start()
@@ -191,13 +190,17 @@ var ticks=0;var timer=new Timer(function(){ticks++;},"");timer.interval=100;time
     now = 1040
     surface.change('restoring')
     session.present()
-    assert.equal(Math.min(...[...scheduled].map((task) => task.at)), 1100)
+    assert.deepEqual([...scheduled].map((task) => task.at).sort((a, b) => a - b), [1090, 1100])
+    // The watch resumes after 50 ms; the user Timer keeps its remaining 60 ms.
+    now = 1090
+    for (const task of [...scheduled])
+      if (task.at <= now && scheduled.delete(task)) task.callback()
+    await session.idle()
+    assert.equal(await session.evaluate('ticks'), '0')
+    assert.deepEqual([...scheduled].map((task) => task.at).sort((a, b) => a - b), [1100, 1140])
     now = 1100
     for (const task of [...scheduled])
-      if (task.at <= now) {
-        scheduled.delete(task)
-        task.callback()
-      }
+      if (task.at <= now && scheduled.delete(task)) task.callback()
     await session.idle()
     assert.equal(await session.evaluate('ticks'), '1')
   } finally {

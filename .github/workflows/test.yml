@@ -178,6 +178,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/prepare-tests
+        id: prepare
       - name: Preserve native process crash diagnostics
         run: |
           # Installing gdb after a crash can upgrade libc and make the core's
@@ -197,6 +198,16 @@ jobs:
             --test-reporter=tap --test-reporter-destination=out/ci/node.tap \
             --test-reporter=./scripts/record-node-test-events.mjs --test-reporter-destination=stdout \
             tests/conformance/*.test.ts tests/integration/*.test.ts 2>&1 | tee out/ci/node.log
+      - name: Check variant pool reclamation through the JSPI kernel
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        env:
+          KRKR_VARIANT_STACK_VARIANT: jspi
+        run: |
+          ulimit -c unlimited
+          node --experimental-wasm-jspi --import tsx --import ./scripts/record-node-test-process.mjs --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination=out/ci/variant-stack-jspi.tap \
+            tests/conformance/variant-stack.test.ts 2>&1 | tee out/ci/variant-stack-jspi.log
       - name: Record backtraces for any terminated Node process
         if: always()
         run: |
@@ -510,7 +521,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, lifetime-runtime-reference]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -552,6 +563,11 @@ jobs:
     name: Native System termination reference
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     uses: ./.github/workflows/native-termination.yml
+
+  variant-stack-reference:
+    name: Native variant stack compaction
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    uses: ./.github/workflows/variant-stack.yml
 
   lifetime-runtime-reference:
     name: Layer lifetime host runtime diagnosis

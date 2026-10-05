@@ -6,6 +6,7 @@ import { clipboardClass } from './tvp/clipboard.ts'
 import { assertClipboardText, unavailableClipboard, type ClipboardPort } from './ports/clipboard.ts'
 import { unavailableHelp, type HelpPort } from './ports/help.ts'
 import { getWebLocalName, openHelpDocument } from './system/help.ts'
+import { SystemMaintenance } from './system/maintenance.ts'
 import { ScriptTextEncoding } from './script/text-encoding.ts'
 import { debugBridge } from './tvp/debug.ts'
 import { DebugLog } from './diagnostics/log.ts'
@@ -445,8 +446,13 @@ export class EngineSession {
   private disposalPromise?: Promise<void>
   private exitRequested = false
   private exitOnWindowClose = true
+  private exitOnNoWindowStartup = true
   private exitAfterOperation = false
   private terminateRequested = false
+  private maintenance?: SystemMaintenance
+  private compactCallback?: ScriptObject
+  private pendingCompact = 0
+  private compactQueued = false
   private readonly cancellationErrors: unknown[] = []
   private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
@@ -534,6 +540,8 @@ export class EngineSession {
     )
     this.control.onCancel(() => {
       this.terminateRequested = false
+      this.pendingCompact = 0
+      this.maintenance?.close()
       for (const drop of this.pendingFileDrops.values()) { drop.cancelled = true; drop.cancelWait() }
       this.pendingFileDrops.clear()
       this.fileDropReceiptReservations.clear()
@@ -703,6 +711,7 @@ export class EngineSession {
           return this.requestFrameCheckpoint()
         },
         (id, invalidation = true) => {
+          this.systemEvents?.setExternalContinuous(this.transitions?.continuousActive ?? false)
           if (invalidation) this.invalidateLayer(id)
           else this.dirty = true
         },
@@ -1019,6 +1028,15 @@ export class EngineSession {
       this.discard(await this.runtime.execute(soundClasses, 'krkr2-web/sound.tjs'))
       this.discard(await this.runtime.execute(videoClass, 'krkr2-web/video.tjs'))
       this.setState('ready')
+      if (!this.control.cancelled) {
+        const maintenance = new SystemMaintenance(
+          { now: this.deps.now, schedule: this.deps.schedule },
+          () => this.systemEvents?.continuousActive ?? false,
+          (level) => this.requestAutomaticCompact(level),
+        )
+        this.maintenance = maintenance
+        if (this.control.cancelled) maintenance.close()
+      }
     })
   }
   mount(resources: Resource[]): void {
@@ -1037,14 +1055,14 @@ export class EngineSession {
         await this.deps.decodeScript(await resource.read(), '', this.textEncoding.codec),
         resource.name,
       )
-    }).then(() => undefined)
+    }, 1, true).then(() => undefined)
   }
   evaluate(source: string): Promise<string> {
     if (!['ready', 'running'].includes(this.state))
       return Promise.reject(new Error('Session cannot evaluate scripts in its current state'))
     return this.execute(() => this.runtime!.execute(source, 'console.tjs', true))
   }
-  private execute(operation: () => Promise<ScriptValue>, priority: 0 | 1 | 2 = 1): Promise<string> {
+  private execute(operation: () => Promise<ScriptValue>, priority: 0 | 1 | 2 = 1, startup = false): Promise<string> {
     return this.queue.enqueue(async () => {
       await this.control.wait()
       this.control.check()
@@ -1054,9 +1072,17 @@ export class EngineSession {
         recorded = false
       try {
         let value: ScriptValue = undefined,
-          display = 'undefined'
+          display = 'undefined',
+          exitAfterStartup = false
         try {
+          const compact = this.takeAutomaticCompact()
+          if (compact.kind === 'invoke')
+            this.discard(await this.runtime!.invoke(compact.callback, compact.args))
           value = await operation()
+          // Sample at the startup entry's return. A later onPaint/focus tail
+          // is not part of TVPInitializeStartupScript's Window-count check.
+          exitAfterStartup = startup && this.exitOnNoWindowStartup &&
+            !this.windows!.registered().length && !this.debugPanels.get('controller')
           await this.outerNativeCheckpoint()
           await this.inputs?.synchronize()
           if (
@@ -1120,6 +1146,7 @@ export class EngineSession {
             this.log('Deferred cleanup failed: ' + String(closingError), 'error')
           }
         }
+        if (exitAfterStartup) this.terminateRequested = true
         this.attemptedFrameVersion = this.frameWorkVersion
         this.present()
         this.notify()
@@ -1182,6 +1209,30 @@ export class EngineSession {
     void this.stop().catch((error) => {
       this.deps.event({ type: 'log', level: 'error', text: String(error) })
     })
+  }
+  /** Compact listeners do not expose a user event. While the VM is suspended,
+   * retain only the strongest requested level; it includes weaker cache work.
+   * The private original native method runs at a safe outer or modal boundary. */
+  private requestAutomaticCompact(level: number): void {
+    if (this.control.cancelled || !this.compactCallback) return
+    this.pendingCompact = Math.max(this.pendingCompact, level)
+    this.modalWakeup?.()
+    if (this.compactQueued) return
+    this.compactQueued = true
+    void this.execute(async () => undefined, 0).then(() => {
+      this.compactQueued = false
+      if (this.pendingCompact) this.requestAutomaticCompact(this.pendingCompact)
+    }, (error) => {
+      this.compactQueued = false
+      if (!this.control.cancelled) this.fail(error)
+    })
+  }
+  private takeAutomaticCompact(): HostReply {
+    if (this.control.cancelled || !this.pendingCompact || !this.compactCallback)
+      return { kind: 'value', value: undefined }
+    const level = this.pendingCompact
+    this.pendingCompact = 0
+    return { kind: 'invoke', callback: this.compactCallback, args: [BigInt(level)] }
   }
   /** This method is only called after an exported VM operation has returned.
    * Unlike a child host call, that return proves even an enclosing native drain
@@ -1569,6 +1620,7 @@ export class EngineSession {
         ['stopping', 'stopped', 'failed'].includes(this.state)) return ignoredAdmission()
     const active = value.active
     this.applicationActivation = { ...value }
+    if (!active) this.requestAutomaticCompact(10)
     if (!['running', 'paused'].includes(this.state)) return ignoredAdmission()
     return this.acceptEvent(() => this.systemEvents!.application(active), {
       source: this.applicationEventSource, replace: true, priority: 1, discardable: false,
@@ -1588,6 +1640,7 @@ export class EngineSession {
         !(this.graphicsStatus.state === 'restoring' && this.graphicsStatus.pending === true)) ||
       activityPaused(this.activity)
     if (paused === (this.state === 'paused')) return
+    this.maintenance?.setPaused(paused)
     if (paused) {
       this.windowMoves?.cancel()
       this.clearVirtualCursors()
@@ -2373,12 +2426,14 @@ export class EngineSession {
   hasModalWork(): boolean {
     if (this.control.cancelled || this.control.paused) return false
     return (
+      this.pendingCompact > 0 ||
       !!this.systemEvents?.hasDispatchableWork() ||
       (!this.nativeReleasesPending() && (this.hasOutsideReceipts() || this.hasPendingFrameWork()))
     )
   }
   beginModalDispatch(): HostReply {
     if (!this.hasModalWork()) return { kind: 'value', value: undefined }
+    if (this.pendingCompact) return this.takeAutomaticCompact()
     if (this.hasOutsideReceipts() && !this.nativeReleasesPending())
       return this.beginCheckpoint(undefined)
     if (this.systemEvents?.disabled) return this.beginCheckpoint(undefined, true, false)
@@ -3821,6 +3876,11 @@ export class EngineSession {
       await attempt(() => this.pads?.dispose())
       await attempt(() => this.modalLoop?.dispose())
       await attempt(() => {
+        const callback = this.compactCallback
+        this.compactCallback = undefined
+        if (callback) this.runtime?.release(callback)
+      })
+      await attempt(() => {
         this.detachPendingEvents?.()
         this.detachPendingEvents = undefined
         this.setModalWakeup(undefined)
@@ -4056,6 +4116,11 @@ export class EngineSession {
       return { kind: 'value', value: undefined }
     }
     if (operation === 'System.class') return { kind: 'value', value: systemClassValue(args) }
+    if (operation === 'System.bindCompact') {
+      if (this.compactCallback || !isScriptObject(args[0])) throw new Error('Invalid native compact binding')
+      this.compactCallback = context.retain(args[0])
+      return { kind: 'value', value: undefined }
+    }
     if (operation === 'System.createUUID')
       return { kind: 'value', value: this.systemEnvironment.createUUID() }
     if (operation === 'System.get') {
@@ -4415,6 +4480,10 @@ export class EngineSession {
       case 'System.exitOnWindowClose':
         if (args.length) this.exitOnWindowClose = !!number(0)
         value = this.exitOnWindowClose ? 1n : 0n
+        break
+      case 'System.exitOnNoWindowStartup':
+        if (args.length) this.exitOnNoWindowStartup = !!clipInteger(0)
+        value = this.exitOnNoWindowStartup ? 1n : 0n
         break
       case 'Scripts.class':
         return { kind: 'value', value: { type: 'native-class', name: 'Scripts' } }

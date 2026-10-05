@@ -9,12 +9,21 @@
 // Intermediate Code Execution
 //---------------------------------------------------------------------------
 #pragma once
+#include <cstdint>
+#include <mutex>
 
 namespace TJS {
 
     extern void TJSVariantArrayStackCompact();
 
     extern void TJSVariantArrayStackCompactNow();
+
+    struct tTJSVariantArrayStackStats {
+        tjs_uint AllocatedBlocks = 0;
+        tjs_uint UsingBlocks = 0;
+        tjs_uint AllocatedSlots = 0;
+        tjs_uint UsingSlots = 0;
+    };
 
     class tTJSVariantArrayStack {
 
@@ -28,8 +37,9 @@ namespace TJS {
         tjs_int NumArraysAllocated;
         tjs_int NumArraysUsing;
         tVariantArray *Current;
-        tjs_int CompactVariantArrayMagic;
+        std::uint64_t CompactVariantArrayMagic;
         tjs_int OperationDisabledCount;
+        mutable std::mutex MetadataMutex;
 
         void IncreaseVariantArray(tjs_int num);
 
@@ -46,7 +56,9 @@ namespace TJS {
 
         void Deallocate(tjs_int num, tTJSVariant *ptr);
 
-        void Compact() { InternalCompact(); }
+        void Compact();
+
+        tTJSVariantArrayStackStats Inspect() const;
     };
     //---------------------------------------------------------------------------
 } // namespace TJS

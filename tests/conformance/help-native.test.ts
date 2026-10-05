@@ -68,7 +68,7 @@ async function execute(vm: TjsWasmRuntime, binary: boolean, source: string) {
 test('native Help is independently advertised without changing System or Storages', async () => {
   assert.equal(manifest.abi, 5)
   assert.equal(manifest.capabilities?.nativeHelp, 1)
-  assert.equal(manifest.capabilities?.nativeSystem, 4)
+  assert.equal(manifest.capabilities?.nativeSystem, 5)
   assert.equal(manifest.capabilities?.nativeStorages, 2)
 })
 

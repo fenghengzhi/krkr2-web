@@ -75,7 +75,7 @@ fore.beginTransition("crossfade",false,back,%[time:1000,selfupdate:true]);
 })
 test('automatic transition time freezes during pause and pending callbacks disappear on stop', async () => {
   let now = 0
-  const scheduled = new Set<() => void>()
+  const scheduled = new Set<{ at: number; callback: () => void }>()
   const { session } = await headless(
     {
       'startup.tjs':
@@ -86,23 +86,22 @@ fore.beginTransition("crossfade",true,back,%[time:100]);
     },
     {
       now: () => now,
-      schedule: (callback) => {
-        scheduled.add(callback)
+      schedule: (callback, delay) => {
+        const task = { at: now + delay, callback }
+        scheduled.add(task)
         return () => {
-          scheduled.delete(callback)
+          scheduled.delete(task)
         }
       },
     },
   )
   const advance = async (value: number) => {
     now = value
-    const callback = scheduled.values().next().value
-    if (callback) {
-      scheduled.delete(callback)
-      callback()
-      await session.idle()
-      await new Promise((resolve) => setTimeout(resolve, 0))
+    for (const task of [...scheduled].sort((a, b) => a.at - b.at)) {
+      if (task.at <= now && scheduled.delete(task)) task.callback()
     }
+    await session.idle()
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
   try {
     await session.start()

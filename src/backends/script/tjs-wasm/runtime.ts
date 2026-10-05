@@ -234,7 +234,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
           value.id !== 0 ||
           value.className !== 'System' ||
           (value.systemMethods?.length ?? 0) > 14 ||
-          (value.systemProperties?.length ?? 0) > 4
+      (value.systemProperties?.length ?? 0) > 5
         )
           throw new Error('Invalid System class delegates')
         if (

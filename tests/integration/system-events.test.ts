@@ -77,7 +77,7 @@ System.addContinuousHandler(a);System.addContinuousHandler(a);System.addContinuo
     clock.advance(7)
     await session.idle()
     assert.equal(await session.evaluate('order'), 'A7,C7,')
-    assert.equal(clock.tasks.size, 0)
+    assert.equal(clock.tasks.size, 1)
     await session.evaluate(
       'Scripts.exec(' +
         JSON.stringify(
@@ -91,7 +91,7 @@ System.addContinuousHandler(a);System.addContinuousHandler(a);System.addContinuo
     // Native self-removal leaves tombstones until the next empty delivery.
     clock.advance(1)
     await session.idle()
-    assert.equal(clock.tasks.size, 0)
+    assert.equal(clock.tasks.size, 1)
   } finally {
     await session.stop()
   }
@@ -118,7 +118,7 @@ test('a failed continuous callback is removed and disables events while preservi
     clock.advance(1)
     await session.idle()
     assert.equal(session.snapshot().eventDisabled, false)
-    assert.equal(clock.tasks.size, 0)
+    assert.equal(clock.tasks.size, 1)
   } finally {
     await session.stop()
   }
@@ -147,7 +147,7 @@ System.addContinuousHandler(negative);System.addContinuousHandler(%[]);System.ad
     await session.evaluate('System.removeContinuousHandler(negative)')
     clock.advance(1)
     await session.idle()
-    assert.equal(clock.tasks.size, 0)
+    assert.equal(clock.tasks.size, 1)
     assert.deepEqual(logs, [])
   } finally {
     await session.stop()

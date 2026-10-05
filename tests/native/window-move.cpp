@@ -21,7 +21,8 @@
 #include <vector>
 
 namespace fs = std::filesystem;
-constexpr UINT Begin = WM_APP + 41, Finish = WM_APP + 42;
+constexpr UINT Begin = WM_APP + 41, Finish = WM_APP + 42, PrepareInput = WM_APP + 43;
+constexpr ULONG_PTR ControlledInputTag = 0x4b4d4f56;
 constexpr wchar_t ClassName[] = L"KrkrHostedWindowMoveReference";
 const char* boolean(bool value) { return value ? "true" : "false"; }
 std::string quote(const std::string& value) {
@@ -69,10 +70,15 @@ struct State {
     OwnedHandle entered{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     OwnedHandle returned{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     OwnedHandle buttonSeen{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+    OwnedHandle inputPrepared{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+    OwnedHandle neutralSeen{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     OwnedHandle movingSeen{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     std::atomic<HWND> window{nullptr}, child{nullptr};
     std::atomic<DWORD> threadId{0};
     std::atomic<bool> failed{false}, invoked{false}, inCommand{false}, didReturn{false};
+    std::atomic<bool> prepared{false}, neutralObserved{false}, controlledDownObserved{false};
+    std::atomic<LONG> inputX{0}, inputY{0};
+    std::atomic<unsigned> leftDownInjections{0};
     std::atomic<unsigned> enters{0}, exits{0}, moves{0}, moving{0}, captureChanges{0};
     unsigned records = 0;
     RECT before{}, after{};
@@ -80,7 +86,8 @@ struct State {
     SHORT asyncButtonBefore = 0, queuedButtonBefore = 0;
     LRESULT returnValue = 0;
     State(Scenario config, const fs::path& output) : scenario(config), journal(output / (std::string(config.id) + ".jsonl"), std::ios::binary) {
-        if (!journal || !ready.value || !entered.value || !returned.value || !buttonSeen.value || !movingSeen.value)
+        if (!journal || !ready.value || !entered.value || !returned.value || !buttonSeen.value ||
+            !inputPrepared.value || !neutralSeen.value || !movingSeen.value)
             throw std::runtime_error("Cannot create owned observation resources");
     }
     void record(const char* phase, HWND source = nullptr, UINT message = 0, WPARAM wp = 0, LPARAM lp = 0,
@@ -98,6 +105,7 @@ struct State {
           << ",\"lParam\":" << quote(std::to_string(static_cast<long long>(lp)))
           << ",\"inCommand\":" << boolean(inCommand.load()) << ",\"getCapture\":" << handle(GetCapture())
           << ",\"guiOk\":" << boolean(guiOk) << ",\"guiCapture\":" << handle(gui.hwndCapture)
+          << ",\"guiActive\":" << handle(gui.hwndActive) << ",\"guiFocus\":" << handle(gui.hwndFocus)
           << ",\"foreground\":" << handle(GetForegroundWindow())
           << ",\"asyncLeft\":" << GetAsyncKeyState(VK_LBUTTON) << ",\"queuedLeft\":" << GetKeyState(VK_LBUTTON)
           << ",\"rectOk\":" << boolean(rectOk) << ",\"rect\":" << rectangle(rect)
@@ -107,6 +115,23 @@ struct State {
     }
     void error(const char* reason) { failed = true; record("error", nullptr, 0, 0, 0, quote(reason)); }
 };
+// This is only the visible, enabled held-button stimulus precondition. Hidden,
+// disabled and no-activate cases retain their original no-button observations.
+bool controlledTargetReady(const State& s) {
+    const HWND hwnd = s.window.load(), child = s.child.load();
+    GUITHREADINFO gui{sizeof(gui)}; POINT cursor{}; DWORD process = 0;
+    return hwnd && child && GetWindowThreadProcessId(hwnd, &process) == s.threadId.load() &&
+        process == GetCurrentProcessId() && GetParent(child) == hwnd &&
+        GetForegroundWindow() == hwnd && GetGUIThreadInfo(s.threadId.load(), &gui) &&
+        gui.hwndActive == hwnd && gui.hwndFocus == hwnd && gui.hwndCapture == child &&
+        GetCursorPos(&cursor) && std::abs(cursor.x - s.inputX.load()) <= 1 &&
+        std::abs(cursor.y - s.inputY.load()) <= 1 && WindowFromPoint(cursor) == child;
+}
+bool deliveredAtTarget(const State& s, HWND hwnd, LPARAM lp) {
+    POINT point{static_cast<short>(LOWORD(lp)), static_cast<short>(HIWORD(lp))};
+    return hwnd == s.child.load() && ClientToScreen(hwnd, &point) &&
+        std::abs(point.x - s.inputX.load()) <= 1 && std::abs(point.y - s.inputY.load()) <= 1;
+}
 LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     State* state = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -124,11 +149,57 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     case WM_MOVE: ++state->moves; state->record("WM_MOVE", hwnd, message, wp, lp); break;
     case WM_CAPTURECHANGED: ++state->captureChanges; state->record("WM_CAPTURECHANGED", hwnd, message, wp, lp); break;
     case WM_SYSCOMMAND: state->record("WM_SYSCOMMAND", hwnd, message, wp, lp); break;
-    case WM_MOUSEMOVE: state->record("WM_MOUSEMOVE", hwnd, message, wp, lp); break;
-    case WM_LBUTTONDOWN: state->record("WM_LBUTTONDOWN", hwnd, message, wp, lp); SetEvent(state->buttonSeen.value); break;
+    case WM_ACTIVATEAPP: case WM_ACTIVATE: case WM_SETFOCUS: case WM_KILLFOCUS:
+        state->record("activation-or-focus", hwnd, message, wp, lp); break;
+    case WM_MOUSEMOVE:
+        state->record("WM_MOUSEMOVE", hwnd, message, wp, lp);
+        if (state->prepared && !state->neutralObserved && GetMessageExtraInfo() == static_cast<LPARAM>(ControlledInputTag) &&
+            deliveredAtTarget(*state, hwnd, lp) && controlledTargetReady(*state) &&
+            !(wp & MK_LBUTTON) && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000) && !(GetKeyState(VK_LBUTTON) & 0x8000)) {
+            state->neutralObserved = true;
+            state->record("owned-neutral-pointer-observed", hwnd, message, wp, lp);
+            SetEvent(state->neutralSeen.value);
+        }
+        break;
+    case WM_LBUTTONDOWN:
+        state->record("WM_LBUTTONDOWN", hwnd, message, wp, lp);
+        if (state->neutralObserved && GetMessageExtraInfo() == static_cast<LPARAM>(ControlledInputTag) &&
+            deliveredAtTarget(*state, hwnd, lp) && controlledTargetReady(*state) && (wp & MK_LBUTTON) &&
+            (GetAsyncKeyState(VK_LBUTTON) & 0x8000) && (GetKeyState(VK_LBUTTON) & 0x8000)) {
+            state->controlledDownObserved = true;
+            state->record("owned-controlled-left-observed", hwnd, message, wp, lp);
+            SetEvent(state->buttonSeen.value);
+        }
+        break;
     case WM_LBUTTONUP: case WM_KEYDOWN: case WM_KEYUP: case WM_CANCELMODE:
         state->record("input-or-cancel", hwnd, message, wp, lp); break;
+    case PrepareInput: {
+        // The initial neutral SendInput has completed before this owner-thread
+        // request. Do not combine the first desktop move with the left press:
+        // launcher activation may still revoke the startup capture during it.
+        if (hwnd != state->window.load() || !state->scenario.leftButton ||
+            !state->scenario.visible || state->scenario.disabled || state->scenario.noActivate || state->prepared) {
+            state->error("Invalid or repeated controlled input preparation");
+        } else {
+            const bool requested = SetForegroundWindow(hwnd) != FALSE;
+            SetFocus(hwnd); SetCapture(state->child.load());
+            GUITHREADINFO gui{sizeof(gui)};
+            const bool ready = GetForegroundWindow() == hwnd && GetGUIThreadInfo(state->threadId.load(), &gui) &&
+                gui.hwndActive == hwnd && gui.hwndFocus == hwnd && gui.hwndCapture == state->child.load() &&
+                !(GetAsyncKeyState(VK_LBUTTON) & 0x8000) && !(GetKeyState(VK_LBUTTON) & 0x8000);
+            state->record("prepare-controlled-input", hwnd, message, wp, lp,
+                "{\"foregroundRequested\":" + std::string(boolean(requested)) + ",\"ready\":" + boolean(ready) + "}");
+            if (ready) state->prepared = true;
+            else state->error("Owned foreground, focus, capture or neutral button preparation failed");
+        }
+        SetEvent(state->inputPrepared.value); return 0;
+    }
     case Begin: {
+        if (state->scenario.leftButton && (state->failed || !state->controlledDownObserved ||
+            !controlledTargetReady(*state) || !(GetAsyncKeyState(VK_LBUTTON) & 0x8000) || !(GetKeyState(VK_LBUTTON) & 0x8000))) {
+            state->error("Owned controlled input precondition changed before synchronous command");
+            SetEvent(state->returned.value); return 0;
+        }
         state->invoked = true;
         GetWindowRect(hwnd, &state->before);
         state->captureBeforeChild = GetCapture() == state->child.load();
@@ -211,6 +282,10 @@ bool mouse(State& s, POINT point, DWORD button, const char* phase) {
     input.mi.dx = static_cast<LONG>((static_cast<long long>(point.x - left) * 65535) / (width - 1));
     input.mi.dy = static_cast<LONG>((static_cast<long long>(point.y - top) * 65535) / (height - 1));
     input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | button;
+    input.mi.dwExtraInfo = ControlledInputTag;
+    if (button & MOUSEEVENTF_LEFTDOWN) {
+        if (++s.leftDownInjections != 1) { s.error("Repeated controlled left down is forbidden"); return false; }
+    }
     s.record("controlled-mouse-request", nullptr, 0, 0, 0,
         "{\"x\":" + std::to_string(point.x) + ",\"y\":" + std::to_string(point.y) +
         ",\"normalizedX\":" + std::to_string(input.mi.dx) + ",\"normalizedY\":" + std::to_string(input.mi.dy) +
@@ -247,11 +322,23 @@ std::string observe(const Scenario& scenario, const fs::path& output) {
     if (!wait(s.ready.value, 3000)) s.error("Owned UI setup deadline exceeded");
     HWND hwnd = s.window.load(); POINT start{30, 30};
     if (!s.failed && ClientToScreen(hwnd, &start)) {
-        const bool sent = mouse(s, start, scenario.leftButton ? MOUSEEVENTF_LEFTDOWN : 0, "controlled-initial-pointer");
-        if (sent && !cursorReached(start)) s.error("Controlled initial pointer did not reach its declared screen position");
-        // A held-button case must observe its actual input message in the owner
-        // queue before calling BeginMove, so GetKeyState is not stale.
-        if (sent && scenario.leftButton && !wait(s.buttonSeen.value, 1000)) s.error("Controlled left down was not observed by owned child");
+        s.inputX = start.x; s.inputY = start.y;
+        const POINT initial{start.x - (scenario.leftButton ? 2 : 0), start.y};
+        const bool positioned = mouse(s, initial, 0, "controlled-initial-neutral-pointer");
+        if (positioned && !cursorReached(initial)) s.error("Controlled initial pointer did not reach its declared screen position");
+        if (!s.failed && scenario.leftButton) {
+            if (!PostMessageW(hwnd, PrepareInput, 0, 0)) s.error("Could not schedule owned input preparation");
+            else if (!wait(s.inputPrepared.value, 1000)) s.error("Owned input preparation deadline exceeded");
+            if (!s.failed) {
+                const bool moved = mouse(s, start, 0, "controlled-neutral-pointer");
+                if (moved && !wait(s.neutralSeen.value, 1000)) s.error("Owned child did not observe the tagged neutral pointer before deadline");
+            }
+            if (!s.failed && !controlledTargetReady(s)) s.error("Owned input target changed before controlled left down");
+            if (!s.failed) {
+                const bool pressed = mouse(s, start, MOUSEEVENTF_LEFTDOWN, "controlled-left-down");
+                if (pressed && !wait(s.buttonSeen.value, 1000)) s.error("Controlled left down was not observed by owned child");
+            }
+        }
         if (!s.failed) {
             if (!PostMessageW(hwnd, Begin, 0, 0)) s.error("Could not schedule owned synchronous command");
             HANDLE signals[] = {s.returned.value, s.entered.value};
@@ -315,6 +402,8 @@ std::string observe(const Scenario& scenario, const fs::path& output) {
       << ",\"returnValue\":" << quote(std::to_string(static_cast<long long>(s.returnValue)))
       << ",\"captureBeforeChild\":" << boolean(s.captureBeforeChild) << ",\"releaseSucceeded\":" << boolean(s.releaseSucceeded)
       << ",\"captureAfterReleaseNull\":" << boolean(s.captureAfterReleaseNull) << ",\"buttonMatches\":" << boolean(buttonMatches)
+      << ",\"inputPrepared\":" << boolean(s.prepared) << ",\"neutralPointerObserved\":" << boolean(s.neutralObserved)
+      << ",\"controlledLeftObserved\":" << boolean(s.controlledDownObserved) << ",\"leftDownInjections\":" << s.leftDownInjections
       << ",\"before\":" << rectangle(s.before) << ",\"after\":" << rectangle(s.after)
       << ",\"enters\":" << s.enters << ",\"exits\":" << s.exits << ",\"movingMessages\":" << s.moving
       << ",\"moveMessages\":" << s.moves << ",\"captureChanges\":" << s.captureChanges

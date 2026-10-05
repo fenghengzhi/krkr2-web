@@ -112,11 +112,13 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
     // the Boolean mask retains its separate native support below.
     halfSizeColor = image.depth === 32 &&
       image.width === width * 2 && image.height === height * 2,
-    // Both PNG and DIB 256-to-32 references point-sample, whereas their
-    // 48-to-32 references smooth. 96-to-32 center positions are exact integers
-    // and do not distinguish nearest from bilinear. Other integer reductions
-    // remain candidates in the strict gate; 64-to-32 color is handled above.
+    // 100's paired native desktops preserve smoothing through 65, then use
+    // centered point samples at every size 66..80 on either axis, even when
+    // the other axis enlarges from 13. This boundary is for the fixed 32x32
+    // profile; it is not a claim about other target sizes or DPI settings.
+    // Keep the separately observed integer reductions and half-size average.
     pointSample = image.depth < 32 ||
+      image.width >= 66 || image.height >= 66 ||
       (image.width >= width && image.height >= height &&
         image.width % width === 0 && image.height % height === 0)
   // 089's two native desktops distinguish a 16-bit fractional step from the

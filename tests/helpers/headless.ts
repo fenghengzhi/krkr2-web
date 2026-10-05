@@ -19,6 +19,8 @@ const { default: factory } = (await import(
   pathToFileURL(resolve(directory, assets.mjs.file)).href
 )) as { default: ModuleFactory }
 const wasmBinary = new Uint8Array(readFileSync(resolve(directory, assets.wasm.file)))
+export const createHeadlessRuntime: SessionDependencies['createRuntime'] = (handler, control, options) =>
+  TjsWasmRuntime.create(factory, handler, { control, wasmBinary, ...options })
 
 export async function headless(
   files: Record<string, string | Uint8Array> = {},
@@ -31,8 +33,7 @@ export async function headless(
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
     inflateImage,
     deflateImage,
-    createRuntime: (handler, control, options) =>
-      TjsWasmRuntime.create(factory, handler, { control, wasmBinary, ...options }),
+    createRuntime: createHeadlessRuntime,
     renderer: { present() {}, dispose() {} },
     graphics: {
       decode: async () => {

@@ -124,6 +124,13 @@ const properties = [
   `,
   ],
   [
+    'exitOnNoWindowStartup',
+    String.raw`
+    getter() { return global.__host("System.exitOnNoWindowStartup"); }
+    setter(value) { global.__host("System.exitOnNoWindowStartup", int(value)); }
+  `,
+  ],
+  [
     'title',
     String.raw`
     getter() { return global.__host("System.title"); }
@@ -138,6 +145,7 @@ var System=global.__host("System.class",${[
   ...methods.map(([, , body]) => body),
   ...properties.map(([name]) => `&__system_${name}`),
 ].join(',\n')});
+__host("System.bindCompact",System.doCompact incontextof System);
 ${properties.map(([name]) => `delete global.__system_${name};`).join('\n')}
 `
 
