@@ -2,6 +2,8 @@
 
 状态：开发候选，尚待 GitHub-hosted Actions 验证。整体目标仍是完成 KRKR2 Web 模拟器的插件以外功能，包含真实游戏从加载到退出的完整运行，未完成。本批从 `764bc10` 继续；协议 **41**、`nativeSystem:5`，TJS ABI **5**、字体 ABI **2**。
 
+实现提交 `86bab210f0b7f8b77585ee6f4df33f55848fc053` 的 **22 个文件**已整批推送至 `codex/migrated-window-attention`。[完整托管验证 37355736416](https://github.com/fenghengzhi/krkr2-web/actions/runs/37355736416) 首次唯一身份查询为 **queued／conclusion=null**；原始响应保存在 `out/verification/github-actions/37355736416/initial-run-discovery.json`。本轮只确认运行身份，不继续查询 jobs／artifacts。下轮补取 102 缺失结果并回收 103 固定快照，交接文档用 `[skip ci]` 单独提交，不是一次新增验证。
+
 本地仅检查和编辑源码、操作 Git、下载／解包／核对历史原件；没有运行测试、构建、类型检查、浏览器或可执行参考探针。整批提交后只查询一次运行身份，下次取回固定结果，不实时监控。旧失败和未报告均保留。
 
 ## 固定回收与实际修复
