@@ -6,6 +6,8 @@ import {
   type LoopLink,
   type MixerCommand,
   type PcmAsset,
+  type WaveAsset,
+  type PcmReadRequest,
   type SoundEvent,
   type SoundKind,
   type SoundSettings,
@@ -15,11 +17,13 @@ import {
 import { MidiSynth } from './midi-synth.ts'
 import {
   AudioFilterChain,
+  audioFilterChainMemoryBytes,
   newAudioFilterBudget,
   type AudioFilterBudget,
 } from './audio-filter-chain.ts'
 import { FilteredWaveSource, filteredWaveSourceMemoryBytes } from './filtered-wave-source.ts'
 import { phaseVocoderMemoryBytes, validatePhaseVocoderParameters } from './phase-vocoder.ts'
+import { StreamPcm, streamPcmReservation } from './stream-pcm.ts'
 interface Fade {
   target: number
   delta: number
@@ -47,6 +51,7 @@ interface Voice {
   filterSource?: FilteredWaveSource
   filterBudget?: AudioFilterBudget
   ended?: boolean
+  stream?: StreamPcm
 }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 const lowerBound = <T>(items: T[], position: number, key: (item: T) => number): number => {
@@ -91,6 +96,16 @@ export class AudioMixer {
       liveMidiNotes: this.liveMidi.activeNotes,
       clockWork: this.hasClockWork,
     }
+  }
+  takeStreamRequests(): PcmReadRequest[] {
+    return [...this.voices.values()].flatMap((voice) => voice.stream?.takeRequests() ?? [])
+  }
+  inspectStreams(): { voices: number; bytes: number; pending: number; reservedBytes: number } {
+    const streams = [...this.voices.values()].flatMap((voice) => voice.stream ? [voice.stream] : [])
+    return { voices: streams.length,
+      bytes: streams.reduce((sum, stream) => sum + stream.inspect().bytes, 0),
+      pending: streams.reduce((sum, stream) => sum + stream.inspect().pending, 0),
+      reservedBytes: streams.reduce((sum, stream) => sum + streamPcmReservation(stream.asset.channels), 0) }
   }
   private get(id: number): Voice {
     const voice = this.voices.get(id)
@@ -149,7 +164,7 @@ export class AudioMixer {
     activeWindows: readonly number[] = [],
   ): PhaseVocoderFilter[] {
     if (filters.length > 4) throw new Error('Audio filter chain exceeds four stages')
-    if (filters.length && asset.kind !== 'pcm') throw new Error('Audio filters require PCM audio')
+    if (filters.length && asset.kind === 'midi') throw new Error('Audio filters require PCM audio')
     const identities = new Set<number>()
     const next = filters.map((filter, index) => {
       if (
@@ -176,10 +191,10 @@ export class AudioMixer {
         const window = Math.max(items[index]!.window, windows[index] ?? 0)
         bytes += phaseVocoderMemoryBytes(channels, window) + channels * window * 20
       }
-      if (items.length) bytes += channels * 512 * 4
+      if (items.length) bytes += audioFilterChainMemoryBytes(channels)
     }
     reserve(asset.channels, next, activeWindows)
-    if (next.length && asset.kind === 'pcm') bytes += filteredWaveSourceMemoryBytes(asset)
+    if (next.length && asset.kind !== 'midi') bytes += filteredWaveSourceMemoryBytes(asset)
     for (const voice of this.voices.values()) {
       if (voice.id === id || !voice.asset) continue
       const connected = voice.filters ?? []
@@ -188,7 +203,7 @@ export class AudioMixer {
           throw new Error('Audio filter is already connected to a voice')
       count += connected.length
       reserve(voice.asset.channels, connected, voice.filterChain?.windows() ?? [])
-      if (connected.length && voice.asset.kind === 'pcm')
+      if (connected.length && voice.asset.kind !== 'midi')
         bytes += filteredWaveSourceMemoryBytes(voice.asset)
     }
     if (count > 16 || bytes > 64 * 1024 * 1024)
@@ -197,6 +212,10 @@ export class AudioMixer {
   }
   command(command: MixerCommand): AudioResult {
     const start = this.pending.length
+    if (command.op === 'streamData') {
+      this.voices.get(command.request.id)?.stream?.accept(command.request, command.data, command.error)
+      return { events: [] }
+    }
     if (command.op === 'shutdown') {
       this.voices.clear()
       this.liveMidi.reset()
@@ -224,7 +243,9 @@ export class AudioMixer {
       if (!this.voices.has(id)) this.create(id, command.settings, command.kind)
     } else if (command.op === 'load') {
       const { asset, settings } = command
-      if (asset.sampleCount < 1 || asset.sampleRate < 1000 || asset.sampleRate > 384000)
+      if (!Number.isSafeInteger(asset.sampleCount) || asset.sampleCount < 1 ||
+          !Number.isInteger(asset.sampleRate) || asset.sampleRate < 1000 || asset.sampleRate > 384000 ||
+          !Number.isInteger(asset.channels) || asset.channels < 1 || asset.channels > 8)
         throw new Error('Invalid decoded audio')
       if (
         asset.kind === 'pcm' &&
@@ -233,10 +254,12 @@ export class AudioMixer {
       )
         throw new Error('PCM channel length mismatch')
       let bytes =
-        asset.kind === 'pcm' ? asset.data.reduce((sum, data) => sum + data.byteLength, 0) : 0
+        asset.kind === 'pcm' ? asset.data.reduce((sum, data) => sum + data.byteLength, 0)
+          : asset.kind === 'stream' ? streamPcmReservation(asset.channels) : 0
       for (const other of this.voices.values())
-        if (other.id !== id && other.asset?.kind === 'pcm')
-          bytes += other.asset.data.reduce((sum, data) => sum + data.byteLength, 0)
+        if (other.id !== id && other.asset)
+          bytes += other.asset.kind === 'pcm' ? other.asset.data.reduce((sum, data) => sum + data.byteLength, 0)
+            : other.asset.kind === 'stream' ? streamPcmReservation(other.asset.channels) : 0
       if (bytes > 128 * 1024 * 1024) throw new Error('Decoded audio exceeds 128 MiB session budget')
       for (const link of asset.loops.links)
         if (
@@ -247,12 +270,14 @@ export class AudioMixer {
         )
           throw new Error('SLI link is outside the decoded audio')
       const filters = this.filters(id, asset, command.filters ?? [])
+      const stream = asset.kind === 'stream' ? new StreamPcm(id, asset) : undefined
       const voice = this.create(
         id,
         settings,
         command.kind ?? (asset.kind === 'midi' ? 'midi' : 'wave'),
       )
-      voice.asset = asset
+      voice.asset = stream ? stream.asset : asset
+      voice.stream = stream
       voice.filters = filters
       voice.status = 'stop'
       voice.settings.frequency = asset.sampleRate
@@ -359,11 +384,12 @@ export class AudioMixer {
     voice.filterBudget = budget
     if (!voice.filterChain) {
       voice.filterSource = new FilteredWaveSource(
-        voice.asset as PcmAsset,
+        voice.asset as WaveAsset,
         voice.settings.position,
         voice.flags,
         () => voice.settings.looping,
         () => voice.filterBudget!,
+        voice.stream,
       )
       voice.filterChain = new AudioFilterChain(
         voice.asset!.channels,
@@ -495,16 +521,19 @@ export class AudioMixer {
     })
     return false
   }
-  private pcm(asset: PcmAsset, channel: number, position: number): number {
+  private pcm(voice: Voice, channel: number, position: number): number {
+    if (voice.stream) return voice.stream.sample(channel, position)
+    const asset = voice.asset as PcmAsset
     const data = asset.data[channel]
     if (!data || position < 0 || position >= asset.sampleCount) return 0
     const index = Math.floor(position),
       fraction = position - index
     return data[index]! * (1 - fraction) + (data[index + 1] ?? data[index]!) * fraction
   }
-  private advance(voice: Voice, remaining: number): void {
+  private advance(voice: Voice, remaining: number, preflight = false): boolean {
     const asset = voice.asset!,
       settings = voice.settings
+    let ready = true
     // Visit source boundaries before skipping over them during resampling.
     // Otherwise short loops and flag-changing labels vanish at high rates.
     for (let guard = 0; remaining > 1e-9 && guard < 4096; guard++) {
@@ -521,8 +550,11 @@ export class AudioMixer {
         voice.tail.progress += step
         if (voice.tail.progress >= voice.tail.total) voice.tail = undefined
       }
-      if (remaining <= 1e-9) return
-      if (!this.prepareSample(voice)) return
+      if (remaining <= 1e-9) return !preflight || (this.streamReady(voice) && ready)
+      if (!this.prepareSample(voice)) return ready
+      // A miss cannot stop control preflight: later jumps may exceed the
+      // entire cache even when the four pending request slots are already full.
+      if (preflight) ready = this.streamReady(voice) && ready
     }
     if (remaining > 1e-9) {
       voice.status = 'stop'
@@ -532,15 +564,16 @@ export class AudioMixer {
         message: `Audio voice ${voice.id}: too many source boundaries in one output sample`,
       })
     }
+    return !preflight || ((voice.status !== 'play' || this.streamReady(voice)) && ready)
   }
   private sample(voice: Voice, channel: number): number {
-    const asset = voice.asset as PcmAsset,
+    const asset = voice.asset as WaveAsset,
       position = voice.settings.position
     if (voice.tail) {
       const t = voice.tail.progress / voice.tail.total
       return (
-        this.pcm(asset, channel, voice.tail.source) * (1 - t) +
-        this.pcm(asset, channel, position) * t
+        this.pcm(voice, channel, voice.tail.source) * (1 - t) +
+        this.pcm(voice, channel, position) * t
       )
     }
     const link = this.link(voice)
@@ -554,12 +587,72 @@ export class AudioMixer {
       if (before && position >= link.from - before) {
         const t = (position - (link.from - before)) / (before + after)
         return (
-          this.pcm(asset, channel, position) * (1 - t) +
-          this.pcm(asset, channel, link.to + (position - link.from)) * t
+          this.pcm(voice, channel, position) * (1 - t) +
+          this.pcm(voice, channel, link.to + (position - link.from)) * t
         )
       }
     }
-    return this.pcm(asset, channel, position)
+    return this.pcm(voice, channel, position)
+  }
+  private streamRangeReady(stream: StreamPcm, start: number, end: number): boolean {
+    return stream.ready(Math.floor(start), Math.floor(end) - Math.floor(start) + 2)
+  }
+  private streamReady(voice: Voice, advance = 0): boolean {
+    const stream = voice.stream!, asset = voice.asset!, position = voice.settings.position
+    let ready = this.streamRangeReady(stream, position, position + advance)
+    if (voice.tail) ready = this.streamRangeReady(stream, voice.tail.source, voice.tail.source + advance) && ready
+    else {
+      const link = this.link(voice)
+      if (link?.smooth) {
+        const before = Math.min(Math.floor(asset.sampleRate * 0.025), link.from, link.to)
+        if (before && position + advance >= link.from - before)
+          ready = this.streamRangeReady(stream, link.to + Math.max(position, link.from - before) - link.from,
+            link.to + position + advance - link.from) && ready
+      }
+    }
+    return ready
+  }
+  private prepareStreamSample(voice: Voice, step: number): boolean | 'waiting' {
+    const position = voice.settings.position, link = this.link(voice),
+      boundary = Math.min(link?.from ?? voice.asset!.sampleCount,
+        voice.asset!.loops.labels[voice.labelIndex]?.position ?? Infinity,
+        voice.asset!.sampleCount)
+    // Straight runs need only a bounded current/interpolation/advance range.
+    if (position + step < boundary) return this.streamReady(voice, step) ? true : 'waiting'
+    // Preflight the complete output sample, including all skipped labels and
+    // SLI jumps at high playback rates. Neither the initial prepare nor advance
+    // may publish control changes when any required page is still missing.
+    const saved = { position, labelIndex: voice.labelIndex, linkDirty: voice.linkDirty,
+      link: voice.link, tail: voice.tail && { ...voice.tail }, flags: [...voice.flags],
+      ended: voice.ended, status: voice.status, fade: voice.fade,
+      filterChain: voice.filterChain, filterSource: voice.filterSource }, pending = this.pending.length
+    let terminal = false
+    voice.stream!.beginPreflight()
+    try {
+      // EOF/error at the current position already has its original semantics.
+      if (!this.prepareSample(voice)) { terminal = true; return false }
+      const ready = this.streamReady(voice)
+      if (!this.advance(voice, step, true) || !ready) return 'waiting'
+    } finally {
+      voice.stream!.endPreflight()
+      if (!terminal) {
+        voice.settings.position = saved.position
+        voice.labelIndex = saved.labelIndex
+        voice.linkDirty = saved.linkDirty
+        voice.link = saved.link
+        voice.tail = saved.tail
+        voice.flags.splice(0, voice.flags.length, ...saved.flags)
+        voice.ended = saved.ended
+        voice.status = saved.status
+        voice.fade = saved.fade
+        voice.filterChain = saved.filterChain
+        voice.filterSource = saved.filterSource
+        this.pending.length = pending
+      }
+    }
+    // The restored control path is deterministic and all pages are resident;
+    // commit prepare now, then render and commit advance exactly once.
+    return this.prepareSample(voice)
   }
   render(left: Float32Array, right: Float32Array): AudioEvent[] {
     if (left.length !== right.length) throw new Error('Audio output lengths differ')
@@ -573,7 +666,7 @@ export class AudioMixer {
       const settings = voice.settings,
         asset = voice.asset
       const master = voice.kind === 'wave' ? (this.waveMuted ? 0 : this.globalVolume / 100000) : 1
-      let chain: AudioFilterChain | undefined
+      let chain: AudioFilterChain | undefined, waiting = false
       const label = (name: string, position: number) => {
         settings.position = position
         this.event(voice, 'label', name)
@@ -591,10 +684,12 @@ export class AudioMixer {
             settings.volume = clamp(settings.volume + voice.fade.delta, 0, 100000)
           }
         }
-        if (!asset || settings.paused || voice.status !== 'play') continue
+        if (!asset || settings.paused || voice.status !== 'play' || waiting) continue
         try {
+          const step = settings.frequency / this.sampleRate
           chain = voice.filters?.length ? this.filtered(voice, filterBudget) : undefined
           if (chain) {
+            if (!chain.canAdvance(step)) { waiting = true; continue }
             if (!chain.prepare(label)) {
               voice.status = 'stop'
               // Original natural EOF rewinds LoopManager independently of the
@@ -606,8 +701,11 @@ export class AudioMixer {
               continue
             }
             settings.position = chain.sourcePosition()
+          } else if (voice.stream) {
+            const ready = this.prepareStreamSample(voice, step)
+            if (ready === 'waiting') { waiting = true; continue }
+            if (!ready) continue
           } else if (!this.prepareSample(voice)) continue
-          const step = settings.frequency / this.sampleRate
           let l: number, r: number
           if (asset.kind === 'midi') {
             voice.synth!.render(settings.position / asset.sampleRate, step / asset.sampleRate)
@@ -637,6 +735,7 @@ export class AudioMixer {
             chain.advance(step, label)
             settings.position = chain.sourcePosition()
           } else this.advance(voice, step)
+          if (voice.stream && frame === left.length - 1) voice.stream.prefetch(settings.position)
         } catch (error) {
           voice.status = 'stop'
           voice.fade = undefined

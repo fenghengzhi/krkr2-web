@@ -18,6 +18,7 @@ class KrkrMixerProcessor extends AudioWorkletProcessor {
       try {
         const result = this.mixer.command(command)
         this.send({ type: 'reply', serial, result })
+        this.readStreams()
       } catch (error) {
         this.send({
           type: 'reply',
@@ -30,10 +31,14 @@ class KrkrMixerProcessor extends AudioWorkletProcessor {
   private send(message: AudioMessage): void {
     this.port.postMessage(message)
   }
+  private readStreams(): void {
+    for (const request of this.mixer.takeStreamRequests()) this.send({ type: 'streamRead', request })
+  }
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
     const [left, right] = outputs[0] ?? []
     if (!left || !right) return true
     for (const event of this.mixer.render(left, right)) this.send({ type: 'event', event })
+    this.readStreams()
     this.peak = Math.max(this.peak, this.mixer.peak)
     this.maximum = Math.max(this.maximum, this.peak)
     // The mixer clock freezes during pause; telemetry still needs to report
@@ -41,11 +46,16 @@ class KrkrMixerProcessor extends AudioWorkletProcessor {
     this.processedFrames += left.length
     if (this.processedFrames - this.lastStats >= sampleRate / 4) {
       this.lastStats = this.processedFrames
+      const streams = this.mixer.inspectStreams()
       this.send({
         type: 'stats',
         frames: this.mixer.frames,
         peak: this.peak,
         maxPeak: this.maximum,
+        streamVoices: streams.voices,
+        streamBytes: streams.bytes,
+        streamPending: streams.pending,
+        streamReservedBytes: streams.reservedBytes,
       })
       this.peak = 0
     }

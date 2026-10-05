@@ -4,6 +4,7 @@ import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import type { ByteSource, Inflater, Resource } from '../../engine/ports/storage.ts'
 import { cp437 } from './names.ts'
+import { resourceReadBounds } from '../../engine/storage/resource-source.ts'
 
 export const MAX_ZIP_ENTRIES = 100000
 export interface ZipCodecs {
@@ -41,8 +42,8 @@ function fields(bytes: Uint8Array): Map<number, Uint8Array> {
   }
   return result
 }
-async function checksum(bytes: Uint8Array, codecs: ZipCodecs): Promise<number> {
-  const work = crc32(bytes)
+async function checksum(bytes: Uint8Array, codecs: ZipCodecs, previous = 0): Promise<number> {
+  const work = crc32(bytes, previous)
   try {
     while (true) {
       const next = work.next()
@@ -248,20 +249,19 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
     )
   return entries
     .filter((entry) => !entry.directory)
-    .map((entry) => ({
-      name: entry.name,
-      size: entry.size,
-      zip: { method: entry.method, encrypted: !!(entry.flags & 0x2041), crc32: entry.checksum },
-      async read() {
-        const { name, size, stored, offset, flags, method } = entry,
-          boundary = boundaries.get(offset)!
+    .map((entry): ZipResource => {
+      const supported = () => {
+        const { name, flags, method } = entry
         if (entry.symlink) throw new Error(`ZIP symbolic links are not supported: ${name}`)
         if (flags & 0x2041) throw new Error(`Encrypted ZIP member is not supported: ${name}`)
         if (method !== 0 && method !== 8)
           throw new Error(`Unsupported ZIP compression method ${method}: ${name}`)
         if (flags & ~0x80e) throw new Error(`Unsupported ZIP member flags: ${name}`)
-        if (size > MAX_RESOURCE_BYTES || stored > MAX_RESOURCE_BYTES)
-          throw new Error(`ZIP member exceeds 64 MiB decode budget: ${name}`)
+      }
+      const locate = async () => {
+        supported()
+        const { name, size, stored, offset, flags, method } = entry,
+          boundary = boundaries.get(offset)!
         if (method === 0 && size !== stored)
           throw new Error(`ZIP stored member size mismatch: ${name}`)
         bounds(offset, 30, boundary)
@@ -326,14 +326,55 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
           if (!(signed && matches(4)) && !matches(0))
             throw new Error(`ZIP data descriptor mismatch: ${name}`)
         }
-        const encoded = await read(start, stored),
-          output = method === 8 ? await codecs.inflate(encoded, size) : encoded
+        return start
+      }
+      let verified: Promise<number> | undefined
+      // Register the flight before a checkpoint can reenter this source.
+      const verifyStored = () => verified ??= Promise.resolve().then(async () => {
+        const start = await locate()
+        let crc = 0
+        // Before returning even one stored-member byte, preserve ZIP's full
+        // payload CRC contract. This is a bounded-memory complete scan, not a
+        // claim that first playback can begin without reading the whole item.
+        for (let offset = 0; offset < entry.size; offset += 1024 * 1024) {
+          const bytes = await read(start + offset, Math.min(1024 * 1024, entry.size - offset))
+          crc = await checksum(bytes, codecs, crc)
+        }
+        if (crc !== entry.checksum) throw new Error(`ZIP CRC32 mismatch: ${entry.name}`)
         await codecs.checkpoint()
-        if (output.length !== size) throw new Error(`ZIP decompressed size mismatch: ${name}`)
-        if ((await checksum(output, codecs)) !== entry.checksum)
-          throw new Error(`ZIP CRC32 mismatch: ${name}`)
-        await codecs.checkpoint()
-        return method === 0 ? Uint8Array.from(output) : output
-      },
-    }))
+        return start
+      })
+      const ranged: ByteSource | undefined = entry.method === 0 && !entry.symlink &&
+          !(entry.flags & ~0x80e) && !(entry.flags & 0x2041) && entry.size === entry.stored
+        ? {
+            size: entry.size,
+            async read(offset, length) {
+              resourceReadBounds(entry.size, offset, length)
+              await codecs.checkpoint()
+              const start = await verifyStored()
+              return read(start + offset, length)
+            },
+          }
+        : undefined
+      return {
+        name: entry.name,
+        size: entry.size,
+        zip: { method: entry.method, encrypted: !!(entry.flags & 0x2041), crc32: entry.checksum },
+        ...(ranged ? { source: ranged } : {}),
+        async read() {
+          const { name, size, stored, method } = entry
+          supported()
+          if (size > MAX_RESOURCE_BYTES || stored > MAX_RESOURCE_BYTES)
+            throw new Error(`ZIP member exceeds 64 MiB decode budget: ${name}`)
+          const start = await locate(), encoded = await read(start, stored),
+            output = method === 8 ? await codecs.inflate(encoded, size) : encoded
+          await codecs.checkpoint()
+          if (output.length !== size) throw new Error(`ZIP decompressed size mismatch: ${name}`)
+          if ((await checksum(output, codecs)) !== entry.checksum)
+            throw new Error(`ZIP CRC32 mismatch: ${name}`)
+          await codecs.checkpoint()
+          return method === 0 ? Uint8Array.from(output) : output
+        },
+      }
+    })
 }

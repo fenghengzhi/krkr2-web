@@ -476,7 +476,7 @@ export class EngineSession {
       this.redrawRequests.clear()
       this.deferredPaint.clear()
       this.modalReadyRedraw.clear()
-      for (const cancel of [() => this.sounds?.pause(true), () => this.videos?.cancel()]) {
+      for (const cancel of [() => this.sounds?.cancel(), () => this.videos?.cancel()]) {
         try {
           const work = cancel()
           if (work) {
@@ -619,6 +619,13 @@ export class EngineSession {
           if (!this.control.cancelled) this.fail(error)
         },
         (source) => this.systemEvents!.cancelSource(source),
+        {
+          resolve: (name) => this.resolveResource(name),
+          checkpoint: async () => {
+            await this.control.wait()
+            this.control.check()
+          },
+        },
       )
       this.events = new ScriptEvents(
         { now: this.deps.now, schedule: this.deps.schedule },

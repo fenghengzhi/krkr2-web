@@ -35,6 +35,15 @@ export async function importSources(
     add({
       name,
       size: source.size,
+      source: {
+        size: source.size,
+        async read(offset, length) {
+          await checkpoint()
+          const bytes = await source.read(offset, length)
+          await checkpoint()
+          return bytes
+        },
+      },
       async read() {
         await checkpoint()
         if (source.size > MAX_RESOURCE_BYTES)
@@ -52,7 +61,7 @@ export async function importSources(
         ((prefix[2] === 3 && prefix[3] === 4) || (prefix[2] === 5 && prefix[3] === 6))
     const entries =
       /\.xp3$/i.test(name) || hasXp3Signature(prefix)
-        ? await readXp3(source, inflate)
+        ? await readXp3(source, inflate, { checkpoint })
         : /\.zip$/i.test(name) || zipMagic
           ? await readZip(source, {
               inflate: (bytes, size) => inflateRaw(bytes, size, checkpoint),

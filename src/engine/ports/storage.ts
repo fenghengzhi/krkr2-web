@@ -9,6 +9,10 @@ export interface Resource {
   readonly size: number
   /** Identity of these immutable bytes, without retaining the resource's input buffer. */
   readonly cacheToken?: object
+  /** Optional immutable byte source. Opening this capability does not imply
+   * payload verification; an archive source may verify before its first read.
+   * Its underlying storage lifetime belongs to the Session, not one reader. */
+  readonly source?: ByteSource
   read(): Promise<Uint8Array>
 }
 export type Inflater = (bytes: Uint8Array, expectedLength: number) => Promise<Uint8Array>

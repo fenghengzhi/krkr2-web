@@ -21,6 +21,8 @@ import {
 } from '../script/runtime.ts'
 import { PhaseVocoderService, type PhaseVocoderConnection } from './phase-vocoder-service.ts'
 import { parseSli } from '../../formats/audio/sli.ts'
+import type { Resource } from '../ports/storage.ts'
+import { AudioResourceSources, type AudioSourceLease } from '../storage/audio-sources.ts'
 interface Sound {
   id: number
   kind: SoundKind
@@ -35,6 +37,8 @@ interface Sound {
 }
 type Callback = { name: string; args: ScriptValue[] }
 export class SoundService {
+  private readonly sources?: AudioResourceSources
+  private cancelling?: Promise<void>
   private readonly filters: PhaseVocoderService
   private nextId = 1
   private buffers = new Map<number, Sound>()
@@ -59,7 +63,12 @@ export class SoundService {
     ) => Promise<void>,
     private readonly error: (error: unknown) => void,
     private readonly cancelQueued: (source: object) => void = () => {},
+    private readonly resourceSource?: {
+      resolve(name: string): Resource
+      checkpoint(): void | Promise<void>
+    },
   ) {
+    if (resourceSource) this.sources = new AudioResourceSources(() => resourceSource.checkpoint())
     this.filters = new PhaseVocoderService(objects, async (id, filters) => {
       const sound = this.get(id)
       const result = await this.voiceCommand(sound, { op: 'filters', id, filters })
@@ -130,7 +139,7 @@ export class SoundService {
   }
   private async voiceCommand(sound: Sound, command: AudioCommand): Promise<AudioResult> {
     if (this.buffers.get(sound.id) !== sound) throw new Error('SoundBuffer has been invalidated')
-    if (command.op === 'create' || command.op === 'open') sound.resourceRequested = true
+    if (command.op === 'create' || command.op === 'open' || command.op === 'openSource') sound.resourceRequested = true
     const pending = this.command(command)
     sound.inflight.add(pending)
     try {
@@ -397,20 +406,26 @@ export class SoundService {
         sound.filters = this.filters.connect(sound.id, args[3])
       }
       let loops: LoopInfo
+      let sourceLease: AudioSourceLease | undefined
       try {
-        const bytes = await this.read(name),
-          sli = name + '.sli'
+        const sli = name + '.sli'
         loops = this.exists(sli) ? parseSli(await this.text(await this.read(sli))) : emptyLoops()
-        await apply({
-          op: 'open',
-          id: sound.id,
-          kind: sound.kind,
-          bytes,
-          loops,
-          settings: sound.snapshot,
-          filters: sound.filters?.settings(),
-        })
+        if (sound.kind === 'wave' && this.backend?.streaming && this.sources && this.resourceSource) {
+          sourceLease = await this.sources.open(this.resourceSource.resolve(name),
+            () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound)
+          await apply({ op: 'openSource', id: sound.id, kind: sound.kind,
+            source: sourceLease.source, bufferedBytes: sourceLease.bufferedBytes,
+            releaseSource: sourceLease.release, loops, settings: sound.snapshot,
+            filters: sound.filters?.settings() })
+        } else {
+          const bytes = await this.read(name)
+          await apply({ op: 'open', id: sound.id, kind: sound.kind, bytes,
+            loops, settings: sound.snapshot, filters: sound.filters?.settings() })
+        }
       } catch (error) {
+        // Backends release after actual decoder cleanup. Idempotence also
+        // covers failures before the backend acquired this resource lease.
+        sourceLease?.release()
         // open may already have allocated a backend voice before returning an
         // error. Its serialized close completes before releasing native leases.
         // An expired owner already scheduled close after all inflight work;
@@ -522,6 +537,16 @@ export class SoundService {
   async pause(paused: boolean): Promise<void> {
     if (this.backend) await this.command({ op: 'pauseAll', paused })
   }
+  cancel(): Promise<void> {
+    if (this.cancelling) return this.cancelling
+    this.sources?.dispose()
+    // Queue drain waits for TJS host calls. Cancel their source waiters now,
+    // before retirement later waits for those same inflight calls to finish.
+    this.cancelling = Promise.resolve().then(() =>
+      this.backend?.cancel ? this.backend.cancel() : this.pause(true))
+    void this.cancelling.catch(() => {})
+    return this.cancelling
+  }
   async dispose(): Promise<void> {
     if (this.disposed) {
       await this.flushCloses()
@@ -529,6 +554,7 @@ export class SoundService {
     }
     this.disposed = true
     this.unsubscribe?.()
+    if (this.backend?.cancel) void this.cancel()
     for (const id of [...this.buffers.keys()]) this.retire(id)
     let primary: unknown,
       failed = false
@@ -547,10 +573,15 @@ export class SoundService {
       }
     }
     try {
+      await this.cancelling
+    } catch (error) {
+      if (!failed) { primary = error; failed = true }
+    }
+    try {
       await this.backend?.close()
     } catch (error) {
       if (!failed) throw error
-    }
+    } finally { this.sources?.dispose() }
     if (failed) throw primary
   }
 }

@@ -1,3 +1,4 @@
+import type { ByteSource } from './storage.ts'
 export type SoundKind = 'wave' | 'midi' | 'cdda'
 export interface AudioInfo {
   sampleRate: number
@@ -27,6 +28,30 @@ export interface PcmAsset extends AudioInfo {
   data: Float32Array[]
   loops: LoopInfo
 }
+export interface PcmBlock {
+  position: number
+  data: Float32Array[]
+}
+/** Serializable decoder identity and bounded initial pages, never a callback. */
+export interface StreamingPcmAsset extends AudioInfo {
+  kind: 'stream'
+  streamId: number
+  loops: LoopInfo
+  initial: PcmBlock[]
+}
+export type WaveAsset = PcmAsset | StreamingPcmAsset
+export interface PcmReadRequest {
+  id: number
+  streamId: number
+  serial: number
+  position: number
+  frames: number
+}
+/** Synchronous realtime access: missing pages only enqueue bounded requests. */
+export interface PcmAccess {
+  ready(position: number, frames: number): boolean
+  sample(channel: number, position: number): number
+}
 export interface MidiEvent {
   time: number
   status: number
@@ -37,7 +62,7 @@ export interface MidiAsset extends AudioInfo {
   events: MidiEvent[]
   loops: LoopInfo
 }
-export type AudioAsset = PcmAsset | MidiAsset
+export type AudioAsset = WaveAsset | MidiAsset
 /** A connected filter identity is fixed by open; parameters may change afterwards. */
 export interface PhaseVocoderFilter {
   type: 'phase-vocoder'
@@ -72,6 +97,7 @@ export interface SoundEvent {
 }
 export type AudioEvent = SoundEvent | { type: 'error'; message: string }
 export type MixerCommand =
+  | { op: 'streamData'; request: PcmReadRequest; data?: Float32Array[]; error?: string }
   | { op: 'create'; id: number; settings: SoundSettings; kind?: SoundKind }
   | {
       op: 'load'
@@ -104,11 +130,29 @@ export type AudioCommand =
       filters?: readonly PhaseVocoderFilter[]
     }
   | { op: 'focusMode'; mode: number }
+  | {
+      /** Local Worker/backend call only; never sent across MessagePort. */
+      op: 'openSource'
+      id: number
+      kind: SoundKind
+      source: ByteSource
+      bufferedBytes: number
+      /** Backend retires the lease after actual decoder/read cleanup. */
+      releaseSource?: () => void
+      loops: LoopInfo
+      settings: SoundSettings
+      filters?: readonly PhaseVocoderFilter[]
+    }
+export type WireAudioCommand = Exclude<AudioCommand, { op: 'openSource' }>
 export interface AudioResult {
   snapshot?: SoundSnapshot
   events: AudioEvent[]
 }
 export interface AudioBackend {
+  readonly streaming?: boolean
+  /** Stop admission and wake pending source opens before Session queue drain.
+   * Final close still joins decoder/device cleanup. */
+  cancel?(): Promise<void>
   setRequestTimeoutsPaused?(paused: boolean): void
   command(command: AudioCommand): Promise<AudioResult>
   listen(callback: (event: AudioEvent) => void): () => void

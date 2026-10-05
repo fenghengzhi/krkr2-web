@@ -1,5 +1,7 @@
 # 当前实现范围
 
+084 开发候选加入 [有界音频源与流式播放](../decisions/084-streaming-audio.md)：真实资源范围进入 Worker 的 WAV／Vorbis decoder，再由 AudioWorklet 按需取 PCM 页；源位置、循环标签与滤镜部分输入可等待缺页。协议 **29**、TJS ABI **5**、字体 ABI **2**。Vorbis seek 暂为 O(prefix) 精确重放；ZIP stored 仍先扫描完整 CRC，压缩资源／其他编码保留受限完整回退。当前新增实现尚未取得执行结果。082 完整回归仍失败，083 因测试类型错误跳过应用验证，本批修复后需重验；完整非插件目标尚未完成。最新证据与剩余范围见 [实现进度](../non-plugin-progress.md)。
+
 083 开发候选接入 [真实 Gamepad 与按键查询](../decisions/083-gamepad-key-state.md)：生产 navigator 采样、逐键 neutral／重复、会话输入路由、`getKeyState` 第二参数和按下记录；协议 **28**、TJS ABI **5**、字体 ABI **2**。本批尚未执行。081 的光标 Node 定义已有通过报告，但整批仍失败；082 固定快照的文件接受与 ANI 时间元数据已匹配，像素缩放仍有严格失败，常规应用结果当时尚未报告。最新状态以 [实现进度](../non-plugin-progress.md) 为准；完整非插件目标、实际硬件映射／时序、长音频和多音轨等范围尚未完成。
 
 082 开发候选接入 [光标选择顺序、原生热点与解码并发边界](../decisions/082-cursor-selection-decode-budget.md)：先选再解码、矩形排序、DWORD 热点及单个活动解码流程，协议 **27**、TJS ABI **5**、字体 ABI **2** 不变。081 快照已证明 build success、可信生命周期 7/7；两 Windows 严格加载比较各有 48 个 draw mismatch 和 2 个接受差异，其他应用用例当时尚未报告。082 修订尚待托管验证，平滑缩放／mask、零 rate 时间策略与整体非插件范围仍未完成。完整证据、原始失败和后续状态以 [实现进度](../non-plugin-progress.md) 为准；以下保留历史阶段记录。

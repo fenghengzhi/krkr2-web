@@ -4,7 +4,7 @@
  * Kirikiri original license: public/licenses/phase-vocoder/.
  * Request units freeze their link/crossfade boundary before evaluating labels.
  */
-import type { LoopLink, PcmAsset } from '../ports/audio.ts'
+import type { LoopLink, PcmAccess, WaveAsset } from '../ports/audio.ts'
 import type { AudioFilterBudget, FilterPcmSource } from './audio-filter-chain.ts'
 import { WaveSegmentQueue } from './audio-segments.ts'
 
@@ -19,11 +19,11 @@ const lowerBound = <T>(items: T[], position: number, key: (item: T) => number): 
   }
   return left
 }
-const crossfadeCapacity = (asset: PcmAsset) =>
+const crossfadeCapacity = (asset: WaveAsset) =>
   asset.loops.links.some((link) => link.smooth)
     ? Math.min(asset.sampleCount, Math.floor(asset.sampleRate * 0.025) * 2)
     : 0
-export const filteredWaveSourceMemoryBytes = (asset: PcmAsset): number =>
+export const filteredWaveSourceMemoryBytes = (asset: WaveAsset): number =>
   crossfadeCapacity(asset) * asset.channels * 4
 
 /** No offline asset transformation: each read represents one upstream Decode request. */
@@ -32,14 +32,17 @@ export class FilteredWaveSource implements FilterPcmSource {
   private crossfadeLength = 0
   private crossfadePosition = 0
   private decoderPosition: number
+  starved = false
   position: number
   constructor(
-    readonly asset: PcmAsset,
+    readonly asset: WaveAsset,
     position: number,
     readonly flags: number[],
     private readonly looping: () => boolean,
     private readonly budget: () => AudioFilterBudget,
+    private readonly access?: PcmAccess,
   ) {
+    if (asset.kind === 'stream' && !access) throw new Error('Streaming filtered source requires PCM access')
     this.position = Math.trunc(position)
     if (!Number.isSafeInteger(this.position) || position < 0 || position > asset.sampleCount)
       throw new Error('Filtered source position is outside the stream')
@@ -108,13 +111,20 @@ export class FilteredWaveSource implements FilterPcmSource {
     )
   }
   private sample(channel: number, position: number): number {
+    if (position < 0 || position >= this.asset.sampleCount) return 0
+    if (this.access) return this.access.sample(channel, position)
+    if (this.asset.kind !== 'pcm') throw new Error('Streaming filtered source requires PCM access')
     const data = this.asset.data[channel]!
     if (position < 0 || position >= data.length) return 0
     const index = Math.floor(position),
       fraction = position - index
     return data[index]! * (1 - fraction) + (data[index + 1] ?? data[index]!) * fraction
   }
-  private prepareCrossfade(link: LoopLink): void {
+  private ready(position: number, frames: number): boolean {
+    const start = Math.max(0, position), end = Math.min(this.asset.sampleCount, position + frames)
+    return end <= start || !this.access || this.access.ready(start, end - start)
+  }
+  private prepareCrossfade(link: LoopLink): boolean {
     const before = link.from - this.position,
       nearestTarget = this.nearest(link.to, true),
       after = Math.min(
@@ -125,9 +135,13 @@ export class FilteredWaveSource implements FilterPcmSource {
       ),
       count = before + after
     if (count > this.crossfade[0]!.length) throw new Error('Audio filter crossfade budget exceeded')
-    this.reserveRead(count * 2)
     const firstStart = this.decoderPosition,
       secondStart = link.to - before
+    // Request both sides even if the first is missing. Neither decoder cursor
+    // nor the crossfade workspace is committed until both ranges are present.
+    const firstReady = this.ready(firstStart, count), secondReady = this.ready(secondStart, count)
+    if (!firstReady || !secondReady) return false
+    this.reserveRead(count * 2)
     for (let frame = 0; frame < count; frame++) {
       this.step()
       // Original DoCrossFade is two separate 0..50 and 50..100 ramps. These
@@ -144,12 +158,24 @@ export class FilteredWaveSource implements FilterPcmSource {
     this.decoderPosition = Math.min(this.asset.sampleCount, secondStart + count)
     this.crossfadeLength = count
     this.crossfadePosition = 0
+    return true
   }
   read(destination: readonly Float32Array[], frames: number, segments: WaveSegmentQueue): number {
+    this.starved = false
     this.reserveRead(frames)
     const base = segments.length
     let written = 0,
-      jumpsWithoutProgress = 0
+      jumpsWithoutProgress = 0,
+      committedPosition = this.position,
+      committedDecoderPosition = this.decoderPosition
+    const starve = () => {
+      // Zero-length link traversal belongs to the next request unit. A target
+      // page miss must not commit those jumps before any PCM can be read.
+      this.position = committedPosition
+      this.decoderPosition = committedDecoderPosition
+      this.starved = true
+      return written
+    }
     while (written < frames) {
       this.step()
       const link = this.nearest(this.position)
@@ -166,7 +192,7 @@ export class FilteredWaveSource implements FilterPcmSource {
         if (link.smooth) {
           const before = Math.min(Math.floor(this.asset.sampleRate * 0.025), link.from, link.to)
           if (link.from - before > this.position) boundary = link.from - before
-          else if (!this.crossfadeLength) this.prepareCrossfade(link)
+          else if (!this.crossfadeLength && !this.prepareCrossfade(link)) return starve()
         }
       }
       // Freeze this request unit before evaluating any flag expressions in it.
@@ -177,6 +203,7 @@ export class FilteredWaveSource implements FilterPcmSource {
       )
       if (this.crossfadeLength) unit = Math.min(unit, this.crossfadeLength - this.crossfadePosition)
       if (unit <= 0) throw new Error('Audio filter loop makes no forward progress')
+      if (!this.crossfadeLength && !this.ready(this.decoderPosition, unit)) return starve()
       jumpsWithoutProgress = 0
       const labels = this.asset.loops.labels,
         end = this.position + unit
@@ -231,6 +258,8 @@ export class FilteredWaveSource implements FilterPcmSource {
           this.decoderPosition = 0
         }
       }
+      committedPosition = this.position
+      committedDecoderPosition = this.decoderPosition
     }
     return written
   }

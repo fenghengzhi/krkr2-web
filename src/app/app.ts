@@ -384,6 +384,10 @@ export function mountApp(root: HTMLDivElement): void {
           meter.value = audio.muted ? 0 : audio.peak
           meter.dataset.maxPeak = String(audio.maxPeak)
           meter.dataset.frames = String(audio.frames)
+          meter.dataset.streamVoices = String(audio.streamVoices ?? 0)
+          meter.dataset.streamBytes = String(audio.streamBytes ?? 0)
+          meter.dataset.streamPending = String(audio.streamPending ?? 0)
+          meter.dataset.streamReservedBytes = String(audio.streamReservedBytes ?? 0)
         },
         el<HTMLInputElement>('pause-background').checked,
         {

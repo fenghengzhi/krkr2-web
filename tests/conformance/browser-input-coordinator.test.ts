@@ -259,8 +259,8 @@ test('gamepad focus handoff releases the old Window and requires a fresh press o
     await settle()
     clock.tick(100)
     await settle()
-    const events = () => f.packets.filter((packet) => packet.type === 'keyDown' || packet.type === 'keyUp')
-      .map((packet) => [packet.type, packet.windowId, packet.key])
+    const events = () => f.packets.flatMap((packet) => packet.type === 'keyDown' || packet.type === 'keyUp'
+      ? [[packet.type, packet.windowId, packet.key]] : [])
     assert.deepEqual(events(), [['keyDown', 101, 0x1c1], ['keyUp', 101, 0x1c1]])
     assert.deepEqual(f.keys.at(-1), [])
     clock.pad()

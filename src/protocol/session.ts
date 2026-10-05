@@ -7,7 +7,7 @@ import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import type { PadAck, PadMessage, PadFontData } from './pad.ts'
 import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
-export const PROTOCOL_VERSION = 28
+export const PROTOCOL_VERSION = 29
 export interface LocalGameFile {
   path: string
   blob: Blob

@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [084 有界音频源与流式播放](decisions/084-streaming-audio.md)：长 WAV／Vorbis 从 Resource 范围读取，经 Worker decoder 和 AudioWorklet 有界分页输出；加入部分滤镜 hop 的缺页恢复、取消、预算与真实 Session／浏览器验收。协议 **29**，TJS ABI **5**、字体 ABI **2**。本批尚未执行，不记为通过；全量验证仍整批交 GitHub-hosted Actions，下次取回结果。整体目标是完成插件以外的 KRKR2 Web 模拟器，仍有后续任务。
+
+084 固定快照已回收 082／083 共 **28/28 原 ZIP** 并核对 hash／大小。082 终态 **failure**：Node 2829 pass／1 fail（光标缩放一个蓝通道量化差异）、常规浏览器 13 个光标失败、WebKit compatibility 20 pass／12 unreported。083 run 快照仍 in_progress，但 jobs 均终态，build TS2339 使 Node／浏览器／KAG 等 skipped；本批修订类型收窄，手柄新增定义仍未验证。两 Windows 95 份严格比较各 270/332 匹配、62 差异，未比较部分继续保留。旧快照、崩溃和未报告证据不改写，详见 084 决策及运行目录的固定摘要。
+
 最新待核验批次：[Full test suite 37263528041](https://github.com/fenghengzhi/krkr2-web/actions/runs/37263528041)，精确提交 `03f87925ddc707976b2ff84f3aa685183ce1db34`。083 的真实手柄链路、按键查询、原 KAG 验收、光标修订及 95 份 Windows 参考已整批推送。首次唯一查询只确认创建与提交身份，当时 **in_progress／conclusion=null**，未检查实时作业。下一轮补取 082 终态及后续产物，再回收本批固定快照；原失败、未报告与未比较范围不改写。本地未执行验证，未合入旧 main，整体非插件目标保持 active。
 
 2026-10-05 准备 [083 Gamepad 与按键查询](decisions/083-gamepad-key-state.md)：接入真实 navigator 设备采样、原版逐键 neutral／分组重复、Window 队列和物理状态；补齐 `System.getKeyState` 第二参数与按下记录消费，首次 joypad 配置和动态重复参数使用 TJS 转换。协议升 **28**，TJS ABI **5**、字体 ABI **2** 不变。新增纯状态机 25、采样驱动 4、协调器 4、真实 TJS 查询 12、参数 6 个定义，以及每浏览器 4 个手柄定义；原 KAG cursor 的 6 个 case 扩展 Pad 阶段。全部待 GitHub-hosted 执行，非硬件实测，整体非插件目标仍 active。

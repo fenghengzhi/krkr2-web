@@ -2,7 +2,7 @@ import { PausableTimeouts } from '../../shared/pausable-timeouts.ts'
 import workletUrl from './mixer.worklet.ts?worker&url'
 import type {
   AudioAsset,
-  AudioCommand,
+  WireAudioCommand,
   AudioResult,
   MixerCommand,
 } from '../../../engine/ports/audio.ts'
@@ -293,11 +293,15 @@ export class WebAudioHost {
           this.pending.delete(message.serial)
           if (message.error) job.reject(new Error(message.error))
           else job.resolve(message.result ?? { events: [] })
-        } else if (message.type === 'event') this.port.postMessage(message)
+        } else if (message.type === 'event' || message.type === 'streamRead') this.port.postMessage(message)
         else {
           this.state.frames = message.frames
           this.workletPeak = message.peak
           this.state.maxPeak = message.maxPeak
+          this.state.streamVoices = message.streamVoices ?? 0
+          this.state.streamBytes = message.streamBytes ?? 0
+          this.state.streamPending = message.streamPending ?? 0
+          this.state.streamReservedBytes = message.streamReservedBytes ?? 0
           this.notify()
         }
       }
@@ -340,7 +344,10 @@ export class WebAudioHost {
       const transfer: Transferable[] =
         command.op === 'load' && command.asset.kind === 'pcm'
           ? command.asset.data.map((channel) => channel.buffer as ArrayBuffer)
-          : []
+          : command.op === 'load' && command.asset.kind === 'stream'
+            ? command.asset.initial.flatMap((block) => block.data.map((channel) => channel.buffer as ArrayBuffer))
+            : command.op === 'streamData' && command.data
+              ? command.data.map((channel) => channel.buffer as ArrayBuffer) : []
       try {
         node.port.postMessage(message, transfer)
       } catch (error) {
@@ -350,7 +357,7 @@ export class WebAudioHost {
       }
     })
   }
-  private async command(command: AudioCommand): Promise<AudioResult> {
+  private async command(command: WireAudioCommand): Promise<AudioResult> {
     if (command.op === 'shutdown') {
       await this.close()
       return { events: [] }
@@ -380,7 +387,7 @@ export class WebAudioHost {
     return this.send(await this.initialize(), command)
   }
   private async createVoice(
-    command: Extract<AudioCommand, { op: 'open' | 'load' | 'create' }>,
+    command: Extract<WireAudioCommand, { op: 'open' | 'load' | 'create' }>,
   ): Promise<AudioResult> {
     const ticket = this.operations.begin(command.id)
     try {
@@ -464,6 +471,10 @@ export class WebAudioHost {
       this.state.state = 'closed'
       this.state.error = undefined
       this.state.peak = 0
+      this.state.streamVoices = 0
+      this.state.streamBytes = 0
+      this.state.streamPending = 0
+      this.state.streamReservedBytes = 0
       await attempt(() => this.notify())
       if (failed) throw primary
     })

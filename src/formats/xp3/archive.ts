@@ -1,6 +1,7 @@
 import { BinaryReader } from '../binary/reader.ts'
 import type { ByteSource, Inflater, Resource } from '../../engine/ports/storage.ts'
 import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
+import { resourceReadBounds } from '../../engine/storage/resource-source.ts'
 export { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 
 const signature = [0x58, 0x50, 0x33, 0x0d, 0x0a, 0x20, 0x0a, 0x1a, 0x8b, 0x67, 0x01]
@@ -21,7 +22,7 @@ export interface Xp3Resource extends Resource {
 export async function readXp3(
   source: ByteSource,
   inflate: Inflater,
-  options: { verifyAdler32?: boolean } = {},
+  options: { verifyAdler32?: boolean; checkpoint?: () => void | Promise<void> } = {},
 ): Promise<Xp3Resource[]> {
   const header = await source.read(0, 19)
   if (!hasXp3Signature(header))
@@ -91,10 +92,39 @@ export async function readXp3(
       )
         throw new Error('Invalid XP3 file metadata')
       const resourceName = name
+      // A zlib segment requires whole-segment inflation with the current
+      // decoder. Do not disguise that work as an arbitrary range capability.
+      // Explicit Adler verification likewise keeps the complete-read path.
+      const ranged: ByteSource | undefined = !options.verifyAdler32 && segments.every((segment) => !segment.compressed)
+        ? {
+            size: fileSize,
+            async read(offset, length) {
+              resourceReadBounds(fileSize, offset, length)
+              await options.checkpoint?.()
+              const output = new Uint8Array(length)
+              let position = 0
+              for (const segment of segments) {
+                const start = Math.max(offset, position), end = Math.min(offset + length, position + segment.size)
+                if (end > start) {
+                  await options.checkpoint?.()
+                  const bytes = await source.read(segment.offset + start - position, end - start)
+                  await options.checkpoint?.()
+                  if (bytes.length !== end - start) throw new Error(`Short XP3 segment read: ${resourceName}`)
+                  output.set(bytes, start - offset)
+                }
+                position += segment.size
+                if (position >= offset + length) break
+              }
+              await options.checkpoint?.()
+              return output
+            },
+          }
+        : undefined
       resources.push({
         name,
         size: fileSize,
         xp3: { fileHash: checksum, protected: protectedStorage },
+        ...(ranged ? { source: ranged } : {}),
         async read() {
           if (fileSize > MAX_RESOURCE_BYTES)
             throw new Error(`Resource exceeds 64 MiB decode budget: ${resourceName}`)

@@ -2,6 +2,7 @@ import type { SaveFile, SaveStore } from '../ports/saves.ts'
 import { normalizePath } from './resolver.ts'
 import { parseStoragePath, storageWritePath } from './public-path.ts'
 import type { Resource } from '../ports/storage.ts'
+import { resourceReadBounds } from './resource-source.ts'
 
 export class SaveOverlay {
   private files = new Map<string, Uint8Array>()
@@ -21,6 +22,13 @@ export class SaveOverlay {
       name: path,
       size: owned.length,
       cacheToken: {},
+      source: {
+        size: owned.length,
+        read: async (offset, length) => {
+          resourceReadBounds(owned.length, offset, length)
+          return owned.slice(offset, offset + length)
+        },
+      },
       read: async () => owned.slice(),
     })
   }
