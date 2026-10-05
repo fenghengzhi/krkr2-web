@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37292345654](https://github.com/fenghengzhi/krkr2-web/actions/runs/37292345654)，精确提交 `6ca5bcd5dfc5025ba778f5ccc86ec6ab66680e96`。092 的 15 个文件已整批推送，新增 12 个 Node、每浏览器 9 个定义及 28 个原生样本尚待托管结果。首次唯一查询为 **pending／conclusion=null**，只确认身份，没有实时查询 jobs／artifacts。下次补取 091 终态和新增产物，再回收本批固定快照；未本地执行验证，整体非插件目标保持 active。
+
 2026-10-05 准备 [092 全屏 Window 写入限制与拖动期间的宿主控制](decisions/092-window-fullscreen-and-move-controls.md)：接入原版 33 项全屏受限写入矩阵、内部关闭／退出边界，修正 beginMove 吞掉外部 App Stop 的事件范围，并将原生光标临界库存由 155 增至 183。新增 12 个 Node、每浏览器 9 个定义尚待托管执行，协议 **34**、TJS ABI **5**、字体 ABI **2** 不变，整体非插件目标继续 active。
 
 092 固定回收 090 终态 **failure**：Node **3,075/3,081**、6 失败；浏览器 **2,252/2,291**、39 unexpected；兼容 **95/96**。新 XP3 六个 Session、三浏览器共十二个场景通过，beginMove 剩余 12 个失败均为最后 Stop，原光标 125 样本全部严格匹配，新增样本仍 27 差异。091 固定快照仍 in_progress，构建成功但全部应用验收未报告。两运行 **32/32 ZIP、285,535,435 字节**全部核对 API SHA-256／大小；历史失败与一份 WebKit 原生 crash 保留，下次补取 091 终态和新增产物，不实时轮询。以下保留历史批次当时的状态。
