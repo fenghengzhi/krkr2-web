@@ -6,7 +6,7 @@ import type { VideoMessage, VideoRequest } from '../../src/protocol/video.ts'
 
 export type VideoAudioLifetimeCase = 'url-failure' | 'audio-failure' | 'frame-failure' |
   'close-candidate' | 'cancel-candidate' | 'window-candidate' | 'supersede-candidate' |
-  'old-graph-cleanup' | 'opening-newer-command'
+  'old-graph-cleanup' | 'opening-newer-command' | 'image-mismatch'
 const check = (value: unknown, message: string) => { if (!value) throw new Error(message) }
 async function until(ready: () => boolean): Promise<void> {
   const end = performance.now() + 12000
@@ -22,8 +22,9 @@ const pixels = (video: HTMLVideoElement) => {
 }
 interface FrameToken { element: HTMLVideoElement; id: number }
 
-/** Real selected MP4 bytes and native video decoding. Only acquisition faults
- * and presentation delivery are injected; no synthetic decoded frame or clock. */
+/** Real selected MP4 bytes and native decoding/clock. Acquisition and delivery
+ * faults are injected; image-mismatch additionally corrupts one readback byte
+ * in the last pixel, leaving the first-pixel legacy observation unchanged. */
 export async function exerciseVideoAudioLifetime(name: VideoAudioLifetimeCase, bytes: Uint8Array) {
   const timeline = await readVideoTimeline(bytes)
   check(timeline?.audioStreams === 2, 'The lifetime fixture needs two actual MP4 audio tracks')
@@ -36,9 +37,27 @@ export async function exerciseVideoAudioLifetime(name: VideoAudioLifetimeCase, b
   node.append(canvas); document.body.append(node)
   const createUrl = URL.createObjectURL, revokeUrl = URL.revokeObjectURL,
     requestFrame = HTMLVideoElement.prototype.requestVideoFrameCallback,
-    cancelFrame = HTMLVideoElement.prototype.cancelVideoFrameCallback
+    cancelFrame = HTMLVideoElement.prototype.cancelVideoFrameCallback,
+    contextPrototype = Object.getPrototypeOf(new OffscreenCanvas(1, 1).getContext('2d')!) as OffscreenCanvasRenderingContext2D,
+    drawImage = contextPrototype.drawImage, getImageData = contextPrototype.getImageData,
+    imageSources = new WeakMap<OffscreenCanvasRenderingContext2D, HTMLVideoElement>()
   let createdUrls = 0, revokedUrls = 0, connected = 0, closed = 0, serial = 0,
-    failUrl = false, failAudio = false, failFrame = false, failOldClose = false, hold = false, holdInitial = false
+    failUrl = false, failAudio = false, failFrame = false, failOldClose = false, hold = false, holdInitial = false,
+    corruptImage = false, corruptedReadbacks = 0
+  contextPrototype.drawImage = function (image: CanvasImageSource, ...coordinates: number[]) {
+    if (image instanceof HTMLVideoElement) imageSources.set(this, image)
+    else imageSources.delete(this)
+    Reflect.apply(drawImage, this, [image, ...coordinates])
+  }
+  contextPrototype.getImageData = function (sx, sy, sw, sh, settings) {
+    const result = getImageData.call(this, sx, sy, sw, sh, settings), source = imageSources.get(this)
+    if (corruptImage && source && !source.dataset.videoId && result.data.length > 4) {
+      const at = result.data.length - 4
+      result.data[at] = result.data[at]! ^ 1
+      corruptedReadbacks++
+    }
+    return result
+  }
   URL.createObjectURL = (blob) => {
     if (failUrl) { failUrl = false; throw new Error('candidate-url-failure') }
     const url = createUrl.call(URL, blob)
@@ -146,10 +165,14 @@ export async function exerciseVideoAudioLifetime(name: VideoAudioLifetimeCase, b
         result.snapshot.status === 'play' && graphs.size === 1 && urls.size === 1
       mixingPreserved = node.querySelector('.video-mixing-bitmap') === mixing
       check(oldCleanupRecovered && mixingPreserved, 'Committed selection reported play but left its real media clock paused')
-    } else if (name.endsWith('failure')) {
+    } else if (name.endsWith('failure') || name === 'image-mismatch') {
       failUrl = name === 'url-failure'; failAudio = name === 'audio-failure'; failFrame = name === 'frame-failure'
+      corruptImage = name === 'image-mismatch'
       const error = await rejected(select(1, 2))
-      check(error.includes(`candidate-${name.split('-')[0]}-failure`), `Selection lost its acquisition error: ${error}`)
+      corruptImage = false
+      check(error.includes(name === 'image-mismatch' ? 'complete presented image' : `candidate-${name.split('-')[0]}-failure`),
+        `Selection lost its candidate error: ${error}`)
+      if (name === 'image-mismatch') check(corruptedReadbacks > 0, 'The candidate never reached full-image validation')
       const current = node.querySelector<HTMLVideoElement>('video[data-video-id]')!, result = await send({ op: 'inspect', id: 7, epoch: 2 })
       rollbackPreserved = current === original && current.paused && Math.abs(current.currentTime - position) <= 0.001 &&
         pixels(current) === before && result.snapshot?.enabledAudioStream === 0 && graphs.size === 1 && urls.size === 1
@@ -189,7 +212,7 @@ export async function exerciseVideoAudioLifetime(name: VideoAudioLifetimeCase, b
     check(!pending.size && !errors.length, 'Unexpected host replies or asynchronous playback errors')
     return { connected, closed, createdUrls, revokedUrls, liveGraphs: graphs.size, liveUrls: urls.size,
       pendingFrames: frames.size, pendingReplies: pending.size, videos: node.querySelectorAll('video').length,
-      rollbackPreserved, mixingPreserved, lateDeliverySafe, oldCleanupRecovered, errors }
+      rollbackPreserved, mixingPreserved, lateDeliverySafe, oldCleanupRecovered, corruptedReadbacks, errors }
   } finally {
     hold = false
     try { await host.close() }
@@ -199,6 +222,8 @@ export async function exerciseVideoAudioLifetime(name: VideoAudioLifetimeCase, b
       URL.createObjectURL = createUrl; URL.revokeObjectURL = revokeUrl
       HTMLVideoElement.prototype.requestVideoFrameCallback = requestFrame
       HTMLVideoElement.prototype.cancelVideoFrameCallback = cancelFrame
+      contextPrototype.drawImage = drawImage
+      contextPrototype.getImageData = getImageData
     }
   }
 }

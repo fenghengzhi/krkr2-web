@@ -38,3 +38,17 @@ export function videoPresentedFrameAt(timeline: VideoTimeline, time: number): nu
       timeline.times[frame + 1] === timeline.times[frame]) return
   return distance <= 0.001 ? frame : undefined
 }
+
+/** Some browser seek callbacks report the requested point inside a sample,
+ * rather than that sample's exact PTS. This identifies a reported interval,
+ * not proof of decoded image identity. Track replacement additionally compares
+ * the complete paused images at the same media-clock position. */
+export function videoReportedFrameAt(timeline: VideoTimeline, time: number): number | undefined {
+  if (!Number.isFinite(time) || !timeline.times.length) return
+  const exact = videoPresentedFrameAt(timeline, time)
+  if (exact !== undefined) return exact
+  const frame = videoFrameAt(timeline, time), start = timeline.times[frame]!,
+    end = timeline.times[frame + 1] ?? timeline.duration
+  if (timeline.times[frame - 1] === start || timeline.times[frame + 1] === start) return
+  if (time > start && time < end) return frame
+}

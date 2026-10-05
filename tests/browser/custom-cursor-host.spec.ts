@@ -175,6 +175,22 @@ async function screenshotRgba(page: Page, png: Buffer) {
   }, 'data:image/png;base64,' + png.toString('base64'))
 }
 
+/** Crop decoded PNG bytes in their existing CSS-pixel grid. No Canvas2D or
+ * screenshot clip is allowed to resample the canonical reference region. */
+function cropScreenshot(png: Buffer, crop: { x: number; y: number; width: number; height: number }) {
+  const decoded = readScreenshotPng(png)
+  if (![crop.x, crop.y, crop.width, crop.height].every(Number.isSafeInteger) ||
+      crop.x < 0 || crop.y < 0 || crop.width < 1 || crop.height < 1 ||
+      crop.x + crop.width > decoded.width || crop.y + crop.height > decoded.height)
+    throw new Error('Cursor screenshot crop is outside its captured image')
+  const data: number[] = []
+  for (let row = 0; row < crop.height; row++) {
+    const from = ((crop.y + row) * decoded.width + crop.x) * 4
+    data.push(...decoded.rgba.subarray(from, from + crop.width * 4))
+  }
+  return { width: crop.width, height: crop.height, data }
+}
+
 test('custom cursor AND/XOR matches actual CSS canvas rasterization at noninteger scales', async ({ page }, info) => {
   const marker = page.locator('#cursor-host-1 .game-custom-cursor'),
     readings: { scale: number; rendering: string; computedRendering: string; devicePixelRatio: number;
@@ -183,11 +199,16 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
       background: Awaited<ReturnType<typeof screenshotRgba>>;
       expected: number[]; raw: number[]; screenshot: Awaited<ReturnType<typeof screenshotRgba>>;
       rawMismatches: number; screenshotMismatches: number;
+      legacySmallClip: { background: Awaited<ReturnType<typeof screenshotRgba>>;
+        screenshot: Awaited<ReturnType<typeof screenshotRgba>>; expected: number[];
+        rawMismatches: number; screenshotMismatches: number;
+        backgroundVersusCanonical: number; cursorVersusCanonical: number };
       screenshotReferences: { scope: string; capturedSize: number[]; crop: number[];
-        pixels: number[]; mismatches: number }[];
+        pixels: number[]; mismatches: number; legacySmallClipMismatches: number }[];
       deviceRaster: { scale: number; capturedSize: number[]; background: number[];
         sampled: number[]; mismatches: number };
-      samplingCandidates: { padding: number; quality: string; pixels: number[]; mismatches: number }[] }[] = []
+      samplingCandidates: { padding: number; quality: string; pixels: number[]; mismatches: number;
+        legacySmallClipMismatches: number }[] }[] = []
   let revision = 200
   for (const scale of [1.5, 2.25]) for (const rendering of ['auto', 'pixelated'] as const) {
     await page.evaluate(({ scale, rendering }) => {
@@ -199,22 +220,26 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
       clip = { x: Math.round(canvas.x + 24 * canvas.width / 64 - 3),
         y: Math.round(canvas.y + 16 * canvas.height / 48 - 2), width: 8, height: 8 },
       backgroundPng = await page.screenshot({ clip, scale: 'css' }),
-      background = await screenshotRgba(page, backgroundPng),
-      // The selected fixture is AND=255, XOR=255 in every RGB channel. This
-      // expectation uses the actual hidden-cursor page screenshot exclusively.
-      expected = background.data.map((value, index) => index % 4 === 3 ? 255 : value ^ 255)
+      legacyBackground = await screenshotRgba(page, backgroundPng),
+      backgroundViewportPng = await page.screenshot({ scale: 'css' }),
+      background = cropScreenshot(backgroundViewportPng, clip),
+      // AND=255/XOR=255 uses the independent hidden-cursor viewport pixels.
+      // 091 proved that a small WebKit screenshot clip alters its boundary;
+      // preserve that historical oracle below, but never resample this crop.
+      expected = background.data.map((value, index) => index % 4 === 3 ? 255 : value ^ 255),
+      legacyExpected = legacyBackground.data.map((value, index) => index % 4 === 3 ? 255 : value ^ 255)
     await info.attach(`css-${rendering}-${scale}-background`, { body: backgroundPng, contentType: 'image/png' })
-    // 089's twelve Canvas2D padding/quality paths all retain the same fifteen
-    // WebKit auto/1.5 differences. Observe whether screenshot extent itself
-    // changes that last row before altering the production raster or oracle.
-    // The crop below copies PNG bytes only: it does not resize or interpolate.
+    // 091's three larger capture extents independently agree. Retain those
+    // checks and the original small-clip diagnostics alongside the canonical
+    // full viewport before/after evidence. Cropping only copies PNG bytes.
     const screenshotReferences: typeof readings[number]['screenshotReferences'] = []
     for (const margin of [4, 16, null]) {
       const rectangle = margin === null ? undefined : {
         x: clip.x - margin, y: clip.y - margin,
         width: clip.width + margin * 2, height: clip.height + margin * 2,
       }, scope = margin === null ? 'viewport' : `margin-${margin}`,
-        captured = await page.screenshot({ clip: rectangle, scale: 'css' }), decoded = readScreenshotPng(captured),
+        captured = margin === null ? backgroundViewportPng : await page.screenshot({ clip: rectangle, scale: 'css' }),
+        decoded = readScreenshotPng(captured),
         x = clip.x - (rectangle?.x ?? 0), y = clip.y - (rectangle?.y ?? 0), pixels: number[] = []
       if (x < 0 || y < 0 || x + clip.width > decoded.width || y + clip.height > decoded.height)
         throw new Error('Cursor screenshot diagnostic crop is outside its captured image')
@@ -224,10 +249,11 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
       }
       screenshotReferences.push({ scope, capturedSize: [decoded.width, decoded.height],
         crop: [x, y, clip.width, clip.height], pixels,
-        mismatches: pixels.filter((value, index) => value !== background.data[index]).length })
+        mismatches: pixels.filter((value, index) => value !== background.data[index]).length,
+        legacySmallClipMismatches: pixels.filter((value, index) => value !== legacyBackground.data[index]).length })
       await info.attach(`css-${rendering}-${scale}-background-${scope}`, { body: captured, contentType: 'image/png' })
     }
-    // Keep device-pixel observation separate from the existing CSS-pixel
+    // Keep device-pixel observation separate from the CSS-pixel
     // cursor contract. It may distinguish a DPR raster stage; no device path
     // is chosen as a replacement policy by this diagnostic.
     const devicePng = await page.screenshot({ clip, scale: 'device' }), device = readScreenshotPng(devicePng),
@@ -269,7 +295,8 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
       }
       return observations
     }, { clip, rendering }), samplingCandidates = candidates.map((candidate) => ({ ...candidate,
-      mismatches: candidate.pixels.filter((value, index) => value !== background.data[index]).length }))
+      mismatches: candidate.pixels.filter((value, index) => value !== background.data[index]).length,
+      legacySmallClipMismatches: candidate.pixels.filter((value, index) => value !== legacyBackground.data[index]).length }))
     await page.evaluate((revision) => {
       window.cursorCompositionFixture.suspend(false)
       window.cursorCompositionFixture.write(1, revision)
@@ -278,12 +305,20 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
     const raw = await marker.evaluate((node) => [...(node as HTMLCanvasElement).getContext('2d')!
       .getImageData(0, 0, 8, 8).data]),
       cursorPng = await page.screenshot({ clip, scale: 'css' }),
-      screenshot = await screenshotRgba(page, cursorPng)
+      legacyScreenshot = await screenshotRgba(page, cursorPng),
+      cursorViewportPng = await page.screenshot({ scale: 'css' }),
+      screenshot = cropScreenshot(cursorViewportPng, clip),
+      legacySmallClip = { background: legacyBackground, screenshot: legacyScreenshot, expected: legacyExpected,
+        rawMismatches: raw.filter((value, index) => value !== legacyExpected[index]).length,
+        screenshotMismatches: legacyScreenshot.data.filter((value, index) => value !== legacyExpected[index]).length,
+        backgroundVersusCanonical: legacyBackground.data.filter((value, index) => value !== background.data[index]).length,
+        cursorVersusCanonical: legacyScreenshot.data.filter((value, index) => value !== screenshot.data[index]).length }
     await info.attach(`css-${rendering}-${scale}-cursor`, { body: cursorPng, contentType: 'image/png' })
+    await info.attach(`css-${rendering}-${scale}-cursor-viewport`, { body: cursorViewportPng, contentType: 'image/png' })
     readings.push({ scale, rendering, clip, sourceRectangle: canvas,
       computedRendering: await page.locator('#cursor-surface-1').evaluate((canvas) => getComputedStyle(canvas).imageRendering),
       devicePixelRatio: await page.evaluate(() => devicePixelRatio),
-      background, expected, raw, screenshot, samplingCandidates, screenshotReferences, deviceRaster,
+      background, expected, raw, screenshot, legacySmallClip, samplingCandidates, screenshotReferences, deviceRaster,
       rawMismatches: raw.filter((value, index) => value !== expected[index]).length,
       screenshotMismatches: screenshot.data.filter((value, index) => value !== expected[index]).length })
   }
@@ -291,7 +326,8 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
   // observations even when one browser uses a different CSS sampling path.
   await info.attach('css-raster-readings', { body: JSON.stringify({
     scope: 'Actual CSS canvas screenshots versus cursor composition; not Windows cursor scaling',
-    diagnostic: 'Twelve padding/quality paths, three screenshot extents and one device-pixel raster are observations only; the original strict CSS oracle is unchanged',
+    oracle: 'Full-viewport CSS screenshots before/after, pure decoded RGBA crop, exact 8x8 comparison',
+    diagnostic: 'The original small-clip screenshots/expectation/differences remain in legacySmallClip; 091 independent margin4/margin16/viewport captures disproved small-clip extent invariance. Twelve Canvas2D paths and device-pixel observations do not relax the canonical zero-difference gate.',
     userAgent: await page.evaluate(() => navigator.userAgent),
     source: { width: 64, height: 48 }, cursor: { width: 8, height: 8 }, readings,
   }), contentType: 'application/json' })

@@ -1,0 +1,168 @@
+name: Native Windows geometry reference
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  window-geometry-reference:
+    name: outer/client geometry / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Observe owned User32 geometry with bounded lifetime
+        env:
+          PROBE_RUNNER_LABEL: ${{ matrix.os }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:GITHUB_WORKSPACE 'out/ci/native-window-geometry'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $status = [ordered]@{
+            schema = 1; state = 'not-executed'; stage = 'setup'
+            sourceCommit = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID; runAttempt = $env:GITHUB_RUN_ATTEMPT
+            runner = $env:PROBE_RUNNER_LABEL; imageOS = $env:ImageOS; imageVersion = $env:ImageVersion
+            scope = 'Owned User32 rectangles; not VCL property retention, constraints or auto-scroll'
+            globalInputUsed = $false; displayModeChanged = $false; vclCompatibilityClaim = $false
+            expectedCases = 24; expectedMeasurements = 960; observedCases = 0; observedMeasurements = 0; processDeadlineMs = 120000
+            startedAt = [DateTime]::UtcNow.ToString('o'); finishedAt = $null
+            compilerExitCode = $null; processId = $null; exitCode = $null
+            error = $null; cleanupError = $null
+          }
+          $statusPath = Join-Path $output 'status.json'
+          $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          $process = $null
+          try {
+            if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
+              throw 'Window geometry observations require GitHub-hosted Windows.'
+            }
+            $source = Join-Path $env:GITHUB_WORKSPACE 'tests/native/window-geometry.cpp'
+            Copy-Item -LiteralPath $source -Destination (Join-Path $output 'window-geometry.cpp')
+            $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+            if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio discovery tool is missing.' }
+            & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json -utf8 1> (Join-Path $output 'vswhere.json') 2> (Join-Path $output 'vswhere.stderr.log')
+            if ($LASTEXITCODE -ne 0) { throw "vswhere failed with exit code $LASTEXITCODE." }
+            $instances = @(Get-Content -LiteralPath (Join-Path $output 'vswhere.json') -Raw | ConvertFrom-Json)
+            if ($instances.Count -ne 1) { throw 'Expected one complete Visual Studio C++ installation.' }
+            $vcvars = Join-Path $instances[0].installationPath 'VC/Auxiliary/Build/vcvars64.bat'
+            if (-not (Test-Path -LiteralPath $vcvars)) { throw 'vcvars64.bat is missing.' }
+            $executable = Join-Path $output 'window-geometry.exe'
+            $object = Join-Path $output 'window-geometry.obj'
+            $compile = Join-Path $output 'compile.cmd'
+            @(
+              '@echo off'
+              ('call "{0}"' -f $vcvars)
+              'if errorlevel 1 exit /b %errorlevel%'
+              ('cl /nologo /Bv /std:c++17 /EHsc /W4 /utf-8 /DUNICODE /D_UNICODE "{0}" /Fe"{1}" /Fo"{2}" /link user32.lib gdi32.lib uxtheme.lib' -f $source, $executable, $object)
+              'exit /b %errorlevel%'
+            ) | Set-Content -Encoding ascii $compile
+            $status.stage = 'compile'
+            & cmd.exe /d /c ('"{0}"' -f $compile) 2>&1 | Tee-Object -FilePath (Join-Path $output 'compiler.log')
+            $status.compilerExitCode = $LASTEXITCODE
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $executable)) { throw 'Window geometry reference compilation failed.' }
+            $status.stage = 'observe'
+            $process = Start-Process -FilePath $executable -ArgumentList ('"{0}"' -f $output) -WorkingDirectory $output -PassThru `
+              -RedirectStandardOutput (Join-Path $output 'stdout.log') -RedirectStandardError (Join-Path $output 'stderr.log')
+            $status.processId = $process.Id; $status.state = 'running'
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+            if (-not $process.WaitForExit($status.processDeadlineMs)) {
+              $status.state = 'timed-out'
+              throw 'Owned geometry process exceeded 120 seconds; partial journals remain evidence, not a native negative result.'
+            }
+            $status.exitCode = $process.ExitCode
+            if ($process.ExitCode -ne 0) { throw "Window geometry reference exited with code $($process.ExitCode)." }
+            $status.stage = 'evidence'
+            $observations = Get-Content -LiteralPath (Join-Path $output 'observations.json') -Raw | ConvertFrom-Json
+            if ($observations.schema -ne 1 -or $observations.completed -ne $true -or $observations.classCleanupConfirmed -ne $true -or
+                $observations.sourceCommit -cne $env:GITHUB_SHA -or $observations.expectedCases -ne 24 -or
+                $observations.expectedMeasurements -ne 960 -or $observations.observedCases -ne 24 -or $observations.cases.Count -ne 24 -or
+                $observations.globalInputUsed -ne $false -or $observations.displayModeChanged -ne $false -or $observations.vclCompatibilityClaim -ne $false) {
+              throw 'Geometry inventory, provenance or cleanup is incomplete.'
+            }
+            $styles = @('popup', 'popup-border', 'caption', 'resizable', 'tool-caption', 'tool-resizable')
+            $menus = @('absent', 'empty', 'short', 'long-labels')
+            $phases = @('outer-wide', 'outer-narrow', 'outer-restored', 'nominal-client', 'measured-client-correction')
+            $expectedCases = [Collections.Generic.HashSet[string]]::new()
+            foreach ($style in $styles) { foreach ($menu in $menus) { [void]$expectedCases.Add("$style-$menu") } }
+            foreach ($case in $observations.cases) {
+              if (-not $expectedCases.Remove($case.id) -or $case.status -cne 'observed' -or $case.cleanupConfirmed -ne $true -or
+                  $case.measurements -ne 40 -or $case.events -le 0 -or $case.events -ge 8192) {
+                throw "Incomplete geometry case: $($case.id)"
+              }
+              $rows = @(Get-Content -LiteralPath (Join-Path $output $case.measurementFile) | ForEach-Object { $_ | ConvertFrom-Json })
+              $events = @(Get-Content -LiteralPath (Join-Path $output $case.eventFile) | ForEach-Object { $_ | ConvertFrom-Json })
+              if ($rows.Count -ne 40 -or $events.Count -ne $case.events) { throw "Truncated journal: $($case.id)" }
+              $expectedRows = [Collections.Generic.HashSet[string]]::new()
+              for ($phase = 0; $phase -lt 5; $phase++) {
+                foreach ($sunken in @($false, $true)) {
+                  for ($bars = 0; $bars -lt 4; $bars++) { [void]$expectedRows.Add("$phase/$sunken/$bars") }
+                }
+              }
+              for ($index = 0; $index -lt $rows.Count; $index++) {
+                $row = $rows[$index]
+                if ($row.case -cne $case.id -or $row.sequence -ne $index -or
+                    $row.phaseIndex -lt 0 -or $row.phaseIndex -gt 4 -or $row.phase -cne $phases[$row.phaseIndex] -or
+                    -not $expectedRows.Remove("$($row.phaseIndex)/$($row.sunken)/$($row.scrollbars)") -or
+                    $row.parent.dpi -le 0 -or $row.viewport.dpi -le 0 -or $row.paintbox.dpi -le 0 -or
+                    $row.parent.outerScreen.Count -ne 4 -or $row.parent.clientLocal.Count -ne 4 -or
+                    $row.viewport.outerScreen.Count -ne 4 -or $row.viewport.clientLocal.Count -ne 4 -or
+                    $row.paintbox.outerScreen.Count -ne 4 -or
+                    ($row.horizontal.requested -and -not $row.horizontal.infoOk) -or
+                    ($row.vertical.requested -and -not $row.vertical.infoOk)) {
+                  throw "Incomplete or duplicate geometry measurement: $($case.id)/$index"
+                }
+                # Preserve API result/error fields for absent/empty menus and hidden bars.
+                # A false clientTargetMatched is an observed adjustment limitation, not a VCL setter claim.
+              }
+              if ($expectedRows.Count -ne 0) { throw "Missing geometry combinations: $($case.id)" }
+              $status.observedMeasurements += $rows.Count
+              $status.observedCases++
+            }
+            if ($expectedCases.Count -ne 0 -or $status.observedMeasurements -ne 960) { throw 'Geometry inventory is incomplete.' }
+            $status.state = 'observed'; $status.stage = 'complete'
+            # Complete native measurements are evidence only, not a VCL/browser compatibility pass.
+          } catch {
+            if ($status.state -ne 'timed-out') { $status.state = 'failed' }
+            $status.error = $_.Exception.ToString(); throw
+          } finally {
+            if ($null -ne $process) {
+              try {
+                if (-not $process.HasExited) {
+                  # Terminate only this held Process object; never kill a PID tree.
+                  $process.Kill()
+                  if (-not $process.WaitForExit(10000)) { throw 'Owned geometry process did not terminate.' }
+                }
+              } catch { $status.cleanupError = $_.Exception.ToString() }
+            }
+            $status.finishedAt = [DateTime]::UtcNow.ToString('o')
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          }
+      - name: Preserve source and exact observation hashes
+        if: always()
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE 'out/ci/native-window-geometry'
+          if (-not (Test-Path -LiteralPath $output)) { New-Item -ItemType Directory -Force $output | Out-Null }
+          $files = @(Get-ChildItem -LiteralPath $output -File | Sort-Object Name | ForEach-Object {
+            [ordered]@{ file = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+          })
+          [ordered]@{ schema = 1; sourceCommit = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID; runner = '${{ matrix.os }}'; files = $files } |
+            ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 (Join-Path $output 'manifest.json')
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: native-window-geometry-${{ matrix.os }}-${{ github.run_attempt }}
+          path: out/ci/native-window-geometry/
+          if-no-files-found: error
+          retention-days: 14

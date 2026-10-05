@@ -47,14 +47,18 @@ for (const binary of [false, true]) {
       assert.equal(first.region.height, 3)
       await f.execute(String.raw`
 root.setSize(2,2);root.setImageSize(4,3);root.setImagePos(-2,-1);root.setClip(0,0,4,3);
-root.fillRect(0,0,4,3,0xffffffff);root.opacity=0;root.setClip(0,0,1,1);
+root.fillRect(0,0,4,3,0xffffffff);root.setClip(0,0,1,1);
 var child=new Layer(win,root);child.setSize(20,20);child.fillRect(0,0,20,20,0xffffffff);child.visible=true;
 win.setZoom(3,2);win.setLayerPos(5,7);win.setInnerSize(30,40);
 `)
       assert.equal(await f.session.evaluate('root.getMaskPixel(0,0)+","+root.getMaskPixel(3,2)'), '255,255')
       assert.equal(await f.session.evaluate('root.imageLeft+","+root.imageTop'), '-2,-1',
         'The 2x2 display remains inside the 4x3 image while its origin differs')
-      assert.equal(await f.session.evaluate('root.opacity+","+win.layerLeft+","+win.layerTop'), '0,5,7')
+      // Native SetOpacity rejects a non-opaque primary Layer. Catch that
+      // separate public-property error without faulting this region scenario.
+      assert.match(await f.caught('root.opacity=0'), /primary layer must remain opaque/)
+      assert.equal(await f.session.evaluate('root.opacity+","+win.layerLeft+","+win.layerTop'), '255,5,7')
+      assert.equal(f.session.snapshot().state, 'running')
       assert.equal(f.regions().length, 1, 'Bitmap and geometry changes do not recreate an installed native region')
       assert.deepEqual([...first.region.rectangles], [1, 0, 2, 2, 0, 2, 1, 1, 3, 2, 1, 1])
       await f.session.evaluate('win.setMaskRegion(void)')

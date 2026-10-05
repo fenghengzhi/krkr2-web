@@ -19,7 +19,7 @@ test.beforeAll(async () => {
 })
 
 for (const name of ['url-failure', 'audio-failure', 'frame-failure', 'close-candidate', 'cancel-candidate',
-  'window-candidate', 'supersede-candidate', 'old-graph-cleanup', 'opening-newer-command'] as const satisfies readonly VideoAudioLifetimeCase[]) {
+  'window-candidate', 'supersede-candidate', 'old-graph-cleanup', 'opening-newer-command', 'image-mismatch'] as const satisfies readonly VideoAudioLifetimeCase[]) {
   test(`real video audio candidate lifetime: ${name}`, async ({ page }) => {
     test.setTimeout(60000)
     const errors: string[] = []
@@ -48,9 +48,9 @@ for (const name of ['url-failure', 'audio-failure', 'frame-failure', 'close-cand
     expect(result.connected).toBe(result.closed)
     expect(result.createdUrls).toBe(result.revokedUrls)
     expect([result.liveGraphs, result.liveUrls, result.pendingFrames, result.pendingReplies, result.videos]).toEqual([0, 0, 0, 0, 0])
-    if (name.endsWith('failure') || name === 'opening-newer-command') expect(result.rollbackPreserved).toBe(true)
+    if (name.endsWith('failure') || name === 'opening-newer-command' || name === 'image-mismatch') expect(result.rollbackPreserved).toBe(true)
     else if (name === 'old-graph-cleanup') expect(result.oldCleanupRecovered).toBe(true)
     else expect(result.lateDeliverySafe).toBe(true)
-    if (name.endsWith('failure') || name === 'supersede-candidate' || name === 'old-graph-cleanup') expect(result.mixingPreserved).toBe(true)
+    if (name.endsWith('failure') || name === 'supersede-candidate' || name === 'old-graph-cleanup' || name === 'image-mismatch') expect(result.mixingPreserved).toBe(true)
   })
 }

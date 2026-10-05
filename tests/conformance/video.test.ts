@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { readVideoTimeline } from '../../src/formats/video/mp4.ts'
-import { videoFrameAt, videoFrameTime, videoPresentedFrameAt } from '../../src/engine/media/video-time.ts'
+import { videoFrameAt, videoFrameTime, videoPresentedFrameAt, videoReportedFrameAt } from '../../src/engine/media/video-time.ts'
 test('MP4 B-frames and edit lists resolve to presentation-order frame times', async () => {
   const source = readFileSync(new URL('../fixtures/video/colors.mp4', import.meta.url)),
     wrapped = new Uint8Array(source.length + 21)
@@ -19,6 +19,22 @@ test('MP4 B-frames and edit lists resolve to presentation-order frame times', as
   assert.ok(Math.abs(videoFrameTime(timeline, 6) - 500) < 1e-9)
   assert.throws(() => videoFrameTime(timeline, 18), /outside/)
   await assert.rejects(readVideoTimeline(source.subarray(0, source.length - 1)), /Truncated/)
+})
+
+test('reported seek intervals are distinct from exact sample timestamps and do not prove picture identity', async () => {
+  const timeline = await readVideoTimeline(readFileSync(new URL('../fixtures/video/colors.mp4', import.meta.url)))
+  assert(timeline)
+  // Literal Firefox callback positions in 091's independent numbered frames:
+  // both requests actually display frame 15, whose source PTS is 1250 ms.
+  assert.equal(videoReportedFrameAt(timeline, 1291.667), 15)
+  assert.equal(videoReportedFrameAt(timeline, 1322.687), 15)
+  assert.equal(videoPresentedFrameAt(timeline, 1322.687), undefined)
+  assert.equal(videoReportedFrameAt(timeline, 833.333), 10)
+  assert.equal(videoReportedFrameAt(timeline, 1501), undefined)
+  assert.equal(videoReportedFrameAt(timeline, -1), undefined)
+  assert.equal(videoReportedFrameAt(timeline, Number.NaN), undefined)
+  assert.equal(videoReportedFrameAt({ ...timeline, times: [0, 0] }, 1), undefined)
+  assert.equal(videoReportedFrameAt({ ...timeline, times: [] }, 0), undefined)
 })
 
 test('presented MP4 timestamps match microsecond-quantized PTS without changing playback floor semantics', async () => {

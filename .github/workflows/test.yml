@@ -510,7 +510,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -542,3 +542,8 @@ jobs:
     name: Native Window beginMove reference
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     uses: ./.github/workflows/native-window-move.yml
+
+  window-geometry-reference:
+    name: Native Window geometry reference
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    uses: ./.github/workflows/native-window-geometry.yml

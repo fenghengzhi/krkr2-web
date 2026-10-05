@@ -5,7 +5,7 @@ import type {
   RendererStatus,
 } from '../engine/ports/graphics.ts'
 import { WindowRendererRegistry } from '../backends/render/window-renderers.ts'
-import { WebGLRenderer } from '../backends/render/webgl2/renderer.ts'
+import { WindowGpuPool } from '../backends/render/webgl2/window-pool.ts'
 import {
   hasWindowSurfaceIdentity,
   type WindowSurfaceIdentity,
@@ -262,6 +262,7 @@ export class WorkerWindowSurfaces implements Renderer {
   private readonly windows = new Map<number, DeferredWindowRenderer>()
   private readonly renderers: WindowRendererRegistry
   private readonly owned = new WeakSet<Renderer>()
+  private gpu?: WindowGpuPool
   private disposed = false
 
   constructor(
@@ -271,7 +272,7 @@ export class WorkerWindowSurfaces implements Renderer {
   ) {
     if (!Number.isSafeInteger(generation) || generation < 1)
       throw new RangeError('Surface session generation must be a positive safe integer')
-    const create = options.createRenderer ?? ((canvas) => new WebGLRenderer(canvas))
+    const create = options.createRenderer ?? ((canvas) => (this.gpu ??= new WindowGpuPool()).attach(canvas))
     this.renderers = new WindowRendererRegistry((windowId) => {
       const renderer = new DeferredWindowRenderer(
         { generation, windowId, surfaceEpoch: 1 },
@@ -340,11 +341,12 @@ export class WorkerWindowSurfaces implements Renderer {
     if (this.disposed) return
     this.disposed = true
     this.port.removeEventListener('message', this.receive)
-    try {
-      this.renderers.dispose()
-    } finally {
-      this.windows.clear()
-      this.port.close()
-    }
+    const errors: unknown[] = []
+    try { this.renderers.dispose() } catch (error) { errors.push(error) }
+    try { this.gpu?.dispose() } catch (error) { errors.push(error) }
+    this.windows.clear()
+    try { this.port.close() } catch (error) { errors.push(error) }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Window surface cleanup failed')
   }
 }

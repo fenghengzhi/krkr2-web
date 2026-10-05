@@ -33,8 +33,9 @@ function throwErrors(errors: unknown[], message: string): void {
 }
 
 /**
- * One renderer owns one Window's texture cache and drawing surface. The factory
- * can return a transport proxy while its surface attaches asynchronously; it
+ * One renderer owns one Window's presentation identity and drawing surface.
+ * Its GPU work may use a shared backend. The factory can return a transport
+ * proxy while its surface attaches asynchronously; it
  * must clean its own partial resources if it throws before returning a renderer.
  * Window IDs cannot be reused after retirement. Context restoration belongs to
  * the existing renderer, rather than opening that Window a second time.

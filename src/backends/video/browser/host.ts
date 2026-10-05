@@ -9,7 +9,7 @@ import {
   type VideoSnapshot,
   type VideoTimeline,
 } from '../../../engine/ports/video.ts'
-import { videoFrameAt, videoFrameTime, videoPresentedFrameAt } from '../../../engine/media/video-time.ts'
+import { videoFrameAt, videoFrameTime, videoPresentedFrameAt, videoReportedFrameAt } from '../../../engine/media/video-time.ts'
 import { videoOutputRectangle } from '../../../engine/media/video-mixing.ts'
 import type { Pixels } from '../../../engine/ports/graphics.ts'
 import type { WindowView } from '../../../engine/scene/window.ts'
@@ -83,6 +83,7 @@ export class WebVideoHost {
   private readonly encoded = new VideoEncodedResources()
   private readonly stages = new Map<number, VideoStage>()
   private mixingBytes = 0
+  private retainedFrameBytes = 0
   private closed = false
   private closing?: Promise<void>
   private paused = false
@@ -457,6 +458,10 @@ export class WebVideoHost {
   }
   private pixels(movie: Movie): Pixels | undefined {
     if (movie.settings.mode !== 1 || movie.element.readyState < 2) return
+    return this.decodedPixels(movie)
+  }
+  private decodedPixels(movie: Movie): Pixels {
+    if (movie.element.readyState < 2) throw new Error('Video has no decoded image')
     const width = movie.element.videoWidth,
       height = movie.element.videoHeight
     if (width <= 0 || height <= 0 || width > 4096 || height > 4096)
@@ -589,14 +594,19 @@ export class WebVideoHost {
   ): Promise<void> {
     if (ready() && !start) return
     return new Promise((resolve, reject) => {
+      let settled = false
       const done = (error?: unknown) => {
+        if (settled) return
+        settled = true
         cancelTimeout()
         movie.element.removeEventListener(name, success)
         movie.element.removeEventListener('error', failure)
         movie.abort.signal.removeEventListener('abort', cancel)
         error ? reject(error) : resolve()
       }
-      const success = () => done(),
+      const success = () => {
+          try { if (ready()) done() } catch (error) { done(error) }
+        },
         failure = () =>
           done(
             new Error(
@@ -607,7 +617,7 @@ export class WebVideoHost {
       const cancelTimeout = this.timeouts.start(15000, () =>
         done(new Error(`Video ${name} timed out`)),
       )
-      movie.element.addEventListener(name, success, { once: true })
+      movie.element.addEventListener(name, success)
       movie.element.addEventListener('error', failure, { once: true })
       movie.abort.signal.addEventListener('abort', cancel, { once: true })
       if (movie.abort.signal.aborted) {
@@ -676,6 +686,66 @@ export class WebVideoHost {
       movie.abort.signal.addEventListener('abort', cancel, { once: true })
       if (movie.abort.signal.aborted) { cancel(); return }
       cancelTimeout = this.timeouts.start(15000, () => done(new Error('Video selected track frame timed out')))
+      try {
+        request()
+        void this.seek(movie, position).then(() => { sought = true; complete() }, done)
+      } catch (error) { done(error) }
+    })
+  }
+  private async seekRetainedFrame(movie: Movie, position: number, expected: Pixels,
+    expectedPresentation: number, timeline: VideoTimeline): Promise<void> {
+    const frame = videoReportedFrameAt(timeline, expectedPresentation)
+    if (frame === undefined) throw new Error('The previous video presentation cannot be identified')
+    const matches = (time: number) => videoReportedFrameAt(timeline, time) === frame,
+      sameImage = () => {
+        const actual = this.decodedPixels(movie)
+        if (actual.width !== expected.width || actual.height !== expected.height ||
+            actual.data.length !== expected.data.length)
+          throw new Error('Selected audio track changed the decoded image dimensions')
+        for (let at = 0; at < actual.data.length; at++)
+          if (actual.data[at] !== expected.data[at])
+            throw new Error('Selected audio track did not preserve the complete presented image')
+      }
+    if (Math.abs(movie.element.currentTime * 1000 - position) <= 0.00001 &&
+        movie.presentedTime !== undefined && matches(movie.presentedTime)) {
+      await this.seek(movie, position)
+      if (movie.abort.signal.aborted) throw new Error('Video operation cancelled')
+      sameImage()
+      return
+    }
+    await new Promise<void>((resolve, reject) => {
+      let settled = false, sought = false, presented = false, callback: number | undefined
+      let cancelTimeout = () => {}
+      const done = (error?: unknown) => {
+        if (settled) return
+        settled = true
+        cancelTimeout()
+        if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback)
+        movie.abort.signal.removeEventListener('abort', cancel)
+        error ? reject(error) : resolve()
+      }, complete = () => {
+        if (!sought || !presented || settled) return
+        try {
+          if (movie.element.seeking || Math.abs(movie.element.currentTime * 1000 - position) > 0.001)
+            throw new Error('Selected audio track changed the paused media clock')
+          sameImage()
+          done()
+        } catch (error) { done(error) }
+      }, cancel = () => done(new Error('Video operation cancelled')),
+        request = () => {
+          callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
+            callback = undefined
+            if (settled) return
+            movie.presentedTime = metadata.mediaTime * 1000
+            if (matches(movie.presentedTime)) { presented = true; complete() }
+            else {
+              try { request() } catch (error) { done(error) }
+            }
+          })
+        }
+      movie.abort.signal.addEventListener('abort', cancel, { once: true })
+      if (movie.abort.signal.aborted) { cancel(); return }
+      cancelTimeout = this.timeouts.start(15000, () => done(new Error('Video retained frame timed out')))
       try {
         request()
         void this.seek(movie, position).then(() => { sought = true; complete() }, done)
@@ -934,14 +1004,23 @@ export class WebVideoHost {
       source: movie.source.retain(), abort: new AbortController(), disposed: false }
     this.stages.set(movie.id, stage)
     movie.switching = stage
-    let committed = false, candidate: Movie | undefined
+    let committed = false, candidate: Movie | undefined, retained: Pixels | undefined, reserved = 0
     try {
       // Switching is deliberately not gapless. Freeze the authoritative media
       // clock before preparing the candidate, so no period/loop/ended boundary
       // or old-epoch layer frame is consumed during the asynchronous handoff.
       movie.element.pause()
       this.cancelFrame(movie)
-      const position = movie.element.currentTime * 1000
+      const position = movie.element.currentTime * 1000, presentation = movie.presentedTime,
+        bytes = movie.element.videoWidth * movie.element.videoHeight * 4
+      // Reserve both complete readbacks before allocation. Decoder/GPU memory
+      // and delayed garbage collection are separate from these owned buffers.
+      if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > 64 * 1024 * 1024 ||
+          bytes * 2 > 128 * 1024 * 1024 - this.retainedFrameBytes)
+        throw new Error('Video retained frame resource budget exceeded')
+      if (presentation === undefined) throw new Error('Video has no observed presentation')
+      this.retainedFrameBytes += reserved = bytes * 2
+      retained = this.decodedPixels(movie)
       const variant = await this.encoded.select(stage.source, index, movie.timeline, movie.mime,
         () => this.stageCurrent(stage))
       if (stage.disposed) { variant.release(); throw new Error('Video operation cancelled') }
@@ -955,7 +1034,7 @@ export class WebVideoHost {
           Math.abs(candidate.element.duration - movie.element.duration) > 0.001)
         throw new Error('Selected audio track changed the video presentation timeline')
       this.applySettings(candidate, settings)
-      await this.seekPresented(candidate, position)
+      await this.seekRetainedFrame(candidate, position, retained, presentation, movie.timeline)
       this.stageCurrent(stage)
       candidate.periodArmed = movie.periodArmed
       candidate.blocked = movie.blocked
@@ -998,6 +1077,9 @@ export class WebVideoHost {
         }
       }
       throw error
+    } finally {
+      retained = undefined
+      this.retainedFrameBytes -= reserved
     }
   }
   private async command(command: VideoCommand): Promise<VideoResult> {

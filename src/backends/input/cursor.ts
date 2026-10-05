@@ -109,7 +109,8 @@ function clip(context: CanvasRenderingContext2D, rectangle: CursorRectangle, lef
 
 /** Sample the committed DOM canvas bitmap and the host's ordered video layers.
  * No CSS blend mode can implement the colored destination-dependent XOR path.
- * The scratch bitmap is only one bounded cursor image, never a full-window copy. */
+ * One CSS pixel around the target preserves the rasterizer's edge support.
+ * The scratch remains bounded by 258x258, never a full-window copy. */
 export function composeCursorBackdrop(
   context: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
@@ -127,40 +128,45 @@ export function composeCursorBackdrop(
   if (scene.background && !CSS.supports('color', scene.background))
     throw new Error('Invalid explicit cursor backdrop color')
   const bounds = canvas.getBoundingClientRect(),
-    area = intersection(bounds, scene.plane.getBoundingClientRect())
-  context.canvas.width = image.width
-  context.canvas.height = image.height
+    area = intersection(bounds, scene.plane.getBoundingClientRect()),
+    // 091's independent margin4/margin16/full-viewport screenshots agree
+    // with the complete padding1/2/4 Canvas2D observations. A cursor-sized
+    // destination alone changes pixelated edge samples at fractional scales.
+    // Sample the surrounding scene, then crop bytes without another resample.
+    support = 1, sampleLeft = left - support, sampleTop = top - support
+  context.canvas.width = image.width + support * 2
+  context.canvas.height = image.height + support * 2
   context.save()
   try {
-    clip(context, area, left, top)
+    clip(context, area, sampleLeft, sampleTop)
     if (scene.background) {
       context.fillStyle = scene.background
-      context.fillRect(0, 0, image.width, image.height)
+      context.fillRect(0, 0, context.canvas.width, context.canvas.height)
     }
     // A transferred HTMLCanvasElement is a CanvasImageSource: its committed
     // placeholder bitmap, rather than a later worker draw, is sampled here.
     const rendering = getComputedStyle(canvas).imageRendering
     context.imageSmoothingEnabled = rendering !== 'pixelated' && rendering !== 'crisp-edges'
-    context.drawImage(canvas, bounds.left - left, bounds.top - top, bounds.width, bounds.height)
+    context.drawImage(canvas, bounds.left - sampleLeft, bounds.top - sampleTop, bounds.width, bounds.height)
     for (const layer of scene.layers) {
       const rectangle = layer.rectangle, visible = intersection(area, layer.clip)
       if (!rectangle.width || !rectangle.height || !visible.width || !visible.height) continue
       context.save()
       try {
-        clip(context, visible, left, top)
+        clip(context, visible, sampleLeft, sampleTop)
         context.globalAlpha = layer.opacity ?? 1
         if (layer.background) {
           context.fillStyle = layer.background
-          context.fillRect(rectangle.left - left, rectangle.top - top, rectangle.width, rectangle.height)
+          context.fillRect(rectangle.left - sampleLeft, rectangle.top - sampleTop, rectangle.width, rectangle.height)
         }
         if (layer.source) {
           context.imageSmoothingEnabled = layer.smoothing !== false
-          context.drawImage(layer.source, rectangle.left - left, rectangle.top - top, rectangle.width, rectangle.height)
+          context.drawImage(layer.source, rectangle.left - sampleLeft, rectangle.top - sampleTop, rectangle.width, rectangle.height)
         }
       } finally { context.restore() }
     }
   } finally { context.restore() }
-  const result = context.getImageData(0, 0, image.width, image.height),
+  const result = context.getImageData(support, support, image.width, image.height),
     data = new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength)
   // Edge pixels are clipped by the presentation plane too. Interior alpha
   // means an unknown HTML backdrop; RGB XOR cannot truthfully use that value.
