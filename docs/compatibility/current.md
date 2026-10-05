@@ -1,5 +1,7 @@
 # 当前实现范围
 
+106 实现提交 `e35f394d87b3aa48fd85c0281f9b9a8becd6dc1c` 已推送，[Actions 37368014184](https://github.com/fenghengzhi/krkr2-web/actions/runs/37368014184) 首次唯一查询为 pending／conclusion=null，只确认身份，尚无本批执行结论；结果下轮回收，完整非插件目标保持 active。
+
 106 候选补 [托管回归与原生错误边界](../decisions/106-hosted-regressions-and-text-errors.md)：应用事件泵持有真实私有上下文，原生容器工厂随引擎退休，文本流和全屏方法接入已确认的消息 holder；AVC 名义帧率与展示时间戳分开、参考视频按原容器核对。104 构建通过但 Node／浏览器有失败和缺失，menu-modal 的 native heap 崩溃根因未定；105 尚未报告执行。本批尚待验证，协议 **41**，完整非插件目标仍未完成。以下保留历史状态。
 
 105 实现提交 `34aca0ddc9594618a284d8c1f29eef96eed75898` 已推送，[Actions 37364141321](https://github.com/fenghengzhi/krkr2-web/actions/runs/37364141321) 首次唯一查询为 pending／conclusion=null。仅确认身份，尚无本批执行结论；下轮取回结果，完整非插件目标保持 active。
