@@ -1,5 +1,7 @@
 # 当前实现范围
 
+105 实现提交 `34aca0ddc9594618a284d8c1f29eef96eed75898` 已推送，[Actions 37364141321](https://github.com/fenghengzhi/krkr2-web/actions/runs/37364141321) 首次唯一查询为 pending／conclusion=null。仅确认身份，尚无本批执行结论；下轮取回结果，完整非插件目标保持 active。
+
 105 候选补 [原生 TVP 消息与真实异常消费者](../decisions/105-native-tvp-message-consumers.md)，固定原版 138 个 holder 与六个 CONST，迁移已核对的实际错误分支并保留纯格式化和失败原因；新增 `nativeMessages:1`，协议仍 **41**。按原版证据，pending terminate 不会自动关闭 popup，真实关闭后才结束外层执行，Stop 仍立即取消。103 光标 strict 固定范围各 1076/1076、5578 未比较，应用因构建失败跳过；104 应用与光标仍未报告，Win2022 beginMove 有一项调用前标签失败。新增候选没有通过结论，所有消息消费者、历史回归和整体非插件目标仍待完成。以下保留历史状态。
 
 104 候选补 [RandomGenerator 宿主熵与恢复边界](../decisions/104-native-random-and-cursor-evidence.md)，新增 `nativeRandom:1`，协议仍 **41**。102 双 Windows 固定 32px 光标严格比较各 1076/1076，通过范围以对应 profile 为限，5578 未比较保留；103 beginMove 双系统各 7/7。两批应用仍因构建失败未执行，本批修两处 TS 推断和 C# 编译错误，新增候选尚待验证。完整 TVP 消息映射、历史回归与完整非插件目标仍未完成。以下保留历史状态。

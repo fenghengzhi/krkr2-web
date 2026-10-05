@@ -2,6 +2,8 @@
 
 状态：开发候选，尚待 GitHub-hosted Actions 验证。从 `88c234f` 继续，整体目标仍是完成插件以外的 KRKR2 Web 模拟器，未完成。本批补充原生消息库存及真实异常消费者，并按新取回的原版证据修订菜单打开时的异步退出。协议 **41**、TJS ABI **5**、字体 ABI **2**、`nativeSystem:5`、`nativeRandom:1` 保持，新增独立门禁 **`nativeMessages:1`**。私有 Reply 的类型增加不改变 Session RPC。
 
+实现提交 `34aca0ddc9594618a284d8c1f29eef96eed75898` 的 **52 个文件**已整批推送至 `codex/migrated-window-attention`。[完整托管验证 37364141321](https://github.com/fenghengzhi/krkr2-web/actions/runs/37364141321) 首次唯一身份查询为 **pending／conclusion=null**。原始响应保存于 `out/verification/github-actions/37364141321/initial-run-discovery.json`，只确认提交及运行身份。本轮不再查询 jobs／artifacts，下轮补取 104 未报告范围及本批固定结果。交接文档通过 `[skip ci]` 单独提交，不是另一轮验证。
+
 本地仅检查和编辑源码、操作 Git，以及下载、解包、核对和解析历史原件。没有本地运行测试、构建、类型检查、浏览器或可执行验证探针。整批推送后只记录一次运行身份，下轮取回结果，不实时监控。
 
 ## 本轮固定回收
