@@ -1,6 +1,8 @@
 # 102 原生栈池、系统生命周期与光标缩放边界
 
-状态：开发候选，尚待 GitHub-hosted Actions 执行。完整目标仍是完成 KRKR2 Web 模拟器的插件以外功能，未完成。本轮从干净的 `dabfeb0` 继续，上一轮 101 已实现并提交，是实际进展。协议 **40**、`nativeSystem:5`，TJS ABI **5**、字体 ABI **2**。
+状态：开发候选，尚待 GitHub-hosted Actions 验证结果。完整目标仍是完成 KRKR2 Web 模拟器的插件以外功能，未完成。本轮从干净的 `dabfeb0` 继续，上一轮 101 已实现并提交，是实际进展。协议 **40**、`nativeSystem:5`，TJS ABI **5**、字体 ABI **2**。
+
+实现提交 `79b7a27dd4354426bac1c17a07c31b91db513e72` 的 49 个文件已整批推送至 `codex/migrated-window-attention`。[完整托管验证 37352789584](https://github.com/fenghengzhi/krkr2-web/actions/runs/37352789584) 首次唯一身份查询为 **in_progress／conclusion=null**，原始响应保存在 `out/verification/github-actions/37352789584/initial-run-discovery.json`。本轮只确认提交和运行身份，不实时查询 jobs／artifacts；下轮补取 101 缺失结果并回收本批固定快照。交接文档使用 `[skip ci]` 提交，不是另一轮验证。
 
 本地只进行源码检查、编辑、Git 操作及历史原件的下载、解包、哈希和解析；没有运行测试、构建、类型检查、浏览器或可执行参考探针。整批提交后只记录首次运行身份，下轮取回固定结果，不实时监控。
 

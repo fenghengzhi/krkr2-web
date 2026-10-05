@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+最新待核验批次：[Full test suite 37352789584](https://github.com/fenghengzhi/krkr2-web/actions/runs/37352789584)，精确提交 `79b7a27dd4354426bac1c17a07c31b91db513e72`。102 的 49 个文件已整批推送，新增 **29 个常规 Node、每浏览器 8 个、可信 Chromium 4 个定义**，另有同次构建的 JSPI 栈池 8 定义、双 sanitizer 原生场景和 20 个 PNG 光标样本。首次唯一查询为 **in_progress／conclusion=null**，只确认运行身份。下轮补取 101 缺失结果并回收本批固定快照，不实时监控，没有本地执行验证，完整目标保持 active。
+
 2026-10-06 准备 [102 原生栈池、系统生命周期与光标缩放边界](decisions/102-native-pool-and-system-lifecycle.md)：回收真实空闲寄存器块，补空闲／应用失活自动整理和完整无窗口启动条件；按双 Windows 的 323 样本原件修正固定 32px 光标的 66 像素分支。原版 Timer 退出夹具与 beginMove 前置同步也已修订，历史失败保留。协议 **40**、`nativeSystem:5`，TJS ABI **5**、字体 ABI **2**；候选仍待托管执行，完整目标保持 active。
 
 102 固定回收 **15 原 ZIP、54,247,847 字节**全部匹配。100 终态 failure：旧两处类型错误导致应用验证跳过，光标 strict 各 **539/1016 matched、477 failure、5278 uncompared**。101 快照仍 in_progress，build 未报告；双系统原版退出各 **3/8 observed、5 failure**，五项均未到待观察终止调用；Win2025 beginMove 六 observed、一前置失败，未调用 SC_MOVE。下轮补取，不实时监控。以下保留历史批次当时状态。
