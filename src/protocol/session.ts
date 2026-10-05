@@ -8,7 +8,8 @@ import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import type { PadAck, PadMessage, PadFontData } from './pad.ts'
 import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
 import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
-export const PROTOCOL_VERSION = 33
+import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
+export const PROTOCOL_VERSION = 34
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -74,6 +75,7 @@ export interface SessionApi {
   closeWindow(windowId: number): Promise<InputAdmissionAck>
   moveWindow(windowId: number, left: number, top: number): Promise<void>
   windowMove(message: WindowMoveMessage): Promise<boolean>
+  windowPopup(message: WindowPopupMessage): Promise<InputAdmissionAck>
   resizeWindow(windowId: number, width: number, height: number): Promise<void>
   menuClick(id: number, popup?: MenuPopupIdentity): Promise<InputAdmissionAck>
   menuDismiss(popup?: MenuPopupIdentity): Promise<void>

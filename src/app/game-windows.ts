@@ -15,7 +15,7 @@ export interface WindowHostView extends WindowView {
 type WindowHostIdentity = { windowId: number; surfaceEpoch: number }
 export type WindowHostAction = WindowHostIdentity &
   (
-    | { type: 'activate' | 'close' | 'exitFullScreen' }
+    | { type: 'activate' | 'close' | 'exitFullScreen' | 'popupHide' }
     | { type: 'move'; left: number; top: number }
     | { type: 'resize'; width: number; height: number }
   )
@@ -126,7 +126,7 @@ export function createGameWindows(
   const emit = (
     surface: WindowElement,
     action:
-      | { type: 'activate' | 'close' | 'exitFullScreen' }
+      | { type: 'activate' | 'close' | 'exitFullScreen' | 'popupHide' }
       | { type: 'move'; left: number; top: number }
       | { type: 'resize'; width: number; height: number },
   ) => {
@@ -647,7 +647,14 @@ export function createGameWindows(
       windows.set(windowId, surface)
       surface.observer.observe(body)
       const options = { signal: surfaceAbort.signal }
-      element.addEventListener('pointerdown', () => activate(surface), {
+      element.addEventListener('pointerdown', (event) => {
+        // Native WM_NCL/RBUTTONDOWN precedes chrome activation/dragging.
+        // Canvas down has its own engine Form prelude and must not double-post.
+        if (interactive(surface) && (event.button === 0 || event.button === 2) &&
+            event.target instanceof Node && !content.contains(event.target))
+          emit(surface, { type: 'popupHide' })
+        activate(surface)
+      }, {
         ...options,
         capture: true,
       })

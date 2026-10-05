@@ -1,4 +1,5 @@
 import type { InputPacket, InputView } from '../../engine/ports/input.ts'
+import type { WindowPopupMessage } from '../../engine/ports/window-popup.ts'
 import type { WindowView } from '../../engine/scene/window.ts'
 import { BrowserInput, virtualKey, type BrowserCursorState, type BrowserInputHooks } from './browser.ts'
 import type { CursorScene, SelectedCursorAsset } from './cursor.ts'
@@ -20,6 +21,7 @@ interface SurfaceInput {
 interface QueuedInput {
   readonly surface: SurfaceInput
   readonly packet: InputPacket
+  readonly settled?: (admitted: boolean) => void
 }
 
 export interface BrowserInputCoordinatorOptions {
@@ -29,6 +31,10 @@ export interface BrowserInputCoordinatorOptions {
   mouseKeyClock?: MouseKeyClock
   /** Temporary page controls such as owned menu popups preserve Window focus. */
   isTransientFocus?(target: EventTarget | null): boolean
+  /** Page-only window messages, independent of physical key state. */
+  windowPopup?(message: WindowPopupMessage): void
+  /** An owned menu overlay can lie outside its Window's DOM focus root. */
+  popupWindow?(target: EventTarget | null): number | undefined
   cursor?: {
     resolve(id: number): SelectedCursorAsset | undefined
     scene(windowId: number, epoch: number): CursorScene | undefined
@@ -52,11 +58,14 @@ export class BrowserInputCoordinator {
   private readonly physicalOwners = new Map<number, number>()
   private readonly hostKeys = new Set<number>()
   private readonly hostKeyEvents = new WeakSet<KeyboardEvent>()
+  private readonly popupHideKeyEvents = new WeakSet<KeyboardEvent>()
+  private readonly popupHideAdmissions = new WeakMap<KeyboardEvent, Promise<boolean>>()
   private publishedKeys = ''
   private queue: QueuedInput[] = []
   private active?: SurfaceInput
   private mouseOwner?: SurfaceInput
   private sending = false
+  private sendingEntry?: QueuedInput
   private suspended = false
   private closed = false
   private generation = 0
@@ -82,6 +91,10 @@ export class BrowserInputCoordinator {
         if (this.closed || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return
         this.pagePointer = { x: event.clientX, y: event.clientY }
         this.pointerObservation++
+        if (type === 'mousedown' && !this.suspended && !this.hostMoving) {
+          const source = this.popupSource(event.target)
+          if (!source) this.options.windowPopup?.({ type: 'application', active: false })
+        }
         if (this.hostMoving) {
           for (const [key, mask] of [[1, 1], [2, 2], [4, 4], [5, 8], [6, 16]] as const) {
             if (event.buttons & mask) this.pressed.add(key)
@@ -117,6 +130,17 @@ export class BrowserInputCoordinator {
         if (this.closed) return
         const key = virtualKey(event)
         if (!key) return
+        if (!this.suspended && !this.hostMoving && !event.isComposing && event.keyCode !== 229 &&
+            (event.altKey || key === 18 || key === 121)) {
+          const source = this.popupSource(event.target)
+          if (source) {
+            let settle!: (admitted: boolean) => void
+            this.popupHideAdmissions.set(event, new Promise<boolean>((resolve) => { settle = resolve }))
+            try {
+              if (this.enqueue(source, { type: 'popupHide' }, settle)) this.popupHideKeyEvents.add(event)
+            } catch (error) { settle(false); this.error(error) }
+          }
+        }
         if (this.hostMoving) {
           this.pressed.add(key)
           if (this.active) this.physicalOwners.set(key, this.active.id)
@@ -175,8 +199,9 @@ export class BrowserInputCoordinator {
     )
     window.addEventListener(
       'blur',
-      () => {
-        if (this.closed) return
+      (event) => {
+        if (this.closed || event.target !== window) return
+        this.options.windowPopup?.({ type: 'application', active: false })
         this.focusVersion++
         this.setActive(undefined)
         this.clearPhysical()
@@ -186,11 +211,20 @@ export class BrowserInputCoordinator {
     this.gamepad = new BrowserGamepad((sample) => this.observeGamepad(sample), this.error, options.gamepad,
       () => this.tickMouseKeys())
     document.addEventListener('visibilitychange', () => this.syncGamepad(), { signal: this.abort.signal })
-    window.addEventListener('focus', () => this.syncGamepad(), { signal: this.abort.signal })
+    window.addEventListener('focus', (event) => {
+      if (event.target !== window) return
+      if (!this.closed && !document.hidden)
+        this.options.windowPopup?.({ type: 'application', active: true })
+      this.syncGamepad()
+    }, { signal: this.abort.signal })
   }
 
   get focusRevision(): number {
     return this.focusVersion
+  }
+  /** A consumed menu shortcut must not overtake its own queued Form prelude. */
+  popupHideAdmission(event: KeyboardEvent): Promise<boolean> | undefined {
+    return this.popupHideAdmissions.get(event)
   }
 
   attach(
@@ -290,6 +324,7 @@ export class BrowserInputCoordinator {
       },
       keyboard: (event) =>
         current() && this.active === surface && (!event || !this.hostKeyEvents.has(event)),
+      popupHidePosted: (event) => this.popupHideKeyEvents.has(event),
       mouse: (type, buttons) => {
         if (!current() || (this.mouseOwner && this.mouseOwner !== surface)) return false
         if (type === 'down') this.mouseOwner = surface
@@ -347,8 +382,7 @@ export class BrowserInputCoordinator {
       this.mouseOwner = undefined
       // Already admitted VM work retains its native lifetime. DOM work still
       // waiting for admission now belongs to the host's movement loop.
-      this.queue = this.queue.filter((entry) =>
-        entry.packet.type === 'activate' || entry.packet.type === 'deactivate')
+      this.discardQueued((entry) => entry.packet.type !== 'activate' && entry.packet.type !== 'deactivate')
     }
     for (const surface of this.surfaces.values()) surface.input.setHostMoving(moving)
     this.syncMouseKeyTicker()
@@ -418,7 +452,7 @@ export class BrowserInputCoordinator {
       surface.blocked = blocked
       surface.revision++
       if (blocked) {
-        this.queue = this.queue.filter((entry) => entry.surface !== surface)
+        this.discardQueued((entry) => entry.surface === surface)
         if (this.active === surface) this.setActive(undefined)
         if (this.mouseOwner === surface) this.mouseOwner = undefined
         // Applying inert may already have blurred the DOM before this roster
@@ -435,7 +469,7 @@ export class BrowserInputCoordinator {
     if (surface.visible !== view.visible) {
       surface.visible = view.visible
       if (!view.visible) {
-        this.queue = this.queue.filter((entry) => entry.surface !== surface)
+        this.discardQueued((entry) => entry.surface === surface)
         if (this.active === surface) {
           this.setActive(undefined)
         }
@@ -468,7 +502,7 @@ export class BrowserInputCoordinator {
     this.gamepad.setSuspended(suspended)
     if (suspended) {
       this.generation++
-      this.queue = []
+      this.discardQueued(() => true)
       this.active = undefined
       this.mouseOwner = undefined
       this.clearPhysical()
@@ -498,6 +532,14 @@ export class BrowserInputCoordinator {
           (!!target && surface.focusRoot?.contains(target as Node))),
     )
     this.setActive(surface)
+  }
+
+  private popupSource(target: EventTarget | null): SurfaceInput | undefined {
+    const menuWindow = this.options.popupWindow?.(target),
+      node = !!target && (typeof Node === 'undefined' || target instanceof Node)
+    return [...this.surfaces.values()].find((surface) => this.current(surface) &&
+      surface.visible && !surface.blocked && (surface.id === menuWindow || surface.input.ownsFocus(target) ||
+        (node && !!surface.focusRoot?.contains(target as Node))))
   }
 
   private setActive(surface: SurfaceInput | undefined): void {
@@ -569,7 +611,7 @@ export class BrowserInputCoordinator {
     if (this.active === surface) this.gamepad.setActive(false)
     this.surfaces.delete(surface.id)
     this.mouseKeyObservations.delete(surface.id)
-    this.queue = this.queue.filter((entry) => entry.surface !== surface)
+    this.discardQueued((entry) => entry.surface === surface)
     if (this.active === surface) this.active = undefined
     if (this.mouseOwner === surface) this.mouseOwner = undefined
     surface.input.close()
@@ -600,9 +642,18 @@ export class BrowserInputCoordinator {
     }
   }
 
-  private enqueue(surface: SurfaceInput, packet: InputPacket): void {
-    if (!this.current(surface) || this.suspended || surface.blocked) return
-    if (this.hostMoving && packet.type !== 'activate' && packet.type !== 'deactivate') return
+  private discardQueued(matches: (entry: QueuedInput) => boolean): void {
+    const discarded = this.queue.filter(matches)
+    this.queue = this.queue.filter((entry) => !matches(entry))
+    for (const entry of discarded) entry.settled?.(false)
+    if (this.sendingEntry && matches(this.sendingEntry)) this.sendingEntry.settled?.(false)
+  }
+  private enqueue(surface: SurfaceInput, packet: InputPacket, settled?: (admitted: boolean) => void): boolean {
+    if (!this.current(surface) || this.suspended || surface.blocked ||
+        (this.hostMoving && packet.type !== 'activate' && packet.type !== 'deactivate')) {
+      settled?.(false)
+      return false
+    }
     if (packet.type === 'keyDown' || packet.type === 'keyUp' || packet.type === 'text' || packet.type === 'mouseKeyTick') {
       const targetId = packet.type === 'mouseKeyTick' ? surface.id :
         this.inputs.get(surface.id)?.keyboardRoute?.windowId ?? surface.id,
@@ -614,7 +665,7 @@ export class BrowserInputCoordinator {
         if (observation) packet = { ...packet, mouseKeyObservation: observation }
       }
     }
-    const entry = { surface, packet: { ...packet, windowId: surface.id } },
+    const entry: QueuedInput = { surface, packet: { ...packet, windowId: surface.id }, settled },
       last = this.queue.at(-1)
     if (
       last?.surface === surface &&
@@ -623,16 +674,22 @@ export class BrowserInputCoordinator {
         (packet.type === 'touchMove' &&
           last.packet.type === 'touchMove' &&
           last.packet.id === packet.id))
-    )
+    ) {
+      last.settled?.(false)
       this.queue[this.queue.length - 1] = entry
-    else if (this.queue.length >= 256) {
+    } else if (this.queue.length >= 256) {
+      this.discardQueued(() => true)
+      settled?.(false)
       this.queue = [...this.surfaces.values()].map((surface) => ({
         surface,
         packet: { type: 'cancel', windowId: surface.id },
       }))
       this.error(new Error('Input queue budget exceeded'))
+      if (!this.sending) void this.flush()
+      return false
     } else this.queue.push(entry)
     if (!this.sending) void this.flush()
+    return true
   }
 
   private async flush(): Promise<void> {
@@ -640,21 +697,24 @@ export class BrowserInputCoordinator {
     try {
       while (!this.closed && !this.suspended && this.queue.length) {
         const entry = this.queue.shift()!
-        if (!this.current(entry.surface) || entry.surface.blocked) continue
+        if (!this.current(entry.surface) || entry.surface.blocked) { entry.settled?.(false); continue }
+        this.sendingEntry = entry
         const generation = this.generation,
           revision = entry.surface.revision
         try {
           await this.send(entry.packet)
+          entry.settled?.(true)
         } catch (error) {
+          entry.settled?.(false)
           if (
             this.current(entry.surface) &&
             generation === this.generation &&
             revision === entry.surface.revision
           ) {
-            this.queue = this.queue.filter((pending) => pending.surface !== entry.surface)
+            this.discardQueued((pending) => pending.surface === entry.surface)
             this.error(error)
           }
-        }
+        } finally { if (this.sendingEntry === entry) this.sendingEntry = undefined }
       }
     } finally {
       this.sending = false

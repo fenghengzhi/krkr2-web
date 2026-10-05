@@ -39,9 +39,11 @@ export type InputPacket = {
       button: number
       clicks: number
     }
-  | { type: 'leave' | 'cancel' | 'activate' | 'deactivate' | 'mouseKeyTick' }
+  | { type: 'leave' | 'cancel' | 'activate' | 'deactivate' | 'mouseKeyTick' | 'popupHide' }
   | { type: 'wheel'; x: number; y: number; shift: number; delta: number }
-  | { type: 'keyDown' | 'keyUp'; key: number; shift: number; systemKey?: boolean }
+  | { type: 'keyDown' | 'keyUp'; key: number; shift: number; systemKey?: boolean;
+      /** The DOM coordinator already queued this system message's popup prelude. */
+      popupHidePosted?: boolean }
   | { type: 'text'; text: string }
   | {
       type: 'touchDown' | 'touchMove' | 'touchUp'

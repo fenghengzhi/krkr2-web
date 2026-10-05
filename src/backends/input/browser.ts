@@ -106,6 +106,7 @@ export interface BrowserInputHooks {
   activate(): boolean
   deactivate(pageBlur: boolean, nextTarget: EventTarget | null): void
   keyboard(event?: KeyboardEvent): boolean
+  popupHidePosted?(event: KeyboardEvent): boolean
   mouse(type: 'down' | 'move' | 'up', buttons: number): boolean
 }
 /** Retained by the coordinator across replacement surfaces of one Window. */
@@ -740,6 +741,7 @@ export class BrowserInput {
       key,
       shift,
       ...(event.altKey || key === 18 || key === 121 ? { systemKey: true } : {}),
+      ...(down && this.shared?.popupHidePosted?.(event) ? { popupHidePosted: true } : {}),
     })
     const controls: Record<string, string> = { Enter: '\r', Escape: '\u001b', Backspace: '\b' }
     if (down && controls[event.key] !== undefined) {

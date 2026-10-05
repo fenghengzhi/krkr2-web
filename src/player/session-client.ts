@@ -1,5 +1,6 @@
 import type { PadMessage } from '../protocol/pad.ts'
 import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
+import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
 import { copySystemDisplayUpdate, type SystemDisplayUpdate } from '../engine/system/display.ts'
 import { createRpcClient, type RpcClient } from 'vite-plugin-worker-rpc/runtime'
 import { transfer } from 'vite-plugin-worker-rpc/client'
@@ -188,6 +189,10 @@ export class SessionClient {
   }
   windowMove(message: WindowMoveMessage) {
     return this.call('windowMove', message)
+  }
+  async windowPopup(message: WindowPopupMessage): Promise<void> {
+    if (!this.initialized) return
+    await this.call('windowPopup', message)
   }
   resizeWindow(windowId: number, width: number, height: number) {
     return this.call('resizeWindow', windowId, width, height)

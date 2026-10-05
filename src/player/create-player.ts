@@ -17,6 +17,7 @@ import { activityPaused, initialActivity } from '../engine/ports/activity.ts'
 import type { InputView } from '../engine/ports/input.ts'
 import type { WindowPresentation, WindowView } from '../engine/scene/window.ts'
 import type { WindowMoveRequest, WindowMoveMessage } from '../engine/ports/window-move.ts'
+import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import { copyWindowRegion, WindowRegions, type WindowRegion } from '../engine/scene/window-region.ts'
 import type { WindowSurfaceIdentity } from '../protocol/surfaces.ts'
 import { normalizeSystemDataPath } from '../engine/system/environment.ts'
@@ -363,6 +364,13 @@ export function createPlayer(
     (x, y, windowId, sequence) => session.pointerState(x, y, windowId, sequence),
     onError,
     {
+      windowPopup: (message) => { if (!stopping) void session.windowPopup(message).catch(onError) },
+      popupWindow: (target) => {
+        if (!(target instanceof Element)) return
+        const popup = target.closest<HTMLElement>('.game-menu-overlay[data-window-id][data-request-id]'),
+          id = Number(popup?.dataset.windowId)
+        if (Number.isSafeInteger(id) && id > 0 && !retiredWindows.has(id) && surfaces?.get(id)) return id
+      },
       cursor: {
         resolve: (id) => cursorAssets.get(id),
         scene: (windowId, epoch) => video.cursorScene(windowId, epoch),
@@ -457,6 +465,11 @@ export function createPlayer(
     syncInput()
   }, pauseWhenHidden)
   const player = {
+    async menuClick(id: number, popup?: MenuPopupIdentity, shortcutEvent?: KeyboardEvent): Promise<void> {
+      const admission = shortcutEvent && input?.popupHideAdmission(shortcutEvent)
+      if (admission && !(await admission)) return
+      if (!stopping && !session.isDisposed) await session.menuClick(id, popup)
+    },
     isWindowActive(windowId: number, epoch?: number): boolean {
       return !retiredWindows.has(windowId) && input!.isActive(windowId, epoch)
     },

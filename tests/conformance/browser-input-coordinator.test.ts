@@ -219,6 +219,68 @@ function fixture(
   }
 }
 
+test('system-key popup preludes keep the original admission order even when a menu consumes the key', async () => {
+  const gate = deferred(), f = fixture(async (packet) => {
+    if (packet.type === 'keyDown' && packet.key === 65) await gate.promise
+  })
+  const key = (name: string, code: number, menu = false) => {
+    const target = f.textareas[0]!, event = new Event('keydown', { cancelable: true })
+    Object.assign(event, { key: name, code: name, keyCode: code, shiftKey: false, ctrlKey: false,
+      altKey: name === 'Alt', repeat: false, isComposing: false })
+    Object.defineProperty(event, 'target', { value: target })
+    f.page.dispatchEvent(event)
+    if (menu) event.preventDefault()
+    target.dispatchEvent(event)
+    return event as unknown as KeyboardEvent
+  }
+  try {
+    f.a.focus()
+    await settle()
+    key('A', 65)
+    const menuEvent = key('F10', 121, true), admission = f.coordinator.popupHideAdmission(menuEvent)
+    assert(admission)
+    let admitted = false
+    void admission.then((value) => { admitted = value })
+    await settle()
+    assert.equal(admitted, false)
+    assert.equal(f.packets.filter((packet) => packet.type === 'popupHide').length, 0)
+    gate.resolve()
+    assert.equal(await admission, true)
+    await settle()
+    assert.equal(f.packets.at(-1)!.type, 'popupHide')
+    assert.equal(f.packets.at(-1)!.windowId, 101)
+    assert.equal(f.packets.some((packet) => packet.type === 'keyDown' && packet.key === 121), false)
+    key('Alt', 18)
+    await settle()
+    assert.deepEqual(f.packets.slice(-2).map((packet) => packet.type), ['popupHide', 'keyDown'])
+    assert.equal((f.packets.at(-1) as { popupHidePosted?: boolean }).popupHidePosted, true)
+    assert.deepEqual(f.errors, [])
+  } finally { gate.resolve(); f.close() }
+})
+
+test('retiring a surface settles its queued popup admission without waiting for an old transport ACK', async () => {
+  const gate = deferred(), f = fixture(async (packet) => {
+    if (packet.type === 'down') await gate.promise
+  })
+  try {
+    f.a.focus()
+    await settle()
+    f.mouse(f.a, 'mousedown', 1, 10)
+    const event = new Event('keydown', { cancelable: true })
+    Object.assign(event, { key: 'F10', code: 'F10', keyCode: 121, altKey: false, isComposing: false })
+    Object.defineProperty(event, 'target', { value: f.textareas[0] })
+    f.page.dispatchEvent(event)
+    const admission = f.coordinator.popupHideAdmission(event as unknown as KeyboardEvent)
+    assert(admission)
+    f.coordinator.detach(101, 1)
+    assert.equal(await admission, false)
+    gate.resolve()
+    await settle()
+    assert.equal(f.packets.some((packet) => packet.type === 'popupHide'), false)
+    assert.deepEqual(f.errors, [])
+  } finally { gate.resolve(); f.close() }
+})
+
 test('host movement keeps physical state current while suppressing game pointer/key packets and its ending keyup', async () => {
   const f = fixture()
   const key = (name: string, code: number, down: boolean) => {

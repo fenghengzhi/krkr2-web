@@ -29,7 +29,8 @@ async function fixture(binary: boolean, overrides: Partial<SessionDependencies> 
       assert.equal(new TextDecoder().decode(bytes.subarray(0, 4)), 'TJS2')
     }
     const execute = (source: string) => f.session.evaluate(`Scripts.exec(${JSON.stringify(source)})`)
-    return { ...f, id, execute, regions: () => regionEvents(f.events, id) }
+    const caught = (source: string) => f.session.evaluate(`(function(){try{Scripts.exec(${JSON.stringify(source + ';')});return "missing error";}catch(error){return error.message;}})()`)
+    return { ...f, id, execute, caught, regions: () => regionEvents(f.events, id) }
   } catch (error) { await f.session.stop(); throw error }
 }
 
@@ -45,12 +46,14 @@ for (const binary of [false, true]) {
       assert.equal(first.region.width, 4)
       assert.equal(first.region.height, 3)
       await f.execute(String.raw`
-root.setSize(2,2);root.setImageSize(4,3);root.setImagePos(7,9);root.setClip(0,0,4,3);
+root.setSize(2,2);root.setImageSize(4,3);root.setImagePos(-2,-1);root.setClip(0,0,4,3);
 root.fillRect(0,0,4,3,0xffffffff);root.opacity=0;root.setClip(0,0,1,1);
 var child=new Layer(win,root);child.setSize(20,20);child.fillRect(0,0,20,20,0xffffffff);child.visible=true;
 win.setZoom(3,2);win.setLayerPos(5,7);win.setInnerSize(30,40);
 `)
       assert.equal(await f.session.evaluate('root.getMaskPixel(0,0)+","+root.getMaskPixel(3,2)'), '255,255')
+      assert.equal(await f.session.evaluate('root.imageLeft+","+root.imageTop'), '-2,-1',
+        'The 2x2 display remains inside the 4x3 image while its origin differs')
       assert.equal(await f.session.evaluate('root.opacity+","+win.layerLeft+","+win.layerTop'), '0,5,7')
       assert.equal(f.regions().length, 1, 'Bitmap and geometry changes do not recreate an installed native region')
       assert.deepEqual([...first.region.rectangles], [1, 0, 2, 2, 0, 2, 1, 1, 3, 2, 1, 1])
@@ -92,10 +95,10 @@ win.setZoom(3,2);win.setLayerPos(5,7);win.setInnerSize(30,40);
     try {
       await f.execute('win.setMaskRegion();var blank=new Window();blank.visible=true;')
       const previous = f.regions().at(-1)!, count = f.regions().length
-      await assert.rejects(f.session.evaluate('blank.setMaskRegion()'), /primary Layer/)
+      assert.match(await f.caught('blank.setMaskRegion()'), /primary Layer/)
       await f.execute('blank.removeMaskRegion();root.hasImage=false;')
       assert.equal(await f.session.evaluate('root.hasImage'), '0')
-      await assert.rejects(f.session.evaluate('win.setMaskRegion()'), /drawable image/)
+      assert.match(await f.caught('win.setMaskRegion()'), /drawable image/)
       assert.equal(f.regions().length, count)
       assert.deepEqual([...f.regions().at(-1)!.region!.rectangles], [...previous.region!.rectangles])
       // Image operations construct >65,536 distinct native runs without a
@@ -107,7 +110,7 @@ for(var x=0;x<512;x+=2)root.setMaskPixel(x,0,255);
 for(var x=1;x<512;x+=2)root.setMaskPixel(x,1,255);
 for(var y=2;y<257;y++)root.copyRect(0,y,root,0,y%2,512,1);
 `)
-      await assert.rejects(f.session.evaluate('win.setMaskRegion()'), /rectangle budget exceeded/)
+      assert.match(await f.caught('win.setMaskRegion()'), /rectangle budget exceeded/)
       assert.equal(f.regions().length, count)
       assert.deepEqual([...f.regions().at(-1)!.region!.rectangles], [...previous.region!.rectangles])
     } finally { await f.session.stop() }
@@ -119,7 +122,7 @@ for(var y=2;y<257;y++)root.copyRect(0,y,root,0,y%2,512,1);
       await f.execute('win.setMaskRegion();invalidate root;')
       const first = f.regions().at(-1)!
       assert(first.region)
-      await assert.rejects(f.session.evaluate('win.setMaskRegion()'), /primary Layer/)
+      assert.match(await f.caught('win.setMaskRegion()'), /primary Layer/)
       assert.equal(f.regions().length, 1)
       await f.execute('win.removeMaskRegion();invalidate win;')
       assert.equal(f.regions().at(-1)!.region, null)

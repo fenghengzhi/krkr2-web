@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import { build } from 'vite'
 import type { createCursorCompositionFixture } from '../helpers/web-cursor-composition.ts'
+import { readScreenshotPng } from '../helpers/screenshot-png.ts'
 
 declare global {
   interface Window {
@@ -182,6 +183,10 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
       background: Awaited<ReturnType<typeof screenshotRgba>>;
       expected: number[]; raw: number[]; screenshot: Awaited<ReturnType<typeof screenshotRgba>>;
       rawMismatches: number; screenshotMismatches: number;
+      screenshotReferences: { scope: string; capturedSize: number[]; crop: number[];
+        pixels: number[]; mismatches: number }[];
+      deviceRaster: { scale: number; capturedSize: number[]; background: number[];
+        sampled: number[]; mismatches: number };
       samplingCandidates: { padding: number; quality: string; pixels: number[]; mismatches: number }[] }[] = []
   let revision = 200
   for (const scale of [1.5, 2.25]) for (const rendering of ['auto', 'pixelated'] as const) {
@@ -199,6 +204,50 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
       // expectation uses the actual hidden-cursor page screenshot exclusively.
       expected = background.data.map((value, index) => index % 4 === 3 ? 255 : value ^ 255)
     await info.attach(`css-${rendering}-${scale}-background`, { body: backgroundPng, contentType: 'image/png' })
+    // 089's twelve Canvas2D padding/quality paths all retain the same fifteen
+    // WebKit auto/1.5 differences. Observe whether screenshot extent itself
+    // changes that last row before altering the production raster or oracle.
+    // The crop below copies PNG bytes only: it does not resize or interpolate.
+    const screenshotReferences: typeof readings[number]['screenshotReferences'] = []
+    for (const margin of [4, 16, null]) {
+      const rectangle = margin === null ? undefined : {
+        x: clip.x - margin, y: clip.y - margin,
+        width: clip.width + margin * 2, height: clip.height + margin * 2,
+      }, scope = margin === null ? 'viewport' : `margin-${margin}`,
+        captured = await page.screenshot({ clip: rectangle, scale: 'css' }), decoded = readScreenshotPng(captured),
+        x = clip.x - (rectangle?.x ?? 0), y = clip.y - (rectangle?.y ?? 0), pixels: number[] = []
+      if (x < 0 || y < 0 || x + clip.width > decoded.width || y + clip.height > decoded.height)
+        throw new Error('Cursor screenshot diagnostic crop is outside its captured image')
+      for (let row = 0; row < clip.height; row++) {
+        const from = ((y + row) * decoded.width + x) * 4
+        pixels.push(...decoded.rgba.subarray(from, from + clip.width * 4))
+      }
+      screenshotReferences.push({ scope, capturedSize: [decoded.width, decoded.height],
+        crop: [x, y, clip.width, clip.height], pixels,
+        mismatches: pixels.filter((value, index) => value !== background.data[index]).length })
+      await info.attach(`css-${rendering}-${scale}-background-${scope}`, { body: captured, contentType: 'image/png' })
+    }
+    // Keep device-pixel observation separate from the existing CSS-pixel
+    // cursor contract. It may distinguish a DPR raster stage; no device path
+    // is chosen as a replacement policy by this diagnostic.
+    const devicePng = await page.screenshot({ clip, scale: 'device' }), device = readScreenshotPng(devicePng),
+      deviceScale = device.width / clip.width
+    if (deviceScale !== device.height / clip.height || !Number.isFinite(deviceScale) || deviceScale <= 0)
+      throw new Error('Cursor device screenshot has inconsistent pixel scaling')
+    const sampled = await page.evaluate(({ clip, rendering, deviceScale, width, height }) => {
+      const source = document.querySelector<HTMLCanvasElement>('#cursor-surface-1')!,
+        bounds = source.getBoundingClientRect(), scratch = document.createElement('canvas')
+      scratch.width = width; scratch.height = height
+      const context = scratch.getContext('2d', { willReadFrequently: true })!
+      context.setTransform(deviceScale, 0, 0, deviceScale, 0, 0)
+      context.imageSmoothingEnabled = rendering === 'auto'
+      context.drawImage(source, bounds.left - clip.x, bounds.top - clip.y, bounds.width, bounds.height)
+      return [...context.getImageData(0, 0, width, height).data]
+    }, { clip, rendering, deviceScale, width: device.width, height: device.height }),
+      deviceRaster = { scale: deviceScale, capturedSize: [device.width, device.height],
+        background: [...device.rgba], sampled,
+        mismatches: sampled.filter((value, index) => value !== device.rgba[index]).length }
+    await info.attach(`css-${rendering}-${scale}-background-device`, { body: devicePng, contentType: 'image/png' })
     // 087 WebKit auto/1.5 differs only on the last scratch row. Characterize
     // target-edge padding and the browser's declared sampling qualities using
     // real Canvas2D, without selecting a policy or weakening the strict check.
@@ -234,7 +283,7 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
     readings.push({ scale, rendering, clip, sourceRectangle: canvas,
       computedRendering: await page.locator('#cursor-surface-1').evaluate((canvas) => getComputedStyle(canvas).imageRendering),
       devicePixelRatio: await page.evaluate(() => devicePixelRatio),
-      background, expected, raw, screenshot, samplingCandidates,
+      background, expected, raw, screenshot, samplingCandidates, screenshotReferences, deviceRaster,
       rawMismatches: raw.filter((value, index) => value !== expected[index]).length,
       screenshotMismatches: screenshot.data.filter((value, index) => value !== expected[index]).length })
   }
@@ -242,7 +291,7 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
   // observations even when one browser uses a different CSS sampling path.
   await info.attach('css-raster-readings', { body: JSON.stringify({
     scope: 'Actual CSS canvas screenshots versus cursor composition; not Windows cursor scaling',
-    diagnostic: 'Twelve target-padding/sampling-quality candidates are observations only; no closest policy is selected',
+    diagnostic: 'Twelve padding/quality paths, three screenshot extents and one device-pixel raster are observations only; the original strict CSS oracle is unchanged',
     userAgent: await page.evaluate(() => navigator.userAgent),
     source: { width: 64, height: 48 }, cursor: { width: 8, height: 8 }, readings,
   }), contentType: 'application/json' })

@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [091 窗口弹出通知与视频呈现校准](decisions/091-window-popup-and-video-calibration.md)：接通 `Window.onPopupHide` 的逆注册顺序、投递时有效性、真实页面输入和应用失活通知；修订 region 测试的有效图像位置与预期异常处理，追加独立媒体画面及 CSS 光标取证。协议 **34**、TJS ABI **5**、字体 ABI **2**；本批尚待托管执行，完整非插件目标保持 active。
+
+091 固定回收 089 终态 **failure**：Node **3,056/3,064**、8 失败；浏览器 **61 unexpected**，兼容专项 **96/96**。090 快照仍 **in_progress**，6 jobs 成功、18 运行；构建无 TypeScript 诊断，但 Node／光标／浏览器／runtime／KAG 未发布。两运行 **32/32 原 ZIP、312,807,994 字节**均核对 API SHA-256／大小，历史失败保留。下次补取 090 终态和后续产物，再取本批固定快照，不实时轮询。以下各段保留对应历史批次当时的状态。
+
 最新待核验批次：[Full test suite 37285720064](https://github.com/fenghengzhi/krkr2-web/actions/runs/37285720064)，精确提交 `9859a266ad69f8d77cc2aef0439b07d9859e6384`。090 的 21 个文件已整批推送，新增 17 个 Node、每浏览器 5 个定义仍待托管执行。首次唯一查询为 **in_progress／conclusion=null**，没有实时查询 jobs／artifacts。下次补取 089 终态和新增产物，再回收本批固定快照；未本地执行验证，未合入旧 main，整体非插件目标继续 active。
 
 2026-10-05 准备 [090 EXE 内嵌 XP3、原生光标与窗口捕获](decisions/090-embedded-xp3-native-cursor.md)：按原版 MZ／16 字节对齐扫描接入内嵌 XP3 的实际游戏加载、范围源和存档流程；依据两 Windows 的 41 个完整平面修订通用 Q16 步长；修正子画布捕获丢失误取消窗口移动。新增 17 个 Node、每浏览器 5 个定义尚待托管执行，协议 **33**、TJS ABI **5**、字体 ABI **2** 不变，完整非插件目标保持 active。

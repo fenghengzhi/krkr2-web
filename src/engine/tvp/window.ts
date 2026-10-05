@@ -117,6 +117,7 @@ class Window {
   ${[
     ['onActivate', ''],
     ['onDeactivate', ''],
+    ['onPopupHide', ''],
     ['onClick', 'x,y'],
     ['onDoubleClick', 'x,y'],
     ['onMouseDown', 'x,y,button,shift'],

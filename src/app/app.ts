@@ -309,13 +309,15 @@ export function mountApp(root: HTMLDivElement): void {
         else {
           const session = instance.session
           const operation =
-            action.type === 'close'
-              ? session.closeWindow(action.windowId)
-              : action.type === 'move'
-                ? session.moveWindow(action.windowId, action.left, action.top)
-                : action.type === 'resize'
-                  ? session.resizeWindow(action.windowId, action.width, action.height)
-                  : session.exitFullScreen(action.windowId)
+            action.type === 'popupHide'
+              ? session.windowPopup({ type: 'window', windowId: action.windowId })
+              : action.type === 'close'
+                ? session.closeWindow(action.windowId)
+                : action.type === 'move'
+                  ? session.moveWindow(action.windowId, action.left, action.top)
+                  : action.type === 'resize'
+                    ? session.resizeWindow(action.windowId, action.width, action.height)
+                    : session.exitFullScreen(action.windowId)
           void operation.catch(report)
         }
       })
@@ -425,9 +427,9 @@ export function mountApp(root: HTMLDivElement): void {
             const menus = createGameMenus(
               surface.menu,
               () => windows.get(surface.windowId, surface.surfaceEpoch)?.canvas ?? null,
-              (id, popup) => {
+              (id, popup, shortcutEvent) => {
                 if (current !== generation || instance.session.isDisposed) return
-                void instance.session.menuClick(id, popup).catch(report)
+                void instance.menuClick(id, popup, shortcutEvent).catch(report)
               },
               (popup) => {
                 if (current !== generation || instance.session.isDisposed) return

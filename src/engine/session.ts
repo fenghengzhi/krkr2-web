@@ -65,6 +65,7 @@ import { ModalLoop } from './scheduler/modal-loop.ts'
 import { WindowModals } from './scene/window-modal.ts'
 import { WindowMoves } from './scene/window-move.ts'
 import type { WindowMoveMessage, WindowMoveRequest } from './ports/window-move.ts'
+import type { WindowPopupMessage } from './ports/window-popup.ts'
 import { MenuModals } from './scene/menu-modal.ts'
 import { SystemDialogs, type SystemDialogSnapshot } from './scene/system-dialogs.ts'
 import { modalBridge } from './tvp/modal.ts'
@@ -359,6 +360,7 @@ export class EngineSession {
   private userPaused = false
   private snapshotRevision = 0
   private activity = initialActivity()
+  private applicationActive = true
   private graphicsStatus: RendererStatus = { state: 'ready', generation: 0 }
   private detachRenderer?: () => void
   private window = new WindowState()
@@ -1347,6 +1349,9 @@ export class EngineSession {
     validateActivity(activity)
     if (this.control.cancelled || activity.sequence <= this.activity.sequence) return
     const previous = this.activity
+    if (previous.state === 'visible' && activity.state !== 'visible')
+      this.observeAdmission(this.acceptWindowPopup({ type: 'application', active: false }))
+    else if (previous.state !== 'visible' && activity.state === 'visible') this.applicationActive = true
     this.activity = { ...activity }
     // Freeze transport deadlines before applyPause sends pauseAll requests.
     this.pauseMediaRequestTimeouts()
@@ -2280,6 +2285,21 @@ export class EngineSession {
       (!!cursor && sequence <= cursor.view.basePhysicalSequence)
   }
   acceptInput(packet: InputPacket, observe = true, additionalValid?: () => boolean): SessionAdmission {
+    if (packet.type === 'popupHide')
+      return this.acceptWindowPopup({ type: 'window', windowId: packet.windowId ?? this.windowId })
+    const admissions: SessionAdmission[] = []
+    try {
+      admissions.push(this.acceptFormInput(packet, observe, additionalValid, admissions))
+    } catch (error) {
+      for (const admission of admissions) this.observeAdmission(admission)
+      throw error
+    }
+    if (admissions.length === 1) return admissions[0]!
+    return { status: admissions.some((entry) => entry.status === 'accepted') ? 'accepted' : 'ignored',
+      completion: Promise.all(admissions.map((entry) => entry.completion)).then(() => {}) }
+  }
+  private acceptFormInput(packet: InputPacket, observe: boolean,
+    additionalValid: (() => boolean) | undefined, preludes: SessionAdmission[]): SessionAdmission {
     if (this.fontSelection.active && packet.type !== 'cancel' && packet.type !== 'deactivate')
       return ignoredAdmission()
     for (const value of Object.values(packet))
@@ -2332,6 +2352,9 @@ export class EngineSession {
       typeof packet.systemKey !== 'boolean'
     )
       throw new Error('Invalid system key classification')
+    if ((packet.type === 'keyDown' || packet.type === 'keyUp') && packet.popupHidePosted !== undefined &&
+        (typeof packet.popupHidePosted !== 'boolean' || packet.type !== 'keyDown' || !packet.systemKey))
+      throw new Error('Invalid popup system key prelude')
     if (this.activity.state !== 'visible') return ignoredAdmission()
     const windowId = packet.windowId ?? this.windowId,
       window = this.registeredWindow(windowId),
@@ -2393,6 +2416,13 @@ export class EngineSession {
     ) this.pointerState(packet.x, packet.y, windowId, packet.pointerSequence)
     if (this.state !== 'running') return ignoredAdmission()
     if (this.stalePointerMove(packet, windowId)) return ignoredAdmission()
+    if (packet.type === 'activate' || packet.type === 'down' || packet.type === 'keyDown')
+      this.applicationActive = true
+    // WindowForm posts popup input events before mouse down and before system
+    // key trapping/conversion. Script postInputEvent bypasses this Form path.
+    if (packet.type === 'down' ||
+        (packet.type === 'keyDown' && packet.systemKey && !packet.popupHidePosted))
+      preludes.push(this.queuePopupHide(windowId, 1))
     if (packet.type === 'down' || packet.type === 'move') {
       const record = this.windowMouseKeys(window), point = { x: packet.x, y: packet.y,
         paintBoxPoint: { ...packet.paintBoxPoint! } }
@@ -2606,6 +2636,62 @@ export class EngineSession {
   windowMove(message: WindowMoveMessage): boolean {
     if (this.control.cancelled || !['running', 'paused'].includes(this.state)) return false
     return this.windowMoves?.receive(message) ?? false
+  }
+  acceptWindowPopup(message: WindowPopupMessage): SessionAdmission {
+    if (!message || (message.type !== 'window' && message.type !== 'application'))
+      throw new Error('Invalid Window popup message')
+    if (message.type === 'window') {
+      if (!Number.isSafeInteger(message.windowId) || message.windowId <= 0)
+        throw new Error('Invalid Window popup source')
+      const admission = this.queuePopupHide(message.windowId)
+      if (this.registeredWindow(message.windowId)?.state.visible) this.applicationActive = true
+      return admission
+    }
+    if (typeof message.active !== 'boolean') throw new Error('Invalid application activation')
+    if (this.applicationActive === message.active) return ignoredAdmission()
+    const admission = message.active ? ignoredAdmission() : this.queuePopupHide()
+    this.applicationActive = message.active
+    return admission
+  }
+  private queuePopupHide(sourceWindowId?: number, reserve = 0): SessionAdmission {
+    if (this.control.cancelled || !this.windows || !['running', 'paused'].includes(this.state))
+      return ignoredAdmission()
+    const popup = (window: WindowRecord) =>
+      window.state.visible && !window.state.focusable && window.state.stayOnTop
+    if (sourceWindowId !== undefined) {
+      const source = this.registeredWindow(sourceWindowId)
+      if (!source || !source.state.visible || this.windowModals?.blocked(sourceWindowId) || popup(source))
+        return ignoredAdmission()
+    }
+    // The original Form snapshots eligibility as it posts in reverse Window
+    // registration order, not activation/stack order. It does not coalesce.
+    const targets = this.windows.registered().reverse().filter(popup),
+      generation = this.windowInputGeneration, admissions: SessionAdmission[] = []
+    if (this.eventReceipts.size + targets.length + reserve > 65536)
+      throw new Error('Event receipt budget exceeded')
+    try {
+      for (const window of targets) {
+        let lease: ScriptObject | undefined
+        admissions.push(this.acceptEvent(() => {
+          lease = this.runtime!.upgrade(window.owner)
+          return lease ? { kind: 'invoke', callback: lease, member: 'onPopupHide', args: [] }
+            : { kind: 'value', value: undefined }
+        }, {
+          priority: 1, source: window,
+          // OnPopupHide checks CanDeliverEvents again. Changing focusable or
+          // stayOnTop after posting does not revoke this already queued event.
+          valid: () => this.registeredWindow(window.id) === window && window.state.visible &&
+            generation === this.windowInputGeneration && !this.windowModals?.blocked(window.id) &&
+            !this.systemEvents!.disabled,
+          onSettled: () => { const owned = lease; lease = undefined; if (owned) this.runtime!.release(owned) },
+        }))
+      }
+    } catch (error) {
+      for (const admission of admissions) this.observeAdmission(admission)
+      throw error
+    }
+    return { status: admissions.some((entry) => entry.status === 'accepted') ? 'accepted' : 'ignored',
+      completion: Promise.all(admissions.map((entry) => entry.completion)).then(() => {}) }
   }
   resizeWindow(windowId: number, width: number, height: number): void {
     if (this.windowModals?.blocked(windowId)) return

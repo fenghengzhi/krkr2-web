@@ -229,6 +229,9 @@ const api: SessionApi = {
   async windowMove(message) {
     return active().windowMove(message)
   },
+  async windowPopup(message) {
+    return admitInput((target) => target.acceptWindowPopup(message))
+  },
   async resizeWindow(windowId, width, height) {
     active().resizeWindow(windowId, width, height)
   },

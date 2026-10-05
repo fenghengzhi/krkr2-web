@@ -27,7 +27,7 @@ const canRestoreFocus = (element: HTMLElement) =>
 export function createGameMenus(
   container: HTMLElement,
   canvas: () => HTMLCanvasElement | null,
-  choose: (id: number, popup?: MenuPopupIdentity) => void,
+  choose: (id: number, popup?: MenuPopupIdentity, shortcutEvent?: KeyboardEvent) => void,
   dismiss: (popup?: MenuPopupIdentity) => void,
   options: { active?: () => boolean } = {},
 ) {
@@ -52,11 +52,11 @@ export function createGameMenus(
     popupRequest = undefined
     if (restore && previous && canRestoreFocus(previous)) previous.focus({ preventScroll: true })
   }
-  const select = (id: number) => {
+  const select = (id: number, shortcutEvent?: KeyboardEvent) => {
     if (disposed || modal || !running || document.hidden || (eventDisabled && !current.popup))
       return
     for (const details of container.querySelectorAll('details')) details.open = false
-    choose(id, current.popup)
+    choose(id, current.popup, shortcutEvent)
   }
   // A snapshot can arrive while a menu is open or a pointer is held down.
   // Keep each item's DOM node so updates preserve focus and pending clicks.
@@ -250,7 +250,7 @@ export function createGameMenus(
     const item = current.root && visit(current.root)
     if (item) {
       event.preventDefault()
-      select(item.id)
+      select(item.id, event)
     }
   }
   window.addEventListener('keydown', keydown, { capture: true })
