@@ -73,6 +73,8 @@ export interface GraphicsDecoder {
   loadFont?(bytes: Uint8Array): Promise<LoadedFont>
   measureGlyph?(character: string, font: FontSpec): GlyphMetrics
   glyph?(character: string, font: FontSpec, antialiased: boolean): RasterGlyph | undefined
+  /** Release reusable raster scratch buffers, never loaded/live font handles. */
+  compact?(): void
   dispose?(): void
 }
 export interface RasterGlyph {

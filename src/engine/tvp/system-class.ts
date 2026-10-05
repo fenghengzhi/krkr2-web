@@ -65,8 +65,8 @@ const methods = [
     0x101,
     String.raw`function(key) { return global.__host("System.createAppLock", string(key)); }`,
   ],
-  ['exit', 0, String.raw`function(code=0) { global.__host("System.exit", int(code)); }`],
-  ['terminate', 0, String.raw`function(code=0) { global.__host("System.exit", int(code)); }`],
+  ['exit', 0, String.raw`function() { global.__host("System.exit"); }`],
+  ['terminate', 0, String.raw`function() { global.__host("System.terminate"); }`],
   [
     'inform',
     1,

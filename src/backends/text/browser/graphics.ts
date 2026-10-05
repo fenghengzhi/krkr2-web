@@ -20,6 +20,12 @@ export class BrowserGraphics implements GraphicsDecoder {
   private nativePromise?: Promise<FontKernel>
   private disposed = false
   constructor(private readonly nativeLoader?: () => Promise<FontKernel>) {}
+  compact(): void {
+    if (this.disposed) return
+    // Glyph results own their bytes. The reusable canvas can shrink while an
+    // asynchronous text operation retains a completed glyph image.
+    this.raster.width = this.raster.height = 1
+  }
   async loadFont(bytes: Uint8Array) {
     if (this.disposed) throw new Error('Font backend is disposed')
     if (this.nativeLoader) {

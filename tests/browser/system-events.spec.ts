@@ -62,8 +62,11 @@ Debug.message("system-ready");
       name: 'startup.tjs',
       mimeType: 'text/plain',
       buffer: Buffer.from(`
-var w=new Window();w.visible=true;w.setInnerSize(80,40);var clicks=0;
+var w=new Window();w.visible=true;var clicks=0;
 var group=new MenuItem(w,"Tools"),item=new MenuItem(w,"Count");w.menu.add(group);group.add(item);
+var layer=new Layer(w,null);w.add(layer);layer.setSize(80,40);layer.fillRect(0,0,80,40,0xff123456);
+// Leave a visible viewport below the real menu, including browser font metrics.
+w.setInnerSize(80,80);
 item.shortcut="Shift+F6";item.onClick=function(){clicks++;};Debug.message("menu-ready");
 `),
     })

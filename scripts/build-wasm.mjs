@@ -108,7 +108,7 @@ manifest.capabilities = {
   windowObjectLifetime: 1,
   nativeReleaseState: 1,
   nativeClipboard: 1,
-  nativeSystem: 3,
+  nativeSystem: 4,
   nativeStorages: 2,
   nativeTextStreams: 2,
   nativeHelp: 1,

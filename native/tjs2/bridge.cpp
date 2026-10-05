@@ -16,6 +16,7 @@
 #include "tjs.h"
 #include "tjsObject.h"
 #include "tjsError.h"
+#include "tjsMessage.h"
 #include "tjsDictionary.h"
 #include "tjsArray.h"
 #include "tjsNative.h"
@@ -1022,6 +1023,43 @@ public:
     }
 };
 
+// Run the engine's native collection hook on this TJS call stack. Calling the
+// external collect export from a suspended host import would reenter the VM.
+// This vendored engine reclaims free string blocks; its immediate stack-pool
+// hook is currently empty, so do not claim that active register pools shrink.
+class SystemCompact final : public tTJSNativeClassMethod {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit SystemCompact(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        const tjs_int level = count && args[0]->Type() != tvtVoid ? (tjs_int)*args[0] : 100;
+        krkr::ExecutionFrame delegation(2);
+        tTJSVariant value(level), failure;
+        if(level >= 5) {
+            // A native GC listener failure must not skip later compact hooks.
+            // Cancellation and resource limits are control flow, not listener
+            // failures; keep them outside this report-and-continue policy.
+            try { vm->engine->DoGarbageCollection(); }
+            catch(const krkr::ExecutionCancelled&) { throw; }
+            catch(const krkr::ExecutionLimitError&) { throw; }
+            catch(const eTJS& error) { failure = error.GetMessage(); }
+            catch(const std::exception& error) { failure = ttstr(error.what()); }
+        }
+        tTJSVariant* input[] = { &value, &failure };
+        constexpr auto operation = u"System.doCompact";
+        std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 2, input));
+        if(!reply) TJS_eTJSError(u"System.doCompact returned no response");
+        resolveReply(vm, *reply, nullptr);
+        return TJS_S_OK;
+    }
+};
+
 // Private bootstrap callback: lookup and invocation follow fixed SystemIntf's
 // TVPFireOnApplicationActivateEvent. The bootstrap removes the temporary member.
 class SystemApplicationEvent final : public tTJSNativeClassMethod {
@@ -1061,6 +1099,28 @@ public:
         // Deliberately outside the lookup catch: callback exceptions belong to
         // the ordinary event exception handler, and bound objthis is preserved.
         if(callback.Object) callback.FuncCall(0, nullptr, nullptr, nullptr, 0, nullptr, nullptr);
+        return TJS_S_OK;
+    }
+};
+
+// SystemIntf assigns the registered native message holder even when the return
+// value is unused. Unknown IDs return zero; no new holder is manufactured.
+class SystemAssignMessage final : public tTJSNativeClassMethod {
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    SystemAssignMessage() : tTJSNativeClassMethod(noOp) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        if(count < 2) return TJS_E_BADPARAMCOUNT;
+        krkr::ExecutionFrame delegation(2);
+        const ttstr id = *args[0];
+        const ttstr message = *args[1];
+        const bool assigned = TJSAssignMessage(id.c_str(), message.c_str());
+        if(result) *result = static_cast<tjs_int>(assigned);
         return TJS_S_OK;
     }
 };
@@ -1698,7 +1758,9 @@ API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix
     if(system) {
         object->RegisterNCM(u"createUUID", new SystemUuid(vm), u"System", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"shellExecute", new SystemShellExecute(vm), u"System", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"doCompact", new SystemCompact(vm), u"System", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"__applicationEvent", new SystemApplicationEvent(vm), u"System", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"assignMessage", new SystemAssignMessage(), u"System", nitMethod, TJS_STATICMEMBER);
     }
     if(storages) {
         for(const auto& policy : storageMethodPolicies)

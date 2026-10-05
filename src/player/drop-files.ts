@@ -167,7 +167,7 @@ export async function enumerateDrop(captured: CapturedDrop,
     check()
     let handle: HandleCapability | undefined, handleError: unknown
     if (!item.entry && item.handle) {
-      const result = await wait(item.handle)
+      const result = await wait<HandleOutcome>(item.handle)
       if ('error' in result) handleError = result.error
       else handle = result.handle ?? undefined
     }

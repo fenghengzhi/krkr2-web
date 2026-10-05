@@ -446,6 +446,7 @@ export class EngineSession {
   private exitRequested = false
   private exitOnWindowClose = true
   private exitAfterOperation = false
+  private terminateRequested = false
   private readonly cancellationErrors: unknown[] = []
   private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
@@ -484,6 +485,7 @@ export class EngineSession {
       (name) => this.resolveResource(name),
       deps.graphics,
       (work) => this.finishGraphics(work),
+      (error) => deps.event({ type: 'log', level: 'error', text: `Compact Event (Font faces): ${String(error)}` }),
     )
     this.fontCatalog = new FontCatalog({
       // Never enumerate unopened packages just to discover optional fonts.
@@ -531,6 +533,7 @@ export class EngineSession {
       (text) => this.log(text),
     )
     this.control.onCancel(() => {
+      this.terminateRequested = false
       for (const drop of this.pendingFileDrops.values()) { drop.cancelled = true; drop.cancelWait() }
       this.pendingFileDrops.clear()
       this.fileDropReceiptReservations.clear()
@@ -1104,7 +1107,10 @@ export class EngineSession {
             closingFailed = true
           }
           try {
-            await this.flushFiles()
+            // Immediate exit has already scheduled Stop after this VM entry.
+            // Its durable gate owns the flush: attempting it here as well
+            // would silently retry a failed persistent write during Stop.
+            if (!this.exitRequested) await this.flushFiles()
           } catch (error) {
             if (!failed && !closingFailed) throw error
             this.reportFlushFailure(error)
@@ -1149,6 +1155,14 @@ export class EngineSession {
         throw error
       } finally {
         this.executing = false
+        if (this.terminateRequested) {
+          this.terminateRequested = false
+          // Application.Terminate returns to its script. Its posted quit is
+          // consumed only when the outer VM entry has unwound; an I/O yield
+          // inside that entry is not a second application message loop.
+          this.completeReadyReceipts()
+          if (!this.control.cancelled) this.requestExit()
+        }
         if (this.exitAfterOperation) {
           this.exitAfterOperation = false
           // The native entry has returned. Resolve completed admissions in
@@ -4119,6 +4133,13 @@ export class EngineSession {
     if (operation.startsWith('Checkpoint.')) return this.checkpointHost(operation, args, context)
     if (operation.startsWith('Modal.')) {
       if (!this.modalLoop) throw new Error('Modal dispatcher is unavailable')
+      if (operation === 'Modal.wait' && this.terminateRequested) {
+        // Quit ends the innermost message loop through its ordinary canceled
+        // result. Keep the request pending while enclosing TJS scopes unwind;
+        // System.exit instead cancels the VM immediately and never returns.
+        const token = Number(args[0])
+        if (token === this.modalLoop.activeToken) this.modalLoop.cancel(token, 'application-termination')
+      }
       return this.modalLoop.host(operation, args)
     }
     if (
@@ -4346,6 +4367,33 @@ export class EngineSession {
       case 'System.clearGraphicCache':
         this.images.clear()
         break
+      case 'System.doCompact': {
+        const level = clipInteger(0), listeners: [string, () => void][] = []
+        if (typeof args[1] === 'string') this.deps.event({
+          type: 'log', level: 'error', text: `Compact Event (Native GC): ${args[1]}`,
+        })
+        if (level >= 10) listeners.push(
+          ['Layer composition', () => this.composer.clear()],
+          ['Storage auto paths', () => this.storage.invalidateSearch()],
+        )
+        if (level >= 15) listeners.push(
+          ['Source images', () => this.images.compact()],
+          ['Font faces', () => this.fonts.compact()],
+          ['Raster scratch', () => this.deps.graphics.compact?.()],
+        )
+        for (const [name, compact] of listeners) {
+          this.control.check()
+          try { compact() }
+          catch (error) {
+            this.control.check()
+            if (error instanceof ExecutionCancelled) throw error
+            // Fixed compact delivery reports a faulty listener and continues
+            // to the next one. It is not a request to clear active resources.
+            this.deps.event({ type: 'log', level: 'error', text: `Compact Event (${name}): ${String(error)}` })
+          }
+        }
+        break
+      }
       case 'System.touchImages': {
         if (!isScriptObject(args[0])) throw new Error('System.touchImages requires an Array')
         const names = context.snapshot(args[0])
@@ -4359,6 +4407,10 @@ export class EngineSession {
         break
       case 'System.exit':
         this.requestExit()
+        break
+      case 'System.terminate':
+        this.terminateRequested = true
+        this.modalLoop?.notify()
         break
       case 'System.exitOnWindowClose':
         if (args.length) this.exitOnWindowClose = !!number(0)

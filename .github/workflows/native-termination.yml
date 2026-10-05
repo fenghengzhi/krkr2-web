@@ -1,0 +1,34 @@
+name: Original System termination observations
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  termination:
+    name: Original termination / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Observe eight bounded owned SDK processes
+        shell: pwsh
+        env:
+          NATIVE_OS: ${{ matrix.os }}
+        run: ./tests/probes/original-termination.ps1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: native-termination-${{ matrix.os }}-${{ github.run_attempt }}
+          path: out/verification/original-termination
+          if-no-files-found: error
+          retention-days: 30

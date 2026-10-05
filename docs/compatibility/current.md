@@ -1,5 +1,7 @@
 # 当前实现范围
 
+101 候选接入 [System 消息、内存整理与退出语义](../decisions/101-system-messages-compaction-and-termination.md)：原生消息 holder、分级缓存清理及 terminate／exit 的独立行为；协议 **40**、`nativeSystem:4`。仅覆盖实际已注册的原生消息，自动生命周期清理和完整 TVP 消息库存仍待补齐。098 终态主浏览器有 191 失败、86 未报告，Node 仍有 6 失败；099 构建失败后应用验证跳过，100 的构建和 323 光标原件未报告。本批未执行，不计通过，完整非插件目标未完成。以下保留历史批次当时的状态。
+
 100 候选接入 [应用激活与 Layer 整组边界](../decisions/100-application-events-and-layer-bounds.md)：System 回调随真实应用状态动态派发，Layer.setPos 按原版精确四参数提交；补播放中换音轨与无 alpha 光标半尺寸缩放。协议 **40**、`nativeSystem:3`。098 Node 仍有 6 失败，已报告的两份主浏览器报告有 81 失败，另三份主分片未报告；直接 runtime 6/6、原 KAG 96/96 已通过。099 仍无报告，本批尚待托管执行，完整非插件目标未完成。以下保留历史批次当时的状态。
 
 099 候选接入 [Window 文件拖放与窗口回归](../decisions/099-window-file-drop.md)：真实 File／目录能力进入同一输入队列，注册为只读会话资源，保留同名文件、空目录和惰性归档；Window 收到逆序 TJS Array。补取消、事件容量预留与 popup 期间旧 mouseleave 的顺序修复。协议 **39**。097 完整 Node 仍有 32 失败，主浏览器 379 失败、155 未报告；098 build 成功，主要应用结果尚缺。本批尚待托管执行，物理 OS 拖放仍未验证，整体非插件目标未完成。以下保留历史批次当时的状态。

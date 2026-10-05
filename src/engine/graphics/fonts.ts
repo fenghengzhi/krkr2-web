@@ -49,6 +49,10 @@ export class FontService {
   private mappings = new Map<string, MappedFont>()
   private sources = new Map<object, MappedFont>()
   private files = new Map<object, FileFont>()
+  private readonly activeFiles = new Set<FileFont>()
+  private readonly retiredFiles = new Set<FileFont>()
+  private readonly compactRetiredFiles = new Set<FileFont>()
+  private cacheEpoch = 0
   private namedFiles = new Map<string, NamedFontFace[]>()
   // A dialog preview may still be finishing when its suspended script resumes.
   // Keep raster operations together so another operation cannot evict its face.
@@ -59,6 +63,7 @@ export class FontService {
     private readonly resolve: (name: string) => Resource | Promise<Resource>,
     private readonly graphics: GraphicsDecoder,
     private readonly finish: Finish,
+    private readonly onCompactError?: (error: unknown) => void,
   ) {}
   private check(): void {
     if (this.disposed) throw new ExecutionCancelled()
@@ -100,6 +105,44 @@ export class FontService {
   private mappedBytes(): number {
     return [...this.sources.values()].reduce((sum, item) => sum + item.font.bytes, 0)
   }
+  private releaseRetired(): void {
+    const errors: unknown[] = []
+    for (const entry of this.retiredFiles) {
+      if (this.activeFiles.has(entry)) continue
+      this.retiredFiles.delete(entry)
+      const deferredCompact = this.compactRetiredFiles.delete(entry)
+      try { entry.loaded.dispose() } catch (error) {
+        if (deferredCompact && !this.disposed && this.onCompactError && !(error instanceof ExecutionCancelled)) {
+          try { this.onCompactError(error) } catch (reportError) { errors.push(reportError) }
+        } else errors.push(error)
+      }
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Font cache release failed')
+  }
+  compact(): void {
+    this.cacheEpoch++
+    for (const entry of this.files.values()) {
+      this.retiredFiles.add(entry)
+      if (this.activeFiles.has(entry)) this.compactRetiredFiles.add(entry)
+    }
+    this.files.clear()
+    this.releaseRetired()
+    // Mapped prerendered coverage and named-font catalog entries are explicit
+    // bindings, not expendable raster cache entries.
+  }
+  private rasterOperation<T>(operation: () => Promise<T>): Promise<T> {
+    return this.raster.enqueue(async () => {
+      let result!: T
+      const errors: unknown[] = []
+      try { result = await operation() } catch (error) { errors.push(error) }
+      this.activeFiles.clear()
+      try { this.releaseRetired() } catch (error) { errors.push(error) }
+      if (errors.length === 1) throw errors[0]
+      if (errors.length) throw new AggregateError(errors, 'Font operation and cache release failed')
+      return result
+    })
+  }
   async map(spec: FontSpec, name: string): Promise<void> {
     this.check()
     const key = fontKey(spec),
@@ -135,7 +178,7 @@ export class FontService {
   }
   private async prepare(spec: FontSpec): Promise<FontSpec> {
     this.check()
-    const family = spec.face.toLowerCase(),
+    const epoch = this.cacheEpoch, family = spec.face.toLowerCase(),
       variants =
         this.namedFiles.get(family) ??
         (family.startsWith('@') ? this.namedFiles.get(family.slice(1)) : undefined),
@@ -185,8 +228,14 @@ export class FontService {
       }
       entry = { loaded, bytes: bytes.length }
     }
-    this.files.delete(token)
-    this.files.set(token, entry)
+    this.activeFiles.add(entry)
+    if (epoch === this.cacheEpoch) {
+      this.files.delete(token)
+      this.files.set(token, entry)
+    } else {
+      this.retiredFiles.add(entry)
+      this.compactRetiredFiles.add(entry)
+    }
     return {
       ...spec,
       face: entry.loaded.face,
@@ -198,7 +247,7 @@ export class FontService {
   }
   measure(text: string, spec: FontSpec): Promise<{ width: number; height: number }> {
     const font = { ...spec }
-    return this.raster.enqueue(() => this.measureText(text, font))
+    return this.rasterOperation(() => this.measureText(text, font))
   }
   private async measureText(
     text: string,
@@ -234,7 +283,7 @@ export class FontService {
   draw(text: string, spec: FontSpec, color: number, options: TextOptions): Promise<TextDraw[]> {
     const font = { ...spec },
       settings = { ...options }
-    return this.raster.enqueue(() => this.drawText(text, font, color, settings))
+    return this.rasterOperation(() => this.drawText(text, font, color, settings))
   }
   private async drawText(
     text: string,
@@ -364,7 +413,7 @@ export class FontService {
   }
   bounds(text: string, spec: FontSpec) {
     const font = { ...spec }
-    return this.raster.enqueue(() => this.glyphBounds(text, font))
+    return this.rasterOperation(() => this.glyphBounds(text, font))
   }
   private async glyphBounds(text: string, spec: FontSpec) {
     if (text.length > 8192) throw new Error('Text exceeds glyph bounds budget')
@@ -430,8 +479,7 @@ export class FontService {
     this.waiters.clear()
     this.mappings.clear()
     this.sources.clear()
-    for (const entry of this.files.values()) entry.loaded.dispose()
-    this.files.clear()
     this.namedFiles.clear()
+    this.compact()
   }
 }

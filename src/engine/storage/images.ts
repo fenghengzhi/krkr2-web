@@ -59,6 +59,7 @@ export class ImageLoader {
   clear(): void {
     this.cache.clear()
   }
+  compact(): void { this.cache.compact() }
   invalidate(name: string): void {
     this.cache.invalidate(name)
   }

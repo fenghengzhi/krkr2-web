@@ -85,6 +85,14 @@ export class ImageCache {
     this.bytes = 0
     this.epoch++
   }
+  compact(): void {
+    this.entries.clear()
+    this.bytes = 0
+    this.epoch++
+    // Pending decoders still own their source/workspace and their queue slot.
+    // Existing readers may finish and share that work; the old epoch prevents
+    // a late result from repopulating the cache after this compact request.
+  }
   invalidate(name: string): void {
     this.remove(name)
     this.flights.delete(name)

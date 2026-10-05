@@ -235,7 +235,7 @@ for (const backend of ['asyncify', 'jspi']) {
     })
   }
 
-  test(`${backend}: production loader rejects missing and old nativeSystem while retaining nativeClipboard and recovers with the version 3 kernel`, async ({
+  test(`${backend}: production loader rejects missing and old nativeSystem while retaining nativeClipboard and recovers with the version 4 kernel`, async ({
     page,
   }, info) => {
     const setup = await prepareSystemPage(page, backend),
@@ -245,7 +245,7 @@ for (const backend of ['asyncify', 'jspi']) {
       matchManifest = (url: URL) => url.pathname === manifestPath,
       intercepted: { url: string; original: WasmManifest; served: WasmManifest }[] = [],
       routeErrors: string[] = []
-    let suppliedVersion: 1 | 2 | undefined
+    let suppliedVersion: 1 | 2 | 3 | undefined
     await page.context().route(matchManifest, async (route) => {
       try {
         const response = await route.fetch(),
@@ -254,9 +254,9 @@ for (const backend of ['asyncify', 'jspi']) {
           throw new Error('The served WASM manifest differs from this exact hosted build')
         const original = JSON.parse(bytes.toString('utf8')) as WasmManifest,
           served = structuredClone(original)
-        if (served.capabilities?.nativeSystem !== 3 || served.capabilities.nativeClipboard !== 1)
+        if (served.capabilities?.nativeSystem !== 4 || served.capabilities.nativeClipboard !== 1)
           throw new Error(
-            'The real hosted manifest must provide nativeSystem=3 and nativeClipboard=1',
+            'The real hosted manifest must provide nativeSystem=4 and nativeClipboard=1',
           )
         if (suppliedVersion === undefined) delete served.capabilities.nativeSystem
         else served.capabilities.nativeSystem = suppliedVersion
@@ -268,7 +268,7 @@ for (const backend of ['asyncify', 'jspi']) {
       }
     })
     try {
-      for (const [attempt, version] of ([undefined, 1, 2] as const).entries()) {
+      for (const [attempt, version] of ([undefined, 1, 2, 3] as const).entries()) {
         suppliedVersion = version
         await page
           .locator('#files')
@@ -295,7 +295,7 @@ for (const backend of ['asyncify', 'jspi']) {
         const rejected = intercepted.at(-1)!
         expect({
           ...rejected.served,
-          capabilities: { ...rejected.served.capabilities, nativeSystem: 3 },
+          capabilities: { ...rejected.served.capabilities, nativeSystem: 4 },
         }).toEqual(rejected.original)
         expect(rejected.served.capabilities?.nativeSystem).toBe(version)
         expect(rejected.served.capabilities?.nativeClipboard).toBe(1)
@@ -315,7 +315,7 @@ for (const backend of ['asyncify', 'jspi']) {
         .setInputFiles(
           systemFiles(
             false,
-            `if(System.toActualColor(0x01123456)!==0x563412)throw "nativeSystem version 2 color method missing";var recovered=System.createUUID();Debug.message("${systemPrefix}manifest-recovered:"+recovered);`,
+            `if(System.toActualColor(0x01123456)!==0x563412)throw "nativeSystem version 2 color method missing";System.doCompact();var recovered=System.createUUID();Debug.message("${systemPrefix}manifest-recovered:"+recovered);`,
           ),
         )
       await expect(page.getByText(/^system-core-proof:manifest-recovered:/)).toBeVisible()
@@ -325,7 +325,7 @@ for (const backend of ['asyncify', 'jspi']) {
       ).slice((systemPrefix + 'manifest-recovered:').length)
       expect(recovered).toMatch(uuidPattern)
       await expect(page.locator('#runtime-info')).toContainText(backend.toUpperCase())
-      expect(setup.workers).toHaveLength(4)
+      expect(setup.workers).toHaveLength(5)
       expect(setup.errors).toEqual([])
     } finally {
       await info.attach('missing-native-system-manifest-intervention', {
