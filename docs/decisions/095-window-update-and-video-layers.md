@@ -1,6 +1,8 @@
 # 095 同步窗口更新与视频图层路由
 
-状态：开发候选，尚未取得本批托管执行结果。上一轮 094 已完成 56 个文件的实现、提交与推送，是实际进展；本轮从干净的 `e34fd19` 继续完整非插件目标。会话协议 **35**、TJS ABI **5**、字体 ABI **2** 不变。
+状态：开发候选已推送，尚未取得本批托管执行结果。上一轮 094 已完成 56 个文件的实现、提交与推送，是实际进展；本轮从干净的 `e34fd19` 继续完整非插件目标。会话协议 **35**、TJS ABI **5**、字体 ABI **2** 不变。
+
+实现提交 **`d287d06e9c6abdc6224a55a8f03b5b62710bfbe2`**，22 个文件，已推送到 `codex/migrated-window-attention`。[Full test suite 37318168828](https://github.com/fenghengzhi/krkr2-web/actions/runs/37318168828) 的首次唯一查询确认该精确提交，当时 **in_progress／conclusion=null**；未查询实时 jobs／artifacts。原返回保存在 `out/verification/github-actions/37318168828/initial-run-discovery.json`。本次结果由下一轮取回；文档交接提交使用 `[skip ci]`，不计为另一轮执行。
 
 所有测试、构建、类型检查、浏览器及原生可执行探针只在 GitHub-hosted Actions 运行。本地仅源码检查、编辑及历史原始产物下载、解包、哈希核对与解析。运行结果按每轮固定快照回收，不实时轮询；未执行、跳过、崩溃和未报告都不计为通过。
 
