@@ -2,6 +2,8 @@
 
 状态：开发候选，尚未取得本批执行结果。整体目标是完成插件以外的 KRKR2 Web 模拟器，当前仍有未实现和未验证范围。所有可执行验证只在 GitHub-hosted Actions 执行；合并成较大批次推送，本次不实时监控，下次工作时取回上一批的固定快照及产物。会话协议 **30**，TJS ABI **5**、字体 ABI **2** 不变。
 
+已整批推送 `b88247d737706177ef923edf74839dee9c798c86`，对应 [Full test suite 37270916669](https://github.com/fenghengzhi/krkr2-web/actions/runs/37270916669)。首次唯一查询为 **queued／conclusion=null**，仅确认运行创建及精确提交绑定；原响应保存在 `out/verification/github-actions/37270916669/initial-run-discovery.json`。没有查询实时 jobs／artifacts，下次工作时取回固定清单和全部产物。此运行记录用 `[skip ci]` 文档提交保存，不新增验证结论。
+
 ## 音轨接口与原版语义
 
 `VideoOverlay.selectAudioStream(index)` 和可读写的 `enabledAudioStream` 进入同一选择路径。参数先由 TJS `int` 转换，再截为 unsigned 32-bit；未打开或转换后的索引超出原始音轨数量时不改变选择。未打开时 getter 返回 −1；省略方法参数报错。

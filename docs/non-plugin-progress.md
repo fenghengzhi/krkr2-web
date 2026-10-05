@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37270916669](https://github.com/fenghengzhi/krkr2-web/actions/runs/37270916669)，精确提交 `b88247d737706177ef923edf74839dee9c798c86`。085 的真实 MP4 音轨选择、生命周期与预算、新 Windows 光标采样及 084 构建修订已整批推送；新增 20 个 Node、每浏览器 17 个视频定义尚待执行。首次唯一查询为 **queued／conclusion=null**，只确认创建与提交身份，不实时监控。下一轮取回本批结果，保留历史失败、skipped、unreported、uncompared；未本地执行验证、未合入旧 main，整体非插件目标仍 active。
+
 2026-10-05 准备 [085 视频音轨选择与原生光标采样](decisions/085-video-audio-tracks.md)：MP4 保留媒体字节和时间轴，使用真实单元素音视频时钟切换音轨；补齐原版方法／属性 setter 的 uint32 转换和越界空操作。增加真实频谱、播放／暂停位置、取消和编码资源预算验收。协议 **30**、TJS ABI **5**、字体 ABI **2**。另增 1,100 行 Windows mask footprint 观察和 158 个颜色缩放候选；当前生产光标差异仍未解决。所有新增实现尚待 GitHub-hosted 执行，整体非插件目标仍 active。
 
 085 已回收 083／084 的 **completed／failure** 终态，固定清单共 **10/10 原 ZIP** 大小和 SHA-256 核对一致。084 build 有 9 条测试类型错误，本批修订；Node／浏览器／原 KAG 等后续作业全部 skipped，流式音频和手柄改动不能记为通过。两 Windows strict 各 270/332 匹配、62 draw 差异、1,858 未比较，原失败保留。每次运行 allocator 均每后端 60/60，仅代表独立诊断。未实时轮询，未本地执行验证；详细终态见对应运行目录的 `085-final-summary.md`。
