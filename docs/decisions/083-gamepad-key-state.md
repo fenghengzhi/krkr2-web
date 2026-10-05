@@ -2,6 +2,8 @@
 
 状态：开发候选，未取得本批执行结果。仍以完成插件以外的 KRKR2 Web 模拟器为整体目标。全部可执行验证只在 GitHub-hosted Actions 运行，按大批次提交；下次取回结果，不实时监控。新增输入设置使用会话协议 **28**；TJS ABI **5**、字体 ABI **2** 不变。
 
+已整批推送 `03f87925ddc707976b2ff84f3aa685183ce1db34`，对应 [Full test suite 37263528041](https://github.com/fenghengzhi/krkr2-web/actions/runs/37263528041)。首次唯一查询为 **in_progress／conclusion=null**，仅确认创建与提交绑定；原响应在 `out/verification/github-actions/37263528041/initial-run-discovery.json`。未查询实时作业结果。本记录以 `[skip ci]` 提交，不产生额外验证结论。
+
 ## 原版合同与 Web 输入边界
 
 原 KAG 的 `system/MainWindow.tjs` 已有方向、确认和取消的 Pad 映射，但此前 Web 只定义 `VK_PAD*` 常量，没有真实设备来源。本批接入 `navigator.getGamepads()` → 会话级采样器 → 现有 Window 输入队列 → Worker／TJS。没有用键盘 DOM 伪事件替代 Pad 键值，也没有替换 KAG 原处理器。
