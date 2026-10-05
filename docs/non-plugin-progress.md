@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37312988058](https://github.com/fenghengzhi/krkr2-web/actions/runs/37312988058)，精确提交 `0846cd31a04c72b5a370b2dfb3de2e6dcca47a8a`。094 的 56 个文件已整批推送，新增 35 个 Node、每浏览器 20 个定义；宿主堆对照另运行既有 20 定义 × 3 次 × 2 模式。首次唯一查询为 **in_progress／conclusion=null**，只确认身份，没有实时查询 jobs／artifacts。下次补取 092 缺失结果并回收 093／094 固定快照。未本地执行验证，整体非插件目标保持 active。
+
 2026-10-05 准备 [094 窗口五矩形与媒体公开时钟](decisions/094-window-geometry-and-media-clock.md)：区分 outer／client／inner／viewport／PaintBox，独立 MessagePort 测量真实页面 chrome 和滚动条，接通输入／光标／IME／全屏实际缩放；公开媒体属性改用平均帧时钟，回调帧独立，新增真实 VFR 与宿主堆诊断。协议 **35**、TJS ABI **5**、字体 ABI **2**。本批尚待托管执行，完整非插件目标仍 active。
 
 094 固定回收 **49/49 原 ZIP、575,013,476 字节**，全部 API SHA-256／大小一致。091 终态 failure，浏览器 **2,278/2,339**，历史 Node 崩溃和 11 未报告子项保留；092 仍 in_progress，Node **3,105/3,109**、浏览器已报 **1,977/2,024**，缺 WebKit shard 2，兼容 **95/96**；093 pending、0 jobs／artifacts。092 已报 Chromium／Firefox beginMove **24/24** 通过，双 Windows 183 光标 strict **536/596 matched、60 failure、3,178 uncompared**。未刷新运行结果，下次补取缺失部分；以下保留历史状态。

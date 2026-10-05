@@ -1,6 +1,8 @@
 # 094 窗口五矩形与媒体公开时钟
 
-状态：开发候选，尚未取得本批托管结果。整体目标仍是完成插件以外的 KRKR2 Web 模拟器；上一轮 093 的 25 文件实现、提交、推送是实际进展。本轮在干净 `25f4468` 上继续实现窗口几何、媒体时钟和已定位夹具错误。协议升至 **35**，TJS ABI **5**、字体 ABI **2** 不变。
+状态：开发候选已推送，尚未取得本批托管结果。整体目标仍是完成插件以外的 KRKR2 Web 模拟器；上一轮 093 的 25 文件实现、提交、推送是实际进展。本轮在干净 `25f4468` 上继续实现窗口几何、媒体时钟和已定位夹具错误。协议升至 **35**，TJS ABI **5**、字体 ABI **2** 不变。
+
+实现提交 **`0846cd31a04c72b5a370b2dfb3de2e6dcca47a8a`**，56 个文件，已推送到 `codex/migrated-window-attention`。[Full test suite 37312988058](https://github.com/fenghengzhi/krkr2-web/actions/runs/37312988058) 的首次唯一查询确认该精确提交，当时 **in_progress／conclusion=null**；未查询实时 jobs／artifacts。原返回保存在 `out/verification/github-actions/37312988058/initial-run-discovery.json`。本次运行结果由下一轮取回；后续仅文档交接提交使用 `[skip ci]`，不作为另一轮执行证据。
 
 所有测试、构建、类型检查、浏览器与原生可执行探针只在 GitHub-hosted Actions 上运行。本地仅源码检查／编辑及历史原始产物下载、解包、哈希核对和解析。本批没有本地执行候选算法；推送后只取一次运行身份，下一轮回收固定结果，不实时轮询。
 
