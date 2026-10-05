@@ -15,7 +15,7 @@ assert.equal(process.platform, 'win32')
 
 type Mapping = 'endpoint' | 'center'
 type Direction = 'top-down' | 'bottom-up'
-type Arithmetic = 'absolute-f64' | 'incremental-f64' | 'absolute-f32' | 'incremental-f32'
+type Arithmetic = 'absolute-f64' | 'incremental-f64' | 'absolute-f32' | 'incremental-f32' | 'incremental-f32-step-f64'
 type Kernel =
   | 'weighted-x-y' | 'weighted-y-x' | 'lerp-x-y' | 'lerp-y-x'
   | 'floor-weighted-x-y' | 'floor-weighted-y-x' | 'floor-lerp-x-y' | 'floor-lerp-y-x'
@@ -50,6 +50,12 @@ interface Observation {
     displayBitsPerPixel: number; dpi: { x: number; y: number }
   }
   fixtures: NativeFixture[]
+}
+interface GeometryObservation {
+  schema: number; sourceCommit: string; completed: boolean; cleanupFailed: boolean; failures: number
+  expectedSamples: number; observedSamples: number; platform: Observation['platform']
+  samples: Array<{ id: string; file: string; depth: number; width: number; height: number; loaded: boolean
+    pattern: { kind: string; plane: string; constant: number }; info: NativeInfo }>
 }
 interface Difference {
   x: number; y: number; actual: number[]; candidate: number[]
@@ -125,10 +131,30 @@ assert.equal(precisionAddedIds.length, 30)
 assert.equal(candidates.length, 158)
 assert.deepEqual(candidates.slice(0, 128).map((candidate) => candidate.id), legacyCandidateIds)
 assert.equal(new Set(candidates.map((candidate) => candidate.id)).size, candidates.length)
+const previousCandidateIds = candidates.map((candidate) => candidate.id),
+  stepArithmetic: readonly Arithmetic[] = [...precisionArithmetic, 'incremental-f32-step-f64'],
+  stepCombinationIds: string[] = [], stepAddedIds: string[] = [], stepReusedIds: string[] = []
+// 086's constant-color raw planes preserve only their first column and bottom
+// row on six smooth geometries, including the final X coordinate. A rounded
+// binary32 step accumulated in binary64 is distinct from both earlier paths.
+// Measure its complete X/Y matrix; do not select it as production policy.
+for (const direction of ['top-down', 'bottom-up'] as const)
+  for (const xArithmetic of stepArithmetic) for (const yArithmetic of stepArithmetic) {
+    const kernel: Kernel = 'horizontal-term-floor-except-fy-zero',
+      id: string = `endpoint/${direction}/x-${xArithmetic}/y-${yArithmetic}/${kernel}`
+    stepCombinationIds.push(id)
+    if (candidates.some((candidate) => candidate.id === id)) stepReusedIds.push(id)
+    else { add('endpoint', direction, xArithmetic, yArithmetic, kernel); stepAddedIds.push(id) }
+  }
+assert.equal(stepCombinationIds.length, 50); assert.equal(stepReusedIds.length, 32); assert.equal(stepAddedIds.length, 18)
+assert.equal(candidates.length, 176)
+assert.deepEqual(candidates.slice(0, 158).map((candidate) => candidate.id), previousCandidateIds)
+assert.equal(new Set(candidates.map((candidate) => candidate.id)).size, candidates.length)
 
 function axis(source: number, target: number, mapping: Mapping, arithmetic: Arithmetic): number[] {
   const f32 = arithmetic.endsWith('f32'), round = f32 ? Math.fround : (value: number) => value,
-    increment = round(mapping === 'endpoint' ? (target === 1 ? 0 : (source - 1) / (target - 1)) : source / target),
+    stepRound = f32 || arithmetic === 'incremental-f32-step-f64' ? Math.fround : (value: number) => value,
+    increment = stepRound(mapping === 'endpoint' ? (target === 1 ? 0 : (source - 1) / (target - 1)) : source / target),
     origin = mapping === 'endpoint' ? 0 : round(round(increment * 0.5) - 0.5),
     values: number[] = []
   let position = origin
@@ -268,13 +294,14 @@ function nativePixels(info: NativeInfo | undefined, label: string) {
 }
 
 const fixtures: Record<string, unknown>[] = [], errors: Record<string, unknown>[] = []
-let observationSha256: string | undefined, observedFixtures = 0, eligibleFixtures = 0,
+let observationSha256: string | undefined, geometryObservationSha256: string | undefined,
+  geometryFixtures = 0, observedFixtures = 0, eligibleFixtures = 0,
   comparedTargets = 0, resizedTargets = 0, status = 'diagnostic-running', fatalError: unknown
 const describeError = (error: unknown) => error instanceof Error
   ? { message: error.message, stack: error.stack } : { message: String(error) }
 const save = () => writeFileSync(file('scaling-candidates.json'), JSON.stringify({
   schema: 1, sourceCommit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,
-  observationSha256, status, fatalError,
+  observationSha256, geometryObservationSha256, status, fatalError,
   scope: 'Raw GetIconInfo color-plane scaling measurements for native-loaded, single-image 32bpp sources; not drawing, selection, hotspot, mask, or playback compatibility',
   interpretation: 'Ranking is diagnostic only. No closest candidate is selected as policy. The independent strict load comparison remains authoritative.',
   channelContract: 'Actual BGRA is normalized to top-down straight RGBA. and-xor compares RGB; alpha compares RGBA. Mask capture is validated but not scored.',
@@ -288,13 +315,21 @@ const save = () => writeFileSync(file('scaling-candidates.json'), JSON.stringify
       combinations: 32, reused: 2, added: 30,
       combinationIds: precisionCombinationIds, reusedIds: precisionReusedIds, addedIds: precisionAddedIds,
     },
-    axisRules: 'endpoint: step=(source-1)/(target-1), origin=0; center: step=source/target, origin=step/2-1/2; f32 rounds ratio, origin, and every multiply/add or accumulation; no near-integer snapping',
+    roundedStepSupplement: {
+      mapping: 'endpoint', kernel: 'horizontal-term-floor-except-fy-zero',
+      directions: ['top-down', 'bottom-up'], arithmetic: stepArithmetic,
+      combinations: 50, reused: 32, added: 18,
+      combinationIds: stepCombinationIds, reusedIds: stepReusedIds, addedIds: stepAddedIds,
+      previousPrefix: { count: 158, ids: previousCandidateIds },
+    },
+    geometryInput: 'One original constant-1, 32bpp AND fixture per each of the seven mask geometries; all mask variants share its observed color plane',
+    axisRules: 'endpoint: step=(source-1)/(target-1), origin=0; center: step=source/target, origin=step/2-1/2; f32 rounds ratio, origin, and every multiply/add or accumulation; incremental-f32-step-f64 rounds only the ratio to binary32 and accumulates in binary64; no near-integer snapping',
     directionRules: 'bottom-up starts at the bottom source/output memory row and accumulates positive Y; raw reference is independently normalized to top-down',
     kernelRules: 'weighted=(1-f)*a+f*b; lerp=a+(b-a)*f; staged floors first-axis results before second-axis blend; four-tap floors each byte*Xweight*Yweight; horizontal-term-floor-except-fy-zero floors each horizontal term before vertical weighting unless fy==0, where it floors the complete horizontal sum only; all interpolators floor final bytes; nearest rounds clamped coordinates',
     pixelArithmetic: 'binary64; f32 variants change axis arithmetic only',
     rankingOrder: ['differentPixels', 'differentChannels', 'absoluteError', 'candidateId'],
   }, candidateCount: candidates.length, candidates,
-  observedFixtures, eligibleFixtures, comparedTargets, resizedTargets,
+  observedFixtures, geometryFixtures, eligibleFixtures, comparedTargets, resizedTargets,
   rankings: { allTargets: ranking(allRanks), resizedTargets: ranking(resizedRanks) },
   zeroDifferenceCandidates: ranking(allRanks).filter((entry) => !entry.differentPixels).map((entry) => entry.candidateId),
   errors, fixtures,
@@ -315,9 +350,31 @@ try {
   assert.equal(native.platform.displayBitsPerPixel, 32)
   assert.deepEqual(native.platform.dpi, { x: 96, y: 96 })
   observedFixtures = native.fixtures.length
+  const geometryBytes = readFileSync(file('mask-geometry.json')),
+    geometry = JSON.parse(geometryBytes.toString()) as GeometryObservation,
+    shapeNames = new Set(['64x64', '48x48', '13x9', '64x48', '48x64', '64x13', '13x64']),
+    extra: NativeFixture[] = []
+  geometryObservationSha256 = hash(geometryBytes)
+  assert.equal(geometry.schema, 1); assert.equal(geometry.sourceCommit, native.sourceCommit)
+  assert.equal(geometry.completed, true); assert.equal(geometry.cleanupFailed, false); assert.equal(geometry.failures, 0)
+  assert.equal(geometry.expectedSamples, 2670); assert.equal(geometry.observedSamples, 2670)
+  assert.equal(geometry.samples.length, 2670)
+  assert.deepEqual(geometry.platform.systemCursor, native.platform.systemCursor)
+  assert.equal(geometry.platform.displayBitsPerPixel, native.platform.displayBitsPerPixel)
+  assert.deepEqual(geometry.platform.dpi, native.platform.dpi)
+  for (const sample of geometry.samples) {
+    if (sample.depth !== 32 || sample.pattern.kind !== 'constant' || sample.pattern.plane !== 'AND' || sample.pattern.constant !== 1) continue
+    const shape: string = `${sample.width}x${sample.height}`
+    assert(shapeNames.delete(shape), 'Duplicate or unexpected constant-color geometry')
+    assert.equal(sample.loaded, true)
+    extra.push({ id: sample.id, file: sample.file, kind: 'cur', loaded: sample.loaded,
+      entries: [{ width: sample.width, height: sample.height, depth: sample.depth }], info: sample.info, steps: [{ step: 0 }] })
+  }
+  assert.equal(shapeNames.size, 0); assert.equal(extra.length, 7)
+  geometryFixtures = extra.length
   const ids = new Set<string>()
   save()
-  for (const fixture of native.fixtures) {
+  for (const fixture of [...native.fixtures, ...extra]) {
     const targets: Record<string, unknown>[] = [], excludedSteps: Record<string, unknown>[] = [],
       fixtureMetrics = new Map<string, FixtureMeasurement>(candidates.map(({ id }) => [id, {
         candidateId: id, targets: 0, comparedPixels: 0, comparedChannels: 0,

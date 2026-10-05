@@ -39,6 +39,7 @@ import type { CursorAsset } from '../formats/cursor/index.ts'
 import { loadCursorBytes, windowsDesktopCursorProfile } from '../formats/cursor/load.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree, type LayerState } from './scene/layers.ts'
+import { createWindowRegion, copyWindowRegion, WindowRegions, type WindowRegion } from './scene/window-region.ts'
 import { deviceInt, drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
 import { LayerService } from './scene/layer-objects.ts'
 import { captureVideoMixingBitmap } from './media/video-mixing.ts'
@@ -179,6 +180,8 @@ export type EngineEvent =
   | { type: 'window'; window: WindowView }
   | { type: 'windows'; windows: WindowPresentation[] }
   | { type: 'window-closed'; windowId: number }
+  | { type: 'window-region'; windowId: number; revision: number; region: WindowRegion | null }
+  | { type: 'window-regions-clear' }
   | { type: 'window-activate'; windowId: number }
   | { type: 'window-input'; windowId: number; input: InputView }
   | { type: 'cursor-asset'; id: number; asset: CursorAsset }
@@ -371,6 +374,10 @@ export class EngineSession {
   private readonly physicalPointerSequences = new Map<number, number>()
   private readonly virtualCursors = new Map<number, VirtualCursorState>()
   private readonly mouseKeys = new Map<number, WindowMouseKeys>()
+  private readonly windowRegions = new WindowRegions()
+  private readonly windowRegionRequests = new Map<number, number>()
+  private nextWindowRegionRequest = 1
+  private nextWindowRegionRevision = 1
   private nextVirtualCursorRevision = 1
   private readonly keyStates = new ObservedKeyState()
   private get physicalKeys(): ReadonlySet<number> { return this.keyStates.current }
@@ -473,6 +480,7 @@ export class EngineSession {
         () => this.composer.clear(),
         () => this.images.dispose(),
         () => this.closeCursors(),
+        () => this.closeWindowRegions(),
         () => this.fonts.dispose(),
         () => deps.graphics.dispose?.(),
       ]) {
@@ -724,6 +732,8 @@ export class EngineSession {
         },
         async (window) => {
           this.clearVirtualCursors(window.id)
+          this.windowRegionRequests.delete(window.id)
+          this.windowRegions.replace(window.id, null)
           this.windowModals?.invalidate(window.id)
           this.menus.dismiss(window.id, undefined, 'unavailable')
           this.systemEvents!.cancelSource(window)
@@ -750,6 +760,8 @@ export class EngineSession {
           this.physicalPointerSequences.delete(window.id)
           this.virtualCursors.delete(window.id)
           this.mouseKeys.delete(window.id)
+          this.windowRegionRequests.delete(window.id)
+          this.windowRegions.replace(window.id, null)
           this.windowInputViews.delete(window.id)
           this.keyboardRoutes.delete(window.id)
           this.refreshKeyboardRoutes()
@@ -1422,6 +1434,30 @@ export class EngineSession {
       main: this.windows?.mainId === window.id,
       active: this.windowId === window.id,
     }))
+  }
+  private closeWindowRegions(): void {
+    this.windowRegionRequests.clear()
+    this.windowRegions.clear()
+    this.deps.event({ type: 'window-regions-clear' })
+  }
+  private publishWindowRegion(window: WindowRecord, region: WindowRegion | null): void {
+    if (!Number.isSafeInteger(this.nextWindowRegionRevision + 1))
+      throw new Error('Window region revision exhausted')
+    const previous = this.windowRegions.get(window.id),
+      copy = region ? copyWindowRegion(region) : null,
+      revision = this.nextWindowRegionRevision++
+    this.windowRegions.replace(window.id, region)
+    try {
+      // The event receives private plane ownership. It may be transferred or
+      // consumed by a host without mutating the Session's retained snapshot.
+      this.deps.event({ type: 'window-region', windowId: window.id, revision, region: copy })
+    } catch (error) {
+      this.windowRegions.replace(window.id, previous)
+      throw error
+    }
+    window.state.regionRevision = revision
+    window.state.revision++
+    this.dirty = true
   }
   pointerState(x: number, y: number, windowId = this.windowId, pointerSequence?: number): void {
     if (
@@ -3143,6 +3179,8 @@ export class EngineSession {
       await attempt(() => this.windows?.dispose())
       this.virtualCursors.clear()
       this.mouseKeys.clear()
+      this.windowRegions.clear()
+      this.windowRegionRequests.clear()
       this.physicalPointerSequences.clear()
       this.windowPointers.clear()
       this.keyboardRoutes.clear()
@@ -4030,6 +4068,41 @@ export class EngineSession {
         window.state.resize(number(1), number(2))
         this.queueResize(window)
         this.dirty = true
+        break
+      }
+      case 'Window.setMaskRegion': {
+        const window = this.windows!.get(number(0)),
+          primary = this.inputControllers.get(window.id)?.root() ?? 0
+        if (window.closing || window.finished) throw new Error('Window has been invalidated')
+        if (!primary) throw new Error('Window has no primary Layer')
+        const pixels = this.layers.bitmap(primary).pixels,
+          request = this.nextWindowRegionRequest++
+        if (!Number.isSafeInteger(this.nextWindowRegionRequest)) throw new Error('Window region request identity exhausted')
+        this.windowRegionRequests.set(window.id, request)
+        const check = () => {
+          this.control.check()
+          if (this.registeredWindow(window.id) !== window ||
+              this.windowRegionRequests.get(window.id) !== request)
+            throw new Error('Window region destination changed')
+        }
+        const region = await cancelable(createWindowRegion(pixels, clipInteger(1) >>> 0, {
+          maxRectangles: this.windowRegions.availableRectangles(window.id),
+          checkpoint: check,
+          yieldControl: async () => {
+            await this.deps.yieldToHost()
+            await this.control.wait()
+            check()
+          },
+        }), this.control)
+        check()
+        this.publishWindowRegion(window, region)
+        break
+      }
+      case 'Window.removeMaskRegion': {
+        const window = this.windows!.get(number(0))
+        if (window.closing || window.finished) throw new Error('Window has been invalidated')
+        this.windowRegionRequests.delete(window.id)
+        this.publishWindowRegion(window, null)
         break
       }
       case 'Window.postInput': {

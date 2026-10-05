@@ -96,6 +96,8 @@ class Window {
   function setMaxSize(width,height) { maxWidth=width;maxHeight=height; }
   function update(type=utNormal) { __host("Window.update",__windowId); }
   function hideMouseCursor() { mouseCursorState=mcsTempHidden; }
+  function setMaskRegion(threshold=void) { __host("Window.setMaskRegion",__windowId,threshold===void?1:int(threshold)); }
+  function removeMaskRegion() { __host("Window.removeMaskRegion",__windowId); }
   function postInputEvent(name,params=null) {
     if(name!="onKeyDown" && name!="onKeyUp" && name!="onKeyPress")throw new Exception("Unknown input event: "+name);
     if(params===null || params.key===void)throw new Exception("Input event requires key");

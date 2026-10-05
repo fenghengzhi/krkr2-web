@@ -46,7 +46,7 @@ function append(...parts: Uint8Array[]): Uint8Array {
   for (const part of parts) { bytes.set(part, at); at += part.length }
   return bytes
 }
-function box(kind: string, body = new Uint8Array()): Uint8Array {
+function box(kind: string, body: Uint8Array = new Uint8Array()): Uint8Array {
   const bytes = new Uint8Array(body.length + 8)
   new DataView(bytes.buffer).setUint32(0, bytes.length)
   bytes.set([...kind].map((character) => character.charCodeAt(0)), 4)

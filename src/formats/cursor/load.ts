@@ -71,8 +71,9 @@ function nearest(at: number, source: number, target: number): number {
 }
 /** Deleted monochrome pixels accumulate into the next centered sample. The
  * complete 085 256-to-32 axis observations give [0,4], [5,12], ... [245,252].
- * Repeated samples while enlarging have a single source pixel. Other ratios
- * remain subject to the independent native geometry/strict drawing probes. */
+ * Repeated samples while enlarging have a single source pixel. 086's 3770
+ * native mask comparisons cover this ratio and seven further square/mixed
+ * geometries. Other sizes remain subject to the strict native probes. */
 function maskRange(at: number, source: number, target: number): [number, number] {
   const last = nearest(at, source, target)
   return [at ? Math.min(last, nearest(at - 1, source, target) + 1) : 0, last]

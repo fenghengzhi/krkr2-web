@@ -324,7 +324,7 @@ jobs:
       - name: Compare native-profile cursor file loading and natural-size drawing
         if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
         run: node --import tsx tests/probes/cursor-load-compare.ts out/ci/native-cursor
-      - name: Characterize 158 bounded scaling candidates against raw native bitmap planes
+      - name: Characterize 176 bounded scaling candidates against raw native bitmap planes
         if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
         run: |
           Copy-Item -LiteralPath 'tests/probes/cursor-scaling-candidates.ts' -Destination 'out/ci/native-cursor/cursor-scaling-candidates.ts'

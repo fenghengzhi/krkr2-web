@@ -1,6 +1,6 @@
 # 当前实现范围
 
-086 开发候选新增 [键盘模拟鼠标、掩码缩放与交错视频](../decisions/086-mouse-keys-and-mask-scaling.md)：`Window.useMouseKey` 的实际键盘／PAD 行为、单色双高 mask 边界修订，以及不依赖 MP4Box 错误 offset 的多 trun 校验。协议 **31**、TJS ABI **5**、字体 ABI **2**。本批尚未执行；085 固定快照因 3 条测试类型错误跳过应用验收，本批修订后仍需托管重验。颜色缩放、其他尺寸掩码和整体非插件目标继续未完成，最新证据见 [实现进度](../non-plugin-progress.md)。
+087 开发候选新增 [窗口形状遮罩与构建修订](../decisions/087-window-mask-regions.md)：`Window.setMaskRegion/removeMaskRegion` 的主图像快照、预算、取消与全外框裁剪，修订 086 构建的 5 条 TypeScript 诊断。协议 **32**、TJS ABI **5**、字体 ABI **2**。086 两 Windows 的 3,770 行 mask 严格比较全部匹配，但主光标绘制仍各 39 差异、1,858 未比较；Node／浏览器等应用验收仍 skipped。本批与此前手柄、流式音频、视频候选尚待托管验证，完整非插件目标继续未完成，详见 [实现进度](../non-plugin-progress.md)。
 
 085 开发候选加入 [视频音轨选择](../decisions/085-video-audio-tracks.md)：自包含 MP4 的实际音轨选择、原版方法／可写属性参数语义、保留媒体时钟的候选替换及取消／资源预算。协议 **30**、TJS ABI **5**、字体 ABI **2**；尚未取得执行结果，不宣称无缝切换、所有容器／编码兼容或完整模拟器完成。083／084 已回收的终态均失败；084 的 9 条测试类型错误在本批修订，后续应用测试仍无执行报告。新增 Windows 光标采样只用于判断剩余严格像素差异，不改变原失败。最新状态见 [实现进度](../non-plugin-progress.md)，以下保留历史阶段记录。
 

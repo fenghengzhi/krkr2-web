@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [087 窗口形状遮罩与构建修订](decisions/087-window-mask-regions.md)：补齐 `Window.setMaskRegion/removeMaskRegion` 的主图像 alpha 快照、预算、生命周期和全窗口 clip-path 呈现；修复 086 的 5 条 TypeScript 诊断；颜色诊断保留原 158 项并增加 18 个独立混合精度候选。协议 **32**，TJS ABI **5**、字体 ABI **2**。本批尚待 GitHub-hosted 执行，整体非插件目标保持 active。
+
+087 已回收 085／086 的 **completed／failure**，各 11 jobs 为 2 success／4 failure／5 skipped，全部 **10/10 ZIP、40,544,098 字节**核对大小与 SHA-256。086 两 Windows mask 各 **3,770/3,770 matched**，仅限已采样的 AND／单色 XOR plane；主 strict 仍各 39 mismatch、1,858 uncompared，颜色候选仍无全域零差异。Node、浏览器、原 KAG 等均因 build 跳过；不能把手柄、流式音频、音轨及新增窗口功能计为已通过。固定摘要保存在对应运行目录 `087-final-summary.md`，原快照与失败历史保留。
+
 最新待核验批次：[Full test suite 37273929294](https://github.com/fenghengzhi/krkr2-web/actions/runs/37273929294)，精确提交 `a3272586a93a5b7f13c1812396cc5b35f313db31`。086 的键盘模拟鼠标、AND／单色双高掩码、多 trun 校验及 085 构建类型修订已整批推送；新增 30 个 Node、每浏览器 12 个定义及全部 3,770 行严格 mask 比较尚待执行。首次唯一查询为 **in_progress／conclusion=null**，只确认创建和提交身份，不监控实时作业。下一轮补取 085 终态及后续产物，再回收本批固定快照；未本地执行验证、未合入旧 main，整体非插件目标保持 active。
 
 2026-10-05 准备 [086 键盘模拟鼠标、掩码缩放与交错视频](decisions/086-mouse-keys-and-mask-scaling.md)：接通原来仅存储属性的 `Window.useMouseKey`，在陷阱接收与输入生命周期检查之后转换键盘／PAD；按完整原生轴线和边界采样修订 AND／单色双高 mask，并为其他比例新增 2,670 行原生观察；独立计算 MP4 多 trun 地址以支持真实交错容器。协议 **31**、TJS ABI **5**、字体 ABI **2**。本批代码与定义尚未取得执行结果，完整非插件目标仍 active。

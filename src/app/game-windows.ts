@@ -1,4 +1,6 @@
 import type { WindowView } from '../engine/scene/window.ts'
+import type { WindowRegion } from '../engine/scene/window-region.ts'
+import { WindowRegionClip } from './window-region.ts'
 import './game-windows.css'
 
 export interface WindowHostView extends WindowView {
@@ -32,6 +34,8 @@ export interface GameWindows {
   detach(windowId: number, surfaceEpoch: number): void
   /** Supply the epoch when forwarding asynchronous protocol events. */
   update(windowId: number, view: WindowHostView, active: boolean, surfaceEpoch?: number): void
+  /** Region events target a live surface; the player replays on replacement. */
+  setRegion(windowId: number, revision: number, region: WindowRegion | null, surfaceEpoch: number): void
   get(windowId: number, surfaceEpoch?: number): GameWindowSurface | undefined
   /** Whether this exact surface is actually placed in the viewport. */
   isFullscreen(windowId: number, surfaceEpoch: number): boolean
@@ -47,6 +51,7 @@ interface WindowElement extends GameWindowSurface {
   readonly leaveFullscreen: HTMLButtonElement
   readonly resize: HTMLElement
   readonly primary: boolean
+  readonly region: WindowRegionClip
   view: WindowHostView
   active: boolean
   order: number
@@ -116,15 +121,16 @@ export function createGameWindows(
   const fit = (surface: WindowElement) => {
     if (fullscreen !== surface) {
       surface.content.style.width = ''
-      return
+    } else {
+      // Fit the actual element box. Letterboxing inside canvas would break pointer,
+      // IME and video mappings, which all use its CSS dimensions and offsets.
+      const width = Math.min(
+        surface.body.clientWidth,
+        (surface.body.clientHeight * surface.view.width) / surface.view.height,
+      )
+      surface.content.style.width = `${Math.max(0, width)}px`
     }
-    // Fit the actual element box. Letterboxing inside canvas would break pointer,
-    // IME and video mappings, which all use its CSS dimensions and offsets.
-    const width = Math.min(
-      surface.body.clientWidth,
-      (surface.body.clientHeight * surface.view.width) / surface.view.height,
-    )
-    surface.content.style.width = `${Math.max(0, width)}px`
+    surface.region.project()
   }
   const layout = (surface: WindowElement) => {
     const { element, canvas, view } = surface,
@@ -371,6 +377,7 @@ export function createGameWindows(
     surface.gesture?.()
     surface.abort.abort()
     surface.observer.disconnect()
+    surface.region.dispose()
     windows.delete(surface.windowId)
     surface.element.remove()
     if (fullscreen === surface) fullscreen = undefined
@@ -457,6 +464,7 @@ export function createGameWindows(
         leaveFullscreen,
         resize,
         primary,
+        region: new WindowRegionClip(stage, element, canvas, () => surface.preview ?? surface.view),
         view: defaultView(),
         active: false,
         order: ++order,
@@ -552,6 +560,11 @@ export function createGameWindows(
       if (surface && (surfaceEpoch === undefined || surfaceEpoch === surface.surfaceEpoch))
         apply(surface, view, active)
       else pending.set(windowId, { view: { ...view }, active, surfaceEpoch })
+    },
+    setRegion(windowId, revision, region, surfaceEpoch) {
+      const surface = windows.get(windowId)
+      if (!surface || !live(surface) || surface.surfaceEpoch !== surfaceEpoch) return
+      surface.region.set(revision, region)
     },
     get(windowId, surfaceEpoch) {
       const surface = windows.get(windowId)

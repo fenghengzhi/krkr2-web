@@ -18,6 +18,8 @@ export interface WindowView {
   zoomDenom: number
   mouseCursorState: number
   useMouseKey?: boolean
+  /** Immutable region payloads travel separately, once per replacement. */
+  regionRevision?: number
   stayOnTop?: boolean
   minWidth?: number
   minHeight?: number
@@ -60,6 +62,7 @@ export class WindowState implements WindowView {
   trappedKeysArmed = false
   keyboardRevision = 0
   useMouseKey = false
+  regionRevision = 0
   stayOnTop = false
   revision = 0
   get innerWidth(): number {
@@ -143,6 +146,7 @@ export class WindowState implements WindowView {
       zoomDenom,
       mouseCursorState,
       useMouseKey,
+      regionRevision,
       stayOnTop,
       minWidth,
       minHeight,
@@ -167,6 +171,7 @@ export class WindowState implements WindowView {
       zoomDenom,
       mouseCursorState,
       useMouseKey,
+      regionRevision,
       stayOnTop,
       minWidth,
       minHeight,

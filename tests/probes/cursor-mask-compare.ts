@@ -136,12 +136,14 @@ try {
         assert.equal(image.width, 32); assert.equal(image.height, 32)
         assert.equal(image.mode, 'and-xor')
         let differentPixels = 0, differentPlanes = 0
-        const first: { x: number; y: number; plane: string; native: number; portable: number }[] = []
+        const first: { x: number; y: number; plane: string; native: number; portable: number }[] = [],
+          planes: ReadonlyArray<'AND' | 'XOR'> = sample.depth === 1 ? ['AND', 'XOR'] : ['AND']
         for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
           let different = false
-          for (const label of sample.depth === 1 ? ['AND', 'XOR'] : ['AND']) {
-            const value = ((raw[(y + (label === 'XOR' ? 32 : 0)) * 4 + (x >>> 3)]! >>> (7 - (x & 7))) & 1) * 255,
-              portable = label === 'AND' ? image.andMask[y * 32 + x]! : image.data[(y * 32 + x) * 4]!
+          for (let planeIndex = 0; planeIndex < planes.length; planeIndex++) {
+            const label: 'AND' | 'XOR' = planes[planeIndex]!,
+              value: number = ((raw[(y + (label === 'XOR' ? 32 : 0)) * 4 + (x >>> 3)]! >>> (7 - (x & 7))) & 1) * 255,
+              portable: number = label === 'AND' ? image.andMask[y * 32 + x]! : image.data[(y * 32 + x) * 4]!
             if (label === 'XOR') {
               assert.equal(image.data[(y * 32 + x) * 4 + 1], portable)
               assert.equal(image.data[(y * 32 + x) * 4 + 2], portable)

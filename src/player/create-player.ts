@@ -16,6 +16,7 @@ import { PageActivityMonitor } from './page-activity.ts'
 import { activityPaused, initialActivity } from '../engine/ports/activity.ts'
 import type { InputView } from '../engine/ports/input.ts'
 import type { WindowPresentation, WindowView } from '../engine/scene/window.ts'
+import { copyWindowRegion, WindowRegions, type WindowRegion } from '../engine/scene/window-region.ts'
 import type { WindowSurfaceIdentity } from '../protocol/surfaces.ts'
 import { normalizeSystemDataPath } from '../engine/system/environment.ts'
 import { copySystemColorPalette } from '../engine/graphics/system-colors.ts'
@@ -38,6 +39,8 @@ export interface PlayerWindowHost {
   attach(windowId: number, surfaceEpoch: number): HTMLCanvasElement | undefined
   detach(windowId: number, surfaceEpoch: number): void
   update(windowId: number, view: WindowView, active: boolean, surfaceEpoch?: number): void
+  /** Apply an immutable native pixel region to this exact live surface. */
+  setRegion(windowId: number, revision: number, region: WindowRegion | null, surfaceEpoch: number): void
   get(windowId: number, surfaceEpoch?: number): PlayerWindowSurface | undefined
   /** Actual host placement, which may suppress a requested fullscreen window. */
   isFullscreen?(windowId: number, surfaceEpoch: number): boolean
@@ -109,6 +112,9 @@ export function createPlayer(
   const surfaceChannel = new MessageChannel()
   const windows = new Map<number, WindowPresentation>()
   const inputViews = new Map<number, InputView>()
+  const windowRegions = new WindowRegions()
+  const regionRevisions = new Map<number, number>()
+  let regionsRetired = false
   const cursorAssets = new Map<number, SelectedCursorAsset>()
   const unselectedCursorAssets = new Map<number, CursorAsset>()
   const cursorAssetIds = new Set<number>()
@@ -163,10 +169,31 @@ export function createPlayer(
         ),
     ])
   }
+  const applyRegion = (windowId: number, surfaceEpoch: number) => {
+    const revision = regionRevisions.get(windowId)
+    if (revision === undefined || regionsRetired || retiredWindows.has(windowId)) return
+    const region = windowRegions.get(windowId)
+    options.windows.setRegion(windowId, revision, region ? copyWindowRegion(region) : null, surfaceEpoch)
+  }
+  const clearRegions = () => {
+    if (regionsRetired) return
+    regionsRetired = true
+    const ids = [...regionRevisions.keys()]
+    windowRegions.clear()
+    regionRevisions.clear()
+    // Retirement wins immediately, including while the Worker drains Stop.
+    // A final local revision also excludes stale direct calls to a live host.
+    updateParts(ids.map((id) => () => {
+      const epoch = surfaces?.get(id)?.identity.surfaceEpoch
+      if (epoch !== undefined) options.windows.setRegion(id, Number.MAX_SAFE_INTEGER, null, epoch)
+    }))
+  }
   const retireWindow = (windowId: number) => {
     retiredWindows.add(windowId)
     windows.delete(windowId)
     inputViews.delete(windowId)
+    windowRegions.replace(windowId, null)
+    regionRevisions.delete(windowId)
     if (focusRequest?.windowId === windowId) focusRequest = undefined
     // Retirement is independent of whether a presentation or canvas ever
     // arrived. Tombstone before cleanup so late messages cannot recreate it.
@@ -219,6 +246,20 @@ export function createPlayer(
       unselectedCursorAssets.clear()
       cursorAssetIds.clear()
       input?.refreshCursors()
+    }
+    if (event.type === 'window-regions-clear') clearRegions()
+    if (event.type === 'window-region' && !regionsRetired && !stopping && !retiredWindows.has(event.windowId)) {
+      updateParts([() => {
+        if (!Number.isSafeInteger(event.windowId) || event.windowId < 1 ||
+            !Number.isSafeInteger(event.revision) || event.revision < 1)
+          throw new Error('Invalid Window region identity')
+        if (event.revision <= (regionRevisions.get(event.windowId) ?? 0)) return
+        const region = event.region ? copyWindowRegion(event.region) : null
+        windowRegions.replace(event.windowId, region)
+        regionRevisions.set(event.windowId, event.revision)
+        const epoch = surfaces?.get(event.windowId)?.identity.surfaceEpoch
+        if (epoch !== undefined) applyRegion(event.windowId, epoch)
+      }])
     }
     if (event.type === 'font-selection') {
       fontSelecting = !!event.request
@@ -298,6 +339,7 @@ export function createPlayer(
       const window = windows.get(windowId),
         state = inputViews.get(windowId)
       if (window) options.windows.update(windowId, window.view, window.active, surfaceEpoch)
+      applyRegion(windowId, surfaceEpoch)
       input!.attach(windowId, surfaceEpoch, canvas, surface.element)
       if (window) input!.setWindow(windowId, window.view)
       if (state) input!.setInput(windowId, state)
@@ -407,6 +449,7 @@ export function createPlayer(
           () => help.suspend(),
           () => video.setPagePaused(true),
           () => input?.close(),
+          () => clearRegions(),
           () => {
             cursorsRetired = true
             cursorAssets.clear()
