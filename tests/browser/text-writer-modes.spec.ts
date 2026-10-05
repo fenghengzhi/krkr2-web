@@ -50,6 +50,7 @@ function paths(binary: boolean, names: string[]) {
 
 const rejectedKinds = ['lines', 'array', 'dictionary', 'forced-text'] as const
 const rejectionProgram = String.raw`
+System.assignMessage("TVPUnsupportedModeString","writer-mode:%1");
 var rejectedKinds=["lines","array","dictionary","forced-text"],rejectedModes=["c0","c9","c01","bc0"];
 for(var i=0;i<rejectedKinds.count;i++)["original:"+rejectedKinds[i]].save("savedata/keep-"+rejectedKinds[i]+".txt","utf-8");
 function runRejectedSaves(){
@@ -67,7 +68,7 @@ function runRejectedSaves(){
       }catch(e){caught=1;errorText=e.message;}
       var sentinel=caught*10+returned;
       writerCheck(sentinel==10,"immediate-catch:"+label+":"+existing);
-      writerCheck(errorText.indexOf("Unsupported text writer encoding ")>=0,"mode-error:"+label);
+      writerCheck(errorText==="writer-mode:unsupported cipher mode","mode-error:"+label);
       errors++;
       var recovery="savedata/after-"+label+"-"+existing+".txt",expected="continued:"+label+":"+existing;
       [expected].save(recovery,"utf-8");

@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import type { ModuleFactory, WasmManifest } from '../../src/backends/script/tjs-wasm/module.ts'
-import type { HostReply, ScriptValue } from '../../src/engine/script/runtime.ts'
+import { isScriptObject, type HostReply, type ScriptValue } from '../../src/engine/script/runtime.ts'
 import { systemClass, systemClassValue } from '../../src/engine/tvp/system-class.ts'
 
 const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
@@ -22,11 +22,20 @@ const wasmBinary = new Uint8Array(readFileSync(resolve(directory, assets.wasm.fi
 async function boundary() {
   const calls: { operation: string; args: ScriptValue[] }[] = []
   let shellResult: ScriptValue = 7n
+  let compactBindings = 0
   const vm = await TjsWasmRuntime.create(
     factory,
     async (operation, args): Promise<HostReply> => {
       if (operation === 'System.class')
         return { kind: 'value', value: systemClassValue(args) }
+      if (operation === 'System.bindCompact') {
+        // Bootstrap binds a native callback; it is not a Help string argument.
+        // This isolated host has no maintenance pump and does not retain it.
+        assert.equal(compactBindings++, 0)
+        assert.equal(args.length, 1)
+        assert(isScriptObject(args[0]))
+        return { kind: 'value', value: undefined }
+      }
       if (operation === 'StoragesFactory')
         return {
           kind: 'value',

@@ -5,6 +5,8 @@ import {
   type TextCodecs,
 } from '../../formats/text/stream.ts'
 import { inflate } from './blob-source.ts'
+import { CompressionError } from '../../formats/binary/compression-error.ts'
+import { BinaryWriter } from '../../formats/binary/writer.ts'
 const codecs: TextCodecs = {
   narrow(bytes, encoding) {
     if (encoding) return new TextDecoder(encoding, { fatal: true }).decode(bytes)
@@ -20,7 +22,22 @@ const codecs: TextCodecs = {
     const stream = new Blob([Uint8Array.from(bytes).buffer])
       .stream()
       .pipeThrough(new CompressionStream('deflate'))
-    return new Uint8Array(await new Response(stream).arrayBuffer())
+    const reader = stream.getReader(), output = new BinaryWriter()
+    let ended = false
+    try {
+      while (true) {
+        const { value, done } = await reader.read().catch((error: unknown) => {
+          throw new CompressionError('deflate', error instanceof Error ? error.message : 'Compression failed', { cause: error })
+        })
+        if (done) { ended = true; break }
+        output.append(value)
+      }
+      return output.finish()
+    } finally {
+      // Only this private codec reader's rejection is classified above.
+      // Allocation/budget errors and unsupported CompressionStream stay raw.
+      if (!ended) await reader.cancel().catch(() => undefined)
+    }
   },
 }
 export const readText = (bytes: Uint8Array, mode = '', encoding?: string) =>

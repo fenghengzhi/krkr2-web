@@ -1,5 +1,7 @@
 import { BinaryReader } from '../binary/reader.ts'
+import { CompressionError } from '../binary/compression-error.ts'
 import { parseStreamMode, parseTextWriterMode } from './mode.ts'
+import { TextStreamError } from './errors.ts'
 
 export interface TextCodecs {
   narrow(bytes: Uint8Array, encoding?: string): string
@@ -46,17 +48,33 @@ export async function decodeTextStream(
   const bytes = input.subarray(offset)
   if (bytes.length > MAX_TEXT_BYTES) throw new Error('Text stream exceeds 64 MiB budget')
   if (bytes[0] === 0xfe && bytes[1] === 0xfe) {
-    if (bytes[3] !== 0xff || bytes[4] !== 0xfe)
-      throw new Error('Invalid encoded text stream header')
     const cipher = bytes[2]
+    if (cipher !== 0 && cipher !== 1 && cipher !== 2)
+      throw new TextStreamError('unsupported-cipher', `Unsupported text stream encoding ${cipher}`)
+    if (bytes[3] !== 0xff || bytes[4] !== 0xfe)
+      throw new TextStreamError('unsupported-cipher', 'Invalid encoded text stream header')
     if (cipher === 2) {
       const reader = new BinaryReader(bytes.subarray(5))
-      const packed = reader.u64(),
-        length = reader.u64()
+      // Native Win32 unsigned long is 32 bits. Check its explicit cipher
+      // rejection before applying the separate, smaller Web resource budget.
+      const sizes = reader.slice(16), view = new DataView(sizes.buffer, sizes.byteOffset, sizes.byteLength),
+        packed64 = view.getBigUint64(0, true), length64 = view.getBigUint64(8, true)
+      if (packed64 > 0xffffffffn || length64 > 0xffffffffn)
+        throw new TextStreamError('unsupported-cipher', 'Encoded text stream sizes exceed native uint32 range')
+      const packed = Number(packed64), length = Number(length64)
       if (length > MAX_TEXT_BYTES) throw new Error('Decoded text stream exceeds budget')
-      return decodeUtf16(await codecs.inflate(reader.slice(packed), length))
+      const compressed = reader.slice(packed)
+      let decoded: Uint8Array
+      try { decoded = await codecs.inflate(compressed, length) }
+      catch (error) {
+        if (error instanceof CompressionError && error.operation === 'inflate')
+          throw new TextStreamError('unsupported-cipher', 'Encoded text stream decompression failed', { cause: error })
+        throw error
+      }
+      if (decoded.length !== length)
+        throw new TextStreamError('unsupported-cipher', 'Encoded text stream decompressed size mismatch')
+      return decodeUtf16(decoded)
     }
-    if (cipher !== 0 && cipher !== 1) throw new Error(`Unsupported text stream encoding ${cipher}`)
     const data = Uint8Array.from(bytes.subarray(5))
     if (data.length % 2) throw new Error('Truncated encoded text stream')
     const view = new DataView(data.buffer)
@@ -101,8 +119,14 @@ export async function encodeTextStream(
   if (parsedMode.encoding === 'compressed') {
     // CompressionStream provides the host default level; the parsed native
     // level is retained as metadata, not a promise of an identical bitstream.
-    const packed = await codecs.deflate(data),
-      output = new Uint8Array(21 + packed.length)
+    let packed: Uint8Array
+    try { packed = await codecs.deflate(data) }
+    catch (error) {
+      if (error instanceof CompressionError && error.operation === 'deflate')
+        throw new TextStreamError('compression-failed', 'Text stream compression failed', { cause: error })
+      throw error
+    }
+    const output = new Uint8Array(21 + packed.length)
     output.set([0xfe, 0xfe, 2, 0xff, 0xfe])
     const view = new DataView(output.buffer)
     view.setBigUint64(5, BigInt(packed.length), true)

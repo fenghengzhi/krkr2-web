@@ -9,6 +9,7 @@ import {
   type SoundSnapshot,
   type LoopInfo,
 } from '../ports/audio.ts'
+import { mapTextStreamError } from '../system/text-stream-error.ts'
 import {
   isScriptObject,
   scriptList,
@@ -409,7 +410,14 @@ export class SoundService {
       let sourceLease: AudioSourceLease | undefined
       try {
         const sli = name + '.sli'
-        loops = await this.exists(sli) ? parseSli(await this.text(await this.read(sli))) : emptyLoops()
+        loops = emptyLoops()
+        if (await this.exists(sli)) {
+          const bytes = await this.read(sli)
+          let text: string
+          try { text = await this.text(bytes) }
+          catch (error) { throw mapTextStreamError(error, sli) }
+          loops = parseSli(text)
+        }
         if (sound.kind === 'wave' && this.backend?.streaming && this.sources && this.resourceSource) {
           sourceLease = await this.sources.open(await this.resourceSource.resolve(name),
             () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound)

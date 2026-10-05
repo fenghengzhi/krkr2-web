@@ -1,3 +1,5 @@
+import { TextStreamError } from './errors.ts'
+
 export interface StreamMode {
   mode: string
   hasOffset: boolean
@@ -64,7 +66,8 @@ export function parseTextWriterMode(input: string): TextWriterMode {
     else if (kind === 2) {
       encoding = 'compressed'
       if (compressed >= 0) compressionLevel = digitAt(mode, compressed + 1)
-    } else if (kind !== -1) throw new Error(`Unsupported text writer encoding ${kind}`)
+    } else if (kind !== -1)
+      throw new TextStreamError('unsupported-mode', `Unsupported text writer encoding ${kind}`)
   }
   return {
     ...parseStreamMode(mode),

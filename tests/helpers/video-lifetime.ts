@@ -62,14 +62,21 @@ ${definitions}
     )
     assert.equal(await session.evaluate('6*7'), '42')
     const baseline = session.inspectOwnership(),
-      handles = session.snapshot().handles
+      handles = session.snapshot().handles,
+      maintenanceTasks = clock.tasks.size
+    // Keep the real MainForm watch in the baseline; do not filter scheduled
+    // work by its interval or confuse it with retired media/event resources.
+    assert.equal(maintenanceTasks, 1)
+    assert.deepEqual([...clock.tasks].map((task) => task.at), [clock.now + 50])
     const restored = async () => {
       await session.idle()
       assert.deepEqual(session.inspectOwnership(), baseline)
       assert.equal(session.snapshot().handles, handles)
       assert.equal(session.snapshot().state, 'running')
       assert.equal(video.movies.size, 0)
-      assert.equal(clock.tasks.size, 0)
+      assert.equal(clock.tasks.size, maintenanceTasks)
+      const watch = [...clock.tasks][0]!
+      assert(watch.at > clock.now && watch.at <= clock.now + 50)
     }
     const stopped = () => {
       assert(Object.values(session.inspectOwnership()).every((value) => value === 0))

@@ -30,7 +30,7 @@ var ref1=new VideoOverlay(win);ref1.mode=vomLayer;ref1.layer1=r1;ref1.open("ref1
 `, [
         { name: 'tracks.mp4', mimeType: 'video/mp4', buffer: readFileSync(resolve(`out/verification/video-tracks/video-${container}.mp4`)) },
         ...[0, 1].map((index) => ({ name: `ref${index}.mp4`, mimeType: 'video/mp4',
-          buffer: readFileSync(resolve(`out/verification/video-tracks/video-reference-${index}.mp4`)) })),
+          buffer: readFileSync(resolve(`out/verification/video-tracks/video-${container}-reference-${index}.mp4`)) })),
       ], true)
       await expect(page.locator('video[data-video-id]')).toHaveCount(3)
       const capture = async (stream: number) => {
@@ -48,7 +48,9 @@ var ref1=new VideoOverlay(win);ref1.mode=vomLayer;ref1.layer1=r1;ref1.open("ref1
         expect(actual.paused).toBe(true); expect(actual.seeking).toBe(false)
         expect(Math.abs(actual.position - 1)).toBeLessThanOrEqual(0.000001)
         if (mode === 1) {
-          // Independent FFmpeg stream-copy references use one video track.
+          // Independent FFmpeg stream-copy references use one video track
+          // from this exact container, with packet hashes and PTS/DTS checked
+          // during generation (the historical regular references are retained).
           // Compare both bound Layer regions against that reference through
           // a real game-canvas screenshot, in addition to complete decoder RGBA.
           const png = await game!.surface('video-streams').locator('canvas[data-window-id]').screenshot()

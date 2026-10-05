@@ -8,6 +8,7 @@ import { unavailableHelp, type HelpPort } from './ports/help.ts'
 import { getWebLocalName, openHelpDocument } from './system/help.ts'
 import { SystemMaintenance } from './system/maintenance.ts'
 import { TvpError } from './system/tvp-error.ts'
+import { mapTextStreamError } from './system/text-stream-error.ts'
 import type { TvpMessageId } from './system/tvp-message-ids.ts'
 import { ScriptTextEncoding } from './script/text-encoding.ts'
 import { debugBridge } from './tvp/debug.ts'
@@ -537,7 +538,7 @@ export class EngineSession {
     this.appLocks = deps.appLocks ?? new MemoryAppLocks()
     this.kag = new KagService(
       async (name) =>
-        this.deps.readText(await this.readResource(name), '', this.textEncoding.codec),
+        this.withTextError(name, async () => this.deps.readText(await this.readResource(name), '', this.textEncoding.codec)),
       (text) => this.log(text),
     )
     this.control.onCancel(() => {
@@ -1054,7 +1055,8 @@ export class EngineSession {
     return this.execute(async () => {
       const resource = await this.resolveResource(entry)
       return this.runtime!.execute(
-        await this.deps.decodeScript(await resource.read(), '', this.textEncoding.codec),
+        await this.withTextError(toPublicStoragePath(resource.name), async () =>
+          this.deps.decodeScript(await resource.read(), '', this.textEncoding.codec)),
         resource.name,
       )
     }, 1, true).then(() => undefined)
@@ -3971,6 +3973,14 @@ export class EngineSession {
   private async readResource(name: string): Promise<Uint8Array> {
     return (await this.resolveResource(name, 'TVPCannotOpenStorage')).read()
   }
+  private async withTextError<T>(name: string, operation: () => Promise<T>): Promise<T> {
+    try { return await operation() }
+    catch (error) { throw mapTextStreamError(error, name) }
+  }
+  private textWriterMode(name: string, mode: string): StreamMode {
+    try { return parseTextWriterMode(mode) }
+    catch (error) { throw mapTextStreamError(error, name) }
+  }
   private async resolveResource(name: string, missing: TvpMessageId = 'TVPCannotFindStorage'): Promise<Resource> {
     const resource = await this.findResource(name)
     if (!resource) throw new TvpError(missing, [name], `Resource not found: ${name}`)
@@ -4510,21 +4520,21 @@ export class EngineSession {
         this.textEncoding.set(text(0))
         break
       case 'Scripts.readCompile':
-        value = await this.deps.readText(
+        value = await this.withTextError(text(0), async () => this.deps.readText(
           await this.readResource(text(0)),
           '',
           this.textEncoding.codec,
-        )
+        ))
         break
       case 'Scripts.execStorage': {
         const resource = await this.resolveResource(text(0))
         return {
           kind: 'script',
-          source: await this.deps.decodeScript(
+          source: await this.withTextError(toPublicStoragePath(resource.name), async () => this.deps.decodeScript(
             await resource.read(),
             typeof args[1] === 'string' ? args[1] : '',
             this.textEncoding.codec,
-          ),
+          )),
           name: resource.name.replace(/^.*[\\/>]/, ''),
           context: isScriptObject(args[2]) ? args[2] : undefined,
           expression: args[3] === 1n,
@@ -4555,11 +4565,11 @@ export class EngineSession {
         return this.debug!.dispatch(this.diagnostics.begin('Dumped to ' + requested))
       }
       case 'Storage.readText':
-        value = await this.deps.readText(
+        value = await this.withTextError(text(0), async () => this.deps.readText(
           await this.readResource(text(0)),
           text(1),
           this.textEncoding.codec,
-        )
+        ))
         break
       case 'Storage.readBinary': {
         const bytes = await this.readResource(text(0)),
@@ -4573,7 +4583,7 @@ export class EngineSession {
       case 'Storage.validateTextWrite':
         // Text mode errors belong to construction, before a stream can queue
         // bytes on destruction. Match the native mode-before-path ordering.
-        value = await this.storageWriteTarget(text(0), parseTextWriterMode(text(1)))
+        value = await this.storageWriteTarget(text(0), this.textWriterMode(text(0), text(1)))
         break
       case 'Storage.validateWrite':
         storageWritePath(text(0), this.project?.directory)
@@ -4584,10 +4594,11 @@ export class EngineSession {
         this.materializeLogs()
         const mode = text(1),
           parsed =
-            operation === 'Storage.writeText' ? parseTextWriterMode(mode) : parseStreamMode(mode),
+            operation === 'Storage.writeText' ? this.textWriterMode(text(0), mode) : parseStreamMode(mode),
           path = storageWritePath(text(0))
         const encoded =
-          operation === 'Storage.writeText' ? await this.deps.writeText(text(2), mode) : args[2]
+          operation === 'Storage.writeText'
+            ? await this.withTextError(text(0), () => this.deps.writeText(text(2), mode)) : args[2]
         if (!(encoded instanceof Uint8Array)) throw new Error('Expected binary file contents')
         let output = encoded
         if (parsed.hasOffset || parsed.append) {
@@ -4670,7 +4681,7 @@ export class EngineSession {
         value = BigInt(await openHelpDocument(text(0), text(1), {
           currentDirectory: this.project?.directory,
           find: (name) => this.findResource(name),
-          decode: (bytes) => this.deps.readText(bytes, '', this.textEncoding.codec),
+          decode: (bytes) => this.withTextError(text(0), () => this.deps.readText(bytes, '', this.textEncoding.codec)),
           host: this.help,
           control: this.control,
         }))

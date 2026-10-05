@@ -15,6 +15,16 @@ for (const binary of [false, true]) {
       await f.restored()
       assert.equal(await f.session.evaluate('finalized'), '1')
       assert.equal(f.video.closedIds.length, 1)
+      assert.deepEqual([...f.clock.tasks].map((task) => task.at), [50])
+      f.clock.advance(50)
+      await f.session.idle()
+      assert.deepEqual([...f.clock.tasks].map((task) => task.at), [100])
+      await f.restored()
+      const lateWatch = [...f.clock.tasks][0]!.callback
+      await f.session.stop()
+      f.stopped()
+      lateWatch()
+      f.stopped()
     } finally {
       await f.session.stop()
     }

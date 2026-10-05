@@ -230,6 +230,16 @@ jobs:
             --test-reporter=spec --test-reporter-destination=stdout \
             --test-reporter=tap --test-reporter-destination=out/ci/tvp-messages-jspi.tap \
             tests/conformance/tvp-messages.test.ts 2>&1 | tee out/ci/tvp-messages-jspi.log
+      - name: Check native container factory retirement through the JSPI kernel
+        if: ${{ always() && steps.prepare.outcome == 'success' }}
+        env:
+          KRKR_CONTAINER_VARIANT: jspi
+        run: |
+          ulimit -c unlimited
+          node --experimental-wasm-jspi --import tsx --import ./scripts/record-node-test-process.mjs --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination=out/ci/native-container-factories-jspi.tap \
+            tests/conformance/native-container-factories.test.ts 2>&1 | tee out/ci/native-container-factories-jspi.log
       - name: Record backtraces for any terminated Node process
         if: always()
         run: |
@@ -245,6 +255,14 @@ jobs:
         with:
           name: node-results
           path: out/ci/
+          retention-days: 14
+      - name: Preserve original Node core bytes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: node-native-cores
+          path: out/native-cores/
+          if-no-files-found: ignore
           retention-days: 14
 
   browser:

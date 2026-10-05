@@ -7,6 +7,50 @@ const deadline = { timeout: 60_000 }
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
+  test(`${mode}: sound retirement preserves the maintenance watch and an independent user Timer`, deadline, async () => {
+    const { session, audio, clock, execute, restored, stopped, baseline } = await soundFixture(binary, `
+var userTicks=0;
+function userTick(){global.userTicks++;global.userTimer.enabled=false;}
+function createTimer(){global.userTimer=new Timer(userTick,"");userTimer.interval=75;userTimer.enabled=true;}
+function createSound(){global.sound=new WaveSoundBuffer(null);sound.open("tone.wav");sound.play();}
+`)
+    const due = () => [...clock.tasks].map((task) => task.at).sort((a, b) => a - b)
+    try {
+      assert.deepEqual(due(), [50])
+      await execute('createSound();createTimer();')
+      assert.deepEqual(due(), [50, 75])
+      assert.equal(audio.voices.size, 1)
+      assert.equal(session.inspectOwnership().eventSources, baseline.eventSources + 1)
+      await execute('invalidate sound;delete global.sound;')
+      assert.equal(audio.voices.size, 0)
+      assert.equal(session.inspectOwnership().soundSources, baseline.soundSources)
+      assert.deepEqual(due(), [50, 75])
+
+      clock.advance(50)
+      await session.idle()
+      assert.equal(await session.evaluate('userTicks'), '0')
+      assert.deepEqual(due(), [75, 100])
+      clock.advance(25)
+      await session.idle()
+      assert.equal(await session.evaluate('userTicks'), '1')
+      assert.deepEqual(due(), [100])
+      await execute('invalidate userTimer;delete global.userTimer;')
+      await restored()
+
+      await execute('createSound();createTimer();')
+      assert.deepEqual(due(), [100, 150])
+      const lateWatch = [...clock.tasks].find((task) => task.at === 100)!.callback
+      await stopped()
+      lateWatch()
+      clock.advance(1000)
+      assert.equal(clock.tasks.size, 0)
+      assert.equal(audio.voices.size, 0)
+      assert.equal(session.snapshot().handles, 0)
+    } finally {
+      await stopped()
+    }
+  })
+
   for (const kind of ['WaveSoundBuffer', 'MIDISoundBuffer', 'CDDASoundBuffer']) {
     for (const activity of ['unopened', 'playing', 'fading'])
       test(

@@ -114,8 +114,9 @@ export async function exerciseEventLifetime(
     check((await session.evaluate('6*7')) === '42', 'Warm VM arithmetic failed')
     baseline = state()
     check(
-      baseline.clockTasks === 0 && baseline.pendingHandles === 0,
-      'Baseline has pending event work',
+      baseline.clockTasks === 1 && [...clock.tasks][0]!.at === 50 &&
+        baseline.eventSources === 0 && baseline.pendingHandles === 0,
+      'Baseline must contain only the real 50 ms MainForm maintenance watch',
     )
     const restored = async () => {
       await session.idle()
@@ -144,9 +145,9 @@ export async function exerciseEventLifetime(
     active = 'no-super-finalization'
     await execute('createPair();')
     const pair = owns(2)
-    check(pair.clockTasks === 1, 'Enabled timer did not register a clock wake')
+    check(pair.clockTasks === baseline.clockTasks + 1, 'Enabled timer did not register its own clock wake')
     await execute('delete global.owner;delete global.spare;')
-    check(clock.tasks.size === 0, 'Implicit finalization left a timer wake registered')
+    check(clock.tasks.size === baseline.clockTasks, 'Implicit finalization did not restore the maintenance-only clock')
     clock.advance(100)
     await session.idle()
     const pairResult = await session.evaluate('calls+","+finalized')
@@ -183,7 +184,7 @@ export async function exerciseEventLifetime(
       (await session.evaluate('(isvalid owner)+","+(isvalid spare)')) === '1,1',
       'Calling base finalize directly invalidated an instance',
     )
-    check(base.clockTasks === 1, 'Calling base finalize directly stopped the timer')
+    check(base.clockTasks === baseline.clockTasks + 1, 'Calling base finalize directly stopped the timer')
     clock.advance(10)
     await session.idle()
     await execute('spare.trigger();')
@@ -193,7 +194,7 @@ export async function exerciseEventLifetime(
     await execute('invalidate owner;invalidate spare;')
     const baseResult = await session.evaluate('(isvalid owner)+","+(isvalid spare)+","+calls')
     check(baseResult === '0,0,2', 'Explicit invalidate did not invalidate both base owners')
-    check(clock.tasks.size === 0, 'Explicit invalidate retained a timer wake')
+    check(clock.tasks.size === baseline.clockTasks, 'Explicit invalidate did not restore the maintenance-only clock')
     await execute('delete global.owner;delete global.spare;')
     cases.push({ name: active, owned: base, retained, result: baseResult, after: await restored() })
 

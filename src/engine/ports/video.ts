@@ -13,7 +13,8 @@ export interface VideoTrackTimeline {
 export interface VideoTimeline {
   times: number[]
   duration: number
-  /** Mean decoded sample duration in milliseconds, before edits/CTS offsets. */
+  /** Nominal progressive AVC duration when unambiguous; otherwise mean sample
+   * duration, in milliseconds. Independent of edited presentation timestamps. */
   frameDuration: number
   audioStreams: number
   videoStreams: number

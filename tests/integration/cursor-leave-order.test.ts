@@ -28,6 +28,7 @@ win.onMouseLeave=function(){global.leaveCount++;};
 var group=new MenuItem(win,"Popup"),item=new MenuItem(win,"Item");
 win.menu.add(group);group.add(item);
 function moveScript(){global.root.cursor="pointer.cur";global.root.setCursorPos(12,14);}
+function moveAndResume(){moveScript();System.eventDisabled=false;return 1;}
 var timer=new Timer();timer.enabled=false;timer.interval=10;
 timer.onTimer=function(){global.timer.enabled=false;global.moveScript();Debug.message("cursor:changed");};
 win.onKeyDown=function(key,shift){if(key==120){
@@ -107,7 +108,10 @@ for (const binary of [false,true]) {
         delayedLeaveResult = delayed.completion.then(() => ({ ok: true as const }),
           (error: unknown) => ({ ok: false as const, error }))
         assert.equal(delayed.status, 'accepted')
-        await f.session.evaluate('moveScript();System.eventDisabled=false;')
+        // evaluate accepts one expression. Keep both statements inside the
+        // actual source/bytecode program so the admitted leave can resume.
+        assert.equal(await f.session.evaluate('moveAndResume()'), '1')
+        assert.equal(await f.session.evaluate('int(System.eventDisabled)'), '0')
         const delayedOutcome = await delayedLeaveResult
         if (!delayedOutcome.ok) throw delayedOutcome.error
         await f.session.idle()

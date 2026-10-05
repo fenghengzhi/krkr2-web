@@ -1,5 +1,7 @@
 # 当前实现范围
 
+106 候选补 [托管回归与原生错误边界](../decisions/106-hosted-regressions-and-text-errors.md)：应用事件泵持有真实私有上下文，原生容器工厂随引擎退休，文本流和全屏方法接入已确认的消息 holder；AVC 名义帧率与展示时间戳分开、参考视频按原容器核对。104 构建通过但 Node／浏览器有失败和缺失，menu-modal 的 native heap 崩溃根因未定；105 尚未报告执行。本批尚待验证，协议 **41**，完整非插件目标仍未完成。以下保留历史状态。
+
 105 实现提交 `34aca0ddc9594618a284d8c1f29eef96eed75898` 已推送，[Actions 37364141321](https://github.com/fenghengzhi/krkr2-web/actions/runs/37364141321) 首次唯一查询为 pending／conclusion=null。仅确认身份，尚无本批执行结论；下轮取回结果，完整非插件目标保持 active。
 
 105 候选补 [原生 TVP 消息与真实异常消费者](../decisions/105-native-tvp-message-consumers.md)，固定原版 138 个 holder 与六个 CONST，迁移已核对的实际错误分支并保留纯格式化和失败原因；新增 `nativeMessages:1`，协议仍 **41**。按原版证据，pending terminate 不会自动关闭 popup，真实关闭后才结束外层执行，Stop 仍立即取消。103 光标 strict 固定范围各 1076/1076、5578 未比较，应用因构建失败跳过；104 应用与光标仍未报告，Win2022 beginMove 有一项调用前标签失败。新增候选没有通过结论，所有消息消费者、历史回归和整体非插件目标仍待完成。以下保留历史状态。

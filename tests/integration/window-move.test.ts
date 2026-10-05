@@ -161,10 +161,11 @@ for (const binary of [false, true]) {
     } finally { await unsupported.session.stop() }
     const f = await fixture(binary)
     try {
+      await f.session.evaluate('System.assignMessage("TVPInvalidMethodInFullScreen","window-move:fullscreen-method")')
       await f.session.evaluate('win.fullScreen=true')
       // An uncaught console exception faults the Session by design. Catch the
       // native error in TJS before probing the same live Window's next move.
-      assert.match(await f.session.evaluate('(function(){try{win.beginMove();return "missing error";}catch(e){return e.message;}})()'), /fullscreen/)
+      assert.equal(await f.session.evaluate('(function(){try{win.beginMove();return "missing error";}catch(e){return e.message;}})()'), 'window-move:fullscreen-method')
       assert.equal(f.session.inspectOwnership().modalScopes, 0)
       await f.exec('win.fullScreen=false;retireOnTimer=true')
       const opening = track(f.exec('timer.enabled=true;win.beginMove();Debug.message("move:after-retire")')),

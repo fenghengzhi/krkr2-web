@@ -104,8 +104,10 @@ variableMovie.open("variable.mp4");variableMovie.pause();Debug.message("variable
         { name: 'variable.mp4', mimeType: 'video/mp4', buffer: readFileSync(resolve('out/verification/video-tracks/numbered-variable.mp4')) },
       ])
       await expect(page.getByText('variable-ready', { exact: true })).toBeVisible()
-      await evaluate(page, 'Math.abs(variableMovie.fps-864.0/107)<0.000000001', '1')
-      await evaluate(page, '(function(){variableMovie.frame=1;return variableMovie.frame+","+variableMovie.position;})()', '1,124')
+      await evaluate(page, 'variableMovie.fps', '12')
+      // Nominal VUI frame 2 lies inside the existing uneven interval for
+      // decoded picture 1. Keep the original independent barcode observation.
+      await evaluate(page, '(function(){variableMovie.frame=2;return variableMovie.frame+","+variableMovie.position;})()', '2,167')
       const state = await page.locator('video[data-video-id]').evaluate((node) => {
         const video = node as HTMLVideoElement, canvas = new OffscreenCanvas(video.videoWidth, video.videoHeight),
           context = canvas.getContext('2d')!
@@ -117,7 +119,7 @@ variableMovie.open("variable.mp4");variableMovie.pause();Debug.message("variable
       expect(state.paused).toBe(true)
       expect(state.seeking).toBe(false)
       expect(state.ready).toBeGreaterThanOrEqual(2)
-      expect(Math.abs(state.position - 107 / 864)).toBeLessThanOrEqual(0.000001)
+      expect(Math.abs(state.position - 1 / 6)).toBeLessThanOrEqual(0.000001)
       // The generated first interval is [1/12, 1/4). Both an exact PTS and a
       // requested-position callback must remain inside that same real interval.
       expect(state.presentedTime).toBeGreaterThanOrEqual(1 / 12 - 0.000001)

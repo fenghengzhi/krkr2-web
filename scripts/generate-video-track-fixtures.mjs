@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -169,13 +169,26 @@ for (const [file, flags, extra] of [
 ]) run(['-i', videoRegular, '-map', '0', '-c', 'copy', '-movflags', flags, ...extra, file])
 for (const [index, file] of videoReferences.entries())
   run(['-i', videoRegular, '-map', `0:v:${index}`, '-map', '0:a', '-c', 'copy', '-movflags', '+faststart', file])
-const videoSelectionFiles = [videoRegular, videoFragmented, videoInterleaved, videoSeparate, ...videoReferences].map((file, fixtureIndex) => {
+// Preserve the historical regular references above. New references are copied
+// from each actual container, whose mux offsets can differ even for identical
+// encoded frames. No candidate selector or timeline parser generates them.
+const videoContainers = [videoRegular, videoFragmented, videoInterleaved, videoSeparate],
+  containerReferences = videoContainers.flatMap((source) => [0, 1].map((index) => ({
+    source, index, file: source.replace(/\.mp4$/, `-reference-${index}.mp4`),
+  })))
+for (const { source, index, file } of containerReferences)
+  run(['-copyts', '-i', source, '-map', `0:v:${index}`, '-map', '0:a', '-c', 'copy',
+    '-copytb', '1', '-avoid_negative_ts', 'disabled', '-movflags', '+faststart', file])
+const packetReports = new Map(), videoSelectionFiles = [
+  ...videoContainers.map((file) => ({ file, patterns: videoPatterns })),
+  ...videoReferences.map((file, index) => ({ file, patterns: [videoPatterns[index]] })),
+  ...containerReferences.map(({ file, index }) => ({ file, patterns: [videoPatterns[index]] })),
+].map(({ file, patterns }) => {
   const bytes = readFileSync(file), sha256 = createHash('sha256').update(bytes).digest('hex'),
     probeCommand = ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', file],
     metadata = JSON.parse(execFileSync('ffprobe', probeCommand, { encoding: 'utf8', timeout: 30000 })),
     videos = metadata.streams.filter((stream) => stream.codec_type === 'video'),
-    audios = metadata.streams.filter((stream) => stream.codec_type === 'audio'),
-    patterns = fixtureIndex < 4 ? videoPatterns : [videoPatterns[fixtureIndex - 4]]
+    audios = metadata.streams.filter((stream) => stream.codec_type === 'audio')
   if (videos.length !== patterns.length || audios.length !== 2 ||
       videos.some((stream, index) => stream.codec_name !== 'h264' || stream.width !== patterns[index].width ||
         stream.height !== patterns[index].height || stream.r_frame_rate !== patterns[index].fps + '/1') ||
@@ -190,8 +203,52 @@ const videoSelectionFiles = [videoRegular, videoFragmented, videoInterleaved, vi
       throw new Error(`Unexpected encoded video frame count: ${file}, track ${index}`)
   writeFileSync(file + '.packets.json', JSON.stringify({ schema: 1, file: file.split('/').at(-1), sha256,
     command: packetCommand, streams: metadata.streams, packets: packetOutput.packets }, null, 2) + '\n')
+  packetReports.set(file, { streams: metadata.streams, packets: packetOutput.packets })
   return { file: file.split('/').at(-1), bytes: bytes.length, sha256, probeCommand, metadata,
     packetCount: packetOutput.packets.length }
+})
+const sameTimestamp = (left, leftBase, right, rightBase) => {
+  if (!Number.isSafeInteger(left) || !Number.isSafeInteger(right)) return false
+  const [ln, ld] = leftBase.split('/').map(BigInt), [rn, rd] = rightBase.split('/').map(BigInt)
+  return ld > 0n && rd > 0n && BigInt(left) * ln * rd === BigInt(right) * rn * ld
+}
+const referenceBindings = containerReferences.map(({ source, index, file }) => {
+  const original = packetReports.get(source), reference = packetReports.get(file),
+    originalTrack = original.streams.filter((stream) => stream.codec_type === 'video')[index],
+    referenceTrack = reference.streams.find((stream) => stream.codec_type === 'video'),
+    expected = original.packets.filter((packet) => packet.stream_index === originalTrack.index),
+    actual = reference.packets.filter((packet) => packet.stream_index === referenceTrack.index)
+  if (actual.length !== expected.length) throw new Error(`Video reference packet count changed: ${file}`)
+  for (const [frame, packet] of expected.entries()) {
+    const copy = actual[frame]
+    if (packet.size !== copy.size || packet.data_hash !== copy.data_hash ||
+        !sameTimestamp(packet.pts, originalTrack.time_base, copy.pts, referenceTrack.time_base) ||
+        !sameTimestamp(packet.dts, originalTrack.time_base, copy.dts, referenceTrack.time_base))
+      throw new Error(`Video reference bytes or timestamps changed: ${file}, packet ${frame}`)
+  }
+  return { source: source.split('/').at(-1), index, reference: file.split('/').at(-1),
+    packets: actual.length, originalTimeBase: originalTrack.time_base,
+    referenceTimeBase: referenceTrack.time_base, exactEncodedBytesAndPtsDts: true }
+})
+// Independently record the decoder's SPS/VUI fields. This is hosted evidence,
+// not a second implementation of our bit parser or a hardcoded FPS fallback.
+const codecTiming = [...videoContainers.flatMap((file) => [0, 1].map((index) => ({ file, index, fps: videoPatterns[index].fps }))),
+  { file: numberedVariable, index: 0, fps: 12 }].map(({ file, index, fps }) => {
+  const args = ['-hide_banner', '-loglevel', 'info', '-i', file, '-map', `0:v:${index}`,
+    '-c:v', 'copy', '-bsf:v', 'trace_headers', '-f', 'null', '-']
+  commands.push(args)
+  const observed = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 30000, maxBuffer: 8 * 1024 * 1024 }),
+    log = file.split('/').at(-1) + `.track-${index}.headers.log`
+  writeFileSync(resolve(directory, log), observed.stderr ?? '')
+  if (observed.error || observed.status !== 0)
+    throw new Error(`Independent AVC header observation failed: ${log}`, { cause: observed.error })
+  const fields = (field) => [...observed.stderr.matchAll(new RegExp(`\\b${field}\\s+[01]+\\s*=\\s*(\\d+)`, 'g'))].map((match) => Number(match[1])),
+    units = fields('num_units_in_tick'), scales = fields('time_scale'), progressive = fields('frame_mbs_only_flag')
+  if (!units.length || units.length !== scales.length || !progressive.length || progressive.some((value) => value !== 1) ||
+      units.some((value, at) => value <= 0 || scales[at] !== 2 * value * fps))
+    throw new Error(`Unexpected independent AVC nominal timing: ${log}`)
+  return { file: file.split('/').at(-1), index, log, units, scales, progressive,
+    fixed: fields('fixed_frame_rate_flag') }
 })
 const videoSelectionFrames = videoReferences.map((file, index) => {
   const png = `video-reference-${index}.png`, decodeCommand = ['-i', file, '-map', '0:v:0',
@@ -205,6 +262,7 @@ writeFileSync(resolve(directory, 'video-selection-reference.json'), JSON.stringi
   schema: 1, commit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,
   scope: 'Two actual H.264 videos and two AAC audios; reference movies are stream copies, PNGs are independent FFmpeg decodes.',
   patterns: videoPatterns, files: videoSelectionFiles, frames: videoSelectionFrames,
+  referenceBindings, codecTiming,
 }, null, 2) + '\n')
 const provenance = {
   commit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,

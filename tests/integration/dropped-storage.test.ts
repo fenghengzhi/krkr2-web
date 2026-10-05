@@ -6,19 +6,21 @@ import { BlobSource } from '../../src/backends/files/blob-source.ts'
 const program = String.raw`
 var win=new Window();win.setInnerSize(3,2);var image=new Layer(win,null);win.add(image);image.setSize(3,2);image.setImageSize(3,2);
 image.fillRect(0,0,3,2,0xff778899);
-function requireReadonly(call){try{call();}catch(error){if(error.message.indexOf("read-only")<0)throw error;return 1;}throw "write unexpectedly succeeded";}
+function requireReadonly(call,target){try{call(target);}catch(error){if(error.message.indexOf("read-only")<0)throw error;return 1;}throw "write unexpectedly succeeded";}
 function writes(path,empty,ancestor){
  var denied=0;
- denied+=requireReadonly(function(){["changed"].save(path,"utf-8");});
- denied+=requireReadonly(function(){["changed"].save(path,"utf-8a");});
- denied+=requireReadonly(function(){["changed"].save(path,"utf-8o0");});
- denied+=requireReadonly(function(){var value=%[state:"changed"];(Dictionary.saveStruct incontextof value)(path,"b");});
- denied+=requireReadonly(function(){["changed",42].saveStruct(path,"b");});
- denied+=requireReadonly(function(){Scripts.compileStorage("compile-source.tjs",path,false,true,false);});
- denied+=requireReadonly(function(){image.saveLayerImage(path,"bmp32");});
- denied+=requireReadonly(function(){["new file"].save(empty+"new.sav","utf-8");});
- denied+=requireReadonly(function(){["ancestor"].save(ancestor,"utf-8");});
- denied+=requireReadonly(function(){["case alias"].save(path.toUpperCase(),"utf-8");});
+ // TJS function values do not capture the enclosing function's locals.
+ // Pass each target explicitly so every actual writer reaches the readonly sink.
+ denied+=requireReadonly(function(target){["changed"].save(target,"utf-8");},path);
+ denied+=requireReadonly(function(target){["changed"].save(target,"utf-8a");},path);
+ denied+=requireReadonly(function(target){["changed"].save(target,"utf-8o0");},path);
+ denied+=requireReadonly(function(target){var value=%[state:"changed"];(Dictionary.saveStruct incontextof value)(target,"b");},path);
+ denied+=requireReadonly(function(target){["changed",42].saveStruct(target,"b");},path);
+ denied+=requireReadonly(function(target){Scripts.compileStorage("compile-source.tjs",target,false,true,false);},path);
+ denied+=requireReadonly(function(target){global.image.saveLayerImage(target,"bmp32");},path);
+ denied+=requireReadonly(function(target){["new file"].save(target,"utf-8");},empty+"new.sav");
+ denied+=requireReadonly(function(target){["ancestor"].save(target,"utf-8");},ancestor);
+ denied+=requireReadonly(function(target){["case alias"].save(target.toUpperCase(),"utf-8");},path);
  ["kept"].save("savedata/healthy.txt","utf-8");
  return denied+"|"+[].load(path,"utf-8")[0];
 }

@@ -1,6 +1,7 @@
 import type { HostReply } from '../script/runtime.ts'
 import { ModalLoop } from '../scheduler/modal-loop.ts'
 import type { WindowRecord, WindowService } from './windows.ts'
+import { TvpError } from '../system/tvp-error.ts'
 
 export interface WindowModalActions {
   /** Clear old input, show and activate this Window using host state only. */
@@ -56,9 +57,12 @@ export class WindowModals {
       throw new Error('A modal Window requires a request identity')
     const window = this.windows.get(windowId)
     if (window.closing || window.finished) throw new Error('Window has been invalidated')
+    // WindowImpl checks fullscreen before entering Form.ShowWindowAsModal:
+    // visibility/duplicate checks, input clearing and activation come later.
+    if (window.state.fullScreen)
+      throw new TvpError('TVPInvalidMethodInFullScreen', [], 'A fullscreen Window cannot be shown modally')
     if (this.tokens.has(windowId)) throw new Error('Window is already modal')
     if (window.state.visible) throw new Error('A modal Window must be hidden before showModal')
-    if (window.state.fullScreen) throw new Error('A fullscreen Window cannot be shown modally')
     const previousWindowId = this.windows.active?.id ?? 0
     let complete!: () => void, fail!: (error: unknown) => void
     const completion = new Promise<void>((resolve, reject) => {

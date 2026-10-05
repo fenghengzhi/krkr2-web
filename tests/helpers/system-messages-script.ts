@@ -1,7 +1,8 @@
 /** These functions enter the actual native message mapper; no host log or
  * exception replacement stands in for the compiler/runtime's own messages. */
 export const systemMessagesSource = String.raw`
-function missingMessage(){var object=new Object();try{return object.missing;}catch(error){return error.message;}}
+class MessageObject {}
+function missingMessage(){var object=new global.MessageObject();try{return object.missing;}catch(error){return error.message;}}
 function translatedMessage(){
  var accepted=System.assignMessage("TJSMemberNotFound","找不到『%1』 雪 😀");
  return accepted+"|"+missingMessage();

@@ -151,6 +151,12 @@ for (const name of names) test(`${name}: complete video catalog retains independ
     assert.equal(selected.times, track.times)
     assert.equal(selected.times.length, times.length)
     selected.times.forEach((time, frame) => assert(Math.abs(time - times[frame]!) < 1e-9, `${index}:${frame}`))
+    const referenceName = name.replace(/\.mp4$/, `-reference-${index}.mp4`),
+      referenceBytes = fixture(referenceName), singleTrack = await readVideoTimeline(referenceBytes)
+    report(referenceName, referenceBytes)
+    assert(singleTrack); assert.equal(singleTrack.videoStreams, 1)
+    assert.equal(singleTrack.frameDuration, selected.frameDuration)
+    assert.deepEqual(singleTrack.times, selected.times, 'The independent reference must retain this container\'s PTS')
     assert.equal(selectVideoTimeline(selected, 1 - index).times, timeline.videoTracks![1 - index]!.times)
   }
   assert.equal(timeline.selectedVideoStream, 0, 'Choosing a view never mutates the original active view')

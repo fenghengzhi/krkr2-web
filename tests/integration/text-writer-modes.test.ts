@@ -33,7 +33,7 @@ async function fixture(
     close() {},
   }
   const harness = await headless(
-    { 'startup.tjs': '', 'text-writer-modes.tjs': source, ...resources },
+    { 'startup.tjs': '', 'text-writer-modes.tjs': 'System.assignMessage("TVPUnsupportedModeString","writer-mode:%1");\n' + source, ...resources },
     {
       saveStore: store,
       async writeText(text, mode = '') {
@@ -128,9 +128,9 @@ ${cases
         assert.equal(await f.session.evaluate('exercise()'), '63')
         assert.equal(await f.session.evaluate('caught.count'), '6')
         for (let index = 0; index < cases.length; index++)
-          assert.match(
+          assert.equal(
             await f.session.evaluate(`caught[${index}]`),
-            /Unsupported text writer encoding/,
+            'writer-mode:unsupported cipher mode',
           )
         // The invalid path and invalid offset cannot replace the cipher error.
         assert.equal(
@@ -306,7 +306,7 @@ ${commands}
     )
     try {
       assert.equal(await f.session.evaluate('exercise()'), '1')
-      assert.match(await f.session.evaluate('caughtMessage'), /Unsupported text writer encoding 0/)
+      assert.equal(await f.session.evaluate('caughtMessage'), 'writer-mode:unsupported cipher mode')
       for (const [index] of modes.entries()) {
         assert.deepEqual(
           output(f.files(), `savedata/array-${index}`),

@@ -2,6 +2,7 @@ import type { WindowMoveMessage, WindowMoveRequest } from '../ports/window-move.
 import type { HostReply } from '../script/runtime.ts'
 import type { ModalLoop } from '../scheduler/modal-loop.ts'
 import type { WindowRecord } from './windows.ts'
+import { TvpError } from '../system/tvp-error.ts'
 
 export interface WindowMoveActions {
   window(id: number): WindowRecord | undefined
@@ -33,7 +34,8 @@ export class WindowMoves {
   begin(windowId: number, identity: string): HostReply {
     const window = this.actions.window(windowId)
     if (!window || window.closing || window.finished) throw new Error('Window has been invalidated')
-    if (window.state.fullScreen) throw new Error('Window.beginMove is unavailable in fullscreen')
+    if (window.state.fullScreen)
+      throw new TvpError('TVPInvalidMethodInFullScreen', [], 'Window.beginMove is unavailable in fullscreen')
     if (!this.supported) throw new Error('Window moving presentation is unavailable')
     if (!identity) throw new Error('Invalid Window move request identity')
     if (this.current) throw new Error('A Window move is already active')

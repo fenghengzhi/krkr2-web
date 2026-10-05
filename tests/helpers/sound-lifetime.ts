@@ -44,12 +44,19 @@ ${definitions}
     )
     assert.equal(await session.evaluate('6*7'), '42')
     const baseline = session.inspectOwnership(),
-      handles = session.snapshot().handles
+      handles = session.snapshot().handles,
+      maintenanceTasks = clock.tasks.size
+    // The real MainForm watch is the only background task before user audio or
+    // Timers are created. Count it explicitly instead of ignoring 50 ms tasks.
+    assert.equal(maintenanceTasks, 1)
+    assert.deepEqual([...clock.tasks].map((task) => task.at), [clock.now + 50])
     const assertRestored = () => {
       assert.deepEqual(session.inspectOwnership(), baseline)
       assert.equal(session.snapshot().handles, handles)
       assert.equal(audio.voices.size, 0)
-      assert.equal(clock.tasks.size, 0)
+      assert.equal(clock.tasks.size, maintenanceTasks)
+      const watch = [...clock.tasks][0]!
+      assert(watch.at > clock.now && watch.at <= clock.now + 50)
       assert.equal(session.snapshot().state, 'running')
     }
     const restored = async () => {

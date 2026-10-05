@@ -4,7 +4,10 @@ let sequence = 0
 /** Asynchronous game callbacks may log after the expression's own result. */
 export async function evaluate(page: Page, expression: string, result: string): Promise<void> {
   const marker = `test-result-${++sequence}:`
-  const source = `${JSON.stringify(marker)}+string(${expression})`
+  // The console is a single-line HTML input. Preserve embedded line breaks
+  // (including line-comment endings) in a TJS string before native evaluation.
+  const value = /[\r\n]/.test(expression) ? `Scripts.eval(${JSON.stringify(expression)})` : expression
+  const source = `${JSON.stringify(marker)}+string(${value})`
   // A running state can arrive before startup has finished creating/focusing
   // its Windows. Wait for the console's own readiness before editing it.
   await expect(page.locator('#evaluate')).toBeEnabled()

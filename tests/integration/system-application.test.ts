@@ -38,7 +38,9 @@ for (const binary of [false, true]) {
       await f.session.acceptWindowPopup({ type: 'application', active: false }).completion
       await f.session.acceptWindowPopup({ type: 'window', windowId: id }).completion
       assert.equal(await f.trace(), '')
-      await f.post(false).completion; await f.post(true).completion
+      await f.post(false).completion
+      assert.equal(f.session.snapshot().eventDisabled, false, f.logs.join('\n'))
+      await f.post(true).completion
       assert.equal(await f.trace(), 'deactivate:0|activate:0')
       assert.equal(await f.session.evaluate('typeof originalSystem.__applicationEvent'), 'undefined')
       if (binary) assert.equal(new TextDecoder().decode(f.session.exportSaves().find((file) => file.path === 'savedata/application.cjs')!.bytes.subarray(0, 4)), 'TJS2')

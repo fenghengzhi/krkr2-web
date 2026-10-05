@@ -78,20 +78,38 @@ test('real regular and fragmented 12 fps files retain cadence independently of p
   }
 })
 
-test('a real VFR stream keeps average-frame requests inside their actual sample interval', async () => {
-  const timeline = await readVideoTimeline(readFileSync(resolve('out/verification/video-tracks/numbered-variable.mp4')))
+test('a real VFR stream separates codec nominal frame requests from CTS, with an explicit container-clock fallback', async () => {
+  const source = readFileSync(resolve('out/verification/video-tracks/numbered-variable.mp4')),
+    timeline = await readVideoTimeline(source)
   assert(timeline)
   assert.equal(timeline.times.length, 72)
-  // Independent generation: 72 frames over 107 ticks at a 12 Hz time base.
-  assert(Math.abs(timeline.frameDuration - 107000 / 864) < 1e-9)
+  // The archived independent FFprobe reports r_frame_rate=12/1 while its
+  // avg_frame_rate=864/107. VUI supplies the former; it does not rewrite CTS.
+  assert.equal(timeline.frameDuration, 1000 / 12)
   assert(Math.abs(timeline.times[1]! - 1000 / 12) < 1e-9)
   assert.equal(timeline.times[2], 250)
-  const request = videoClockFrameTime(timeline, 1, timeline.duration)
+  const request = videoClockFrameTime(timeline, 2, timeline.duration)
   assert(request > timeline.times[1]! && request < timeline.times[2]!)
-  assert.equal(videoClockFrameAt(timeline, request), 1)
+  assert.equal(videoClockFrameAt(timeline, request), 2)
   assert.equal(videoReportedFrameAt(timeline, request), 1)
   assert.equal(videoPresentedFrameAt(timeline, request), undefined,
-    'A public average-frame request is not an exact presentation timestamp')
+    'A nominal public frame is not necessarily a presentation timestamp')
+
+  // Declare the same samples as in-band avc3: a static avcC SPS can no longer
+  // prove their clock. This controlled metadata variant keeps the real uneven
+  // CTS and the previous literal average-clock fallback assertions intact.
+  const inBand = Buffer.from(source), avcC = inBand.indexOf('avcC'), avc1 = inBand.lastIndexOf('avc1', avcC)
+  assert(avc1 >= 4 && avcC > avc1)
+  assert(inBand.readUInt32BE(avc1 - 4) > avcC - avc1)
+  inBand.write('avc3', avc1, 'ascii')
+  const fallback = await readVideoTimeline(inBand)
+  assert(fallback); assert.deepEqual(fallback.times, timeline.times)
+  assert(Math.abs(fallback.frameDuration - 107000 / 864) < 1e-9)
+  const averageRequest = videoClockFrameTime(fallback, 1, fallback.duration)
+  assert(averageRequest > fallback.times[1]! && averageRequest < fallback.times[2]!)
+  assert.equal(videoClockFrameAt(fallback, averageRequest), 1)
+  assert.equal(videoReportedFrameAt(fallback, averageRequest), 1)
+  assert.equal(videoPresentedFrameAt(fallback, averageRequest), undefined)
 })
 
 test('reported seek intervals are distinct from exact sample timestamps and do not prove picture identity', async () => {

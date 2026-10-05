@@ -19,6 +19,7 @@
 namespace TJS {
     //---------------------------------------------------------------------------
     static tjs_int32 ClassID_Dictionary;
+    static iTJSDispatch2 *DictionaryFactoryClass = nullptr;
     //---------------------------------------------------------------------------
     // tTJSDictionaryClass : tTJSDictionary class
     //---------------------------------------------------------------------------
@@ -786,21 +787,23 @@ namespace TJS {
     // TJSCreateDictionaryObject
     //---------------------------------------------------------------------------
     iTJSDispatch2 *TJSCreateDictionaryObject(iTJSDispatch2 **classout) {
-        // create a Dictionary object
-        struct tHolder {
-            iTJSDispatch2 *Obj;
-            tHolder() { Obj = new tTJSDictionaryClass(); }
-            ~tHolder() { Obj->Release(); }
-        } static dictionaryclass;
-
-        if(classout)
-            *classout = dictionaryclass.Obj, dictionaryclass.Obj->AddRef();
-
-        tTJSDictionaryObject *dictionaryobj;
-        (dictionaryclass.Obj)
-            ->CreateNew(0, nullptr, nullptr, (iTJSDispatch2 **)&dictionaryobj,
-                        0, nullptr, dictionaryclass.Obj);
+        // Keep method identity stable while the engine is alive, but retire
+        // this native factory with the engine rather than the process/module.
+        if(!DictionaryFactoryClass) DictionaryFactoryClass = new tTJSDictionaryClass();
+        iTJSDispatch2 *dictionaryobj = nullptr;
+        const auto status = DictionaryFactoryClass->CreateNew(
+            0, nullptr, nullptr, &dictionaryobj, 0, nullptr, DictionaryFactoryClass);
+        if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status);
+        if(classout) {
+            *classout = DictionaryFactoryClass;
+            DictionaryFactoryClass->AddRef();
+        }
         return dictionaryobj;
+    }
+    void TJSReleaseDictionaryFactory() {
+        auto *owned = DictionaryFactoryClass;
+        DictionaryFactoryClass = nullptr;
+        if(owned) owned->Release();
     }
     //---------------------------------------------------------------------------
 

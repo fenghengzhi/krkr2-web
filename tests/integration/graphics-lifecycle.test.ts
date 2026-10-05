@@ -9,6 +9,7 @@ class Surface implements Renderer {
   listener?: (status: RendererStatus) => void
   frames = 0
   last: number[] = []
+  lastLayers: { id: number; pixels: number[] }[] = []
   disposed = false
   subscribe(listener: (status: RendererStatus) => void) {
     this.listener = listener
@@ -25,6 +26,7 @@ class Surface implements Renderer {
     if (this.status.state === 'lost' || this.status.state === 'failed') return false
     this.frames++
     this.last = [...(layers[0]?.pixels.data ?? [])]
+    this.lastLayers = layers.map((layer) => ({ id: layer.id, pixels: [...layer.pixels.data.subarray(0, 8)] }))
     if (this.status.state === 'restoring') this.change('ready')
     return true
   }
@@ -42,7 +44,7 @@ var clicks=0;root.onClick=function(){clicks++;};
 ["checkpoint"].save("savedata/state.txt","utf-8");
 `
 
-test('graphics recovery preserves automatic transition phase and its completion callback', async () => {
+test('graphics recovery preserves automatic transition phase and its completion callback', { timeout: 60000 }, async () => {
   const surface = new Surface()
   let now = 0
   const scheduled = new Set<{ at: number; callback: () => void }>()
@@ -54,7 +56,7 @@ test('graphics recovery preserves automatic transition phase and its completion 
 var front=new Layer(window,root),back=new Layer(window,root),completed=0;
 front.setSize(2,1);back.setSize(2,1);front.visible=true;
 front.fillRect(0,0,2,1,0xffff0000);back.fillRect(0,0,2,1,0xff0000ff);
-front.onTransitionCompleted=function(){completed++;};front.beginTransition("crossfade",true,back,%[time:100]);
+front.onTransitionCompleted=function(){global.completed++;};front.beginTransition("crossfade",true,back,%[time:100]);
 `,
     },
     {
@@ -77,22 +79,37 @@ front.onTransitionCompleted=function(){completed++;};front.beginTransition("cros
     await session.idle()
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
+  const failures: unknown[] = []
   try {
     await session.start()
+    const frontId = Number(await session.evaluate('front.__id')), backId = Number(await session.evaluate('back.__id'))
     await advance(40)
+    assert.deepEqual(surface.lastLayers.find((layer) => layer.id === -frontId)?.pixels, [153, 0, 102, 255, 153, 0, 102, 255])
     surface.change('lost')
     assert.equal(scheduled.size, 0)
     now = 1040
     surface.change('restoring')
     session.present()
     await advance(1099)
+    // The synthetic clock jumps directly to each observation time. Its 16 ms
+    // frame callback at 1099 rearms for 1115, not 1100. Sample the exact 99/100
+    // ms phase through a real Layer/Window completion, rather than relying on
+    // evaluation of an unrelated variable to fabricate a pending frame.
+    assert.equal(await session.evaluate('(function(){global.front.update();global.window.update();return global.completed;})()'), '0')
     assert.equal(await session.evaluate('completed'), '0')
+    assert.deepEqual(surface.lastLayers.find((layer) => layer.id === -frontId)?.pixels, [3, 0, 252, 255, 3, 0, 252, 255])
     await advance(1100)
+    assert.equal(await session.evaluate('(function(){global.front.update();global.window.update();return global.completed;})()'), '1')
     assert.equal(await session.evaluate('completed'), '1')
+    assert.deepEqual(surface.lastLayers.find((layer) => layer.id === backId)?.pixels, [0, 0, 255, 255, 0, 0, 255, 255])
     assert.equal(await session.evaluate('root.children[0]===back'), '1')
-  } finally {
+  } catch (error) { failures.push(error) }
+  try {
     await session.stop()
-  }
+    assert.equal(scheduled.size, 0)
+  } catch (error) { failures.push(error) }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length) throw new AggregateError(failures, 'Graphics recovery or cleanup failed', { cause: failures[0] })
 })
 
 test('graphics loss holds the VM and input until a complete replacement frame is presented', async () => {

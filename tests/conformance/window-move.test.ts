@@ -7,6 +7,7 @@ import type { WindowMoveRequest } from '../../src/engine/ports/window-move.ts'
 import { ModalLoop } from '../../src/engine/scheduler/modal-loop.ts'
 import { ExecutionControl } from '../../src/engine/scheduler/control.ts'
 import type { HostContext, HostReply, ScriptObject } from '../../src/engine/script/runtime.ts'
+import { TvpError } from '../../src/engine/system/tvp-error.ts'
 
 function token(reply: HostReply): number {
   assert.equal(reply.kind, 'invoke')
@@ -98,7 +99,18 @@ test('fullscreen, missing host support and nested moves fail explicitly without 
     assert.throws(() => unsupported.moves.begin(1, 'first'), /presentation is unavailable/)
     assert.equal(unsupported.loop.depth, 0)
     f.window.state.fullScreen = true
-    assert.throws(() => f.moves.begin(1, 'first'), /fullscreen/)
+    const fullscreenError = (error: unknown) => {
+      assert(error instanceof TvpError)
+      assert.deepEqual(error.tvpMessage, { id: 'TVPInvalidMethodInFullScreen', args: [] })
+      return true
+    }
+    assert.throws(() => f.moves.begin(1, 'first'), fullscreenError)
+    unsupported.window.state.fullScreen = true
+    assert.throws(() => unsupported.moves.begin(1, 'first'), fullscreenError)
+    assert.equal(unsupported.loop.depth, 0)
+    assert.equal(unsupported.requests.length, 0)
+    assert.equal(f.loop.depth, 0)
+    assert.equal(f.requests.length, 0)
     f.window.state.fullScreen = false
     f.window.state.borderStyle = 0
     f.window.state.focusable = false

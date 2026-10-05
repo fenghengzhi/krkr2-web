@@ -4,6 +4,9 @@ import { resolve } from 'node:path'
 
 const base = '/drop-capabilities-assets/', bundles = new Map<string, string>()
 let entry = ''
+declare global { interface Window {
+  withDropItemAccessors<T>(values: Record<string, unknown>, capture: () => T): T
+} }
 test.beforeAll(async () => {
   const result = await build({ configFile: false, envFile: false, logLevel: 'error',
     build: { write: false, target: 'es2022', minify: false,
@@ -17,6 +20,27 @@ test.beforeAll(async () => {
   if (!entry) throw new Error('Missing drop capability browser entry')
 })
 async function mount(page: Page) {
+  await page.addInitScript(() => {
+    // Chromium's indexed getter creates a fresh DataTransferItem wrapper on
+    // each read. Instrument the real prototype only for this synchronous
+    // acquisition call, then restore every descriptor even when it throws.
+    window.withDropItemAccessors = <T>(values: Record<string, unknown>, capture: () => T): T => {
+      const prototype = DataTransferItem.prototype,
+        saved = new Map<string, PropertyDescriptor | undefined>()
+      try {
+        for (const [name, value] of Object.entries(values)) {
+          saved.set(name, Object.getOwnPropertyDescriptor(prototype, name))
+          Object.defineProperty(prototype, name, { configurable: true, value })
+        }
+        return capture()
+      } finally {
+        for (const [name, descriptor] of saved) {
+          if (descriptor) Object.defineProperty(prototype, name, descriptor)
+          else Reflect.deleteProperty(prototype, name)
+        }
+      }
+    }
+  })
   await page.route('**/drop-capabilities-assets/**', (route) => {
     const source = bundles.get(new URL(route.request().url()).pathname.slice(base.length))
     return route.fulfill({ status: source === undefined ? 404 : 200, contentType: 'text/javascript', body: source ?? 'Missing asset' })
@@ -63,12 +87,12 @@ test('actual OPFS directory handles enumerate nested files and empty directories
       const binary = await nested.getFileHandle('bytes.bin', { create: true }), binaryWriter = await binary.createWritable()
       await binaryWriter.write(new Uint8Array([0,1,127,255])); await binaryWriter.close()
       const transfer = new DataTransfer(); transfer.items.add(new File([], 'placeholder'))
-      const item = transfer.items[0]!, calls: boolean[] = []; let inDrop = true
-      Object.defineProperty(item, 'webkitGetAsEntry', { configurable: true, value: () => null })
-      Object.defineProperty(item, 'getAsFileSystemHandle', { configurable: true, value: () => { calls.push(inDrop); return Promise.resolve(folder) } })
-      const captured = captureDrop(transfer)
+      const calls: boolean[] = []; let inDrop = true
+      const captured = window.withDropItemAccessors({
+        webkitGetAsEntry: () => null,
+        getAsFileSystemHandle: () => { calls.push(inDrop); return Promise.resolve(folder) },
+      }, () => captureDrop(transfer))
       inDrop = false; transfer.items.clear()
-      Object.defineProperty(item, 'getAsFileSystemHandle', { value: () => { throw new Error('late capability acquisition') } })
       const tree = await enumerateDrop(captured, { signal: new AbortController().signal }),
         entries = await Promise.all(tree.entries.map(async (item) => ({ path: item.path, kind: item.kind,
           ...(item.kind === 'file' ? { bytes: [...new Uint8Array(await item.source.arrayBuffer())] } : {}),
@@ -116,10 +140,10 @@ test('actual legacy filesystem entries retain empty-directory metadata and read 
         writer.write(new Blob(['entry-bytes']))
       }) } finally { writer.onwriteend = null; writer.onerror = null }
       const transfer = new DataTransfer(); transfer.items.add(new File([], 'placeholder'))
-      let inDrop = true; const calls: boolean[] = [], item = transfer.items[0]!
-      Object.defineProperty(item, 'webkitGetAsEntry', { value: () => { calls.push(inDrop); return folder } })
-      Object.defineProperty(item, 'getAsFileSystemHandle', { value: undefined })
-      const captured = captureDrop(transfer); inDrop = false; transfer.items.clear()
+      let inDrop = true; const calls: boolean[] = []
+      const captured = window.withDropItemAccessors({
+        webkitGetAsEntry: () => { calls.push(inDrop); return folder }, getAsFileSystemHandle: undefined,
+      }, () => captureDrop(transfer)); inDrop = false; transfer.items.clear()
       const tree = await enumerateDrop(captured, { signal: new AbortController().signal })
       return { calls, roots: tree.roots, name, entries: await Promise.all(tree.entries.map(async (item) => ({
         path: item.path, kind: item.kind, ...(item.kind === 'file' ? { text: await item.source.text() } : {}),
@@ -144,19 +168,17 @@ test('capability gaps, bounded root counts and cancellation fail explicitly with
     window.addEventListener('unhandledrejection', listener)
     try {
       const unavailable = new DataTransfer(); unavailable.items.add(new File([], 'directory'))
-      const missing = unavailable.items[0]!
-      for (const [name, value] of [['getAsFile', () => null], ['webkitGetAsEntry', () => null], ['getAsFileSystemHandle', undefined]])
-        Object.defineProperty(missing, name as string, { value })
-      try { captureDrop(unavailable) } catch (error) { errors.push(String(error)) }
+      try { window.withDropItemAccessors({ getAsFile: () => null, webkitGetAsEntry: () => null,
+        getAsFileSystemHandle: undefined }, () => captureDrop(unavailable)) }
+      catch (error) { errors.push(String(error)) }
       const oversized = new DataTransfer()
       for (let i = 0; i < 257; i++) oversized.items.add(new File([], String(i)))
       try { captureDrop(oversized) } catch (error) { errors.push(String(error)) }
       const transfer = new DataTransfer(); transfer.items.add(new File([], 'pending'))
       let reject!: (error: unknown) => void, called = 0
-      const item = transfer.items[0]!
-      Object.defineProperty(item, 'webkitGetAsEntry', { value: () => null })
-      Object.defineProperty(item, 'getAsFileSystemHandle', { value: () => { called++; return new Promise((_yes, no) => { reject = no }) } })
-      const captured = captureDrop(transfer), abort = new AbortController(), pending = enumerateDrop(captured, { signal: abort.signal })
+      const captured = window.withDropItemAccessors({ webkitGetAsEntry: () => null,
+        getAsFileSystemHandle: () => { called++; return new Promise((_yes, no) => { reject = no }) },
+      }, () => captureDrop(transfer)), abort = new AbortController(), pending = enumerateDrop(captured, { signal: abort.signal })
       abort.abort(new Error('enumeration cancelled'))
       try { await pending } catch (error) { errors.push(String(error)) }
       reject(new Error('late browser handle rejection'))

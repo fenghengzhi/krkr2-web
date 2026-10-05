@@ -2,6 +2,10 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+2026-10-06 准备 [106 托管回归与原生错误边界](decisions/106-hosted-regressions-and-text-errors.md)：修复应用激活泵的 TJS 局部捕获失效、容器静态工厂退休后残留，补原文本流及全屏方法消息；区分 AVC 编码帧率与容器 CTS，并为各容器生成独立视频参考。新增 **32 常规 Node、每浏览器 8 定义**，同 4 个容器工厂定义另用 JSPI。协议 **41**、ABI／能力版本保持。完整目标尚未完成，本批仍待托管执行。
+
+106 固定回收 **30 原 ZIP、361,278,446 字节**全部匹配。104 构建通过，Node 被取消且有原生进程崩溃；独立事件流记录 **3308 passed、157 failed、21 未报告**（仅该流实际排队库存），原 TAP 是较小的部分输出。Chromium 主 **845 expected／62 unexpected**，Firefox 第一主分片 **434／20／1 skipped**，其他三主分片未报告；原 KAG／兼容三浏览器各 **32/32**，不能代替整体通过。105 固定状态仍 pending、0 jobs／0 artifacts。本轮不刷新，下轮补取未报告范围；历史 core 只有 hash／backtrace，未来改为保留完整 core。以下保留此前当时状态。
+
 最新待核验批次：[Full test suite 37364141321](https://github.com/fenghengzhi/krkr2-web/actions/runs/37364141321)，精确提交 `34aca0ddc9594618a284d8c1f29eef96eed75898`。105 的 **52 个文件**已整批推送，新增 **31 常规 Node、每浏览器 10 定义**，同 17 个原生消息定义另用 JSPI 内核执行。首次唯一查询为 **pending／conclusion=null**，仅记录运行身份。下轮补取 104 未报告结果并回收本批固定结果，不实时监控；没有本地执行验证，完整目标保持 active。
 
 2026-10-06 准备 [105 原生 TVP 消息与真实消费者](decisions/105-native-tvp-message-consumers.md)：注册固定原版 138 个 holder 与六个 CONST，让已迁移的真实存储、图层、窗口、菜单等异常在返回 TJS 时使用最新 `System.assignMessage` 文本；补纯原生格式化与末尾错误保留，按原版证据修订菜单打开时 pending terminate 的顺序。新增 **31 常规 Node、每浏览器 10 定义**，同 17 个消息边界定义另用 JSPI 内核执行。协议 **41**、TJS ABI **5**、字体 ABI **2** 保持，新增 `nativeMessages:1`。候选尚待托管结果，完整消息消费者和整体目标均未完成。

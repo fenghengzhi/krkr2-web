@@ -35,6 +35,7 @@
 namespace TJS {
     //---------------------------------------------------------------------------
     static tjs_int32 ClassID_Array;
+    static iTJSDispatch2 *ArrayFactoryClass = nullptr;
 
     //---------------------------------------------------------------------------
     static bool inline TJS_iswspace(tjs_char ch) {
@@ -1828,21 +1829,18 @@ tjs_int32 TJSGetArrayClassID() { return ClassID_Array; }
 // TJSCreateArrayObject
 //---------------------------------------------------------------------------
 iTJSDispatch2 *TJSCreateArrayObject(iTJSDispatch2 **classout) {
-    // create an Array object
-    struct tHolder {
-        iTJSDispatch2 *Obj;
-
-        tHolder() { Obj = new tTJSArrayClass(); }
-
-        ~tHolder() { Obj->Release(); }
-    } static arrayclass;
-
+    if(!ArrayFactoryClass) ArrayFactoryClass = new tTJSArrayClass();
     iTJSDispatch2 *arrayobj = nullptr;
-    const auto status = arrayclass.Obj->CreateNew(0, nullptr, nullptr, &arrayobj, 0,
-                    nullptr, arrayclass.Obj);
+    const auto status = ArrayFactoryClass->CreateNew(0, nullptr, nullptr, &arrayobj, 0,
+                    nullptr, ArrayFactoryClass);
     if(TJS_FAILED(status)) TJSThrowFrom_tjs_error(status);
-    if(classout) { *classout = arrayclass.Obj; arrayclass.Obj->AddRef(); }
+    if(classout) { *classout = ArrayFactoryClass; ArrayFactoryClass->AddRef(); }
     return arrayobj;
+}
+void TJSReleaseArrayFactory() {
+    auto *owned = ArrayFactoryClass;
+    ArrayFactoryClass = nullptr;
+    if(owned) owned->Release();
 }
 //---------------------------------------------------------------------------
 

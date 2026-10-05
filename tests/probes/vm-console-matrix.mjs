@@ -767,7 +767,7 @@ function eventOwnership(rows, backend) {
   for (const row of rows) {
     assert.equal(row.variant, backend)
     assert.equal(row.baseline.pendingHandles, 0)
-    assert.equal(row.baseline.clockTasks, 0)
+    assert.equal(row.baseline.clockTasks, 1)
     combinations(row.cases, Object.keys(expected), (item) => item.name)
     for (const item of row.cases) {
       const [count, result] = expected[item.name]
@@ -778,7 +778,7 @@ function eventOwnership(rows, backend) {
       if (item.name === 'direct-base-finalize') {
         assert.equal(item.retained.eventSources, item.owned.eventSources)
         assert.equal(item.retained.weakOwners, item.owned.weakOwners)
-        assert.equal(item.retained.clockTasks, 1)
+        assert.equal(item.retained.clockTasks, row.baseline.clockTasks + 1)
       }
     }
     assert.deepEqual(Object.keys(row.stopped).sort(), Object.keys(row.baseline).sort())

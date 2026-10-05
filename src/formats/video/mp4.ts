@@ -1,4 +1,5 @@
 import type { VideoTimeline, VideoTrackTimeline } from '../../engine/ports/video.ts'
+import { readAvcFrameDuration } from './avc-timing.ts'
 const MAX_SAMPLES = 1000000
 /** Retain the original catalog while projecting one selected video timeline. */
 export function selectVideoTimeline(original: VideoTimeline, index: number): VideoTimeline {
@@ -102,6 +103,7 @@ export async function readVideoTimeline(input: Uint8Array): Promise<VideoTimelin
   if (!info.videoTracks.length) return
   if (info.videoTracks.length > 256) throw new Error('MP4 video track budget exceeded')
   let videoSamples = 0, editedSamples = 0, editWork = 0
+  const avcBudget = { remaining: 1024 * 1024 }, descriptionDurations = new Map<unknown, number | undefined>()
   for (const track of info.videoTracks) {
     const samples = file.getTrackSamplesInfo(track.id),
       width = track.video?.width ?? track.track_width, height = track.video?.height ?? track.track_height
@@ -112,18 +114,30 @@ export async function readVideoTimeline(input: Uint8Array): Promise<VideoTimelin
     if (samples.length > MAX_SAMPLES || (videoSamples += samples.length) > MAX_SAMPLES * 2 ||
         !Number.isSafeInteger(track.timescale) || track.timescale <= 0)
       throw new Error('Invalid MP4 video sample table')
-    // AvgTimePerFrame describes the stream cadence. Empty edits and the initial
-    // composition offset can lengthen the presentation timeline without changing
-    // that cadence; edited sample count / movie duration is not its frame rate.
+    // Container timing may stretch the initial sample to account for mux/audio
+    // priming. Codec nominal timing is separate from those real CTS intervals.
+    // Use it only when every used description has one consistent AVC cadence;
+    // other codecs/configuration changes retain the container-derived estimate.
     let sampleDuration = 0
+    const descriptions = new Set<unknown>()
     for (const sample of samples) {
       if (!Number.isSafeInteger(sample.duration) || sample.duration < 0 || !Number.isSafeInteger(sample.cts))
         throw new Error('Invalid MP4 video sample duration or timestamp')
       sampleDuration += sample.duration
+      descriptions.add(sample.description)
+      if (descriptions.size > 256) throw new Error('MP4 sample description budget exceeded')
     }
     if (!Number.isSafeInteger(sampleDuration) || (samples.length && sampleDuration <= 0))
       throw new Error('Invalid MP4 video sample duration')
-    const frameDuration = samples.length ? (sampleDuration * 1000) / track.timescale / samples.length : 0
+    let codecDuration: number | undefined, codecAvailable = descriptions.size > 0
+    for (const description of descriptions) {
+      if (!descriptionDurations.has(description))
+        descriptionDurations.set(description, readAvcFrameDuration(description, avcBudget))
+      const value = descriptionDurations.get(description)
+      if (value === undefined || (codecDuration !== undefined && value !== codecDuration)) codecAvailable = false
+      codecDuration ??= value
+    }
+    const frameDuration = codecAvailable ? codecDuration! : samples.length ? (sampleDuration * 1000) / track.timescale / samples.length : 0
     const raw = samples
       .map((sample) => ({ time: (sample.cts * 1000) / track.timescale,
         end: ((sample.cts + sample.duration) * 1000) / track.timescale }))

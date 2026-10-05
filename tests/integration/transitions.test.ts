@@ -73,18 +73,24 @@ fore.beginTransition("crossfade",false,back,%[time:1000,selfupdate:true]);
     await session.stop()
   }
 })
-test('automatic transition time freezes during pause and pending callbacks disappear on stop', async () => {
+test('automatic transition time freezes during pause and pending callbacks disappear on stop', { timeout: 60000 }, async () => {
   let now = 0
+  let lastLayers: { id: number; pixels: number[] }[] = []
   const scheduled = new Set<{ at: number; callback: () => void }>()
   const { session } = await headless(
     {
       'startup.tjs':
         scene +
         String.raw`
+fore.onTransitionCompleted=function(dest,src){global.done++;if(dest!==global.fore||src!==global.back)throw new Exception("Wrong transition identity");};
 fore.beginTransition("crossfade",true,back,%[time:100]);
 `,
     },
     {
+      renderer: {
+        present(layers) { lastLayers = layers.map((layer) => ({ id: layer.id, pixels: [...layer.pixels.data.subarray(0, 8)] })) },
+        dispose() {},
+      },
       now: () => now,
       schedule: (callback, delay) => {
         const task = { at: now + delay, callback }
@@ -103,21 +109,35 @@ fore.beginTransition("crossfade",true,back,%[time:100]);
     await session.idle()
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
+  const failures: unknown[] = []
   try {
     await session.start()
+    const foreId = Number(await session.evaluate('fore.__id')), backId = Number(await session.evaluate('back.__id'))
     await advance(40)
+    assert.deepEqual(lastLayers.find((layer) => layer.id === -foreId)?.pixels, [153, 0, 102, 255, 153, 0, 102, 255])
     session.pause()
     assert.equal(scheduled.size, 0)
     now = 1000
     session.resume()
     await advance(1059)
+    // As in graphics recovery, a jump to 1059 executes a due frame at that
+    // time and rearms it for 1075. Explicit completion samples the strict
+    // 99/100 ms boundary without waiting for a later automatic frame.
+    assert.equal(await session.evaluate('(function(){global.fore.update();global.window.update();return global.done;})()'), '0')
     assert.equal(await session.evaluate('done'), '0')
+    assert.deepEqual(lastLayers.find((layer) => layer.id === -foreId)?.pixels, [3, 0, 252, 255, 3, 0, 252, 255])
     await advance(1060)
+    assert.equal(await session.evaluate('(function(){global.fore.update();global.window.update();return global.done;})()'), '1')
     assert.equal(await session.evaluate('done'), '1')
+    assert.deepEqual(lastLayers.find((layer) => layer.id === backId)?.pixels, [0, 0, 255, 255, 0, 0, 255, 255])
     await session.evaluate('back.beginTransition("crossfade",true,fore,%[time:100])')
     await session.stop()
     assert.equal(scheduled.size, 0)
-  } finally {
+  } catch (error) { failures.push(error) }
+  try {
     await session.stop()
-  }
+    assert.equal(scheduled.size, 0)
+  } catch (error) { failures.push(error) }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length) throw new AggregateError(failures, 'Transition pause or cleanup failed', { cause: failures[0] })
 })

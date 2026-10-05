@@ -1,6 +1,7 @@
 import type { ByteSource } from '../../engine/ports/storage.ts'
 import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { BinaryWriter } from '../../formats/binary/writer.ts'
+import { CompressionError } from '../../formats/binary/compression-error.ts'
 
 export class BlobSource implements ByteSource {
   readonly size: number
@@ -88,17 +89,19 @@ async function inflateBounded(
   try {
     while (true) {
       await checkpoint?.()
-      const { value, done } = await reader.read()
+      const { value, done } = await reader.read().catch((error: unknown) => {
+        throw new CompressionError('inflate', error instanceof Error ? error.message : 'Decompression failed', { cause: error })
+      })
       if (done) {
         ended = true
         break
       }
       if (value.length > expectedLength - position)
-        throw new Error('Decompressed data exceeds declared size')
+        throw new CompressionError('inflate', 'Decompressed data exceeds declared size')
       output.set(value, position)
       position += value.length
     }
-    if (position !== expectedLength) throw new Error('Decompressed size mismatch')
+    if (position !== expectedLength) throw new CompressionError('inflate', 'Decompressed size mismatch')
     return output
   } finally {
     // As above, no consumer needs to acquire this private stream afterwards.

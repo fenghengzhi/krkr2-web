@@ -40,6 +40,8 @@
 #include "tjsRegExp.h"
 
 namespace TJS {
+    void TJSReleaseArrayFactory();
+    void TJSReleaseDictionaryFactory();
 #ifndef TJS_NO_REGEXP
 
     extern iTJSDispatch2 *TJSCreateRegExpClass();
@@ -228,6 +230,12 @@ namespace TJS {
 
         delete PPValues;
         delete Cache;
+
+        // Native serialization/snapshot helpers lazily retain their own class
+        // factories. Drop those roots before the engine's global registrations
+        // and strings, even when an earlier forced finalizer failed.
+        try { TJSReleaseArrayFactory(); } catch(...) {}
+        try { TJSReleaseDictionaryFactory(); } catch(...) {}
 
         TJSReservedWordsHashRelease();
 

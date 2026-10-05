@@ -45,14 +45,14 @@ class PoolFinal {
  function PoolFinal(value){kind=value;}
  function finalize(){
    global.finalTrace+=kind+",";
-   __host("Pool.mark","final:"+kind+":before");
-   System.doCompact(5);
+   global.__host("Pool.mark","final:"+kind+":before");
+   global.System.doCompact(5);
    if(kind=="outer"){
-     var nested=new PoolFinal("inner");
-     if(grow(8,1)!=227)throw "nested registers";
+     var nested=new global.PoolFinal("inner");
+     if(global.grow(8,1)!=227)throw "nested registers";
    }
-   __host("Pool.mark","final:"+kind+":after");
-   if(kind=="throw")throw new Exception("pool-finalizer-error");
+   global.__host("Pool.mark","final:"+kind+":after");
+   if(kind=="throw")throw new global.Exception("pool-finalizer-error");
  }
 }
 function releaseFrame(){var owner=new PoolFinal("outer");return 42;}
