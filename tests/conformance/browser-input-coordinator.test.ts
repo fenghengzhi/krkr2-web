@@ -219,6 +219,84 @@ function fixture(
   }
 }
 
+test('host movement keeps physical state current while suppressing game pointer/key packets and its ending keyup', async () => {
+  const f = fixture()
+  const key = (name: string, code: number, down: boolean) => {
+    const target = f.textareas[0]!, event = new Event(down ? 'keydown' : 'keyup', { cancelable: true })
+    Object.assign(event, { key: name, code: name, keyCode: code, shiftKey: false, ctrlKey: false,
+      altKey: false, repeat: false, isComposing: false })
+    Object.defineProperty(event, 'target', { value: target })
+    // Match browser capture order: the global observer sees this same event
+    // before the textarea's game listener. No actual browser dispatch claim.
+    f.page.dispatchEvent(event)
+    target.dispatchEvent(event)
+  }
+  try {
+    f.a.focus()
+    f.dispatch(f.a, 'pointerdown', { pointerType: 'mouse', pointerId: 7 })
+    f.mouse(f.a, 'mousedown', 1, 10)
+    await settle()
+    assert.equal(f.a.hasPointerCapture(7), true)
+    const count = f.packets.length
+    f.coordinator.setHostMoving(true)
+    assert.equal(f.a.hasPointerCapture(7), false)
+    assert.deepEqual(f.keys.at(-1), [1], 'Starting a host move does not erase the held physical button')
+    f.mouse(f.a, 'mousemove', 1, 40)
+    key('Escape', 27, true)
+    assert.deepEqual(f.keys.at(-1), [1, 27])
+    f.mouse(f.a, 'mouseup', 0, 45)
+    assert.deepEqual(f.keys.at(-1), [27])
+    await settle()
+    assert.equal(f.packets.length, count, 'No cancel/deactivate or invented game move is sent')
+    f.coordinator.setHostMoving(false)
+    key('Escape', 27, false)
+    await settle()
+    assert.equal(f.keys.at(-1)!.length, 0)
+    assert.equal(f.packets.length, count, 'Ending Escape belongs to the host even after input resumes')
+    key('A', 65, true)
+    await settle()
+    assert.equal(f.packets.at(-1)!.type, 'keyDown')
+    assert.equal((f.packets.at(-1) as { key: number }).key, 65)
+    f.mouse(f.a, 'mousedown', 1, 60)
+    f.mouse(f.a, 'mouseup', 0, 60)
+    await settle()
+    assert.deepEqual(f.packets.slice(-2).map((packet) => packet.type), ['down', 'up'])
+    assert.deepEqual([...f.errors], [])
+  } finally { f.close() }
+})
+
+test('host movement drops only unadmitted DOM work and leaves an already admitted operation alive', async () => {
+  const gate = deferred(), clock = gamepadSource(), f = fixture(async (packet) => {
+    if (packet.type === 'keyDown' && packet.key === 65) await gate.promise
+  }, false, undefined, false, clock.source)
+  try {
+    const view = new WindowState()
+    view.visible = true; view.useMouseKey = true
+    f.coordinator.setWindow(101, view.view())
+    f.coordinator.setInput(101, inputView())
+    f.a.focus()
+    await settle()
+    f.key(f.textareas[0]!, 'a')
+    await settle()
+    f.key(f.textareas[0]!, 'b')
+    const stale = clock.captured()
+    f.coordinator.setHostMoving(true)
+    clock.tick(50)
+    for (const callback of stale) callback()
+    gate.resolve()
+    await settle()
+    assert.deepEqual(f.packets.flatMap((packet) => packet.type === 'keyDown' ? [packet.key] : []), [65])
+    assert.equal(f.packets.some((packet) => packet.type === 'cancel' || packet.type === 'deactivate'), false)
+    assert.equal(f.packets.some((packet) => packet.type === 'mouseKeyTick'), false)
+    assert.deepEqual(f.keys.at(-1), [65, 66], 'Dropping queued callbacks does not invent physical key releases')
+    f.coordinator.setHostMoving(false)
+    f.key(f.textareas[0]!, 'c')
+    await settle()
+    assert.deepEqual(f.packets.flatMap((packet) => packet.type === 'keyDown' ? [packet.key] : []), [65, 67])
+    assert.deepEqual([...f.errors], [])
+  } finally { gate.resolve(); f.close() }
+})
+
 test('mouse-key observations follow the actual trap-key receiver while real key packets retain their original route', async () => {
   const f = fixture()
   try {

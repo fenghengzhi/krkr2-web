@@ -179,6 +179,45 @@ test('cursor load PNG256 centers samples before alpha composition and scales its
   assert.equal(source.frames[0]!.images[0]!.width, 256)
 })
 
+test('cursor load DIB48 preserves the complete native RGB plane and its narrowed-ratio outer edge', async () => {
+  // Native 087 run 37275964642, both Windows desktops, dib-scale-48x48-32:
+  // SHA-256 is the original GetIconInfo plane normalized to top-down RGB.
+  // The native zero-alpha plane is AND/XOR; its unused alpha is not scored.
+  const raw = cursorFile([{ width: 48, height: 48, hotspot: [23, 17],
+    payload: cursorDib({ width: 48, height: 48, depth: 32,
+      xorRows: Array.from({ length: 48 }, (_, row) => {
+        const y = 47 - row
+        return Array.from({ length: 48 }, (_, x) =>
+          [(113 + x + y) & 255, (71 + y * 5) & 255, (37 + x * 3) & 255, 0]).flat()
+      }),
+      andRows: Array.from({ length: 48 }, (_, row) => row < 24 ? [255, 255, 255, 255, 255, 255] : []),
+    }) }]), result = loadedImage(await loadCursorBytes(raw, { png })),
+    rgb = result.data.filter((_, at) => at % 4 !== 3)
+  assert.equal(result.mode, 'and-xor')
+  assert.deepEqual(result.hotspot, { x: 15, y: 11 })
+  assert.deepEqual([...result.data.subarray((31 * 32 + 31) * 4, (31 * 32 + 31) * 4 + 3)], [177, 50, 206])
+  assert.deepEqual([...result.data.subarray(31 * 4, 31 * 4 + 3)], [177, 70, 159])
+  assert.equal(createHash('sha256').update(rgb).digest('hex'),
+    '9b860c984706f15eb2e9354bd18a6e340e227133ff09d5a4e9199bc7206e7dc5')
+})
+
+test('cursor load PNG48 preserves the complete native RGBA plane including alpha at the outer edge', async () => {
+  // Native 087 png-scale-48x48, GetIconInfo's original top-down straight RGBA.
+  // The independently encoded PNG contains the recorded source formula;
+  // neither the literal pixels nor the full-plane digest use the scaler.
+  const pixels: number[] = []
+  for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++)
+    pixels.push((x * 5 + 31) & 255, (y * 7 + 61) & 255, (x + y + 127) & 255, (x + y * 48) & 255)
+  const raw = cursorFile([{ width: 48, height: 48, hotspot: [23, 17], payload: cursorPng(48, 48, pixels) }]),
+    result = loadedImage(await loadCursorBytes(raw, { png }))
+  assert.equal(result.mode, 'alpha')
+  assert.deepEqual(result.hotspot, { x: 15, y: 11 })
+  assert.deepEqual([...result.data.subarray((31 * 32 + 31) * 4)], [9, 134, 220, 254])
+  assert.deepEqual([...result.data.subarray(31 * 4, 32 * 4)], [9, 60, 173, 46])
+  assert.equal(createHash('sha256').update(result.data).digest('hex'),
+    '616661fffd5393d4a716e2b2134959157507741cdde42aa0bcbc2cb519930d82')
+})
+
 test('cursor load keeps every ANI frame and step while the smooth scaling candidate awaits native pixel calibration', async () => {
   const source = asset([[image(13, 9, 32, 37, [12, 8])], [image(48, 48, 32, 111, [12, 24])],
     [image(32, 32, 32, 7, [17, 23])]], 'ani')
@@ -466,7 +505,7 @@ test('cursor alpha half-size DIB and PNG match complete native color planes', as
       rows.push(row)
     }
     const payload = encoding === 'dib'
-      ? cursorDib({ width: 64, height: 64, depth: 32, xorRows: rows }) : cursorPng(64, 64, pixels),
+      ? cursorDib({ width: 64, height: 64, depth: 32, xorRows: [...rows].reverse() }) : cursorPng(64, 64, pixels),
       loaded = loadedImage(await loadCursorBytes(cursorFile([{ width: 64, height: 64,
         hotspot: [21, 16], payload }]), { png }))
     assert.equal(loaded.mode, 'alpha')

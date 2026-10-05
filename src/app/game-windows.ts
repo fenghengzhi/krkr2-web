@@ -1,6 +1,7 @@
 import type { WindowView } from '../engine/scene/window.ts'
 import type { WindowRegion } from '../engine/scene/window-region.ts'
 import { WindowRegionClip } from './window-region.ts'
+import type { WindowMoveRequest, WindowMoveMessage } from '../engine/ports/window-move.ts'
 import './game-windows.css'
 
 export interface WindowHostView extends WindowView {
@@ -36,6 +37,8 @@ export interface GameWindows {
   update(windowId: number, view: WindowHostView, active: boolean, surfaceEpoch?: number): void
   /** Region events target a live surface; the player replays on replacement. */
   setRegion(windowId: number, revision: number, region: WindowRegion | null, surfaceEpoch: number): void
+  beginMove(request: WindowMoveRequest, surfaceEpoch: number,
+    publish: (message: WindowMoveMessage) => void, signal: AbortSignal): Promise<void>
   get(windowId: number, surfaceEpoch?: number): GameWindowSurface | undefined
   /** Whether this exact surface is actually placed in the viewport. */
   isFullscreen(windowId: number, surfaceEpoch: number): boolean
@@ -59,6 +62,10 @@ interface WindowElement extends GameWindowSurface {
   fullscreenSuppressed: boolean
   gesture?: () => void
   preview?: { left: number; top: number; width: number; height: number }
+  scriptMove?: boolean
+  /** A script can detach the sole responsive surface into the page desktop. */
+  floatingScale?: number
+  floatingSpace?: HTMLElement
 }
 
 const defaultView = (): WindowHostView => ({
@@ -99,7 +106,15 @@ export function createGameWindows(
     fullscreenOrder = 0,
     fullscreen: WindowElement | undefined,
     bodyOverflow: string | undefined
+  let pointer: { id: number; x: number; y: number; buttons: number } | undefined
+  let moving: WindowElement | undefined
   stage.classList.add('game-desktop')
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const)
+    browser.addEventListener(type, (event) => {
+      if (!event.isTrusted || !event.isPrimary || disposed) return
+      pointer = { id: event.pointerId, x: event.clientX, y: event.clientY,
+        buttons: type === 'pointercancel' ? 0 : event.buttons }
+    }, { signal: abort.signal, capture: true, passive: true })
 
   const live = (surface: WindowElement) =>
     !disposed &&
@@ -135,7 +150,7 @@ export function createGameWindows(
   const layout = (surface: WindowElement) => {
     const { element, canvas, view } = surface,
       geometry = surface.preview ?? view,
-      embedded = windows.size === 1 && surface.primary,
+      embedded = windows.size === 1 && surface.primary && surface.floatingScale === undefined,
       isFullscreen = fullscreen === surface
     element.hidden = !view.visible
     element.inert = !!view.blocked
@@ -150,6 +165,8 @@ export function createGameWindows(
     element.dataset.blocked = String(!!view.blocked)
     element.dataset.zoom = `${view.zoomNumer}/${view.zoomDenom}`
     element.style.setProperty('--game-window-width', `${geometry.width}px`)
+    element.style.width = !isFullscreen && surface.floatingScale !== undefined
+      ? `${geometry.width * surface.floatingScale}px` : ''
     element.style.setProperty('--game-window-left', `${geometry.left}px`)
     element.style.setProperty('--game-window-top', `${geometry.top}px`)
     surface.title.textContent = view.caption
@@ -195,7 +212,7 @@ export function createGameWindows(
     // These describe the sole surface for existing single-window consumers;
     // each floating window remains responsible for its own appearance.
     const sole = windows.size === 1 ? windows.values().next().value : undefined
-    if (sole?.primary) sole.gesture?.()
+    if (sole?.primary && sole.floatingScale === undefined) sole.gesture?.()
     stage.classList.toggle('window-sunken', !!sole?.view.innerSunken)
     if (sole) stage.dataset.border = String(sole.view.borderStyle)
     else delete stage.dataset.border
@@ -237,7 +254,9 @@ export function createGameWindows(
       !view.visible ||
       !view.focusable ||
       !!view.blocked !== !!surface.view.blocked ||
-      gestureProperties.some((property) => view[property] !== surface.view[property])
+      gestureProperties.some((property) =>
+        !(surface.scriptMove && (property === 'left' || property === 'top')) &&
+        view[property] !== surface.view[property])
     )
       surface.gesture?.()
     if (view.fullScreen && !surface.view.fullScreen) {
@@ -260,7 +279,7 @@ export function createGameWindows(
       fullscreen === surface ||
       // Responsive embedded playback has a fixed page origin. Script position
       // remains intact and becomes the DOM position only in floating mode.
-      (windows.size === 1 && surface.primary) ||
+      (windows.size === 1 && surface.primary && surface.floatingScale === undefined) ||
       surface.view.borderStyle === 0 ||
       (resizing && ![2, 5].includes(surface.view.borderStyle))
     )
@@ -378,6 +397,7 @@ export function createGameWindows(
     surface.abort.abort()
     surface.observer.disconnect()
     surface.region.dispose()
+    surface.floatingSpace?.remove()
     windows.delete(surface.windowId)
     surface.element.remove()
     if (fullscreen === surface) fullscreen = undefined
@@ -394,6 +414,7 @@ export function createGameWindows(
         event.key !== 'Escape' ||
         event.isComposing ||
         event.defaultPrevented ||
+        moving ||
         !fullscreen ||
         !interactive(fullscreen)
       )
@@ -404,6 +425,148 @@ export function createGameWindows(
     { signal: abort.signal },
   )
   return {
+    beginMove(request, surfaceEpoch, publish, signal) {
+      const surface = windows.get(request.windowId)
+      if (!surface || !live(surface) || surface.surfaceEpoch !== surfaceEpoch)
+        return Promise.reject(new Error('Window move surface is unavailable'))
+      if (moving) return Promise.reject(new Error('A Window move is already active'))
+      if (signal.aborted) return Promise.resolve()
+      if (surface.view.fullScreen || fullscreen === surface)
+        return Promise.reject(new Error('A fullscreen Window cannot be moved'))
+      if (!pointer) return Promise.reject(new Error('Window movement requires a page pointer observation'))
+      surface.gesture?.()
+      const observed = { ...pointer }, start = { ...surface.view },
+        previousScale = surface.floatingScale,
+        origin = { x: observed.x, y: observed.y, left: stage.scrollLeft, top: stage.scrollTop },
+        bounds = surface.element.getBoundingClientRect(), desktop = stage.getBoundingClientRect(),
+        embedded = windows.size === 1 && surface.primary && previousScale === undefined,
+        left = embedded ? Math.round(bounds.left - desktop.left - stage.clientLeft + stage.scrollLeft) : start.left,
+        top = embedded ? Math.round(bounds.top - desktop.top - stage.clientTop + stage.scrollTop) : start.top,
+        local = new AbortController(), options = { signal: local.signal, capture: true }
+      let sequence = 0, complete = false, frame: number | undefined,
+        position = { left, top }, changed = false, keyboardX = 0, keyboardY = 0
+      const send = (message: { type: 'update' | 'commit'; left: number; top: number } | { type: 'cancel' }) =>
+        publish({ ...message, requestId: request.requestId, windowId: request.windowId, sequence: ++sequence })
+      if (!interactive(surface)) {
+        send({ type: 'cancel' })
+        return Promise.resolve()
+      }
+      return new Promise<void>((resolve, reject) => {
+        const finish = (commit: boolean, notify = true, failure?: unknown) => {
+          if (complete) return
+          complete = true
+          if (frame !== undefined) browser.cancelAnimationFrame(frame)
+          local.abort()
+          signal.removeEventListener('abort', cancelled)
+          surface.gesture = undefined
+          surface.scriptMove = false
+          surface.preview = undefined
+          moving = undefined
+          surface.element.classList.remove('game-window-dragging')
+          if (!commit) {
+            surface.floatingScale = previousScale
+            if (embedded) {
+              surface.floatingSpace?.remove()
+              surface.floatingSpace = undefined
+            }
+          }
+          surface.view = { ...surface.view, left: commit ? position.left : start.left,
+            top: commit ? position.top : start.top }
+          const errors: unknown[] = failure === undefined ? [] : [failure]
+          try {
+            if (surface.element.hasPointerCapture(observed.id)) {
+              try { surface.element.releasePointerCapture(observed.id) }
+              catch (error) {
+                if (!(error instanceof (browser as Window & typeof globalThis).DOMException) ||
+                    error.name !== 'NotFoundError') throw error
+              }
+            }
+          } catch (error) { errors.push(error) }
+          try {
+            if (live(surface)) layout(surface)
+            if (notify && !signal.aborted) send(commit ? { type: 'commit', ...position } : { type: 'cancel' })
+          } catch (error) { errors.push(error) }
+          if (errors.length) reject(errors.length === 1 ? errors[0] : new AggregateError(errors, 'Window move cleanup failed'))
+          else resolve()
+        }
+        const cancelled = () => finish(false, false)
+        const consume = (event: Event) => { event.preventDefault(); event.stopPropagation() }
+        const preview = () => {
+          if (complete) return
+          surface.preview = { ...position, width: start.width, height: start.height }
+          layout(surface)
+          changed = true
+          if (frame === undefined) frame = browser.requestAnimationFrame(() => {
+            frame = undefined
+            if (complete || !changed) return
+            changed = false
+            try { send({ type: 'update', ...position }) }
+            catch (error) { finish(false, false, error) }
+          })
+        }
+        const move = (event: PointerEvent) => {
+          if (event.pointerId !== observed.id || complete) return
+          consume(event)
+          position = {
+            left: Math.round(left + keyboardX + event.clientX - origin.x + stage.scrollLeft - origin.left),
+            top: Math.round(top + keyboardY + event.clientY - origin.y + stage.scrollTop - origin.top),
+          }
+          preview()
+        }
+        try {
+          surface.scriptMove = true
+          moving = surface
+          if (embedded) {
+            surface.floatingScale = surface.canvas.getBoundingClientRect().width / start.width || 1
+            // Preserve the responsive surface's former flow extent while it
+            // becomes absolute. Otherwise the desktop/page can collapse under
+            // the pointer and clip the same-size window during its first move.
+            const space = document.createElement('div')
+            space.className = 'game-window-flow-space'
+            space.setAttribute('aria-hidden', 'true')
+            space.style.cssText = `width:1px;height:${bounds.height}px;pointer-events:none;visibility:hidden`
+            surface.floatingSpace = space
+            stage.insertBefore(space, surface.element)
+          }
+          surface.gesture = () => finish(false)
+          surface.element.classList.add('game-window-dragging')
+          signal.addEventListener('abort', cancelled, { once: true })
+          browser.addEventListener('pointermove', move, options)
+          browser.addEventListener('pointerup', (event) => {
+            if (event.pointerId !== observed.id) return
+            move(event)
+            finish(true)
+          }, options)
+          browser.addEventListener('pointercancel', (event) => {
+            if (event.pointerId === observed.id) { consume(event); finish(false) }
+          }, options)
+          browser.addEventListener('keydown', (event) => {
+            if (event.isComposing) return
+            consume(event)
+            if (event.key === 'Escape') finish(false)
+            else if (event.key === 'Enter') finish(true)
+            // CSS-pixel keyboard adjustment is a Web desktop adaptation.
+            else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+              const dx = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0,
+                dy = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0
+              keyboardX += dx; keyboardY += dy
+              position = { left: position.left + dx, top: position.top + dy }
+              preview()
+            }
+          }, options)
+          browser.addEventListener('blur', () => finish(false), { signal: local.signal })
+          surface.element.addEventListener('lostpointercapture', (event) => {
+            if (event.pointerId === observed.id) finish(false)
+          }, options)
+          // These compatibility events follow pointer events separately. Never
+          // let the OS-style move loop turn them into game mouse callbacks.
+          for (const type of ['mousedown', 'mousemove', 'mouseup', 'click', 'dblclick', 'keyup'])
+            browser.addEventListener(type, consume, options)
+          if (observed.buttons) surface.element.setPointerCapture(observed.id)
+          preview()
+        } catch (error) { finish(false, false, error) }
+      })
+    },
     attach(windowId, surfaceEpoch) {
       if (disposed) return
       const known = epochs.get(windowId)

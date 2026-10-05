@@ -74,6 +74,16 @@ class Window {
     onCloseQuery(true);
   }
   function bringToFront() { __host("Window.activate",__windowId); }
+  function beginMove() {
+    var request=[];
+    try {
+      var result=__host("Window.beginMove",__windowId,request);
+      if(typeof result=="String")throw new Exception(result);
+    } catch(error) {
+      try { __host("Window.moveAbort",__windowId,request); } catch(cleanupError) {}
+      throw error;
+    }
+  }
   function onCloseQuery(canClose) {
     if(__host("Window.modalRespond",__windowId,int(!!canClose))) {
       __windowUserClosing=false;

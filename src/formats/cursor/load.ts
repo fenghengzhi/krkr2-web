@@ -118,7 +118,11 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
     pointSample = image.depth < 32 ||
       (image.width >= width && image.height >= height &&
         image.width % width === 0 && image.height % height === 0)
-  const stepX = (image.width - 1) / (width - 1), stepY = (image.height - 1) / (height - 1)
+  // 087's complete DIB/PNG 48-to-32 color planes distinguish the X ratio:
+  // narrow it once to binary32, then accumulate in binary64. Keep Y's current
+  // precision: those planes do not distinguish its three incremental paths.
+  // 13-to-32 byte-stage differences remain visible in the strict native gate.
+  const stepX = Math.fround((image.width - 1) / (width - 1)), stepY = (image.height - 1) / (height - 1)
   let positionY = 0
   for (let row = 0; row < height; row++, positionY += stepY) {
     // Native planes originate from bottom-up DIB memory. Keep its traversal

@@ -63,6 +63,8 @@ import {
 import { checkpointBridge } from './tvp/checkpoints.ts'
 import { ModalLoop } from './scheduler/modal-loop.ts'
 import { WindowModals } from './scene/window-modal.ts'
+import { WindowMoves } from './scene/window-move.ts'
+import type { WindowMoveMessage, WindowMoveRequest } from './ports/window-move.ts'
 import { MenuModals } from './scene/menu-modal.ts'
 import { SystemDialogs, type SystemDialogSnapshot } from './scene/system-dialogs.ts'
 import { modalBridge } from './tvp/modal.ts'
@@ -182,6 +184,7 @@ export type EngineEvent =
   | { type: 'window-closed'; windowId: number }
   | { type: 'window-region'; windowId: number; revision: number; region: WindowRegion | null }
   | { type: 'window-regions-clear' }
+  | { type: 'window-move'; request: WindowMoveRequest | null }
   | { type: 'window-activate'; windowId: number }
   | { type: 'window-input'; windowId: number; input: InputView }
   | { type: 'cursor-asset'; id: number; asset: CursorAsset }
@@ -208,6 +211,8 @@ interface WindowMouseKeys {
   move: { x: number; y: number; paintBoxPoint: { x: number; y: number } }
 }
 export interface SessionDependencies {
+  /** The page implements the matching request/reply presentation protocol. */
+  windowMoveSupported?: boolean
   systemDisplay?: SystemDisplayMetrics
   systemFonts?: FontDescriptor[]
   systemColors?: readonly number[]
@@ -319,6 +324,7 @@ export class EngineSession {
   private systemEvents?: SystemEvents
   private modalLoop?: ModalLoop
   private windowModals?: WindowModals
+  private windowMoves?: WindowMoves
   private menuModals?: MenuModals
   private systemDialogs?: SystemDialogs
   private pads?: PadService
@@ -573,8 +579,10 @@ export class EngineSession {
           this.windowModals?.beforeWait(token)
           this.menuModals?.beforeWait(token)
           this.systemDialogs?.beforeWait(token)
+          this.windowMoves?.beforeWait(token)
         },
         changed: (phase) => {
+          this.windowMoves?.present()
           // Opening the native dialog captures the old DOM focus before the
           // Window roster applies inert. Unwinding restores eligibility first.
           if (phase === 'open') {
@@ -731,6 +739,7 @@ export class EngineSession {
           }
         },
         async (window) => {
+          this.windowMoves?.invalidate(window.id)
           this.clearVirtualCursors(window.id)
           this.windowRegionRequests.delete(window.id)
           this.windowRegions.replace(window.id, null)
@@ -816,6 +825,16 @@ export class EngineSession {
         query: (window, onNotEntered) =>
           this.observeAdmission(this.enqueueCloseWindow(window.id, onNotEntered)),
       })
+      this.windowMoves = new WindowMoves(this.modalLoop, {
+        window: (id) => this.registeredWindow(id),
+        position: (window, left, top) => {
+          if (this.registeredWindow(window.id) !== window) return
+          window.state.set('left', left)
+          window.state.set('top', top)
+          this.present()
+        },
+        changed: (request) => this.deps.event({ type: 'window-move', request }),
+      }, this.deps.windowMoveSupported === true)
       this.menuItems = new MenuService(this.runtime, this.menus, this.windows, (item) => {
         this.systemEvents?.cancelSource(item)
       })
@@ -1334,6 +1353,7 @@ export class EngineSession {
     if (activityPaused(activity) && !activityPaused(previous) && this.state === 'paused')
       this.events?.pause(true)
     if (previous.state === 'visible' && activity.state !== 'visible') {
+      this.windowMoves?.cancel()
       this.clearVirtualCursors()
       this.keyStates.release()
       for (const window of this.windows?.registered() ?? []) window.inputActive = false
@@ -1371,6 +1391,7 @@ export class EngineSession {
       activityPaused(this.activity)
     if (paused === (this.state === 'paused')) return
     if (paused) {
+      this.windowMoves?.cancel()
       this.clearVirtualCursors()
       this.keyStates.release()
       for (const window of this.windows?.registered() ?? []) window.inputActive = false
@@ -2579,6 +2600,12 @@ export class EngineSession {
     window.state.set('left', left)
     window.state.set('top', top)
     this.present()
+  }
+  /** Host drag updates bypass the serialized VM queue while beginMove owns
+   * its modal continuation. Identity/sequence validation stays in the core. */
+  windowMove(message: WindowMoveMessage): boolean {
+    if (this.control.cancelled || !['running', 'paused'].includes(this.state)) return false
+    return this.windowMoves?.receive(message) ?? false
   }
   resizeWindow(windowId: number, width: number, height: number): void {
     if (this.windowModals?.blocked(windowId)) return
@@ -4014,6 +4041,13 @@ export class EngineSession {
       case 'Window.showModal':
         if (!isScriptObject(args[1])) throw new Error('Modal Window request must be an object')
         return this.windowModals!.show(number(0), this.runtime!.objectIdentity(args[1]))
+      case 'Window.beginMove':
+        if (!isScriptObject(args[1])) throw new Error('Window move request must be an object')
+        return this.windowMoves!.begin(number(0), this.runtime!.objectIdentity(args[1]))
+      case 'Window.moveAbort':
+        if (isScriptObject(args[1]))
+          this.windowMoves?.abort(number(0), this.runtime!.objectIdentity(args[1]))
+        break
       case 'Window.modalAbort':
         if (isScriptObject(args[1]))
           this.windowModals?.abort(number(0), this.runtime!.objectIdentity(args[1]))
@@ -4134,6 +4168,8 @@ export class EngineSession {
           before = [window.state.width, window.state.height],
           property = text(1)
         window.state.set(text(1), typeof args[2] === 'string' ? text(2) : number(2))
+        if ((property === 'visible' && !window.state.visible) ||
+            (property === 'fullScreen' && window.state.fullScreen)) this.windowMoves?.cancel(window.id)
         if (property === 'useMouseKey') {
           const record = this.windowMouseKeys(window)
           this.observeAdmission(this.mouseKeyActions(window,

@@ -61,6 +61,7 @@ export class BrowserInputCoordinator {
   private closed = false
   private generation = 0
   private focusVersion = 0
+  private hostMoving = false
   private readonly cursorStates = new Map<number, BrowserCursorState>()
 
   constructor(
@@ -81,6 +82,13 @@ export class BrowserInputCoordinator {
         if (this.closed || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return
         this.pagePointer = { x: event.clientX, y: event.clientY }
         this.pointerObservation++
+        if (this.hostMoving) {
+          for (const [key, mask] of [[1, 1], [2, 2], [4, 4], [5, 8], [6, 16]] as const) {
+            if (event.buttons & mask) this.pressed.add(key)
+            else { this.pressed.delete(key); this.physicalOwners.delete(key) }
+          }
+          this.keys()
+        }
         // A real OS pointer is global, including when a trap-key Window is
         // not the physical target. Retire its Web cursor immediately instead
         // of waiting for a later keyboard packet or a delayed Worker view.
@@ -109,6 +117,13 @@ export class BrowserInputCoordinator {
         if (this.closed) return
         const key = virtualKey(event)
         if (!key) return
+        if (this.hostMoving) {
+          this.pressed.add(key)
+          if (this.active) this.physicalOwners.set(key, this.active.id)
+          this.hostKeys.add(key)
+          this.keys()
+          return
+        }
         const game =
           !this.suspended &&
           this.active?.visible &&
@@ -317,12 +332,26 @@ export class BrowserInputCoordinator {
     if (view) input.setWindow(view)
     if (state) input.setInput(state, windowId)
     input.setSuspended(this.suspended || !surface.visible || surface.blocked)
+    input.setHostMoving(this.hostMoving)
   }
 
   /** An asset event can arrive after the input snapshot that references it. */
   refreshCursors(): void {
     if (this.closed) return
     for (const surface of this.surfaces.values()) surface.input.refreshCursor()
+  }
+  setHostMoving(moving: boolean): void {
+    if (this.closed || this.hostMoving === moving) return
+    this.hostMoving = moving
+    if (moving) {
+      this.mouseOwner = undefined
+      // Already admitted VM work retains its native lifetime. DOM work still
+      // waiting for admission now belongs to the host's movement loop.
+      this.queue = this.queue.filter((entry) =>
+        entry.packet.type === 'activate' || entry.packet.type === 'deactivate')
+    }
+    for (const surface of this.surfaces.values()) surface.input.setHostMoving(moving)
+    this.syncMouseKeyTicker()
   }
 
   detach(windowId: number, epoch: number): void {
@@ -511,7 +540,7 @@ export class BrowserInputCoordinator {
     catch (error) { this.error(error) }
   }
   private mouseKeyEligible(surface: SurfaceInput): boolean {
-    return this.current(surface) && !this.suspended && surface.visible && surface.focusable &&
+    return this.current(surface) && !this.suspended && !this.hostMoving && surface.visible && surface.focusable &&
       !surface.blocked && !!this.views.get(surface.id)?.useMouseKey && !document.hidden &&
       (typeof document.hasFocus !== 'function' || document.hasFocus()) &&
       surface.input.ownsFocus(document.activeElement)
@@ -573,6 +602,7 @@ export class BrowserInputCoordinator {
 
   private enqueue(surface: SurfaceInput, packet: InputPacket): void {
     if (!this.current(surface) || this.suspended || surface.blocked) return
+    if (this.hostMoving && packet.type !== 'activate' && packet.type !== 'deactivate') return
     if (packet.type === 'keyDown' || packet.type === 'keyUp' || packet.type === 'text' || packet.type === 'mouseKeyTick') {
       const targetId = packet.type === 'mouseKeyTick' ? surface.id :
         this.inputs.get(surface.id)?.keyboardRoute?.windowId ?? surface.id,

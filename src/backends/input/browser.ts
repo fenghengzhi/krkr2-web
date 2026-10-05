@@ -143,6 +143,7 @@ export class BrowserInput {
   private sending = false
   private disposed = false
   private suspended = false
+  private hostMoving = false
   private epoch = 0
   private captured = new Set<number>()
   private active = false
@@ -381,6 +382,21 @@ export class BrowserInput {
     } else if (document.activeElement === this.text) this.activate()
     this.appearance()
   }
+  /** OS-style movement owns pointer messages without generating a Layer
+   * release/deactivate callback or changing real physical key observations. */
+  setHostMoving(moving: boolean): void {
+    if (this.disposed || this.hostMoving === moving) return
+    this.hostMoving = moving
+    if (moving) {
+      this.mouseButtons = 0
+      this.mouseTouch = undefined
+      this.touches.clear()
+      this.clicks.clear()
+      this.pressed.clear()
+      this.cancelComposition()
+      this.releasePointerCaptures()
+    }
+  }
   private appearance(): void {
     if (this.disposed) return
     this.canvas.style.cursor = this.view?.mouseCursorState
@@ -609,7 +625,7 @@ export class BrowserInput {
     this.keys()
   }
   private mouse(event: MouseEvent, type: 'down' | 'move' | 'up'): void {
-    if (this.suspended || this.disposed) return
+    if (this.suspended || this.disposed || this.hostMoving) return
     if (this.shared && !this.shared.mouse(type, event.buttons)) return
     this.physicalCursor = { x: event.clientX, y: event.clientY }
     const button = [0, 2, 1, 3, 4][event.button] ?? 0,
@@ -635,7 +651,7 @@ export class BrowserInput {
     }
   }
   private touch(event: PointerEvent): void {
-    if (this.suspended || this.disposed) return
+    if (this.suspended || this.disposed || this.hostMoving) return
     if (event.type === 'pointerdown') this.captured.add(event.pointerId)
     else if (event.type === 'pointerup' || event.type === 'pointercancel')
       this.captured.delete(event.pointerId)
@@ -749,6 +765,7 @@ export class BrowserInput {
     return (
       !this.suspended &&
       !this.disposed &&
+      !this.hostMoving &&
       this.ownsFocus(document.activeElement) &&
       (this.shared?.keyboard(event) ?? true)
     )

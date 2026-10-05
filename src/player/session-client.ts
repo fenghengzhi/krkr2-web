@@ -1,4 +1,5 @@
 import type { PadMessage } from '../protocol/pad.ts'
+import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
 import { copySystemDisplayUpdate, type SystemDisplayUpdate } from '../engine/system/display.ts'
 import { createRpcClient, type RpcClient } from 'vite-plugin-worker-rpc/runtime'
 import { transfer } from 'vite-plugin-worker-rpc/client'
@@ -68,6 +69,7 @@ export class SessionClient {
     dataPath?: string,
     systemColors?: readonly number[],
     help?: MessagePort,
+    windowMoveSupported = false,
   ) {
     const request = {
       version: PROTOCOL_VERSION,
@@ -82,6 +84,7 @@ export class SessionClient {
       video,
       clipboard,
       help,
+      windowMoveSupported,
       dataPath,
       systemColors,
       systemDisplay: this.systemDisplay?.metrics,
@@ -182,6 +185,9 @@ export class SessionClient {
   }
   moveWindow(windowId: number, left: number, top: number) {
     return this.call('moveWindow', windowId, left, top)
+  }
+  windowMove(message: WindowMoveMessage) {
+    return this.call('windowMove', message)
   }
   resizeWindow(windowId: number, width: number, height: number) {
     return this.call('resizeWindow', windowId, width, height)

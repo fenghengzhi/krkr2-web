@@ -134,6 +134,8 @@ const api: SessionApi = {
       throw new Error('Invalid clipboard channel')
     if (request.help !== undefined && !(request.help instanceof MessagePort))
       throw new Error('Invalid help channel')
+    if (request.windowMoveSupported !== undefined && typeof request.windowMoveSupported !== 'boolean')
+      throw new Error('Invalid Window move capability')
     if (!prepared || request.gameId !== gameId)
       throw new Error('Prepare the game sources before initializing')
     session = createSession(request)
@@ -223,6 +225,9 @@ const api: SessionApi = {
   },
   async moveWindow(windowId, left, top) {
     active().moveWindow(windowId, left, top)
+  },
+  async windowMove(message) {
+    return active().windowMove(message)
   },
   async resizeWindow(windowId, width, height) {
     active().resizeWindow(windowId, width, height)

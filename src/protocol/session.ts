@@ -7,7 +7,8 @@ import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import type { PadAck, PadMessage, PadFontData } from './pad.ts'
 import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
-export const PROTOCOL_VERSION = 32
+import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
+export const PROTOCOL_VERSION = 33
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -41,6 +42,8 @@ export interface InitializeRequest {
   clipboard?: MessagePort
   /** Help presentation ACKs are independent of a suspended script RPC. */
   help?: MessagePort
+  /** A host capable of completing the synchronous Window movement interaction. */
+  windowMoveSupported?: boolean
   activity: ActivityState
 }
 export type SessionEvent = EngineEvent & { generation: number; sequence: number }
@@ -70,6 +73,7 @@ export interface SessionApi {
   activateWindow(windowId: number): Promise<InputAdmissionAck>
   closeWindow(windowId: number): Promise<InputAdmissionAck>
   moveWindow(windowId: number, left: number, top: number): Promise<void>
+  windowMove(message: WindowMoveMessage): Promise<boolean>
   resizeWindow(windowId: number, width: number, height: number): Promise<void>
   menuClick(id: number, popup?: MenuPopupIdentity): Promise<InputAdmissionAck>
   menuDismiss(popup?: MenuPopupIdentity): Promise<void>

@@ -38,6 +38,7 @@ export function createSession(request: InitializeRequest): EngineSession {
     systemColors,
     systemDisplay,
     activity: request.activity,
+    windowMoveSupported: request.windowMoveSupported === true,
     arguments: arguments_,
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
     renderer: new WorkerWindowSurfaces(request.surfaces, request.generation),

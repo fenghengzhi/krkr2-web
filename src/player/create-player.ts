@@ -16,6 +16,7 @@ import { PageActivityMonitor } from './page-activity.ts'
 import { activityPaused, initialActivity } from '../engine/ports/activity.ts'
 import type { InputView } from '../engine/ports/input.ts'
 import type { WindowPresentation, WindowView } from '../engine/scene/window.ts'
+import type { WindowMoveRequest, WindowMoveMessage } from '../engine/ports/window-move.ts'
 import { copyWindowRegion, WindowRegions, type WindowRegion } from '../engine/scene/window-region.ts'
 import type { WindowSurfaceIdentity } from '../protocol/surfaces.ts'
 import { normalizeSystemDataPath } from '../engine/system/environment.ts'
@@ -41,6 +42,8 @@ export interface PlayerWindowHost {
   update(windowId: number, view: WindowView, active: boolean, surfaceEpoch?: number): void
   /** Apply an immutable native pixel region to this exact live surface. */
   setRegion(windowId: number, revision: number, region: WindowRegion | null, surfaceEpoch: number): void
+  beginMove?(request: WindowMoveRequest, surfaceEpoch: number,
+    publish: (message: WindowMoveMessage) => void, signal: AbortSignal): Promise<void>
   get(windowId: number, surfaceEpoch?: number): PlayerWindowSurface | undefined
   /** Actual host placement, which may suppress a requested fullscreen window. */
   isFullscreen?(windowId: number, surfaceEpoch: number): boolean
@@ -128,6 +131,7 @@ export function createPlayer(
   let activity = initialActivity()
   let workerPaused = true
   let fontSelecting = false
+  let moving: { request: WindowMoveRequest; epoch: number; abort: AbortController } | undefined
   let focusRequest: { windowId: number; epoch?: number; revision: number } | undefined
   const syncInput = () => {
     const suspended = workerPaused || fontSelecting || activity.state !== 'visible'
@@ -188,12 +192,65 @@ export function createPlayer(
       if (epoch !== undefined) options.windows.setRegion(id, Number.MAX_SAFE_INTEGER, null, epoch)
     }))
   }
+  const retireMove = () => {
+    const previous = moving
+    moving = undefined
+    // Local retirement cannot send a reply that resumes TJS ahead of Stop or
+    // of the engine's own modal-stack cancellation/cleanup.
+    try { previous?.abort.abort() }
+    finally { input?.setHostMoving(false) }
+  }
+  const beginMove = (incoming: WindowMoveRequest | null) => {
+    retireMove()
+    if (!incoming || stopping || retiredWindows.has(incoming.windowId)) return
+    const request = Object.freeze({ ...incoming }),
+      epoch = surfaces?.get(request.windowId)?.identity.surfaceEpoch,
+      fallback = (message: string) => {
+        void session.windowMove({ type: 'error', ...request, sequence: Number.MAX_SAFE_INTEGER,
+          message: (message || 'Window move presentation failed').slice(0, 4096) }).catch((error) => {
+            if (moving?.request.requestId === request.requestId) retireMove()
+            onError(error)
+          })
+      }
+    if (epoch === undefined || !options.windows.beginMove) {
+      fallback('Window move host is unavailable')
+      return
+    }
+    const operation = { request, epoch, abort: new AbortController() }
+    moving = operation
+    const current = () => moving === operation && !stopping && !operation.abort.signal.aborted &&
+      !retiredWindows.has(request.windowId) && surfaces?.get(request.windowId)?.identity.surfaceEpoch === epoch
+    let terminalSent = false
+    try {
+      input?.setHostMoving(true)
+      const completion = options.windows.beginMove(request, epoch, (message) => {
+        if (!current()) return
+        if (message.requestId !== request.requestId || message.windowId !== request.windowId)
+          throw new Error('Window move host returned a mismatched identity')
+        terminalSent ||= message.type !== 'update'
+        void session.windowMove(message).catch((error) => {
+          if (current()) fallback(error instanceof Error ? error.message : String(error))
+        })
+      }, operation.abort.signal)
+      void Promise.resolve(completion).then(() => {
+        // Keep admission blocked until the ordered engine null event confirms
+        // interaction retirement. TJS modal unwinding may follow that event.
+        if (current() && !terminalSent) fallback('Window move host completed without a result')
+      }, (error: unknown) => {
+        if (current()) fallback(error instanceof Error ? error.message : String(error))
+        else onError(error)
+      })
+    } catch (error) {
+      if (current()) fallback(error instanceof Error ? error.message : String(error))
+    }
+  }
   const retireWindow = (windowId: number) => {
     retiredWindows.add(windowId)
     windows.delete(windowId)
     inputViews.delete(windowId)
     windowRegions.replace(windowId, null)
     regionRevisions.delete(windowId)
+    if (moving?.request.windowId === windowId) retireMove()
     if (focusRequest?.windowId === windowId) focusRequest = undefined
     // Retirement is independent of whether a presentation or canvas ever
     // arrived. Tombstone before cleanup so late messages cannot recreate it.
@@ -248,6 +305,7 @@ export function createPlayer(
       input?.refreshCursors()
     }
     if (event.type === 'window-regions-clear') clearRegions()
+    if (event.type === 'window-move') beginMove(event.request)
     if (event.type === 'window-region' && !regionsRetired && !stopping && !retiredWindows.has(event.windowId)) {
       updateParts([() => {
         if (!Number.isSafeInteger(event.windowId) || event.windowId < 1 ||
@@ -354,6 +412,13 @@ export function createPlayer(
       const { windowId, surfaceEpoch } = identity,
         surface = options.windows.get(windowId, surfaceEpoch),
         errors: unknown[] = []
+      if (moving?.request.windowId === windowId && moving.epoch === surfaceEpoch) {
+        const request = moving.request
+        retireMove()
+        if (!stopping && !retiredWindows.has(windowId))
+          void session.windowMove({ type: 'cancel', requestId: request.requestId, windowId,
+            sequence: Number.MAX_SAFE_INTEGER }).catch(onError)
+      }
       if (
         focusRequest?.windowId === windowId &&
         (focusRequest.epoch === undefined || focusRequest.epoch === surfaceEpoch)
@@ -420,6 +485,7 @@ export function createPlayer(
         dataPath,
         systemColors,
         helpChannel.port2,
+        !!options.windows.beginMove,
       )
       await session.mount()
       // Only ordered Session events update the host. A start RPC snapshot can
@@ -447,6 +513,7 @@ export function createPlayer(
           () => options.pads?.dispose(),
           () => options.onClipboardRequest?.(null),
           () => help.suspend(),
+          () => retireMove(),
           () => video.setPagePaused(true),
           () => input?.close(),
           () => clearRegions(),

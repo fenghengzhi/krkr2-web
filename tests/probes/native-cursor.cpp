@@ -60,8 +60,29 @@ struct Image {
     // Empty preserves the original half-plane AND/XOR fixture. Named patterns
     // below are generated in source coordinates independently of Web scaling.
     std::string bitPattern;
+    std::string colorPattern;
     Bytes payload;
 };
+std::string colorPatternDefinition(const std::string& name) {
+    if (name == "x-axis") return "RGBA=((17*x+3)%256,(73*x+91)%256,(127*x+113)%256,0)";
+    if (name == "y-axis") return "RGBA=((17*y+3)%256,(73*y+91)%256,(127*y+113)%256,0)";
+    if (name == "xy-asymmetric") return "RGBA=((17*x+37*y+3)%256,(73*x+11*y+91)%256,(127*x+61*y+113)%256,0)";
+    if (name == "checker") return "RGBA=(255*(x%2),255*(y%2),255*((x+y)%2),0)";
+    if (name == "impulses") return "RGBA=(255*[x==1&&y==1],255*[x==floor(width/2)&&y==floor(height/2)],255*[x==width-2&&y==height-2],0)";
+    throw std::runtime_error("Unknown color-plane fixture pattern: " + name);
+}
+struct ColorChannels { unsigned r, g, b; };
+ColorChannels colorPatternValue(const std::string& name, unsigned x, unsigned y, unsigned width, unsigned height) {
+    if (name == "x-axis") return {(17 * x + 3) & 255, (73 * x + 91) & 255, (127 * x + 113) & 255};
+    if (name == "y-axis") return {(17 * y + 3) & 255, (73 * y + 91) & 255, (127 * y + 113) & 255};
+    if (name == "xy-asymmetric") return {(17 * x + 37 * y + 3) & 255,
+        (73 * x + 11 * y + 91) & 255, (127 * x + 61 * y + 113) & 255};
+    if (name == "checker") return {255 * (x % 2), 255 * (y % 2), 255 * ((x + y) % 2)};
+    if (name == "impulses") return {x == 1 && y == 1 ? 255u : 0u,
+        x == width / 2 && y == height / 2 ? 255u : 0u,
+        x == width - 2 && y == height - 2 ? 255u : 0u};
+    throw std::runtime_error("Unknown color-plane fixture pattern: " + name);
+}
 std::string bitPatternDefinition(const std::string& name) {
     if (name == "multi-edge") return "(3<=x<9)||(63<=x<129)||(193<=x<251)";
     if (name == "isolated-one") return "(x%32==floor(y/32))&&(y%32==floor(x/32))";
@@ -91,6 +112,11 @@ std::string imageJson(const Image& i) {
           << quote(bitPatternDefinition(i.bitPattern))
           << ",\"and\":\"F(x,y)\",\"monochromeXor\":\"F(y,255-x)\"}";
     }
+    if (!i.colorPattern.empty()) {
+        o << ",\"colorPlanePattern\":{\"id\":" << quote(i.colorPattern)
+          << ",\"coordinateSpace\":\"top-down source pixels\",\"rgba\":" << quote(colorPatternDefinition(i.colorPattern))
+          << ",\"and\":\"y>=floor(height/2)\"}";
+    }
     o << '}';
     return o.str();
 }
@@ -103,6 +129,9 @@ Bytes dib(const Image& i) {
     if (!i.bitPattern.empty() && (i.width != 256 || i.height != 256 ||
         (i.bpp != 1 && i.bpp != 32) || i.alphaMode != 0 || i.omitMask))
         throw std::runtime_error("Named bit-plane patterns require complete 256x256 monochrome or zero-alpha DIBs");
+    if (!i.colorPattern.empty() && (i.width < 3 || i.height < 3 || i.bpp != 32 ||
+        i.header != 40 || i.compression != BI_RGB || i.alphaMode != 0 || i.topDown || i.omitMask || !i.bitPattern.empty()))
+        throw std::runtime_error("Named color patterns require complete bottom-up 32bpp zero-alpha INFO DIBs");
     const unsigned palette = i.bpp <= 8 ? 1u << i.bpp : 0,
         xorStride = ((i.width * i.bpp + 31) / 32) * 4,
         andStride = ((i.width + 31) / 32) * 4;
@@ -159,6 +188,10 @@ Bytes dib(const Image& i) {
                 // channels. Mode 3 is raw straight data, not premultiplied.
                 if (i.alphaMode == 3) alpha = (x + y * i.width) & 255;
                 if (i.alphaMode == 2) { r = r * alpha / 255; g = g * alpha / 255; bl = bl * alpha / 255; }
+                if (!i.colorPattern.empty()) {
+                    const auto color = colorPatternValue(i.colorPattern, x, y, i.width, i.height);
+                    r = color.r; g = color.g; bl = color.b;
+                }
                 const auto pixel = at + x * (i.bpp / 8);
                 if (i.bpp == 16) {
                     const unsigned v = i.compression == BI_BITFIELDS
@@ -406,6 +439,19 @@ std::vector<Fixture> fixtures() {
     { Fixture f; f.id = "cur-truncated-directory"; f.bytes = {0, 0, 2, 0, 1, 0}; f.classification = "malformed"; output.push_back(f); }
     { Fixture f; f.id = "cur-truncated-pixels"; f.images = {a}; f.bytes = cur(f.images); f.bytes.resize(f.bytes.size() - 20); f.classification = "malformed"; output.push_back(f); }
     { Fixture f; f.id = "ani-truncated-container"; f.kind = "ani"; f.frames = {{a}, {b}}; f.steps = 2; f.bytes = ani(f); f.bytes.resize(f.bytes.size() - 30); f.classification = "malformed"; output.push_back(f); }
+    // Preserve the original 95 identities/order. Independent byte fields expose
+    // horizontal-only, vertical-only and two-dimensional truncation stages;
+    // transposed enlargement and a mixed ratio must not be inferred from 48^2.
+    if (output.size() != 95) throw std::runtime_error("Historical cursor fixture inventory changed");
+    for (const auto shape : {std::pair<unsigned, unsigned>{13, 9}, {9, 13}, {48, 48}, {17, 41}}) {
+        for (const char* pattern : {"x-axis", "y-axis", "xy-asymmetric", "checker", "impulses"}) {
+            Image i; i.width = shape.first; i.height = shape.second;
+            i.hotX = i.width / 3; i.hotY = i.height / 4; i.colorPattern = pattern;
+            add("color-stages-" + std::to_string(i.width) + "x" + std::to_string(i.height) + "-" + i.colorPattern,
+                {i}, "scaling");
+        }
+    }
+    if (output.size() != 115) throw std::runtime_error("Color stage fixture inventory is incomplete");
     return output;
 }
 

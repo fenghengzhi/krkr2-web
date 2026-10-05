@@ -1,0 +1,145 @@
+name: Native Windows beginMove reference
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  window-move-reference:
+    name: beginMove / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Observe owned User32 move loops with bounded controlled input
+        env:
+          PROBE_RUNNER_LABEL: ${{ matrix.os }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:GITHUB_WORKSPACE 'out/ci/native-window-move'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $status = [ordered]@{
+            schema = 1; state = 'not-executed'; stage = 'setup'
+            sourceCommit = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID; runAttempt = $env:GITHUB_RUN_ATTEMPT
+            runner = $env:PROBE_RUNNER_LABEL; imageOS = $env:ImageOS; imageVersion = $env:ImageVersion
+            scope = 'Owned HWND User32 synchronous SC_MOVE+2; controlled OS input, not physical hardware or VCL/Layer capture'
+            globalInputUsed = $true; controlledSendInput = $true; physicalHardwareClaim = $false
+            expectedCases = 7; observedCases = 0; processDeadlineMs = 120000
+            startedAt = [DateTime]::UtcNow.ToString('o'); finishedAt = $null
+            compilerExitCode = $null; processId = $null; exitCode = $null
+            error = $null; cleanupError = $null
+          }
+          $statusPath = Join-Path $output 'status.json'
+          $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          $process = $null
+          try {
+            if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
+              throw 'Window move observations require GitHub-hosted Windows.'
+            }
+            $source = Join-Path $env:GITHUB_WORKSPACE 'tests/native/window-move.cpp'
+            Copy-Item -LiteralPath $source -Destination (Join-Path $output 'window-move.cpp')
+            $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+            if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio discovery tool is missing.' }
+            & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json -utf8 1> (Join-Path $output 'vswhere.json') 2> (Join-Path $output 'vswhere.stderr.log')
+            if ($LASTEXITCODE -ne 0) { throw "vswhere failed with exit code $LASTEXITCODE." }
+            $instances = @(Get-Content -LiteralPath (Join-Path $output 'vswhere.json') -Raw | ConvertFrom-Json)
+            if ($instances.Count -ne 1) { throw 'Expected one complete Visual Studio C++ installation.' }
+            $vcvars = Join-Path $instances[0].installationPath 'VC/Auxiliary/Build/vcvars64.bat'
+            if (-not (Test-Path -LiteralPath $vcvars)) { throw 'vcvars64.bat is missing.' }
+            $executable = Join-Path $output 'window-move.exe'
+            $object = Join-Path $output 'window-move.obj'
+            $compile = Join-Path $output 'compile.cmd'
+            @(
+              '@echo off'
+              ('call "{0}"' -f $vcvars)
+              'if errorlevel 1 exit /b %errorlevel%'
+              ('cl /nologo /Bv /std:c++17 /EHsc /W4 /utf-8 /DUNICODE /D_UNICODE "{0}" /Fe"{1}" /Fo"{2}" /link user32.lib gdi32.lib' -f $source, $executable, $object)
+              'exit /b %errorlevel%'
+            ) | Set-Content -Encoding ascii $compile
+            $status.stage = 'compile'
+            & cmd.exe /d /c ('"{0}"' -f $compile) 2>&1 | Tee-Object -FilePath (Join-Path $output 'compiler.log')
+            $status.compilerExitCode = $LASTEXITCODE
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $executable)) { throw 'Window move reference compilation failed.' }
+            $status.stage = 'observe'
+            $process = Start-Process -FilePath $executable -ArgumentList ('"{0}"' -f $output) -WorkingDirectory $output -PassThru `
+              -RedirectStandardOutput (Join-Path $output 'stdout.log') -RedirectStandardError (Join-Path $output 'stderr.log')
+            $status.processId = $process.Id; $status.state = 'running'
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+            if (-not $process.WaitForExit($status.processDeadlineMs)) {
+              $status.state = 'timed-out'
+              throw 'Owned beginMove process exceeded 120 seconds; partial journals remain evidence, not a native negative result.'
+            }
+            $status.exitCode = $process.ExitCode
+            if ($process.ExitCode -ne 0) { throw "Window move reference exited with code $($process.ExitCode)." }
+            $status.stage = 'evidence'
+            $observations = Get-Content -LiteralPath (Join-Path $output 'observations.json') -Raw | ConvertFrom-Json
+            if ($observations.schema -ne 1 -or $observations.completed -ne $true -or $observations.classCleanupConfirmed -ne $true -or
+                $observations.sourceCommit -cne $env:GITHUB_SHA -or $observations.expectedCases -ne 7 -or
+                $observations.observedCases -ne 7 -or $observations.cases.Count -ne 7 -or
+                $observations.controlledSendInput -ne $true -or $observations.physicalHardwareClaim -ne $false) {
+              throw 'Window move observation inventory, provenance or cleanup is incomplete.'
+            }
+            $ids = [Collections.Generic.HashSet[string]]::new()
+            foreach ($case in $observations.cases) {
+              if (-not $ids.Add($case.id) -or $case.status -cne 'observed' -or $case.invoked -ne $true -or
+                  $case.returned -ne $true -or $case.ownerThreadJoined -ne $true -or $case.cleanupConfirmed -ne $true -or
+                  $case.captureBeforeChild -ne $true -or $case.captureAfterReleaseNull -ne $true -or
+                  $case.releaseSucceeded -ne $true -or $case.buttonMatches -ne $true -or $case.records -le 0 -or $case.records -ge 512) {
+                throw "Incomplete controlled observation: $($case.id)"
+              }
+              $journal = Join-Path $output $case.journal
+              if (-not (Test-Path -LiteralPath $journal)) { throw "Missing event journal: $($case.id)" }
+              $events = @(Get-Content -LiteralPath $journal | ForEach-Object { $_ | ConvertFrom-Json })
+              if ($events.Count -ne $case.records) { throw "Truncated event journal: $($case.id)" }
+              if (@($events | Where-Object { $_.phase -eq 'before-synchronous-SendMessage' -and $_.wParam -eq '61458' -and $_.lParam -eq '0' }).Count -ne 1 -or
+                  @($events | Where-Object { $_.phase -eq 'after-synchronous-SendMessage' }).Count -ne 1) {
+                throw "The exact synchronous SC_MOVE+2 call is not fully recorded: $($case.id)"
+              }
+            }
+            $status.observedCases = 7; $status.state = 'observed'; $status.stage = 'complete'
+            # An observed API response is evidence only, not a browser/VCL compatibility pass.
+          } catch {
+            if ($status.state -ne 'timed-out') { $status.state = 'failed' }
+            $status.error = $_.Exception.ToString(); throw
+          } finally {
+            if ($null -ne $process) {
+              try {
+                if (-not $process.HasExited) {
+                  # Terminate only this held Process object; never kill a PID tree.
+                  $process.Kill()
+                  if (-not $process.WaitForExit(10000)) { throw 'Owned beginMove process did not terminate.' }
+                }
+              } catch { $status.cleanupError = $_.Exception.ToString() }
+            }
+            $status.finishedAt = [DateTime]::UtcNow.ToString('o')
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          }
+      - name: Preserve source and exact observation hashes
+        if: always()
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE 'out/ci/native-window-move'
+          if (-not (Test-Path -LiteralPath $output)) { New-Item -ItemType Directory -Force $output | Out-Null }
+          $files = @(Get-ChildItem -LiteralPath $output -File | Sort-Object Name | ForEach-Object {
+            [ordered]@{ file = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+          })
+          [ordered]@{ schema = 1; sourceCommit = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID; runner = '${{ matrix.os }}'; files = $files } |
+            ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 (Join-Path $output 'manifest.json')
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: native-window-move-${{ matrix.os }}-${{ github.run_attempt }}
+          path: out/ci/native-window-move/
+          if-no-files-found: error
+          retention-days: 14
