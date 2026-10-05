@@ -265,6 +265,10 @@ export class WorkerWindowSurfaces implements Renderer {
   private gpu?: WindowGpuPool
   private disposed = false
 
+  windowSurfaceEpoch(windowId: number): number | undefined {
+    return this.disposed ? undefined : this.windows.get(windowId)?.identity.surfaceEpoch
+  }
+
   constructor(
     private readonly port: MessagePort,
     private readonly generation: number,

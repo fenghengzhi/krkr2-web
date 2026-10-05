@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-06 准备 [099 Window 文件拖放与窗口回归](decisions/099-window-file-drop.md)：真实文件／目录能力经过 DOM FIFO、Worker 和 Session，投递逆序真实 TJS Array；新增会话只读资源树、空目录、按需归档、取消及容量预留。修复 popup 期间旧 mouseleave 覆盖新脚本光标，并校准历史窗口／像素夹具。协议 **39**，TJS ABI **5**、字体 ABI **2**。本批尚待 GitHub-hosted Actions 执行，整体非插件目标保持 active。
+
+099 冻结回收 **37 个原 ZIP、858,611,351 字节**，全部 API SHA-256／大小匹配。097 终态 failure：Node **3,225/3,257 pass，32 failure**；主浏览器 **1,938 pass、379 failure、155 未报告**；原 KAG **96/96**、直接运行时 **6/6 failure**。098 的 run 返回 queued，分别取得的 jobs 包含 7 success、18 running、3 queued；build 已成功，主应用报告尚缺，保留非原子快照差异。下轮补取，不实时刷新；以下保留历史批次当时的状态。
+
 最新待核验批次：[Full test suite 37335381893](https://github.com/fenghengzhi/krkr2-web/actions/runs/37335381893)，精确提交 `a9e3f97802392a374a9d07e5f5c6887fc30521a1`。098 的 63 个文件已整批推送，新增 **36 个 Node、每浏览器 5 个定义**。首次唯一查询为 **pending／conclusion=null**，仅确认提交和运行身份；下轮补取 097 后续原件并回收本批固定结果，不实时监控，没有本地执行验证，整体目标保持 active。
 
 2026-10-05 准备 [098 按访问打开归档与回归修复](decisions/098-lazy-archives-and-regressions.md)：归档索引改为按访问打开、64 容器成功 LRU、完整 AutoPath 重建和异步目录选择；修复窗口清理读取已退休几何，以及同步更新／宿主 Pad 的重复画面提交。协议 **38**。所有新改动尚待 GitHub-hosted Actions 验证，整体非插件目标保持 active。

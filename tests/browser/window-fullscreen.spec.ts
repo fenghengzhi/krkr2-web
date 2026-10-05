@@ -14,6 +14,7 @@ guarded.add(guardedImage);
 var secondary=null,secondaryImage=null,guardErrors=[];
 var enter=new MenuItem(guarded,"Enter fullscreen and check");guarded.menu.add(enter);
 var child=new MenuItem(guarded,"Ordinary child");guarded.menu.add(child);
+guarded.setInnerSize(160,96);
 function guardedGeometry(){
   return [guarded.width,guarded.height,guarded.innerWidth,guarded.innerHeight,
     guarded.left,guarded.top,guarded.minWidth,guarded.minHeight,guarded.maxWidth,
@@ -74,19 +75,22 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
   const variant = `${backend}/${binary ? 'bytecode' : 'source'}`
   test(`${variant}: fullscreen rejects script geometry and root-menu writes, while a real exit restores writable geometry`, async ({ page }, info) => {
     test.setTimeout(90000)
+    await page.setViewportSize({ width: 1280, height: 900 })
     const game = await launchWindowAttention(page, backend, binary, source), failures: unknown[] = []
     try {
       await game.surface('Fullscreen contract').getByRole('button', { name: 'Enter fullscreen and check', exact: true }).click()
       const surface = game.surface('Fullscreen permitted caption')
       await expect(surface).toHaveClass(/game-window-fullscreen/)
       await expect(page.locator('#logs')).toContainText('fullscreen-guards=11:1')
-      await expect(surface.locator('canvas')).toHaveJSProperty('width', 160)
-      await expect(surface.locator('canvas')).toHaveJSProperty('height', 96)
+      // Fullscreen fits the requested 160:96 inner aspect into the actual
+      // 1280x900 desktop. Its rendered backing is the 1280x768 viewport.
+      await expect(surface.locator('canvas')).toHaveJSProperty('width', 1280)
+      await expect(surface.locator('canvas')).toHaveJSProperty('height', 768)
       await expect(surface.getByRole('button', { name: 'Ordinary child', exact: true })).toBeVisible()
       await info.attach('fullscreen-rejected-script-writes', { body: await page.screenshot(), contentType: 'image/png' })
       await surface.getByRole('button', { name: '退出全屏', exact: true }).click()
       await expect(surface).not.toHaveClass(/game-window-fullscreen/)
-      await evaluate(page, '(function(){guarded.setInnerSize(180,108);guarded.setPos(32,36);guarded.innerSunken=true;guarded.menu.visible=false;return guarded.innerWidth+","+guarded.innerHeight+","+guarded.left+","+guarded.top+","+int(guarded.innerSunken)+","+int(guarded.menu.visible)+","+int(guarded.fullScreen);})()', '180,108,32,36,1,0,0')
+      await evaluate(page, '(function(){guarded.innerSunken=true;guarded.menu.visible=false;guarded.setInnerSize(180,108);guarded.setPos(32,36);return guarded.innerWidth+","+guarded.innerHeight+","+guarded.left+","+guarded.top+","+int(guarded.innerSunken)+","+int(guarded.menu.visible)+","+int(guarded.fullScreen);})()', '180,108,32,36,1,0,0')
       await expect(surface.locator('canvas')).toHaveJSProperty('width', 180)
       await expect(surface.locator('canvas')).toHaveJSProperty('height', 108)
       await expect(surface.getByRole('button', { name: 'Ordinary child', exact: true })).toBeHidden()

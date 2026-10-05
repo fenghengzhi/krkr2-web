@@ -32,6 +32,9 @@ item.onClick=function(){global.selectedCount++;global.mark("click:"+global.resul
 var more=new MenuItem(parent,"Second popup"),other=new MenuItem(parent,"Select second");
 parent.menu.add(more);more.add(other);
 other.onClick=function(){global.mark("unexpected-second-click");};
+// Menu chrome consumes the outer window's client height. Establish the intended
+// drawable area after both menus exist, before exercising the real pointer.
+parent.setInnerSize(180,100);
 function tick(){
   clock.enabled=false;timerCount++;mark("timer:"+result);
   if(flow=="window"){
@@ -78,6 +81,8 @@ async function launch(page: Page, backend: string, binary: boolean, flow = 'sele
     child,
     popup,
     async open() {
+      await expect(parent.locator('canvas[data-window-id]')).toHaveJSProperty('width', 180)
+      await expect(parent.locator('canvas[data-window-id]')).toHaveJSProperty('height', 100)
       await parent.locator('canvas[data-window-id]').click({ position: { x: 90, y: 50 } })
       await expect(page.getByText('popup-proof:before', { exact: true })).toBeVisible()
       await expect(page.getByText('popup-proof:timer:-1', { exact: true })).toBeVisible()

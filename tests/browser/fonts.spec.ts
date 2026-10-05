@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { injectActivity, visibility } from '../helpers/activity-browser.ts'
+import { pointerPixel } from '../helpers/pointer-pixel.ts'
 const file = async (name: string) => ({
   name,
   mimeType: 'application/octet-stream',
@@ -76,7 +77,8 @@ var last="";w.onKeyDown=function(){last=a.cursorX+","+a.cursorY;};System.eventDi
     const box = (await canvas.boundingBox())!
     await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.25)
     await page.keyboard.down('a') // Its script delivery remains pending.
-    await page.mouse.move(box.x + box.width * (90.5 / 120), box.y + box.height * (60.5 / 80))
+    const position = await pointerPixel(canvas, 90, 60)
+    await page.mouse.move(position.x, position.y)
     await page.keyboard.up('a')
     await evaluate(page, 'a.cursorX+","+a.cursorY', '90,60')
     await evaluate(page, 'System.eventDisabled=false', '0')

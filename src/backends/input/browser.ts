@@ -224,7 +224,7 @@ export class BrowserInput {
       },
       options,
     )
-    canvas.addEventListener('mouseleave', () => this.push({ type: 'leave' }), options)
+    canvas.addEventListener('mouseleave', (event) => this.leave(event), options)
     canvas.addEventListener('contextmenu', (event) => event.preventDefault(), options)
     canvas.addEventListener(
       'click',
@@ -677,6 +677,34 @@ export class BrowserInput {
       this.clicks.delete(button)
     }
   }
+  private leave(event: MouseEvent): void {
+    if (this.suspended || this.disposed || this.hostMoving) return
+    const point = this.point(event.clientX, event.clientY), screen = this.screenEvent(event)
+    this.physicalCursor = undefined
+    // Like movement, a real departure is observed before its callback waits on
+    // an earlier input (for example a synchronous TJS popup). A later script
+    // cursor write can then identify this queued leave as an older observation.
+    const pointerSequence = this.observePointer(point.x, point.y, screen.physicalScreen)
+    if (pointerSequence !== undefined) this.push({ type: 'leave', pointerSequence, ...screen })
+  }
+  private observePointer(x: number, y: number, screen?: PhysicalPointerScreen): number | undefined {
+    this.retireVirtualCursor()
+    if (!Number.isSafeInteger(this.cursorState.physicalSequence + 1)) {
+      this.error(new Error('Physical pointer sequence exhausted'))
+      return undefined
+    }
+    const sequence = ++this.cursorState.physicalSequence
+    this.cursorAppearance()
+    if (this.shared) this.shared.pointer(x, y, sequence, screen)
+    else {
+      const epoch = this.epoch
+      // Physical observation must bypass a packet waiting on TJS/event delivery.
+      void this.sendPointer(x, y, sequence, screen).catch((error) => {
+        if (!this.disposed && epoch === this.epoch) this.error(error)
+      })
+    }
+    return sequence
+  }
   private touch(event: PointerEvent): void {
     if (this.suspended || this.disposed || this.hostMoving) return
     if (event.type === 'pointerdown') this.captured.add(event.pointerId)
@@ -875,28 +903,16 @@ export class BrowserInput {
       packet.type === 'up' ||
       packet.type === 'wheel'
     ) {
-      this.retireVirtualCursor()
-      if (!Number.isSafeInteger(this.cursorState.physicalSequence + 1)) {
-        this.error(new Error('Physical pointer sequence exhausted'))
-        return
-      }
-      const sequence = ++this.cursorState.physicalSequence
+      const capturedPoint = this.view && paintBoxPoint(this.view, packet.x, packet.y),
+        sequence = this.observePointer(packet.x, packet.y, packet.physicalScreen)
+      if (sequence === undefined) return
       // VCL captures PaintBox-relative integers before the Window callback.
       // Preserve this origin snapshot while the packet waits behind earlier
       // input; raw coordinates still feed physical observation and takeover.
       packet = {
         ...packet,
         pointerSequence: sequence,
-        ...(this.view ? { paintBoxPoint: paintBoxPoint(this.view, packet.x, packet.y) } : {}),
-      }
-      this.cursorAppearance()
-      if (this.shared) this.shared.pointer(packet.x, packet.y, sequence, packet.physicalScreen)
-      else {
-        const epoch = this.epoch
-        // Physical observation must bypass a packet waiting on TJS/event delivery.
-        void this.sendPointer(packet.x, packet.y, sequence, packet.physicalScreen).catch((error) => {
-          if (!this.disposed && epoch === this.epoch) this.error(error)
-        })
+        ...(capturedPoint ? { paintBoxPoint: capturedPoint } : {}),
       }
     }
     if (packet.type === 'leave' || packet.type === 'cancel') {

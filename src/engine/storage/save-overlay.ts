@@ -14,6 +14,7 @@ export class SaveOverlay {
   constructor(
     private readonly store: SaveStore,
     private readonly changed?: (path: string) => void,
+    private readonly assertWritable?: (path: string) => void,
   ) {}
   private replace(path: string, bytes: Uint8Array): void {
     const owned = bytes.slice()
@@ -62,6 +63,7 @@ export class SaveOverlay {
   }
   private writeFile(path: string, bytes: Uint8Array, gameWrite: boolean): void {
     const name = storageWritePath(path)
+    this.assertWritable?.(name)
     let size = bytes.length
     for (const [existing, value] of this.files) if (existing !== name) size += value.length
     if (size > 64 * 1024 * 1024)
@@ -102,7 +104,9 @@ export class SaveOverlay {
     // Validate a complete backup before mutating the running overlay.
     const normalized = files.map(({ path, bytes }) => {
       if (path.includes('>')) throw new Error('Archive storage is read-only')
-      return { path: normalizePath(path), bytes: bytes.slice() }
+      const name = normalizePath(path)
+      this.assertWritable?.(name)
+      return { path: name, bytes: bytes.slice() }
     })
     const names = new Set(normalized.map((file) => file.path))
     if (names.size !== normalized.length) throw new Error('Duplicate file in save backup')

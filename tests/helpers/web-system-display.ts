@@ -16,11 +16,13 @@ interface DisplayPacket {
 interface DisplayObservation {
   packets: DisplayPacket[]
   activeObserverTargets: string[][]
+  scopedObserverTargets: Array<{ owner: string; targets: string[] }>
 }
 declare global {
   interface Window {
     systemDisplayEmbeddings?: DisplayEmbedding[]
     systemDisplayObservation(): DisplayObservation
+    systemDisplayObserverScope(owner?: string): void
     sendRawSystemDisplay(
       worker: number,
       generation: number,
@@ -42,11 +44,14 @@ export async function observeSystemDisplay(page: Page) {
         }
       >(),
       targets = new Map<ResizeObserver, Set<Element>>(),
+      owners = new Map<ResizeObserver, string>(),
       NativeWorker = window.Worker,
       nativePost = NativeWorker.prototype.postMessage,
       nativeObserve = ResizeObserver.prototype.observe,
       nativeUnobserve = ResizeObserver.prototype.unobserve,
       nativeDisconnect = ResizeObserver.prototype.disconnect
+    let owner: string | undefined
+    window.systemDisplayObserverScope = (value) => { owner = value }
     window.Worker = new Proxy(NativeWorker, {
       construct(target, args, newTarget) {
         const worker = Reflect.construct(target, args, newTarget) as Worker
@@ -76,6 +81,7 @@ export async function observeSystemDisplay(page: Page) {
           observed = targets.get(receiver) ?? new Set<Element>()
         observed.add(args[0] as Element)
         targets.set(receiver, observed)
+        if (owner !== undefined) owners.set(receiver, owner)
         return result
       },
     })
@@ -98,6 +104,9 @@ export async function observeSystemDisplay(page: Page) {
       activeObserverTargets: [...targets.values()]
         .filter((set) => set.size > 0)
         .map((set) => [...set].map((element) => element.id)),
+      scopedObserverTargets: [...targets]
+        .filter(([observer, set]) => owners.has(observer) && set.size > 0)
+        .map(([observer, set]) => ({ owner: owners.get(observer)!, targets: [...set].map((element) => element.id) })),
     })
     // Replay the observed RPC envelope only for the explicit stale-generation
     // and stale-revision fixtures. Native Worker dispatch and acknowledgments
@@ -182,14 +191,16 @@ Debug.message("system-display:ready");
               configured = value
             },
             onError: (error) => errors.push(String(error)),
-          },
-          player = createPlayer(
-            canvas,
-            () => {},
-            () => {},
-            false,
-            options,
-          )
+          }
+        // Observe synchronous Player construction separately from later Window
+        // surface observers. Fixed System metrics forbid display observers,
+        // while live game chrome still requires its own ResizeObservers.
+        window.systemDisplayObserverScope(`player:${index}`)
+        let player: ReturnType<typeof createPlayer>
+        try { player = createPlayer(canvas, () => {}, () => {}, false, options) }
+        finally { window.systemDisplayObserverScope() }
+        const displayObservers = window.systemDisplayObservation().scopedObserverTargets
+          .filter((entry) => entry.owner === `player:${index}`).length
         window.systemDisplayEmbeddings.push({ player, root, desktop, errors })
         if (supplied) {
           supplied.screenWidth = 7
@@ -215,6 +226,7 @@ Debug.message("system-display:ready");
             header: Array.from(bytes.subarray(0, 4)),
           })),
           reads,
+          displayObservers,
           canvasReparented: canvas.parentElement !== initialParent,
           errors: [...errors],
         })

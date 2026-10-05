@@ -130,7 +130,9 @@ for (const backend of ['asyncify','jspi']) for (const binary of [false,true]) {
 
       // Explicit untrusted DOM negative controls, separate from the real browser
       // mouse above: client-only delta must fail to restore; screen-only must work.
-      const control = { clientX: point.x + 10, clientY: point.y + 9, screenX: baseline.screenX, screenY: baseline.screenY }
+      // MouseEvent stores these client fields as integers. Keep the controls
+      // explicitly representable while independently varying the screen field.
+      const control = { clientX: Math.round(point.x + 10), clientY: Math.round(point.y + 9), screenX: baseline.screenX, screenY: baseline.screenY }
       await canvas.evaluate((node, coordinates) => node.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, ...coordinates })), control)
       expect(await state(page)).toBe(1)
       await canvas.evaluate((node, coordinates) => node.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, ...coordinates, screenX: coordinates.screenX + 1 })), control)

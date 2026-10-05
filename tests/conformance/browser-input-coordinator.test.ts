@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BrowserInputCoordinator } from '../../src/backends/input/coordinator.ts'
+import { BrowserInputCoordinator, type BrowserInputCoordinatorOptions } from '../../src/backends/input/coordinator.ts'
+import type { BrowserDropTree } from '../../src/protocol/storage-drop.ts'
 import type { InputPacket, InputView, PhysicalPointerScreen } from '../../src/engine/ports/input.ts'
 import { WindowState } from '../../src/engine/scene/window.ts'
 import type { BrowserGamepadSource } from '../../src/backends/input/gamepad-browser.ts'
@@ -208,6 +209,7 @@ function fixture(
   transient?: (target: EventTarget | null) => boolean,
   gamepad: BrowserGamepadSource | false = false,
   mouseKeyClock?: MouseKeyClock,
+  dropFiles?: BrowserInputCoordinatorOptions['dropFiles'],
 ) {
   const env = dom(),
     packets: InputPacket[] = [],
@@ -226,7 +228,7 @@ function fixture(
         pointers.push([x, y, id])
       },
       (error) => errors.push(error),
-      { isTransientFocus: transient, gamepad, mouseKeyClock },
+      { isTransientFocus: transient, gamepad, mouseKeyClock, dropFiles },
     ),
     a = env.canvas(),
     b = env.canvas(),
@@ -300,6 +302,67 @@ test('menu cursor override preserves logical changes and is scoped to a visible 
     f.coordinator.setMenuActive(202, 1, false)
     assert.equal(f.b.style.cursor, 'none')
     f.coordinator.close(); f.coordinator.setMenuActive(202, 1, true)
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
+
+const dropTree = (): BrowserDropTree => ({ roots: [{ name: 'one.txt', kind: 'file' }],
+  entries: [{ root: 0, path: '', kind: 'file', source: new Blob(['one']) }] })
+
+test('directory acquisition, inactive Window drop and later physical input share one non-coalescing FIFO', { timeout: 30000 }, async () => {
+  const order: string[] = [], gate = deferred(), tree = dropTree(),
+    f = fixture(async (packet) => { if (packet.type === 'down') order.push(`down:${packet.windowId}`) },
+      false, undefined, false, undefined, async (identity, payload) => {
+        assert.equal(payload, tree); order.push(`drop:${identity.windowId}:${identity.sequence}`); return true
+      })
+  try {
+    f.coordinator.setWindow(101, { ...new WindowState().view(), visible: true, focusable: false })
+    f.coordinator.setWindow(202, { ...new WindowState().view(), visible: true })
+    f.b.focus(); await settle()
+    assert.equal(f.coordinator.queueFileDrop(101, 1, async () => { order.push('acquire'); await gate.promise; return tree }), true)
+    f.mouse(f.b, 'mousedown', 1, 10)
+    assert.equal(f.coordinator.queueFileDrop(101, 1, async () => tree), true)
+    await settle(); assert.deepEqual(order, ['acquire'])
+    gate.resolve(); await settle(); await settle()
+    assert.deepEqual(order, ['acquire', 'drop:101:1', 'down:202', 'drop:101:2'])
+    assert.deepEqual(f.errors, [])
+  } finally { gate.resolve(); f.close() }
+})
+
+test('retiring a drop surface cancels directory acquisition and lets another Window input continue', { timeout: 30000 }, async () => {
+  const gate = deferred(), tree = dropTree(), received: number[] = [],
+    f = fixture(undefined, false, undefined, false, undefined, async (identity) => { received.push(identity.sequence); return true })
+  let signal: AbortSignal | undefined
+  try {
+    f.coordinator.setWindow(101, { ...new WindowState().view(), visible: true })
+    f.coordinator.setWindow(202, { ...new WindowState().view(), visible: true })
+    f.coordinator.queueFileDrop(101, 1, async (current) => { signal = current; await gate.promise; return tree })
+    await settle()
+    f.coordinator.detach(101, 1)
+    f.mouse(f.b, 'mousedown', 1, 10)
+    await settle()
+    assert.equal(signal?.aborted, true)
+    assert.equal(f.packets.some((packet) => packet.type === 'down' && packet.windowId === 202), true)
+    assert.equal(f.coordinator.queueFileDrop(101, 1, async () => tree), false)
+    gate.reject(new Error('Late provider failure')); await settle()
+    assert.deepEqual(received, []); assert.deepEqual(f.errors, [])
+  } finally { gate.resolve(); f.close() }
+})
+
+test('an in-flight drop RPC receives cancellation when its visible Window becomes blocked', { timeout: 30000 }, async () => {
+  let signal: AbortSignal | undefined
+  const f = fixture(undefined, false, undefined, false, undefined, async (_identity, _tree, current) => {
+    signal = current
+    return new Promise<boolean>((resolve) => current.addEventListener('abort', () => resolve(false), { once: true }))
+  })
+  try {
+    const view = { ...new WindowState().view(), visible: true }
+    f.coordinator.setWindow(101, view)
+    f.coordinator.queueFileDrop(101, 1, async () => dropTree())
+    await settle(); assert.equal(signal?.aborted, false)
+    f.coordinator.setWindow(101, { ...view, blocked: true })
+    await settle(); assert.equal(signal?.aborted, true)
+    assert.equal(f.coordinator.canDropFiles(101, 1), false)
     assert.deepEqual(f.errors, [])
   } finally { f.close() }
 })
@@ -2172,4 +2235,49 @@ test('measured viewport coordinates drive physical input and IME independently o
     assert.equal(f.textareas[0]!.style.top, '9px')
     assert.deepEqual(f.errors, [])
   } finally { f.close() }
+})
+
+test('a real leave observes position before a blocked popup input completes and carries its original sequence', { timeout: 30000 }, async () => {
+  const env = dom(), canvas = env.canvas(), root = env.canvas(), gate = deferred(),
+    packets: InputPacket[] = [], observations: { x: number; y: number; sequence?: number }[] = [],
+    errors: unknown[] = [], coordinator = new BrowserInputCoordinator(async (packet) => {
+      packets.push(packet)
+      if (packet.type === 'keyDown' && packet.key === 120) await gate.promise
+    }, async () => {}, (x, y, _id, sequence) => { observations.push({ x, y, sequence }) },
+    (error) => errors.push(error), { gamepad: false }),
+    markers = () => root.children.filter((node) => node.className === 'game-virtual-cursor' && !node.removed)
+  root.append(canvas)
+  try {
+    coordinator.attach(101, 1, canvas as unknown as HTMLCanvasElement)
+    coordinator.setWindow(101, { ...new WindowState().view(), visible: true })
+    coordinator.setInput(101, inputView({ cursor: -3,
+      virtualCursor: { x: 40, y: 30, revision: 1, basePhysicalSequence: 0 } }))
+    canvas.focus(); await settle()
+    env.dispatch(env.textareas[0]!, 'keydown', { key: 'F9', code: 'F9', keyCode: 120,
+      shiftKey: false, ctrlKey: false, altKey: false, repeat: false, isComposing: false })
+    await settle()
+    assert.equal(packets.at(-1)?.type, 'keyDown')
+    coordinator.setMenuActive(101, 1, true)
+    env.mouse(canvas, 'mouseleave', 0, 810)
+    assert.deepEqual(observations, [{ x: 810, y: 10, sequence: 1 }])
+    assert.equal(packets.some((packet) => packet.type === 'leave'), false,
+      'The popup input still owns the transport; physical observation does not wait for it')
+    coordinator.setInput(101, inputView({ cursor: -4,
+      virtualCursor: { x: 50, y: 35, revision: 2, basePhysicalSequence: 1 } }))
+    gate.resolve(); await settle()
+    const leave = packets.find((packet) => packet.type === 'leave')
+    assert.ok(leave)
+    assert.equal(leave.pointerSequence, 1, 'Queued leave retains the pre-script-write observation')
+    coordinator.setMenuActive(101, 1, false)
+    assert.equal(markers().length, 1)
+    assert.equal(markers()[0]!.dataset.cursorRevision, '2')
+    assert.equal(markers()[0]!.dataset.cursorShape, 'text')
+    env.mouse(canvas, 'mouseleave', 0, 820)
+    assert.deepEqual(observations.at(-1), { x: 820, y: 10, sequence: 2 })
+    assert.equal(markers().length, 0, 'A later real departure retires the new virtual revision')
+    await settle()
+    assert.equal(packets.at(-1)?.type, 'leave')
+    assert.equal(packets.at(-1)?.pointerSequence, 2)
+    assert.deepEqual(errors, [])
+  } finally { gate.resolve(); coordinator.close(); env.restore() }
 })

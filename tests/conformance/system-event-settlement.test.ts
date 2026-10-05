@@ -242,6 +242,27 @@ test('queue budget rejection keeps new ownership with the caller and replacement
   assert.equal(rejectedHook, 0)
 })
 
+test('transactional admission reservations protect capacity without becoming runnable or retaining script values', async (t) => {
+  const h = setup(), baseline = h.leases.size,
+    releases = Array.from({ length: 65536 }, () => h.events.reserveAdmission()),
+    prepare = (): HostReply => ({ kind: 'value', value: undefined })
+  t.after(h.cleanup)
+  assert.equal(h.events.hasDispatchableWork(), false)
+  assert.equal(h.leases.size, baseline)
+  assert.equal(h.wakes.size, 0)
+  assert.throws(() => h.events.enqueue(prepare), /Event queue budget exceeded/)
+  assert.throws(() => h.events.reserveAdmission(), /Event queue budget exceeded/)
+  // A failed resource transaction releases exactly its own slot.
+  releases[0]!(); releases[0]!()
+  h.track(h.events.enqueue(prepare).completion)
+  assert.throws(() => h.events.enqueue(prepare), /Event queue budget exceeded/)
+  releases[1]!()
+  h.track(h.events.enqueue(prepare).completion)
+  h.events.dispose()
+  for (const release of releases) { release(); release() }
+  assert.throws(() => h.events.reserveAdmission(), { name: 'AbortError' })
+})
+
 test('source cancellation detaches its batch before hooks post or cancel more work', async (t) => {
   const h = setup()
   t.after(h.cleanup)

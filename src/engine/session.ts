@@ -24,6 +24,7 @@ import {
   type ScriptValue,
 } from './script/runtime.ts'
 import { StorageResolver } from './storage/resolver.ts'
+import { DropStorage } from './storage/drop.ts'
 import { copyGameProject, type GameProject } from './storage/project.ts'
 import {
   chopStorageExt,
@@ -50,6 +51,8 @@ import type { ArchiveReader, Inflater, Resource } from './ports/storage.ts'
 import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts'
 import { SaveOverlay } from './storage/save-overlay.ts'
 import { StorageSelector, normalizeSelectorPath } from './storage/selector.ts'
+import type { DropResourceTree } from './ports/storage-drop.ts'
+import type { WindowFileDropIdentity } from './ports/window-file-drop.ts'
 import { modeOffset } from '../formats/text/stream.ts'
 import { parseStreamMode, parseTextWriterMode, type StreamMode } from '../formats/text/mode.ts'
 import { ScriptEvents } from './scheduler/events.ts'
@@ -288,6 +291,7 @@ export class EngineSession {
   readonly control = new ExecutionControl()
   private readonly queue = new SerialQueue()
   private readonly storage: StorageResolver
+  private readonly dropped: DropStorage
   private readonly project?: GameProject
   private readonly images = new ImageLoader(
     (name) => this.findResource(name),
@@ -357,6 +361,9 @@ export class EngineSession {
   private pads?: PadService
   private clipboardBusy = 0
   private windowInputGeneration = 0
+  private readonly fileDropSequences = new Map<number, number>()
+  private readonly pendingFileDrops = new Map<string, { windowId: number; cancelled: boolean; cancelWait(): void }>()
+  private readonly fileDropReceiptReservations = new Set<object>()
   private modalWakeup?: () => void
   private detachPendingEvents?: () => void
   private checkpointCallbacks?: CheckpointCallbacks
@@ -501,7 +508,9 @@ export class EngineSession {
     this.saves = new SaveOverlay(deps.saveStore ?? new MemorySaveStore(), (path) => {
       this.images.invalidate(path)
       this.storage.invalidateSearch()
-    })
+    }, (path) => this.storage.assertWritable(path))
+    this.dropped = new DropStorage(this.storage, () => this.saves.list().map((file) => file.name),
+      async () => { this.control.check(); await deps.yieldToHost(); this.control.check() })
     this.diagnostics = new DebugLog(this.saves, deps.wallNow ?? Date.now, (entry) =>
       deps.event({ type: 'log', level: entry.level, text: entry.text }),
     )
@@ -512,6 +521,10 @@ export class EngineSession {
       (text) => this.log(text),
     )
     this.control.onCancel(() => {
+      for (const drop of this.pendingFileDrops.values()) { drop.cancelled = true; drop.cancelWait() }
+      this.pendingFileDrops.clear()
+      this.fileDropReceiptReservations.clear()
+      this.fileDropSequences.clear()
       // Revoke tickets and wake modal waits before any device/user cleanup
       // can throw. Preserve those failures for the terminal stop result.
       this.cancelEventReceipts(new ExecutionCancelled())
@@ -535,6 +548,7 @@ export class EngineSession {
         () => this.windowUpdates.finish(),
         () => { this.physicalScreen = undefined; this.hiddenCursorPositions.clear() },
         () => this.images.dispose(),
+        () => this.dropped.dispose(),
         () => this.storage.dispose(),
         () => this.closeCursors(),
         () => this.closeWindowRegions(),
@@ -796,6 +810,10 @@ export class EngineSession {
           }
         },
         async (window) => {
+          this.fileDropSequences.delete(window.id)
+          for (const drop of this.pendingFileDrops.values()) if (drop.windowId === window.id) {
+            drop.cancelled = true; drop.cancelWait()
+          }
           this.hiddenCursorPositions.delete(window.id)
           this.windowUpdates.remove(window.id)
           this.geometryRequests.delete(window.id)
@@ -824,6 +842,7 @@ export class EngineSession {
           await this.videos?.flushCloses()
         },
         (window) => {
+          this.fileDropSequences.delete(window.id)
           this.windowUpdates.remove(window.id)
           this.geometryRequests.delete(window.id)
           this.geometrySignatures.delete(window.id)
@@ -1886,8 +1905,11 @@ export class EngineSession {
     prepare: () => HostReply,
     options: EventOptions,
     delivery?: { release(): void; before(): readonly number[] },
+    receiptReservation?: object,
   ): SessionAdmission {
-    if (!delivery && this.eventReceipts.size >= 65536)
+    const reserved = receiptReservation !== undefined && this.fileDropReceiptReservations.delete(receiptReservation)
+    if (receiptReservation !== undefined && !reserved) throw new ExecutionCancelled()
+    if (!delivery && !reserved && this.eventReceipts.size + this.fileDropReceiptReservations.size >= 65536)
       throw new Error('Event receipt budget exceeded')
     let resolve!: () => void, reject!: (error: unknown) => void
     const completion = new Promise<void>((yes, no) => {
@@ -1959,7 +1981,8 @@ export class EngineSession {
     try {
       // A video already owns its callback. Even preparation or budget failure
       // must transfer that lease into a native-fenced failed receipt.
-      if (this.eventReceipts.size > 65536) throw new Error('Event receipt budget exceeded')
+      if (!reserved && this.eventReceipts.size + this.fileDropReceiptReservations.size > 65536)
+        throw new Error('Event receipt budget exceeded')
       receipt.frameWindows = (delivery?.before() ?? []).flatMap((id) => {
         const window = this.registeredWindow(id)
         return window ? [window] : []
@@ -2449,11 +2472,72 @@ export class EngineSession {
     for (const source of this.windows?.registered() ?? []) this.keyboardRoute(source)
   }
   private stalePointerMove(packet: InputPacket, windowId: number): boolean {
-    if (packet.type !== 'move' || packet.pointerSequence === undefined) return false
+    // Leave also changes the last-hit cursor. Its physical observation may
+    // precede a script cursor write while delivery waits behind a popup.
+    if ((packet.type !== 'move' && packet.type !== 'leave') || packet.pointerSequence === undefined) return false
     const sequence = packet.pointerSequence,
       cursor = this.currentVirtualCursor(windowId)
     return sequence < (this.physicalPointerSequences.get(windowId) ?? 0) ||
       (!!cursor && sequence <= cursor.view.basePhysicalSequence)
+  }
+  async acceptFileDrop(identity: WindowFileDropIdentity, tree: DropResourceTree): Promise<SessionAdmission> {
+    if (!identity || !Number.isSafeInteger(identity.windowId) || identity.windowId < 1 ||
+        !Number.isSafeInteger(identity.surfaceEpoch) || identity.surfaceEpoch < 0 ||
+        !Number.isSafeInteger(identity.sequence) || identity.sequence < 1)
+      throw new Error('Invalid file drop identity')
+    let cancelWait!: () => void
+    const cancelled = new Promise<null>((resolve) => { cancelWait = () => resolve(null) }),
+      pending = { windowId: identity.windowId, cancelled: false, cancelWait },
+      key = `${identity.windowId}:${identity.surfaceEpoch}:${identity.sequence}`,
+      window = this.registeredWindow(identity.windowId), generation = this.windowInputGeneration,
+      surfaceEpoch = () => this.deps.renderer.windowSurfaceEpoch
+        ? this.deps.renderer.windowSurfaceEpoch(identity.windowId) : 0,
+      valid = () => !!window && !pending.cancelled && !this.control.cancelled && this.state === 'running' &&
+        this.activity.state === 'visible' && !this.fontSelection.active &&
+        this.registeredWindow(window.id) === window && window.state.visible &&
+        !this.windowModals?.blocked(window.id) && generation === this.windowInputGeneration &&
+        surfaceEpoch() === identity.surfaceEpoch
+    if (!valid() || !window || identity.sequence <= (this.fileDropSequences.get(window.id) ?? 0))
+      return ignoredAdmission()
+    // A sequence prevents replay; a later distinct drop does not revoke an
+    // earlier one. Native WM_DROPFILES events are not coalesced.
+    this.fileDropSequences.set(window.id, identity.sequence)
+    if (this.eventReceipts.size + this.fileDropReceiptReservations.size >= 65536)
+      throw new Error('Event receipt budget exceeded')
+    const releaseQueue = this.systemEvents!.reserveAdmission()
+    this.fileDropReceiptReservations.add(pending)
+    this.pendingFileDrops.set(key, pending)
+    try {
+      const result = await Promise.race([this.commitDroppedResources(tree, valid).then((names) => ({ names })), cancelled])
+      if (!result || !valid()) return ignoredAdmission()
+      const { names } = result
+      let lease: ScriptObject | undefined
+      // Consume both pre-reserved slots synchronously. No other input or
+      // Timer can occupy them between namespace commit and event admission.
+      releaseQueue()
+      return this.acceptEvent(() => {
+        lease = this.runtime!.upgrade(window.owner)
+        return lease ? { kind: 'invoke', callback: lease, member: 'onFileDrop',
+          args: [scriptList([...names].reverse())] } : { kind: 'value', value: undefined }
+      }, {
+        priority: 1, source: window, valid,
+        // eventDisabled delays this input; it does not discard the file list.
+        discardable: false,
+        onSettled: () => { const owned = lease; lease = undefined; if (owned) this.runtime!.release(owned) },
+      }, undefined, pending)
+    } catch (error) { if (!valid()) return ignoredAdmission(); throw error }
+    finally {
+      releaseQueue()
+      this.fileDropReceiptReservations.delete(pending)
+      if (this.pendingFileDrops.get(key) === pending) this.pendingFileDrops.delete(key)
+    }
+  }
+  cancelFileDrop(identity: WindowFileDropIdentity): void {
+    if (!identity || !Number.isSafeInteger(identity.windowId) || identity.windowId < 1 ||
+        !Number.isSafeInteger(identity.surfaceEpoch) || identity.surfaceEpoch < 0 ||
+        !Number.isSafeInteger(identity.sequence) || identity.sequence < 1) return
+    const pending = this.pendingFileDrops.get(`${identity?.windowId}:${identity?.surfaceEpoch}:${identity?.sequence}`)
+    if (pending) { pending.cancelled = true; pending.cancelWait() }
   }
   acceptInput(packet: InputPacket, observe = true, additionalValid?: () => boolean): SessionAdmission {
     if (packet.type === 'popupHide')
@@ -3764,6 +3848,12 @@ export class EngineSession {
     await this.saves.import(files)
     this.notify()
   }
+  async commitDroppedResources(tree: DropResourceTree, valid: () => boolean): Promise<string[]> {
+    this.control.check()
+    const names = await this.dropped.commit(tree, valid)
+    this.control.check()
+    return names
+  }
   private async readResource(name: string): Promise<Uint8Array> {
     return (await this.resolveResource(name)).read()
   }
@@ -3782,10 +3872,15 @@ export class EngineSession {
   }
   private async storageWriteTarget(name: string, mode: StreamMode): Promise<string> {
     const requested = storageWritePath(name, this.project?.directory)
+    this.storage.assertWritable(requested)
     this.materializeLogs()
     if (mode.hasOffset || mode.append) {
       const existing = await this.findResource(toPublicStoragePath(requested))
-      if (existing) return storageWritePath(existing.name)
+      if (existing) {
+        const target = storageWritePath(existing.name)
+        this.storage.assertWritable(target)
+        return target
+      }
       // Append alone is a Web extension that may create a new file. An explicit
       // offset still selects UPDATE and requires a target, including ao0.
       if (mode.hasOffset) throw new Error(`Update target not found: ${name}`)
@@ -3793,7 +3888,11 @@ export class EngineSession {
       // Ordinary WRITE does not search auto paths, but must keep the spelling
       // of a direct existing target instead of creating a case-only shadow.
       const existing = this.saves.resource(requested) ?? this.storage.find(requested)
-      if (existing) return storageWritePath(existing.name)
+      if (existing) {
+        const target = storageWritePath(existing.name)
+        this.storage.assertWritable(target)
+        return target
+      }
     }
     return requested
   }
@@ -5400,6 +5499,7 @@ export class EngineSession {
       }
       case 'Layer.saveImage': {
         const path = storageWritePath(text(1), this.project?.directory)
+        this.storage.assertWritable(path)
         const id = number(0),
           layer = this.layers.get(id),
           bytes = await this.imageWriter.encode(

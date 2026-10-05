@@ -11,6 +11,8 @@ export interface Resource {
    * loose file: normal paths and registered auto paths take precedence, and
    * successful lookup returns the canonical archive resource/identity. */
   readonly aliasOf?: string
+  /** Runtime imports opt out of the legacy collection's bare archive aliases. */
+  readonly archiveAliases?: boolean
   /** Successfully indexed container; present even when the archive is empty. */
   readonly archiveKind?: 'xp3' | 'zip'
   /** Identity of these immutable bytes, without retaining the resource's input buffer. */

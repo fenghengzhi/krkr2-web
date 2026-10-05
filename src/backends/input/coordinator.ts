@@ -6,6 +6,8 @@ import type { CursorScene, SelectedCursorAsset } from './cursor.ts'
 import { BrowserGamepad, type BrowserGamepadSource } from './gamepad-browser.ts'
 import type { GamepadSample } from './gamepad.ts'
 import { MouseKeyTicker, type MouseKeyClock } from '../../engine/input/mouse-key.ts'
+import type { BrowserDropTree } from '../../protocol/storage-drop.ts'
+import type { WindowFileDropIdentity } from '../../engine/ports/window-file-drop.ts'
 
 interface SurfaceInput {
   readonly id: number
@@ -19,13 +21,18 @@ interface SurfaceInput {
   revision: number
   resumingFromModal: boolean
 }
-interface QueuedInput {
+type QueuedInput = {
   readonly surface: SurfaceInput
-  readonly packet: InputPacket
   readonly settled?: (admitted: boolean) => void
-}
+} & ({ readonly packet: InputPacket; readonly drop?: undefined } | {
+  readonly packet?: undefined
+  readonly drop: { readonly sequence: number; readonly abort: AbortController
+    readonly acquire: (signal: AbortSignal) => Promise<BrowserDropTree> }
+})
 
 export interface BrowserInputCoordinatorOptions {
+  /** Resource registration and event admission, not script callback completion. */
+  dropFiles?(identity: WindowFileDropIdentity, tree: BrowserDropTree, signal: AbortSignal): Promise<boolean>
   /** Observe the global screen point without moving any Window-local cursor. */
   screenPointer?(screen: PhysicalPointerScreen): Promise<void> | void
   /** Omit for the real browser Gamepad API. false disables device sampling. */
@@ -76,6 +83,7 @@ export class BrowserInputCoordinator {
   private generation = 0
   private focusVersion = 0
   private hostMoving = false
+  private nextDropSequence = 1
   private readonly cursorStates = new Map<number, BrowserCursorState>()
 
   constructor(
@@ -424,7 +432,7 @@ export class BrowserInputCoordinator {
       this.mouseOwner = undefined
       // Already admitted VM work retains its native lifetime. DOM work still
       // waiting for admission now belongs to the host's movement loop.
-      this.discardQueued((entry) => entry.packet.type !== 'activate' && entry.packet.type !== 'deactivate')
+      this.discardQueued((entry) => entry.packet?.type !== 'activate' && entry.packet?.type !== 'deactivate')
     }
     for (const surface of this.surfaces.values()) surface.input.setHostMoving(moving)
     this.syncMouseKeyTicker()
@@ -712,8 +720,46 @@ export class BrowserInputCoordinator {
   private discardQueued(matches: (entry: QueuedInput) => boolean): void {
     const discarded = this.queue.filter(matches)
     this.queue = this.queue.filter((entry) => !matches(entry))
-    for (const entry of discarded) entry.settled?.(false)
-    if (this.sendingEntry && matches(this.sendingEntry)) this.sendingEntry.settled?.(false)
+    for (const entry of discarded) { entry.drop?.abort.abort(); entry.settled?.(false) }
+    if (this.sendingEntry && matches(this.sendingEntry)) {
+      this.sendingEntry.drop?.abort.abort()
+      this.sendingEntry.settled?.(false)
+    }
+  }
+  canDropFiles(windowId: number, epoch: number): boolean {
+    const surface = this.surfaces.get(windowId)
+    return !!this.options.dropFiles && !!surface && surface.epoch === epoch && this.current(surface) &&
+      surface.visible && !surface.blocked && !this.suspended && !this.hostMoving
+  }
+  /** Capture DOM file capabilities before this call. Enumeration occupies the
+   * same FIFO slot as input, so a later click cannot overtake a slow directory. */
+  queueFileDrop(windowId: number, epoch: number,
+    acquire: (signal: AbortSignal) => Promise<BrowserDropTree>, settled?: (admitted: boolean) => void): boolean {
+    if (!this.canDropFiles(windowId, epoch)) { settled?.(false); return false }
+    if (!Number.isSafeInteger(this.nextDropSequence)) throw new Error('File drop sequence exhausted')
+    if (this.queue.length >= 256) throw new Error('Input queue budget exceeded')
+    let completed = false
+    const finish = settled && ((admitted: boolean) => {
+      if (completed) return
+      completed = true
+      settled(admitted)
+    })
+    this.queue.push({ surface: this.surfaces.get(windowId)!, settled: finish,
+      drop: { sequence: this.nextDropSequence++, abort: new AbortController(), acquire } })
+    if (!this.sending) void this.flush()
+    return true
+  }
+  private async acquireDrop(entry: QueuedInput): Promise<BrowserDropTree> {
+    if (!entry.drop) throw new Error('Expected file drop queue entry')
+    const { signal } = entry.drop.abort
+    signal.throwIfAborted()
+    let cancel!: () => void
+    const cancelled = new Promise<never>((_, reject) => {
+      cancel = () => reject(new Error('File drop was cancelled'))
+      signal.addEventListener('abort', cancel, { once: true })
+    })
+    try { return await Promise.race([entry.drop.acquire(signal), cancelled]) }
+    finally { signal.removeEventListener('abort', cancel) }
   }
   private enqueue(surface: SurfaceInput, packet: InputPacket, settled?: (admitted: boolean) => void): boolean {
     if (!this.current(surface) || this.suspended || surface.blocked ||
@@ -736,10 +782,10 @@ export class BrowserInputCoordinator {
       last = this.queue.at(-1)
     if (
       last?.surface === surface &&
-      last.packet.type === packet.type &&
+      last.packet?.type === packet.type &&
       (packet.type === 'move' || packet.type === 'mouseKeyTick' ||
         (packet.type === 'touchMove' &&
-          last.packet.type === 'touchMove' &&
+          last.packet?.type === 'touchMove' &&
           last.packet.id === packet.id))
     ) {
       last.settled?.(false)
@@ -764,21 +810,34 @@ export class BrowserInputCoordinator {
     try {
       while (!this.closed && !this.suspended && this.queue.length) {
         const entry = this.queue.shift()!
-        if (!this.current(entry.surface) || entry.surface.blocked) { entry.settled?.(false); continue }
+        if (!this.current(entry.surface) || entry.surface.blocked) {
+          entry.drop?.abort.abort(); entry.settled?.(false); continue
+        }
         this.sendingEntry = entry
         const generation = this.generation,
           revision = entry.surface.revision
         try {
-          await this.send(entry.packet)
-          entry.settled?.(true)
+          if (entry.drop) {
+            const tree = await this.acquireDrop(entry)
+            if (entry.drop.abort.signal.aborted || !this.canDropFiles(entry.surface.id, entry.surface.epoch) ||
+                generation !== this.generation || revision !== entry.surface.revision) {
+              entry.settled?.(false); continue
+            }
+            const accepted = await this.options.dropFiles!({ windowId: entry.surface.id,
+              surfaceEpoch: entry.surface.epoch, sequence: entry.drop.sequence }, tree, entry.drop.abort.signal)
+            entry.settled?.(accepted)
+          } else {
+            await this.send(entry.packet)
+            entry.settled?.(true)
+          }
         } catch (error) {
           entry.settled?.(false)
           if (
             this.current(entry.surface) &&
             generation === this.generation &&
-            revision === entry.surface.revision
+            revision === entry.surface.revision && !entry.drop?.abort.signal.aborted
           ) {
-            this.discardQueued((pending) => pending.surface === entry.surface)
+            if (!entry.drop) this.discardQueued((pending) => pending.surface === entry.surface)
             this.error(error)
           }
         } finally { if (this.sendingEntry === entry) this.sendingEntry = undefined }

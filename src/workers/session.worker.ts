@@ -6,6 +6,7 @@ import { HttpRangePool } from '../backends/files/http-range.ts'
 import { gameIdentity, projectIdentity } from '../player/game-identity.ts'
 import { copyProjectSelection, selectProjectLazy, type GameProject } from '../engine/storage/project.ts'
 import { archiveReader } from '../backends/files/archive-reader.ts'
+import { prepareDroppedResources } from '../backends/files/drop-resources.ts'
 import type { Resource } from '../engine/ports/storage.ts'
 import { PROTOCOL_VERSION, type InputAdmissionAck, type SessionApi } from '../protocol/session.ts'
 import type { EngineSession, SessionAdmission } from '../engine/session.ts'
@@ -65,6 +66,9 @@ function admitInput(accept: (target: EngineSession) => SessionAdmission): InputA
     pendingClicks--
     throw error
   }
+  return observeInputAdmission(target, admission)
+}
+function observeInputAdmission(target: EngineSession, admission: SessionAdmission): InputAdmissionAck {
   // The page owns only the admission ACK. Keep the slot and the captured
   // Session until this particular callback operation settles, including when
   // a newer UI action or shutdown has overtaken its acknowledgment.
@@ -243,6 +247,19 @@ const api: SessionApi = {
   },
   async input(packet) {
     return admitInput((target) => target.acceptInput(packet, false))
+  },
+  async dropFiles(request) {
+    if (!request || request.generation !== generation) return { status: 'ignored' }
+    const target = active()
+    reserveInput()
+    let admission: SessionAdmission
+    try {
+      admission = await target.acceptFileDrop(request, prepareDroppedResources(request.tree))
+    } catch (error) { pendingClicks--; throw error }
+    return observeInputAdmission(target, admission)
+  },
+  async cancelFileDrop(request) {
+    if (request?.generation === generation) active().cancelFileDrop(request)
   },
   async keyState(keys) {
     active().keyState(keys)

@@ -56,13 +56,15 @@ async function close(page: Page, summary: Locator) {
 async function finish(page: Page, info: TestInfo, stop: () => Promise<void>, failures: unknown[]) {
   try { await info.attach('menu-cursor-logs', { body: Buffer.from(await page.locator('#logs').innerText()), contentType: 'text/plain' }) }
   catch (error) { failures.push(error) }
-  // The popup covers the page by design. Dispatch the existing application's
-  // Stop control rather than making cleanup depend on pointer hit testing.
+  // A popup or fullscreen game covers the page by design. Dispatch the
+  // existing Stop control so cleanup cannot replace the primary assertion
+  // with a blocked pointer click against the fullscreen canvas.
   try {
-    if (await page.locator('.game-menu-overlay').count()) await page.locator('#stop').dispatchEvent('click')
+    if (await page.locator('.game-menu-overlay, .game-window-fullscreen').count())
+      await page.locator('#stop').dispatchEvent('click')
     await stop()
   } catch (error) { failures.push(error) }
-  if (failures.length) throw new AggregateError(failures, 'Menu cursor scenario or cleanup failed')
+  if (failures.length) throw new AggregateError(failures, 'Menu cursor scenario or cleanup failed', { cause: failures[0] })
 }
 
 for (const backend of ['asyncify','jspi']) for (const binary of [false,true]) {

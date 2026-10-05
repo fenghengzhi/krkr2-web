@@ -37,6 +37,9 @@ export interface Renderer {
   closeWindow?(windowId: number): void
   /** Wait only for this Window's surface. Recoverable faults remain retryable. */
   waitWindowReady?(windowId: number): RendererReadiness
+  /** The current browser surface identity, absent after retirement. Renderers
+   * without host surface identities use the explicit headless epoch zero. */
+  windowSurfaceEpoch?(windowId: number): number | undefined
   /** false means the frame was not presented and must remain dirty. */
   present(layers: FrameLayer[], width: number, height: number, windowId?: number): void | boolean
   /** Delivers the current status immediately, then any changes. */

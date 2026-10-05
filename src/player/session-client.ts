@@ -230,6 +230,12 @@ export class SessionClient {
   browseStorageSelector(id: number, directory: string) {
     return this.call('browseStorageSelector', id, directory)
   }
+  dropFiles(request: import('../protocol/session.ts').WindowFileDropRequest) {
+    return this.call('dropFiles', request)
+  }
+  cancelFileDrop(request: Omit<import('../protocol/session.ts').WindowFileDropRequest, 'tree'>) {
+    return this.call('cancelFileDrop', request)
+  }
   previewFont(id: number, face: string, kind: 'sample' | 'label' = 'sample') {
     return this.call('previewFont', id, face, kind)
   }

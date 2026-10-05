@@ -24,8 +24,8 @@ export class StorageResolver {
   constructor(readonly currentDirectory = '', private readonly archiveAliases = true,
     private readonly reader?: ArchiveReader, private readonly checkpoint: () => Promise<void> = async () => {}) {
     this.archives = new StorageArchives(reader, checkpoint, () => ({
-      entries: 250000 - this.files.size - this.aliases.size,
-      units: 16 * 1024 * 1024 - [...this.files.keys(), ...this.aliases.keys()].reduce((sum, name) => sum + name.length, 0),
+      entries: 250000 - this.files.size - this.aliases.size - this.directories.size,
+      units: 16 * 1024 * 1024 - [...this.files.keys(), ...this.aliases.keys(), ...this.directories].reduce((sum, name) => sum + name.length, 0),
     }))
   }
   private files = new Map<string, Resource>()
@@ -33,7 +33,10 @@ export class StorageResolver {
   private aliases = new Map<string, string>()
   private foldedAliases = new Map<string, Set<string>>()
   private autoPaths: string[] = []
-  mount(resources: Resource[]): void {
+  private directories = new Set<string>()
+  private readonlyRoots = new Set<string>()
+  mount(resources: Resource[], options: { directories?: readonly string[]; readonlyRoots?: readonly string[] } = {}): void {
+    this.check()
     // Validate the entire mount before mutating the active namespace.
     const prepared = resources.map((resource) => ({
       resource,
@@ -42,8 +45,18 @@ export class StorageResolver {
     }))
     const available = new Set([...this.files.keys(), ...prepared.filter((entry) => entry.aliasOf === undefined).map((entry) => entry.name)])
     const aliasNames = new Set([...this.aliases.keys(), ...prepared.filter((entry) => entry.aliasOf !== undefined).map((entry) => entry.name)])
-    if (available.size + aliasNames.size > 250000 ||
-        [...available, ...aliasNames].reduce((sum, name) => sum + name.length, 0) > 16 * 1024 * 1024)
+    const directory = (value: string) => {
+      const name = normalizeResourcePath(value)
+      if (name.includes('>')) throw new Error('Mounted directory cannot address an archive member')
+      return name + '/'
+    }, addedDirectories = (options.directories ?? []).map(directory),
+      roots = (options.readonlyRoots ?? []).map(directory),
+      allDirectories = new Set([...this.directories, ...addedDirectories, ...roots])
+    for (const { name } of prepared) this.assertOutsideReadonly(name)
+    for (const name of addedDirectories) this.assertOutsideReadonly(name)
+    for (const root of roots) if (this.hasTree(root)) throw new Error('Read-only import namespace already exists')
+    if (available.size + aliasNames.size + allDirectories.size > 250000 ||
+        [...available, ...aliasNames, ...allDirectories].reduce((sum, name) => sum + name.length, 0) > 16 * 1024 * 1024)
       throw new Error('Mount exceeds namespace metadata budget')
     for (const { name, aliasOf } of prepared) {
       if (aliasOf !== undefined && (!aliasOf.includes('>') || name.includes('>') ||
@@ -58,6 +71,8 @@ export class StorageResolver {
       names.add(name)
       table.set(folded, names)
     }
+    this.directories = allDirectories
+    for (const root of roots) this.readonlyRoots.add(root.toLowerCase())
     this.invalidateSearch()
     this.archives.trim()
   }
@@ -128,6 +143,24 @@ export class StorageResolver {
     }
   }
   invalidateSearch(): void { this.revision++; this.autoTable = undefined }
+  /** Reserve against real/alias files, directories, and case-folded spelling;
+   * callers include save-overlay names in the same final synchronous check. */
+  hasTree(prefix: string, extraPaths: readonly string[] = []): boolean {
+    const root = normalizeResourcePath(prefix).toLowerCase(), beginning = root + '/'
+    return [...this.files.keys(), ...this.aliases.keys(), ...this.directories, ...extraPaths].some((key) => {
+      const name = key.replace(/\/$/, '').toLowerCase()
+      return name === root || name.startsWith(beginning) || root.startsWith(name + '/')
+    })
+  }
+  private assertOutsideReadonly(path: string): void {
+    const name = path.replace(/\/$/, '').toLowerCase()
+    for (const prefix of this.readonlyRoots) {
+      const root = prefix.slice(0, -1)
+      if (name === root || name.startsWith(prefix) || root.startsWith(name + '/'))
+        throw new Error('Dropped storage is read-only')
+    }
+  }
+  assertWritable(path: string): void { this.assertOutsideReadonly(parseStoragePath(path)) }
   private check(): void { if (this.disposed) throw new Error('Storage resolver is disposed') }
   private member(index: OpenArchive, member: string): Resource | undefined {
     const exact = index.entries.get(member)
@@ -165,7 +198,7 @@ export class StorageResolver {
     for (const mounted of this.files.values()) {
       this.check()
       if (!(++visited % 256)) await this.checkpoint()
-      if (mounted.name.includes('>')) continue
+      if (mounted.name.includes('>') || mounted.archiveAliases === false) continue
       const raw = overlay?.(mounted.name) ?? mounted
       const index = await this.archives.open(raw)
       if (index) for (const [name, resource] of index.entries) {
@@ -241,7 +274,8 @@ export class StorageResolver {
     overlayResources: readonly Resource[] = []): Promise<Resource[]> {
     const matches = (values: readonly Resource[]) => {
       const found = values.filter((resource) => resource.name.toLowerCase().startsWith(path.toLowerCase())),
-        prefixes = new Set(found.map((resource) => resource.name.slice(0, path.length)))
+        prefixes = new Set([...found.map((resource) => resource.name.slice(0, path.length)),
+          ...[...this.directories].filter((name) => name.toLowerCase().startsWith(path.toLowerCase())).map((name) => name.slice(0, path.length))])
       if (prefixes.has(path)) return found.filter((resource) => resource.name.startsWith(path))
       if (prefixes.size > 1) throw new Error(`Ambiguous storage directory: ${path}`)
       return found
@@ -264,6 +298,11 @@ export class StorageResolver {
     this.check()
     let name = parseStoragePath(path)
     if (name && !/[/>]$/.test(name)) throw new Error('Expected storage directory')
+    if (!this.directories.has(name)) {
+      const matching = [...this.directories].filter((entry) => entry.toLowerCase() === name.toLowerCase())
+      if (matching.length > 1) throw new Error(`Ambiguous storage directory: ${name}`)
+      if (matching.length === 1) name = matching[0]!
+    }
     const overlays = new Map(overlayResources.map((resource) => [resource.name, resource])),
       source = await this.directoryEntries(name, (key) => overlays.get(key), overlayResources),
       all = new Map([...source, ...overlayResources.filter((resource) => resource.name.toLowerCase().startsWith(name.toLowerCase()))]
@@ -288,7 +327,12 @@ export class StorageResolver {
         if (!name.includes('>') && await this.archives.candidate(resource)) directories.add(resource.name + '>')
       }
     }
-    if (name && !all.size && !name.endsWith('>')) {
+    for (const directory of this.directories) {
+      if (!directory.startsWith(name) || directory === name) continue
+      const relative = directory.slice(name.length), separator = relative.indexOf('/')
+      directories.add(name + relative.slice(0, separator + 1))
+    }
+    if (name && !all.size && !name.endsWith('>') && !this.directories.has(name)) {
       const parent = name.replace(/[^/>]+\/$/, '')
       if (parent !== name) {
         const listing = await this.listDirectory(parent, overlayResources)
@@ -316,6 +360,8 @@ export class StorageResolver {
     this.aliases.clear()
     this.foldedAliases.clear()
     this.autoPaths = []
+    this.directories.clear()
+    this.readonlyRoots.clear()
     this.invalidateSearch()
     this.archives.clear()
   }

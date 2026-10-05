@@ -738,6 +738,10 @@ export function createGameWindows(
       surface.observer.observe(stage)
       surface.observer.observe(header)
       surface.observer.observe(menu)
+      // Embedders without measured Window geometry may resize the canvas in
+      // CSS. Reproject their outer region clip when that displayed scale
+      // changes; measured surfaces still keep the clip in outer logical units.
+      surface.observer.observe(canvas)
       scrollbox.addEventListener('scroll', () => {
         const geometry = domGeometry(surface)
         if (!live(surface) || !geometry || surface.view.blocked) return

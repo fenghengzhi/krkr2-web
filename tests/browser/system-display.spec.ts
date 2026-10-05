@@ -50,6 +50,7 @@ test.describe('native System display through public Players and actual Session W
             expect(result.actual).toBe(systemDisplayExpected(oracle))
             expect(result.checks).toBe('6|6|6|6|6')
             expect(result.reads).toBe(1)
+            expect(result.displayObservers).toBe(2)
             expect(result.canvasReparented).toBe(true)
             expect(result.errors).toEqual([])
             expect(result.saved).toEqual(
@@ -269,6 +270,7 @@ test.describe('native System display through public Players and actual Session W
             expect(result.initial).toBe(systemDisplayExpected(metrics[index]!))
             expect(result.checks).toBe('6|6|6|6|6')
             expect(result.reads).toBe(1)
+            expect(result.displayObservers).toBe(0)
             expect(result.errors).toEqual([])
           }
           const beforeResize = await page.evaluate(
@@ -296,10 +298,8 @@ test.describe('native System display through public Players and actual Session W
             beforeResize,
           )
           expect(
-            await page.evaluate(() =>
-              window.systemDisplayObservation().activeObserverTargets.flat(),
-            ),
-          ).not.toContain('system-display-parent-0')
+            await page.evaluate(() => window.systemDisplayObservation().scopedObserverTargets),
+          ).toEqual([])
           const changed = { ...otherSystemDisplayMetrics, desktopWidth: 733 }
           await page.evaluate(
             async ({ changed }) => {

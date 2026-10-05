@@ -85,6 +85,7 @@ export class SystemEvents {
   private cancelWake?: () => void
   private frequency = 0
   private readonly pendingListeners = new Set<() => void>()
+  private readonly admissionReservations = new Set<object>()
 
   constructor(
     private readonly objects: ScriptRuntime,
@@ -175,6 +176,18 @@ export class SystemEvents {
     }
   }
 
+  /** Reserve capacity while external resource metadata is prepared. This owns
+   * no script value and is not dispatchable work. Consume/release immediately
+   * before a synchronous enqueue, or release on cancellation. */
+  reserveAdmission(): () => void {
+    if (this.disposed) throw new ExecutionCancelled()
+    if (this.jobs.length + this.admissionReservations.size >= 65536)
+      throw new Error('Event queue budget exceeded')
+    const token = {}
+    this.admissionReservations.add(token)
+    return () => { this.admissionReservations.delete(token) }
+  }
+
   /** Throw before accepting a new job; accepted/discarded jobs own their settlement hook. */
   enqueue(prepare: () => HostReply, options: EventOptions = {}): EventAdmission {
     const {
@@ -193,7 +206,7 @@ export class SystemEvents {
       if (source && replace) this.cancelSource(source)
       // A replacement's settlement hook may have stopped the scheduler.
       if (this.disposed) throw new ExecutionCancelled()
-      if (this.jobs.length >= 65536) throw new Error('Event queue budget exceeded')
+      if (this.jobs.length + this.admissionReservations.size >= 65536) throw new Error('Event queue budget exceeded')
     }
     let resolve!: () => void, reject!: (error: unknown) => void
     const completion = new Promise<void>((yes, no) => {
@@ -612,6 +625,7 @@ export class SystemEvents {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.admissionReservations.clear()
     this.cancelWake?.()
     this.cancelWake = undefined
     const jobs = this.jobs

@@ -138,13 +138,19 @@ var witnessRoot=new Layer(witness,null);witnessRoot.setSize(60,40);
         await expectAttentionAnchor(surface, -19 / 200, 2 / 100)
         const width = (await surface.locator('canvas[data-window-id]').boundingBox())!.width
         await page.addStyleTag({
-          content: '.game-window[aria-label="Attention"] { width: 27vw !important; }',
+          // The measured viewport has its own fixed logical dimensions. Page
+          // presentation scales the complete outer box and its clip rectangles.
+          content: '.game-window[aria-label="Attention"] { transform: scale(0.75) !important; transform-origin: 0 0 !important; }',
         })
         await expect
           .poll(async () => (await surface.locator('canvas[data-window-id]').boundingBox())!.width)
           .not.toBe(width)
         await expectAttentionAnchor(surface, -19 / 200, 2 / 100)
         await page.setViewportSize({ width: 1030, height: 710 })
+        await page.addStyleTag({
+          content: '.game-window[aria-label="Attention"] { transform: scale(0.6) !important; }',
+        })
+        await expect.poll(async () => (await surface.locator('canvas[data-window-id]').boundingBox())!.width).toBeCloseTo(width * 0.6, 3)
         await expectAttentionAnchor(surface, -19 / 200, 2 / 100)
         await expect(text).toHaveCSS('font-size', '22px')
         await info.attach('dom-attention-projection', {

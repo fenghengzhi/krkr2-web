@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
+import { pointerPixel } from '../helpers/pointer-pixel.ts'
 
 const scene = String.raw`
 var win=new Window();win.visible=true;win.setInnerSize(160,80);
@@ -41,10 +42,8 @@ async function clickCanvas(page: Page, x: number, y: number, result: string) {
   const canvas = page.locator('canvas')
   await expect(canvas).toHaveJSProperty('width', 160)
   await expect(canvas).toHaveJSProperty('height', 80)
-  const bounds = (await canvas.boundingBox())!
-  await canvas.click({
-    position: { x: (bounds.width * (x + 0.5)) / 160, y: (bounds.height * (y + 0.5)) / 80 },
-  })
+  const point = await pointerPixel(canvas, x, y)
+  await page.mouse.click(point.x, point.y)
   // Both the target and the primary Layer acknowledge delivery. A miss is
   // proved by the primary's actual callback, not by immediately reading zero.
   await expect(page.getByText(result, { exact: true })).toBeVisible()

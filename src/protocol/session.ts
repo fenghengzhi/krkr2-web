@@ -9,7 +9,13 @@ import type { PadAck, PadMessage, PadFontData } from './pad.ts'
 import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
 import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
 import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
-export const PROTOCOL_VERSION = 38
+import type { DroppedTree } from '../engine/ports/storage-drop.ts'
+import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
+export const PROTOCOL_VERSION = 39
+export interface WindowFileDropRequest extends WindowFileDropIdentity {
+  readonly generation: number
+  readonly tree: DroppedTree<Blob>
+}
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -73,6 +79,8 @@ export interface SessionApi {
   screenPointerState(screen: import('../engine/ports/input.ts').PhysicalPointerScreen): Promise<void>
   /** Resolve immediately after admission so browser input can continue queueing. */
   input(packet: InputPacket): Promise<InputAdmissionAck>
+  dropFiles(request: WindowFileDropRequest): Promise<InputAdmissionAck>
+  cancelFileDrop(request: Omit<WindowFileDropRequest, 'tree'>): Promise<void>
   keyState(keys: number[]): Promise<void>
   exitFullScreen(windowId?: number): Promise<void>
   activateWindow(windowId: number): Promise<InputAdmissionAck>

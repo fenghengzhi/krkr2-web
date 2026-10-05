@@ -14,6 +14,7 @@ import { BrowserInputCoordinator } from '../backends/input/coordinator.ts'
 import { selectCursorAsset, type SelectedCursorAsset } from '../backends/input/cursor.ts'
 import type { CursorAsset } from '../formats/cursor/index.ts'
 import { BrowserWindowSurfaces } from './window-surfaces.ts'
+import { attachWindowFileDrop } from './window-file-drop.ts'
 import { PageActivityMonitor } from './page-activity.ts'
 import { activityPaused, initialActivity } from '../engine/ports/activity.ts'
 import type { InputView } from '../engine/ports/input.ts'
@@ -138,6 +139,7 @@ export function createPlayer(
   let stopping: Promise<void> | undefined
   let input: BrowserInputCoordinator | undefined
   let surfaces: BrowserWindowSurfaces | undefined
+  const fileDrops = new Map<number, { epoch: number; dispose(): void }>()
   let display: BrowserSystemDisplay | undefined
   let activity = initialActivity()
   let workerPaused = true
@@ -375,6 +377,20 @@ export function createPlayer(
     (x, y, windowId, sequence, screen) => session.pointerState(x, y, windowId, sequence, screen),
     onError,
     {
+      dropFiles: async (drop, tree, signal) => {
+        if (stopping || signal.aborted) return false
+        const identity = { generation: session.generation, ...drop },
+          cancel = () => {
+            if (!session.isDisposed) void session.cancelFileDrop(identity).catch((error) => {
+              if (!stopping && !session.isDisposed) onError(error)
+            })
+          }
+        signal.addEventListener('abort', cancel, { once: true })
+        try {
+          const ack = await session.dropFiles({ ...identity, tree })
+          return !signal.aborted && ack.status === 'accepted'
+        } finally { signal.removeEventListener('abort', cancel) }
+      },
       screenPointer: (screen) => { if (!stopping) return session.screenPointerState(screen) },
       windowPopup: (message) => { if (!stopping) void session.windowPopup(message).catch(onError) },
       popupWindow: (target) => {
@@ -419,6 +435,9 @@ export function createPlayer(
       if (window) options.windows.update(windowId, window.view, window.active, surfaceEpoch)
       applyRegion(windowId, surfaceEpoch)
       input!.attach(windowId, surfaceEpoch, canvas, surface.element)
+      fileDrops.get(windowId)?.dispose()
+      fileDrops.set(windowId, { epoch: surfaceEpoch,
+        dispose: attachWindowFileDrop(surface.element, windowId, surfaceEpoch, input!, onError) })
       if (window) input!.setWindow(windowId, window.view)
       if (state) input!.setInput(windowId, state)
       video.attachWindow(windowId, surfaceEpoch, canvas, surface.videoPlane)
@@ -455,6 +474,10 @@ export function createPlayer(
       if (surface?.content.contains(document.activeElement) && windows.has(windowId))
         focusRequest = { windowId, revision: input!.focusRevision }
       for (const action of [
+        () => {
+          const drop = fileDrops.get(windowId)
+          if (drop?.epoch === surfaceEpoch) { fileDrops.delete(windowId); drop.dispose() }
+        },
         () => geometry.detach(windowId),
         () => input!.detach(windowId, surfaceEpoch),
         () => video.detachWindow(windowId, surfaceEpoch),

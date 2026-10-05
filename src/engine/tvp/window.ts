@@ -132,6 +132,10 @@ class Window {
     __host("Window.update",__windowId);
   }
   function hideMouseCursor() { mouseCursorState=mcsTempHidden; }
+  function onFileDrop(args*) {
+    if(args.count<1)throw new Exception("Window.onFileDrop requires files");
+    if(typeof this.action!="undefined")this.action(%[type:"onFileDrop",target:this,files:args[0]]);
+  }
   function setMaskRegion(threshold=void) { __host("Window.setMaskRegion",__windowId,threshold===void?1:int(threshold)); }
   function removeMaskRegion() { __host("Window.removeMaskRegion",__windowId); }
   function postInputEvent(name,params=null) {
