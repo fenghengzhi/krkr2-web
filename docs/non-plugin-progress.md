@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+最新待核验批次：[Full test suite 37359511361](https://github.com/fenghengzhi/krkr2-web/actions/runs/37359511361)，精确提交 `168126b9922ea5f2ea7a9b78fa14ad9550a51e7d`。104 的 **37 个文件**已整批推送，新增 **36 常规 Node、每浏览器 6 定义**，随机数同 16 定义另用 JSPI 内核执行。首次唯一查询为 **in_progress／conclusion=null**，只确认运行身份。下轮补取 103 光标／终态并回收本批固定结果，不实时监控；没有本地执行验证，完整目标保持 active。
+
 2026-10-06 准备 [104 原生随机熵与光标证据](decisions/104-native-random-and-cursor-evidence.md)：补 `Math.RandomGenerator` 无参数构造／重设的真实宿主熵，保留原 MT 序列、显式种子与序列化；校验恢复索引并保护失败前的状态，新增 `nativeRandom:1`。协议 **41**、`nativeSystem:5`、TJS ABI **5**、字体 ABI **2** 保持。新增 **36 常规 Node、每浏览器 6 定义**，随机数同 16 定义另经 JSPI 独立执行，尚待托管结果。
 
 104 固定回收 **24 原 ZIP、58,958,213 字节**全部匹配。102 双 Windows 完整 343 光标库存的 strict 各 **1076/1076 matched、0 failure、5578 uncompared**；103 双 beginMove 各 **7/7 observed**。两批应用因构建失败均 skipped；103 两条 TS7022 和退出参考的 C# CS0819 本批修订，零执行不计通过。103 光标与最终状态下轮再取，不实时监控，完整目标继续 active。下面保留历史阶段当时状态。

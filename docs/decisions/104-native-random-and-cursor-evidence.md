@@ -2,6 +2,8 @@
 
 状态：开发候选，尚待 GitHub-hosted Actions 验证。本批从干净的 `c0b2cb2` 继续；上一批已实现、提交和推送视频流选择，属于实际进展。整体目标仍是完成 KRKR2 Web 模拟器的插件以外功能，未完成。协议 **41**、TJS ABI **5**、字体 ABI **2**、`nativeSystem:5` 保持，新增独立能力 **`nativeRandom:1`**。
 
+实现提交 `168126b9922ea5f2ea7a9b78fa14ad9550a51e7d` 的 **37 个文件**已整批推送至 `codex/migrated-window-attention`。[完整托管验证 37359511361](https://github.com/fenghengzhi/krkr2-web/actions/runs/37359511361) 首次唯一身份查询为 **in_progress／conclusion=null**，原始响应保存于 `out/verification/github-actions/37359511361/initial-run-discovery.json`。本轮不再查询 jobs／artifacts；下轮补取 103 的光标与终态，并回收本批固定结果。交接文档使用 `[skip ci]` 单独提交，不是另一轮验证。
+
 本地仅检查／编辑源码、操作 Git，以及下载、解包、核对和解析历史原件。没有运行测试、构建、类型检查、浏览器、候选算法或可执行参考探针。整批提交后只记录一次运行身份，下轮取回固定结果，不实时监控。
 
 ## 固定回收
