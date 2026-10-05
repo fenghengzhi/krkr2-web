@@ -35,7 +35,7 @@ export async function installVideoAudioProbe(page: Page): Promise<void> {
       if (urls.delete(url)) revokedUrls++
       revokeUrl.call(URL, url)
     }
-    ;(window as ProbeWindow).videoAudioObservation = () => ({
+    ;(window as unknown as ProbeWindow).videoAudioObservation = () => ({
       graphs: [...analysers].map((analyser) => {
         analyser.fftSize = 4096
         analyser.smoothingTimeConstant = 0
@@ -58,4 +58,4 @@ export async function installVideoAudioProbe(page: Page): Promise<void> {
 }
 
 export const observeVideoAudio = (page: Page): Promise<VideoAudioObservation> =>
-  page.evaluate(() => (window as ProbeWindow).videoAudioObservation())
+  page.evaluate(() => (window as unknown as ProbeWindow).videoAudioObservation())

@@ -36,6 +36,7 @@ export class BrowserGamepad {
     private readonly observe: (sample: GamepadSample) => void,
     private readonly error: (error: unknown) => void,
     source?: BrowserGamepadSource | false,
+    private readonly beforeSample?: (now: number) => void,
   ) {
     this.source = source === false ? undefined : source ?? browserSource()
     this.schedule()
@@ -54,6 +55,9 @@ export class BrowserGamepad {
   }
   setRepeat(delay: number, interval: number): void {
     this.state.setRepeat(delay, interval)
+  }
+  get sampling(): boolean {
+    return !!this.source && this.active && !this.closed && !this.suspended && !this.failed
   }
   setSuspended(suspended: boolean): void {
     if (this.closed || suspended === this.suspended) return
@@ -75,6 +79,7 @@ export class BrowserGamepad {
     try {
       const now = this.source.now()
       this.lastSample = now
+      this.beforeSample?.(now)
       this.observe(this.state.sample(this.source.read(), now, this.active))
     } catch (error) {
       // API denial/disconnection errors retire admitted keys once. Keyboard

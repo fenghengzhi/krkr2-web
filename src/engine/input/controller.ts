@@ -781,7 +781,7 @@ export class InputController {
     // The Window receives the PaintBox integer point captured at admission.
     // Retain it across callbacks; only the destination size is sampled later.
     const mousePoint = packet.type === 'down' || packet.type === 'up' ||
-      packet.type === 'move' || packet.type === 'wheel'
+      packet.type === 'move' || packet.type === 'wheel' || packet.type === 'click'
       ? packet.paintBoxPoint
         ? { ...packet.paintBoxPoint }
         : paintBoxPoint(this.window(), packet.x, packet.y)
@@ -893,7 +893,7 @@ export class InputController {
       return
     }
     if (!('clicks' in packet)) return
-    this.point = { x: packet.x, y: packet.y }
+    if (packet.type !== 'click') this.point = { x: packet.x, y: packet.y }
     if (packet.type === 'move') {
       yield {
         target: 0,
@@ -949,6 +949,7 @@ export class InputController {
       if (hit && (packet.clicks === 2 || this.capture === hit))
         yield { target: hit, method, args: this.local(hit, p!.x, p!.y) }
     }
+    if (packet.type === 'click') return
     yield {
       target: 0,
       method: 'onMouseUp',

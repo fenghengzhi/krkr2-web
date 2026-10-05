@@ -39,7 +39,7 @@ import type { CursorAsset } from '../formats/cursor/index.ts'
 import { loadCursorBytes, windowsDesktopCursorProfile } from '../formats/cursor/load.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree, type LayerState } from './scene/layers.ts'
-import { drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
+import { deviceInt, drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
 import { LayerService } from './scene/layer-objects.ts'
 import { captureVideoMixingBitmap } from './media/video-mixing.ts'
 import type { DecodedImage, GraphicsDecoder, Renderer, RendererStatus } from './ports/graphics.ts'
@@ -108,6 +108,7 @@ import { videoClass } from './tvp/video.ts'
 import { InputControllers } from './input/controllers.ts'
 import { InputService } from './input/service.ts'
 import { ObservedKeyState } from './input/key-state.ts'
+import { MouseKeyState, type MouseKeyAction } from './input/mouse-key.ts'
 import { inputBridge } from './tvp/input.ts'
 import type { InputPacket, InputView, VirtualCursor } from './ports/input.ts'
 import { SceneComposer } from './scene/composer.ts'
@@ -189,10 +190,19 @@ export type EngineEvent =
   | { type: 'log'; level: 'info' | 'error'; text: string }
 interface VirtualCursorState {
   view: VirtualCursor
-  layer: LayerState
+  /** Keyboard emulation owns a Window cursor, including a Window without a
+   * primary Layer. Script Layer writes retain their stricter Layer lifetime. */
+  layer?: LayerState
   window: WindowRecord
   controllerEpoch: number
   inputGeneration: number
+}
+interface WindowMouseKeys {
+  state: MouseKeyState
+  scaleX: number
+  scaleY: number
+  down: { x: number; y: number; paintBoxPoint: { x: number; y: number } }
+  move: { x: number; y: number; paintBoxPoint: { x: number; y: number } }
 }
 export interface SessionDependencies {
   systemDisplay?: SystemDisplayMetrics
@@ -360,6 +370,7 @@ export class EngineSession {
   private readonly windowPointers = new Map<number, { x: number; y: number }>()
   private readonly physicalPointerSequences = new Map<number, number>()
   private readonly virtualCursors = new Map<number, VirtualCursorState>()
+  private readonly mouseKeys = new Map<number, WindowMouseKeys>()
   private nextVirtualCursorRevision = 1
   private readonly keyStates = new ObservedKeyState()
   private get physicalKeys(): ReadonlySet<number> { return this.keyStates.current }
@@ -738,6 +749,7 @@ export class EngineSession {
           this.windowPointers.delete(window.id)
           this.physicalPointerSequences.delete(window.id)
           this.virtualCursors.delete(window.id)
+          this.mouseKeys.delete(window.id)
           this.windowInputViews.delete(window.id)
           this.keyboardRoutes.delete(window.id)
           this.refreshKeyboardRoutes()
@@ -1463,9 +1475,10 @@ export class EngineSession {
       this.fontSelection.active || this.clipboardBusy > 0 ||
       controller?.epoch !== cursor.controllerEpoch ||
       this.windowInputGeneration !== cursor.inputGeneration ||
-      !this.layers.has(cursor.layer.id) || this.layers.get(cursor.layer.id) !== cursor.layer ||
-      this.layerObjects?.isClosing(cursor.layer.id) ||
-      this.cursorWindow(cursor.layer.id) !== cursor.window
+      (cursor.layer !== undefined && (
+        !this.layers.has(cursor.layer.id) || this.layers.get(cursor.layer.id) !== cursor.layer ||
+        this.layerObjects?.isClosing(cursor.layer.id) ||
+        this.cursorWindow(cursor.layer.id) !== cursor.window))
     ) {
       this.virtualCursors.delete(windowId)
       return undefined
@@ -1552,6 +1565,79 @@ export class EngineSession {
     }
     if (state.mouseCursorState === 1) state.set('mouseCursorState', 0)
     this.presentInputViews()
+  }
+  private windowMouseKeys(window: WindowRecord): WindowMouseKeys {
+    let record = this.mouseKeys.get(window.id)
+    if (!record) {
+      const state = new MouseKeyState()
+      state.configure(window.state.useMouseKey, this.deps.now())
+      record = { state, scaleX: 1, scaleY: 1,
+        down: { x: 0, y: 0, paintBoxPoint: { x: 0, y: 0 } },
+        move: { x: 0, y: 0, paintBoxPoint: { x: 0, y: 0 } } }
+      this.mouseKeys.set(window.id, record)
+    }
+    return record
+  }
+  private mouseKeyActions(window: WindowRecord, actions: readonly MouseKeyAction[], held = this.physicalKeys): SessionAdmission {
+    const record = this.windowMouseKeys(window), controller = this.inputControllers.get(window.id)
+    if (!controller || !actions.length) return ignoredAdmission()
+    const admissions: SessionAdmission[] = []
+    try { for (const action of actions) {
+      const current = this.currentVirtualCursor(window.id)?.view ??
+        this.windowPointers.get(window.id) ?? { x: 0, y: 0 }
+      if (action.type === 'move') {
+        const point = { x: current.x + action.dx * record.scaleX,
+          y: current.y + action.dy * record.scaleY }
+        if (![point.x, point.y].every((value) => Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER))
+          throw new Error('Mouse key position is out of range')
+        if (!Number.isSafeInteger(this.nextVirtualCursorRevision + 1))
+          throw new Error('Virtual cursor revision exhausted')
+        const cursor: VirtualCursorState = {
+          view: { ...point, revision: this.nextVirtualCursorRevision++,
+            basePhysicalSequence: this.physicalPointerSequences.get(window.id) ?? 0 },
+          window, controllerEpoch: controller.epoch, inputGeneration: this.windowInputGeneration,
+        }
+        const previous = this.virtualCursors.get(window.id), previousMove = record.move
+        this.virtualCursors.set(window.id, cursor)
+        let shift = 0
+        for (const [key, flag] of [[16, 1], [18, 2], [17, 4], [1, 8], [2, 16], [4, 32], [5, 256], [6, 512]])
+          if (held.has(key!)) shift |= flag!
+        const inside = point.x >= 0 && point.y >= 0 && point.x < window.state.width && point.y < window.state.height
+        const wasInside = current.x >= 0 && current.y >= 0 && current.x < window.state.width && current.y < window.state.height
+        try {
+          if (inside || controller.capture)
+            admissions.push(this.acceptInput({ type: 'move', ...point, shift, button: 0, clicks: 0,
+              windowId: window.id }, false, () => this.currentVirtualCursor(window.id) === cursor))
+          else if (wasInside)
+            admissions.push(this.acceptInput({ type: 'leave', windowId: window.id }, false,
+              () => this.currentVirtualCursor(window.id) === cursor))
+        } catch (error) {
+          if (previous) this.virtualCursors.set(window.id, previous)
+          else this.virtualCursors.delete(window.id)
+          record.move = previousMove
+          throw error
+        }
+        if (window.state.mouseCursorState === 1) window.state.set('mouseCursorState', 0)
+        this.presentInputViews()
+      } else {
+        // InternalKeyDown/Up uses ScrollBox-relative integers directly as
+        // PaintBox arguments. This differs from an actual mouse message,
+        // whose PaintBox origin has already been subtracted by VCL.
+        const point = action.position === 'down' ? record.down : action.position === 'move' ? record.move : {
+          x: current.x, y: current.y,
+          paintBoxPoint: { x: deviceInt(current.x), y: deviceInt(current.y) },
+        }
+        admissions.push(this.acceptInput({ type: action.type, ...point, windowId: window.id,
+          button: action.button, shift: 0, clicks: action.type === 'click' ? 1 : 0 }, false))
+      }
+    } } catch (error) {
+      // A later action (left up follows click) may fail admission after an
+      // earlier event already owns a receipt. Preserve its cleanup/reporting.
+      for (const admission of admissions) this.observeAdmission(admission)
+      throw error
+    }
+    return { status: admissions.some((entry) => entry.status === 'accepted') ? 'accepted' : 'ignored',
+      completion: Promise.all(admissions.map((entry) => entry.completion)).then(() => {}) }
   }
   keyState(keys: number[]): void {
     if (keys.length > 256 || keys.some((key) => !Number.isInteger(key) || key < 0 || key > 65535))
@@ -2136,7 +2222,7 @@ export class EngineSession {
     return sequence < (this.physicalPointerSequences.get(windowId) ?? 0) ||
       (!!cursor && sequence <= cursor.view.basePhysicalSequence)
   }
-  acceptInput(packet: InputPacket, observe = true): SessionAdmission {
+  acceptInput(packet: InputPacket, observe = true, additionalValid?: () => boolean): SessionAdmission {
     if (this.fontSelection.active && packet.type !== 'cancel' && packet.type !== 'deactivate')
       return ignoredAdmission()
     for (const value of Object.values(packet))
@@ -2150,12 +2236,24 @@ export class EngineSession {
     if (packet.paintBoxPoint !== undefined) {
       const point = packet.paintBoxPoint
       if (
-        !['move', 'down', 'up', 'wheel'].includes(packet.type) ||
+        !['move', 'down', 'up', 'wheel', 'click'].includes(packet.type) ||
         !point || typeof point !== 'object' ||
         ![point.x, point.y].every((value) =>
           Number.isInteger(value) && value >= -2147483648 && value <= 2147483647)
       ) throw new Error('Invalid PaintBox mouse coordinates')
     }
+    if (packet.mouseKeyObservation !== undefined) {
+      const sample = packet.mouseKeyObservation
+      if (!sample || !Number.isSafeInteger(sample.windowId) || sample.windowId <= 0 ||
+          !Number.isSafeInteger(sample.pointerSequence) || sample.pointerSequence < 0 ||
+          ![sample.x, sample.y].every((value) => Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER) ||
+          ![sample.scaleX, sample.scaleY].every((value) => Number.isFinite(value) && value > 0 && value <= 65536))
+        throw new Error('Invalid mouse key observation')
+    }
+    if (packet.mouseKeyKeys !== undefined && (packet.type !== 'mouseKeyTick' ||
+        !Array.isArray(packet.mouseKeyKeys) || packet.mouseKeyKeys.length > 256 ||
+        packet.mouseKeyKeys.some((key) => !Number.isInteger(key) || key < 0 || key > 65535)))
+      throw new Error('Invalid mouse key tick state')
     if (
       packet.pointerSequence !== undefined &&
       (!Number.isSafeInteger(packet.pointerSequence) || packet.pointerSequence < 1)
@@ -2215,7 +2313,7 @@ export class EngineSession {
     }
     if (this.state !== 'running' && (packet.type === 'cancel' || packet.type === 'deactivate'))
       controller.resetTransient()
-    if (observe && this.state === 'running') {
+    if (observe && this.state === 'running' && packet.type !== 'click' && packet.type !== 'mouseKeyTick') {
       // A logical Window losing focus releases its local roles, not the
       // physical keys held elsewhere in the page. Restore the shared snapshot
       // before applying the next packet's key/shift changes.
@@ -2238,6 +2336,12 @@ export class EngineSession {
     ) this.pointerState(packet.x, packet.y, windowId, packet.pointerSequence)
     if (this.state !== 'running') return ignoredAdmission()
     if (this.stalePointerMove(packet, windowId)) return ignoredAdmission()
+    if (packet.type === 'down' || packet.type === 'move') {
+      const record = this.windowMouseKeys(window), point = { x: packet.x, y: packet.y,
+        paintBoxPoint: { ...packet.paintBoxPoint! } }
+      if (packet.type === 'down') record.down = point
+      else record.move = point
+    }
     const keyboard = packet.type === 'keyDown' || packet.type === 'keyUp' || packet.type === 'text',
       receiver = keyboard ? this.keyboardReceiver(window) : window,
       receiverController = this.inputControllers.get(receiver.id)
@@ -2267,6 +2371,40 @@ export class EngineSession {
       )
         return ignoredAdmission()
     }
+    if (keyboard || packet.type === 'mouseKeyTick') {
+      const record = this.windowMouseKeys(receiver), sample = packet.mouseKeyObservation
+      if (sample && sample.windowId !== receiver.id) return ignoredAdmission()
+      if (sample) {
+        record.scaleX = sample.scaleX
+        record.scaleY = sample.scaleY
+        if (sample.pointerSequence) {
+          this.pointerState(sample.x, sample.y, receiver.id, sample.pointerSequence)
+          // A stationary physical pointer has new client coordinates after
+          // the Window moves or its CSS size changes. Refresh that projection
+          // without pretending a new physical movement superseded a live
+          // virtual cursor, and never accept an older physical authority.
+          if (sample.pointerSequence === this.physicalPointerSequences.get(receiver.id) &&
+              !this.currentVirtualCursor(receiver.id))
+            this.windowPointers.set(receiver.id, { x: sample.x, y: sample.y })
+        }
+      }
+      if (packet.type === 'mouseKeyTick') {
+        if (!receiver.inputActive || this.windowId !== receiver.id || !receiver.state.useMouseKey ||
+            !receiver.state.visible || this.menus.hasPopup || this.state !== 'running') return ignoredAdmission()
+        const held = packet.mouseKeyKeys ? new Set(packet.mouseKeyKeys) : this.physicalKeys
+        return this.mouseKeyActions(receiver, record.state.tick(this.deps.now(), held), held)
+      }
+      if (packet.type === 'text') {
+        const text = [...packet.text].filter((character) => !record.state.text(character)).join('')
+        if (!text) return ignoredAdmission()
+        packet = { ...packet, text }
+      } else if (packet.type === 'keyDown' || packet.type === 'keyUp') {
+        const point = this.currentVirtualCursor(receiver.id)?.view ?? this.windowPointers.get(receiver.id),
+          inside = !!point && point.x >= 0 && point.y >= 0 && point.x < receiver.state.width && point.y < receiver.state.height,
+          result = record.state.key(packet.type === 'keyDown', packet.key, this.deps.now(), this.physicalKeys, inside)
+        if (result.consumed) return this.mouseKeyActions(receiver, result.actions)
+      }
+    }
     // Freeze the receiver at admission. Changes to trapKey while this receipt
     // waits must not retarget it or change the physical source's active Window.
     const routedPacket = { ...packet, windowId: receiver.id }
@@ -2278,6 +2416,7 @@ export class EngineSession {
         this.inputs!.packet(
           routedPacket,
           () => !this.stalePointerMove(packet, windowId) &&
+            (!additionalValid || additionalValid()) &&
             (receiver === window || (
                 this.registeredWindow(windowId) === window &&
                 window.state.visible &&
@@ -2288,6 +2427,7 @@ export class EngineSession {
           this.registeredWindow(windowId) === window &&
           this.registeredWindow(receiver.id) === receiver &&
           !this.stalePointerMove(packet, windowId) &&
+          (!additionalValid || additionalValid()) &&
           (!keyboard || window.state.visible) &&
           // Admission can precede an earlier callback's focus change. A
           // composition queued behind it must not commit to the new Layer.
@@ -2311,7 +2451,7 @@ export class EngineSession {
     )
   }
   private captureMousePoint(packet: InputPacket, window: WindowRecord): InputPacket {
-    if (packet.type !== 'move' && packet.type !== 'down' && packet.type !== 'up' && packet.type !== 'wheel')
+    if (packet.type !== 'move' && packet.type !== 'down' && packet.type !== 'up' && packet.type !== 'wheel' && packet.type !== 'click')
       return packet
     return {
       ...packet,
@@ -3002,6 +3142,7 @@ export class EngineSession {
       await attempt(() => this.kag.clear())
       await attempt(() => this.windows?.dispose())
       this.virtualCursors.clear()
+      this.mouseKeys.clear()
       this.physicalPointerSequences.clear()
       this.windowPointers.clear()
       this.keyboardRoutes.clear()
@@ -3920,6 +4061,11 @@ export class EngineSession {
           before = [window.state.width, window.state.height],
           property = text(1)
         window.state.set(text(1), typeof args[2] === 'string' ? text(2) : number(2))
+        if (property === 'useMouseKey') {
+          const record = this.windowMouseKeys(window)
+          this.observeAdmission(this.mouseKeyActions(window,
+            record.state.configure(window.state.useMouseKey, this.deps.now())))
+        }
         if (property === 'visible' && !window.state.visible) this.clearVirtualCursors(window.id)
         if (property === 'visible' || property === 'focusable' || property === 'trapKey')
           this.refreshKeyboardRoutes()

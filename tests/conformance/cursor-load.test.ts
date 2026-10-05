@@ -111,6 +111,58 @@ test('cursor load nonintegral point scaling and hotspot rounding follow the nati
   assert.equal(selected.data[31 * 4], 12)
 })
 
+test('cursor mask reduction keeps the observed deleted-pixel support and discarded outer tail', async () => {
+  // Native 085 run 37270916669, both Windows desktops, independent single-zero
+  // lines in all 256 source coordinates. These boundary outputs are literals
+  // from mask-footprint-{32}-zero-line-{x,y}-N, not the scaler's formula.
+  const observations = [[0, 0], [4, 0], [5, 1], [12, 1], [13, 2], [252, 31], [253, -1], [255, -1]] as const
+  for (const axis of ['x', 'y'] as const) for (const [coordinate, destination] of observations) {
+    const source = image(256, 256)
+    source.andMask.fill(255)
+    for (let across = 0; across < 256; across++)
+      source.andMask[axis === 'x' ? across * 256 + coordinate : coordinate * 256 + across] = 0
+    const result = loadedImage(await loadCursorAsset(asset([[source]])))
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++)
+      assert.equal(result.andMask[y * 32 + x], (axis === 'x' ? x : y) === destination ? 0 : 255,
+        `${axis}/${coordinate} at ${x},${y}`)
+  }
+})
+
+test('monochrome reduction preserves the native boundary between its combined AND and XOR planes', async () => {
+  // Exact native zero sets for the two 085 axis fixtures. The first row of
+  // XOR includes the AND tail; it is not a separately resized color image.
+  for (const [axis, coordinate] of [['x', 5], ['y', 253]] as const) {
+    const source = image(256, 256, 1)
+    source.data.fill(255); source.andMask.fill(255)
+    for (let across = 0; across < 256; across++) {
+      source.andMask[axis === 'x' ? across * 256 + coordinate : coordinate * 256 + across] = 0
+      const xor = axis === 'x' ? coordinate * 256 + across : across * 256 + coordinate
+      source.data.fill(0, xor * 4, xor * 4 + 3)
+    }
+    const result = loadedImage(await loadCursorAsset(asset([[source]])))
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const andZero = axis === 'x' && x === 1,
+        xorZero = axis === 'x' ? y === 1 || (y === 0 && x === 1) : y === 0
+      assert.equal(result.andMask[y * 32 + x], andZero ? 0 : 255)
+      assert.deepEqual([...result.data.subarray((y * 32 + x) * 4, (y * 32 + x + 1) * 4)],
+        xorZero ? [0, 0, 0, 255] : [255, 255, 255, 255])
+    }
+  }
+})
+
+test('a native AND tail point can affect only the loaded monochrome XOR plane', async () => {
+  // mask-footprint-1-zero-point-5-253: observed AND has no zero pixels;
+  // observed XOR has exactly (1,0). The transposed source XOR point is clipped.
+  const source = image(256, 256, 1)
+  source.data.fill(255); source.andMask.fill(255)
+  source.andMask[253 * 256 + 5] = 0
+  source.data.fill(0, (5 * 256 + 253) * 4, (5 * 256 + 253) * 4 + 3)
+  const result = loadedImage(await loadCursorAsset(asset([[source]])))
+  assert(result.andMask.every((value) => value === 255))
+  assert.deepEqual(Array.from({ length: 1024 }, (_, pixel) => pixel)
+    .filter((pixel) => result.data[pixel * 4] === 0), [1])
+})
+
 test('cursor load PNG256 centers samples before alpha composition and scales its outside-center hotspot', async () => {
   const pixels: number[] = []
   for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++)

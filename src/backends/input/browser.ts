@@ -1,4 +1,4 @@
-import type { InputPacket, InputView } from '../../engine/ports/input.ts'
+import type { InputPacket, InputView, MouseKeyObservation } from '../../engine/ports/input.ts'
 import type { WindowView } from '../../engine/scene/window.ts'
 import { paintBoxPoint } from '../../engine/scene/draw-device.ts'
 import { BrowserCursorPresenter, type BrowserCursorOptions, type CursorPosition } from './cursor.ts'
@@ -416,6 +416,33 @@ export class BrowserInput {
     // Asset-clear events also arrive while Stop has already suspended input.
     if (!this.cursorOptions?.resolve(this.input?.cursor ?? 0)) this.customCursor?.clear()
     this.cursorAppearance()
+  }
+  /** Map one real page pointer observation to this keyboard receiver. A
+   * trap-key receiver need not be the canvas under the physical pointer. */
+  mouseKeyObservation(windowId: number, point: { x: number; y: number } | undefined,
+    newlyObserved: boolean): MouseKeyObservation | undefined {
+    if (this.disposed || this.suspended || !this.view) return undefined
+    const bounds = this.canvas.getBoundingClientRect()
+    if (!(bounds.width > 0 && bounds.height > 0)) return undefined
+    const position = point ? this.point(point.x, point.y) : { x: 0, y: 0 }
+    if (point && newlyObserved) {
+      if (!Number.isSafeInteger(this.cursorState.physicalSequence + 1))
+        throw new Error('Physical pointer sequence exhausted')
+      this.retireVirtualCursor()
+      this.physicalCursor = { ...point }
+      const sequence = ++this.cursorState.physicalSequence
+      if (this.shared) this.shared.pointer(position.x, position.y, sequence)
+      else {
+        const epoch = this.epoch
+        void this.sendPointer(position.x, position.y, sequence).catch((error) => {
+          if (!this.disposed && epoch === this.epoch) this.error(error)
+        })
+      }
+      this.cursorAppearance()
+    }
+    return { windowId, ...position, scaleX: this.view.width / bounds.width,
+      scaleY: this.view.height / bounds.height,
+      pointerSequence: point ? this.cursorState.physicalSequence : 0 }
   }
   private restoreCursor(): void {
     this.canvas.style.cursor = this.view?.mouseCursorState || this.virtualMarker || this.customCursor?.visible

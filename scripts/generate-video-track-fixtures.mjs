@@ -13,6 +13,7 @@ mkdirSync(directory, { recursive: true })
 const original = resolve('tests/fixtures/video/colors.mp4'),
   regular = resolve(directory, 'multitrack.mp4'), fragmented = resolve(directory, 'fragmented.mp4'),
   separate = resolve(directory, 'separate-fragments.mp4'),
+  interleaved = resolve(directory, 'interleaved.mp4'),
   common = ['-hide_banner', '-loglevel', 'error', '-y'], commands = []
 const run = (args) => {
   commands.push(args)
@@ -27,7 +28,9 @@ run(['-stream_loop', '3', '-i', original,
   '-movflags', '+faststart', regular])
 run(['-i', regular, '-map', '0', '-c', 'copy', '-movflags', '+empty_moov+default_base_moof+frag_keyframe', fragmented])
 run(['-i', regular, '-map', '0', '-c', 'copy', '-movflags', '+empty_moov+default_base_moof+frag_keyframe+separate_moof', separate])
-const files = [regular, fragmented, separate].map((file) => {
+run(['-i', regular, '-map', '0', '-c', 'copy', '-movflags', '+empty_moov+default_base_moof+frag_keyframe',
+  '-frag_interleave', '1', interleaved])
+const files = [regular, fragmented, separate, interleaved].map((file) => {
   const bytes = readFileSync(file), metadata = JSON.parse(execFileSync('ffprobe', [
     '-v', 'error', '-show_streams', '-show_format', '-of', 'json', file,
   ], { encoding: 'utf8', timeout: 30000 }))
@@ -37,8 +40,16 @@ const files = [regular, fragmented, separate].map((file) => {
       video[0].width !== 64 || video[0].height !== 48 ||
       audio.some((stream) => stream.codec_name !== 'aac' || stream.sample_rate !== '48000' || stream.channels !== 2))
     throw new Error(`Unexpected generated video tracks: ${file}`)
+  const sha256 = createHash('sha256').update(bytes).digest('hex'),
+    packetCommand = ['-v', 'error', '-show_packets', '-show_data_hash', 'sha256', '-of', 'json', file],
+    packetOutput = JSON.parse(execFileSync('ffprobe', packetCommand, { encoding: 'utf8', timeout: 30000,
+      maxBuffer: 8 * 1024 * 1024 }))
+  if (!Array.isArray(packetOutput.packets) || !packetOutput.packets.length)
+    throw new Error(`No independent packet inventory: ${file}`)
+  writeFileSync(file + '.packets.json', JSON.stringify({ schema: 1, file: file.split('/').at(-1), sha256,
+    command: packetCommand, streams: metadata.streams, packets: packetOutput.packets }, null, 2) + '\n')
   return { file: file.split('/').at(-1), bytes: bytes.length,
-    sha256: createHash('sha256').update(bytes).digest('hex'), metadata }
+    sha256, metadata, packetCount: packetOutput.packets.length }
 })
 const provenance = {
   commit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,

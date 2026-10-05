@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [086 键盘模拟鼠标、掩码缩放与交错视频](decisions/086-mouse-keys-and-mask-scaling.md)：接通原来仅存储属性的 `Window.useMouseKey`，在陷阱接收与输入生命周期检查之后转换键盘／PAD；按完整原生轴线和边界采样修订 AND／单色双高 mask，并为其他比例新增 2,670 行原生观察；独立计算 MP4 多 trun 地址以支持真实交错容器。协议 **31**、TJS ABI **5**、字体 ABI **2**。本批代码与定义尚未取得执行结果，完整非插件目标仍 active。
+
+086 只取一次 085 固定快照：run 仍 **in_progress／conclusion=null**，10 jobs 为 3 failed／1 success／1 running／5 skipped；已归档固定清单 **4/4 原 ZIP** 并核对大小与 SHA-256。Build 3 条测试类型错误在本批修订，应用验收未执行。两 Windows 各 1,100 条 mask 原始观察已完成且一致，支持单色两平面共同缩放的边界解释；95 份严格加载比较仍各 62 draw 差异，颜色量化未闭合。JSPI allocator 和最终 gate 尚未报告，下轮补取；历史失败与原快照保留，未本地执行验证或持续轮询。
+
 最新待核验批次：[Full test suite 37270916669](https://github.com/fenghengzhi/krkr2-web/actions/runs/37270916669)，精确提交 `b88247d737706177ef923edf74839dee9c798c86`。085 的真实 MP4 音轨选择、生命周期与预算、新 Windows 光标采样及 084 构建修订已整批推送；新增 20 个 Node、每浏览器 17 个视频定义尚待执行。首次唯一查询为 **queued／conclusion=null**，只确认创建与提交身份，不实时监控。下一轮取回本批结果，保留历史失败、skipped、unreported、uncompared；未本地执行验证、未合入旧 main，整体非插件目标仍 active。
 
 2026-10-05 准备 [085 视频音轨选择与原生光标采样](decisions/085-video-audio-tracks.md)：MP4 保留媒体字节和时间轴，使用真实单元素音视频时钟切换音轨；补齐原版方法／属性 setter 的 uint32 转换和越界空操作。增加真实频谱、播放／暂停位置、取消和编码资源预算验收。协议 **30**、TJS ABI **5**、字体 ABI **2**。另增 1,100 行 Windows mask footprint 观察和 158 个颜色缩放候选；当前生产光标差异仍未解决。所有新增实现尚待 GitHub-hosted 执行，整体非插件目标仍 active。

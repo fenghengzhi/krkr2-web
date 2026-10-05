@@ -4,6 +4,7 @@ import { BrowserInput, virtualKey, type BrowserCursorState, type BrowserInputHoo
 import type { CursorScene, SelectedCursorAsset } from './cursor.ts'
 import { BrowserGamepad, type BrowserGamepadSource } from './gamepad-browser.ts'
 import type { GamepadSample } from './gamepad.ts'
+import { MouseKeyTicker, type MouseKeyClock } from '../../engine/input/mouse-key.ts'
 
 interface SurfaceInput {
   readonly id: number
@@ -24,6 +25,8 @@ interface QueuedInput {
 export interface BrowserInputCoordinatorOptions {
   /** Omit for the real browser Gamepad API. false disables device sampling. */
   gamepad?: BrowserGamepadSource | false
+  /** A monotonic clock boundary; default uses the browser animation clock. */
+  mouseKeyClock?: MouseKeyClock
   /** Temporary page controls such as owned menu popups preserve Window focus. */
   isTransientFocus?(target: EventTarget | null): boolean
   cursor?: {
@@ -41,6 +44,10 @@ export class BrowserInputCoordinator {
   private readonly pressed = new Set<number>()
   private readonly padKeys = new Set<number>()
   private readonly gamepad: BrowserGamepad
+  private readonly mouseKeyTicker: MouseKeyTicker
+  private pagePointer?: { x: number; y: number }
+  private pointerObservation = 0
+  private readonly mouseKeyObservations = new Map<number, number>()
   private gamepadEnabled = true
   private readonly physicalOwners = new Map<number, number>()
   private readonly hostKeys = new Set<number>()
@@ -63,6 +70,27 @@ export class BrowserInputCoordinator {
     private readonly error: (error: unknown) => void,
     private readonly options: BrowserInputCoordinatorOptions = {},
   ) {
+    const clock = options.mouseKeyClock ?? (typeof window.requestAnimationFrame === 'function' ? {
+      now: () => performance.now(),
+      request: (callback: () => void) => window.requestAnimationFrame(callback),
+      cancel: (handle: number) => window.cancelAnimationFrame(handle),
+    } : undefined)
+    this.mouseKeyTicker = new MouseKeyTicker(clock, () => this.tickMouseKeys())
+    for (const type of ['mousemove', 'mousedown', 'mouseup', 'wheel'] as const)
+      window.addEventListener(type, (event) => {
+        if (this.closed || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return
+        this.pagePointer = { x: event.clientX, y: event.clientY }
+        this.pointerObservation++
+        // A real OS pointer is global, including when a trap-key Window is
+        // not the physical target. Retire its Web cursor immediately instead
+        // of waiting for a later keyboard packet or a delayed Worker view.
+        for (const [id, surface] of this.surfaces) {
+          if (!this.views.get(id)?.useMouseKey || !surface.visible || surface.blocked || this.suspended) continue
+          try { surface.input.mouseKeyObservation(id, this.pagePointer, true) }
+          catch (error) { this.error(error) }
+          this.mouseKeyObservations.set(id, this.pointerObservation)
+        }
+      }, { signal: this.abort.signal, capture: true, passive: true })
     document.addEventListener(
       'focusin',
       (event) => {
@@ -140,7 +168,8 @@ export class BrowserInputCoordinator {
       },
       { signal: this.abort.signal },
     )
-    this.gamepad = new BrowserGamepad((sample) => this.observeGamepad(sample), this.error, options.gamepad)
+    this.gamepad = new BrowserGamepad((sample) => this.observeGamepad(sample), this.error, options.gamepad,
+      () => this.tickMouseKeys())
     document.addEventListener('visibilitychange', () => this.syncGamepad(), { signal: this.abort.signal })
     window.addEventListener('focus', () => this.syncGamepad(), { signal: this.abort.signal })
   }
@@ -175,6 +204,7 @@ export class BrowserInputCoordinator {
       },
       pointer: (x, y, sequence) => {
         if (!current()) return
+        this.mouseKeyObservations.set(windowId, this.pointerObservation)
         const generation = this.generation,
           revision = surface.revision
         try {
@@ -389,6 +419,7 @@ export class BrowserInputCoordinator {
     } finally {
       surface.resumingFromModal = false
     }
+    this.syncGamepad()
   }
 
   setInput(windowId: number, view: InputView): void {
@@ -398,8 +429,8 @@ export class BrowserInputCoordinator {
     if (view.gamepad) {
       this.gamepadEnabled = view.gamepad.enabled
       this.gamepad.setRepeat(view.gamepad.delay, view.gamepad.interval)
-      this.syncGamepad()
     }
+    this.syncGamepad()
   }
 
   setSuspended(suspended: boolean): void {
@@ -426,6 +457,7 @@ export class BrowserInputCoordinator {
     if (this.closed || this.suspended) return
     if (this.options.isTransientFocus?.(target)) {
       this.gamepad.setActive(false)
+      this.mouseKeyTicker.setActive(false)
       return
     }
     const surface = [...this.surfaces.values()].find(
@@ -464,6 +496,25 @@ export class BrowserInputCoordinator {
       surface.visible && surface.focusable && !surface.blocked && !document.hidden &&
       (typeof document.hasFocus !== 'function' || document.hasFocus()) &&
       surface.input.ownsFocus(document.activeElement)))
+    this.syncMouseKeyTicker()
+  }
+  private syncMouseKeyTicker(): void {
+    // Native TickBeat moves the cursor before polling DirectInput. When the
+    // Gamepad driver owns that 50 ms beat, its beforeSample hook supplies the
+    // tick; keyboard-only configurations retain a separate clock owner.
+    this.mouseKeyTicker.setActive(!this.gamepad.sampling && !!this.active && this.mouseKeyEligible(this.active))
+  }
+  private tickMouseKeys(): void {
+    const surface = this.active
+    if (!surface || !this.mouseKeyEligible(surface)) return
+    try { this.enqueue(surface, { type: 'mouseKeyTick', mouseKeyKeys: [...new Set([...this.pressed, ...this.padKeys])] }) }
+    catch (error) { this.error(error) }
+  }
+  private mouseKeyEligible(surface: SurfaceInput): boolean {
+    return this.current(surface) && !this.suspended && surface.visible && surface.focusable &&
+      !surface.blocked && !!this.views.get(surface.id)?.useMouseKey && !document.hidden &&
+      (typeof document.hasFocus !== 'function' || document.hasFocus()) &&
+      surface.input.ownsFocus(document.activeElement)
   }
   private observeGamepad(sample: GamepadSample): void {
     if (this.closed) return
@@ -482,15 +533,18 @@ export class BrowserInputCoordinator {
       this.enqueue(surface, { type: event.type, key: event.key, shift: shift | (event.repeat ? 128 : 0),
         ...(route ? { keyboardRouteRevision: route.revision,
           ...(route.inputRevision !== undefined ? { keyboardInputRevision: route.inputRevision } : {}) } : {}) })
+    this.syncMouseKeyTicker()
   }
 
   private remove(surface: SurfaceInput): void {
     if (this.active === surface) this.gamepad.setActive(false)
     this.surfaces.delete(surface.id)
+    this.mouseKeyObservations.delete(surface.id)
     this.queue = this.queue.filter((entry) => entry.surface !== surface)
     if (this.active === surface) this.active = undefined
     if (this.mouseOwner === surface) this.mouseOwner = undefined
     surface.input.close()
+    this.syncGamepad()
   }
 
   private clearPhysical(): void {
@@ -519,12 +573,23 @@ export class BrowserInputCoordinator {
 
   private enqueue(surface: SurfaceInput, packet: InputPacket): void {
     if (!this.current(surface) || this.suspended || surface.blocked) return
+    if (packet.type === 'keyDown' || packet.type === 'keyUp' || packet.type === 'text' || packet.type === 'mouseKeyTick') {
+      const targetId = packet.type === 'mouseKeyTick' ? surface.id :
+        this.inputs.get(surface.id)?.keyboardRoute?.windowId ?? surface.id,
+        target = this.surfaces.get(targetId)
+      if (target && this.views.get(targetId)?.useMouseKey) {
+        const observation = target.input.mouseKeyObservation(targetId, this.pagePointer,
+          this.mouseKeyObservations.get(targetId) !== this.pointerObservation)
+        this.mouseKeyObservations.set(targetId, this.pointerObservation)
+        if (observation) packet = { ...packet, mouseKeyObservation: observation }
+      }
+    }
     const entry = { surface, packet: { ...packet, windowId: surface.id } },
       last = this.queue.at(-1)
     if (
       last?.surface === surface &&
       last.packet.type === packet.type &&
-      (packet.type === 'move' ||
+      (packet.type === 'move' || packet.type === 'mouseKeyTick' ||
         (packet.type === 'touchMove' &&
           last.packet.type === 'touchMove' &&
           last.packet.id === packet.id))
@@ -572,10 +637,12 @@ export class BrowserInputCoordinator {
     this.setSuspended(true)
     this.closed = true
     this.gamepad.close()
+    this.mouseKeyTicker.close()
     this.abort.abort()
     for (const surface of [...this.surfaces.values()]) this.remove(surface)
     this.views.clear()
     this.inputs.clear()
     this.cursorStates.clear()
+    this.mouseKeyObservations.clear()
   }
 }

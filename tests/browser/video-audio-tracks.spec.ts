@@ -21,7 +21,7 @@ async function audible(page: Page, frequency: number) {
 }
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
-for (const container of ['multitrack', 'fragmented']) {
+for (const container of ['multitrack', 'fragmented', 'interleaved']) {
   test(`${backend}/${binary ? 'bytecode' : 'source'}/${container}: VideoOverlay switches real AAC tracks while preserving its media clock and layer`, async ({ page }, info) => {
     test.setTimeout(90000)
     const errors: string[] = [], observations: { stage: string; value: VideoAudioObservation }[] = [],

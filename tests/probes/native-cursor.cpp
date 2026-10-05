@@ -616,36 +616,39 @@ std::string environment() {
 // fixture so source support is measured, never assigned to a guessed region.
 struct MaskFootprint {
     std::string kind;
+    std::string plane = "crossed";
     char axis = 'x';
     unsigned coordinate = 0, x = 0, y = 0, constant = 0;
 };
 bool footprintBit(const MaskFootprint& pattern, unsigned x, unsigned y, bool xorPlane) {
+    if ((pattern.plane == "AND" && xorPlane) || (pattern.plane == "XOR" && !xorPlane)) return true;
+    const bool crossed = pattern.plane == "crossed";
     if (pattern.kind == "constant") return pattern.constant != 0;
     if (pattern.kind == "zero-line") {
-        const char axis = xorPlane ? (pattern.axis == 'x' ? 'y' : 'x') : pattern.axis;
+        const char axis = crossed && xorPlane ? (pattern.axis == 'x' ? 'y' : 'x') : pattern.axis;
         return (axis == 'x' ? x : y) != pattern.coordinate;
     }
     if (pattern.kind == "zero-point")
-        return !(x == (xorPlane ? pattern.y : pattern.x) && y == (xorPlane ? pattern.x : pattern.y));
+        return !(x == (crossed && xorPlane ? pattern.y : pattern.x) && y == (crossed && xorPlane ? pattern.x : pattern.y));
     throw std::runtime_error("Unknown footprint pattern");
 }
-Bytes footprintCursor(unsigned depth, const MaskFootprint& pattern) {
+Bytes footprintCursor(unsigned depth, const MaskFootprint& pattern, unsigned width = 256, unsigned height = 256) {
     if (depth != 1 && depth != 32) throw std::runtime_error("Invalid footprint depth");
-    constexpr unsigned extent = 256, maskStride = 32;
-    const unsigned colorStride = extent * depth / 8;
+    if (!width || !height || width > 256 || height > 256) throw std::runtime_error("Invalid footprint dimensions");
+    const unsigned maskStride = ((width + 31) / 32) * 4, colorStride = ((width * depth + 31) / 32) * 4;
     Bytes payload;
-    put32(payload, 40); put32(payload, extent); put32(payload, extent * 2);
+    put32(payload, 40); put32(payload, width); put32(payload, height * 2);
     put16(payload, 1); put16(payload, depth); put32(payload, BI_RGB);
-    put32(payload, (colorStride + maskStride) * extent); put32(payload, 0); put32(payload, 0);
+    put32(payload, (colorStride + maskStride) * height); put32(payload, 0); put32(payload, 0);
     put32(payload, depth == 1 ? 2 : 0); put32(payload, 0);
     if (depth == 1) { put32(payload, 0); put32(payload, 0x00ffffff); }
-    const auto colorAt = payload.size(), maskAt = colorAt + colorStride * extent;
-    payload.resize(maskAt + maskStride * extent, 0);
+    const auto colorAt = payload.size(), maskAt = colorAt + colorStride * height;
+    payload.resize(maskAt + maskStride * height, 0);
     // Top-down fixture coordinates are written into independent bottom-up DIB
     // planes. Constant non-grey RGB prevents an all-black color image from
     // collapsing to a monochrome representation; alpha remains exactly zero.
-    for (unsigned y = 0; y < extent; y++) for (unsigned x = 0; x < extent; x++) {
-        const unsigned row = extent - 1 - y, bit = 1u << (7 - x % 8);
+    for (unsigned y = 0; y < height; y++) for (unsigned x = 0; x < width; x++) {
+        const unsigned row = height - 1 - y, bit = 1u << (7 - x % 8);
         if (footprintBit(pattern, x, y, false)) payload[maskAt + row * maskStride + x / 8] |= bit;
         if (depth == 1 && footprintBit(pattern, x, y, true)) payload[colorAt + row * colorStride + x / 8] |= bit;
         if (depth == 32) {
@@ -653,18 +656,19 @@ Bytes footprintCursor(unsigned depth, const MaskFootprint& pattern) {
             payload[at] = 65; payload[at + 1] = 33; payload[at + 2] = 17;
         }
     }
-    Image image; image.width = image.height = extent; image.bpp = depth;
+    Image image; image.width = width; image.height = height; image.bpp = depth;
     image.hotX = image.hotY = 0; image.payload = std::move(payload);
     return cur({image});
 }
-int observeMaskFootprints(const fs::path& output) {
-    constexpr unsigned expected = 1100;
+int observeMaskFootprints(const fs::path& output, bool geometry = false) {
+    const unsigned expected = geometry ? 2670 : 1100;
+    const std::string basename = geometry ? "mask-geometry" : "mask-footprints";
     const char* sha = std::getenv("GITHUB_SHA");
     const auto platform = environment();
     std::vector<std::string> rows;
     unsigned failures = 0;
     bool cleanupFailed = false;
-    std::ofstream journal(output / "mask-footprints.jsonl", std::ios::binary | std::ios::trunc);
+    std::ofstream journal(output / (basename + ".jsonl"), std::ios::binary | std::ios::trunc);
     if (!journal) throw std::runtime_error("Cannot open footprint journal");
     auto save = [&](bool completed) {
         std::ostringstream json;
@@ -672,27 +676,35 @@ int observeMaskFootprints(const fs::path& output) {
           << "\"globalInputUsed\":false,\"drawIconExUsed\":false,\"portableCandidatesUsed\":false,\"completed\":"
           << (completed ? "true" : "false") << ",\"cleanupFailed\":" << (cleanupFailed ? "true" : "false")
           << ",\"failures\":" << failures << ",\"sourceCommit\":" << quote(sha ? sha : "")
-          << ",\"platform\":" << platform << ",\"sourceExtent\":256,\"expectedSamples\":" << expected
+          << ",\"platform\":" << platform << ",\"sourceExtent\":" << (geometry ? "null" : "256")
+          << ",\"expectedSamples\":" << expected
           << ",\"observedSamples\":" << rows.size()
-          << ",\"design\":{\"axisLines\":1024,\"constants\":4,\"points\":72,"
-          << "\"coordinateSpace\":\"top-down source pixels\",\"lineXor\":\"other axis, same source coordinate\","
-          << "\"pointXor\":\"transpose source x and y\",\"color32\":\"BGRA=(65,33,17,0), independent AND plane\"},\"samples\":[";
+          << ",\"design\":{\"axisLines\":" << (geometry ? 1872 : 1024)
+          << ",\"constants\":" << (geometry ? 42 : 4) << ",\"points\":" << (geometry ? 756 : 72)
+          << ",\"coordinateSpace\":\"top-down source pixels\",\"lineXor\":"
+          << quote(geometry ? "only named plane changes; other plane stays one" : "other axis, same source coordinate")
+          << ",\"pointXor\":" << quote(geometry ? "only named plane changes; no transpose" : "transpose source x and y")
+          << ",\"sourceShapes\":" << (geometry ? "[[64,64],[48,48],[13,9],[64,48],[48,64],[64,13],[13,64]]" : "[[256,256]]")
+          << ",\"color32\":\"BGRA=(65,33,17,0), independent AND plane\"},\"samples\":[";
         for (size_t n = 0; n < rows.size(); n++) { if (n) json << ','; json << rows[n]; }
-        json << "]}\n"; writeText(output / "mask-footprints.json", json.str());
+        json << "]}\n"; writeText(output / (basename + ".json"), json.str());
     };
     save(false);
-    auto observeOne = [&](unsigned depth, const MaskFootprint& pattern) {
+    auto observeOne = [&](unsigned depth, const MaskFootprint& pattern, unsigned width = 256, unsigned height = 256) {
         std::string suffix = pattern.kind + "-";
         if (pattern.kind == "zero-line") suffix += std::string(1, pattern.axis) + "-" + std::to_string(pattern.coordinate);
         else if (pattern.kind == "zero-point") suffix += std::to_string(pattern.x) + "-" + std::to_string(pattern.y);
         else suffix += std::to_string(pattern.constant);
-        const std::string id = "mask-footprint-" + std::to_string(depth) + "-" + suffix, filename = id + ".cur";
+        const std::string prefix = geometry ? "mask-geometry-" + std::to_string(width) + "x" + std::to_string(height) + "-"
+          + pattern.plane + "-" : "mask-footprint-";
+        const std::string id = prefix + std::to_string(depth) + "-" + suffix, filename = id + ".cur";
         std::cout << "BEGIN " << id << std::endl;
-        const auto bytes = footprintCursor(depth, pattern);
+        const auto bytes = footprintCursor(depth, pattern, width, height);
         write(output / filename, bytes);
         std::ostringstream row;
         row << "{\"id\":" << quote(id) << ",\"file\":" << quote(filename) << ",\"bytes\":" << bytes.size()
-          << ",\"depth\":" << depth << ",\"pattern\":{\"kind\":" << quote(pattern.kind)
+          << ",\"depth\":" << depth << ",\"width\":" << width << ",\"height\":" << height
+          << ",\"pattern\":{\"kind\":" << quote(pattern.kind) << ",\"plane\":" << quote(pattern.plane)
           << ",\"axis\":" << quote(std::string(1, pattern.axis)) << ",\"coordinate\":" << pattern.coordinate
           << ",\"x\":" << pattern.x << ",\"y\":" << pattern.y << ",\"constant\":" << pattern.constant << '}';
         SetLastError(0);
@@ -718,7 +730,26 @@ int observeMaskFootprints(const fs::path& output) {
         if (rows.size() % 16 == 0) save(false);
         std::cout << "OBSERVED " << id << std::endl;
     };
-    for (unsigned depth : {1u, 32u}) {
+    if (geometry) {
+        const unsigned shapes[][2] = {{64,64},{48,48},{13,9},{64,48},{48,64},{64,13},{13,64}};
+        for (const auto& shape : shapes) for (unsigned depth : {1u, 32u}) for (const auto& plane : {"AND", "XOR"}) {
+            if (depth == 32 && std::string(plane) == "XOR") continue;
+            const unsigned width = shape[0], height = shape[1];
+            for (unsigned value : {0u, 1u}) {
+                MaskFootprint p; p.plane = plane; p.kind = "constant"; p.constant = value;
+                observeOne(depth, p, width, height);
+            }
+            for (char axis : {'x', 'y'}) for (unsigned coordinate = 0; coordinate < (axis == 'x' ? width : height); coordinate++) {
+                MaskFootprint p; p.plane = plane; p.kind = "zero-line"; p.axis = axis; p.coordinate = coordinate;
+                observeOne(depth, p, width, height);
+            }
+            for (unsigned x : {0u, 1u, 4u, 5u, width - 2, width - 1})
+              for (unsigned y : {0u, 1u, 4u, 5u, height - 2, height - 1}) {
+                MaskFootprint p; p.plane = plane; p.kind = "zero-point"; p.x = x; p.y = y;
+                observeOne(depth, p, width, height);
+            }
+        }
+    } else for (unsigned depth : {1u, 32u}) {
         for (unsigned value : {0u, 1u}) {
             MaskFootprint pattern; pattern.kind = "constant"; pattern.constant = value;
             observeOne(depth, pattern);
@@ -742,11 +773,11 @@ int wmain(int argc, wchar_t** argv) {
         const char* actions = std::getenv("GITHUB_ACTIONS"), *runner = std::getenv("RUNNER_ENVIRONMENT"), *os = std::getenv("RUNNER_OS");
         if (!actions || std::string(actions) != "true" || !runner || std::string(runner) != "github-hosted" || !os || std::string(os) != "Windows")
             throw std::runtime_error("This probe runs only on GitHub-hosted Windows Actions");
-        if (argc != 2 && (argc != 3 || std::wstring(argv[2]) != L"--mask-footprints"))
-            throw std::runtime_error("Expected output directory and optional --mask-footprints");
+        if (argc != 2 && (argc != 3 || (std::wstring(argv[2]) != L"--mask-footprints" && std::wstring(argv[2]) != L"--mask-geometry")))
+            throw std::runtime_error("Expected output directory and optional --mask-footprints or --mask-geometry");
         SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
         const fs::path output = fs::absolute(argv[1]); fs::create_directories(output);
-        if (argc == 3) return observeMaskFootprints(output);
+        if (argc == 3) return observeMaskFootprints(output, std::wstring(argv[2]) == L"--mask-geometry");
         const auto cases = fixtures(); const std::string platform = environment();
         const char* sha = std::getenv("GITHUB_SHA");
         auto frameInfo = reinterpret_cast<GetCursorFrameInfoFn>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetCursorFrameInfo"));

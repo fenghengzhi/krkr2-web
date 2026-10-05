@@ -5,6 +5,7 @@ import type { InputPacket, InputView } from '../../src/engine/ports/input.ts'
 import { WindowState } from '../../src/engine/scene/window.ts'
 import type { BrowserGamepadSource } from '../../src/backends/input/gamepad-browser.ts'
 import { gamepadSource } from '../helpers/gamepad-source.ts'
+import type { MouseKeyClock } from '../../src/engine/input/mouse-key.ts'
 
 // This fixture exercises event observation and asynchronous scheduling, not browser
 // layout or trusted pointer capture. Those remain covered by browser acceptance.
@@ -161,6 +162,7 @@ function fixture(
   scope = false,
   transient?: (target: EventTarget | null) => boolean,
   gamepad: BrowserGamepadSource | false = false,
+  mouseKeyClock?: MouseKeyClock,
 ) {
   const env = dom(),
     packets: InputPacket[] = [],
@@ -179,7 +181,7 @@ function fixture(
         pointers.push([x, y, id])
       },
       (error) => errors.push(error),
-      { isTransientFocus: transient, gamepad },
+      { isTransientFocus: transient, gamepad, mouseKeyClock },
     ),
     a = env.canvas(),
     b = env.canvas(),
@@ -216,6 +218,116 @@ function fixture(
     },
   }
 }
+
+test('mouse-key observations follow the actual trap-key receiver while real key packets retain their original route', async () => {
+  const f = fixture()
+  try {
+    const a = new WindowState(), b = new WindowState()
+    a.visible = b.visible = true
+    b.useMouseKey = true
+    b.width = 400
+    b.height = 300
+    f.coordinator.setWindow(101, a.view())
+    f.coordinator.setWindow(202, b.view())
+    f.coordinator.setInput(101, inputView({ keyboardRoute: {
+      windowId: 202, revision: 10, inputRevision: 20, focused: 11, imeMode: 1,
+    } }))
+    f.a.focus()
+    f.mouse(f.a, 'mousedown', 1, 80)
+    await settle()
+    f.key(f.textareas[0]!, 'a')
+    await settle()
+    const packet = f.packets.at(-1)!
+    assert.equal(packet.type, 'keyDown')
+    assert.equal(packet.windowId, 101)
+    assert.equal(packet.keyboardInputRevision, 20)
+    assert(packet.mouseKeyObservation)
+    assert.deepEqual({ ...packet.mouseKeyObservation, pointerSequence: 0 }, {
+      windowId: 202, x: 40, y: 5, scaleX: 0.5, scaleY: 0.5, pointerSequence: 0,
+    })
+    assert(packet.mouseKeyObservation.pointerSequence > 0)
+    assert(f.keys.at(-1)!.includes(65), 'The browser observes the real key; only engine admission may consume it')
+    assert(f.pointers.some(([x, y, id]) => id === 202 && x === 40 && y === 5))
+  } finally { f.close() }
+})
+
+test('mouse-key ticks stop for menus, hidden windows, replacement and late suspended RAF callbacks', async () => {
+  let transient: EventTarget | null = null
+  const clock = gamepadSource(), f = fixture(undefined, false, (target) => target === transient, false, clock.source),
+    menu = f.canvas(), view = new WindowState()
+  transient = menu
+  try {
+    view.visible = true
+    view.useMouseKey = true
+    f.coordinator.setWindow(101, view.view())
+    f.coordinator.setInput(101, inputView())
+    f.a.focus()
+    await settle()
+    clock.tick(50)
+    await settle()
+    assert.equal(f.packets.at(-1)!.type, 'mouseKeyTick')
+    const stale = clock.captured(), count = f.packets.length
+    menu.focus()
+    assert.equal(clock.pending, 0)
+    for (const callback of stale) callback()
+    await settle()
+    assert.equal(f.packets.length, count)
+    f.a.focus()
+    clock.tick(100)
+    await settle()
+    assert.equal(f.packets.at(-1)!.type, 'mouseKeyTick')
+    f.coordinator.setSuspended(true)
+    assert.equal(clock.pending, 0)
+    for (const callback of stale) callback()
+    assert.equal(clock.pending, 0)
+    f.coordinator.setSuspended(false)
+    f.a.focus()
+    view.visible = false
+    f.coordinator.setWindow(101, view.view())
+    assert.equal(clock.pending, 0)
+    view.visible = true
+    f.coordinator.setWindow(101, view.view())
+    f.a.focus()
+    f.coordinator.detach(101, 1)
+    assert.equal(clock.pending, 0)
+    for (const callback of stale) callback()
+    assert.equal(clock.pending, 0)
+    assert.deepEqual([...f.errors], [])
+  } finally { f.close() }
+})
+
+test('mouse-key ticks freeze the previous Pad state before polling even behind an in-flight admission ACK', async () => {
+  const clock = gamepadSource(), gate = deferred(),
+    f = fixture(async (packet) => {
+      if (packet.type === 'keyDown' && packet.key === 65) await gate.promise
+    }, false, undefined, clock.source)
+  try {
+    const view = new WindowState()
+    view.visible = true
+    view.useMouseKey = true
+    clock.pad()
+    f.coordinator.setWindow(101, view.view())
+    f.coordinator.setInput(101, inputView())
+    f.a.focus()
+    await settle()
+    f.key(f.textareas[0]!, 'a')
+    await settle()
+    clock.pad([15])
+    clock.tick(50)
+    clock.pad()
+    clock.tick(100)
+    assert.deepEqual(f.keys.at(-1), [65], 'The independent physical state has already observed Pad release')
+    gate.resolve()
+    await settle()
+    const ordered = f.packets.filter((packet) => packet.type === 'mouseKeyTick' ||
+      ((packet.type === 'keyDown' || packet.type === 'keyUp') && packet.key === 0x1b7))
+    assert.deepEqual(ordered.slice(-4).map((packet) => packet.type), ['mouseKeyTick', 'keyDown', 'mouseKeyTick', 'keyUp'])
+    assert.deepEqual(ordered.at(-4)!.mouseKeyKeys, [65])
+    assert.deepEqual(ordered.at(-2)!.mouseKeyKeys, [65, 0x1b7],
+      'The queued mouse tick retains the pre-poll held Pad, without rewriting physical key state')
+    assert.deepEqual([...f.errors], [])
+  } finally { gate.resolve(); f.close() }
+})
 
 test('gamepad shares the ordered Window queue while released physical keys bypass a blocked callback', async () => {
   const clock = gamepadSource(), waiting = deferred(),

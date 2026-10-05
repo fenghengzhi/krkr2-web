@@ -11,7 +11,7 @@ export interface Mp4AudioSelectionOptions {
   yieldControl?(): void | Promise<void>
 }
 interface Box { kind: string; start: number; body: number; end: number }
-interface Track { id: number; handler: string; box: Box; header: Box; alternate: number; descriptions: number; samples: number }
+interface Track { id: number; handler: string; box: Box; header: Box; alternate: number; descriptions: number; samples: number; regularSamples: number }
 interface FragmentTrack { box: Box; id: number; runs: number[]; ordinal: number }
 const MAX_BOXES = 100000, MAX_SAMPLES = 1000000, MAX_BYTES = 64 * 1024 * 1024
 const padding = ['free', 'skip', 'wide']
@@ -112,6 +112,17 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
   await cooperate()
   const top = list(0, bytes.length)
   const topStarts = new Set(top.map((box) => box.start)), topEnds = new Set(top.map((box) => box.end))
+  const media = top.filter((box) => box.kind === 'mdat')
+  const validateSample = (offset: number, size: number, dts: number, cts: number, duration: number) => {
+    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || size < 0 ||
+        !Number.isSafeInteger(cts) || !Number.isSafeInteger(dts) || !Number.isSafeInteger(duration) || duration < 0 ||
+        !Number.isSafeInteger(dts + duration) || !Number.isSafeInteger(cts + duration))
+      throw new Error('Invalid MP4 sample extent or timestamp')
+    let low = 0, high = media.length
+    while (low < high) { const mid = (low + high) >>> 1; if (media[mid]!.body <= offset) low = mid + 1; else high = mid }
+    const data = media[low - 1]
+    if (!data || offset > data.end || size > data.end - offset) throw new Error('MP4 sample is outside media data')
+  }
   for (const box of top)
     if (!['ftyp', 'styp', 'moov', 'mdat', 'moof', 'mfra', 'sidx', ...padding].includes(box.kind))
       throw new Error(`Unsupported MP4 top-level ${box.kind} box`)
@@ -249,7 +260,8 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
       if (chunkSamples > MAX_SAMPLES) throw new Error('MP4 chunk sample budget exceeded')
     }
     if (chunkSamples !== sizeSamples) throw new Error('MP4 chunk and size sample counts disagree')
-    tracks.push({ id, handler, box, header, alternate: header.body + (version ? 46 : 34), descriptions: entries.length, samples: sizeSamples })
+    tracks.push({ id, handler, box, header, alternate: header.body + (version ? 46 : 34), descriptions: entries.length,
+      samples: sizeSamples, regularSamples: sizeSamples })
   }
   if (tableSamples > MAX_SAMPLES * 2) throw new Error('MP4 aggregate sample budget exceeded')
   const audio = tracks.filter((track) => track.handler === 'soun'), selected = audio[index]
@@ -257,18 +269,18 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
   const removed = new Set(audio.filter((track) => track !== selected).map((track) => track.id))
   for (const track of audio) if (track !== selected) free.push(track.box)
   const byId = new Map(tracks.map((track) => [track.id, track]))
-  const mvex = one(movie, 'mvex', false), defaults = new Set<number>()
+  const mvex = one(movie, 'mvex', false), defaults = new Map<number, { size: number; duration: number }>()
   if (mvex) for (const box of children(mvex, ['trex', 'mehd'])) {
     if (padding.includes(box.kind)) continue
     if (box.kind === 'mehd') { exact(box, box.body + (full(box, [0, 1]).version ? 12 : 8)); continue }
     full(box); need(box, box.body, 24); exact(box, box.body + 24)
     const id = view.getUint32(box.body + 4), description = view.getUint32(box.body + 8)
     if (!byId.has(id) || defaults.has(id) || !description || description > byId.get(id)!.descriptions) throw new Error('Invalid MP4 trex track or description')
-    defaults.add(id)
+    defaults.set(id, { duration: view.getUint32(box.body + 12), size: view.getUint32(box.body + 16) })
     if (removed.has(id)) free.push(box)
   }
   const fragments = new Map<number, FragmentTrack[]>()
-  let fragmentCount = 0
+  let fragmentCount = 0, inspectedFragments = 0
   for (const moof of top.filter((box) => box.kind === 'moof')) {
     if (!(fragmentCount++ % 128)) await cooperate()
     if (!mvex) throw new Error('MP4 fragments require movie defaults')
@@ -285,32 +297,56 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
       if (!byId.has(id) || !defaults.has(id)) throw new Error('Unknown MP4 fragment track')
       if ((flags & 1) && (flags & 0x020000)) throw new Error('Conflicting MP4 fragment bases')
       if (!(flags & 1) && !(flags & 0x020000) && boxes.length !== 1) throw new Error('Inherited MP4 fragment data bases are unsupported')
-      let at = tfhd.body + 8
-      if (flags & 1) { if (u64(tfhd, at) > bytes.length) throw new Error('MP4 fragment base is outside file'); at += 8 }
+      let at = tfhd.body + 8, base = moof.start,
+        defaultSize = defaults.get(id)!.size, defaultDuration = defaults.get(id)!.duration
+      if (flags & 1) {
+        base = u64(tfhd, at)
+        if (base > bytes.length) throw new Error('MP4 fragment base is outside file')
+        at += 8
+      }
       for (const bit of [2, 8, 16, 32]) if (flags & bit) {
         need(tfhd, at, 4)
         if (bit === 2 && (!view.getUint32(at) || view.getUint32(at) > byId.get(id)!.descriptions)) throw new Error('Invalid MP4 fragment sample description')
+        if (bit === 8) defaultDuration = view.getUint32(at)
+        if (bit === 16) defaultSize = view.getUint32(at)
         at += 4
       }
       exact(tfhd, at)
       const tfdt = one(items, 'tfdt')!, decodeVersion = full(tfdt, [0, 1]).version
       exact(tfdt, tfdt.body + (decodeVersion ? 12 : 8))
+      let decodeTime = decodeVersion ? u64(tfdt, tfdt.body + 4) : view.getUint32(tfdt.body + 4), previousEnd = 0
       const runs = items.filter((item) => item.kind === 'trun'), counts: number[] = []
       if (!runs.length) throw new Error('MP4 fragment has no sample runs')
       for (let i = 0; i < runs.length; i++) {
-        const run = runs[i]!, flags = full(run, [0, 1], 0xf05).flags
+        const run = runs[i]!, { flags, version } = full(run, [0, 1], 0xf05)
         need(run, run.body, 8)
         if (!i && !(flags & 1)) throw new Error('MP4 first fragment run requires an explicit data offset')
-        // Pinned MP4Box 2.4.1 applies data_offset only to the first run. Do not
-        // mistake its inferred contiguous offsets for validation of a later
-        // explicit address, including one pointing outside the file.
-        if (i && (flags & 1)) throw new Error('Unsupported MP4 explicit data offset after the first fragment run')
         if ((flags & 4) && (flags & 0x400)) throw new Error('Conflicting MP4 sample flag fields')
         const samples = view.getUint32(run.body + 4), width = [0x100, 0x200, 0x400, 0x800].filter((bit) => flags & bit).length * 4
         if (empty && samples) throw new Error('MP4 empty fragment contains samples')
         if (samples > MAX_SAMPLES || (tableSamples += samples) > MAX_SAMPLES * 2) throw new Error('MP4 fragment sample budget exceeded')
         if ((byId.get(id)!.samples += samples) > MAX_SAMPLES) throw new Error('MP4 track sample budget exceeded')
         exact(run, run.body + 8 + (flags & 1 ? 4 : 0) + (flags & 4 ? 4 : 0) + samples * width)
+        let field = run.body + 8, position = previousEnd
+        if (flags & 1) { position = base + view.getInt32(field); field += 4 }
+        if (flags & 4) field += 4
+        if (!Number.isSafeInteger(position) || position < 0 || position > bytes.length)
+          throw new Error('MP4 fragment run offset is outside the file')
+        // Each explicit offset uses this traf's fixed base, even after the
+        // first run; an omitted offset continues the previous run's end.
+        // Validate directly, without allocating a second per-sample table.
+        for (let sample = 0; sample < samples; sample++) {
+          if (!(inspectedFragments++ % 4096)) await cooperate()
+          let duration = defaultDuration, size = defaultSize, composition = 0
+          if (flags & 0x100) { duration = view.getUint32(field); field += 4 }
+          if (flags & 0x200) { size = view.getUint32(field); field += 4 }
+          if (flags & 0x400) field += 4
+          if (flags & 0x800) { composition = version ? view.getInt32(field) : view.getUint32(field); field += 4 }
+          validateSample(position, size, decodeTime, decodeTime + composition, duration)
+          position += size
+          decodeTime += duration
+        }
+        previousEnd = position
         counts.push(samples)
       }
       const keep = !removed.has(id)
@@ -375,8 +411,9 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
     if (entries && !topEnds.has(position)) throw new Error('MP4 segment index ends inside a box')
     if (removed.has(id)) free.push(box)
   }
-  // MP4Box expands regular and fragmented sample tables independently; validate
-  // every original track before hiding any of its metadata from the demuxer.
+  // MP4Box still validates regular tables and total sample counts. Its pinned
+  // 2.4.1 fragment offsets ignore later explicit trun offsets, so fragment
+  // addresses/times were validated independently above and are not reused here.
   await cooperate()
   const { createFile } = await import('mp4box'), file = createFile(false)
   file.onError = (message) => { throw new Error(`MP4 audio metadata: ${message}`) }
@@ -385,21 +422,15 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
   // also avoids MultiBufferStream's overlap/concatenation copies.
   file.appendBuffer(Object.assign(bytes.buffer, { fileStart: 0, usedBytes: 0 })); file.flush()
   await cooperate()
-  const media = top.filter((box) => box.kind === 'mdat')
   let total = 0, inspected = 0
   for (const track of tracks) {
     const samples = file.getTrackSamplesInfo(track.id)
     if (!samples || samples.length > MAX_SAMPLES || (total += samples.length) > MAX_SAMPLES * 2) throw new Error('MP4 decoded sample table budget exceeded')
     if (samples.length !== track.samples) throw new Error('MP4 expanded sample count does not match its source tables')
-    for (const sample of samples) {
+    for (let i = 0; i < track.regularSamples; i++) {
+      const sample = samples[i]!
       if (!(inspected++ % 4096)) await cooperate()
-      if (!Number.isSafeInteger(sample.offset) || !Number.isSafeInteger(sample.size) || sample.size < 0 ||
-          !Number.isSafeInteger(sample.cts) || !Number.isSafeInteger(sample.dts) || !Number.isSafeInteger(sample.duration) || sample.duration < 0)
-        throw new Error('Invalid MP4 sample extent or timestamp')
-      let low = 0, high = media.length
-      while (low < high) { const mid = (low + high) >>> 1; if (media[mid]!.body <= sample.offset) low = mid + 1; else high = mid }
-      const data = media[low - 1]
-      if (!data || sample.offset > data.end || sample.size > data.end - sample.offset) throw new Error('MP4 sample is outside media data')
+      validateSample(sample.offset, sample.size, sample.dts, sample.cts, sample.duration)
     }
   }
   await cooperate()

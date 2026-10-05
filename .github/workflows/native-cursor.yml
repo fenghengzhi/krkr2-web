@@ -225,6 +225,81 @@ jobs:
             $status.finishedAt = [DateTime]::UtcNow.ToString('o')
             $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
           }
+      - name: Observe independent mask planes across seven source geometries
+        id: mask_geometry
+        if: ${{ !cancelled() && steps.reference.outcome == 'success' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:GITHUB_WORKSPACE 'out/ci/native-cursor'
+          $statusPath = Join-Path $output 'mask-geometry-status.json'
+          $status = [ordered]@{
+            schema = 1; state = 'not-executed'; sourceCommit = $env:GITHUB_SHA; runId = $env:GITHUB_RUN_ID
+            expectedSamples = 2670; observedSamples = 0; processDeadlineMs = 180000
+            startedAt = [DateTime]::UtcNow.ToString('o'); finishedAt = $null
+            processId = $null; exitCode = $null; error = $null; cleanupError = $null
+          }
+          $process = $null
+          $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          try {
+            $start = @{
+              FilePath = Join-Path $output 'native-cursor.exe'
+              ArgumentList = ('"{0}" --mask-geometry' -f $output)
+              WorkingDirectory = $output; PassThru = $true
+              RedirectStandardOutput = Join-Path $output 'mask-geometry.stdout.log'
+              RedirectStandardError = Join-Path $output 'mask-geometry.stderr.log'
+            }
+            $process = Start-Process @start
+            $status.processId = $process.Id; $status.state = 'running'
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+            if (-not $process.WaitForExit($status.processDeadlineMs)) {
+              $status.state = 'timed-out'
+              throw 'Mask geometry process exceeded its 180-second deadline; partial observations remain evidence.'
+            }
+            $status.exitCode = $process.ExitCode
+            if ($process.ExitCode -ne 0) { throw "Mask geometry process exited with code $($process.ExitCode)." }
+            $observations = Get-Content -LiteralPath (Join-Path $output 'mask-geometry.json') -Raw | ConvertFrom-Json
+            if ($observations.completed -ne $true -or $observations.cleanupFailed -ne $false -or $observations.failures -ne 0 -or
+                $observations.sourceCommit -cne $env:GITHUB_SHA -or $observations.expectedSamples -ne 2670 -or
+                $observations.observedSamples -ne 2670 -or $observations.samples.Count -ne 2670 -or
+                $observations.globalInputUsed -ne $false -or $observations.drawIconExUsed -ne $false) {
+              throw 'Mask geometry inventory, native load, or cleanup is incomplete.'
+            }
+            $ids = [Collections.Generic.HashSet[string]]::new()
+            foreach ($sample in $observations.samples) {
+              if (-not $ids.Add($sample.id) -or $sample.loaded -ne $true -or $sample.destroyed -ne $true -or
+                  $sample.info.ok -ne $true -or $sample.info.planesCopied -ne $true -or $sample.info.bitmapsDeleted -ne $true) {
+                throw "Incomplete mask geometry sample: $($sample.id)"
+              }
+              $source = Join-Path $output $sample.file
+              if (-not (Test-Path -LiteralPath $source) -or (Get-Item -LiteralPath $source).Length -ne $sample.bytes) {
+                throw "Incomplete mask geometry source bytes: $($sample.id)"
+              }
+              foreach ($plane in @($sample.info.maskPlane, $sample.info.colorPlane)) {
+                if ($plane.present) {
+                  $raw = Join-Path $output $plane.file
+                  if ($plane.ok -ne $true -or -not (Test-Path -LiteralPath $raw) -or
+                      (Get-Item -LiteralPath $raw).Length -ne ($plane.stride * $plane.height)) {
+                    throw "Incomplete mask geometry plane: $($sample.id)"
+                  }
+                }
+              }
+            }
+            $status.observedSamples = 2670; $status.state = 'observed'
+          } catch {
+            if ($status.state -ne 'timed-out') { $status.state = 'failed' }
+            $status.error = $_.Exception.ToString(); throw
+          } finally {
+            if ($null -ne $process) {
+              try {
+                if (-not $process.HasExited) {
+                  $process.Kill()
+                  if (-not $process.WaitForExit(10000)) { throw 'Owned mask geometry process did not terminate.' }
+                }
+              } catch { $status.cleanupError = $_.Exception.ToString() }
+            }
+            $status.finishedAt = [DateTime]::UtcNow.ToString('o')
+            $status | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $statusPath
+          }
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: ${{ !cancelled() && steps.reference.outcome == 'success' }}
         with:
@@ -237,6 +312,12 @@ jobs:
         if: ${{ !cancelled() && steps.footprints.outcome == 'success' && steps.dependencies.outcome == 'success' }}
         timeout-minutes: 3
         run: node --import tsx tests/probes/cursor-mask-footprints.ts out/ci/native-cursor
+      - name: Compare complete mask planes across the retained and new native observations
+        if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          Copy-Item -LiteralPath 'tests/probes/cursor-mask-compare.ts' -Destination 'out/ci/native-cursor/cursor-mask-compare.ts'
+          node --import tsx tests/probes/cursor-mask-compare.ts out/ci/native-cursor
       - name: Compare independent decoder with the actual observed fixture bytes
         if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
         run: node --import tsx tests/probes/cursor-compare.ts out/ci/native-cursor

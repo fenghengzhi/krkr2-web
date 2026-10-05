@@ -17,6 +17,7 @@ export interface WindowView {
   zoomNumer: number
   zoomDenom: number
   mouseCursorState: number
+  useMouseKey?: boolean
   stayOnTop?: boolean
   minWidth?: number
   minHeight?: number
@@ -141,6 +142,7 @@ export class WindowState implements WindowView {
       zoomNumer,
       zoomDenom,
       mouseCursorState,
+      useMouseKey,
       stayOnTop,
       minWidth,
       minHeight,
@@ -164,6 +166,7 @@ export class WindowState implements WindowView {
       zoomNumer,
       zoomDenom,
       mouseCursorState,
+      useMouseKey,
       stayOnTop,
       minWidth,
       minHeight,

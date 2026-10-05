@@ -69,6 +69,14 @@ function snapshot(image: CursorImage): CursorImage {
 function nearest(at: number, source: number, target: number): number {
   return Math.min(source - 1, Math.floor((at + 0.5) * source / target))
 }
+/** Deleted monochrome pixels accumulate into the next centered sample. The
+ * complete 085 256-to-32 axis observations give [0,4], [5,12], ... [245,252].
+ * Repeated samples while enlarging have a single source pixel. Other ratios
+ * remain subject to the independent native geometry/strict drawing probes. */
+function maskRange(at: number, source: number, target: number): [number, number] {
+  const last = nearest(at, source, target)
+  return [at ? Math.min(last, nearest(at - 1, source, target) + 1) : 0, last]
+}
 /** File loading narrows the directory hotspot to signed SHORT, rounds the
  * scaled value by truncating after +0.5 (also for negatives), and stores a
  * signed SHORT result in ICONINFO's DWORD fields. Preserve that unsigned API
@@ -93,7 +101,8 @@ export function loadedCursorHotspot(
 }
 async function resize(image: CursorImage, profile: CursorLoadProfile, options: CursorLoadOptions): Promise<CursorImage> {
   const width = profile.width, height = profile.height,
-    hotspot = loadedCursorHotspot(image, profile)
+    hotspot = loadedCursorHotspot(image, profile),
+    monochrome = image.encoding === 'dib' && image.depth === 1 && image.mode === 'and-xor'
   if (image.width === width && image.height === height) return { ...image, hotspot }
   const data = new Uint8Array(width * height * 4), andMask = new Uint8Array(width * height),
     // 082's complete DIB/PNG alpha color planes establish a centered 2x2
@@ -115,15 +124,32 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
     // and incremental coordinates even though our public plane is top-down.
     const y = height - 1 - row, nearY = nearest(y, image.height, height),
       sy = Math.min(image.height - 1, positionY), baseY = Math.floor(sy),
-      y0 = image.height - 1 - baseY, y1 = Math.max(0, y0 - 1), fy = sy - baseY
+      y0 = image.height - 1 - baseY, y1 = Math.max(0, y0 - 1), fy = sy - baseY,
+      maskY = maskRange(y, image.height, height),
+      xorY = monochrome ? maskRange(y + height, image.height * 2, height * 2) : undefined
     let positionX = 0
     for (let x = 0; x < width; x++, positionX += stepX) {
       const target = y * width + x, nearX = nearest(x, image.width, width),
-        source = nearY * image.width + nearX
-      // Boolean AND remains a separate plane. Color interpolation must never
-      // turn inversion into alpha transparency or interpolate the mask values.
-      andMask[target] = image.andMask[source]!
-      if (halfSizeAlpha) {
+        source = nearY * image.width + nearX, maskX = maskRange(x, image.width, width)
+      // Keep Boolean mask operations distinct from color interpolation;
+      // inversion must not become alpha transparency or a fractional mask.
+      let and = 255
+      for (let my = maskY[0]; my <= maskY[1]; my++) for (let mx = maskX[0]; mx <= maskX[1]; mx++)
+        and &= image.andMask[my * image.width + mx]!
+      andMask[target] = and
+      if (xorY) {
+        // Native monochrome ICONINFO has one double-height bitmap. 085's raw
+        // XOR first row includes the AND plane's final three source rows at
+        // 256-to-32; independently resizing each half loses that boundary.
+        for (let channel = 0; channel < 3; channel++) {
+          let xor = 255
+          for (let my = xorY[0]; my <= xorY[1]; my++) for (let mx = maskX[0]; mx <= maskX[1]; mx++)
+            xor &= my < image.height ? image.andMask[my * image.width + mx]!
+              : image.data[((my - image.height) * image.width + mx) * 4 + channel]!
+          data[target * 4 + channel] = xor
+        }
+        data[target * 4 + 3] = 255
+      } else if (halfSizeAlpha) {
         const from = (y * 2 * image.width + x * 2) * 4, nextRow = from + image.width * 4
         for (let channel = 0; channel < 4; channel++)
           data[target * 4 + channel] = Math.floor((image.data[from + channel]! +

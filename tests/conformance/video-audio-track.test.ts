@@ -7,6 +7,7 @@ import { selectMp4AudioTrack } from '../../src/formats/video/mp4-audio.ts'
 import { readVideoTimeline } from '../../src/formats/video/mp4.ts'
 
 interface RawBox { kind: string; start: number; body: number; end: number }
+interface Sample { offset: number; size: number; dts: number; cts: number; duration: number; data: string }
 const text = (bytes: Uint8Array, at: number) => String.fromCharCode(...bytes.subarray(at, at + 4))
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const fixture = (name: string) => new Uint8Array(readFileSync(resolve('out/verification/video-tracks', name)))
@@ -52,17 +53,93 @@ function box(kind: string, body = new Uint8Array()): Uint8Array {
   bytes.set(body, 8)
   return bytes
 }
+/** Independent test reader, cross-checked against the hosted ffprobe packet
+ * inventory. MP4Box 2.4.1 offsets are never used for fragmented samples. */
+function fragmentSamples(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), movie = required(boxes(bytes), 'moov'),
+    extension = inside(bytes, movie).find((box) => box.kind === 'mvex'), result = new Map<number, Sample[]>(),
+    runs: Array<{ id: number; run: RawBox; base: number; offset: number; end: number; previous?: number; explicit: boolean; index: number }> = [],
+    defaults = new Map<number, { duration: number; size: number }>()
+  if (extension) for (const entry of inside(bytes, extension).filter((box) => box.kind === 'trex'))
+    defaults.set(view.getUint32(entry.body + 4), { duration: view.getUint32(entry.body + 12), size: view.getUint32(entry.body + 16) })
+  for (const moof of boxes(bytes).filter((box) => box.kind === 'moof'))
+    for (const traf of inside(bytes, moof).filter((box) => box.kind === 'traf')) {
+      const items = inside(bytes, traf), tfhd = required(items, 'tfhd'), tfdt = required(items, 'tfdt'),
+        flags = view.getUint32(tfhd.body) & 0xffffff, id = view.getUint32(tfhd.body + 4), standard = defaults.get(id)!
+      assert(standard)
+      let at = tfhd.body + 8, base = moof.start, duration = standard.duration, size = standard.size,
+        time = bytes[tfdt.body] ? Number(view.getBigUint64(tfdt.body + 4)) : view.getUint32(tfdt.body + 4), previous: number | undefined
+      if (flags & 1) { base = Number(view.getBigUint64(at)); at += 8 }
+      if (flags & 2) at += 4
+      if (flags & 8) { duration = view.getUint32(at); at += 4 }
+      if (flags & 16) { size = view.getUint32(at); at += 4 }
+      const track = result.get(id) ?? []
+      result.set(id, track)
+      let runIndex = 0
+      for (const run of items.filter((box) => box.kind === 'trun')) {
+        const flags = view.getUint32(run.body) & 0xffffff, count = view.getUint32(run.body + 4), explicit = !!(flags & 1)
+        let field = run.body + 8, position = previous ?? base
+        if (explicit) { position = base + view.getInt32(field); field += 4 }
+        if (flags & 4) field += 4
+        const offset = position
+        for (let i = 0; i < count; i++) {
+          const sampleDuration = flags & 0x100 ? view.getUint32(field) : duration
+          if (flags & 0x100) field += 4
+          const sampleSize = flags & 0x200 ? view.getUint32(field) : size
+          if (flags & 0x200) field += 4
+          if (flags & 0x400) field += 4
+          const composition = flags & 0x800 ? (bytes[run.body] ? view.getInt32(field) : view.getUint32(field)) : 0
+          if (flags & 0x800) field += 4
+          assert(position >= 0 && sampleSize <= bytes.length - position)
+          track.push({ offset: position, size: sampleSize, dts: time, cts: time + composition, duration: sampleDuration,
+            data: hash(bytes.subarray(position, position + sampleSize)) })
+          position += sampleSize; time += sampleDuration
+        }
+        assert.equal(field, run.end)
+        runs.push({ id, run, base, offset, end: position, previous, explicit, index: runIndex++ })
+        previous = position
+      }
+    }
+  return { tracks: result, runs }
+}
 async function samples(bytes: Uint8Array) {
   const { createFile, MP4BoxBuffer } = await import('mp4box'), file = createFile(false)
   file.onError = (message) => { throw new Error(String(message)) }
   file.appendBuffer(MP4BoxBuffer.fromArrayBuffer(Uint8Array.from(bytes).buffer, 0)); file.flush()
-  const info = file.getInfo()
-  return { audio: info.audioTracks.map((track) => track.id), video: info.videoTracks.map((track) => track.id),
-    tracks: new Map([...info.videoTracks, ...info.audioTracks].map((track) => [track.id,
-      file.getTrackSamplesInfo(track.id).map((sample) => ({
+  const info = file.getInfo(), fragmented = fragmentSamples(bytes), result = new Map<number, Sample[]>()
+  for (const track of [...info.videoTracks, ...info.audioTracks]) {
+    const all = file.getTrackSamplesInfo(track.id), fragments = fragmented.tracks.get(track.id) ?? [],
+      regular = all.slice(0, all.length - fragments.length).map((sample) => ({
         offset: sample.offset, size: sample.size, dts: sample.dts, cts: sample.cts, duration: sample.duration,
         data: hash(bytes.subarray(sample.offset, sample.offset + sample.size)),
-      }))])) }
+      }))
+    assert(all.length >= fragments.length)
+    result.set(track.id, [...regular, ...fragments])
+  }
+  return { audio: info.audioTracks.map((track) => track.id), video: info.videoTracks.map((track) => track.id),
+    tracks: result }
+}
+function packetReference(name: string, source: Uint8Array) {
+  const report = JSON.parse(readFileSync(resolve('out/verification/video-tracks', name + '.packets.json'), 'utf8')) as {
+    schema: number; file: string; sha256: string;
+    streams: Array<{ index: number; id: string }>;
+    packets: Array<{ stream_index: number; pos: string; size: string; data_hash: string }>;
+  }
+  assert.equal(report.schema, 1); assert.equal(report.file, name); assert.equal(report.sha256, hash(source))
+  const ids = new Map(report.streams.map((stream) => [stream.index, Number(stream.id)])),
+    result = new Map<number, Array<{ offset: number; size: number; data: string }>>()
+  for (const packet of report.packets) {
+    const id = ids.get(packet.stream_index)
+    assert(id !== undefined && Number.isSafeInteger(id))
+    assert.match(packet.data_hash, /^SHA256:[0-9a-f]{64}$/i)
+    assert(Number.isSafeInteger(Number(packet.pos)) && Number(packet.pos) >= 0)
+    assert(Number.isSafeInteger(Number(packet.size)) && Number(packet.size) > 0)
+    assert(Number(packet.size) <= source.length - Number(packet.pos))
+    const samples = result.get(id) ?? []
+    samples.push({ offset: Number(packet.pos), size: Number(packet.size), data: packet.data_hash.slice(7).toLowerCase() })
+    result.set(id, samples)
+  }
+  return result
 }
 function randomAccess(bytes: Uint8Array) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), result: Array<{
@@ -87,7 +164,7 @@ function randomAccess(bytes: Uint8Array) {
   return result
 }
 
-for (const name of ['multitrack.mp4', 'fragmented.mp4', 'separate-fragments.mp4']) for (const index of [0, 1])
+for (const name of ['multitrack.mp4', 'fragmented.mp4', 'separate-fragments.mp4', 'interleaved.mp4']) for (const index of [0, 1])
   test(`${name}: selecting audio ${index} preserves the actual video and chosen audio samples`, async () => {
     const source = fixture(name), originals = tracks(source), audio = originals.filter((track) => track.kind === 'soun'),
       video = originals.filter((track) => track.kind === 'vide'), selected = audio[index]!, sourceHash = hash(source),
@@ -102,7 +179,10 @@ for (const name of ['multitrack.mp4', 'fragmented.mp4', 'separate-fragments.mp4'
       { audio: 2, video: 1, id: selected.id })
     assert.equal(hash(source), sourceHash)
     assert.equal(chosen.bytes.length, source.length)
-    const before = await samples(source), after = await samples(chosen.bytes)
+    const before = await samples(source), after = await samples(chosen.bytes), independent = packetReference(name, source)
+    for (const [id, packets] of before.tracks)
+      assert.deepEqual(packets.map(({ offset, size, data }) => ({ offset, size, data })), independent.get(id),
+        `Every original track ${id} packet extent/hash must match the hosted ffprobe inventory`)
     assert.equal(before.audio.length, 2)
     assert.deepEqual(after.audio, [selected.id])
     assert.deepEqual(after.video, before.video)
@@ -131,9 +211,9 @@ for (const name of ['multitrack.mp4', 'fragmented.mp4', 'separate-fragments.mp4'
       for (const entry of newIndex) {
         const old = oldIndex.find((item) => item.id === entry.id && item.offset === entry.offset)!
         assert(old)
-        const fragment = boxes(source).find((box) => box.start === old.offset)!,
-          oldTracks = inside(source, fragment).filter((box) => box.kind === 'traf'),
-          kept = oldTracks.filter((box) => text(chosen.bytes, box.start + 4) === 'traf')
+        const fragment: RawBox = boxes(source).find((box) => box.start === old.offset)!
+        const oldTracks: RawBox[] = inside(source, fragment).filter((box) => box.kind === 'traf')
+        const kept: RawBox[] = oldTracks.filter((box) => text(chosen.bytes, box.start + 4) === 'traf')
         assert.equal(entry.ordinal, kept.indexOf(oldTracks[old.ordinal - 1]!) + 1)
         assert.equal(entry.offset, old.offset)
       }
@@ -150,6 +230,12 @@ for (const name of ['multitrack.mp4', 'fragmented.mp4', 'separate-fragments.mp4'
         if (removed) removedFragments++
       }
       assert(removedFragments > 0, 'The whole-moof path must actually be exercised')
+    }
+    if (name === 'interleaved.mp4') {
+      const inspected = fragmentSamples(source)
+      assert(inspected.runs.some((run) => run.index > 0), 'The fixture must contain multiple trun boxes in one traf')
+      assert(inspected.runs.some((run) => run.index > 0 && run.explicit && run.offset !== run.previous),
+        'The fixture must exercise a non-contiguous later explicit offset')
     }
   })
 
@@ -228,6 +314,9 @@ test('later explicit trun offsets cannot bypass validation through MP4Box inferr
     traf = inside(original, moof).filter((box) => box.kind === 'traf').find((box) =>
       view.getUint32(required(inside(original, box), 'tfhd').body + 4) === audio.id)!,
     originalRun = inside(original, traf).find((box) => box.kind === 'trun')!, flags = view.getUint32(originalRun.body) & 0xffffff
+  const tfhd = required(inside(original, traf), 'tfhd')
+  assert(view.getUint32(tfhd.body) & 0x020000)
+  assert.equal(view.getUint32(tfhd.body) & 1, 0)
   assert(flags & 1); assert(flags & 0x200)
   assert(view.getUint32(originalRun.body + 4) >= 3)
   const stride = [0x100, 0x200, 0x400, 0x800].filter((bit) => flags & bit).length * 4,
@@ -248,7 +337,127 @@ test('later explicit trun offsets cannot bypass validation through MP4Box inferr
     assert(spare >= 8)
     const source = original.slice()
     source.set(append(first, second, box('free', new Uint8Array(spare - 8))), originalRun.start)
-    await assert.rejects(selectMp4AudioTrack(source, 1), /Unsupported MP4 explicit data offset after the first fragment run/)
+    if (offset === thirdOffset) {
+      const chosen = await selectMp4AudioTrack(source, 0)
+      assert(chosen)
+      const kept = fragmentSamples(chosen.bytes).tracks.get(audio.id)!
+      assert.deepEqual(kept.slice(0, 2).map(({ offset, size, data }) => ({ offset, size, data })), [
+        { offset: moof.start + firstOffset, size: sizes[0]!,
+          data: hash(original.subarray(moof.start + firstOffset, moof.start + firstOffset + sizes[0]!)) },
+        { offset: moof.start + thirdOffset, size: sizes[2]!,
+          data: hash(original.subarray(moof.start + thirdOffset, moof.start + thirdOffset + sizes[2]!)) },
+      ])
+      assert.equal(chosen.bytes.length, source.length)
+      assert.deepEqual(chosen.bytes.subarray(originalRun.start, originalRun.end), source.subarray(originalRun.start, originalRun.end))
+    } else {
+      // Validate even the audio being removed: otherwise a broken parser's
+      // invented contiguous address could hide the actual out-of-file offset.
+      await assert.rejects(selectMp4AudioTrack(source, 1), /run offset is outside/)
+    }
+  }
+})
+
+/** A small real-AAC fragment with literal addresses: packet A twice, seven
+ * sentinel bytes, then packet B. No production parser computes expectations.
+ * The explicit-base variant places mdat before moof so both run offsets are
+ * negative; the other variant uses the moof start as its base. */
+function addressedFragment(override: boolean, negative: boolean) {
+  const original = fixture('fragmented.mp4'), audio = tracks(original).find((track) => track.kind === 'soun')!,
+    packets = packetReference('fragmented.mp4', original).get(audio.id)!,
+    first = packets[0]!, second = packets[1]!,
+    a = original.slice(first.offset, first.offset + first.size), b = original.slice(second.offset, second.offset + second.size),
+    originalTop = boxes(original), ftyp = required(originalTop, 'ftyp'), moov = required(originalTop, 'moov'),
+    prefix = append(original.subarray(ftyp.start, ftyp.end), original.subarray(moov.start, moov.end)),
+    prefixView = new DataView(prefix.buffer),
+    defaults = required(inside(prefix, required(boxes(prefix), 'moov')), 'mvex'),
+    trex = inside(prefix, defaults).find((box) => box.kind === 'trex' && prefixView.getUint32(box.body + 4) === audio.id)!
+  assert.equal(hash(a), first.data); assert.equal(hash(b), second.data)
+  assert(a.length > 0 && b.length > 0)
+  // Deliberately wrong trex defaults in the override variant prove precedence.
+  prefixView.setUint32(trex.body + 12, override ? 7 : 1024)
+  prefixView.setUint32(trex.body + 16, override ? 1 : a.length)
+  const duration = override ? 2048 : 1024, media = box('mdat', append(a, a, new Uint8Array(7).fill(0x5a), b)),
+    header = new Uint8Array(8 + (negative ? 8 : 0) + (override ? 8 : 0)), headerView = new DataView(header.buffer),
+    clock = new Uint8Array(12), clockView = new DataView(clock.buffer), sequence = new Uint8Array(8),
+    firstRun = new Uint8Array(12), firstView = new DataView(firstRun.buffer),
+    nextRun = new Uint8Array(12), nextView = new DataView(nextRun.buffer),
+    lastRun = new Uint8Array(24), lastView = new DataView(lastRun.buffer)
+  headerView.setUint32(0, (negative ? 1 : 0x020000) | (override ? 0x18 : 0))
+  headerView.setUint32(4, audio.id)
+  if (override) {
+    headerView.setUint32(negative ? 16 : 8, duration)
+    headerView.setUint32(negative ? 20 : 12, a.length)
+  }
+  clockView.setUint32(0, 0x01000000); clockView.setBigUint64(4, 4096n)
+  new DataView(sequence.buffer).setUint32(4, 1)
+  firstView.setUint32(0, 1); firstView.setUint32(4, 1)
+  nextView.setUint32(0, 0x800); nextView.setUint32(4, 1); nextView.setUint32(8, 0x80000000)
+  lastView.setUint32(0, 0x01000b01); lastView.setUint32(4, 1)
+  lastView.setUint32(12, 512); lastView.setUint32(16, b.length); lastView.setInt32(20, -32)
+  const fragment = () => box('moof', append(box('mfhd', sequence), box('traf', append(box('tfhd', header), box('tfdt', clock),
+    box('trun', firstRun), box('trun', nextRun), box('trun', lastRun)))))
+  const fragmentLength = fragment().length, mediaStart = prefix.length + (negative ? 0 : fragmentLength),
+    firstAddress = mediaStart + 8, lastAddress = firstAddress + a.length * 2 + 7,
+    base = negative ? mediaStart + media.length : prefix.length
+  if (negative) headerView.setBigUint64(8, BigInt(base))
+  firstView.setInt32(8, firstAddress - base); lastView.setInt32(8, lastAddress - base)
+  const bytes = negative ? append(prefix, media, fragment()) : append(prefix, fragment(), media)
+  const expected: Sample[] = [
+    { offset: firstAddress, size: a.length, dts: 4096, cts: 4096, duration, data: first.data },
+    { offset: firstAddress + a.length, size: a.length, dts: 4096 + duration,
+      cts: 4096 + duration + 2147483648, duration, data: first.data },
+    { offset: lastAddress, size: b.length, dts: 4096 + duration * 2,
+      cts: 4096 + duration * 2 - 32, duration: 512, data: second.data },
+  ]
+  return { bytes, id: audio.id, expected }
+}
+
+for (const override of [false, true]) for (const negative of [false, true])
+  test(`fragment addresses: ${override ? 'tfhd override' : 'trex default'}, ${negative ? 'negative explicit base' : 'moof base'}`, async () => {
+    const { bytes, id, expected } = addressedFragment(override, negative), before = hash(bytes), chosen = await selectMp4AudioTrack(bytes, 0)
+    assert(chosen)
+    assert.equal(chosen.selectedTrackId, id)
+    assert.deepEqual(fragmentSamples(bytes).tracks.get(id), expected)
+    assert.deepEqual(fragmentSamples(chosen.bytes).tracks.get(id), expected)
+    assert.equal(hash(bytes), before)
+    assert.equal(chosen.bytes.length, bytes.length)
+    const media = required(boxes(bytes), 'mdat')
+    assert.deepEqual(chosen.bytes.subarray(media.start, media.end), bytes.subarray(media.start, media.end))
+    const runs = fragmentSamples(chosen.bytes).runs
+    assert.equal(runs.length, 3)
+    assert.equal(runs[1]!.explicit, false)
+    assert.equal(runs[1]!.offset, expected[1]!.offset)
+    assert.notEqual(runs[2]!.offset, runs[2]!.previous)
+  })
+
+test('fragment ranges and default sample extents reject without trusting inferred parser offsets', async () => {
+  const { bytes } = addressedFragment(true, true),
+    moof = required(boxes(bytes), 'moof'), traf = required(inside(bytes, moof), 'traf'),
+    items = inside(bytes, traf), runs = items.filter((box) => box.kind === 'trun'), tfhd = required(items, 'tfhd')
+  for (const offset of [-0x80000000, 0x7fffffff]) {
+    const invalid = bytes.slice()
+    new DataView(invalid.buffer).setInt32(runs[2]!.body + 8, offset)
+    await assert.rejects(selectMp4AudioTrack(invalid, 0), /run offset is outside/)
+  }
+  const crossing = bytes.slice(), data = required(boxes(crossing), 'mdat'), crossingView = new DataView(crossing.buffer),
+    base = Number(crossingView.getBigUint64(tfhd.body + 8))
+  // A valid in-file address that crosses the end of mdat must still reject.
+  crossingView.setInt32(runs[2]!.body + 8, data.end - 1 - base)
+  await assert.rejects(selectMp4AudioTrack(crossing, 0), /outside media data/)
+  const wrongDefault = bytes.slice()
+  new DataView(wrongDefault.buffer).setUint32(tfhd.body + 20, bytes.length)
+  await assert.rejects(selectMp4AudioTrack(wrongDefault, 0), /outside media data/)
+})
+
+test('fragment decode/composition timestamp sums must remain safe integers', async () => {
+  const { bytes } = addressedFragment(false, false), moof = required(boxes(bytes), 'moof'),
+    traf = required(inside(bytes, moof), 'traf'), tfdt = required(inside(bytes, traf), 'tfdt')
+  for (const time of [BigInt(Number.MAX_SAFE_INTEGER), BigInt(Number.MAX_SAFE_INTEGER) - 1000000n]) {
+    const unsafe = bytes.slice()
+    new DataView(unsafe.buffer).setBigUint64(tfdt.body + 4, time)
+    // The second value has safe decode ends, but the unsigned version-0
+    // composition offset on run two exceeds the safe timestamp range.
+    await assert.rejects(selectMp4AudioTrack(unsafe, 0), /Invalid MP4 sample extent or timestamp/)
   }
 })
 

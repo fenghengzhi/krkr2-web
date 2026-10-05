@@ -169,7 +169,7 @@ class Window {
     .map(
       (name) => `property ${name} {
     getter() { return __host("Window.get",__windowId,"${name}"); }
-    setter(value) { __host("Window.set",__windowId,"${name}",${name === 'caption' ? 'string(value)' : name === 'trapKey' ? 'int(!!value)' : 'int(value)'}); }
+    setter(value) { __host("Window.set",__windowId,"${name}",${name === 'caption' ? 'string(value)' : name === 'trapKey' || name === 'useMouseKey' ? 'int(!!value)' : 'int(value)'}); }
   }`,
     )
     .join('\n')}

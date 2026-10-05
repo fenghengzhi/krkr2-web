@@ -1,3 +1,14 @@
+export interface MouseKeyObservation {
+  /** Keyboard receiver, which can differ from the focused source Window. */
+  windowId: number
+  x: number
+  y: number
+  /** Window client pixels per CSS pixel at observation time. */
+  scaleX: number
+  scaleY: number
+  /** Zero means that the page has not observed a real pointer yet. */
+  pointerSequence: number
+}
 export type InputPacket = {
   windowId?: number
   /** Exact editing ownership, including the focused Layer; used by IME commits. */
@@ -13,16 +24,22 @@ export type InputPacket = {
    * Window callbacks must not reinterpret this point after a queued zoom or
    * layer-origin change. Touch events never use this field. */
   paintBoxPoint?: { x: number; y: number }
+  /** Browser geometry/physical sampling only. Conversion happens after native
+   * keyboard routing and trap-key admission in the engine. */
+  mouseKeyObservation?: MouseKeyObservation
+  /** TickBeat observes held keys before polling the next Gamepad sample.
+   * This snapshot only drives emulation; it never replaces physical state. */
+  mouseKeyKeys?: number[]
 } & (
   | {
-      type: 'move' | 'down' | 'up'
+      type: 'move' | 'down' | 'up' | 'click'
       x: number
       y: number
       shift: number
       button: number
       clicks: number
     }
-  | { type: 'leave' | 'cancel' | 'activate' | 'deactivate' }
+  | { type: 'leave' | 'cancel' | 'activate' | 'deactivate' | 'mouseKeyTick' }
   | { type: 'wheel'; x: number; y: number; shift: number; delta: number }
   | { type: 'keyDown' | 'keyUp'; key: number; shift: number; systemKey?: boolean }
   | { type: 'text'; text: string }
