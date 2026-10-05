@@ -2,6 +2,8 @@
 
 状态：开发候选，尚未取得本批执行结果。整体目标仍是完成插件以外的 KRKR2 Web 模拟器。本批接通长 WAV／Vorbis 的按需 PCM 播放，修复 083 的测试类型收窄错误；不把新增定义、未运行工作流或历史中断记为通过。所有可执行验证只在 GitHub-hosted Actions 执行，整批推送后下一轮取回结果，不实时监控。会话协议 **29**，TJS ABI **5**、字体 ABI **2** 不变。
 
+已整批推送 `29be5f1d12e33696ef33601754c9bb139eb402b8`，对应 [Full test suite 37267857946](https://github.com/fenghengzhi/krkr2-web/actions/runs/37267857946)。首次唯一查询为 **in_progress／conclusion=null**，仅确认创建与精确提交绑定；原响应保存在 `out/verification/github-actions/37267857946/initial-run-discovery.json`。没有查询实时 jobs／artifacts；下次取回固定快照与全部清单产物。本记录使用 `[skip ci]` 提交，不产生新的验证结论。
+
 ## 读取、解码与播放
 
 此前 WaveSoundBuffer 先读取完整资源，再生成完整 Float32 PCM，分别受 64 MiB 编码文件和 128 MiB PCM 预算限制。现在真实 Session 将不可变 `Resource.source` 交给音频后端，Worker 保留解码器，AudioWorklet 只请求并持有有界 PCM 分页。没有把解码器、存储回调或整段长 PCM 跨线程传输。
