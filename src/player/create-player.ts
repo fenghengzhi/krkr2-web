@@ -18,11 +18,12 @@ import { PageActivityMonitor } from './page-activity.ts'
 import { activityPaused, initialActivity } from '../engine/ports/activity.ts'
 import type { InputView } from '../engine/ports/input.ts'
 import type { WindowPresentation, WindowView } from '../engine/scene/window.ts'
+import { copyProjectSelection, type ProjectSelection } from '../engine/storage/project.ts'
 import type { WindowMoveRequest, WindowMoveMessage } from '../engine/ports/window-move.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import { copyWindowRegion, WindowRegions, type WindowRegion } from '../engine/scene/window-region.ts'
 import type { WindowSurfaceIdentity } from '../protocol/surfaces.ts'
-import { normalizeSystemDataPath } from '../engine/system/environment.ts'
+import { validateSystemDataPathTemplate } from '../engine/system/environment.ts'
 import { copySystemColorPalette } from '../engine/graphics/system-colors.ts'
 import { sampleSystemColorPalette } from './system-colors.ts'
 import { BrowserSystemDisplay } from './system-display.ts'
@@ -92,7 +93,9 @@ export function createPlayer(
   options: PlayerOptions,
 ) {
   const dataPath = options.dataPath
-  normalizeSystemDataPath(dataPath)
+  // Bounds depend on the selected executable directory, determined during
+  // prepare. The Worker completes that check before allocating the Session.
+  validateSystemDataPathTemplate(dataPath)
   const suppliedSystemColors = options.systemColors
   const suppliedSystemDisplay = options.systemDisplay
   const systemDisplay =
@@ -483,6 +486,11 @@ export function createPlayer(
     syncInput()
   }, pauseWhenHidden)
   const player = {
+    /** Presentation-only menu ownership is scoped to the actual DOM surface;
+     * an obsolete component cannot release a replacement Window's override. */
+    setWindowMenuActive(windowId: number, epoch: number, opened: boolean): void {
+      if (!stopping && !retiredWindows.has(windowId)) input?.setMenuActive(windowId, epoch, opened)
+    },
     async menuClick(id: number, popup?: MenuPopupIdentity, shortcutEvent?: KeyboardEvent): Promise<void> {
       const admission = shortcutEvent && input?.popupHideAdmission(shortcutEvent)
       if (admission && !(await admission)) return
@@ -503,8 +511,9 @@ export function createPlayer(
       entry = 'startup.tjs',
       backend: BackendPreference = 'auto',
       debugMode = false,
+      project?: ProjectSelection,
     ) {
-      identity = await session.prepare(files)
+      identity = await session.prepare(files, Array.isArray(files) ? copyProjectSelection(project) : undefined)
       await session.initialize(
         surfaceChannel.port2,
         backend,

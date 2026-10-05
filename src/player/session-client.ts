@@ -7,6 +7,7 @@ import { transfer } from 'vite-plugin-worker-rpc/client'
 import type { SaveFile } from '../engine/ports/saves.ts'
 import type { InputPacket, PhysicalPointerScreen } from '../engine/ports/input.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
+import type { ProjectSelection } from '../engine/storage/project.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
 import { wasmManifestFile } from './build-info.ts'
@@ -138,8 +139,8 @@ export class SessionClient {
       return Promise.resolve({ status: 'ignored' as const })
     return this.call('pad', message)
   }
-  prepare(files: GameInput) {
-    return this.call('prepare', files)
+  prepare(files: GameInput, project?: ProjectSelection) {
+    return this.call('prepare', files, project)
   }
   mount() {
     return this.call('mount')

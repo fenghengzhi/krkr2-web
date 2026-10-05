@@ -90,7 +90,7 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
         title = document.createElement('h3'),
         description = document.createElement('p')
       title.textContent = game.title
-      description.textContent = `${amount(game.size)} · ${game.fileCount} 个源文件 · ${game.entry}`
+      description.textContent = `${amount(game.size)} · ${game.fileCount} 个源文件 · ${game.project ? game.project.directory || './' : '文件集合'} · ${game.entry}`
       info.append(title, description)
       const controls = document.createElement('div')
       controls.className = 'library-controls'

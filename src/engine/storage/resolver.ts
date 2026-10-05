@@ -16,6 +16,7 @@ export function normalizeStorageName(input: string, directory = false): string {
 }
 
 export class StorageResolver {
+  constructor(readonly currentDirectory = '', private readonly archiveAliases = true) {}
   private files = new Map<string, Resource>()
   private folded = new Map<string, Set<string>>()
   private aliases = new Map<string, string>()
@@ -44,15 +45,15 @@ export class StorageResolver {
     }
   }
   addAutoPath(path: string): void {
-    const normalized = storageDirectoryPath(path)
+    const normalized = storageDirectoryPath(path, this.currentDirectory)
     if (!this.autoPaths.includes(normalized)) this.autoPaths.push(normalized)
   }
   removeAutoPath(path: string): void {
-    const normalized = storageDirectoryPath(path)
+    const normalized = storageDirectoryPath(path, this.currentDirectory)
     this.autoPaths = this.autoPaths.filter((path) => path !== normalized)
   }
   candidates(path: string): string[] {
-    const normalized = parseStoragePath(path)
+    const normalized = parseStoragePath(path, this.currentDirectory)
     if (!normalized || /[/>]$/.test(normalized)) return [normalized]
     const basename = normalized.split(/[/>]/).at(-1)!
     return [
@@ -72,6 +73,7 @@ export class StorageResolver {
     return undefined
   }
   private fallback(path: string): Resource | undefined {
+    if (!this.archiveAliases) return undefined
     const exact = this.aliases.get(path)
     if (exact !== undefined) return this.files.get(exact)
     const names = this.foldedAliases.get(path.toLowerCase())

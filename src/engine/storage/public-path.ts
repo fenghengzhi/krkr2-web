@@ -25,7 +25,12 @@ export function normalizeResourcePath(input: string, allowRoot = false): string 
 function relativeInput(input: string): string {
   const slashes = input.replaceAll('\\', '/')
   if (/^game:\/\/\.\//i.test(slashes)) return slashes.slice(publicRoot.length)
+  if (/^game:\/\/\//i.test(slashes)) return slashes.slice('game:///'.length)
   if (scheme.test(slashes)) throw new Error(`Unsupported storage media: ${input}`)
+  if (slashes.startsWith('//./')) return slashes.slice(4)
+  if (slashes.startsWith('///')) return slashes.slice(3)
+  if (slashes.startsWith('//')) throw new Error(`Unsupported storage domain: ${input}`)
+  if (slashes.startsWith('/')) return slashes.slice(1)
   return slashes
 }
 
@@ -37,8 +42,9 @@ function directoryEnding(path: string): boolean {
  * Directory delimiters survive; archives and members have separate root bounds.
  * Percent escapes, # and ? have no URL semantics. Paths preserve their spelling.
  */
-export function parseStoragePath(input: string): string {
-  const path = relativeInput(input)
+export function parseStoragePath(input: string, currentDirectory = ''): string {
+  const absolute = /^(?:game:\/\/(?:\.\/|\/)|\/)/i.test(input.replaceAll('\\', '/')),
+    path = (absolute ? '' : currentDirectory) + relativeInput(input)
   const delimiter = path.indexOf('>')
   if (delimiter < 0) {
     const normalized = normalizeResourcePath(path, true)
@@ -56,27 +62,27 @@ export function toPublicStoragePath(logical: string): string {
   return publicRoot + parseStoragePath(logical)
 }
 
-export function getFullStoragePath(input: string): string {
-  return input === '' ? '' : publicRoot + parseStoragePath(input)
+export function getFullStoragePath(input: string, currentDirectory = ''): string {
+  return input === '' ? '' : publicRoot + parseStoragePath(input, currentDirectory)
 }
 
 /** Validate a file operation without accidentally writing a directory or root. */
-export function storageFilePath(input: string): string {
-  const path = parseStoragePath(input)
+export function storageFilePath(input: string, currentDirectory = ''): string {
+  const path = parseStoragePath(input, currentDirectory)
   if (!path || path.endsWith('/') || path.endsWith('>'))
     throw new Error('Expected a storage file path')
   return path
 }
 
 /** Registration checks the caller's delimiter before any normalization. */
-export function storageDirectoryPath(input: string): string {
+export function storageDirectoryPath(input: string, currentDirectory = ''): string {
   if (!/[\\/>]$/.test(input)) throw new Error('Missing storage directory delimiter at end')
-  const path = parseStoragePath(input)
+  const path = parseStoragePath(input, currentDirectory)
   return path && !/[/>]$/.test(path) ? path + '/' : path
 }
 
-export function storageWritePath(input: string): string {
-  const path = storageFilePath(input)
+export function storageWritePath(input: string, currentDirectory = ''): string {
+  const path = storageFilePath(input, currentDirectory)
   if (path.includes('>')) throw new Error('Archive storage is read-only')
   return path
 }

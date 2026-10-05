@@ -10,6 +10,7 @@ import {
   type VideoMixingBitmap,
 } from '../ports/video.ts'
 import type { Pixels } from '../ports/graphics.ts'
+import { videoBalanceReadback } from './video-audio.ts'
 import { ExecutionCancelled } from '../scheduler/control.ts'
 import {
   isScriptObject,
@@ -458,7 +459,7 @@ export class VideoService {
       }
     } else if (method === 'get') {
       const property = text(0)
-      if (video.ready) await apply({ op: 'inspect', ...identity() })
+      if (video.ready && property !== 'audioVolume') await apply({ op: 'inspect', ...identity() })
       if (
         video.ready &&
         video.snapshot.frame < 0 &&
@@ -466,9 +467,14 @@ export class VideoService {
       )
         throw new Error('This video container has no supported frame index')
       if (!(property in video.snapshot)) throw new Error(`Unsupported video property: ${property}`)
-      const result = !video.ready && (property === 'enabledAudioStream' || property === 'enabledVideoStream')
-        ? -1 : !video.ready && (property === 'playRate' || property === 'mixingMovieAlpha')
-          ? 0 : video.snapshot[property as keyof VideoSnapshot]
+      let result = video.snapshot[property as keyof VideoSnapshot]
+      // The fixed dsmovie GetAudioVolume returns without writing its output;
+      // VideoOvlImpl initializes attenuation to zero, hence public full volume.
+      // Keep the actual graph setting separate so reads cannot unmute playback.
+      if (property === 'audioVolume') result = 100000
+      else if (property === 'audioBalance') result = videoBalanceReadback(Number(result))
+      else if (!video.ready && (property === 'enabledAudioStream' || property === 'enabledVideoStream')) result = -1
+      else if (!video.ready && (property === 'playRate' || property === 'mixingMovieAlpha')) result = 0
       value =
         typeof result === 'string'
           ? result
@@ -482,7 +488,9 @@ export class VideoService {
       // setters return before talking to or validating an absent media graph.
       if (!video.ready && graphSettings.has(property))
         return scriptRecord({ value, callbacks: scriptList([]) })
-      const setting = number(1)
+      const setting = property === 'audioVolume' || property === 'audioBalance'
+        ? Number(BigInt.asIntN(32, typeof input[1] === 'bigint' ? input[1] : BigInt(number(1))))
+        : number(1)
       if (property === 'position' || property === 'frame') {
         if (video.ready) {
           this.cancelEvents(video)

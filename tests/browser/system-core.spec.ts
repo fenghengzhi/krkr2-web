@@ -528,18 +528,16 @@ test.describe('public createPlayer System dataPath embedding', () => {
       }
     })
 
-  test('invalid public dataPath options reject before channels, audio or Worker acquisition and a fresh valid Player still runs', async ({
+  test('context-independent invalid dataPath options reject before channels, audio or Worker acquisition and a fresh valid Player still runs', async ({
     page,
   }, info) => {
     const setup = await openEmbedding(page, 'asyncify'),
       paths = [
-        '/outside-game',
-        '../outside-game',
         'https://example.invalid/save',
         'game.xp3>save',
         '$(unknown)/save',
-        './C:\\save',
-        'inside/../web+file://host/save',
+        'C:\\save',
+        'save\u0000bad',
       ],
       rejected = await rejectSystemEmbeddingPaths(page, entry, paths)
     await info.attach('public-system-datapath-rejected-acquisitions', {
@@ -552,13 +550,11 @@ test.describe('public createPlayer System dataPath embedding', () => {
     })
     expect(setup.workers).toEqual([])
     const expectedErrors = [
-      /^Error: Invalid resource path:/,
-      /^Error: Resource path escapes game root$/,
-      /^Error: Invalid System dataPath: absolute URL or drive$/,
-      /^Error: Invalid System dataPath: unknown macro or archive directory$/,
-      /^Error: Invalid System dataPath: unknown macro or archive directory$/,
-      /^Error: Invalid resource path:/,
-      /^Error: Invalid resource path:/,
+      /^Error: Invalid System dataPath/,
+      /^Error: Invalid System dataPath/,
+      /^Error: Invalid System dataPath: unknown macro/,
+      /^Error: Invalid System dataPath/,
+      /^Error: Invalid System dataPath/,
     ]
     for (const [index, item] of rejected.entries()) {
       expect(item.constructed).toBe(false)
@@ -592,5 +588,29 @@ test.describe('public createPlayer System dataPath embedding', () => {
         2,
       ),
     })
+  })
+
+  test('dataPath root bounds are checked after project selection and a nested executable permits a parent save directory', async ({ page }, info) => {
+    const setup = await openEmbedding(page, 'asyncify'),
+      paths = ['/outside-game', '../outside-game', './C:\\save', 'inside/../web+file://host/save'],
+      rejected = await rejectSystemEmbeddingPaths(page, entry, paths, true)
+    for (const result of rejected) {
+      expect(result.constructed).toBe(true)
+      expect(result.error).toMatch(/Invalid resource path|Resource path escapes game root/)
+      expect(result.error).not.toContain('must not reach VM')
+    }
+    await expect.poll(() => setup.workers.map((worker) => worker.closed)).toEqual(paths.map(() => true))
+    const project = { directory: 'games/app/content-data/', executableDirectory: 'games/app/' },
+      recovered = await runSystemEmbedding(page, entry, 'asyncify', '$(exepath)/../slots', project)
+    expect(recovered.actual).toBe('game://./games/slots/|game://./games/slots/|other|1|game://./games/app/savedata/|game://./games/app/savedata/')
+    expect(recovered.configuredArgument).toBe('$(exepath)/../slots')
+    expect(recovered.files.some((file) => file.path === 'games/slots/embedding-counter.txt')).toBe(true)
+    expect(recovered.files.every((file) => !file.path.includes('://'))).toBe(true)
+    expect(recovered.disposed).toBe(true)
+    expect(recovered.liveWindows).toBe(0)
+    expect(recovered.errors).toEqual([])
+    await expect.poll(() => setup.workers.map((worker) => worker.closed)).toEqual([...paths.map(() => true), true])
+    await info.attach('project-contextual-datapath', { contentType: 'application/json',
+      body: JSON.stringify({ rejected, recovered, workers: setup.workers.map(({ url, closed }) => ({ url, closed })) }) })
   })
 })

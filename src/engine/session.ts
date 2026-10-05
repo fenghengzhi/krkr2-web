@@ -24,6 +24,7 @@ import {
   type ScriptValue,
 } from './script/runtime.ts'
 import { StorageResolver } from './storage/resolver.ts'
+import { copyGameProject, type GameProject } from './storage/project.ts'
 import {
   chopStorageExt,
   extractStorageExt,
@@ -148,6 +149,7 @@ const ignoredAdmission = (): SessionAdmission => ({
   completion: Promise.resolve(),
 })
 export interface SessionSnapshot {
+  project?: GameProject
   windows?: WindowPresentation[]
   activeWindow?: number
   mainWindow?: number
@@ -222,6 +224,7 @@ interface WindowMouseKeys {
   move: { x: number; y: number; paintBoxPoint: { x: number; y: number } }
 }
 export interface SessionDependencies {
+  project?: GameProject
   /** The page implements the matching request/reply presentation protocol. */
   windowMoveSupported?: boolean
   windowGeometry?: WindowGeometryPort
@@ -283,7 +286,8 @@ export class EngineSession {
   private fontPreviewBusy = false
   readonly control = new ExecutionControl()
   private readonly queue = new SerialQueue()
-  private readonly storage = new StorageResolver()
+  private readonly storage: StorageResolver
+  private readonly project?: GameProject
   private readonly images = new ImageLoader(
     (name) => this.findResource(name),
     (bytes) => this.decodeImage(bytes),
@@ -432,6 +436,8 @@ export class EngineSession {
   private readonly cancellationErrors: unknown[] = []
   private readonly cancellationWork = new Set<Promise<void>>()
   constructor(private readonly deps: SessionDependencies) {
+    this.project = copyGameProject(deps.project)
+    this.storage = new StorageResolver(this.project?.directory ?? '', !this.project)
     this.windowGeometry = deps.windowGeometry ?? new HeadlessWindowGeometry()
     this.detachGeometry = this.windowGeometry.subscribe((observation) => this.observeWindowScroll(observation))
     this.systemColors = new SystemColors(deps.systemColors)
@@ -443,6 +449,7 @@ export class EngineSession {
       this.systemArguments,
       deps.fillRandomBytes,
       deps.systemDisplay,
+      this.project,
     )
     this.clipboard = deps.clipboard ?? unavailableClipboard()
     this.help = deps.help ?? unavailableHelp()
@@ -452,7 +459,7 @@ export class EngineSession {
       (work) => this.finishGraphics(work),
     )
     this.fontCatalog = new FontCatalog({
-      files: () => this.storage.list().map((file) => this.resolveResource(file.name)),
+      files: () => this.storage.list().map((file) => this.resolveResource(toPublicStoragePath(file.name))),
       resolve: (name) => this.resolveResource(name),
       bind: (fonts) => {
         this.fonts.registerNamed(fonts)
@@ -3559,6 +3566,7 @@ export class EngineSession {
       graphics: { ...this.graphicsStatus },
       activity: { ...this.activity },
       resources: this.storage.count,
+      ...(this.project ? { project: { ...this.project } } : {}),
       ...this.layers.inspect(),
       handles: runtime?.handles ?? 0,
       memoryBytes: runtime?.memoryBytes ?? 0,
@@ -3739,10 +3747,10 @@ export class EngineSession {
     return !!this.findResource(name)
   }
   private storageWriteTarget(name: string, mode: StreamMode): string {
-    const requested = storageWritePath(name)
+    const requested = storageWritePath(name, this.project?.directory)
     this.materializeLogs()
     if (mode.hasOffset || mode.append) {
-      const existing = this.findResource(requested)
+      const existing = this.findResource(toPublicStoragePath(requested))
       if (existing) return storageWritePath(existing.name)
       // Append alone is a Web extension that may create a new file. An explicit
       // offset still selects UPDATE and requires a target, including ao0.
@@ -4267,7 +4275,7 @@ export class EngineSession {
         value = this.storageWriteTarget(text(0), parseTextWriterMode(text(1)))
         break
       case 'Storage.validateWrite':
-        storageWritePath(text(0))
+        storageWritePath(text(0), this.project?.directory)
         value = this.storageWriteTarget(text(0), parseStreamMode(text(1)))
         break
       case 'Storage.writeText':
@@ -4311,7 +4319,7 @@ export class EngineSession {
           },
         }
       case 'Storages.selectFilePath':
-        value = normalizeSelectorPath(text(0))
+        value = normalizeSelectorPath(getFullStoragePath(text(0), this.project?.directory))
         break
       case 'Storages.selectFile': {
         this.materializeLogs()
@@ -4357,6 +4365,7 @@ export class EngineSession {
         break
       case 'System.shellExecute':
         value = BigInt(await openHelpDocument(text(0), text(1), {
+          currentDirectory: this.project?.directory,
           find: (name) => this.findResource(name),
           decode: (bytes) => this.deps.readText(bytes, '', this.textEncoding.codec),
           host: this.help,
@@ -4364,10 +4373,10 @@ export class EngineSession {
         }))
         break
       case 'Storages.getLocalName':
-        value = getWebLocalName(text(0))
+        value = getWebLocalName(text(0), this.project?.directory)
         break
       case 'Storages.getFullPath':
-        value = getFullStoragePath(text(0))
+        value = getFullStoragePath(text(0), this.project?.directory)
         break
       case 'Storages.extractStorageExt':
         value = extractStorageExt(text(0))
@@ -5349,7 +5358,7 @@ export class EngineSession {
         break
       }
       case 'Layer.saveImage': {
-        const path = storageWritePath(text(1))
+        const path = storageWritePath(text(1), this.project?.directory)
         const id = number(0),
           layer = this.layers.get(id),
           bytes = await this.imageWriter.encode(

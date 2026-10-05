@@ -293,9 +293,10 @@ export async function runSystemEmbedding(
   entry: string,
   backend: 'asyncify' | 'jspi',
   dataPath?: string,
+  project?: { directory: string; executableDirectory: string },
 ) {
   return page.evaluate(
-    async ({ entry, backend, dataPath, source, readyPrefix }) => {
+    async ({ entry, backend, dataPath, source, readyPrefix, project }) => {
       const { createPlayer, createGameWindows } = (await import(entry)) as {
           createPlayer: typeof import('../../src/player/create-player.ts').createPlayer
           createGameWindows: typeof import('../../src/app/game-windows.ts').createGameWindows
@@ -335,9 +336,11 @@ export async function runSystemEmbedding(
         // option object later must not change the not-yet-initialized Worker.
         if (supplied) options.dataPath = 'changed-before-load/'
         const loaded = await player.load(
-          [{ path: 'startup.tjs', blob: new Blob([source], { type: 'text/plain' }) }],
+          [{ path: (project?.directory ?? '') + 'startup.tjs', blob: new Blob([source], { type: 'text/plain' }) }],
           'startup.tjs',
           backend,
+          false,
+          project ? { mode: 'root', ...project } : undefined,
         )
         await ready
         const actual = await player.session.evaluate(
@@ -380,13 +383,14 @@ export async function runSystemEmbedding(
       dataPath,
       source: systemEmbeddingProgram,
       readyPrefix: systemPrefix + 'embedding:',
+      project,
     },
   )
 }
 
-export async function rejectSystemEmbeddingPaths(page: Page, entry: string, paths: string[]) {
+export async function rejectSystemEmbeddingPaths(page: Page, entry: string, paths: string[], duringLoad = false) {
   return page.evaluate(
-    async ({ entry, paths }) => {
+    async ({ entry, paths, duringLoad }) => {
       const { createPlayer, createGameWindows } = (await import(entry)) as {
           createPlayer: typeof import('../../src/player/create-player.ts').createPlayer
           createGameWindows: typeof import('../../src/app/game-windows.ts').createGameWindows
@@ -422,6 +426,7 @@ export async function rejectSystemEmbeddingPaths(page: Page, entry: string, path
               dataPath: path,
             },
           )
+          if (duringLoad) await player.load([{ path: 'startup.tjs', blob: new Blob(['throw "must not reach VM";']) }], 'startup.tjs', 'asyncify')
         } catch (caught) {
           error = String(caught)
         } finally {
@@ -444,6 +449,6 @@ export async function rejectSystemEmbeddingPaths(page: Page, entry: string, path
       }
       return results
     },
-    { entry, paths },
+    { entry, paths, duringLoad },
   )
 }

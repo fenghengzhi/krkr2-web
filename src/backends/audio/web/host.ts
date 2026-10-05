@@ -11,6 +11,7 @@ import { decodeWav } from '../../../formats/audio/wav.ts'
 import { decodeMidi } from '../../../formats/audio/midi.ts'
 import { encodedSampleRate } from '../../../formats/audio/encoded-rate.ts'
 import { VoiceOperations } from '../voice-operations.ts'
+import { videoAudioGains } from '../../../engine/media/video-audio.ts'
 import type {
   AudioMessage,
   AudioRequest,
@@ -174,10 +175,9 @@ export class WebAudioHost {
       return {
         set: (volume, balance) => {
           if (closed) throw new Error('Media audio connection is closed')
-          const gain = volume / 100000,
-            pan = balance / 100000
-          left.gain.value = gain * (pan > 0 ? 1 - pan : 1)
-          right.gain.value = gain * (pan < 0 ? 1 + pan : 1)
+          const gains = videoAudioGains(volume, balance)
+          left.gain.value = gains.left
+          right.gain.value = gains.right
         },
         close: current.close,
       }

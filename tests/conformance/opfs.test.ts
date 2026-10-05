@@ -110,8 +110,10 @@ test('library manifests reject unsafe identities, paths, digests, budgets and se
     gameSettings({ title: '  Game  ', entry: './scenario/start.tjs', backend: 'jspi' }),
     { title: 'Game', entry: 'scenario/start.tjs', backend: 'jspi' },
   )
-  for (const entry of ['../start', '/start', 'x>start', ''])
+  for (const entry of ['../start', 'x>../start', 'x>nested>start', 'https://host/start', ''])
     assert.throws(() => gameSettings({ title: 'Game', entry, backend: 'auto' }))
+  for (const [entry, expected] of [['/start', 'game://./start'], ['game:///x>start', 'game://./x>start'], ['x>start', 'x>start']] as const)
+    assert.equal(gameSettings({ title: 'Game', entry, backend: 'auto' }).entry, expected)
 })
 test('OPFS copy handles short writes, Unicode names and empty files, and hashes actual copied bytes', async () => {
   const bytes = Uint8Array.from({ length: 2003 }, (_, i) => i % 251),

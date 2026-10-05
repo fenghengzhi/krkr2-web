@@ -15,6 +15,7 @@ interface SurfaceInput {
   visible: boolean
   focusable: boolean
   blocked: boolean
+  menuActive: boolean
   revision: number
   resumingFromModal: boolean
 }
@@ -383,6 +384,7 @@ export class BrowserInputCoordinator {
       visible: this.views.get(windowId)?.visible ?? true,
       focusable: this.views.get(windowId)?.focusable ?? true,
       blocked: !!this.views.get(windowId)?.blocked,
+      menuActive: false,
       revision: 0,
       resumingFromModal: false,
     }
@@ -399,6 +401,21 @@ export class BrowserInputCoordinator {
   refreshCursors(): void {
     if (this.closed) return
     for (const surface of this.surfaces.values()) surface.input.refreshCursor()
+  }
+  setMenuActive(windowId: number, epoch: number, active: boolean): void {
+    const surface = this.surfaces.get(windowId)
+    if (this.closed || !surface || surface.epoch !== epoch ||
+        (active && (!surface.visible || surface.blocked))) return
+    if (surface.menuActive === active) return
+    surface.menuActive = active
+    // An App resume snapshot renders its menus before syncInput releases the
+    // coordinator pause. Retain that current-epoch DOM fact and apply it when
+    // resumed, rather than losing a deduplicated GameMenus notification.
+    surface.input.setMenuActive(active && !this.suspended)
+    // Native TickBeat uses showingmenu independently of keyboard focus.
+    // Focus returned by an embedding host cannot restart either sampler while
+    // this Window still owns an actual open menu.
+    this.syncGamepad()
   }
   setHostMoving(moving: boolean): void {
     if (this.closed || this.hostMoving === moving) return
@@ -502,6 +519,10 @@ export class BrowserInputCoordinator {
       }
     }
     surface.resumingFromModal = resumingFromModal
+    if (!view.visible || blocked) {
+      surface.menuActive = false
+      surface.input.setMenuActive(false)
+    }
     try {
       surface.input.setSuspended(this.suspended || !view.visible || blocked)
     } finally {
@@ -532,8 +553,11 @@ export class BrowserInputCoordinator {
       this.mouseOwner = undefined
       this.clearPhysical()
     }
-    for (const surface of this.surfaces.values())
+    for (const surface of this.surfaces.values()) {
+      if (suspended) this.setMenuActive(surface.id, surface.epoch, false)
       surface.input.setSuspended(suspended || !surface.visible || surface.blocked)
+      if (!suspended) surface.input.setMenuActive(surface.menuActive && surface.visible && !surface.blocked)
+    }
     this.syncGamepad()
   }
 
@@ -607,7 +631,7 @@ export class BrowserInputCoordinator {
   private syncGamepad(): void {
     const surface = this.active
     this.gamepad.setActive(!!(this.gamepadEnabled && surface && this.current(surface) && !this.suspended &&
-      surface.visible && surface.focusable && !surface.blocked && !document.hidden &&
+      surface.visible && surface.focusable && !surface.blocked && !surface.menuActive && !document.hidden &&
       (typeof document.hasFocus !== 'function' || document.hasFocus()) &&
       surface.input.ownsFocus(document.activeElement)))
     this.syncMouseKeyTicker()
@@ -626,7 +650,7 @@ export class BrowserInputCoordinator {
   }
   private mouseKeyEligible(surface: SurfaceInput): boolean {
     return this.current(surface) && !this.suspended && !this.hostMoving && surface.visible && surface.focusable &&
-      !surface.blocked && !!this.views.get(surface.id)?.useMouseKey && !document.hidden &&
+      !surface.blocked && !surface.menuActive && !!this.views.get(surface.id)?.useMouseKey && !document.hidden &&
       (typeof document.hasFocus !== 'function' || document.hasFocus()) &&
       surface.input.ownsFocus(document.activeElement)
   }

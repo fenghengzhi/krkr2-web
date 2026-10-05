@@ -23,18 +23,22 @@ import { PortWindowGeometry } from '../backends/window/port-geometry.ts'
 import type { InitializeRequest, SessionEvent } from '../protocol/session.ts'
 import { fontManifestFile } from './build-info.ts'
 import { loadFontKernel } from '../backends/text/freetype/module.ts'
+import { copyGameProject, type GameProject } from '../engine/storage/project.ts'
 
-export function createSession(request: InitializeRequest): EngineSession {
+export function createSession(request: InitializeRequest, project?: GameProject): EngineSession {
   // Reject invalid configuration before any port backend or surface owns the
-  // transferred channels. The player's API performs the same early validation.
+  // transferred channels. Player validates template syntax before preparation;
+  // only here is the frozen executable directory available for path bounds.
   const dataPath = request.dataPath
-  normalizeSystemDataPath(dataPath)
+  const storageProject = copyGameProject(project)
+  normalizeSystemDataPath(dataPath, storageProject?.executableDirectory)
   const systemColors = copySystemColorPalette(request.systemColors)
   const systemDisplay = copySystemDisplayMetrics(request.systemDisplay)
   const arguments_ = new Map<string, string>(request.debugMode ? [['-debug', 'yes']] : [])
   if (dataPath !== undefined) arguments_.set('-datapath', dataPath)
   let sequence = 0
   const session: EngineSession = new EngineSession({
+    project: storageProject,
     systemFonts: request.systemFonts,
     systemColors,
     systemDisplay,

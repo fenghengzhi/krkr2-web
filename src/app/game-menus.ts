@@ -30,7 +30,9 @@ export function createGameMenus(
   canvas: () => HTMLCanvasElement | null,
   choose: (id: number, popup?: MenuPopupIdentity, shortcutEvent?: KeyboardEvent) => void,
   dismiss: (popup?: MenuPopupIdentity) => void,
-  options: { active?: () => boolean; windowView?: () => WindowView | undefined } = {},
+  options: { active?: () => boolean; windowView?: () => WindowView | undefined;
+    /** Actual presented menu loop, independent of Window.mouseCursorState. */
+    opened?: (opened: boolean) => void } = {},
 ) {
   let current: MenuSnapshot = {},
     running = false,
@@ -41,6 +43,21 @@ export function createGameMenus(
   let popupRequest: number | undefined
   let modal = false
   let disposed = false
+  let menuOpened = false
+  const publishOpened = () => {
+    const expanded = !container.hidden && [...container.querySelectorAll('details[open]')].some((node) => {
+      for (let parent = node.parentElement; parent && parent !== container; parent = parent.parentElement)
+        if (parent instanceof HTMLDetailsElement && !parent.open) return false
+      return true
+    }), next = !disposed && !modal && running && !document.hidden &&
+      (!!overlay || (!eventDisabled && expanded))
+    if (next === menuOpened) return
+    menuOpened = next
+    options.opened?.(next)
+  }
+  // toggle does not bubble. Capturing it observes native pointer/keyboard
+  // details activation as well as nested and programmatic open changes.
+  container.addEventListener('toggle', publishOpened, true)
   const removePopup = (restoreFocus = true) => {
     const previous = overlay && popupFocusOrigins.get(overlay),
       restore = restoreFocus && overlay?.contains(document.activeElement)
@@ -57,6 +74,7 @@ export function createGameMenus(
     if (disposed || modal || !running || document.hidden || (eventDisabled && !current.popup))
       return
     for (const details of container.querySelectorAll('details')) details.open = false
+    publishOpened()
     choose(id, current.popup, shortcutEvent)
   }
   // A snapshot can arrive while a menu is open or a pointer is held down.
@@ -160,7 +178,7 @@ export function createGameMenus(
     build(bar, visible ? current.root!.children : [], current.root?.enabled)
     const popup = current.popup,
       menu = popup && find(current.root, popup.id)
-    if (!modal && popup && menu) {
+    if (running && !modal && popup && menu) {
       const fresh = !overlay || popupRequest !== popup.requestId
       if (fresh) {
         const previous = popupFocusOrigin(document.activeElement)
@@ -219,6 +237,7 @@ export function createGameMenus(
       // in the engine, but must no longer cover or cancel the child in the DOM.
       removePopup(!modal)
     }
+    publishOpened()
   }
   const keydown = (event: KeyboardEvent) => {
     if (disposed || modal) return
@@ -230,6 +249,7 @@ export function createGameMenus(
       // activation. Its blocking request must still accept cancellation.
       if (!current.popup && options.active?.() === false) return
       for (const details of container.querySelectorAll('details')) details.open = false
+      publishOpened()
       if (current.popup) {
         event.preventDefault()
         dismiss(current.popup)
@@ -279,11 +299,13 @@ export function createGameMenus(
       if (disposed) return
       disposed = true
       window.removeEventListener('keydown', keydown, { capture: true })
+      container.removeEventListener('toggle', publishOpened, true)
       container.replaceChildren()
       container.hidden = true
       removePopup()
       const popup = current.popup
       current = {}
+      publishOpened()
       if (popup) dismiss(popup)
     },
     modal(active: boolean) {

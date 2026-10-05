@@ -1,5 +1,7 @@
 import type { LibraryGame } from '../../protocol/library.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
+import { copyGameProject, type GameProject } from '../../engine/storage/project.ts'
+import { storageFilePath, toPublicStoragePath } from '../../engine/storage/public-path.ts'
 
 export const LIBRARY_DIRECTORY = 'krkr2-library-v1'
 export const LIBRARY_DATABASE = 'krkr2-library'
@@ -27,13 +29,20 @@ export function libraryReadLock(id: string): string {
 }
 export function gameSettings(
   value: Pick<LibraryGame, 'title' | 'entry' | 'backend'>,
+  project?: GameProject,
 ): Pick<LibraryGame, 'title' | 'entry' | 'backend'> {
   if (typeof value.title !== 'string' || !value.title.trim() || value.title.length > 200)
     throw new Error('Game name must contain 1–200 characters')
   if (typeof value.entry !== 'string' || value.entry.length > 1024)
     throw new Error('Invalid game entry script')
-  const entry = normalizePath(value.entry)
-  if (entry.includes('>') || !['auto', 'asyncify', 'jspi'].includes(value.backend))
+  const logicalEntry = storageFilePath(value.entry, copyGameProject(project)?.directory)
+  let entry = toPublicStoragePath(logicalEntry)
+  if (!/^(?:game:|[\\/])/i.test(value.entry)) {
+    // Retain ordinary relative startup settings. A parent reference that is
+    // valid only in this frozen project is stored as its exact root address.
+    try { entry = storageFilePath(value.entry) } catch { /* Context already validated above. */ }
+  }
+  if (!['auto', 'asyncify', 'jspi'].includes(value.backend))
     throw new Error('Invalid game startup settings')
   return { title: value.title.trim(), entry, backend: value.backend }
 }
@@ -41,7 +50,8 @@ export function validateRecord(value: unknown): LibraryRecord {
   if (!value || typeof value !== 'object') throw new Error('Invalid library record')
   const record = value as LibraryRecord
   libraryId(record.id)
-  gameSettings(record)
+  gameSettings(record, record.project)
+  projectMetadata(record)
   if (
     record.version !== 1 ||
     !/^game-[a-f0-9]{64}$/.test(record.gameId) ||
@@ -90,7 +100,8 @@ export function validateSummary(value: unknown): LibraryGame {
   if (!value || typeof value !== 'object') throw new Error('Invalid library catalog entry')
   const game = value as LibraryGame
   libraryId(game.id)
-  gameSettings(game)
+  gameSettings(game, game.project)
+  projectMetadata(game)
   if (
     !/^game-[a-f0-9]{64}$/.test(game.gameId) ||
     !Number.isSafeInteger(game.createdAt) ||
@@ -114,6 +125,20 @@ export function summary({
   createdAt,
   size,
   fileCount,
+  project,
+  sourceGameId,
 }: LibraryGame): LibraryGame {
-  return { id, gameId, title, entry, backend, createdAt, size, fileCount }
+  return { id, gameId, title, entry, backend, createdAt, size, fileCount,
+    ...(project === undefined ? {} : { project: copyGameProject(project), sourceGameId }) }
+}
+function projectMetadata(game: LibraryGame): void {
+  const project = copyGameProject(game.project)
+  if (project === undefined) {
+    if (game.sourceGameId !== undefined) throw new Error('Unexpected library project identity')
+    return
+  }
+  if (!/^game-[a-f0-9]{64}$/.test(game.sourceGameId ?? '') ||
+      project.directory !== game.project!.directory ||
+      project.executableDirectory !== game.project!.executableDirectory)
+    throw new Error('Invalid library project metadata')
 }

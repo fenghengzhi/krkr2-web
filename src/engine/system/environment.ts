@@ -1,16 +1,36 @@
 import packageInfo from '../../../package.json' with { type: 'json' }
 import { normalizePath } from '../storage/resolver.ts'
 import { SystemDisplay, type SystemDisplayMetrics } from './display.ts'
+import type { GameProject } from '../storage/project.ts'
+import { storageDirectoryPath, toPublicStoragePath } from '../storage/public-path.ts'
 
 const packageVersion = packageInfo.version
 if (!/^\d+\.\d+\.\d+$/.test(packageVersion))
   throw new Error('System version requires a numeric project package version')
 
 /** Validate before player/worker resources are opened as well as at engine init. */
-export function normalizeSystemDataPath(input?: string): string {
+export function validateSystemDataPathTemplate(input?: string): void {
   if (input !== undefined && typeof input !== 'string')
     throw new Error('Invalid System dataPath: expected text')
+  const slashes = input?.replaceAll('\\', '/')
+  if (input !== undefined && (input.length > 4096 || input.includes('\0') || input.includes('>') ||
+      /^[a-z][a-z0-9+.-]*:/i.test(slashes!) && !/^game:\/\/(?:\.\/|\/)/i.test(slashes!)))
+    throw new Error('Invalid System dataPath')
+  if (input?.replace(/\$\((?:exepath|personalpath|appdatapath|vistapath)\)/g, '').includes('$('))
+    throw new Error('Invalid System dataPath: unknown macro')
+}
+export function normalizeSystemDataPath(input?: string, executableDirectory?: string): string {
+  validateSystemDataPathTemplate(input)
   const template = input || '$(exepath)/savedata'
+  if (executableDirectory !== undefined) {
+    const base = toPublicStoragePath(executableDirectory).replace(/\/$/, ''),
+      prefixes: Record<string, string> = { exepath: base, personalpath: base + '/savedata',
+        appdatapath: base + '/savedata', vistapath: base + '/savedata' },
+      expanded = template.replace(/\$\(([^)]+)\)/g, (macro, name: string) => prefixes[name] ?? macro),
+      path = storageDirectoryPath(/[\\/]$/.test(expanded) ? expanded : expanded + '/', executableDirectory)
+    if (path.length > 4096) throw new Error('System dataPath exceeds 4096 characters')
+    return path
+  }
   // A dot represents the virtual root while expanding separators. Replacing
   // $(exepath) with an empty string would turn its following slash absolute.
   const prefixes: Record<string, string> = {
@@ -41,10 +61,10 @@ export function normalizeSystemDataPath(input?: string): string {
 /** Paths are prefixes in the mounted game's VFS, never host filesystem paths. */
 export class SystemEnvironment {
   readonly display: SystemDisplay
-  readonly exePath = ''
+  readonly exePath: string
   readonly exeName = 'krkr2-web'
-  readonly personalPath = 'savedata/'
-  readonly appDataPath = 'savedata/'
+  readonly personalPath: string
+  readonly appDataPath: string
   readonly dataPath: string
   readonly platformName = 'Web'
   readonly osName = 'Web'
@@ -55,9 +75,13 @@ export class SystemEnvironment {
     arguments_: ReadonlyMap<string, string> | undefined,
     private readonly fillRandomBytes?: (bytes: Uint8Array<ArrayBuffer>) => void,
     display?: SystemDisplayMetrics,
+    project?: GameProject,
   ) {
     this.display = new SystemDisplay(display)
-    this.dataPath = normalizeSystemDataPath(arguments_?.get('-datapath'))
+    const path = normalizeSystemDataPath(arguments_?.get('-datapath'), project?.executableDirectory)
+    this.exePath = project ? toPublicStoragePath(project.executableDirectory) : ''
+    this.personalPath = this.appDataPath = project ? toPublicStoragePath(project.executableDirectory + 'savedata/') : 'savedata/'
+    this.dataPath = project ? toPublicStoragePath(path) : path
   }
 
   versionInformation(languageVersion: string | undefined): string {

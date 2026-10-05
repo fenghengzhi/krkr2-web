@@ -9,7 +9,7 @@ import type { PadAck, PadMessage, PadFontData } from './pad.ts'
 import type { SystemDisplayMetrics, SystemDisplayUpdate } from '../engine/system/display.ts'
 import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
 import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
-export const PROTOCOL_VERSION = 36
+export const PROTOCOL_VERSION = 37
 export interface LocalGameFile {
   path: string
   blob: Blob
@@ -56,7 +56,7 @@ export interface InputAdmissionAck {
   status: 'accepted' | 'ignored'
 }
 export interface SessionApi {
-  prepare(files: GameInput): Promise<string>
+  prepare(files: GameInput, project?: import('../engine/storage/project.ts').ProjectSelection): Promise<string>
   initialize(request: InitializeRequest): Promise<SessionSnapshot>
   mount(): Promise<SessionSnapshot>
   start(entry: string): Promise<SessionSnapshot>

@@ -2,7 +2,9 @@ import { LibraryIndex } from '../../backends/files/library-index.ts'
 import { OpfsLibraryFiles, OpfsReadPool } from '../../backends/files/opfs-library.ts'
 import { HttpRangePool } from '../../backends/files/http-range.ts'
 import { resolveFiles, type SourceFile } from '../../backends/files/source-files.ts'
-import { gameIdentity } from '../game-identity.ts'
+import { gameIdentity, projectIdentity } from '../game-identity.ts'
+import { copyGameProject, selectProject } from '../../engine/storage/project.ts'
+import { importSources } from '../../backends/files/import-resources.ts'
 import type {
   LibraryGame,
   LibraryImport,
@@ -75,7 +77,8 @@ export class LibraryService {
     progress: (value: LibraryProgress) => void,
   ): Promise<LibraryGame> {
     signal.throwIfAborted()
-    const settings = gameSettings(request)
+    const requestedProject = copyGameProject(request.project)
+    const settings = gameSettings(request, requestedProject)
     if (
       !/^game-[a-f0-9]{64}$/.test(request.expectedGameId) ||
       !Array.isArray(request.files) ||
@@ -113,7 +116,11 @@ export class LibraryService {
           signal.throwIfAborted()
         }
         const sources = await resolveFiles(request.files, checkpoint, http)
-        const identity = await gameIdentity(sources, checkpoint)
+        const sourceGameId = await gameIdentity(sources, checkpoint)
+        const project = requestedProject
+          ? selectProject(await importSources(sources, checkpoint), { mode: 'root', ...requestedProject })
+          : undefined
+        const identity = await projectIdentity(sourceGameId, project)
         if (identity !== request.expectedGameId)
           throw new Error('Game sources changed; reload the game before saving it to the library')
         total = sources.reduce((sum, file) => sum + file.source.size, 0)
@@ -128,6 +135,7 @@ export class LibraryService {
           version: 1,
           id,
           gameId: identity,
+          ...(project === undefined ? {} : { project, sourceGameId }),
           ...settings,
           createdAt: Date.now(),
           size: total,
@@ -159,7 +167,7 @@ export class LibraryService {
           })
         }
         const stored = await this.files.sources(id, record.files, readPool, signal)
-        if ((await gameIdentity(stored, checkpoint)) !== identity)
+        if ((await gameIdentity(stored, checkpoint)) !== sourceGameId)
           throw new Error('Stored game identity does not match its source')
         signal.throwIfAborted()
         report('committing')
@@ -201,7 +209,8 @@ export class LibraryService {
         if (
           (await gameIdentity(files, async () => {
             signal.throwIfAborted()
-          })) !== record.gameId
+          })) !== (record.sourceGameId ?? record.gameId) ||
+          (await projectIdentity(record.sourceGameId ?? record.gameId, record.project)) !== record.gameId
         )
           throw new Error('Library identity mismatch; import the game again')
         signal.throwIfAborted()
@@ -247,9 +256,9 @@ export class LibraryService {
     settings: Pick<LibraryGame, 'title' | 'entry' | 'backend'>,
   ): Promise<void> {
     libraryId(id)
-    const clean = gameSettings(settings)
     await this.locks.request(LIBRARY_WRITE_LOCK, async () => {
-      await this.index.put({ ...(await this.index.get(id)), ...clean })
+      const record = await this.index.get(id)
+      await this.index.put({ ...record, ...gameSettings(settings, record.project) })
     })
   }
 }

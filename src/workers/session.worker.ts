@@ -3,7 +3,9 @@ import { createSession } from '../player/create-session.ts'
 import { importSources } from '../backends/files/import-resources.ts'
 import { resolveFiles, type SourceFile } from '../backends/files/source-files.ts'
 import { HttpRangePool } from '../backends/files/http-range.ts'
-import { gameIdentity } from '../player/game-identity.ts'
+import { gameIdentity, projectIdentity } from '../player/game-identity.ts'
+import { copyProjectSelection, selectProject, type GameProject } from '../engine/storage/project.ts'
+import type { Resource } from '../engine/ports/storage.ts'
 import { PROTOCOL_VERSION, type InputAdmissionAck, type SessionApi } from '../protocol/session.ts'
 import type { EngineSession, SessionAdmission } from '../engine/session.ts'
 import { LibraryService, type LibraryLease } from '../player/library/service.ts'
@@ -12,6 +14,8 @@ let generation = 0
 let session: EngineSession | undefined
 const sources = new HttpRangePool()
 let prepared: SourceFile[] | undefined
+let preparedResources: Resource[] | undefined
+let preparedProject: GameProject | undefined
 let gameId: string | undefined
 let preparing = false
 let libraryLease: LibraryLease | undefined
@@ -91,7 +95,7 @@ async function completeInput(operation: (target: EngineSession) => Promise<void>
   }
 }
 const api: SessionApi = {
-  async prepare(files) {
+  async prepare(files, selection) {
     sources.signal.throwIfAborted()
     if (session || preparing || prepared) throw new Error('Worker already owns a game source')
     preparing = true
@@ -102,20 +106,42 @@ const api: SessionApi = {
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         deadline = performance.now() + 8
       }
+      // Indexed resources retain this checkpoint after prepare. Preserve the
+      // same pause/cancel boundary as resources indexed by mount().
+      const activeSession = session
+      if (activeSession) {
+        await activeSession.control.wait()
+        activeSession.control.check()
+      }
       sources.signal.throwIfAborted()
     }
     try {
-      let filesReady: SourceFile[], identity: string
+      let filesReady: SourceFile[], identity: string,
+        project: GameProject | undefined, resources: Resource[] | undefined
       if (!Array.isArray(files)) {
         libraryLease = await (await LibraryService.open()).acquire(files.libraryId, sources.signal)
         filesReady = libraryLease.files
         identity = libraryLease.record.gameId
+        if (libraryLease.record.project) {
+          resources = await importSources(filesReady, checkpoint)
+          project = selectProject(resources, { mode: 'root', ...libraryLease.record.project })
+          if (await projectIdentity(libraryLease.record.sourceGameId!, project) !== identity)
+            throw new Error('Library project identity mismatch; import the game again')
+        }
       } else {
         filesReady = await resolveFiles(files, checkpoint, sources)
         identity = await gameIdentity(filesReady, checkpoint)
+        const requested = copyProjectSelection(selection)
+        if (requested.mode !== 'collection') {
+          resources = await importSources(filesReady, checkpoint)
+          project = selectProject(resources, requested)
+          identity = await projectIdentity(identity, project)
+        }
       }
       sources.signal.throwIfAborted()
       prepared = filesReady
+      preparedResources = resources
+      preparedProject = project
       gameId = identity
       return identity
     } catch (error) {
@@ -140,7 +166,7 @@ const api: SessionApi = {
       throw new Error('Invalid Window move capability')
     if (!prepared || request.gameId !== gameId)
       throw new Error('Prepare the game sources before initializing')
-    session = createSession(request)
+    session = createSession(request, preparedProject)
     generation = request.generation
     session.control.onCancel(() => sources.close())
     await session.initialize()
@@ -156,7 +182,7 @@ const api: SessionApi = {
     mounting = true
     try {
       let deadline = performance.now() + 8
-      const resources = await importSources(prepared, async () => {
+      const resources = preparedResources ?? await importSources(prepared, async () => {
         target.control.check()
         if (performance.now() >= deadline) {
           await new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -168,6 +194,7 @@ const api: SessionApi = {
       target.control.check()
       target.mount(resources)
       prepared = undefined
+      preparedResources = undefined
       return target.snapshot()
     } finally {
       mounting = false
@@ -280,6 +307,8 @@ const api: SessionApi = {
   async stop() {
     sources.close()
     prepared = undefined
+    preparedResources = undefined
+    preparedProject = undefined
     if (frameTimer) clearInterval(frameTimer)
     frameTimer = undefined
     frameDelay = 0

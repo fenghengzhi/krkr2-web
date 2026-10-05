@@ -124,21 +124,22 @@ export class StorageSelector {
       throw new Error('File selector option exceeds 4096 characters')
     if (/[\\/>\0]/.test(extension)) throw new Error('Invalid file selector default extension')
     const snapshot = this.namespace(save),
-      requestedName = name ? parseStoragePath(name) : '',
+      requestedName = name ? parseStoragePath(name, this.resources.currentDirectory) : '',
       existingName =
         requestedName && !/[/>]$/.test(requestedName)
           ? (this.saves.resource(requestedName) ?? this.resources.find(requestedName))
           : undefined,
       directory = (value: string) => {
         if (!value) return undefined
-        const normalized = normalizeSelectorPath(value)
+        const normalized = normalizeSelectorPath(toPublicStoragePath(parseStoragePath(value, this.resources.currentDirectory)))
         const candidate = /[/>]$/.test(normalized) ? normalized : normalized + '/'
         return this.directory(candidate, snapshot.directories)
       },
       nameDirectory = name
         ? directory(extractStoragePath(toPublicStoragePath(existingName?.name ?? requestedName)))
         : undefined,
-      initialDirectory = nameDirectory ?? directory(initial) ?? 'game://./',
+      initialDirectory = nameDirectory ?? directory(initial) ??
+        directory(toPublicStoragePath(this.resources.currentDirectory)) ?? 'game://./',
       rawIndex = Number(args[0]),
       filterIndex = filters.length
         ? rawIndex >= 1 && rawIndex <= filters.length

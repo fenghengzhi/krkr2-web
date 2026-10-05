@@ -1,4 +1,5 @@
 import type { BackendPreference, GameFile } from './session.ts'
+import type { GameProject } from '../engine/storage/project.ts'
 
 export interface LibraryGame {
   id: string
@@ -9,6 +10,9 @@ export interface LibraryGame {
   createdAt: number
   size: number
   fileCount: number
+  /** Absent in legacy collection records. */
+  project?: GameProject
+  sourceGameId?: string
 }
 export interface LibraryStatus {
   available: boolean
@@ -25,6 +29,7 @@ export interface LibraryImport {
   entry: string
   backend: BackendPreference
   expectedGameId: string
+  project?: GameProject
 }
 export interface LibraryProgress {
   operation: string

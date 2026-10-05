@@ -146,6 +146,7 @@ export class BrowserInput {
   private disposed = false
   private suspended = false
   private hostMoving = false
+  private menuActive = false
   private epoch = 0
   private captured = new Set<number>()
   private active = false
@@ -399,6 +400,13 @@ export class BrowserInput {
       this.releasePointerCaptures()
     }
   }
+  /** Native ForceMouseCursorVisible is a presentation override. Opening a
+   * menu must not change logical hidden state or retire a script cursor. */
+  setMenuActive(active: boolean): void {
+    if (this.disposed || this.menuActive === active) return
+    this.menuActive = active
+    this.cursorAppearance()
+  }
   private appearance(): void {
     if (this.disposed) return
     this.canvas.style.cursor = this.view?.mouseCursorState
@@ -464,7 +472,7 @@ export class BrowserInput {
       ...(point && screen ? { physicalScreen: { ...screen } } : {}) }
   }
   private restoreCursor(): void {
-    this.canvas.style.cursor = this.view?.mouseCursorState || this.virtualMarker || this.customCursor?.visible
+    this.canvas.style.cursor = this.menuActive ? 'default' : this.view?.mouseCursorState || this.virtualMarker || this.customCursor?.visible
       ? 'none'
       : (cursors[this.input?.cursor ?? 0] ?? 'default')
   }
@@ -487,6 +495,12 @@ export class BrowserInput {
     if (this.suspended || this.view?.visible === false || this.view?.blocked) {
       this.physicalCursor = undefined
       this.retireVirtualCursor()
+      return
+    }
+    if (this.menuActive) {
+      this.removeVirtualMarker()
+      this.customCursor?.hide()
+      this.restoreCursor()
       return
     }
     const candidate = this.input?.virtualCursor,
@@ -521,7 +535,7 @@ export class BrowserInput {
           () => this.restoreCursor(), this.error)
         this.customCursor.show(asset, (): CursorPosition | undefined => {
           if (this.disposed || this.suspended || this.view?.visible === false || this.view?.blocked ||
-              this.view?.mouseCursorState || this.input?.cursor !== id) return undefined
+              this.menuActive || this.view?.mouseCursorState || this.input?.cursor !== id) return undefined
           const bounds = this.canvas.getBoundingClientRect(), point = cursor
             ? { x: bounds.left + cursor.x * bounds.width / (this.view?.geometry?.viewport.width ?? this.view?.width ?? 800),
                 y: bounds.top + cursor.y * bounds.height / (this.view?.geometry?.viewport.height ?? this.view?.height ?? 600) }

@@ -18,6 +18,7 @@ import { createGameLibrary } from './game-library.ts'
 import { createOfflinePanel } from './offline.ts'
 import { remoteUrl } from '../backends/files/http-range.ts'
 import { normalizePath } from '../engine/storage/resolver.ts'
+import { copyProjectSelection, type ProjectSelection } from '../engine/storage/project.ts'
 import { setText } from './dom.ts'
 import {
   backgroundPreferenceKey,
@@ -48,6 +49,22 @@ export function mountApp(root: HTMLDivElement): void {
       <section class="card offline-panel" id="offline-panel"></section><footer><span>krkr2-web / a web-native runtime</span><span>TypeScript · WebAssembly · WebGL2</span></footer>
     </main>`
   const el = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!
+  const projectControls = document.createElement('div')
+  projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">按游戏目录自动识别</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">文件集合沿用已有导入方式；文件夹会按游戏目录自动识别。</p>`
+  root.querySelector('label[for="entry"]')!.before(projectControls)
+  const projectSelection = (): ProjectSelection => {
+    const mode = el<HTMLSelectElement>('project-mode').value,
+      executableDirectory = el<HTMLInputElement>('project-exe-directory').value.trim()
+    return copyProjectSelection(mode === 'root'
+      ? { mode, directory: el<HTMLInputElement>('project-root').value.trim(), executableDirectory }
+      : mode === 'auto' ? { mode, executableDirectory } : { mode: 'collection' })
+  }
+  const updateProjectControls = () => {
+    const mode = el<HTMLSelectElement>('project-mode').value
+    el('project-directory-fields').hidden = mode === 'collection'
+    el('project-root-field').hidden = mode !== 'root'
+  }
+  el('project-mode').addEventListener('change', updateProjectControls)
   let player: ReturnType<typeof createPlayer> | undefined
   let lastFiles: GameInput | undefined
   let snapshot: SessionSnapshot | undefined
@@ -286,7 +303,8 @@ export function mountApp(root: HTMLDivElement): void {
     })
     return stopping
   }
-  const launch = async (files: GameInput) => {
+  const launch = async (files: GameInput, selection?: ProjectSelection) => {
+    const selected = Array.isArray(files) ? selection ?? projectSelection() : undefined
     await stop()
     const current = ++generation
     busy = true
@@ -438,7 +456,11 @@ export function mountApp(root: HTMLDivElement): void {
                 void instance.session.menuDismiss(popup).catch(report)
               },
               { active: () => instance.isWindowActive(surface.windowId, surface.surfaceEpoch),
-                windowView: () => windowViews.get(surface.windowId)?.view },
+                windowView: () => windowViews.get(surface.windowId)?.view,
+                opened: (opened) => {
+                  if (current === generation)
+                    instance.setWindowMenuActive(surface.windowId, surface.surfaceEpoch, opened)
+                } },
             )
             gameMenus.set(surface.windowId, menus)
             updateMenus()
@@ -502,9 +524,13 @@ export function mountApp(root: HTMLDivElement): void {
         el<HTMLInputElement>('entry').value.trim() || 'startup.tjs',
         requested === 'asyncify' || requested === 'jspi' ? requested : preference,
         el<HTMLInputElement>('script-debug').checked,
+        selected,
       )
       if (current === generation && !stopping) {
         acceptSnapshot(loaded)
+        el('project-status').textContent = loaded.project
+          ? `当前游戏：${loaded.project.directory || './'} · 程序目录：${loaded.project.executableDirectory || './'}`
+          : '当前游戏：文件集合（兼容已有导入）'
         log('会话就绪。点击画面继续。')
       }
     } catch (error) {
@@ -568,6 +594,7 @@ export function mountApp(root: HTMLDivElement): void {
                 : lastFiles[0]?.path.replace(/\.[^/.]+$/, '') || 'Game',
             entry: el<HTMLInputElement>('entry').value.trim() || 'startup.tjs',
             backend: el<HTMLSelectElement>('backend').value as BackendPreference,
+            ...(snapshot?.project ? { project: snapshot.project } : {}),
           }
         : undefined,
     canPlay: () => !busy,
@@ -594,7 +621,7 @@ export function mountApp(root: HTMLDivElement): void {
     },
   })
   el('demo').addEventListener('click', () => {
-    void demoFiles().then(launch).catch(report)
+    void demoFiles().then((files) => launch(files, { mode: 'collection' })).catch(report)
   })
   el('remote-form').addEventListener('submit', (event) => {
     event.preventDefault()
@@ -649,6 +676,10 @@ export function mountApp(root: HTMLDivElement): void {
         blob: file,
       }))
       element.value = ''
+      if (input === 'folder' && el<HTMLSelectElement>('project-mode').value === 'collection') {
+        el<HTMLSelectElement>('project-mode').value = 'auto'
+        updateProjectControls()
+      }
       void launch(files).catch(report)
     })
   }

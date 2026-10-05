@@ -25,6 +25,9 @@ function dom() {
     })
   class Element extends EventTarget {
     style: Record<string, string> = {}
+    dataset: Record<string, string> = {}
+    className = ''
+    innerHTML = ''
     value = ''
     inputMode = ''
     offsetLeft = 0
@@ -260,6 +263,113 @@ function fixture(
     },
   }
 }
+
+test('menu cursor override preserves logical changes and is scoped to a visible current Window surface', { timeout: 30000 }, async () => {
+  const f = fixture(), view = { ...new WindowState().view(), visible: true, mouseCursorState: 2 }
+  try {
+    f.coordinator.setWindow(101, view); f.coordinator.setWindow(202, view)
+    f.coordinator.setInput(101, inputView({ cursor: -3 })); f.coordinator.setInput(202, inputView({ cursor: -4 }))
+    f.coordinator.setMenuActive(101, 1, true)
+    assert.equal(f.a.style.cursor, 'default'); assert.equal(f.b.style.cursor, 'none')
+    f.coordinator.setInput(101, inputView({ cursor: -4 }))
+    f.coordinator.setWindow(101, { ...view, mouseCursorState: 0 })
+    assert.equal(f.a.style.cursor, 'default')
+    f.coordinator.setMenuActive(101, 1, false)
+    assert.equal(f.a.style.cursor, 'text')
+    assert.equal(view.mouseCursorState, 2, 'The supplied logical snapshot was not mutated')
+    f.coordinator.setMenuActive(101, 1, true)
+    f.coordinator.setWindow(101, { ...view, visible: false })
+    f.coordinator.setMenuActive(101, 1, true)
+    f.coordinator.setWindow(101, view)
+    assert.equal(f.a.style.cursor, 'none', 'Hidden Window ownership does not survive re-show')
+    const replacement = f.canvas()
+    f.coordinator.attach(101, 2, replacement as unknown as HTMLCanvasElement)
+    f.coordinator.setMenuActive(101, 2, true)
+    f.coordinator.setMenuActive(101, 1, false)
+    assert.equal(replacement.style.cursor, 'default', 'An old component cannot release its successor')
+    f.coordinator.setMenuActive(101, 2, false)
+    assert.equal(replacement.style.cursor, 'none')
+    f.coordinator.setMenuActive(202, 1, true)
+    f.coordinator.setSuspended(true); f.coordinator.setSuspended(false)
+    assert.equal(f.b.style.cursor, 'none')
+    f.coordinator.setSuspended(true)
+    f.coordinator.setMenuActive(202, 1, true) // App renders the resume snapshot before syncInput.
+    assert.equal(f.b.style.cursor, 'none')
+    f.coordinator.setSuspended(false)
+    assert.equal(f.b.style.cursor, 'default')
+    f.coordinator.setMenuActive(202, 1, false)
+    assert.equal(f.b.style.cursor, 'none')
+    f.coordinator.close(); f.coordinator.setMenuActive(202, 1, true)
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
+
+test('opening a menu hides the virtual cursor without retiring its identity; real input still takes over', { timeout: 30000 }, async () => {
+  const f = fixture(), view = { ...new WindowState().view(), visible: true },
+    input = inputView({ cursor: -3, virtualCursor: { x: 40, y: 30, revision: 1, basePhysicalSequence: 0 } }),
+    markers = () => f.rootA.children.filter((node) => node.className === 'game-virtual-cursor' && !node.removed)
+  try {
+    f.coordinator.setWindow(101, view); f.coordinator.setInput(101, input)
+    assert.equal(markers().length, 1)
+    f.coordinator.setMenuActive(101, 1, true)
+    assert.equal(markers().length, 0); assert.equal(f.a.style.cursor, 'default')
+    f.coordinator.setInput(101, inputView({ ...input, cursor: -4 }))
+    f.coordinator.setMenuActive(101, 1, false)
+    assert.equal(markers().length, 1)
+    assert.equal(markers()[0]!.dataset.cursorRevision, '1')
+    assert.equal(markers()[0]!.dataset.cursorShape, 'text')
+    f.coordinator.setMenuActive(101, 1, true)
+    f.mouse(f.a, 'mousemove', 0, 45)
+    assert.equal(f.a.style.cursor, 'default')
+    f.coordinator.setMenuActive(101, 1, false)
+    assert.equal(markers().length, 0)
+    assert.equal(f.a.style.cursor, 'text')
+    await settle(); assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
+
+test('an open menu suspends Pad sampling even with canvas focus and requires neutral readmission', { timeout: 30000 }, async () => {
+  const clock = gamepadSource(), f = fixture(undefined, false, undefined, clock.source)
+  try {
+    clock.pad(); f.a.focus(); await settle()
+    clock.pad([0]); clock.tick(50); await settle()
+    assert.deepEqual(f.keys.at(-1), [0x1c0])
+    f.coordinator.setMenuActive(101, 1, true); await settle()
+    assert.deepEqual(f.keys.at(-1), [])
+    assert.equal(f.coordinator.isActive(101), true)
+    const reads = clock.reads
+    f.coordinator.focus(101); clock.tick(100); clock.tick(200)
+    assert.equal(clock.reads, reads)
+    f.coordinator.setMenuActive(101, 1, false); clock.tick(250); await settle()
+    assert.equal(f.packets.filter((p) => p.type === 'keyDown').length, 1)
+    clock.pad(); clock.tick(300); clock.pad([0]); clock.tick(350); await settle()
+    assert.equal(f.packets.filter((p) => p.type === 'keyDown').length, 2)
+    assert(!f.packets.some((p) => p.type === 'deactivate'))
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
+
+test('menu ownership gates the mouse-key ticker independently of focus and does not suspend another Window', { timeout: 30000 }, async () => {
+  const clock = gamepadSource(), f = fixture(undefined, false, undefined, false, clock.source),
+    view = { ...new WindowState().view(), visible: true, useMouseKey: true }
+  try {
+    f.coordinator.setWindow(101, view); f.coordinator.setWindow(202, view)
+    f.a.focus(); clock.tick(50); await settle()
+    const ticks = () => f.packets.filter((p) => p.type === 'mouseKeyTick'), count = ticks().length,
+      late = clock.captured()
+    assert(count > 0)
+    f.coordinator.setMenuActive(101, 1, true)
+    f.coordinator.focus(101); clock.tick(100); late.forEach((callback) => callback()); await settle()
+    assert.equal(ticks().length, count)
+    f.b.focus(); clock.tick(150); await settle()
+    assert.equal(ticks().at(-1)!.windowId, 202)
+    f.a.focus(); clock.tick(200); await settle()
+    assert.equal(ticks().at(-1)!.windowId, 202)
+    f.coordinator.setMenuActive(101, 1, false); clock.tick(250); await settle()
+    assert.equal(ticks().at(-1)!.windowId, 101)
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
 
 test('system-key popup preludes keep the original admission order even when a menu consumes the key', async () => {
   const gate = deferred(), f = fixture(async (packet) => {

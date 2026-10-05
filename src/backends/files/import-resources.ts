@@ -30,7 +30,7 @@ export async function importSources(
   for (const file of files) {
     await checkpoint()
     const name = normalizePath(file.path),
-      source = file.source
+      source = file.source, containerIndex = resources.length
     if (name.includes('>')) throw new Error('Input filename contains an archive address delimiter')
     add({
       name,
@@ -71,6 +71,8 @@ export async function importSources(
               checkpoint,
             })
           : []
+    if (xp3 || /\.zip$/i.test(name) || zipMagic)
+      resources[containerIndex] = { ...resources[containerIndex]!, archiveKind: xp3 ? 'xp3' : 'zip' }
     for (const entry of entries) {
       await checkpoint()
       const canonical = name + '>' + entry.name
