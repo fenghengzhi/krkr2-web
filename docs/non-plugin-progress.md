@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+最新待核验批次：[Full test suite 37348226922](https://github.com/fenghengzhi/krkr2-web/actions/runs/37348226922)，精确提交 `b592f70f576d8c110c03244be848aa24f4460ddb`。101 的 31 个文件已整批推送，新增 **34 个 Node、每浏览器 12 个定义，以及八场景 × 双 Windows 的原版退出观察**。首次唯一查询为 **in_progress／conclusion=null**，只确认运行身份。下轮补取 100 缺失结果并回收本批固定快照，不实时监控；没有本地执行验证，完整目标保持 active。
+
 2026-10-06 准备 [101 System 消息、内存整理与退出语义](decisions/101-system-messages-compaction-and-termination.md)：直接更新原生 TJS 消息 holder；按等级释放可回收缓存并保留活动读者；区分异步 `terminate` 和即时 `exit`，另以固定原版 SDK 记录模态退出顺序。修订 099 构建中的两处拖放结果类型错误及 098 菜单输入夹具。协议 **40**、`nativeSystem:4`，TJS ABI **5**、字体 ABI **2**。本批仍待 GitHub-hosted 执行，完整非插件目标保持 active。
 
 101 固定回收 **44 个原 ZIP、611,968,120 字节**，全部匹配 API SHA-256／大小。098 终态 failure：Node **3,287/3,293 pass、6 failure**，主浏览器 **2,210 pass、191 failure、86 未报告／2,487**；Chromium library 取消且没有测试库存，另记未报告。099 终态 failure：两处 TS18046 导致应用验证跳过。100 仍 in_progress，构建及 323 光标原件未报告；下轮补取，不实时监控。历史失败、取消和未比较保留。以下保留历史批次当时的状态。
