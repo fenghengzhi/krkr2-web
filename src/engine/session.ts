@@ -39,6 +39,7 @@ import type { CursorAsset } from '../formats/cursor/index.ts'
 import { loadCursorBytes, windowsDesktopCursorProfile } from '../formats/cursor/load.ts'
 import { ImageWriter, layerImageMetadata } from './storage/image-writer.ts'
 import { LayerTree, type LayerState } from './scene/layers.ts'
+import { WindowUpdates } from './scene/window-updates.ts'
 import { createWindowRegion, copyWindowRegion, WindowRegions, type WindowRegion } from './scene/window-region.ts'
 import { deviceInt, deviceMulDiv, drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
 import { LayerService } from './scene/layer-objects.ts'
@@ -324,6 +325,7 @@ export class EngineSession {
   private transitions?: SceneTransitions
   private readonly composer: SceneComposer
   private preparingFrame = false
+  private readonly windowUpdates = new WindowUpdates()
   private paintedLayers = new Set<number>()
   private readonly redrawRequests = new Set<number>()
   private readonly deferredPaint = new Map<number, { generation: number; deadline?: number }>()
@@ -502,6 +504,7 @@ export class EngineSession {
         () => this.detachRenderer?.(),
         () => this.transitions?.dispose(),
         () => this.composer.clear(),
+        () => this.windowUpdates.finish(),
         () => this.images.dispose(),
         () => this.closeCursors(),
         () => this.closeWindowRegions(),
@@ -638,9 +641,13 @@ export class EngineSession {
         (operation) => this.inputs!.start(operation),
         this.deps.now,
         this.deps.schedule,
-        () => this.requestFrameCheckpoint(),
         () => {
-          this.dirty = true
+          for (const id of this.transitions?.windowIds() ?? []) this.invalidateWindow(id)
+          return this.requestFrameCheckpoint()
+        },
+        (id, invalidation = true) => {
+          if (invalidation) this.invalidateLayer(id)
+          else this.dirty = true
         },
         (name) => this.images.rule(name),
         (error) => {
@@ -694,10 +701,12 @@ export class EngineSession {
         (name) => this.readResource(name),
         (id, pixels) => {
           if (!this.layers.has(id)) return
+          const previousWindow = this.layerWindow(id)
           this.layers.image(id, pixels)
           this.layers.resize(id, pixels.width, pixels.height)
           this.videoFrameChanges.set(this.layers.get(id).windowId, ++this.videoFrameChange)
-          this.dirty = true
+          if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+          this.invalidateLayer(id)
         },
         (callback, member, args, valid, before, immediate, source, release) => {
           return this.acceptEvent(
@@ -757,6 +766,7 @@ export class EngineSession {
           }
         },
         async (window) => {
+          this.windowUpdates.remove(window.id)
           this.geometryRequests.delete(window.id)
           this.geometrySignatures.delete(window.id)
           this.geometryPrimaryIds.delete(window.id)
@@ -783,6 +793,7 @@ export class EngineSession {
           await this.videos?.flushCloses()
         },
         (window) => {
+          this.windowUpdates.remove(window.id)
           this.geometryRequests.delete(window.id)
           this.geometrySignatures.delete(window.id)
           this.geometryPrimaryIds.delete(window.id)
@@ -821,7 +832,7 @@ export class EngineSession {
           }
           this.inputControllers.releaseCaptures()
           window.state.set('visible', 1)
-          this.dirty = true
+          this.invalidateWindow(window.id)
           // Publish blocking before the browser receives a new focus command.
           this.present()
           this.observeAdmission(this.acceptActivateWindow(window.id))
@@ -913,14 +924,14 @@ export class EngineSession {
           this.redrawRequests.delete(layer.id)
           this.deferredPaint.delete(layer.id)
           this.systemEvents?.cancelSource(layer)
-          this.dirty = true
+          this.invalidateWindow(layer.windowId)
         },
         (layer) => {
           this.redrawRequests.delete(layer.id)
           this.deferredPaint.delete(layer.id)
           this.systemEvents?.cancelSource(layer)
           this.transitions?.drop(layer.id)
-          this.dirty = true
+          this.invalidateWindow(layer.windowId)
         },
       )
       this.discard(await this.runtime.execute(tvpConstants, 'krkr2-web/constants.tjs'))
@@ -1296,8 +1307,10 @@ export class EngineSession {
           // page transition. A stale wake cannot unlock a replacement request.
           if (!this.systemEvents?.disabled && this.activity.state === 'visible')
             for (const [id, generation] of due)
-              if (this.deferredPaint.get(id)?.generation === generation)
+              if (this.deferredPaint.get(id)?.generation === generation) {
                 this.deferredPaint.delete(id)
+                this.invalidateLayer(id)
+              }
           return undefined
         }, 2)
           .catch(() => {}) // execute records and fails the session itself.
@@ -1309,8 +1322,13 @@ export class EngineSession {
       Math.max(0, deadline - this.deps.now()),
     )
   }
-  private *prepareFrame(source?: number): InputOperation {
-    if (this.preparingFrame) return
+  private *prepareFrame(source?: number | readonly number[], explicit = false): InputOperation {
+    if (source === undefined) {
+      yield* this.deliverWindowUpdates(false)
+      return
+    }
+    if (this.preparingFrame && !explicit) return
+    const wasPreparing = this.preparingFrame
     this.preparingFrame = true
     const layers = this.layers,
       painted = this.paintedLayers,
@@ -1324,8 +1342,9 @@ export class EngineSession {
     function* visit(id: number, paint: boolean, seen = new Set<number>()): InputOperation {
       if (!layers.has(id) || seen.has(id)) return
       seen.add(id)
-      if (paint && !painted.has(id) && !deferred.has(id)) {
+      if (paint && (explicit || (!painted.has(id) && !deferred.has(id)))) {
         pending.delete(id)
+        if (explicit) deferred.delete(id)
         if (layers.get(id).callOnPaint) {
           beginPaint()
           painted.add(id)
@@ -1340,15 +1359,71 @@ export class EngineSession {
       if (layers.has(id)) layers.invalidateChildren(id)
     }
     try {
-      const roots =
-        source === undefined
-          ? this.inputControllers.values().map((controller) => controller.root())
-          : [source]
+      const roots = typeof source === 'number' ? [source] : source,
+        windowPass = typeof source !== 'number',
+        updateWindow = windowPass && roots.length && this.layers.has(roots[0]!)
+          ? this.layers.get(roots[0]!).windowId : undefined
       for (const root of roots) yield* visit(root, true)
-      if (this.transitions?.active) yield* this.transitions.advance()
+      if (this.transitions?.active && (!windowPass || updateWindow !== undefined))
+        yield* this.transitions.advance(updateWindow)
       for (const root of roots) yield* visit(root, false)
     } finally {
-      this.preparingFrame = false
+      this.preparingFrame = wasPreparing
+    }
+  }
+  private invalidateWindow(windowId: number): void {
+    if (!this.registeredWindow(windowId) || this.control.cancelled) return
+    this.windowUpdates.post(windowId)
+    this.dirty = true
+    if (!this.executing && this.state === 'running') this.requestReceiptCheckpoint()
+  }
+  private invalidateLayer(id: number): void {
+    this.dirty = true
+    const windowId = this.layerWindow(id)
+    if (windowId !== undefined) this.invalidateWindow(windowId)
+  }
+  private layerWindow(id: number): number | undefined {
+    if (!this.layers.has(id)) return undefined
+    let layer = this.layers.get(id)
+    if (!layer.width || !layer.height) return undefined
+    // Detached Layers have no native manager/window invalidation route.
+    while (layer.parent) {
+      if (!layer.visible) return undefined
+      layer = this.layers.get(layer.parent)
+    }
+    // DrawDevice::NotifyLayerImageChange ignores secondary managers. Their
+    // pending paints still run when the Window's primary manager is exposed.
+    return layer.primary && this.inputControllers.get(layer.windowId)?.root() === layer.id
+      ? layer.windowId : undefined
+  }
+  private *deliverWindowUpdates(explicit = true): InputOperation {
+    if (!this.windowUpdates.begin()) return
+    const savedPainted = this.paintedLayers
+    this.paintedLayers = new Set()
+    const visited = new Set<number>()
+    try {
+      for (let id = this.windowUpdates.next(); id !== undefined; id = this.windowUpdates.next()) {
+        this.control.check()
+        const window = this.registeredWindow(id)
+        if (!window) continue
+        const roots = this.layers.ids().filter((layerId) => {
+          const layer = this.layers.get(layerId)
+          return layer.windowId === id && layer.primary && !layer.parent
+        })
+        const repeated = visited.has(id)
+        visited.add(id)
+        // New invalidations during delivery may consume the second native
+        // entry immediately. Work left after the two-entry cap remains deferred
+        // until its existing bounded scheduler wake (unless explicitly forced).
+        this.paintedLayers.clear()
+        yield* this.prepareFrame(roots, explicit || repeated)
+        if (this.registeredWindow(id) === window && !this.control.cancelled) this.present(id, true)
+      }
+    } finally {
+      for (const id of this.paintedLayers) savedPainted.add(id)
+      this.paintedLayers = savedPainted
+      this.windowUpdates.finish()
+      this.armRedraw()
     }
   }
   pause(): void {
@@ -2195,7 +2270,8 @@ export class EngineSession {
       return true
     return (
       this.activity.state === 'visible' &&
-      (this.frameRequested || (this.dirty && this.frameWorkVersion !== this.attemptedFrameVersion))
+      (this.frameRequested || (!this.systemEvents?.disabled && this.windowUpdates.pending) ||
+        (this.dirty && this.frameWorkVersion !== this.attemptedFrameVersion))
     )
   }
   private requestReceiptCheckpoint(): void {
@@ -2229,7 +2305,10 @@ export class EngineSession {
     // unrelated event round (including eventDisabled=false) may see an old
     // deadline but must preserve it until the rearmed timer actually fires.
     for (const [id, generation] of this.modalReadyRedraw) {
-      if (this.deferredPaint.get(id)?.generation === generation) this.deferredPaint.delete(id)
+      if (this.deferredPaint.get(id)?.generation === generation) {
+        this.deferredPaint.delete(id)
+        this.invalidateLayer(id)
+      }
       this.modalReadyRedraw.delete(id)
     }
   }
@@ -2794,7 +2873,7 @@ export class EngineSession {
     if (before && (before.outer.width !== geometry.outer.width || before.outer.height !== geometry.outer.height ||
         before.client.width !== geometry.client.width || before.client.height !== geometry.client.height))
       this.queueResize(window)
-    this.dirty = true
+    this.invalidateWindow(window.id)
   }
   private ensureWindowGeometry(window: WindowRecord): Promise<void> {
     const transaction = this.geometryTransactions.get(window.id)
@@ -2836,7 +2915,7 @@ export class EngineSession {
       const updated = scrollWindowGeometry(geometry, observation.x, observation.y)
       this.geometryScrollSequences.set(window.id, observation.sequence)
       window.state.commitGeometry(updated)
-      this.dirty = true
+      this.invalidateWindow(window.id)
       this.present()
     } catch (error) {
       this.deps.event({ type: 'log', level: 'error', text: error instanceof Error ? error.message : String(error) })
@@ -2891,7 +2970,7 @@ export class EngineSession {
         if (this.registeredWindow(window.id) !== window) throw new Error('Window geometry destination changed')
       }
     }
-    const before = [window.state.width, window.state.height],
+    const before = [window.state.width, window.state.height], wasVisible = window.state.visible,
       candidate = geometryProperty ? window.state.copy() : window.state
     if (script) candidate.setScript(property, value)
     else candidate.set(property, value)
@@ -2920,6 +2999,7 @@ export class EngineSession {
         record.state.configure(window.state.useMouseKey, this.deps.now())))
     }
     if (property === 'visible' && !window.state.visible) this.clearVirtualCursors(window.id)
+    if (property === 'visible' && window.state.visible && !wasVisible) this.invalidateWindow(window.id)
     if (property === 'visible' || property === 'focusable' || property === 'trapKey')
       this.refreshKeyboardRoutes()
     if (before[0] !== window.state.width || before[1] !== window.state.height)
@@ -3030,7 +3110,7 @@ export class EngineSession {
       this.deps.event({ type: 'input', input })
     }
   }
-  present(): void {
+  present(onlyWindowId?: number, synchronous = false): void {
     this.presentInputViews()
     const windows = this.windowPresentations(),
       windowViews = JSON.stringify(windows)
@@ -3045,7 +3125,7 @@ export class EngineSession {
     }
     if (
       !this.dirty ||
-      this.preparingFrame ||
+      (this.preparingFrame && !synchronous) ||
       this.state === 'stopped' ||
       this.state === 'stopping' ||
       (!this.deps.renderer.openWindow &&
@@ -3053,7 +3133,8 @@ export class EngineSession {
       (this.activity.state !== 'visible' && this.graphicsStatus.state !== 'restoring')
     )
       return
-    const targets = this.windows?.registered() ?? []
+    const targets = (this.windows?.registered() ?? []).filter((window) =>
+      onlyWindowId === undefined || window.id === onlyWindowId)
     if (!targets.length && !this.deps.renderer.openWindow)
       this.deps.renderer.present([], this.width, this.height)
     let complete = true
@@ -3093,13 +3174,14 @@ export class EngineSession {
         target.id,
       )
       if (presented === false) complete = false
-      else if (window.visible && this.registeredWindow(target.id) === target)
-        this.windowPresentationsCompleted.set(
+      else {
+        if (window.visible && this.registeredWindow(target.id) === target) this.windowPresentationsCompleted.set(
           target.id,
           (this.windowPresentationsCompleted.get(target.id) ?? 0) + 1,
         )
+      }
     }
-    if (complete) this.dirty = false
+    if (complete && onlyWindowId === undefined && !this.windowUpdates.pending) this.dirty = false
     this.completeReadyReceipts()
   }
   private queueResize(window: WindowRecord): void {
@@ -3892,6 +3974,33 @@ export class EngineSession {
     if (operation.startsWith('Transition.')) return this.transitions!.host(operation, args)
     if (operation.startsWith('Sound.') || operation.startsWith('PhaseVocoder.'))
       return { kind: 'value', value: await this.sounds!.host(operation, args, context) }
+    if (operation === 'Video.layer') {
+      const layer = args[2] === null ? null : this.layerObjects!.cast(args[2])
+      return { kind: 'value', value: await this.videos!.host(operation,
+        [args[0], args[1], layer ? BigInt(layer.id) : null, args[2]], context) }
+    }
+    if (operation === 'Video.geometry') {
+      const mutation = await this.videos!.geometry(Number(args[0]), String(args[1]), args.slice(2))
+      if (!mutation) return { kind: 'value', value: undefined }
+      const firstLayer = mutation.layer(0) ?? mutation.layer(1),
+        controller = this.inputControllers.get(mutation.windowId) ??
+          (firstLayer === undefined ? this.inputControllers.active : this.inputControllers.forLayer(firstLayer)),
+        session = this
+      return this.inputs!.start((function* (): InputOperation {
+        for (let channel = 0; channel < 2; channel++) {
+          const id = mutation.layer(channel)
+          if (id === undefined || !session.layers.has(id)) continue
+          yield* session.inputControllers.forLayer(id).change(() => {
+            const values = mutation.values(), previousWindow = session.layerWindow(id)
+            for (const field of ['left', 'top', 'visible'] as const)
+              if (values[field] !== undefined) session.layers.set(id, field, values[field]!)
+            if (previousWindow !== undefined) session.invalidateWindow(previousWindow)
+            session.invalidateLayer(id)
+          })
+        }
+        return undefined
+      })(), controller)
+    }
     if (operation.startsWith('Video.'))
       return { kind: 'value', value: await this.videos!.host(operation, args, context) }
     if (operation === 'System.getArgument') {
@@ -4558,15 +4667,23 @@ export class EngineSession {
         await this.measureWindowGeometry(window, candidate, 'content')
         break
       }
-      case 'Window.update':
-        this.windows!.get(number(0))
-        this.dirty = true
-        break
+      case 'Window.update': {
+        const window = this.windows!.get(number(0)), primaryId = this.inputControllers.get(window.id)?.root() ?? 0,
+          primary = this.layers.has(primaryId) ? this.layers.get(primaryId) : undefined,
+          drawing = primary && drawDeviceGeometry(window.state, primary.width, primary.height)
+        // Form.UpdateWindow exposes the primary source rectangle through the
+        // DrawDevice; a missing/zero drawing surface posts no new invalidation.
+        if (primary && primary.width > 0 && primary.height > 0 && drawing!.width > 0 && drawing!.height > 0)
+          this.invalidateWindow(window.id)
+        if (this.windowUpdates.delivering) break
+        await this.synchronizeWindowGeometry()
+        return this.inputs!.start(this.deliverWindowUpdates())
+      }
       case 'Layer.create': {
         if (!isScriptObject(args[0]) || !isScriptObject(args[3]))
           throw new Error('Expected Layer instance and native state')
         value = BigInt(this.layerObjects!.create(args[0], args[1], args[2], args[3]))
-        this.dirty = true
+        this.invalidateLayer(Number(value))
         break
       }
       case 'Layer.bindLifetime':
@@ -4585,7 +4702,7 @@ export class EngineSession {
       }
       case 'Layer.releaseImage': {
         this.layers.releaseImages(number(0))
-        this.dirty = true
+        this.invalidateLayer(number(0))
         break
       }
       case 'Layer.finish':
@@ -4680,17 +4797,25 @@ export class EngineSession {
           break
         }
         if (['width', 'height', 'imageWidth', 'imageHeight'].includes(text(1))) {
-          const id = number(0), controller = this.inputControllers.forLayer(id)
+          const id = number(0), controller = this.inputControllers.forLayer(id),
+            before = this.layers.property(id, text(1)), previousWindow = this.layerWindow(id)
           // These setters normally return through the Input pump, bypassing
           // the host switch tail. Commit primary sizing/scroll before that
           // pump rechecks hover or the calling TJS reads its cursor position.
           this.layers.set(id, text(1), number(2))
-          this.dirty = true
+          if (before !== this.layers.property(id, text(1))) {
+            if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+            this.invalidateLayer(id)
+          }
           await this.synchronizeWindowGeometry()
           return this.inputs!.change(() => {}, controller)
         }
         return this.inputs!.change(
           () => {
+            const visual = ['left', 'top', 'imageLeft', 'imageTop', 'visible', 'opacity', 'type',
+              'hasImage', 'order', 'absolute', 'absoluteOrderMode', 'cached'].includes(text(1)),
+              previousWindow = visual ? this.layerWindow(number(0)) : undefined,
+              before = visual ? this.layers.property(number(0), text(1)) : undefined
             this.layers.set(
               number(0),
               text(1),
@@ -4710,6 +4835,10 @@ export class EngineSession {
               this.deferredPaint.delete(number(0))
             }
             this.dirty = true
+            if (visual && before !== this.layers.property(number(0), text(1))) {
+              if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+              this.invalidateLayer(number(0))
+            }
           },
           this.inputControllers.forLayer(number(0)),
         )
@@ -4725,10 +4854,16 @@ export class EngineSession {
         this.dirty = true
         break
       }
-      case 'Layer.resize':
-        this.layers.resize(number(0), number(1), number(2))
-        this.dirty = true
+      case 'Layer.resize': {
+        const id = number(0), layer = this.layers.get(id), width = number(1), height = number(2),
+          changed = layer.width !== width || layer.height !== height, previousWindow = this.layerWindow(id)
+        this.layers.resize(id, width, height)
+        if (changed) {
+          if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+          this.invalidateLayer(id)
+        }
         break
+      }
       case 'Layer.fill':
         if (
           this.layers.fill(
@@ -4737,7 +4872,7 @@ export class EngineSession {
             clipInteger(5),
           )
         )
-          this.dirty = true
+          this.invalidateLayer(number(0))
         break
       case 'Layer.image': {
         const id = number(0),
@@ -4750,24 +4885,28 @@ export class EngineSession {
           )
           this.control.check()
           if (record.finished) throw new Error('Layer has been invalidated')
+          const previousWindow = this.layerWindow(id)
           if (!this.layers.finishImageLoad(ticket, image, province))
             throw new Error('Image load destination changed')
           value = image.metadata ? scriptRecord(Object.fromEntries(image.metadata)) : null
-          this.dirty = true
+          if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+          this.invalidateLayer(number(0))
         } catch (error) {
           if (error instanceof ProvinceImageLoadError) {
             this.control.check()
             // Native keeps the completed main image when its companion fails.
             // A changed destination or stopped session must not receive it.
             if (!record.finished) {
-              const { width, height } = ticket.layer
+              const { width, height } = ticket.layer, previousWindow = this.layerWindow(id)
               // The failure skips LoadImages' final Update. Only a change to
               // the Layer's display dimensions requests one during that load.
               if (
                 this.layers.finishImageLoad(ticket, error.image) &&
                 (ticket.layer.width !== width || ticket.layer.height !== height)
-              )
-                this.dirty = true
+              ) {
+                if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+                this.invalidateLayer(number(0))
+              }
             }
             throw error.cause
           }
@@ -4832,7 +4971,7 @@ export class EngineSession {
                   opacity,
                 )
               )
-                session.dirty = true
+                session.invalidateLayer(id)
               yield
             }
           })(),
@@ -4850,7 +4989,7 @@ export class EngineSession {
           this.layers.face(id) === 4,
         )
         this.layers.get(id).imageModified = true
-        this.dirty = true
+        this.invalidateLayer(number(0))
         break
       }
       case 'Font.attention': {
@@ -4929,10 +5068,16 @@ export class EngineSession {
         value = await this.fontSelection.open(number(0), text(1), text(2), text(3), spec)
         break
       }
-      case 'Layer.resizeImage':
-        this.layers.resizeImage(number(0), number(1), number(2))
-        this.dirty = true
+      case 'Layer.resizeImage': {
+        const id = number(0), bitmap = this.layers.bitmap(id), width = number(1), height = number(2),
+          changed = bitmap.width !== width || bitmap.height !== height, previousWindow = this.layerWindow(id)
+        this.layers.resizeImage(id, width, height)
+        if (changed) {
+          if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+          this.invalidateLayer(id)
+        }
         break
+      }
       case 'Layer.color':
         if (
           this.layers.color(
@@ -4942,11 +5087,11 @@ export class EngineSession {
             clipInteger(6),
           )
         )
-          this.dirty = true
+          this.invalidateLayer(number(0))
         break
       case 'Layer.imagePos':
         this.layers.imagePosition(number(0), number(1), number(2))
-        this.dirty = true
+        this.invalidateLayer(number(0))
         break
       case 'Layer.clip': {
         const bitmap = this.layers.bitmap(number(0))
@@ -4960,9 +5105,14 @@ export class EngineSession {
           })
         break
       }
-      case 'Layer.assignImages':
-        if (this.layers.assignImages(number(0), number(1))) this.dirty = true
+      case 'Layer.assignImages': {
+        const id = number(0), previousWindow = this.layerWindow(id)
+        if (this.layers.assignImages(id, number(1))) {
+          if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+          this.invalidateLayer(id)
+        }
         break
+      }
       case 'Layer.independImage': {
         const plane = text(1)
         if (plane !== 'main' && plane !== 'province') throw new Error('Invalid image plane')
@@ -4981,7 +5131,7 @@ export class EngineSession {
             height: clipInteger(7),
           })
         )
-          this.dirty = true
+          this.invalidateLayer(number(0))
         break
       case 'Layer.piledCopy': {
         const id = number(0),
@@ -5029,7 +5179,7 @@ export class EngineSession {
                 )
             )
               session.layers.get(id).imageModified = true
-            session.dirty = true
+            session.invalidateLayer(id)
             return undefined
           })(),
         )
@@ -5056,7 +5206,7 @@ export class EngineSession {
             )
         ) {
           this.layers.get(id).imageModified = true
-          this.dirty = true
+          this.invalidateLayer(number(0))
         }
         break
       }
@@ -5106,7 +5256,7 @@ export class EngineSession {
             face === 1 && this.layers.get(id).holdAlpha,
           )
         this.layers.get(id).imageModified = true
-        this.dirty = true
+        this.invalidateLayer(number(0))
         break
       }
       case 'Layer.affineCopy':
@@ -5143,7 +5293,7 @@ export class EngineSession {
           )
         ) {
           layer.imageModified = true
-          this.dirty = true
+          this.invalidateLayer(number(0))
         }
         break
       }
@@ -5162,7 +5312,7 @@ export class EngineSession {
       }
       case 'Layer.flip':
         this.layers.flip(number(0), !!number(1))
-        this.dirty = true
+        this.invalidateLayer(number(0))
         break
       case 'Layer.convertType': {
         const id = number(0),
@@ -5173,13 +5323,13 @@ export class EngineSession {
           throw new Error('convertType requires dfAlpha to dfAddAlpha, or dfAddAlpha to dfAlpha')
         layer.bitmap?.convert(face === 4)
         layer.imageModified = true
-        this.dirty = true
+        this.invalidateLayer(number(0))
         break
       }
       case 'Layer.grayscale':
         this.layers.bitmap(number(0)).grayscale()
         this.layers.get(number(0)).imageModified = true
-        this.dirty = true
+        this.invalidateLayer(number(0))
         break
       case 'Layer.boxBlur': {
         const id = number(0),
@@ -5197,7 +5347,7 @@ export class EngineSession {
             height: result.height,
           })
           this.layers.get(id).imageModified = true
-          this.dirty = true
+          this.invalidateLayer(number(0))
         }
         break
       }
@@ -5208,8 +5358,10 @@ export class EngineSession {
         const id = number(0),
           parent = this.layerObjects!.parent(id, args[1])
         return this.inputs!.detach(id, () => {
+          const oldWindow = this.layerWindow(id)
           this.layers.reparent(id, parent)
-          this.dirty = true
+          if (oldWindow !== undefined) this.invalidateWindow(oldWindow)
+          this.invalidateLayer(number(0))
         })
       }
       case 'Layer.parentCheck':
@@ -5217,7 +5369,7 @@ export class EngineSession {
         break
       case 'Layer.move':
         this.layers.move(number(0), number(1), !!number(2))
-        this.dirty = true
+        this.invalidateLayer(number(0))
         break
       case 'Layer.pixelGet':
       case 'Layer.pixelSet': {
@@ -5230,7 +5382,7 @@ export class EngineSession {
           if (
             this.layers.setPixel(number(0), clipInteger(1), clipInteger(2), clipInteger(4), plane)
           )
-            this.dirty = true
+            this.invalidateLayer(number(0))
         }
         break
       }
@@ -5247,10 +5399,10 @@ export class EngineSession {
           this.deferredPaint.delete(id)
         }
         if (this.layers.update(id, region) && this.inputControllers.forLayer(id).attached(id)) {
-          if (this.preparingFrame && this.paintedLayers.has(id) && !this.deferredPaint.has(id))
+          if (this.windowUpdates.delivering && this.preparingFrame && this.paintedLayers.has(id) && !this.deferredPaint.has(id))
             this.deferredPaint.set(id, { generation: ++this.redrawGeneration })
           this.redrawRequests.add(id)
-          this.dirty = true
+          this.invalidateLayer(number(0))
         }
         break
       }

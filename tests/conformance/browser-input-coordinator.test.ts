@@ -2007,6 +2007,7 @@ test('measured viewport coordinates drive physical input and IME independently o
     await settle()
     const move = [...f.packets].reverse().find((packet) => packet.type === 'move')
     assert.ok(move)
+    if (move.type !== 'move') assert.fail('Expected a physical move packet')
     assert.equal(move.x, 60)
     assert.equal(move.y, 5)
     assert.deepEqual(move.paintBoxPoint, { x: 52, y: -7 })

@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [095 同步窗口更新与视频图层路由](decisions/095-window-update-and-video-layers.md)：普通／显式更新共用有序窗口队列，补 onResize 默认 action；视频 layer 几何直接作用真实图层，支持原版跨窗绑定与可见性回调重入；修正播放中 seek 等待时钟过度严格及 KAG 手柄夹具持键过久。修复 094 六条测试类型错误。本批尚待 GitHub-hosted 执行，协议 **35**、TJS ABI **5**、字体 ABI **2** 不变，整体目标仍 active。
+
+095 固定回收 **59/59 ZIP、629,278,564 字节**，全部 API SHA-256／大小匹配。092 终态 failure，Node **3,105/3,109**、浏览器 **2,305/2,366**；093 终态 failure，Node **3,042 pass、2 failure、74 未报告**及 3 整文件崩溃，浏览器 **2,341/2,393**、兼容 **96/96**。093 多窗口 GPU 36/36、CSS 光标 12/12、普通 popup 24/24、原生活动 11/11 已报告通过；退休组和音轨切换仍失败。094 构建失败，应用验收与堆诊断被跳过；两光标作业无终态，下次补取。历史崩溃和未报告保留。
+
 最新待核验批次：[Full test suite 37312988058](https://github.com/fenghengzhi/krkr2-web/actions/runs/37312988058)，精确提交 `0846cd31a04c72b5a370b2dfb3de2e6dcca47a8a`。094 的 56 个文件已整批推送，新增 35 个 Node、每浏览器 20 个定义；宿主堆对照另运行既有 20 定义 × 3 次 × 2 模式。首次唯一查询为 **in_progress／conclusion=null**，只确认身份，没有实时查询 jobs／artifacts。下次补取 092 缺失结果并回收 093／094 固定快照。未本地执行验证，整体非插件目标保持 active。
 
 2026-10-05 准备 [094 窗口五矩形与媒体公开时钟](decisions/094-window-geometry-and-media-clock.md)：区分 outer／client／inner／viewport／PaintBox，独立 MessagePort 测量真实页面 chrome 和滚动条，接通输入／光标／IME／全屏实际缩放；公开媒体属性改用平均帧时钟，回调帧独立，新增真实 VFR 与宿主堆诊断。协议 **35**、TJS ABI **5**、字体 ABI **2**。本批尚待托管执行，完整非插件目标仍 active。

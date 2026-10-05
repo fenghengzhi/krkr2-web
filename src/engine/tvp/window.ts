@@ -125,7 +125,12 @@ class Window {
     if(args.count<2)throw new Exception("Window.setMaxSize requires width and height");
     __host("Window.constraints",__windowId,"max",int(args[0]),int(args[1]));
   }
-  function update(type=utNormal) { __host("Window.update",__windowId); }
+  function update(args*) {
+    // Fixed 2.32 Intf tests the second argument's presence before converting
+    // the first. Form.UpdateWindow itself ignores the resulting update type.
+    if(args.count>=2 && args[1]!==void)int(args[0]);
+    __host("Window.update",__windowId);
+  }
   function hideMouseCursor() { mouseCursorState=mcsTempHidden; }
   function setMaskRegion(threshold=void) { __host("Window.setMaskRegion",__windowId,threshold===void?1:int(threshold)); }
   function removeMaskRegion() { __host("Window.removeMaskRegion",__windowId); }
@@ -134,8 +139,8 @@ class Window {
     if(params===null || params.key===void)throw new Exception("Input event requires key");
     __host("Window.postInput",__windowId,string(name),name=="onKeyPress"?string(params.key):int(params.key),int(params.shift));
   }
-  function onResize() {}
   ${[
+    ['onResize', ''],
     ['onActivate', ''],
     ['onDeactivate', ''],
     ['onPopupHide', ''],

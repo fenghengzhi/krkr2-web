@@ -100,17 +100,17 @@ for (const binary of [false, true]) {
     const f = await fixture(
       binary,
       String.raw`
-root.onPaint=function(){aPaints++;Debug.message("fair-a:"+aPaints);if(aPaints<4)root.update();};
+root.onPaint=function(){aPaints++;Debug.message("fair-a:"+aPaints);if(aPaints<8)root.update();};
 other.onPaint=function(){bPaints++;Debug.message("fair-b:"+bPaints);};
 root.update();
 `,
     )
     try {
-      assert.deepEqual(f.a(), ['fair-a:1'])
+      assert.deepEqual(f.a(), ['fair-a:1', 'fair-a:2'])
       for (let time = 8; time <= 48; time += 8) {
         await f.advance(8)
         await f.execute('other.update();')
-        assert.equal(f.a().length, 1 + Math.floor(time / 16), `A at ${time}ms`)
+        assert.equal(f.a().length, 2 + 2 * Math.floor(time / 16), `A at ${time}ms`)
         assert.equal(f.b().length, time / 8, `B at ${time}ms`)
       }
       assert.equal(f.timer.pending, 0)
@@ -124,7 +124,7 @@ root.update();
       f = await fixture(
         binary,
         String.raw`
-root.onPaint=function(){aPaints++;Debug.message("fair-a:"+aPaints);if(aPaints<2)root.update();};
+root.onPaint=function(){aPaints++;Debug.message("fair-a:"+aPaints);if(aPaints<4)root.update();};
 other.onPaint=function(){Debug.message("fair-b:entered");other.loadImages("redraw-gate.bin");Debug.message("fair-b:returned");};
 root.update();
 `,
@@ -150,12 +150,15 @@ root.update();
       // The deadline expires while B owns the serialized VM. It must remain
       // due, rather than acquire a fresh interval when B finally returns.
       f.timer.advance(8)
-      assert.deepEqual(f.a(), ['fair-a:1'])
+      assert.deepEqual(f.a(), ['fair-a:1', 'fair-a:2'])
       blocker.release()
       await operation
       await f.session.idle()
-      assert.deepEqual(f.a(), ['fair-a:1', 'fair-a:2'])
+      assert.deepEqual(f.a(), ['fair-a:1', 'fair-a:2', 'fair-a:3'])
       assert.deepEqual(f.b(), ['fair-b:entered', 'fair-b:returned'])
+      assert.equal(f.timer.pending, 1)
+      await f.advance(16)
+      assert.deepEqual(f.a(), ['fair-a:1', 'fair-a:2', 'fair-a:3', 'fair-a:4'])
       assert.equal(f.timer.pending, 0)
     } finally {
       blocker.release()
@@ -164,7 +167,7 @@ root.update();
     }
   })
 
-  test(`${mode}: a child paint can schedule an earlier unpainted ancestor for the next frame`, async () => {
+  test(`${mode}: a child paint schedules an earlier ancestor in the second entry of the same window delivery`, async () => {
     const f = await fixture(
       binary,
       String.raw`
@@ -174,11 +177,11 @@ other.onPaint=function(){bPaints++;Debug.message("fair-b:"+bPaints);root.update(
     )
     try {
       await f.execute('other.update();')
-      assert.deepEqual(f.a(), [])
+      assert.deepEqual(f.a(), ['fair-a:1'])
       assert.deepEqual(f.b(), ['fair-b:1'])
-      assert.equal(f.timer.pending, 1)
+      assert.equal(f.timer.pending, 0)
       await f.advance(15)
-      assert.deepEqual(f.a(), [])
+      assert.deepEqual(f.a(), ['fair-a:1'])
       await f.advance(1)
       assert.deepEqual(f.a(), ['fair-a:1'])
       assert.equal(f.timer.pending, 0)

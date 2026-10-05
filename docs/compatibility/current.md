@@ -1,5 +1,7 @@
 # 当前实现范围
 
+095 候选补[同步窗口更新与视频图层路由](../decisions/095-window-update-and-video-layers.md)：Window.update 与普通绘图采用原版有序队列及重入上限；layer 模式直接改变绑定图层，允许真实 Layer 跨窗绑定并处理可见性回调重入；播放中 seek 完成允许时钟自然前进。094 六条测试类型错误已修，应用验证因旧构建失败仍未执行。093 已报告共享 GPU 多窗口 36/36、CSS 光标 12/12、popup 24/24、兼容 96/96，但整批仍有失败、3 个 Node worker 崩溃和 74 未报告子项。整体非插件范围尚未完成；以下保留历史阶段边界。
+
 094 候选新增[五矩形窗口模型与媒体公开时钟](../decisions/094-window-geometry-and-media-clock.md)：outer／inner setter 分开，真实页面度量客户区与滚动条，绘图和输入采用 viewport／PaintBox，fullScreen 实际与公开 zoom 分离；视频公开 frame／fps／position 与呈现回调独立，overlay／mixer 使用独立客户区锚点。协议 **35**，尚待执行。093 仍 pending，无结果；092 部分验收还有 4 个 Node、47 个浏览器失败，双 183 光标仍有 60 strict 差异。历史堆崩溃、原生视频 seek／旧编码、fullscreen popup OS 定位及整体非插件兼容尚未完成。
 
 093 开发候选加入[共享窗口 GPU、视频画面保留与独立几何证据](../decisions/093-shared-window-gpu-and-video-handoff.md)：多窗口改用一个 Session GPU，换轨以完整 RGBA 和暂停时钟确认旧图，CSS 光标修订边缘采样，均尚待执行。091 固定快照有 2 个 Node 子项失败、11 项未报告及一处堆崩溃，浏览器已报告部分有 48 unexpected，兼容 95/96；092 尚无结果。原生失活新增 Chromium 严格场景，Firefox／WebKit OS 失活仍未验证。完整窗口模型、公开媒体时钟、原生光标差异与非插件目标继续未完成。

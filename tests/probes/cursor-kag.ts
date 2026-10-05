@@ -37,15 +37,24 @@ type PadRead = {
   pressedButtons: number[]; neutral: boolean; focusedGameSurface: boolean; documentFocused: boolean
   activeElement: { tag: string; className: string; windowId: string | null; surfaceEpoch: string | null } | null
 }
+type PadRelease = {
+  phase: string; fromEpoch: number; toEpoch: number; at: number; text: string; count: number
+  lastHeldRead: number; firstHeldAt: number; lastHeldAt: number
+}
+type PadReleaseRule = { pattern: string; prior: number }
 type PadFixture = {
   installed: boolean; phase: string; epoch: number; axes: number[]; buttons: boolean[]
   reads: number; dropped: number; samples: PadRead[]
+  release?: PadReleaseRule & { epoch: number; phase: string }
+  releases: PadRelease[]
 }
 // Raw init-script text avoids transpiler helpers in the page context. Every
-// entry is a passive record of a real production getGamepads() read.
+// sample is a passive record of a real production getGamepads() read. The
+// fixture releases its device state at the first matching original log DOM
+// observation, before another Playwright round trip can prolong a held key.
 const deviceFixture = String.raw`(() => {
   const state = { installed: false, phase: 'initial-neutral', epoch: 0,
-    axes: [0, 0], buttons: Array(17).fill(false), reads: 0, dropped: 0, samples: [] };
+    axes: [0, 0], buttons: Array(17).fill(false), reads: 0, dropped: 0, samples: [], releases: [], release: undefined };
   Object.defineProperty(window, '__krkrCursorPadDevice', { value: state });
   Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => {
     const at = performance.now(), axes = [...state.axes], active = document.activeElement,
@@ -63,6 +72,23 @@ const deviceFixture = String.raw`(() => {
       mapping: 'standard', timestamp: at, axes,
       buttons: state.buttons.map(pressed => ({ pressed, touched: pressed, value: pressed ? 1 : 0 })) }];
   } });
+  new MutationObserver(() => {
+    const rule = state.release;
+    if (!rule || rule.epoch !== state.epoch) return;
+    const pattern = new RegExp(rule.pattern), matches = [...document.querySelectorAll('#logs p span')]
+      .map(node => node.textContent || '').filter(text => pattern.test(text));
+    if (matches.length <= rule.prior) return;
+    const held = state.samples.filter(sample => sample.epoch === rule.epoch && !sample.neutral);
+    if (!held.length) return;
+    state.release = undefined;
+    state.axes = [0, 0]; state.buttons = Array(17).fill(false);
+    state.phase = rule.phase + ':neutral-after';
+    const toEpoch = ++state.epoch;
+    state.releases.push({ phase: rule.phase, fromEpoch: rule.epoch, toEpoch, at: performance.now(),
+      text: matches[matches.length - 1], count: matches.length,
+      firstHeldAt: held[0].at, lastHeldAt: held[held.length - 1].at,
+      lastHeldRead: held[held.length - 1].read });
+  }).observe(document, { subtree: true, childList: true, characterData: true });
   state.installed = true;
 })();`
 type Result = {
@@ -257,15 +283,22 @@ kag.current.focus();return kag.current.numLinks;
       await evaluate(page, '[kag.padKeyMap[VK_PADLEFT]===VK_LEFT,kag.padKeyMap[VK_PADRIGHT]===VK_RIGHT,kag.padKeyMap[VK_PAD1]===VK_RETURN].join("|")', '1|1|1')
       await evaluate(page, '(kag.current.focus(),kag.current.numLinks)', '2')
       await canvas.focus()
-      const sampleDevice = async (phase: string, horizontal = 0, button = -1): Promise<PadRead> => {
+      const sampleDevice = async (phase: string, horizontal = 0, button = -1, release?: PadReleaseRule): Promise<PadRead> => {
         assert(page)
-        const epoch = await page.evaluate(({ phase, horizontal, button }) => {
+        const epoch = await page.evaluate(({ phase, horizontal, button, release }) => {
           const state = (window as unknown as { __krkrCursorPadDevice: PadFixture }).__krkrCursorPadDevice
+          // An observer-released neutral epoch remains authoritative. Reuse
+          // it here so the next production read proves that exact release.
+          if (!release && horizontal === 0 && button < 0 && state.phase === phase &&
+              state.axes.every(value => value === 0) && state.buttons.every(value => !value))
+            return state.epoch
           state.phase = phase
           state.axes = [horizontal, 0]
           state.buttons = Array.from({ length: 17 }, (_, index) => index === button)
-          return ++state.epoch
-        }, { phase, horizontal, button })
+          const epoch = ++state.epoch
+          state.release = release ? { ...release, epoch, phase } : undefined
+          return epoch
+        }, { phase, horizontal, button, release })
         // The getter is read by production's 50 ms sampler. Waiting for a
         // focused game-surface neutral read admits the pad after focus gating.
         // BrowserInput synchronously redirects canvas focus to its textarea;
@@ -291,14 +324,28 @@ kag.current.focus();return kag.current.numLinks;
       await sampleDevice('pad-initial-neutral')
       steps.push('pad-reloaded-original-links-and-observed-neutral')
       await capture('pad-neutral-ready')
-      const holdDevice = async (label: string, horizontal: number, button: number, observe: () => Promise<void>) => {
-        let failed = false, primary: unknown
+      const holdDevice = async (label: string, horizontal: number, button: number, observe: () => Promise<void>, release: PadReleaseRule) => {
+        let failed = false, primary: unknown, released: PadRelease | undefined
         try {
-          await sampleDevice(label, horizontal, button)
+          const first = await sampleDevice(label, horizontal, button, release)
           await observe()
+          released = await page!.evaluate((epoch) => {
+            const state = (window as unknown as { __krkrCursorPadDevice: PadFixture }).__krkrCursorPadDevice
+            return state.releases.find(value => value.fromEpoch === epoch)
+          }, first.epoch)
+          assert(released, 'The original log must release the injected device in the page')
+          assert.match(released.text, new RegExp(release.pattern))
+          assert(released.count > release.prior)
+          events.push({ ...released, phase: label + ':device-release',
+            boundary: 'DOM observation of original log -> injected device neutral; no game/engine mutation' })
         } catch (error) { failed = true; primary = error }
-        try { await sampleDevice(`${label}:neutral-after`) }
-        catch (error) {
+        try {
+          const neutral = await sampleDevice(`${label}:neutral-after`)
+          if (released) {
+            assert.equal(neutral.epoch, released.toEpoch, 'Production sampled the observer-released epoch')
+            assert(neutral.at >= released.at, 'The actual neutral read follows the page release')
+          }
+        } catch (error) {
           if (failed) throw new AggregateError([primary, error], 'Pad observation and neutral release failed', { cause: primary })
           throw error
         }
@@ -310,14 +357,15 @@ kag.current.focus();return kag.current.numLinks;
         const held = horizontal > 0 ? '1\\|0\\|0' : '0\\|1\\|0',
           observed = page.locator('#logs p span').filter({ hasText: new RegExp(
             `^cursor-kag:pad-state:2\\|${index}\\|${index}\\|[^|]+\\|[^|]+\\|${held}$`) }),
-          prior = await observed.count()
+          prior = await observed.count(),
+          releasePattern = `^cursor-kag:pad-state:2\\|${index}\\|${index}\\|[^|]+\\|[^|]+\\|${held}$`
         await holdDevice(label, horizontal, -1, async () => {
           await expect.poll(() => observed.count()).toBeGreaterThan(prior)
           await expect(observed.last()).toBeVisible()
           events.push({ phase: label, virtualKey: horizontal > 0 ? 439 : 437, index,
             input: 'controlled device axes -> production sampler -> Worker -> original MainWindow/MessageLayer',
             heldObservation: await observed.last().innerText() })
-        })
+        }, { pattern: releasePattern, prior })
         await expect(page.locator('#logs p span').filter({ hasText: /^cursor-kag:pad-state:/ }).last())
           .toHaveText(new RegExp(`^cursor-kag:pad-state:2\\|${index}\\|${index}\\|[^|]+\\|[^|]+\\|0\\|0\\|0$`))
         await expect(marker).toHaveCount(1)
@@ -351,7 +399,7 @@ kag.current.focus();return kag.current.numLinks;
         events.push({ phase: 'pad-confirm-enters-original-second-target',
           label: await enteredSecond.last().innerText(), priorEntries: enteredBeforePad,
           input: 'PAD1 -> original MainWindow/MessageLayer -> original Conductor label' })
-      })
+      }, { pattern: '^cursor-verification\\.ks : Label\\/Page : \\*second\\/Second$', prior: enteredBeforePad })
       steps.push('pad-confirm-enters-original-second-target')
       // Still require the actual target body to complete after the sampled
       // release; observing the label alone cannot satisfy link dispatch.
@@ -402,6 +450,7 @@ kag.current.focus();return kag.current.numLinks;
         ...result, sourceSha256, indexSha256, errors, evidenceErrors, steps, workers,
         originalXp3Bytes: true, originalMethods: true, observedWithoutError: result.status === 'passed',
         observer: 'Separate Timer logs original link/focus/cursor state; original handlers unchanged',
+        deviceRelease: 'Page MutationObserver releases the injected device at the matching original log; production default repeat remains enabled',
         gamepadBoundary, hardwareMeasured: false, padMapping,
         deviceTrace: 'device-samples.json', deviceReads: deviceEvidence?.reads ?? 0,
       }, null, 2) + '\n')

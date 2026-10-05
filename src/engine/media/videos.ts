@@ -39,6 +39,13 @@ interface Callback {
   name: string
   args: ScriptValue[]
 }
+export interface VideoLayerGeometry {
+  windowId: number
+  values(): Partial<Record<'left' | 'top' | 'visible', number>>
+  /** Resolve each slot after preceding Layer callbacks, just like the native
+   * Layer1/Layer2 reads. Weak bindings must not survive invalidation/rebinding. */
+  layer(channel: number): number | undefined
+}
 export const videoSettings = (state: VideoSnapshot): VideoSettings =>
   Object.fromEntries(
     Object.keys(defaultVideoSettings()).map((key) => [key, state[key as keyof VideoSettings]]),
@@ -151,6 +158,55 @@ export class VideoService {
     const video = this.videos.get(id)
     if (!video) throw new Error('VideoOverlay has been invalidated')
     return video
+  }
+  async geometry(id: number, method: string, args: ScriptValue[]): Promise<VideoLayerGeometry | undefined> {
+    const video = this.get(id), fields = method === 'setPos' ? ['left', 'top'] as const
+      : method === 'setSize' ? ['width', 'height'] as const
+      : method === 'setBounds' ? ['left', 'top', 'width', 'height'] as const
+      : ['left', 'top', 'width', 'height', 'visible'].includes(method)
+        ? [method as 'left' | 'top' | 'width' | 'height' | 'visible'] : undefined
+    if (!fields || args.length < fields.length) throw new Error('Invalid video geometry arguments')
+    const changes: Partial<Record<'left' | 'top' | 'width' | 'height' | 'visible', number>> = {}
+    for (let i = 0; i < fields.length; i++) {
+      const value = args[i]
+      if (typeof value !== 'bigint' && (typeof value !== 'number' || !Number.isSafeInteger(value)))
+        throw new Error('Invalid video geometry argument')
+      changes[fields[i]!] = fields[i] === 'visible' ? Number(!!value)
+        : Number(BigInt.asIntN(32, typeof value === 'bigint' ? value : BigInt(value)))
+    }
+    if (video.snapshot.mode === 1) {
+      // Native layer mode keeps its overlay Rect unchanged. setBounds is a
+      // complete no-op, unlike setPos; width/height never resize bound Layers.
+      if (method === 'setBounds' || 'width' in changes || 'height' in changes) return
+      if ('visible' in changes) {
+        video.snapshot.visible = !!changes.visible
+        if (!video.ready) return
+        const result = await this.videoCommand(video, { op: 'set', id, epoch: video.snapshot.epoch,
+          settings: videoSettings(video.snapshot) })
+        if (result.snapshot) video.snapshot = result.snapshot
+      }
+      return { windowId: video.windowId,
+        // SetVisible reads the stored member again for Layer2 after Layer1's
+        // blur callbacks. Positional method arguments remain fixed instead.
+        values: () => method === 'visible' ? { visible: Number(video.snapshot.visible) } : changes,
+        layer: (channel) => this.videos.get(id) === video
+          ? video.layers[channel]?.id : undefined }
+    }
+    const state = { ...video.snapshot }
+    for (const field of fields) {
+      const value = changes[field]!
+      if (field === 'visible') state.visible = !!value
+      else {
+        if (Math.abs(value) > 65536 || ((field === 'width' || field === 'height') && (value <= 0 || value > 4096)))
+          throw new Error('Invalid video bounds')
+        state[field] = value
+      }
+    }
+    if (video.ready) {
+      const result = await this.videoCommand(video, { op: 'set', id, epoch: video.snapshot.epoch,
+        settings: videoSettings(state) })
+      if (result.snapshot) video.snapshot = result.snapshot
+    } else video.snapshot = state
   }
   private async command(command: VideoCommand) {
     if (!this.backend) throw new Error('This environment has no video backend')
@@ -429,16 +485,8 @@ export class VideoService {
           if (video.ready) return scriptRecord({ value, callbacks: scriptList([]) })
           if (![0, 1, 2, 3].includes(setting)) throw new Error('Invalid video mode')
           state.mode = setting as 0
-        } else if (property === 'visible' || property === 'loop') state[property] = !!setting
-        else if (['left', 'top', 'width', 'height'].includes(property)) {
-          if (
-            !Number.isSafeInteger(setting) ||
-            Math.abs(setting) > 65536 ||
-            ((property === 'width' || property === 'height') && (setting <= 0 || setting > 4096))
-          )
-            throw new Error('Invalid video bounds')
-          state[property as 'left'] = setting
-        } else if (property === 'playRate') {
+        } else if (property === 'loop') state.loop = !!setting
+        else if (property === 'playRate') {
           if (setting <= 0 || setting > 16) throw new Error('Video playback rate must be in (0,16]')
           state.playRate = setting
         } else if (property === 'audioVolume')

@@ -25,7 +25,7 @@ type ObservedWindow = Window & { __geometryTrace: GeometryTrace }
 export async function observeWindowGeometry(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const trace: GeometryTrace = { replies: [], scrolls: [] }, native = MessagePort.prototype.postMessage
-    ;(window as ObservedWindow).__geometryTrace = trace
+    ;(window as unknown as ObservedWindow).__geometryTrace = trace
     MessagePort.prototype.postMessage = function(this: MessagePort, ...args: unknown[]) {
       const result = Reflect.apply(native, this, args), data = args[0] as {
         type?: string; ok?: boolean; windowId?: number; geometry?: GeometryEvidence
@@ -46,7 +46,7 @@ export async function observeWindowGeometry(page: Page): Promise<void> {
 export async function readWindowGeometry(surface: Locator) {
   await expect(surface).toHaveClass(/game-window-measured/)
   await expect.poll(() => surface.evaluate((element) => {
-    const trace = (window as ObservedWindow).__geometryTrace,
+    const trace = (window as unknown as ObservedWindow).__geometryTrace,
       last = trace.replies.filter((item) => item.windowId === Number(element.getAttribute('data-window-id'))).at(-1)
     return last?.geometry.revision === Number(element.getAttribute('data-geometry-revision'))
   })).toBe(true)
@@ -62,7 +62,7 @@ export async function readWindowGeometry(surface: Locator) {
       header = outer.querySelector<HTMLElement>('.game-window-header')!,
       menu = outer.querySelector<HTMLElement>('.game-window-menu')!,
       canvas = outer.querySelector<HTMLCanvasElement>('canvas[data-window-id]')!,
-      style = getComputedStyle(outer), trace = (window as ObservedWindow).__geometryTrace,
+      style = getComputedStyle(outer), trace = (window as unknown as ObservedWindow).__geometryTrace,
       id = Number(outer.dataset.windowId), reply = trace.replies.filter((item) => item.windowId === id).at(-1)!
     return {
       geometry: reply.geometry, fullScreen: outer.classList.contains('game-window-fullscreen'),
@@ -143,7 +143,7 @@ export async function geometryPixel(page: Page, surface: Locator, x: number, y: 
 export async function finishGeometry(page: Page, info: TestInfo, stop: () => Promise<void>,
   records: unknown[], failures: unknown[]): Promise<void> {
   try { await info.attach('window-five-rectangles', { contentType: 'application/json', body: JSON.stringify({
-    records, trace: await page.evaluate(() => (window as ObservedWindow).__geometryTrace),
+    records, trace: await page.evaluate(() => (window as unknown as ObservedWindow).__geometryTrace),
     logs: await page.locator('#logs').innerText(),
   }, null, 2) }) } catch (error) { failures.push(error) }
   try {

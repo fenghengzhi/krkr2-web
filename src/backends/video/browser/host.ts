@@ -636,12 +636,18 @@ export class WebVideoHost {
     movie.seeking = true
     this.cancelFrame(movie)
     try {
-      const time = position / 1000
+      const time = position / 1000, playing = !movie.element.paused
       if (Math.abs(movie.element.currentTime - time) > 1e-8)
         await this.wait(
           movie,
           'seeked',
-          () => !movie.element.seeking && Math.abs(movie.element.currentTime - time) < 1e-6,
+          // A playing clock has already advanced when seeked reaches the
+          // main thread. Frozen 093 media events show successful seeks at
+          // 2.002–2.011 s for a 2 s target; equality then waits until timeout.
+          // Paused candidates still require the exact requested media clock.
+          () => !movie.element.seeking && movie.element.readyState >= 2 &&
+            (playing ? movie.element.currentTime >= time - 1e-6
+              : Math.abs(movie.element.currentTime - time) < 1e-6),
           () => {
             movie.element.currentTime = time
           },
@@ -706,12 +712,8 @@ export class WebVideoHost {
       } catch (error) { done(error) }
     })
   }
-  private async seekRetainedFrame(movie: Movie, position: number, expected: Pixels,
-    expectedPresentation: number, timeline: VideoTimeline): Promise<void> {
-    const frame = videoReportedFrameAt(timeline, expectedPresentation)
-    if (frame === undefined) throw new Error('The previous video presentation cannot be identified')
-    const matches = (time: number) => videoReportedFrameAt(timeline, time) === frame,
-      sameImage = () => {
+  private async seekRetainedFrame(movie: Movie, position: number, expected: Pixels, historicalPresentation?: number): Promise<void> {
+    const sameImage = () => {
         const actual = this.decodedPixels(movie)
         if (actual.width !== expected.width || actual.height !== expected.height ||
             actual.data.length !== expected.data.length)
@@ -720,15 +722,19 @@ export class WebVideoHost {
           if (actual.data[at] !== expected.data[at])
             throw new Error('Selected audio track did not preserve the complete presented image')
       }
-    if (Math.abs(movie.element.currentTime * 1000 - position) <= 0.00001 &&
-        movie.presentedTime !== undefined && matches(movie.presentedTime)) {
-      await this.seek(movie, position)
+    // A zero-distance handoff already has this candidate's completed first
+    // presentation. Compare its entire image instead of waiting for a seek
+    // that would not happen. This is not a cached old-graph frame identity.
+    if (!movie.element.seeking && movie.element.readyState >= 2 &&
+        Math.abs(movie.element.currentTime * 1000 - position) <= 0.00001) {
       if (movie.abort.signal.aborted) throw new Error('Video operation cancelled')
       sameImage()
       return
     }
     await new Promise<void>((resolve, reject) => {
       let settled = false, sought = false, presented = false, callback: number | undefined
+      const observations: unknown[] = [{ phase: 'request', position, historicalPresentation,
+        current: movie.element.currentTime * 1000, width: expected.width, height: expected.height }]
       let cancelTimeout = () => {}
       const done = (error?: unknown) => {
         if (settled) return
@@ -736,7 +742,11 @@ export class WebVideoHost {
         cancelTimeout()
         if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback)
         movie.abort.signal.removeEventListener('abort', cancel)
-        error ? reject(error) : resolve()
+        if (error) reject(new Error(`${error instanceof Error ? error.message : String(error)}; retained frame ${JSON.stringify({
+          sought, presented, observations, position: movie.element.currentTime * 1000,
+          seeking: movie.element.seeking, readyState: movie.element.readyState,
+        })}`, { cause: error }))
+        else resolve()
       }, complete = () => {
         if (!sought || !presented || settled) return
         try {
@@ -751,10 +761,15 @@ export class WebVideoHost {
             callback = undefined
             if (settled) return
             movie.presentedTime = metadata.mediaTime * 1000
-            if (matches(movie.presentedTime)) { presented = true; complete() }
-            else {
-              try { request() } catch (error) { done(error) }
-            }
+            observations.push({ phase: 'presented', time: movie.presentedTime,
+              position: movie.element.currentTime * 1000, seeking: movie.element.seeking,
+              readyState: movie.element.readyState })
+            // The old graph's last rVFC can precede its latest seek. It is not
+            // the identity of the complete decoded image frozen by settings().
+            // Require this candidate's fresh callback plus seek completion;
+            // compare the complete image and paused clock after both settle.
+            presented = true
+            complete()
           })
         }
       movie.abort.signal.addEventListener('abort', cancel, { once: true })
@@ -762,7 +777,12 @@ export class WebVideoHost {
       cancelTimeout = this.timeouts.start(15000, () => done(new Error('Video retained frame timed out')))
       try {
         request()
-        void this.seek(movie, position).then(() => { sought = true; complete() }, done)
+        void this.seek(movie, position).then(() => {
+          sought = true
+          observations.push({ phase: 'seeked', position: movie.element.currentTime * 1000,
+            readyState: movie.element.readyState })
+          complete()
+        }, done)
       } catch (error) { done(error) }
     })
   }
@@ -1025,14 +1045,14 @@ export class WebVideoHost {
       // or old-epoch layer frame is consumed during the asynchronous handoff.
       movie.element.pause()
       this.cancelFrame(movie)
-      const position = movie.element.currentTime * 1000, presentation = movie.presentedTime,
+      const position = movie.element.currentTime * 1000,
         bytes = movie.element.videoWidth * movie.element.videoHeight * 4
       // Reserve both complete readbacks before allocation. Decoder/GPU memory
       // and delayed garbage collection are separate from these owned buffers.
       if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > 64 * 1024 * 1024 ||
           bytes * 2 > 128 * 1024 * 1024 - this.retainedFrameBytes)
         throw new Error('Video retained frame resource budget exceeded')
-      if (presentation === undefined) throw new Error('Video has no observed presentation')
+      if (movie.presentedTime === undefined) throw new Error('Video has no observed presentation')
       this.retainedFrameBytes += reserved = bytes * 2
       retained = this.decodedPixels(movie)
       const variant = await this.encoded.select(stage.source, index, movie.timeline, movie.mime,
@@ -1048,7 +1068,7 @@ export class WebVideoHost {
           Math.abs(candidate.element.duration - movie.element.duration) > 0.001)
         throw new Error('Selected audio track changed the video presentation timeline')
       this.applySettings(candidate, settings)
-      await this.seekRetainedFrame(candidate, position, retained, presentation, movie.timeline)
+      await this.seekRetainedFrame(candidate, position, retained, movie.presentedTime)
       this.stageCurrent(stage)
       candidate.periodArmed = movie.periodArmed
       candidate.blocked = movie.blocked

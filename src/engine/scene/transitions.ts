@@ -40,7 +40,7 @@ export class SceneTransitions {
     private readonly now: () => number,
     private readonly schedule: (callback: () => void, delay: number) => () => void,
     private readonly requestFrame: () => Promise<void>,
-    private readonly changed: () => void,
+    private readonly changed: (layerId: number, invalidation?: boolean) => void,
     private readonly readRule: (name: string) => Promise<Pixels>,
     private readonly fail: (error: unknown) => void,
     private readonly owner?: (id: number) => ScriptWeakObject | undefined,
@@ -48,6 +48,10 @@ export class SceneTransitions {
   ) {}
   get active(): boolean {
     return this.states.size > 0
+  }
+  windowIds(): number[] {
+    return [...new Set([...this.states.values()].flatMap((state) =>
+      this.layers.has(state.destination) ? [this.layers.get(state.destination).windowId] : []))]
   }
   frame(id: number): TransitionFrame | undefined {
     return this.states.get(id)
@@ -161,7 +165,7 @@ export class SceneTransitions {
       }
     this.states.set(destination, state)
     this.held.add(state)
-    this.changed()
+    this.changed(destination)
     this.arm()
     if (owned)
       return {
@@ -176,7 +180,7 @@ export class SceneTransitions {
   }
   private remove(state: Transition): void {
     if (this.states.get(state.destination) === state) this.states.delete(state.destination)
-    this.changed()
+    this.changed(state.destination)
     this.arm()
   }
   private release(state: Transition): void {
@@ -194,7 +198,11 @@ export class SceneTransitions {
       if (!this.layers.has(id) || !this.layers.has(state.source)) return
       const layers = this.layers
       const input = typeof this.input === 'function' ? this.input(id) : this.input
-      yield* input.change(() => layers.exchange(id, state.source, state.children))
+      yield* input.change(() => {
+        layers.exchange(id, state.source, state.children)
+        this.changed(id)
+        this.changed(state.source)
+      })
       const complete = !this.shuttingDown(id) && !this.shuttingDown(state.source)
       if (state.owned && this.bridge)
         yield {
@@ -231,7 +239,7 @@ export class SceneTransitions {
     }
     return undefined
   }
-  *advance(): InputOperation {
+  *advance(windowId?: number): InputOperation {
     if (this.advancing || this.pausedAt !== undefined || this.disposed) return
     this.advancing = true
     try {
@@ -242,6 +250,7 @@ export class SceneTransitions {
           this.release(state)
           continue
         }
+        if (windowId !== undefined && this.layers.get(state.destination).windowId !== windowId) continue
         if (!this.layers.property(state.destination, 'nodeVisible')) {
           yield* this.finish(state.destination)
           continue
@@ -257,7 +266,9 @@ export class SceneTransitions {
           0,
           Math.min(phaseMax, Math.floor(((tick - state.started) * phaseMax) / state.duration)),
         )
-        this.changed()
+        // This phase is already part of the active completion. Rendering its
+        // new pixels does not itself post another native Window update event.
+        this.changed(state.destination, false)
         if (state.phase === 1) yield* this.finish(state.destination)
       }
     } finally {

@@ -80,7 +80,7 @@ for (const binary of [false, true]) {
       assert.equal(f.video.movies.size, 0)
     }
   })
-  test(`${mode}: video frame copies and layer binding stay in their owner Window`, async () => {
+  test(`${mode}: video frame copies follow native Layer bindings independently of the graph owner Window`, async () => {
     const f = await fixture(binary)
     try {
       const ma = Number(await f.session.evaluate('ma.__videoId')),
@@ -99,13 +99,10 @@ for (const binary of [false, true]) {
         ),
         '16711680,255,16711680,255',
       )
-      assert.match(
-        await f.session.evaluate(
-          '(function(){try{ma.layer1=lb;return "unexpected";}catch(e){return e.message;}})()',
-        ),
-        /Video layer must belong to its Window/,
-      )
-      assert.equal(await f.session.evaluate('ma.layer1===la && mb.layer1===lb'), '1')
+      await f.session.evaluate('Scripts.exec("ma.layer1=lb;la.fillRect(0,0,1,1,0xff0000ff);lb.fillRect(0,0,1,1,0xff00ff00);")')
+      await f.video.emit(ma, 'frame')
+      assert.equal(await f.session.evaluate('ma.layer1===lb && mb.layer1===lb'), '1')
+      assert.equal(await f.session.evaluate('[la.getMainPixel(0,0),lb.getMainPixel(0,0)].join(",")'), '255,16711680')
     } finally {
       await f.session.stop()
     }
