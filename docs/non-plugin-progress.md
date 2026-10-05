@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37275964642](https://github.com/fenghengzhi/krkr2-web/actions/runs/37275964642)，精确提交 `c87bc28347dda8d9aa1d2a8e3871129408aedf97`。087 的窗口区域、构建修订和新增诊断已整批推送；新增 17 个 Node、每浏览器 7 个定义待托管执行。首次唯一查询为 **in_progress／conclusion=null**，只确认创建及提交身份，未查询实时作业或产物。下次取回本批固定快照，保留历史失败、skipped、unreported、uncompared；未本地执行验证，未合入旧 main，整体非插件目标继续 active。
+
 2026-10-05 准备 [087 窗口形状遮罩与构建修订](decisions/087-window-mask-regions.md)：补齐 `Window.setMaskRegion/removeMaskRegion` 的主图像 alpha 快照、预算、生命周期和全窗口 clip-path 呈现；修复 086 的 5 条 TypeScript 诊断；颜色诊断保留原 158 项并增加 18 个独立混合精度候选。协议 **32**，TJS ABI **5**、字体 ABI **2**。本批尚待 GitHub-hosted 执行，整体非插件目标保持 active。
 
 087 已回收 085／086 的 **completed／failure**，各 11 jobs 为 2 success／4 failure／5 skipped，全部 **10/10 ZIP、40,544,098 字节**核对大小与 SHA-256。086 两 Windows mask 各 **3,770/3,770 matched**，仅限已采样的 AND／单色 XOR plane；主 strict 仍各 39 mismatch、1,858 uncompared，颜色候选仍无全域零差异。Node、浏览器、原 KAG 等均因 build 跳过；不能把手柄、流式音频、音轨及新增窗口功能计为已通过。固定摘要保存在对应运行目录 `087-final-summary.md`，原快照与失败历史保留。

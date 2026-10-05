@@ -2,6 +2,8 @@
 
 状态：开发候选，本批尚未取得执行结果。整体目标继续是完成插件以外的 KRKR2 Web 模拟器；功能实现、原生行为差分和回归验收均未全部完成。会话协议 **32**，TJS ABI **5**、字体 ABI **2** 不变。所有可执行验证只在 GitHub-hosted Actions 运行，整批推送，下次工作时回收结果，不实时监控。
 
+本批已推送精确提交 `c87bc28347dda8d9aa1d2a8e3871129408aedf97`，对应 [Full test suite 37275964642](https://github.com/fenghengzhi/krkr2-web/actions/runs/37275964642)。首次唯一查询为 **in_progress／conclusion=null**，只确认运行已创建并匹配提交；原响应保存在 `out/verification/github-actions/37275964642/initial-run-discovery.json`。未查询实时 jobs／artifacts，结果留待下次固定快照回收。本段以 `[skip ci]` 文档提交保存，不产生通过结论。
+
 ## Window.setMaskRegion / removeMaskRegion
 
 原生依据是固定 KRKR2 提交 `dec49af97e174d31059c3ccd7efc700ba3c6b788` 的 [LayerImpl.cpp](https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/LayerImpl.cpp)、[WindowIntf.cpp](https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/WindowIntf.cpp)、[WindowImpl.cpp](https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/WindowImpl.cpp) 和 [WindowFormUnit.cpp](https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/WindowFormUnit.cpp)。本轮读取缓存的固定源码，不冒称执行原版 VCL 引擎。
