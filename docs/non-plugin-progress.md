@@ -1,5 +1,7 @@
 # 插件以外的实现进度
 
+最新待核验批次：[Full test suite 37273929294](https://github.com/fenghengzhi/krkr2-web/actions/runs/37273929294)，精确提交 `a3272586a93a5b7f13c1812396cc5b35f313db31`。086 的键盘模拟鼠标、AND／单色双高掩码、多 trun 校验及 085 构建类型修订已整批推送；新增 30 个 Node、每浏览器 12 个定义及全部 3,770 行严格 mask 比较尚待执行。首次唯一查询为 **in_progress／conclusion=null**，只确认创建和提交身份，不监控实时作业。下一轮补取 085 终态及后续产物，再回收本批固定快照；未本地执行验证、未合入旧 main，整体非插件目标保持 active。
+
 2026-10-05 准备 [086 键盘模拟鼠标、掩码缩放与交错视频](decisions/086-mouse-keys-and-mask-scaling.md)：接通原来仅存储属性的 `Window.useMouseKey`，在陷阱接收与输入生命周期检查之后转换键盘／PAD；按完整原生轴线和边界采样修订 AND／单色双高 mask，并为其他比例新增 2,670 行原生观察；独立计算 MP4 多 trun 地址以支持真实交错容器。协议 **31**、TJS ABI **5**、字体 ABI **2**。本批代码与定义尚未取得执行结果，完整非插件目标仍 active。
 
 086 只取一次 085 固定快照：run 仍 **in_progress／conclusion=null**，10 jobs 为 3 failed／1 success／1 running／5 skipped；已归档固定清单 **4/4 原 ZIP** 并核对大小与 SHA-256。Build 3 条测试类型错误在本批修订，应用验收未执行。两 Windows 各 1,100 条 mask 原始观察已完成且一致，支持单色两平面共同缩放的边界解释；95 份严格加载比较仍各 62 draw 差异，颜色量化未闭合。JSPI allocator 和最终 gate 尚未报告，下轮补取；历史失败与原快照保留，未本地执行验证或持续轮询。

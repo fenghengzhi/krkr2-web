@@ -2,6 +2,8 @@
 
 状态：开发候选，尚未取得本批执行结果。完整目标仍是完成插件以外的 KRKR2 Web 模拟器。会话协议 **31**，TJS ABI **5**、字体 ABI **2** 不变。所有测试、构建、浏览器与原生探针只在 GitHub-hosted Actions 执行；按较大批次推送，下次工作时回收固定快照，不实时监控。
 
+已整批推送 `a3272586a93a5b7f13c1812396cc5b35f313db31`，对应 [Full test suite 37273929294](https://github.com/fenghengzhi/krkr2-web/actions/runs/37273929294)。首次唯一查询为 **in_progress／conclusion=null**，只确认运行创建及精确提交身份；原响应保存在 `out/verification/github-actions/37273929294/initial-run-discovery.json`。没有查询实时 jobs／artifacts；下一轮先补取 085 终态，再回收本批固定清单与产物。本记录以 `[skip ci]` 文档提交保存，不产生通过结论。
+
 ## Window.useMouseKey
 
 此前 `useMouseKey` 只有属性存储，没有实际行为。本批按固定 KRKR2 提交 `dec49af97e174d31059c3ccd7efc700ba3c6b788` 的 [WindowFormUnit.cpp](https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/visual/win32/WindowFormUnit.cpp) 接入键盘和 PAD 的鼠标模拟。方向键／PAD 方向控制位移，Enter／Space／PAD1 为左键，Escape／PAD2 为右键。
