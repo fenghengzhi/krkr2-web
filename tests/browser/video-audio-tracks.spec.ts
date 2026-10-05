@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { evaluate } from '../helpers/browser-expression.ts'
-import { installVideoAudioProbe, observeVideoAudio, type VideoAudioObservation } from '../helpers/video-audio-probe.ts'
+import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia, type VideoAudioObservation } from '../helpers/video-audio-probe.ts'
 
 async function audible(page: Page, frequency: number) {
   await page.locator('canvas').scrollIntoViewIfNeeded()
@@ -72,6 +72,11 @@ Debug.message("tracks-ready="+movie.numberOfAudioStream+","+movie.enabledAudioSt
       // A paused switch must retain the same presented video frame. The layer
       // readback comes through the real Worker/TJS API, independently of audio.
       await evaluate(page, '(function(){movie.pause();movie.frame=6;global.beforeFrame=movie.frame;global.beforePosition=movie.position;global.beforePixel=image.getMainPixel(1,1);movie.enabledAudioStream=0;return movie.frame==beforeFrame && Math.abs(movie.position-beforePosition)<=1 && image.getMainPixel(1,1)==beforePixel && movie.status=="pause";})()', '1')
+      // Also seek/switch a fractional-millisecond PTS. Frame 10 in the regular
+      // 12 fps file is 833.333333... ms but Chromium presents 0.833333 seconds.
+      // Keep the integer-boundary frame-6 check above and all original limits.
+      await evaluate(page, '(function(){movie.frame=10;global.beforeFrame=movie.frame;global.beforePosition=movie.position;global.beforePixel=image.getMainPixel(1,1);movie.enabledAudioStream=1;return beforeFrame==10 && movie.frame==beforeFrame && Math.abs(movie.position-beforePosition)<=1 && image.getMainPixel(1,1)==beforePixel && movie.status=="pause";})()', '1')
+      await evaluate(page, '(function(){movie.enabledAudioStream=0;return movie.frame==beforeFrame && image.getMainPixel(1,1)==beforePixel;})()', '1')
       await evaluate(page, '(function(){movie.selectAudioStream(2);movie.enabledAudioStream=-1;return movie.enabledAudioStream==0 && movie.frame==beforeFrame;})()', '1')
       await expect(page.locator('video[data-video-id]')).toHaveCount(1)
       await capture('paused-switch')
@@ -98,6 +103,7 @@ Debug.message("tracks-ready="+movie.numberOfAudioStream+","+movie.enabledAudioSt
       await capture('stopped')
     } finally {
       await info.attach('video-track-output', { body: JSON.stringify({ backend, binary, container, observations, errors,
+        media: await observeVideoMedia(page).catch((error: unknown) => ({ observationError: String(error) })),
         logs: await page.locator('#logs').innerText() }, null, 2), contentType: 'application/json' })
     }
   })

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { headless } from '../helpers/headless.ts'
-import { AudioClock, wave } from '../helpers/audio.ts'
+import { AudioClock, settleAudioPages, wave } from '../helpers/audio.ts'
 import { HeadlessAudioBackend } from '../../src/backends/audio/headless.ts'
 
 const deadline = { timeout: 60_000 }
@@ -54,10 +54,20 @@ type Fixture = Awaited<ReturnType<typeof fixture>>
 
 async function expectPcm(harness: Fixture) {
   harness.blocks.length = 0
-  harness.clock.advance(200)
-  await harness.session.idle()
+  // A single synchronous 200 ms jump consumes 8,820 frames before asynchronous
+  // page reads can run, exceeding the initial 8,192-frame cache. Preserve the
+  // same 200 ms observation but admit actual decoder deliveries between the
+  // backend's 20 ms device ticks. Session.idle alone only drains script work.
+  for (let elapsed = 0; elapsed < 200; elapsed += 20) {
+    harness.clock.advance(20)
+    await settleAudioPages(harness.audio)
+    await harness.session.idle()
+  }
   assert.equal(harness.session.snapshot().state, 'running')
+  assert.equal(harness.audio.mixer.inspectStreams().pending, 0)
   assert(harness.blocks.length > 0, 'The real mixer must render output blocks')
+  assert.equal(harness.blocks.reduce((frames, block) => frames + block.length, 0), 8820 * 2,
+    'Both device channels retain the original 200 ms PCM observation')
   let peak = 0
   for (const block of harness.blocks) {
     for (const value of block) {

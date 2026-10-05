@@ -334,14 +334,31 @@ kag.current.focus();return kag.current.numLinks;
       await navigatePad(-1, 0, 'pad-previous-link-highlight')
       await navigatePad(1, 1, 'pad-return-second-link-highlight')
       const selectedSecond = page.getByText('cursor-kag:selected:second', { exact: true }),
-        selectedBeforePad = await selectedSecond.count()
+        selectedBeforePad = await selectedSecond.count(),
+        enteredSecond = page.locator('#logs p span').filter({
+          hasText: /^cursor-verification\.ks : Label\/Page : \*second\/Second$/,
+        }), enteredBeforePad = await enteredSecond.count()
       await sampleDevice('pad-confirm-target:neutral-before')
       // The pinned original MainWindow maps VK_PAD1 to VK_RETURN. This is
       // button index 0 at the public standard Gamepad snapshot boundary.
+      // Release after the original Conductor enters the selected label. Holding
+      // until that label's text finishes rendering generates native pad repeats
+      // throughout rendering: the archived Firefox run entered *second, then
+      // exhausted its 64 input slots before reaching the final Debug.message.
       await holdDevice('pad-confirm-target', 0, 0, async () => {
-        await expect.poll(() => selectedSecond.count()).toBeGreaterThan(selectedBeforePad)
-        await expect(selectedSecond.last()).toBeVisible()
+        await expect.poll(() => enteredSecond.count()).toBeGreaterThan(enteredBeforePad)
+        await expect(enteredSecond.last()).toBeVisible()
+        events.push({ phase: 'pad-confirm-enters-original-second-target',
+          label: await enteredSecond.last().innerText(), priorEntries: enteredBeforePad,
+          input: 'PAD1 -> original MainWindow/MessageLayer -> original Conductor label' })
       })
+      steps.push('pad-confirm-enters-original-second-target')
+      // Still require the actual target body to complete after the sampled
+      // release; observing the label alone cannot satisfy link dispatch.
+      await expect.poll(() => selectedSecond.count()).toBeGreaterThan(selectedBeforePad)
+      await expect(selectedSecond.last()).toBeVisible()
+      await expect(page.locator('#logs p span').filter({ hasText: /^cursor-kag:pad-state:/ }).last())
+        .toHaveText(/^cursor-kag:pad-state:0\|-1\|-1\|[^|]+\|[^|]+\|0\|0\|0$/)
       await expect(page.getByText('cursor-kag:selected:first', { exact: true })).toHaveCount(0)
       steps.push('pad-confirm-runs-original-link-target')
       await capture('pad-entered-second-target')

@@ -28,7 +28,8 @@ async function fixture(binary: boolean, overrides: Partial<SessionDependencies> 
       assert(bytes)
       assert.equal(new TextDecoder().decode(bytes.subarray(0, 4)), 'TJS2')
     }
-    return { ...f, id, regions: () => regionEvents(f.events, id) }
+    const execute = (source: string) => f.session.evaluate(`Scripts.exec(${JSON.stringify(source)})`)
+    return { ...f, id, execute, regions: () => regionEvents(f.events, id) }
   } catch (error) { await f.session.stop(); throw error }
 }
 
@@ -43,12 +44,14 @@ for (const binary of [false, true]) {
       assert.deepEqual([...first.region.rectangles], [1, 0, 2, 2, 0, 2, 1, 1, 3, 2, 1, 1])
       assert.equal(first.region.width, 4)
       assert.equal(first.region.height, 3)
-      await f.session.evaluate(String.raw`
+      await f.execute(String.raw`
 root.setSize(2,2);root.setImageSize(4,3);root.setImagePos(7,9);root.setClip(0,0,4,3);
 root.fillRect(0,0,4,3,0xffffffff);root.opacity=0;root.setClip(0,0,1,1);
 var child=new Layer(win,root);child.setSize(20,20);child.fillRect(0,0,20,20,0xffffffff);child.visible=true;
 win.setZoom(3,2);win.setLayerPos(5,7);win.setInnerSize(30,40);
 `)
+      assert.equal(await f.session.evaluate('root.getMaskPixel(0,0)+","+root.getMaskPixel(3,2)'), '255,255')
+      assert.equal(await f.session.evaluate('root.opacity+","+win.layerLeft+","+win.layerTop'), '0,5,7')
       assert.equal(f.regions().length, 1, 'Bitmap and geometry changes do not recreate an installed native region')
       assert.deepEqual([...first.region.rectangles], [1, 0, 2, 2, 0, 2, 1, 1, 3, 2, 1, 1])
       await f.session.evaluate('win.setMaskRegion(void)')
@@ -77,7 +80,7 @@ win.setZoom(3,2);win.setLayerPos(5,7);win.setInnerSize(30,40);
         assert(region)
         assert.deepEqual([...region.rectangles], [...rectangles])
       }
-      await f.session.evaluate('win.setMaskRegion(256);win.removeMaskRegion()')
+      await f.execute('win.setMaskRegion(256);win.removeMaskRegion();')
       assert(f.regions().at(-2)!.region)
       assert.equal(f.regions().at(-2)!.region!.rectangles.length, 0)
       assert.equal(f.regions().at(-1)!.region, null)
@@ -87,16 +90,17 @@ win.setZoom(3,2);win.setLayerPos(5,7);win.setInnerSize(30,40);
   test(`${mode}: missing primary/image and complexity failure preserve the previous installed region`, { timeout: 60000 }, async () => {
     const f = await fixture(binary)
     try {
-      await f.session.evaluate('win.setMaskRegion();var blank=new Window();blank.visible=true')
+      await f.execute('win.setMaskRegion();var blank=new Window();blank.visible=true;')
       const previous = f.regions().at(-1)!, count = f.regions().length
       await assert.rejects(f.session.evaluate('blank.setMaskRegion()'), /primary Layer/)
-      await f.session.evaluate('blank.removeMaskRegion();root.hasImage=false')
+      await f.execute('blank.removeMaskRegion();root.hasImage=false;')
+      assert.equal(await f.session.evaluate('root.hasImage'), '0')
       await assert.rejects(f.session.evaluate('win.setMaskRegion()'), /drawable image/)
       assert.equal(f.regions().length, count)
       assert.deepEqual([...f.regions().at(-1)!.region!.rectangles], [...previous.region!.rectangles])
       // Image operations construct >65,536 distinct native runs without a
       // giant script loop or a product-only test hook.
-      await f.session.evaluate(String.raw`
+      await f.execute(String.raw`
 root.hasImage=true;root.setImageSize(512,257);root.setClip(0,0,512,257);
 root.fillRect(0,0,512,257,0x00ffffff);
 for(var x=0;x<512;x+=2)root.setMaskPixel(x,0,255);
@@ -112,15 +116,15 @@ for(var y=2;y<257;y++)root.copyRect(0,y,root,0,y%2,512,1);
   test(`${mode}: region snapshots survive primary image lifetime and retire with their owning Window`, { timeout: 60000 }, async () => {
     const f = await fixture(binary)
     try {
-      await f.session.evaluate('win.setMaskRegion();invalidate root')
+      await f.execute('win.setMaskRegion();invalidate root;')
       const first = f.regions().at(-1)!
       assert(first.region)
       await assert.rejects(f.session.evaluate('win.setMaskRegion()'), /primary Layer/)
       assert.equal(f.regions().length, 1)
-      await f.session.evaluate('win.removeMaskRegion();invalidate win')
+      await f.execute('win.removeMaskRegion();invalidate win;')
       assert.equal(f.regions().at(-1)!.region, null)
       assert(f.events.some((event) => event.type === 'window-closed' && event.windowId === f.id))
-      await f.session.evaluate('var replacement=new Window();replacement.visible=true')
+      await f.execute('var replacement=new Window();replacement.visible=true;')
       const replacementId = Number(await f.session.evaluate('replacement.__windowId'))
       assert.notEqual(replacementId, f.id)
       assert.equal(f.session.snapshot().windows!.find((window) => window.id === replacementId)!.view.regionRevision, 0)
@@ -147,7 +151,7 @@ for(var y=2;y<257;y++)root.copyRect(0,y,root,0,y%2,512,1);
       await f.session.evaluate('win.setMaskRegion()')
       const installed = f.regions().length
       armed = true
-      pending = f.session.evaluate('win.setMaskRegion(128);Debug.message("region-after-cancel")')
+      pending = f.execute('win.setMaskRegion(128);Debug.message("region-after-cancel");')
       const failed = pending.then(() => { throw new Error('Mask completed without its controlled yield') },
         (error: unknown) => { throw error })
       // Whichever branch loses still has a rejection observer through race.

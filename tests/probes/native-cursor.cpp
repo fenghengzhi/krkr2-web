@@ -443,7 +443,11 @@ std::vector<Fixture> fixtures() {
     // horizontal-only, vertical-only and two-dimensional truncation stages;
     // transposed enlargement and a mixed ratio must not be inferred from 48^2.
     if (output.size() != 95) throw std::runtime_error("Historical cursor fixture inventory changed");
-    for (const auto shape : {std::pair<unsigned, unsigned>{13, 9}, {9, 13}, {48, 48}, {17, 41}}) {
+    // Append 089's integer-Y paths after the original 20 fields. At 13x32
+    // and 13x63 every output row maps to an exact source Y, distinguishing a
+    // coordinate-based shortcut from a first-row initialization shortcut.
+    for (const auto shape : {std::pair<unsigned, unsigned>{13, 9}, {9, 13}, {48, 48}, {17, 41},
+        {13, 32}, {13, 63}}) {
         for (const char* pattern : {"x-axis", "y-axis", "xy-asymmetric", "checker", "impulses"}) {
             Image i; i.width = shape.first; i.height = shape.second;
             i.hotX = i.width / 3; i.hotY = i.height / 4; i.colorPattern = pattern;
@@ -451,7 +455,7 @@ std::vector<Fixture> fixtures() {
                 {i}, "scaling");
         }
     }
-    if (output.size() != 115) throw std::runtime_error("Color stage fixture inventory is incomplete");
+    if (output.size() != 125) throw std::runtime_error("Color stage fixture inventory is incomplete");
     return output;
 }
 

@@ -1,5 +1,9 @@
 # 插件以外的实现进度
 
+2026-10-05 准备 [089 托管回归修订与原生边界校准](decisions/089-hosted-regression-repairs.md)：修订分片 MP4 的 FFmpeg 首样本索引兼容、测试多语句入口、流式 PCM 交付观测、无左键窗口移动、光标 Y 比例精度与真实输入夹具。协议 **33**、TJS ABI **5**、字体 ABI **2** 不变；本批候选尚待托管执行，整体目标仍是完成插件以外的 KRKR2 Web 模拟器。
+
+089 已补取 087 **completed／failure**：Node **3,007 通过、29 失败／3,036**，浏览器共 43 unexpected，兼容 **94/96**。23 份 ZIP 全部核对。088 本次固定快照仍 **in_progress**，8 jobs 成功、2 光标失败、14 运行中；11 份 ZIP 全部核对，Node／主浏览器／KAG 等未报告。两运行合计 **34/34 ZIP、290,355,537 字节**，历史失败与旧快照均保留。088 两 Windows 的 beginMove 各七项观察完整，但不代表应用实现通过；下一批补取未报告结果，不实时轮询。
+
 最新待核验批次：[Full test suite 37279350828](https://github.com/fenghengzhi/krkr2-web/actions/runs/37279350828)，精确提交 `7ebb8f65a9ecfffee8826b14a65dd3c739e14759`。088 同步移动、输入接线、光标 X 步长和新增原生观察已整批推送；20 个 Node、每浏览器 8 个新增定义尚待托管结果。首次唯一查询为 **in_progress／conclusion=null**，未检查实时作业。下次补取 087 终态和新增产物，再取回本批固定快照；历史失败与未报告范围保留，未运行本地验证，整体非插件目标保持 active。
 
 2026-10-05 准备 [088 同步窗口拖动与光标横向精度](decisions/088-window-begin-move.md)：接通 `Window.beginMove` 的 TJS 模态泵、真实页面拖动和生命周期回报；依据完整原生 plane 修订光标 X 比例精度，保留 13×9 差异，并追加独立色场与 User32 移动观察。协议 **33**，新增 20 个 Node、每浏览器 8 个定义尚待托管执行，整体非插件目标保持 active。

@@ -16,6 +16,7 @@ assert.equal(process.platform, 'win32')
 type Mapping = 'endpoint' | 'center'
 type Direction = 'top-down' | 'bottom-up'
 type Arithmetic = 'absolute-f64' | 'incremental-f64' | 'absolute-f32' | 'incremental-f32' | 'incremental-f32-step-f64'
+  | 'incremental-q8' | 'incremental-q12' | 'incremental-q16' | 'incremental-q24'
 type Kernel =
   | 'weighted-x-y' | 'weighted-y-x' | 'lerp-x-y' | 'lerp-y-x'
   | 'floor-weighted-x-y' | 'floor-weighted-y-x' | 'floor-lerp-x-y' | 'floor-lerp-y-x'
@@ -150,11 +151,34 @@ assert.equal(stepCombinationIds.length, 50); assert.equal(stepReusedIds.length, 
 assert.equal(candidates.length, 176)
 assert.deepEqual(candidates.slice(0, 158).map((candidate) => candidate.id), previousCandidateIds)
 assert.equal(new Set(candidates.map((candidate) => candidate.id)).size, candidates.length)
+const floatingCandidateIds = candidates.map((candidate) => candidate.id),
+  quantizedArithmetic: readonly Arithmetic[] = [...stepArithmetic,
+    'incremental-q8', 'incremental-q12', 'incremental-q16', 'incremental-q24'],
+  quantizedCombinationIds: string[] = [], quantizedAddedIds: string[] = [], quantizedReusedIds: string[] = []
+// 088's independent 13x9 checker and X-only fields retain differences even
+// with a binary32 ratio. Measure dyadic step truncation explicitly; matching
+// a few pixels by hand is not a production policy or a full-plane result.
+for (const direction of ['top-down', 'bottom-up'] as const)
+  for (const xArithmetic of quantizedArithmetic) for (const yArithmetic of quantizedArithmetic) {
+    const kernel: Kernel = 'horizontal-term-floor-except-fy-zero',
+      id: string = `endpoint/${direction}/x-${xArithmetic}/y-${yArithmetic}/${kernel}`
+    quantizedCombinationIds.push(id)
+    if (candidates.some((candidate) => candidate.id === id)) quantizedReusedIds.push(id)
+    else { add('endpoint', direction, xArithmetic, yArithmetic, kernel); quantizedAddedIds.push(id) }
+  }
+assert.equal(quantizedCombinationIds.length, 162)
+assert.equal(quantizedReusedIds.length, 50); assert.equal(quantizedAddedIds.length, 112)
+assert.equal(candidates.length, 288)
+assert.deepEqual(candidates.slice(0, 176).map((candidate) => candidate.id), floatingCandidateIds)
+assert.equal(new Set(candidates.map((candidate) => candidate.id)).size, candidates.length)
 
 function axis(source: number, target: number, mapping: Mapping, arithmetic: Arithmetic): number[] {
   const f32 = arithmetic.endsWith('f32'), round = f32 ? Math.fround : (value: number) => value,
     stepRound = f32 || arithmetic === 'incremental-f32-step-f64' ? Math.fround : (value: number) => value,
-    increment = stepRound(mapping === 'endpoint' ? (target === 1 ? 0 : (source - 1) / (target - 1)) : source / target),
+    bits = arithmetic === 'incremental-q8' ? 8 : arithmetic === 'incremental-q12' ? 12
+      : arithmetic === 'incremental-q16' ? 16 : arithmetic === 'incremental-q24' ? 24 : 0,
+    ratio = mapping === 'endpoint' ? (target === 1 ? 0 : (source - 1) / (target - 1)) : source / target,
+    increment = bits ? Math.floor(ratio * 2 ** bits) / 2 ** bits : stepRound(ratio),
     origin = mapping === 'endpoint' ? 0 : round(round(increment * 0.5) - 0.5),
     values: number[] = []
   let position = origin
@@ -322,8 +346,15 @@ const save = () => writeFileSync(file('scaling-candidates.json'), JSON.stringify
       combinationIds: stepCombinationIds, reusedIds: stepReusedIds, addedIds: stepAddedIds,
       previousPrefix: { count: 158, ids: previousCandidateIds },
     },
+    quantizedStepSupplement: {
+      mapping: 'endpoint', kernel: 'horizontal-term-floor-except-fy-zero',
+      directions: ['top-down', 'bottom-up'], arithmetic: quantizedArithmetic,
+      fractionalBits: [8, 12, 16, 24], combinations: 162, reused: 50, added: 112,
+      combinationIds: quantizedCombinationIds, reusedIds: quantizedReusedIds, addedIds: quantizedAddedIds,
+      previousPrefix: { count: 176, ids: floatingCandidateIds },
+    },
     geometryInput: 'One original constant-1, 32bpp AND fixture per each of the seven mask geometries; all mask variants share its observed color plane',
-    axisRules: 'endpoint: step=(source-1)/(target-1), origin=0; center: step=source/target, origin=step/2-1/2; f32 rounds ratio, origin, and every multiply/add or accumulation; incremental-f32-step-f64 rounds only the ratio to binary32 and accumulates in binary64; no near-integer snapping',
+    axisRules: 'endpoint: step=(source-1)/(target-1), origin=0; center: step=source/target, origin=step/2-1/2; f32 rounds ratio, origin, and every multiply/add or accumulation; incremental-f32-step-f64 rounds only the ratio to binary32 and accumulates in binary64; incremental-qN uses floor(ratio*2**N)/2**N and binary64 accumulation; no near-integer snapping',
     directionRules: 'bottom-up starts at the bottom source/output memory row and accumulates positive Y; raw reference is independently normalized to top-down',
     kernelRules: 'weighted=(1-f)*a+f*b; lerp=a+(b-a)*f; staged floors first-axis results before second-axis blend; four-tap floors each byte*Xweight*Yweight; horizontal-term-floor-except-fy-zero floors each horizontal term before vertical weighting unless fy==0, where it floors the complete horizontal sum only; all interpolators floor final bytes; nearest rounds clamped coordinates',
     pixelArithmetic: 'binary64; f32 variants change axis arithmetic only',

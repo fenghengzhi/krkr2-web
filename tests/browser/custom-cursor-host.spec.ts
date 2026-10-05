@@ -181,7 +181,8 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
       clip: { x: number; y: number; width: number; height: number };
       background: Awaited<ReturnType<typeof screenshotRgba>>;
       expected: number[]; raw: number[]; screenshot: Awaited<ReturnType<typeof screenshotRgba>>;
-      rawMismatches: number; screenshotMismatches: number }[] = []
+      rawMismatches: number; screenshotMismatches: number;
+      samplingCandidates: { padding: number; quality: string; pixels: number[]; mismatches: number }[] }[] = []
   let revision = 200
   for (const scale of [1.5, 2.25]) for (const rendering of ['auto', 'pixelated'] as const) {
     await page.evaluate(({ scale, rendering }) => {
@@ -198,6 +199,28 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
       // expectation uses the actual hidden-cursor page screenshot exclusively.
       expected = background.data.map((value, index) => index % 4 === 3 ? 255 : value ^ 255)
     await info.attach(`css-${rendering}-${scale}-background`, { body: backgroundPng, contentType: 'image/png' })
+    // 087 WebKit auto/1.5 differs only on the last scratch row. Characterize
+    // target-edge padding and the browser's declared sampling qualities using
+    // real Canvas2D, without selecting a policy or weakening the strict check.
+    const candidates = await page.evaluate(({ clip, rendering }) => {
+      const source = document.querySelector<HTMLCanvasElement>('#cursor-surface-1')!,
+        bounds = source.getBoundingClientRect(),
+        observations: { padding: number; quality: string; pixels: number[] }[] = []
+      for (const padding of [0, 1, 2, 4]) for (const quality of ['low', 'medium', 'high'] as const) {
+        const scratch = document.createElement('canvas')
+        scratch.width = clip.width + padding * 2
+        scratch.height = clip.height + padding * 2
+        const context = scratch.getContext('2d', { willReadFrequently: true })!
+        context.imageSmoothingEnabled = rendering === 'auto'
+        context.imageSmoothingQuality = quality
+        context.drawImage(source, bounds.left - clip.x + padding, bounds.top - clip.y + padding,
+          bounds.width, bounds.height)
+        observations.push({ padding, quality: context.imageSmoothingQuality,
+          pixels: [...context.getImageData(padding, padding, clip.width, clip.height).data] })
+      }
+      return observations
+    }, { clip, rendering }), samplingCandidates = candidates.map((candidate) => ({ ...candidate,
+      mismatches: candidate.pixels.filter((value, index) => value !== background.data[index]).length }))
     await page.evaluate((revision) => {
       window.cursorCompositionFixture.suspend(false)
       window.cursorCompositionFixture.write(1, revision)
@@ -211,7 +234,7 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
     readings.push({ scale, rendering, clip, sourceRectangle: canvas,
       computedRendering: await page.locator('#cursor-surface-1').evaluate((canvas) => getComputedStyle(canvas).imageRendering),
       devicePixelRatio: await page.evaluate(() => devicePixelRatio),
-      background, expected, raw, screenshot,
+      background, expected, raw, screenshot, samplingCandidates,
       rawMismatches: raw.filter((value, index) => value !== expected[index]).length,
       screenshotMismatches: screenshot.data.filter((value, index) => value !== expected[index]).length })
   }
@@ -219,6 +242,7 @@ test('custom cursor AND/XOR matches actual CSS canvas rasterization at nonintege
   // observations even when one browser uses a different CSS sampling path.
   await info.attach('css-raster-readings', { body: JSON.stringify({
     scope: 'Actual CSS canvas screenshots versus cursor composition; not Windows cursor scaling',
+    diagnostic: 'Twelve target-padding/sampling-quality candidates are observations only; no closest policy is selected',
     userAgent: await page.evaluate(() => navigator.userAgent),
     source: { width: 64, height: 48 }, cursor: { width: 8, height: 8 }, readings,
   }), contentType: 'application/json' })

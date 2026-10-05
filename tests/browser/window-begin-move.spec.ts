@@ -86,6 +86,32 @@ async function noCompletionInput(page: Page) {
 }
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) {
+  test(`${backend}/${binary ? 'bytecode' : 'source'}: beginMove with the left button up returns without changing embedded placement`, async ({ page }) => {
+    const game = await launchWindowAttention(page, backend, binary, source(true)),
+      target = game.surface('Begin move target')
+    try {
+      await expect(target).toHaveClass(/game-window-embedded/)
+      // The real console click completes before its expression enters TJS, so
+      // the observed left button is up. The old host would wait indefinitely.
+      await evaluate(page, `(function(){
+        global.moveTarget.beginMove();
+        return global.moveTarget.left+","+global.moveTarget.top;
+      })()`, '60,40')
+      await expect(target).toHaveClass(/game-window-embedded/)
+      await expect(target).not.toHaveClass(/game-window-dragging/)
+      await expect(page.locator('.game-window-flow-space')).toHaveCount(0)
+      await evaluate(page, `(function(){
+        global.moveTarget.visible=false;
+        global.moveTarget.beginMove();
+        global.moveTarget.visible=true;
+        return global.moveTarget.left+","+global.moveTarget.top;
+      })()`, '60,40')
+      await expect(target).toBeVisible()
+      await expect(target).toHaveClass(/game-window-embedded/)
+      await expect(page.locator('.game-window-dragging,.game-window-flow-space')).toHaveCount(0)
+    } finally { await game.stop() }
+  })
+
   test(`${backend}/${binary ? 'bytecode' : 'source'}: borderless beginMove suspends its real mouse callback through commit, Escape, hide and invalidation`, async ({ page }, info) => {
     test.setTimeout(120000)
     const game = await launchWindowAttention(page, backend, binary, source(false)),

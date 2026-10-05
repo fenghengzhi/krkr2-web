@@ -130,6 +130,7 @@ for (const { name, keys } of series) {
                 'pad-reloaded-original-links-and-observed-neutral',
                 'pad-first-link-highlight', 'pad-second-link-highlight',
                 'pad-previous-link-highlight', 'pad-return-second-link-highlight',
+                'pad-confirm-enters-original-second-target',
                 'pad-confirm-runs-original-link-target',
                 'pad-original-mainwindow-and-messagelayer-methods-retained',
               ]) assert(detail.steps.includes(step), `Missing KAG cursor stage: ${step}`)

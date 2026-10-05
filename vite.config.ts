@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { offlineShell } from './scripts/build/offline-shell.ts'
 import { fontAssets } from './scripts/build/font-assets.ts'
+import { workerEntryIsolation } from './scripts/build/worker-chunks.ts'
 
 const root = dirname(fileURLToPath(import.meta.url))
 function wasmAssets(): Plugin {
@@ -79,5 +80,18 @@ function wasmAssets(): Plugin {
 export default defineConfig({
   plugins: [workerRpc({ pool: 1 }), wasmAssets(), fontAssets(root), offlineShell()],
   build: { target: 'es2022' },
-  worker: { format: 'es' },
+  worker: {
+    format: 'es',
+    plugins: () => [workerEntryIsolation()],
+    rolldownOptions: {
+      output: {
+        // Vite 8 fixes worker preserveEntrySignatures=false. The portable
+        // source reader and lazy Vorbis decoder share codec-parser; without
+        // an explicit shared chunk Rolldown exports it from session.worker,
+        // causing the decoder to import the stateful RPC entry itself.
+        codeSplitting: { groups: [{ name: 'worker-codec-parser',
+          test: /[\\/]node_modules[\\/]codec-parser[\\/]/ }] },
+      },
+    },
+  },
 })

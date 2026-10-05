@@ -253,8 +253,14 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect(marker).toHaveCount(0)
       await evaluate(page, '(cursorRoot.setCursorPos(60,50),0)', '0')
       await expect(marker).toBeVisible()
+      // Console evaluation scrolls the long page. Enter the actual visible
+      // canvas before testing leave; the 087 failure trace requested a center
+      // at y=-1107, so no canvas mouse event ever retired the virtual position.
+      await canvas.scrollIntoViewIfNeeded()
+      await expect(canvas).toBeInViewport({ ratio: 0.5 })
       const current = (await canvas.boundingBox())!
       await page.mouse.move(current.x + current.width / 2, current.y + current.height / 2)
+      await expect(marker).not.toHaveClass(/game-virtual-cursor/)
       await page.mouse.move(2, 2)
       await expect(marker).toHaveCount(0)
       await evaluate(page, '(cursorRoot.setCursorPos(60,50),0)', '0')

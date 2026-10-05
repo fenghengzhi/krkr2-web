@@ -240,7 +240,8 @@ test('ZIP range startup rejects corrupt payload and local metadata instead of re
 })
 
 test('stored ZIP descriptor variants preserve range results and deflate stays an explicit bounded fallback', async () => {
-  for (const name of ['0-stream1-local640-zip640.zip', '0-stream1-local641-zip641.zip', '8-stream0-local640-zip640.zip']) {
+  for (const name of ['0-stream1-local640-zip640.zip', '0-stream1-local641-zip640.zip',
+    '0-stream1-local640-zip641.zip', '8-stream0-local640-zip640.zip']) {
     const files = await readZip(new BlobSource(new Blob([zipFixture(name)])), zipCodecs),
       resource = files.find((file) => file.name === 'startup.tjs')!, opened = await openResourceSource(resource),
       whole = await resource.read()

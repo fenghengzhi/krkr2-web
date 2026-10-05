@@ -9,7 +9,7 @@ import {
   type VideoSnapshot,
   type VideoTimeline,
 } from '../../../engine/ports/video.ts'
-import { videoFrameAt, videoFrameTime } from '../../../engine/media/video-time.ts'
+import { videoFrameAt, videoFrameTime, videoPresentedFrameAt } from '../../../engine/media/video-time.ts'
 import { videoOutputRectangle } from '../../../engine/media/video-mixing.ts'
 import type { Pixels } from '../../../engine/ports/graphics.ts'
 import type { WindowView } from '../../../engine/scene/window.ts'
@@ -647,7 +647,7 @@ export class WebVideoHost {
   }
   private async seekPresented(movie: Movie, position: number): Promise<void> {
     const timeline = movie.timeline, target = videoFrameAt(timeline!, position),
-      matches = (time: number) => videoFrameAt(timeline!, time) === target
+      matches = (time: number) => videoPresentedFrameAt(timeline!, time) === target
     if (movie.presentedTime !== undefined && matches(movie.presentedTime)) {
       await this.seek(movie, position)
       return

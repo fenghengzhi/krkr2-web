@@ -94,7 +94,7 @@ jobs:
                 $observations.globalInputUsed -ne $false -or $observations.wallClockAnimationMeasured -ne $false -or
                 $observations.observedFixtures -ne $observations.expectedFixtures -or
                 $observations.fixtures.Count -ne $observations.expectedFixtures -or
-                $observations.expectedFixtures -ne 115 -or $observations.sourceCommit -cne $env:GITHUB_SHA) {
+                $observations.expectedFixtures -ne 125 -or $observations.sourceCommit -cne $env:GITHUB_SHA) {
               throw 'Native cursor reference output is incomplete or has an unexpected scope/commit.'
             }
             $ids = [Collections.Generic.HashSet[string]]::new()
@@ -324,7 +324,7 @@ jobs:
       - name: Compare native-profile cursor file loading and natural-size drawing
         if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
         run: node --import tsx tests/probes/cursor-load-compare.ts out/ci/native-cursor
-      - name: Characterize 176 bounded scaling candidates against raw native bitmap planes
+      - name: Characterize 288 bounded scaling candidates against raw native bitmap planes
         if: ${{ !cancelled() && steps.reference.outcome == 'success' && steps.dependencies.outcome == 'success' }}
         run: |
           Copy-Item -LiteralPath 'tests/probes/cursor-scaling-candidates.ts' -Destination 'out/ci/native-cursor/cursor-scaling-candidates.ts'

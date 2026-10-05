@@ -5,11 +5,12 @@ import { PortAudioBackend } from '../../src/backends/audio/port-backend.ts'
 import { PcmStreamPool, type PcmSourceFactory } from '../../src/backends/audio/stream-pool.ts'
 import type { PcmSource } from '../../src/backends/audio/pcm-source.ts'
 import { AudioMixer } from '../../src/engine/media/mixer.ts'
+import { decodeWav } from '../../src/formats/audio/wav.ts'
 import { defaultSoundSettings, emptyLoops, type AudioCommand, type PcmReadRequest,
-  type AudioResult, type StreamingPcmAsset } from '../../src/engine/ports/audio.ts'
+  type AudioResult, type StreamingPcmAsset, type PhaseVocoderFilter, type AudioEvent } from '../../src/engine/ports/audio.ts'
 import type { ByteSource } from '../../src/engine/ports/storage.ts'
 import type { AudioRequest } from '../../src/protocol/audio.ts'
-import { AudioClock, wave } from '../helpers/audio.ts'
+import { AudioClock, settleAudioPages, wave } from '../helpers/audio.ts'
 
 const turn = () => new Promise<void>((resolve) => setImmediate(resolve))
 function observed<T>(signal: AbortSignal, event: Promise<T>, operation?: Promise<unknown>): Promise<T> {
@@ -71,6 +72,77 @@ test('headless production WAVE source reaches audio beyond its initial pages wit
     assert.equal(clock.tasks.size, 0)
     assert.deepEqual(audio.mixer.inspectStreams(), { voices: 0, bytes: 0, pending: 0, reservedBytes: 0 })
   } finally { await audio.close() }
+})
+
+test('real streamed PhaseVocoder holds audible position for delayed pages and resumes exact resident PCM', { timeout: 30000 }, async (t) => {
+  const frames = 44100, channels = 2,
+    bytes = wave(Array.from({ length: frames * channels }, (_, index) =>
+      0.3 * Math.sin(Math.floor(index / channels) * 2 * Math.PI * (index % channels ? 660 : 440) / 44100)), 44100, channels),
+    gate = deferred<void>(), entered = deferred<void>(), ranges: [number, number][] = [],
+    clock = new AudioClock(), blocks: Array<{ left: Float32Array; right: Float32Array }> = [],
+    events: AudioEvent[] = [], filters: PhaseVocoderFilter[] = [
+      { type: 'phase-vocoder', id: 1, window: 512, overlap: 4, time: 1, pitch: 1.5 },
+    ],
+    input: ByteSource = { size: bytes.length, async read(offset, length) {
+      ranges.push([offset, length])
+      if (offset >= 44 + 8192 * channels * 2) { entered.resolve(); await gate.promise }
+      return bytes.slice(offset, offset + length)
+    } },
+    audio = new HeadlessAudioBackend({ now: () => clock.now, schedule: clock.schedule },
+      (left, right) => blocks.push({ left: left.slice(), right: right.slice() }), 44100),
+    resident = new AudioMixer(44100), asset = decodeWav(bytes)!
+  const pcm = () => ({ left: blocks.flatMap((block) => [...block.left]),
+    right: blocks.flatMap((block) => [...block.right]) })
+  audio.listen((event) => events.push(event))
+  try {
+    assert(asset)
+    await audio.command({ ...opening(1, input), filters })
+    resident.command({ op: 'load', id: 1, asset, settings: defaultSoundSettings(), filters })
+    await audio.command({ op: 'play', id: 1 })
+    resident.command({ op: 'play', id: 1 })
+    clock.advance(200)
+    await observed(t.signal, entered.promise)
+    const held = audio.mixer.snapshot(1).position, before = pcm(),
+      expectedLeft = new Float32Array(held), expectedRight = new Float32Array(held)
+    assert(held > 0 && held < 8820, 'The controlled page boundary must interrupt actual filtered output')
+    assert(audio.mixer.inspectStreams().pending > 0)
+    assert.equal(before.left.length, 8820)
+    assert.equal(before.right.length, 8820)
+    assert.deepEqual(resident.render(expectedLeft, expectedRight), [])
+    assert.deepEqual(before.left.slice(0, held), [...expectedLeft])
+    assert.deepEqual(before.right.slice(0, held), [...expectedRight])
+    assert(before.left.slice(held).every((value) => value === 0))
+    assert(before.right.slice(held).every((value) => value === 0))
+    assert(before.left.some((value) => Math.abs(value) > 0.001))
+
+    blocks.length = 0
+    clock.advance(200)
+    assert.equal(audio.mixer.snapshot(1).position, held)
+    assert.equal(audio.mixer.snapshot(1).status, 'play')
+    assert(blocks.every((block) => block.left.every((value) => value === 0) && block.right.every((value) => value === 0)))
+    assert.equal(events.length, 0, 'Missing pages are neither natural EOF nor a decoder error')
+
+    gate.resolve()
+    await settleAudioPages(audio)
+    assert.equal(audio.mixer.snapshot(1).position, held, 'Page delivery itself cannot advance audible time')
+    blocks.length = 0
+    for (let elapsed = 0; elapsed < 200; elapsed += 20) {
+      clock.advance(20)
+      await settleAudioPages(audio)
+    }
+    const resumed = pcm(), left = new Float32Array(8820), right = new Float32Array(8820)
+    assert.deepEqual(resident.render(left, right), [])
+    assert.deepEqual(resumed.left, [...left])
+    assert.deepEqual(resumed.right, [...right])
+    assert(resumed.left.some((value) => Math.abs(value) > 0.001))
+    assert.equal(audio.mixer.snapshot(1).position, resident.snapshot(1).position)
+    assert.equal(events.length, 0)
+    assert(ranges.some(([offset]) => offset >= 44 + 8192 * channels * 2))
+    assert(ranges.every(([, length]) => length < bytes.length))
+    t.diagnostic(JSON.stringify({ heldSourcePosition: held, resumedSourcePosition: resident.snapshot(1).position,
+      deviceFrames: audio.mixer.frames, ranges }))
+  } finally { gate.resolve(); await audio.close() }
+  assert.equal(clock.tasks.size, 0)
 })
 
 test('stream pool limits actual decoder jobs to two and retains retired permits and leases until work settles', { timeout: 30000 }, async () => {

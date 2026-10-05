@@ -218,6 +218,33 @@ test('cursor load PNG48 preserves the complete native RGBA plane including alpha
     '616661fffd5393d4a716e2b2134959157507741cdde42aa0bcbc2cb519930d82')
 })
 
+test('cursor load narrows both axis steps for independent native asymmetric and checker color fields', async () => {
+  // 088 run 37279350828, Windows 2022/2025: complete GetIconInfo RGB planes.
+  // Unlike the older linear gradients, asymmetric XY distinguishes all three
+  // incremental Y paths. These hashes and pixels are native archive literals.
+  for (const [pattern, expected, point, pixel] of [
+    ['xy-asymmetric', '8b64b105250c0bdaa8a3d75c356c7f5c02d970a5fe6c816cd34b2074c4c0189a', [29, 30], [128, 215, 158]],
+    ['checker', '8ff66d6e3679ae9d00c7bd643e0c4e8b9399ae711bf6033c98fe159889d61056', [16, 30], [65, 131, 128]],
+  ] as const) {
+    const rows = Array.from({ length: 48 }, (_, row) => {
+      const y = 47 - row
+      return Array.from({ length: 48 }, (_, x) => {
+        const r = pattern === 'checker' ? 255 * (x % 2) : (17 * x + 37 * y + 3) & 255,
+          g = pattern === 'checker' ? 255 * (y % 2) : (73 * x + 11 * y + 91) & 255,
+          b = pattern === 'checker' ? 255 * ((x + y) % 2) : (127 * x + 61 * y + 113) & 255
+        return [b, g, r, 0]
+      }).flat()
+    }), raw = cursorFile([{ width: 48, height: 48, hotspot: [16, 12],
+      payload: cursorDib({ width: 48, height: 48, depth: 32, xorRows: rows,
+        andRows: Array.from({ length: 48 }, (_, row) => row < 24 ? [255, 255, 255, 255, 255, 255] : []),
+      }) }]), result = loadedImage(await loadCursorBytes(raw, { png })), at = (point[1] * 32 + point[0]) * 4
+    assert.equal(result.mode, 'and-xor')
+    assert.deepEqual(result.hotspot, { x: 11, y: 8 })
+    assert.deepEqual([...result.data.subarray(at, at + 3)], [...pixel], pattern)
+    assert.equal(createHash('sha256').update(result.data.filter((_, at) => at % 4 !== 3)).digest('hex'), expected, pattern)
+  }
+})
+
 test('cursor load keeps every ANI frame and step while the smooth scaling candidate awaits native pixel calibration', async () => {
   const source = asset([[image(13, 9, 32, 37, [12, 8])], [image(48, 48, 32, 111, [12, 24])],
     [image(32, 32, 32, 7, [17, 23])]], 'ani')

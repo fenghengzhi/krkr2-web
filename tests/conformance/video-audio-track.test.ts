@@ -163,6 +163,10 @@ function randomAccess(bytes: Uint8Array) {
     }
   return result
 }
+function fragmentTrackId(bytes: Uint8Array, traf: RawBox): number {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    .getUint32(required(inside(bytes, traf), 'tfhd').body + 4)
+}
 
 for (const name of ['multitrack.mp4', 'fragmented.mp4', 'separate-fragments.mp4', 'interleaved.mp4']) for (const index of [0, 1])
   test(`${name}: selecting audio ${index} preserves the actual video and chosen audio samples`, async () => {
@@ -214,7 +218,10 @@ for (const name of ['multitrack.mp4', 'fragmented.mp4', 'separate-fragments.mp4'
         const fragment: RawBox = boxes(source).find((box) => box.start === old.offset)!
         const oldTracks: RawBox[] = inside(source, fragment).filter((box) => box.kind === 'traf')
         const kept: RawBox[] = oldTracks.filter((box) => text(chosen.bytes, box.start + 4) === 'traf')
-        assert.equal(entry.ordinal, kept.indexOf(oldTracks[old.ordinal - 1]!) + 1)
+        const originalTrack = oldTracks.filter((box) => fragmentTrackId(source, box) === old.id)
+        assert.equal(originalTrack.length, 1, 'Each hosted fixture has exactly one traf per track in each moof')
+        assert.equal(entry.ordinal, kept.indexOf(originalTrack[0]!) + 1)
+        assert.equal(fragmentTrackId(chosen.bytes, kept[entry.ordinal - 1]!), entry.id)
         assert.equal(entry.offset, old.offset)
       }
       assert(!newIndex.some((entry) => entry.id === audio[1 - index]!.id))
@@ -291,6 +298,55 @@ test('duplicate IDs, unknown handlers, external data and encrypted sample entrie
   type(encrypted, boxes(encrypted, stsd.body + 8, stsd.end)[0]!, 'enca')
   await assert.rejects(selectMp4AudioTrack(encrypted, 0), /encrypted/)
   await assert.rejects(selectMp4AudioTrack(append(original, box('uuid', new Uint8Array(16))), 0), /Unsupported/)
+})
+
+test('standards-based tfra ordinals and FFmpeg first-sample ordinals select the same media', async () => {
+  for (const name of ['fragmented.mp4', 'interleaved.mp4']) {
+    const original = fixture(name), corrected = original.slice(), index = randomAccess(corrected)
+    assert(index.length > 0)
+    for (const entry of index) {
+      assert.equal(entry.ordinal, 1, 'The unmodified hosted FFmpeg fixture must exercise its constant-one writer')
+      assert.equal(entry.ordinalWidth, 1)
+      const moof = boxes(corrected).find((box) => box.start === entry.offset)!,
+        trafs = inside(corrected, moof).filter((box) => box.kind === 'traf'),
+        ordinal = trafs.findIndex((box) => fragmentTrackId(corrected, box) === entry.id) + 1
+      assert(ordinal >= 1)
+      corrected[entry.ordinalAt] = ordinal
+    }
+    assert(randomAccess(corrected).some((entry) => entry.ordinal === 3))
+    for (const selected of [0, 1]) {
+      const fromOriginal = await selectMp4AudioTrack(original, selected), fromCorrected = await selectMp4AudioTrack(corrected, selected)
+      assert(fromOriginal); assert(fromCorrected)
+      assert.deepEqual(await samples(fromOriginal.bytes), await samples(fromCorrected.bytes))
+      assert.deepEqual(randomAccess(fromOriginal.bytes), randomAccess(fromCorrected.bytes))
+    }
+  }
+})
+
+test('tfra compatibility recovery rejects wrong times, runs, samples, offsets and ambiguous tracks', async () => {
+  const original = fixture('fragmented.mp4'), audio = tracks(original).filter((track) => track.kind === 'soun'),
+    entry = randomAccess(original).find((entry) => entry.id === audio[0]!.id)!
+  assert.equal(entry.ordinal, 1); assert.equal(entry.ordinalWidth, 1)
+  assert.equal(entry.offsetWidth, 8)
+  assert.equal(new DataView(original.buffer).getUint32(entry.box.body + 8), 0, 'The three ordinal fields each occupy one byte')
+  for (const damage of ['time', 'run', 'sample', 'ordinal', 'offset', 'ambiguous'] as const) {
+    const bytes = original.slice(), view = new DataView(bytes.buffer)
+    if (damage === 'time') {
+      const at = entry.offsetAt - entry.offsetWidth
+      view.setBigUint64(at, view.getBigUint64(at) + 1n)
+    } else if (damage === 'run') bytes[entry.ordinalAt + 1] = 2
+    else if (damage === 'sample') bytes[entry.ordinalAt + 2] = 2
+    else if (damage === 'ordinal') bytes[entry.ordinalAt] = 3
+    else if (damage === 'offset') view.setBigUint64(entry.offsetAt, BigInt(entry.offset + 1))
+    else {
+      const moof = boxes(bytes).find((box) => box.start === entry.offset)!,
+        other = inside(bytes, moof).filter((box) => box.kind === 'traf')
+          .find((box) => fragmentTrackId(bytes, box) === audio[1]!.id)!
+      view.setUint32(required(inside(bytes, other), 'tfhd').body + 4, audio[0]!.id)
+    }
+    await assert.rejects(selectMp4AudioTrack(bytes, 0), /random access entry/, damage)
+    assert.deepEqual(original, fixture('fragmented.mp4'), 'Malformed candidate copies must not alter the archived fixture')
+  }
 })
 
 test('fragment inheritance, missing explicit run offsets and invalid random-access ordinals reject', async () => {

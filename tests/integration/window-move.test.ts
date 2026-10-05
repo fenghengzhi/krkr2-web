@@ -75,6 +75,9 @@ async function fixture(binary: boolean, supported = true) {
       assert.equal(new TextDecoder().decode(bytes.subarray(0, 4)), 'TJS2')
     }
     return { ...f, id, events, logs, clock,
+      // Session.evaluate uses the TJS expression compiler. Programs must enter
+      // through Scripts.exec so statements after the first are actually run.
+      exec: (program: string) => f.session.evaluate(`Scripts.exec(${JSON.stringify(`${program};`)})`),
       async request() { await until(() => requestIndex < requests.length); return requests[requestIndex++]! },
       log: (message: string) => until(() => logs.includes(message)),
       position: () => { const view = f.session.snapshot().windows!.find((window) => window.id === id)!.view; return [view.left, view.top] },
@@ -87,7 +90,7 @@ for (const binary of [false, true]) {
   test(`${mode}: beginMove holds its TJS caller, pumps a real Timer and commits independent host updates before return`, { timeout: 60000 }, async () => {
     const f = await fixture(binary)
     try {
-      const opening = track(f.session.evaluate('timer.enabled=true;Debug.message("move:before");win.beginMove();Debug.message("move:after:"+win.left+","+win.top)')),
+      const opening = track(f.exec('timer.enabled=true;Debug.message("move:before");win.beginMove();Debug.message("move:after:"+win.left+","+win.top)')),
         request = await f.request()
       assert.equal(opening.settled(), false)
       assert.equal(f.session.inspectOwnership().modalScopes, 1)
@@ -109,13 +112,13 @@ for (const binary of [false, true]) {
   test(`${mode}: cancel restores the original Window position and a host failure becomes a catchable TJS exception`, { timeout: 60000 }, async () => {
     const f = await fixture(binary)
     try {
-      const first = track(f.session.evaluate('win.beginMove();Debug.message("move:cancelled:"+win.left+","+win.top)')),
+      const first = track(f.exec('win.beginMove();Debug.message("move:cancelled:"+win.left+","+win.top)')),
         request = await f.request()
       f.session.windowMove({ ...request, type: 'update', sequence: 1, left: 70, top: 80 })
       assert.equal(f.session.windowMove({ ...request, type: 'cancel', sequence: 2 }), true)
       await bounded(first.promise)
       assert(f.logs.includes('move:cancelled:20,30'))
-      const second = track(f.session.evaluate('try{win.beginMove();}catch(e){Debug.message("move:caught:"+e.message);}')),
+      const second = track(f.exec('try{win.beginMove();}catch(e){Debug.message("move:caught:"+e.message);}')),
         next = await f.request()
       assert.notEqual(next.requestId, request.requestId)
       assert.equal(f.session.windowMove({ ...request, type: 'commit', sequence: 999, left: 900, top: 900 }), false)
@@ -160,8 +163,8 @@ for (const binary of [false, true]) {
       await f.session.evaluate('win.fullScreen=true')
       await assert.rejects(f.session.evaluate('win.beginMove()'), /fullscreen/)
       assert.equal(f.session.inspectOwnership().modalScopes, 0)
-      await f.session.evaluate('win.fullScreen=false;retireOnTimer=true')
-      const opening = track(f.session.evaluate('timer.enabled=true;win.beginMove();Debug.message("move:after-retire")')),
+      await f.exec('win.fullScreen=false;retireOnTimer=true')
+      const opening = track(f.exec('timer.enabled=true;win.beginMove();Debug.message("move:after-retire")')),
         request = await f.request()
       f.clock.advance(10)
       await f.log('move:retired')
@@ -177,7 +180,7 @@ for (const binary of [false, true]) {
     const f = await fixture(binary)
     let opening: ReturnType<typeof track<string>> | undefined
     try {
-      opening = track(f.session.evaluate('win.beginMove();Debug.message("move:after-stop")'))
+      opening = track(f.exec('win.beginMove();Debug.message("move:after-stop")'))
       const request = await f.request()
       await bounded(f.session.stop())
       await assert.rejects(opening.promise)

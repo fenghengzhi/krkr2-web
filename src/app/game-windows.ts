@@ -433,8 +433,15 @@ export function createGameWindows(
       if (signal.aborted) return Promise.resolve()
       if (surface.view.fullScreen || fullscreen === surface)
         return Promise.reject(new Error('A fullscreen Window cannot be moved'))
-      if (!pointer) return Promise.reject(new Error('Window movement requires a page pointer observation'))
       surface.gesture?.()
+      // User32 SC_MOVE+2 returns immediately without entering its move loop
+      // when the left button is up (both hosted Windows reference systems).
+      // No page observation likewise cannot establish a held left button.
+      if (!pointer || !(pointer.buttons & 1)) {
+        publish({ type: 'commit', requestId: request.requestId, windowId: request.windowId,
+          sequence: 1, left: request.left, top: request.top })
+        return Promise.resolve()
+      }
       const observed = { ...pointer }, start = { ...surface.view },
         previousScale = surface.floatingScale,
         origin = { x: observed.x, y: observed.y, left: stage.scrollLeft, top: stage.scrollTop },

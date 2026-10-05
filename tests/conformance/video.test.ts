@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { readVideoTimeline } from '../../src/formats/video/mp4.ts'
-import { videoFrameAt, videoFrameTime } from '../../src/engine/media/video-time.ts'
+import { videoFrameAt, videoFrameTime, videoPresentedFrameAt } from '../../src/engine/media/video-time.ts'
 test('MP4 B-frames and edit lists resolve to presentation-order frame times', async () => {
   const source = readFileSync(new URL('../fixtures/video/colors.mp4', import.meta.url)),
     wrapped = new Uint8Array(source.length + 21)
@@ -19,4 +19,25 @@ test('MP4 B-frames and edit lists resolve to presentation-order frame times', as
   assert.ok(Math.abs(videoFrameTime(timeline, 6) - 500) < 1e-9)
   assert.throws(() => videoFrameTime(timeline, 18), /outside/)
   await assert.rejects(readVideoTimeline(source.subarray(0, source.length - 1)), /Truncated/)
+})
+
+test('presented MP4 timestamps match microsecond-quantized PTS without changing playback floor semantics', async () => {
+  const timeline = await readVideoTimeline(readFileSync(new URL('../fixtures/video/colors.mp4', import.meta.url)))
+  assert(timeline)
+  // Literal 0.833333 seconds from 087 Chromium's paused candidate in the
+  // original failed trace. Its frame was presented; no later callback arrived.
+  assert.equal(videoPresentedFrameAt(timeline, 833.333), 10)
+  assert.equal(videoPresentedFrameAt(timeline, 833.334), 10)
+  assert.equal(videoFrameAt(timeline, 833.333), 9)
+  assert.equal(videoPresentedFrameAt(timeline, 750), 9)
+  assert.equal(videoPresentedFrameAt(timeline, 833.335), undefined)
+  assert.equal(videoPresentedFrameAt(timeline, 800), undefined)
+  assert.equal(videoPresentedFrameAt(timeline, Number.NaN), undefined)
+  assert.equal(videoPresentedFrameAt({ ...timeline, times: [] }, 0), undefined)
+  assert.equal(videoPresentedFrameAt({ ...timeline, times: [0, 0.0005] }, 0.00025), undefined,
+    'A midpoint between very close timestamps cannot identify a unique frame')
+  assert.equal(videoPresentedFrameAt({ ...timeline, times: [0, 0.0000005] }, 0), 0,
+    'Presentation matching must not inherit the playback lookup epsilon')
+  assert.equal(videoPresentedFrameAt({ ...timeline, times: [0, 0] }, 0), undefined,
+    'Duplicate PTS values cannot identify a unique frame')
 })

@@ -52,7 +52,8 @@ async function fixture(binary: boolean) {
       observation?: NonNullable<InputPacket['mouseKeyObservation']>): InputPacket => ({
       type, windowId: id, key, shift, ...(observation ? { mouseKeyObservation: observation } : {}),
     })
-    return { ...f, id, key, advance: (milliseconds: number) => { now += milliseconds } }
+    const execute = (source: string) => f.session.evaluate(`Scripts.exec(${JSON.stringify(source)})`)
+    return { ...f, id, key, execute, advance: (milliseconds: number) => { now += milliseconds } }
   } catch (error) { await f.session.stop(); throw error }
 }
 
@@ -88,13 +89,13 @@ for (const binary of [false, true]) {
       await f.session.input(f.key('keyDown', 13))
       await f.session.input({ type: 'move', windowId: f.id, x: 30, y: 15, button: 0, clicks: 0, shift: 0, pointerSequence: 2 })
       await f.session.input({ type: 'move', windowId: f.id, x: 90, y: 25, button: 0, clicks: 0, shift: 0, pointerSequence: 1 })
-      await f.session.evaluate('events.clear();win.useMouseKey=false')
+      await f.execute('events.clear();win.useMouseKey=false;')
       await f.session.idle()
       assert.equal(latestView(f.events, f.id).useMouseKey, false)
       assert.equal(await f.session.evaluate('events.join("|")'), 'window:up:30,15:0:0|a:up:20,10:0:0')
-      await f.session.evaluate('win.useMouseKey=true;events.clear()')
+      await f.execute('win.useMouseKey=true;events.clear();')
       await f.session.input(f.key('keyDown', 32))
-      await f.session.evaluate('events.clear();win.useMouseKey=0.5')
+      await f.execute('events.clear();win.useMouseKey=0.5;')
       assert.equal(await f.session.evaluate('win.useMouseKey'), '1', 'the native setter uses boolean conversion before integer transport')
       await f.session.evaluate('win.useMouseKey=false')
       await f.session.idle()
@@ -108,7 +109,8 @@ for (const binary of [false, true]) {
   test(`${mode}: mouse-key ticks use CSS distance, the 100+45ms initial gate and the latest physical takeover`, { timeout: 60000 }, async () => {
     const f = await fixture(binary)
     try {
-      await f.session.evaluate('win.setZoom(2,1);win.setLayerPos(3,4)')
+      await f.execute('win.setZoom(2,1);win.setLayerPos(3,4);')
+      assert.equal(await f.session.evaluate('win.layerLeft+","+win.layerTop'), '3,4')
       const observed = { windowId: f.id, x: 120, y: 50, scaleX: 2, scaleY: 3, pointerSequence: 1 }
       f.session.pointerState(120, 50, f.id, 1)
       await f.session.input(f.key('keyDown', 37, 0, observed))
@@ -158,7 +160,7 @@ for (const binary of [false, true]) {
       await f.session.input(f.key('keyUp', 13, 0, { ...remapped, x: 30 }))
       assert.equal(await f.session.evaluate('events.join("|")'),
         'window:down:30,15:0:0|a:down:20,10:0:0|window:click:30,15|a:click:20,10|window:up:30,15:0:0|a:up:20,10:0:0')
-      await f.session.evaluate(String.raw`
+      await f.execute(String.raw`
 events.clear();var receiver=new Window();receiver.visible=true;receiver.setInnerSize(100,50);
 receiver.useMouseKey=true;receiver.trapKey=true;
 receiver.onMouseDown=function(x,y,button,shift){events.add("receiver:down:"+x+","+y);};
@@ -183,9 +185,10 @@ receiver.onClick=function(x,y){events.add("receiver:click:"+x+","+y);};
     const f = await fixture(binary)
     try {
       f.session.pointerState(20, 10, f.id, 1)
-      await f.session.evaluate('events.clear();System.eventDisabled=true')
+      await f.execute('events.clear();System.eventDisabled=true;')
+      assert.equal(await f.session.evaluate('System.eventDisabled'), '1')
       const down = f.session.input(f.key('keyDown', 13)), up = f.session.input(f.key('keyUp', 13))
-      await f.session.evaluate('invalidate win;System.eventDisabled=false')
+      await f.execute('invalidate win;System.eventDisabled=false;')
       await Promise.all([down, up])
       assert.equal(await f.session.evaluate('events.count'), '0')
     } finally { await f.session.stop() }

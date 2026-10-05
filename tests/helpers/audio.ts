@@ -61,3 +61,19 @@ export class AudioClock {
     throw new Error('Audio clock failed to settle')
   }
 }
+
+/** A Session idle barrier joins VM work, not the decoder's background I/O.
+ * Keep the synthetic device clock still until requested PCM pages have really
+ * reached its cache. A stalled source fails at this boundary instead of being
+ * hidden by advancing more audio time or accepting silent samples. */
+export async function settleAudioPages(audio: {
+  mixer: { inspectStreams(): { pending: number } }
+}): Promise<void> {
+  const deadline = Date.now() + 10000
+  while (audio.mixer.inspectStreams().pending) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for actual PCM page delivery')
+    // Portable readers deliberately yield a timer task during long work; a
+    // chain of resolved promises cannot admit that checkpoint.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+}

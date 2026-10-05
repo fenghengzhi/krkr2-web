@@ -12,7 +12,7 @@ export interface Mp4AudioSelectionOptions {
 }
 interface Box { kind: string; start: number; body: number; end: number }
 interface Track { id: number; handler: string; box: Box; header: Box; alternate: number; descriptions: number; samples: number; regularSamples: number }
-interface FragmentTrack { box: Box; id: number; runs: number[]; ordinal: number }
+interface FragmentTrack { box: Box; id: number; runs: number[]; ordinal: number; firstTime?: number }
 const MAX_BOXES = 100000, MAX_SAMPLES = 1000000, MAX_BYTES = 64 * 1024 * 1024
 const padding = ['free', 'skip', 'wide']
 
@@ -279,14 +279,15 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
     defaults.set(id, { duration: view.getUint32(box.body + 12), size: view.getUint32(box.body + 16) })
     if (removed.has(id)) free.push(box)
   }
-  const fragments = new Map<number, FragmentTrack[]>()
+  const fragments = new Map<number, { tracks: FragmentTrack[]; unique: Map<number, FragmentTrack | null> }>()
   let fragmentCount = 0, inspectedFragments = 0
   for (const moof of top.filter((box) => box.kind === 'moof')) {
     if (!(fragmentCount++ % 128)) await cooperate()
     if (!mvex) throw new Error('MP4 fragments require movie defaults')
     const items = children(moof, ['mfhd', 'traf']), mfhd = one(items, 'mfhd')!
     full(mfhd); exact(mfhd, mfhd.body + 8)
-    const boxes = items.filter((box) => box.kind === 'traf'), trafs: FragmentTrack[] = []
+    const boxes = items.filter((box) => box.kind === 'traf'), trafs: FragmentTrack[] = [],
+      unique = new Map<number, FragmentTrack | null>()
     if (!boxes.length) throw new Error('MP4 fragment contains no tracks')
     let ordinal = 0
     for (const box of boxes) {
@@ -314,7 +315,8 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
       exact(tfhd, at)
       const tfdt = one(items, 'tfdt')!, decodeVersion = full(tfdt, [0, 1]).version
       exact(tfdt, tfdt.body + (decodeVersion ? 12 : 8))
-      let decodeTime = decodeVersion ? u64(tfdt, tfdt.body + 4) : view.getUint32(tfdt.body + 4), previousEnd = 0
+      let decodeTime = decodeVersion ? u64(tfdt, tfdt.body + 4) : view.getUint32(tfdt.body + 4), previousEnd = 0,
+        firstTime: number | undefined
       const runs = items.filter((item) => item.kind === 'trun'), counts: number[] = []
       if (!runs.length) throw new Error('MP4 fragment has no sample runs')
       for (let i = 0; i < runs.length; i++) {
@@ -343,6 +345,7 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
           if (flags & 0x400) field += 4
           if (flags & 0x800) { composition = version ? view.getInt32(field) : view.getUint32(field); field += 4 }
           validateSample(position, size, decodeTime, decodeTime + composition, duration)
+          if (i === 0 && sample === 0) firstTime = decodeTime + composition
           position += size
           decodeTime += duration
         }
@@ -350,14 +353,16 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
         counts.push(samples)
       }
       const keep = !removed.has(id)
-      trafs.push({ box, id, runs: counts, ordinal: keep ? ++ordinal : 0 })
+      const traf: FragmentTrack = { box, id, runs: counts, ordinal: keep ? ++ordinal : 0, firstTime }
+      trafs.push(traf)
+      unique.set(id, unique.has(id) ? null : traf)
     }
     // A separate per-track fragment may belong entirely to a removed audio
     // track. Its whole moof can become free without moving the following mdat.
     // Keep the original map until every tfra entry has still been validated.
     if (!ordinal) free.push(moof)
     else for (const traf of trafs) if (!traf.ordinal) free.push(traf.box)
-    fragments.set(moof.start, trafs)
+    fragments.set(moof.start, { tracks: trafs, unique })
   }
   let indexEntries = 0
   for (const mfra of top.filter((box) => box.kind === 'mfra')) {
@@ -381,12 +386,24 @@ export async function selectMp4AudioTrack(input: Uint8Array, index: number,
       for (let i = 0; i < entries; i++) {
         if (!(i % 4096)) await cooperate()
         need(box, at, version ? 16 : 8)
-        const offset = version ? u64(box, at + 8) : view.getUint32(at + 4)
+        const time = version ? u64(box, at) : view.getUint32(at),
+          offset = version ? u64(box, at + 8) : view.getUint32(at + 4)
         at += version ? 16 : 8
         const ordinalAt = at, oldOrdinal = unsigned(widths[0]!), run = unsigned(widths[1]!), sample = unsigned(widths[2]!)
-        const traf = fragments.get(offset)?.[oldOrdinal - 1]
+        const fragment = fragments.get(offset)
+        let traf = fragment?.tracks[oldOrdinal - 1]
+        if (traf?.id !== id && oldOrdinal === 1 && run === 1 && sample === 1) {
+          // FFmpeg 6.1.1 mov_write_tfra_tag writes traf/trun/sample = 1 even
+          // when the track is a later traf in a shared moof. Recover only that
+          // first-sample form, with one matching track and its actual CTS.
+          const matching = fragment?.unique.get(id)
+          if (matching && matching.firstTime === time) traf = matching
+        }
         if (!traf || traf.id !== id || run < 1 || run > traf.runs.length || sample < 1 || sample > traf.runs[run - 1]!) throw new Error('MP4 random access entry references an invalid fragment')
-        if (!removed.has(id)) writes.push({ at: ordinalAt, value: traf.ordinal, width: widths[0]! })
+        if (!removed.has(id)) {
+          if (traf.ordinal >= 256 ** widths[0]!) throw new Error('MP4 random access ordinal exceeds its field width')
+          writes.push({ at: ordinalAt, value: traf.ordinal, width: widths[0]! })
+        }
       }
       exact(box, at)
       if (removed.has(id)) free.push(box)
