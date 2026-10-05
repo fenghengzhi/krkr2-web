@@ -245,7 +245,105 @@ test('cursor load narrows both axis steps for independent native asymmetric and 
   }
 })
 
-test('cursor load keeps every ANI frame and step while the smooth scaling candidate awaits native pixel calibration', async () => {
+test('cursor smooth scaling matches all native independent enlargement and mixed-ratio color fields', async () => {
+  // 089 run 37282816379, both Windows desktops. These are SHA-256 literals
+  // of complete GetIconInfo top-down RGB planes, not candidate output. The
+  // 13x32/13x63 cases also cover exact Y positions beyond the first row.
+  const observations = [
+    [13, 9, 10, 7, [
+      'c8bfc25f93789e89975165482d0bda8133180180890a913b30d66c203ba69e46',
+      '8d72d5c63ace97ab7f03d1369c7525cab8a7bf389a669440c4081babd950c44d',
+      '5eff8ad67a071a16d39ca79e0a60ab19f0bc9d2649a2dd3b1c1104f3c5f549ff',
+      'f81ba6ceb70f666a27df5b7d5d9ed93bc7051f3b0b03887d99240baa35c65fcd',
+      'c73be443211957f82aedd9291672c98610acb4b29ac5655a1405263fdab1a718',
+    ]],
+    [9, 13, 11, 7, [
+      '0771f365340e4cfae77dead6f623c3ef8a6770cfbb9bc8be995d3e5609547b91',
+      '5d84261e3bec91dd90e0880bc53240729d890c3fbecdc8472c2a9e32178335e2',
+      '8b558bad85f51dbd40ad76f20efe02b846d4632517adb09bb360494817d26faf',
+      '7b7a1e8c2f5f39fda83d8d0e41abd071fd199844dc040ad0d7fcc7ab4d865843',
+      '565581b551729e38bc3e882a8868e0444df38c264ec6368d34368e4588081a83',
+    ]],
+    [17, 41, 9, 8, [
+      '5a84bd3f7bedd3455b24dd70a3ae619872a77fb88bf1d540a18d4f58fc20d08a',
+      '36a460f9495ac4dd69e508f0bf1b82134eda8aedc226a7c6062db3b891c3dbad',
+      '7931603b84db46e6fe4f6d543ce075db5494394d36ede0897e1056cd4cf8bcd0',
+      'dfdab7bb6c91fc94f1586211ab819e71d7e6d26bf68edfe9637d763b7a1dd474',
+      '1876dcbf74e77225f45f0fea23faa153ca6fb39a8bf79e7f7863ffc5ce2966ad',
+    ]],
+    [13, 32, 10, 8, [
+      '24be49cf6742503e9fbcdf3e39c6d0723705fb188109f87e0ddcbb5dc398d726',
+      '1e3feddf0b2f60fee6dc46fb98d03b4455a6048bc043f8bd90a911d16b368f0c',
+      'f17fe05d2fbde55c5467a6686c1c24268c499547ad413c1da7f529ec12904581',
+      '5c4f3833ce98ab9a51dc758463e62e590f2cfe420e9d8004bd7a9a4bb286a301',
+      '32ee8ae870b23b91b6cfdba84d5d628b5344cb2c3bbfd08123e8fa0cbab4a475',
+    ]],
+    [13, 63, 10, 8, [
+      '24be49cf6742503e9fbcdf3e39c6d0723705fb188109f87e0ddcbb5dc398d726',
+      'cffdd254703645c772380674df636ea065665afa914f2c026bb44b61ae36d5bf',
+      '7007d89e94c6225ec9af4c3a16d71327b5b505f7f9c8dad40f4865ff21b77d3d',
+      '4e82a9545b4fa611d524cb311b9f0071010d0a862a7f046615d343618150833a',
+      'e80232b4d18d0bb7e794be263ba937626f383f9917d4b8a737ba893a8f752293',
+    ]],
+  ] as const
+  for (const [width, height, hotX, hotY, hashes] of observations) {
+    for (const [pattern, expected] of hashes.entries()) {
+      const rows = Array.from({ length: height }, (_, row) => {
+        const y = height - 1 - row
+        return Array.from({ length: width }, (_, x) => {
+          // The five independently authored source fields, in native probe
+          // order: X only, Y only, asymmetric XY, checker and RGB impulses.
+          const axis = pattern === 0 ? x : y,
+            r = pattern < 2 ? (17 * axis + 3) & 255 : pattern === 2 ? (17 * x + 37 * y + 3) & 255
+              : pattern === 3 ? 255 * (x % 2) : x === 1 && y === 1 ? 255 : 0,
+            g = pattern < 2 ? (73 * axis + 91) & 255 : pattern === 2 ? (73 * x + 11 * y + 91) & 255
+              : pattern === 3 ? 255 * (y % 2) : x === Math.floor(width / 2) && y === Math.floor(height / 2) ? 255 : 0,
+            b = pattern < 2 ? (127 * axis + 113) & 255 : pattern === 2 ? (127 * x + 61 * y + 113) & 255
+              : pattern === 3 ? 255 * ((x + y) % 2) : x === width - 2 && y === height - 2 ? 255 : 0
+          return [b, g, r, 0]
+        }).flat()
+      }), bytes = cursorFile([{ width, height, hotspot: [Math.floor(width / 3), Math.floor(height / 4)],
+        payload: cursorDib({ width, height, depth: 32, xorRows: rows }) }]),
+        result = loadedImage(await loadCursorBytes(bytes, { png }))
+      assert.equal(result.mode, 'and-xor')
+      assert.deepEqual(result.hotspot, { x: hotX, y: hotY })
+      assert.equal(createHash('sha256').update(result.data.filter((_, at) => at % 4 !== 3)).digest('hex'),
+        expected, `${width}x${height}, field ${pattern}`)
+    }
+  }
+})
+
+test('cursor smooth scaling matches complete native small DIB and PNG alpha planes', async () => {
+  // Original 13x9 fixtures in both 089 archives. The first two digests retain
+  // all four raw channels; the zero-alpha DIB compares only its XOR RGB.
+  for (const [encoding, alpha, expected] of [
+    ['dib', true, '72677c0170617b041807f73d7b4cc5de17379d097b4d9c9ce655e1be54cef5ef'],
+    ['png', true, 'b09fc89a66dc7dbc43bf940fc1dff681be715c0485549dfd4a1b8d3f93f10900'],
+    ['dib', false, '81bd692ba398e499a34cc196bc756414b5d7e1e6d81e26c412fdcaed4c4fb1c1'],
+  ] as const) {
+    const pixels: number[] = [], rows: number[][] = []
+    for (let y = 0; y < 9; y++) {
+      const row: number[] = []
+      for (let x = 0; x < 13; x++) {
+        const r = encoding === 'dib' ? 37 + x * 3 : 31 + x * 5,
+          g = encoding === 'dib' ? 71 + y * 5 : 61 + y * 7,
+          b = (encoding === 'dib' ? 113 : 127) + x + y, a = alpha ? x + y * 13 : 0
+        pixels.push(r, g, b, a); row.push(b, g, r, a)
+      }
+      rows.push(row)
+    }
+    const payload = encoding === 'dib'
+      ? cursorDib({ width: 13, height: 9, depth: 32, xorRows: [...rows].reverse() }) : cursorPng(13, 9, pixels),
+      result = loadedImage(await loadCursorBytes(cursorFile([{ width: 13, height: 9,
+        hotspot: [12, 8], payload }]), { png }))
+    assert.equal(result.mode, alpha ? 'alpha' : 'and-xor')
+    assert.deepEqual(result.hotspot, { x: 30, y: 28 })
+    assert.equal(createHash('sha256').update(alpha ? result.data : result.data.filter((_, at) => at % 4 !== 3))
+      .digest('hex'), expected, `${encoding}, alpha ${alpha}`)
+  }
+})
+
+test('cursor load keeps every ANI frame and step across selected image scaling', async () => {
   const source = asset([[image(13, 9, 32, 37, [12, 8])], [image(48, 48, 32, 111, [12, 24])],
     [image(32, 32, 32, 7, [17, 23])]], 'ani')
   source.sequence = [2, 0, 2, 1, 0]

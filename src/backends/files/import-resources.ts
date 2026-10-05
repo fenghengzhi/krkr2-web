@@ -1,5 +1,5 @@
 import { inflate, inflateRaw } from './blob-source.ts'
-import { hasXp3Signature, readXp3 } from '../../formats/xp3/archive.ts'
+import { findXp3Archive, hasXp3Signature, readXp3 } from '../../formats/xp3/archive.ts'
 import { readZip } from '../../formats/zip/archive.ts'
 import { MAX_RESOURCE_BYTES, type Resource } from '../../engine/ports/storage.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
@@ -59,9 +59,11 @@ export async function importSources(
         prefix[0] === 0x50 &&
         prefix[1] === 0x4b &&
         ((prefix[2] === 3 && prefix[3] === 4) || (prefix[2] === 5 && prefix[3] === 6))
-    const entries =
-      /\.xp3$/i.test(name) || hasXp3Signature(prefix)
-        ? await readXp3(source, inflate, { checkpoint })
+    const xp3 = /\.xp3$/i.test(name) || hasXp3Signature(prefix) ? source
+      : prefix[0] === 0x4d && prefix[1] === 0x5a
+        ? (await findXp3Archive(source, { checkpoint }))?.source : undefined,
+      entries = xp3
+        ? await readXp3(xp3, inflate, { checkpoint })
         : /\.zip$/i.test(name) || zipMagic
           ? await readZip(source, {
               inflate: (bytes, size) => inflateRaw(bytes, size, checkpoint),

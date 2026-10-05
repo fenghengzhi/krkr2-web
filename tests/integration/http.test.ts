@@ -8,11 +8,12 @@ import { gameIdentity } from '../../src/player/game-identity.ts'
 import { headless } from '../helpers/headless.ts'
 import { httpServer, until } from '../helpers/http-server.ts'
 import { remoteArchive } from '../helpers/remote-archive.ts'
+import { embedXp3 } from '../helpers/xp3-fixtures.ts'
 const checkpoint = async () => {}
 
-for (const kind of ['xp3', 'zip'] as const)
+for (const kind of ['xp3', 'zip', 'embedded-xp3'] as const)
   test(`remote ${kind} is sniffed without extension, starts TJS lazily and keeps save overlays local`, async (t) => {
-    const bytes = remoteArchive(kind),
+    const bytes = kind === 'embedded-xp3' ? embedXp3(remoteArchive('xp3'), 16) : remoteArchive(kind),
       server = await httpServer({ '/download': { bytes, etag: '"v1"' } })
     t.after(() => server.close())
     const pool = new HttpRangePool()

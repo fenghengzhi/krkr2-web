@@ -2,6 +2,41 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 
+type MoveObservation = { dropped: number; entries: Record<string, unknown>[] }
+declare global { interface Window { beginMoveObservation?: MoveObservation } }
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    const observation = window.beginMoveObservation = { dropped: 0, entries: [] } as MoveObservation
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'gotpointercapture',
+      'lostpointercapture', 'focus', 'blur', 'scroll']) {
+      window.addEventListener(type, (event) => {
+        if (observation.entries.length >= 256) { observation.dropped++; return }
+        const target = event.target instanceof Element ? event.target : undefined,
+          pointer = event instanceof PointerEvent ? event : undefined,
+          stage = document.querySelector('.game-desktop'),
+          moving = document.querySelector<HTMLElement>('.game-window-dragging')
+        observation.entries.push({
+          sequence: observation.entries.length, time: performance.now(), type,
+          trusted: event.isTrusted, target: target ? `${target.tagName}.${target.className}` : String(event.target),
+          pointerId: pointer?.pointerId, buttons: pointer?.buttons,
+          x: pointer?.clientX, y: pointer?.clientY, scrollX, scrollY,
+          stageScroll: stage ? [stage.scrollLeft, stage.scrollTop] : undefined,
+          moving: moving?.dataset.windowId,
+          position: moving ? [moving.style.getPropertyValue('--game-window-left'),
+            moving.style.getPropertyValue('--game-window-top')] : undefined,
+        })
+      }, { capture: true, passive: true })
+    }
+  })
+})
+test.afterEach(async ({ page }, info) => {
+  await info.attach('begin-move-dom-observation', {
+    body: JSON.stringify(await page.evaluate(() => window.beginMoveObservation ?? null), null, 2),
+    contentType: 'application/json',
+  })
+})
+
 function source(sole: boolean): string {
   return String.raw`
 System.exitOnWindowClose=false;
@@ -68,7 +103,10 @@ async function box(surface: Locator) {
 async function begin(page: Page, surface: Locator, call: number, returns: number) {
   const canvas = surface.locator('canvas[data-window-id]')
   await canvas.scrollIntoViewIfNeeded()
-  const rectangle = await box(canvas), point = { x: rectangle.x + 36, y: rectangle.y + 32 }
+  // Console interaction can scroll the page between moves. Keep the baseline
+  // in the same viewport coordinate system as the following pointer gesture.
+  const initial = await box(surface), rectangle = await box(canvas),
+    point = { x: rectangle.x + 36, y: rectangle.y + 32 }
   await page.mouse.move(point.x, point.y)
   await page.mouse.down()
   await expect(page.getByText(`begin-move:enter:${call}`, { exact: true })).toBeVisible()
@@ -77,7 +115,7 @@ async function begin(page: Page, surface: Locator, call: number, returns: number
   // suspended. An evaluate RPC would queue behind that callback instead.
   await expect(page.getByText(`begin-move:pending:${call}:${returns}:1`, { exact: true })).toBeVisible()
   await expect(page.getByText(new RegExp(`^begin-move:return:${call}:`))).toHaveCount(0)
-  return point
+  return { ...point, initial }
 }
 
 async function noCompletionInput(page: Page) {
@@ -96,7 +134,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       await evaluate(page, `(function(){
         global.moveTarget.beginMove();
         return global.moveTarget.left+","+global.moveTarget.top;
-      })()`, '60,40')
+      })()`.replace(/\s*\n\s*/g, ' '), '60,40')
       await expect(target).toHaveClass(/game-window-embedded/)
       await expect(target).not.toHaveClass(/game-window-dragging/)
       await expect(page.locator('.game-window-flow-space')).toHaveCount(0)
@@ -105,7 +143,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
         global.moveTarget.beginMove();
         global.moveTarget.visible=true;
         return global.moveTarget.left+","+global.moveTarget.top;
-      })()`, '60,40')
+      })()`.replace(/\s*\n\s*/g, ' '), '60,40')
       await expect(target).toBeVisible()
       await expect(target).toHaveClass(/game-window-embedded/)
       await expect(page.locator('.game-window-dragging,.game-window-flow-space')).toHaveCount(0)
@@ -118,7 +156,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       target = game.surface('Begin move target')
     try {
       await expect(target).not.toHaveClass(/game-window-embedded/)
-      const initial = await box(target), first = await begin(page, target, 1, 0)
+      const first = await begin(page, target, 1, 0), initial = first.initial
       await page.mouse.move(first.x + 70, first.y + 35, { steps: 5 })
       await expect.poll(async () => Math.round((await box(target)).x - initial.x)).toBe(70)
       await expect.poll(async () => Math.round((await box(target)).y - initial.y)).toBe(35)
@@ -132,7 +170,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       await noCompletionInput(page)
       await info.attach('begin-move-borderless-committed', { body: await page.screenshot(), contentType: 'image/png' })
 
-      const committed = await box(target), second = await begin(page, target, 2, 1)
+      const second = await begin(page, target, 2, 1), committed = second.initial
       await page.mouse.move(second.x + 45, second.y + 20, { steps: 3 })
       await expect.poll(async () => Math.round((await box(target)).x - committed.x)).toBe(45)
       await page.keyboard.press('Escape')
@@ -173,7 +211,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
     try {
       await expect(target).toHaveClass(/game-window-embedded/)
       await canvas.scrollIntoViewIfNeeded()
-      const original = await box(target), originalCanvas = await box(canvas), first = await begin(page, target, 1, 0)
+      const originalCanvas = await box(canvas), first = await begin(page, target, 1, 0),
+        original = first.initial
       await expect(target).not.toHaveClass(/game-window-embedded/)
       expect(Math.abs((await box(canvas)).width - originalCanvas.width)).toBeLessThan(1.5)
       expect(Math.abs((await box(canvas)).height - originalCanvas.height)).toBeLessThan(1.5)
@@ -187,7 +226,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       await expect(page.locator('.game-window-flow-space')).toHaveCount(0)
       await noCompletionInput(page)
 
-      const restored = await box(target), second = await begin(page, target, 2, 1)
+      const second = await begin(page, target, 2, 1), restored = second.initial
       await page.mouse.move(second.x + 55, second.y + 30, { steps: 4 })
       await page.mouse.up()
       await expect(page.getByText(/^begin-move:return:2:/)).toBeVisible()

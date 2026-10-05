@@ -4,6 +4,7 @@ import {
   type WindowHostView,
 } from '../../src/app/game-windows.ts'
 import { WindowState } from '../../src/engine/scene/window.ts'
+import type { WindowMoveMessage } from '../../src/engine/ports/window-move.ts'
 
 function observePointerCapture(target: HTMLElement) {
   const limit = 96,
@@ -256,6 +257,9 @@ export function installModalWindowHost() {
     windows.attach(windowId, 1)
     windows.update(windowId, view, false, 1)
   }
+  const moves = new Map<number, { abort: AbortController; messages: WindowMoveMessage[];
+    settled: boolean; error?: string }>()
+  let nextMove = 1
   return {
     update(windowId: number, changes: Partial<WindowHostView>) {
       const view = { ...requiredView(windowId), ...changes }
@@ -271,6 +275,30 @@ export function installModalWindowHost() {
         kind === 'move' ? '.game-window-header' : '.game-window-resize',
       )!
       return observePointerCapture(target)
+    },
+    observeCanvasPointerCapture(windowId: number) {
+      return observePointerCapture(surface(windowId).canvas)
+    },
+    beginScriptMove(windowId: number, pointerId: number) {
+      const current = surface(windowId), view = requiredView(windowId), requestId = nextMove++,
+        record = { abort: new AbortController(), messages: [] as WindowMoveMessage[],
+          settled: false, error: undefined as string | undefined }
+      moves.set(requestId, record)
+      // Match the production Player -> BrowserInput handoff: revoke game
+      // canvas capture, then let GameWindows own the still-held real pointer.
+      current.canvas.releasePointerCapture(pointerId)
+      void windows.beginMove({ requestId, windowId, left: view.left, top: view.top }, 1,
+        (message) => { record.messages.push(message) }, record.abort.signal).then(
+        () => { record.settled = true },
+        (error: unknown) => { record.settled = true; record.error = String(error) },
+      )
+      return requestId
+    },
+    scriptMove(requestId: number) {
+      const record = moves.get(requestId)
+      if (!record) throw new Error(`Unknown fixture move ${requestId}`)
+      return { settled: record.settled, error: record.error,
+        messages: record.messages.map((message) => ({ ...message })) }
     },
     snapshot(windowId: number) {
       const { element, canvas } = surface(windowId),
@@ -298,6 +326,7 @@ export function installModalWindowHost() {
       }
     },
     dispose() {
+      for (const move of moves.values()) move.abort.abort()
       windows.dispose()
       stage.remove()
     },

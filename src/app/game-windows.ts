@@ -563,7 +563,10 @@ export function createGameWindows(
           }, options)
           browser.addEventListener('blur', () => finish(false), { signal: local.signal })
           surface.element.addEventListener('lostpointercapture', (event) => {
-            if (event.pointerId === observed.id) finish(false)
+            // Releasing the game's canvas capture can deliver its queued loss
+            // after this ancestor has acquired the same pointer. That event
+            // bubbles through us but does not revoke the host move's capture.
+            if (event.target === surface.element && event.pointerId === observed.id) finish(false)
           }, options)
           // These compatibility events follow pointer events separately. Never
           // let the OS-style move loop turn them into game mouse callbacks.

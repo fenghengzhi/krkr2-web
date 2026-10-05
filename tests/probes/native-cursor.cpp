@@ -456,6 +456,20 @@ std::vector<Fixture> fixtures() {
         }
     }
     if (output.size() != 125) throw std::runtime_error("Color stage fixture inventory is incomplete");
+    // 090 holdouts preserve all 125 prior identities/bytes. Straddle the
+    // target size on separate axes, reduce larger nonintegral rectangles,
+    // and exercise unequal integer ratios independently of the smooth path.
+    // These are source fields, not expected pixels from a candidate scaler.
+    for (const auto shape : {std::pair<unsigned, unsigned>{31, 33}, {33, 31}, {80, 80}, {127, 255},
+        {64, 96}, {96, 64}}) {
+        for (const char* pattern : {"x-axis", "y-axis", "xy-asymmetric", "checker", "impulses"}) {
+            Image i; i.width = shape.first; i.height = shape.second;
+            i.hotX = i.width / 3; i.hotY = i.height / 4; i.colorPattern = pattern;
+            add("color-stages-" + std::to_string(i.width) + "x" + std::to_string(i.height) + "-" + i.colorPattern,
+                {i}, "scaling");
+        }
+    }
+    if (output.size() != 155) throw std::runtime_error("Color holdout fixture inventory is incomplete");
     return output;
 }
 

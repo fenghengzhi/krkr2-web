@@ -5,8 +5,43 @@ import { resourceReadBounds } from '../../engine/storage/resource-source.ts'
 export { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 
 const signature = [0x58, 0x50, 0x33, 0x0d, 0x0a, 0x20, 0x0a, 0x1a, 0x8b, 0x67, 0x01]
-export function hasXp3Signature(bytes: Uint8Array): boolean {
-  return signature.every((byte, i) => bytes[i] === byte)
+export function hasXp3Signature(bytes: Uint8Array, offset = 0): boolean {
+  return signature.every((byte, i) => bytes[offset + i] === byte)
+}
+
+/** KRKR2's TVPGetXP3ArchiveOffset accepts an XP3 at zero, or the first
+ * 16-byte-aligned mark after an MZ header. It does not parse or execute PE
+ * code. Keep the archive-relative index/segment offsets in a bounded view. */
+export async function findXp3Archive(source: ByteSource,
+  options: { checkpoint?: () => void | Promise<void> } = {},
+): Promise<{ offset: number; source: ByteSource } | undefined> {
+  if (!Number.isSafeInteger(source.size) || source.size < 0) throw new Error('Invalid XP3 source size')
+  const read = async (offset: number, length: number) => {
+    resourceReadBounds(source.size, offset, length)
+    await options.checkpoint?.()
+    const bytes = await source.read(offset, length)
+    await options.checkpoint?.()
+    if (bytes.length !== length) throw new Error('Short XP3 archive read')
+    return bytes
+  }
+  const prefix = await read(0, Math.min(11, source.size))
+  if (hasXp3Signature(prefix)) return { offset: 0, source }
+  if (prefix[0] !== 0x4d || prefix[1] !== 0x5a) return
+  const blockSize = 256 * 1024
+  for (let offset = 16; offset <= source.size - signature.length; offset += blockSize) {
+    const bytes = await read(offset, Math.min(blockSize, source.size - offset))
+    for (let at = 0; at + signature.length <= bytes.length; at += 16) {
+      if (!(at % (64 * 1024))) await options.checkpoint?.()
+      if (!hasXp3Signature(bytes, at)) continue
+      const base = offset + at, size = source.size - base
+      return { offset: base, source: { size,
+        async read(offset, length) {
+          resourceReadBounds(size, offset, length)
+          return read(base + offset, length)
+        },
+      } }
+    }
+  }
 }
 interface Segment {
   compressed: boolean
@@ -24,9 +59,12 @@ export async function readXp3(
   inflate: Inflater,
   options: { verifyAdler32?: boolean; checkpoint?: () => void | Promise<void> } = {},
 ): Promise<Xp3Resource[]> {
+  const located = await findXp3Archive(source, options)
+  if (!located) throw new Error('XP3 signature not found')
+  source = located.source
   const header = await source.read(0, 19)
   if (!hasXp3Signature(header))
-    throw new Error('Unsupported XP3 signature (embedded EXE archives are not supported)')
+    throw new Error('Unsupported XP3 signature')
   let pointer = 11
   const resources: Xp3Resource[] = []
   const visited = new Set<number>()

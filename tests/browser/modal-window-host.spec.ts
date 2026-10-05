@@ -67,6 +67,85 @@ async function launch(page: Page) {
 const first = '.game-window[data-window-id="11"]',
   second = '.game-window[data-window-id="22"]'
 
+test('beginMove distinguishes released descendant capture from loss of its own real capture', async ({ page }, info) => {
+  const errors = await launch(page), canvas = page.locator(`${first} canvas`)
+  await page.evaluate(() => {
+    window.modalWindowHost.update(11, { borderStyle: 0 })
+    window.modalWindowCapture = window.modalWindowHost.observeCanvasPointerCapture(11)
+    document.querySelector<HTMLCanvasElement>('.game-window[data-window-id="11"] canvas')!
+      .addEventListener('pointerdown', (event) => {
+        (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId)
+      })
+  })
+  try {
+    for (const terminal of ['commit', 'cancel'] as const) {
+      await page.evaluate(() => window.modalWindowHost.update(11, { left: 20, top: 20 }))
+      await canvas.scrollIntoViewIfNeeded()
+      const bounds = await canvas.boundingBox()
+      if (!bounds) throw new Error('Capture handoff canvas is missing')
+      const point = { x: bounds.x + 30, y: bounds.y + 30 }
+      await page.mouse.move(point.x, point.y)
+      await page.mouse.down()
+      // Processing another real pointer event establishes the pending canvas
+      // capture before the later host handoff. No capture event is synthesized.
+      await page.mouse.move(point.x + 1, point.y + 1)
+      expect(await page.evaluate(() => window.modalWindowCapture.snapshot().nativeHasCapture)).toBe(true)
+      const setup = await page.evaluate((phase) => {
+        const observation = window.modalWindowCapture.snapshot(), pointerId = observation.pointerId
+        if (pointerId === undefined) throw new Error('No observed real pointer')
+        if (!observation.entries.some((entry) => entry.name === 'gotpointercapture' && entry.isTrusted))
+          throw new Error('The canvas has not received its real capture event')
+        window.modalWindowCapture.phase(`handoff-${phase}`)
+        return { pointerId, requestId: window.modalWindowHost.beginScriptMove(11, pointerId) }
+      }, terminal)
+      await expect(page.locator(first)).toHaveClass(/game-window-dragging/)
+      await page.mouse.move(point.x + 31, point.y + 21)
+      const observation = await page.evaluate(() => window.modalWindowCapture.snapshot())
+      expect(observation.entries.some((entry) => entry.phase === `handoff-${terminal}` &&
+        entry.name === 'lostpointercapture' && entry.isTrusted &&
+        String(entry.eventTarget).startsWith('canvas'))).toBe(true)
+      await expect(page.locator(first)).toHaveClass(/game-window-dragging/)
+      expect(await page.evaluate(() => window.modalWindowHost.snapshot(11))).toMatchObject({
+        left: '50px', top: '40px', dragging: true,
+      })
+      if (terminal === 'cancel') {
+        await page.evaluate((pointerId) => {
+          document.querySelector<HTMLElement>('.game-window[data-window-id="11"]')!
+            .releasePointerCapture(pointerId)
+        }, setup.pointerId)
+        await page.mouse.move(point.x + 32, point.y + 22)
+      }
+      await page.mouse.up()
+      await expect.poll(() => page.evaluate((id) => window.modalWindowHost.scriptMove(id).settled,
+        setup.requestId)).toBe(true)
+      const result = await page.evaluate((id) => window.modalWindowHost.scriptMove(id), setup.requestId)
+      expect(result.error).toBeUndefined()
+      expect(result.messages.filter((message) => message.type !== 'update')).toEqual([
+        terminal === 'commit'
+          ? { type: 'commit', requestId: setup.requestId, windowId: 11,
+              sequence: result.messages.at(-1)!.sequence, left: 50, top: 40 }
+          : { type: 'cancel', requestId: setup.requestId, windowId: 11,
+              sequence: result.messages.at(-1)!.sequence },
+      ])
+      expect(await page.evaluate(() => window.modalWindowHost.snapshot(11))).toMatchObject({
+        left: terminal === 'commit' ? '50px' : '20px',
+        top: terminal === 'commit' ? '40px' : '20px', dragging: false,
+      })
+    }
+    expect(errors).toEqual([])
+  } finally {
+    await page.mouse.up()
+    await info.attach('begin-move-capture-handoff', {
+      body: JSON.stringify(await page.evaluate(() => window.modalWindowCapture.snapshot()), null, 2),
+      contentType: 'application/json',
+    })
+    await page.evaluate(() => {
+      window.modalWindowCapture.restore()
+      window.modalWindowHost.dispose()
+    })
+  }
+})
+
 test('modal blocking preserves Window visibility and focusability while excluding its DOM from focus', async ({
   page,
 }) => {

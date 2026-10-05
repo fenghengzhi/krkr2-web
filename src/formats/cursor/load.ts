@@ -118,12 +118,13 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
     pointSample = image.depth < 32 ||
       (image.width >= width && image.height >= height &&
         image.width % width === 0 && image.height % height === 0)
-  // 087's complete DIB/PNG 48-to-32 planes distinguish X ratio precision;
-  // 088's independent asymmetric/checker color fields distinguish Y as well.
-  // Narrow each ratio once to binary32, then accumulate in binary64. Smaller
-  // enlargement byte-stage differences remain visible in the strict gate.
-  const stepX = Math.fround((image.width - 1) / (width - 1)),
-    stepY = Math.fround((image.height - 1) / (height - 1))
+  // 089's two native desktops distinguish a 16-bit fractional step from the
+  // earlier binary32 candidate: it matches all 41 complete smooth planes,
+  // including independent axes, asymmetric/checker fields and integral-Y
+  // rows. Quantize each endpoint ratio once, then accumulate exactly in
+  // binary64. The separate point/half-alpha paths do not use these steps.
+  const stepX = Math.floor((image.width - 1) * 65536 / (width - 1)) / 65536,
+    stepY = Math.floor((image.height - 1) * 65536 / (height - 1)) / 65536
   let positionY = 0
   for (let row = 0; row < height; row++, positionY += stepY) {
     // Native planes originate from bottom-up DIB memory. Keep its traversal
@@ -167,8 +168,8 @@ async function resize(image: CursorImage, profile: CursorLoadProfile, options: C
         // 081's raw color planes distinguish the axis order and byte stages:
         // an exact source row sums its horizontal terms before truncating;
         // other rows truncate each horizontal term before the vertical sum.
-        // Retain strict full-plane/native drawing comparisons: floating-point
-        // edge coordinates beyond these observed cases remain under review.
+        // Retain strict full-plane/native drawing comparisons for the whole
+        // profile: unobserved source geometries remain evidence boundaries.
         const sx = Math.min(image.width - 1, positionX),
           x0 = Math.floor(sx), x1 = Math.min(image.width - 1, x0 + 1), fx = sx - x0
         for (let channel = 0; channel < 4; channel++) {
