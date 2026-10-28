@@ -10,6 +10,7 @@ import { httpServer, type HttpFixture } from '../helpers/http-server.ts'
 import { remoteArchive } from '../helpers/remote-archive.ts'
 import { zipFixture } from '../helpers/zip-fixtures.ts'
 import { evaluate } from '../helpers/browser-expression.ts'
+import { attachStartup, observeStartup } from '../helpers/startup-observation.ts'
 
 async function load(page: Page, name = 'game.zip') {
   await page
@@ -171,19 +172,36 @@ for (const [stage, source, error] of [
 ]) {
   test(`${stage} failure never publishes a partial game and cleans temporary files`, async ({
     page,
-  }) => {
+  }, info) => {
+    const errors: string[] = [], failures: unknown[] = [], steps: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await observeStartup(page)
     await injectLibraryWorker(page, source)
-    await page.goto('/?backend=asyncify')
-    await load(page)
-    await page.locator('#save-library').click()
-    await expect(page.locator('#library-operation')).toContainText(error)
-    await expect(page.locator('#cancel-library')).toBeHidden()
-    await expect(page.locator('.library-game')).toHaveCount(0)
-    expect(await libraryDirectories(page)).toEqual([])
-    await page.unroute('**/assets/library.worker-*.js*')
-    await page.reload()
-    await load(page, 'another.zip')
-    await save(page, 'After failure')
+    try {
+      await page.goto('/?backend=asyncify')
+      await load(page)
+      steps.push('first-game-ready')
+      await page.locator('#save-library').click()
+      await expect(page.locator('#library-operation')).toContainText(error)
+      await expect(page.locator('#cancel-library')).toBeHidden()
+      await expect(page.locator('.library-game')).toHaveCount(0)
+      expect(await libraryDirectories(page)).toEqual([])
+      steps.push('failed-import-rolled-back')
+      await attachStartup(page, info, 'before-reload', errors)
+      await page.unroute('**/assets/library.worker-*.js*')
+      await page.reload()
+      steps.push('reloaded-without-injected-fault')
+      await load(page, 'another.zip')
+      steps.push('replacement-game-ready')
+      await save(page, 'After failure')
+      steps.push('replacement-import-published')
+      expect(errors).toEqual([])
+    } catch (failure) { failures.push(failure) }
+    try { await attachStartup(page, info, 'final', errors) } catch (failure) { failures.push(failure) }
+    try { await info.attach('library-failure-recovery-stages', { contentType: 'application/json', body: JSON.stringify({ stage, steps, errors }) }) }
+    catch (failure) { failures.push(failure) }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'Library failure recovery or evidence collection failed', { cause: failures[0] })
   })
 }
 

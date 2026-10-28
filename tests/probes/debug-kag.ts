@@ -7,9 +7,18 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { resolve, sep, extname } from 'node:path'
 import { createHash } from 'node:crypto'
-import { chromium, firefox, webkit, expect } from '@playwright/test'
+import { chromium, firefox, webkit, expect, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
 
+interface DiagnosticResult {
+  browser: string
+  backend: string
+  status: 'unreported' | 'running' | 'passed' | 'failed'
+  error?: string
+  evidenceErrors: string[]
+  steps: string[]
+  [key: string]: unknown
+}
 const root = resolve('dist'),
   directory = process.argv[2] ?? 'out/verification/debug',
   out = directory + '/kag-diagnostics',
@@ -20,8 +29,14 @@ const root = resolve('dist'),
     .update(await readFile(root + '/index.html'))
     .digest('hex'),
   sourceSha256 = createHash('sha256').update(source).digest('hex'),
-  results: unknown[] = []
+  results: DiagnosticResult[] = probeBrowsers().flatMap((browser) =>
+    ['asyncify', 'jspi'].map((backend) => ({ browser, backend, status: 'unreported' as const,
+      evidenceErrors: [], steps: [] }))),
+  saveSummary = () => writeFile(directory + '/kag-diagnostics.json', JSON.stringify({
+    recordedAt: new Date().toISOString(), indexSha256, sourceSha256, results,
+  }, null, 2) + '\n')
 await mkdir(out, { recursive: true })
+await saveSummary()
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', 'http://localhost'),
@@ -49,20 +64,21 @@ await once(server, 'listening')
 const address = server.address()
 assert(address && typeof address !== 'string')
 try {
-  for (const name of probeBrowsers())
-    for (const backend of ['asyncify', 'jspi']) {
-      const browser = await { chromium, firefox, webkit }[name].launch(browserLaunchOptions),
-        context = await browser.newContext({ viewport: { width: 1280, height: 900 } }),
-        page = await context.newPage(),
+    for (const result of results) {
+      const name = result.browser as 'chromium' | 'firefox' | 'webkit', backend = result.backend,
         errors: string[] = [],
         prefix = `${out}/${name}-${backend}`
-      page.on('pageerror', (error) => errors.push(error.message))
-      await context.tracing.start({
-        screenshots: name !== 'webkit',
-        snapshots: true,
-        sources: true,
-      })
+      let browser: Browser | undefined, context: BrowserContext | undefined, page: Page | undefined,
+        tracing = false
+      result.status = 'running'
+      await saveSummary()
       try {
+        browser = await { chromium, firefox, webkit }[name].launch(browserLaunchOptions)
+        context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+        page = await context.newPage()
+        page.on('pageerror', (error) => errors.push(error.message))
+        await context.tracing.start({ screenshots: name !== 'webkit', snapshots: true, sources: true })
+        tracing = true
         await page.goto(`http://127.0.0.1:${address.port}/?backend=${backend}`)
         await page.locator('#files').setInputFiles([
           { name: 'kag3_template.xp3', mimeType: 'application/octet-stream', buffer: source },
@@ -82,6 +98,7 @@ try {
           },
         ])
         await expect(page.locator('#evaluate')).toBeEnabled({ timeout: 30000 })
+        result.steps.push('original-kag-ready')
         const exit = page.locator('.leave-fullscreen')
         if (await exit.isVisible()) await exit.click()
         await evaluate(
@@ -90,6 +107,7 @@ try {
           '1',
         )
         await expect(page.locator('#logs')).toContainText('KAG-diagnostic-primary')
+        result.steps.push('deliberate-conductor-error-logged')
         // The fixed KAG Initialize.tjs handler disables events before calling
         // System.inform(e.message), then restores them only after it returns.
         // Confirm this exact deliberate Conductor error through the real UI;
@@ -116,12 +134,14 @@ try {
         await expect(owner).toHaveAttribute('aria-disabled', 'true')
         await expect(page.getByText('KAG-diagnostic-recovered', { exact: true })).toHaveCount(0)
         await expect(confirm).toBeEnabled()
+        result.steps.push('original-handler-dialog-blocks-owner')
         await page.screenshot({ path: prefix + '-dialog.png', fullPage: true })
         await confirm.click()
         await expect(page.locator('.game-system-dialog')).toHaveCount(0)
         await expect(page.locator('#status')).toHaveText('运行中')
         await expect(owner).toHaveAttribute('data-blocked', 'false')
         await evaluate(page, 'System.eventDisabled', '0')
+        result.steps.push('confirmation-restores-events-and-owner')
         await evaluate(page, 'diagnosticSeen.join("\\n").indexOf("KAG-diagnostic-primary")>=0', '1')
         await evaluate(
           page,
@@ -129,6 +149,7 @@ try {
           '1',
         )
         await expect(page.getByText('KAG-diagnostic-recovered', { exact: true })).toBeVisible()
+        result.steps.push('original-conductor-recovers')
         await evaluate(page, 'System.eventDisabled', '0')
         await expect(page.locator('#save-status')).toContainText('已保存')
         const [download] = await Promise.all([
@@ -151,7 +172,8 @@ try {
         assert.deepEqual(errors, [])
         await writeFile(prefix + '.console.log', bytes)
         await page.screenshot({ path: prefix + '.png', fullPage: true })
-        results.push({
+        result.steps.push('exported-log-retains-primary-and-recovery')
+        Object.assign(result, {
           browser: name,
           backend,
           sourceSha256,
@@ -175,21 +197,27 @@ try {
           logSha256: createHash('sha256').update(bytes).digest('hex'),
           bytes: bytes.length,
         })
-        await context.tracing.stop()
-        console.log(`PASS ${name}/${backend}: original KAG error logging and recovery`)
+        result.status = 'passed'
       } catch (error) {
-        await page.screenshot({ path: prefix + '-failure.png', fullPage: true }).catch(() => {})
-        await writeFile(
-          prefix + '-failure.txt',
-          await page
-            .locator('#logs')
-            .innerText()
-            .catch(() => ''),
-        )
-        await context.tracing.stop({ path: prefix + '.zip' })
-        throw error
+        result.status = 'failed'
+        result.error = error instanceof Error ? error.stack ?? error.message : String(error)
+        // Each backend owns its outcome. A failed first backend must not erase
+        // its identity or prevent attempting the independent second backend.
+        if (page) {
+          try { await page.screenshot({ path: prefix + '-failure.png', fullPage: true, timeout: 5000 }) }
+          catch (failure) { result.evidenceErrors.push('Failure screenshot: ' + String(failure)) }
+          try { await writeFile(prefix + '-failure.txt', await page.locator('#logs').innerText({ timeout: 3000 })) }
+          catch (failure) { result.evidenceErrors.push('Failure log: ' + String(failure)) }
+        }
       } finally {
-        await browser.close()
+        try { if (tracing) await context!.tracing.stop({ path: prefix + '.zip' }) }
+        catch (error) { result.evidenceErrors.push('Trace: ' + String(error)) }
+        try { await browser?.close() }
+        catch (error) { result.evidenceErrors.push('Browser cleanup: ' + String(error)) }
+        result.errors = [...errors]
+        if (errors.length || result.evidenceErrors.length) result.status = 'failed'
+        await saveSummary()
+        console.log(`${result.status.toUpperCase()} ${name}/${backend}: original KAG error logging and recovery`)
       }
     }
   assert.equal(
@@ -198,19 +226,8 @@ try {
       .digest('hex'),
     indexSha256,
   )
-  await writeFile(
-    directory + '/kag-diagnostics.json',
-    JSON.stringify(
-      {
-        verifiedAt: new Date().toISOString(),
-        indexSha256,
-        sourceSha256,
-        results,
-      },
-      null,
-      2,
-    ) + '\n',
-  )
+  await saveSummary()
+  assert(results.every((result) => result.status === 'passed'), 'Original KAG diagnostics did not pass every backend; inspect kag-diagnostics.json')
 } finally {
   server.closeAllConnections()
   await new Promise<void>((resolve) => server.close(() => resolve()))

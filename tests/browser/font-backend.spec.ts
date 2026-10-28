@@ -1,9 +1,10 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { transformWithOxc } from 'vite'
+import { runFontWorker } from '../helpers/font-worker.ts'
 
 // Serve actual source modules to an isolated Worker, with the production font assets.
-async function runWorker(page: Page, body: string, data: unknown) {
+async function runWorker(page: Page, testInfo: TestInfo, body: string, data: unknown) {
   const files = new Set([
     'src/backends/text/browser/graphics.ts',
     'src/backends/text/browser/families.ts',
@@ -15,6 +16,7 @@ async function runWorker(page: Page, body: string, data: unknown) {
     'src/formats/font/vertical-substitutions.ts',
     'src/engine/scheduler/control.ts',
     'src/formats/image/bmp.ts',
+    'src/formats/image/selection.ts',
   ])
   await page.route('**/__font-test/**', async (route) => {
     const path = new URL(route.request().url()).pathname.slice('/__font-test/'.length)
@@ -23,45 +25,26 @@ async function runWorker(page: Page, body: string, data: unknown) {
     await route.fulfill({ contentType: 'text/javascript', body: compiled.code })
   })
   await page.goto('/')
-  return await page.evaluate(
-    async ({ body, data }) => {
-      const code = `
-import {BrowserGraphics} from '${location.origin}/__font-test/src/backends/text/browser/graphics.ts';
-import {loadFontKernel} from '${location.origin}/__font-test/src/backends/text/freetype/module.ts';
-import {ExecutionControl} from '${location.origin}/__font-test/src/engine/scheduler/control.ts';
+  const origin = new URL(page.url()).origin
+  return await runFontWorker(page, testInfo, {
+    name: 'font-backend', modulePrefix: '/__font-test/', data,
+    source: `
+import {BrowserGraphics} from '${origin}/__font-test/src/backends/text/browser/graphics.ts';
+import {loadFontKernel} from '${origin}/__font-test/src/backends/text/freetype/module.ts';
+import {ExecutionControl} from '${origin}/__font-test/src/engine/scheduler/control.ts';
 const font={height:20,face:'',angle:0,bold:false,italic:false,underline:false,strikeout:false};
-const load=()=>loadFontKernel('${location.origin}/fonts/manifest.json',new ExecutionControl());
+const load=()=>loadFontKernel('${origin}/fonts/manifest.json',new ExecutionControl());
 const check=(condition,message)=>{if(!condition)throw new Error(message)};
-self.onmessage=async({data})=>{try{${body}}catch(e){postMessage({error:String(e),stack:e.stack})}};`
-      const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' })),
-        worker = new Worker(url, { type: 'module' })
-      try {
-        return await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error('Font Worker timed out')), 12000)
-          worker.onmessage = (e) => {
-            clearTimeout(timer)
-            resolve(e.data)
-          }
-          worker.onerror = (e) => {
-            clearTimeout(timer)
-            reject(new Error(e.message))
-          }
-          worker.postMessage(data)
-        })
-      } finally {
-        worker.terminate()
-        URL.revokeObjectURL(url)
-      }
-    },
-    { body, data },
-  )
+self.onmessage=async({data})=>{try{${body}}catch(e){postMessage({error:String(e),stack:e.stack})}};`,
+  })
 }
 test('Worker file glyphs match native coverage and missing glyphs use browser fallback only where allowed', async ({
   page,
-}) => {
+}, testInfo) => {
   const reference = JSON.parse(await readFile('tests/fixtures/font-geometry/freetype.json', 'utf8'))
   const result = await runWorker(
     page,
+    testInfo,
     `
 const backend=new BrowserGraphics(load),loaded=await backend.loadFont(new Uint8Array(data.bytes)),spec={...font,face:loaded.face};
 for(const row of data.cases){
@@ -88,9 +71,10 @@ loaded.dispose();backend.dispose();postMessage({cases:data.cases.length,fallback
 
 test('font backend retries failed loads, isolates families and releases pending or live kernels once', async ({
   page,
-}) => {
+}, testInfo) => {
   const result = await runWorker(
     page,
+    testInfo,
     `
 const kernel=await load();let closes=0,done=0,attempts=0;
 const close=kernel.module._krfont_close,finish=kernel.module._krfont_done;

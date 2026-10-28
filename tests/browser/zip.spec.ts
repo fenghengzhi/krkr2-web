@@ -1,6 +1,7 @@
 import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect, type Page } from '@playwright/test'
 import { zipFixture, centralRecords } from '../helpers/zip-fixtures.ts'
+import { attachStartup, observeStartup } from '../helpers/startup-observation.ts'
 
 async function expression(page: Page, source: string, value: string) {
   await expect(page.locator('#evaluate')).toBeEnabled()
@@ -113,35 +114,48 @@ for (const backend of ['asyncify', 'jspi']) {
   })
   test(`${backend}: stopping ZIP indexing cancels before the mount is published`, async ({
     page,
-  }) => {
+  }, info) => {
+    const failures: unknown[] = [], errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await observeStartup(page)
     await page.goto(`/?backend=${backend}`)
     test.skip(
       backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)),
       'JSPI unavailable',
     )
-    await page.locator('#status').evaluate((node) => {
-      document.documentElement.dataset.zipMountPublished = 'false'
-      const info = document.querySelector('#runtime-info')!
-      new MutationObserver(() => {
-        if (/· [1-9]\d* 个资源 ·/.test(info.textContent ?? ''))
-          document.documentElement.dataset.zipMountPublished = 'true'
-      }).observe(info, { childList: true, subtree: true, characterData: true })
-      const observer = new MutationObserver(() => {
-        if (node.textContent !== '就绪') return
-        observer.disconnect()
-        node.setAttribute('data-zip-stop-requested', 'true')
-        setTimeout(() => document.querySelector<HTMLButtonElement>('#stop')!.click(), 0)
+    try {
+      await page.locator('#status').evaluate((node) => {
+        document.documentElement.dataset.zipMountPublished = 'false'
+        const info = document.querySelector('#runtime-info')!
+        new MutationObserver(() => {
+          if (/· [1-9]\d* 个资源 ·/.test(info.textContent ?? ''))
+            document.documentElement.dataset.zipMountPublished = 'true'
+        }).observe(info, { childList: true, subtree: true, characterData: true })
+        const observer = new MutationObserver(() => {
+          if (node.textContent !== '就绪') return
+          observer.disconnect()
+          node.setAttribute('data-zip-stop-requested', 'true')
+          node.setAttribute('data-zip-ready-observed-at', String(performance.now()))
+          setTimeout(() => {
+            node.setAttribute('data-zip-stop-dispatched-at', String(performance.now()))
+            document.querySelector<HTMLButtonElement>('#stop')!.click()
+          }, 0)
+        })
+        observer.observe(node, { childList: true, subtree: true, characterData: true })
       })
-      observer.observe(node, { childList: true, subtree: true, characterData: true })
-    })
-    await page
-      .locator('#files')
-      .setInputFiles({ name: 'many.zip', mimeType: 'application/zip', buffer: largeIndex() })
-    await expect(page.locator('#status')).toHaveAttribute('data-zip-stop-requested', 'true')
-    await expect(page.locator('#stop')).toBeDisabled({ timeout: 1800 })
-    await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
-    await expect(page.locator('#logs')).not.toContainText('Resource not found: startup.tjs')
-    await expect(page.locator('#logs')).not.toContainText('ストレージ startup.tjs が見つかりません')
-    await expect(page.locator('html')).toHaveAttribute('data-zip-mount-published', 'false')
+      await page
+        .locator('#files')
+        .setInputFiles({ name: 'many.zip', mimeType: 'application/zip', buffer: largeIndex() })
+      await expect(page.locator('#status')).toHaveAttribute('data-zip-stop-requested', 'true')
+      await expect(page.locator('#stop')).toBeDisabled({ timeout: 1800 })
+      await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
+      await expect(page.locator('#logs')).not.toContainText('Resource not found: startup.tjs')
+      await expect(page.locator('#logs')).not.toContainText('ストレージ startup.tjs が見つかりません')
+      await expect(page.locator('html')).toHaveAttribute('data-zip-mount-published', 'false')
+      expect(errors).toEqual([])
+    } catch (error) { failures.push(error) }
+    try { await attachStartup(page, info, 'zip-index-stop', errors) } catch (error) { failures.push(error) }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'ZIP cancellation or evidence collection failed', { cause: failures[0] })
   })
 }

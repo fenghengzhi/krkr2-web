@@ -84,6 +84,12 @@ for (const { name, keys } of series) {
     for (const result of rows) {
       const row = report.results.find((row) => keyFor(row) === result.key)
       try {
+        if (name === 'kag-diagnostics' && row.status !== 'passed') {
+          result.status = row.status === 'failed' ? 'failed' : 'unreported'
+          result.error = row.error ?? `Probe status: ${row.status}`
+          result.probeStatus = row.status
+          continue
+        }
         if (name === 'kag-storage-selector' || name === 'kag-help' || name === 'kag-cursor') {
           // Preserve an interrupted/failed probe's identity before reading a
           // potentially absent per-case report.
@@ -202,7 +208,14 @@ for (const { name, keys } of series) {
           if (name === 'kag-panels') assert(row.originalMenuHandlers && row.originalShortcuts && row.independentVisibility)
           else {
             assert(row.originalHandler && row.primaryLogged && row.observersNotified && row.recovered)
+            assert.deepEqual(row.evidenceErrors, [])
+            for (const step of ['original-kag-ready', 'deliberate-conductor-error-logged',
+              'original-handler-dialog-blocks-owner', 'confirmation-restores-events-and-owner',
+              'original-conductor-recovers', 'exported-log-retains-primary-and-recovery'])
+              assert(row.steps.includes(step), `Missing KAG diagnostic stage: ${step}`)
             assert.equal(hash(await readFile(artifact(row.log))), row.logSha256)
+            await nonempty(`kag-diagnostics/${browser}-${result.key}.zip`)
+            await nonempty(`kag-diagnostics/${browser}-${result.key}-dialog.png`)
           }
           await nonempty(row.screenshot)
         } else {

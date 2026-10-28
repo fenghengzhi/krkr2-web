@@ -12,6 +12,8 @@
 
 108／`40776092450`／`3e246bf771af3c2f84a1a4a94679449997a9016c` 仍 in_progress，34 jobs 为 22 success、7 failure、5 running。构建成功，常规 Node **3594 项：3532 pass、62 fail**；可信生命周期 17 pass／2 fail，Library 56 pass／1 fail，PWA 59 pass。兼容报告 90 pass、6 未报告；五个主浏览器作业尚无产物。Library 的失败在夹具启动等待 `zip-ready:42:0` 时发生，尚未执行元数据回滚断言，不能称为回滚产品缺陷。
 
+112 勘误：上段“尚未执行元数据回滚断言”的归因错误。原 trace 确认首次启动、注入提交失败、零游戏条目和空临时目录检查均通过；失败发生在移除故障、重载后的第二次 `another.zip` 启动。原件和当时判断保留，精确调用顺序及后续处理见 [112](112-hosted-verification-entrypoints.md)。
+
 109／`40779041112`／`35c1f3f569fa2170196be04b97f5b785f3661eba` 和 110／`40781763654`／`260cb0aae2ef649b62962618911bbb3fd6698383` 都是 pending、零 jobs／artifacts。它们的修复与新增定义仍未验证。保留此前全部失败、取消、skip、未比较及未报告记录；有界菜单诊断不能关闭历史堆崩溃根因。
 
 ## 页面生命周期

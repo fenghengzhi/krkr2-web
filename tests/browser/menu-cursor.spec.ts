@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from '@playwrigh
 import { cursorDib, cursorFile } from '../helpers/cursor-fixtures.ts'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
+import { observeMenuCursor, readMenuCursorProof, snapshotMenuCursor } from '../helpers/menu-cursor-observation.ts'
 
 const custom = cursorFile([{ width: 32, height: 32, hotspot: [4, 5], payload: cursorDib({
   width: 32, height: 32, depth: 24,
@@ -54,14 +55,23 @@ async function close(page: Page, summary: Locator) {
   await expect(summary.locator('..')).not.toHaveAttribute('open', '')
 }
 async function finish(page: Page, info: TestInfo, stop: () => Promise<void>, failures: unknown[]) {
+  try {
+    await snapshotMenuCursor(page, 'before-cleanup')
+    await info.attach('menu-cursor-boundaries', { body: JSON.stringify(await readMenuCursorProof(page), null, 2), contentType: 'application/json' })
+  } catch (error) { failures.push(error) }
   try { await info.attach('menu-cursor-logs', { body: Buffer.from(await page.locator('#logs').innerText()), contentType: 'text/plain' }) }
   catch (error) { failures.push(error) }
   // A popup or fullscreen game covers the page by design. Dispatch the
   // existing Stop control so cleanup cannot replace the primary assertion
   // with a blocked pointer click against the fullscreen canvas.
   try {
-    if (await page.locator('.game-menu-overlay, .game-window-fullscreen').count())
+    if (await page.locator('.game-menu-overlay, .game-window-fullscreen').count()) {
       await page.locator('#stop').dispatchEvent('click')
+      // Stop disables its button asynchronously. Await this first activation
+      // before game.stop's cleanup assertions, instead of racing a second
+      // real click against a button which becomes disabled mid-action.
+      await expect(page.locator('#status')).toHaveText('待机')
+    }
     await stop()
   } catch (error) { failures.push(error) }
   if (failures.length) throw new AggregateError(failures, 'Menu cursor scenario or cleanup failed', { cause: failures[0] })
@@ -71,6 +81,7 @@ for (const backend of ['asyncify','jspi']) for (const binary of [false,true]) {
   const variant = `${backend}/${binary ? 'bytecode' : 'source'}`
   test(`${variant}: nested page menus override cursor presentation while retaining live logic and virtual identity`, async ({ page }, info) => {
     test.setTimeout(90000)
+    await observeMenuCursor(page)
     const game = await launchWindowAttention(page, backend, binary, source,
       [{ name: 'menu.cur', mimeType: 'application/octet-stream', buffer: custom }]),
       a = game.surface('Menu cursor A'), b = game.surface('Menu cursor B'),
@@ -130,15 +141,18 @@ for (const backend of ['asyncify','jspi']) for (const binary of [false,true]) {
 
   test(`${variant}: blocking popup forces default cursor through Timer mutations and restores latest state on cancel or Stop`, async ({ page }, info) => {
     test.setTimeout(90000)
+    await observeMenuCursor(page)
     const game = await launchWindowAttention(page, backend, binary, source,
       [{ name: 'menu.cur', mimeType: 'application/octet-stream', buffer: custom }]),
       a = game.surface('Menu cursor A'), b = game.surface('Menu cursor B'), canvas = a.locator('canvas[data-window-id]'),
       popup = page.locator('.game-menu-popup'), failures: unknown[] = []
     try {
+      await snapshotMenuCursor(page, 'ready')
       await canvas.focus(); await page.keyboard.press('F9')
       await expect(popup).toBeVisible()
       await expect(page.locator('#logs')).toContainText('menu-force-popup-before:1')
       await expect(page.locator('#logs')).toContainText('menu-force-mutation:3:2')
+      await snapshotMenuCursor(page, 'first-popup-mutated')
       await expect(canvas).toHaveCSS('cursor', 'default')
       await expect(a.locator('.game-custom-cursor')).toHaveCount(0)
       await expect(b.locator('canvas[data-window-id]')).toHaveCSS('cursor', 'none')
@@ -146,16 +160,20 @@ for (const backend of ['asyncify','jspi']) for (const binary of [false,true]) {
       await expect(popup).toHaveCount(0)
       await expect(page.locator('#logs')).toContainText('menu-force-popup-return:1:2')
       await expect(canvas).toHaveCSS('cursor', 'none')
+      await snapshotMenuCursor(page, 'first-popup-closed')
 
       await evaluate(page, '(menuWindow.fullScreen=true,0)', '0')
       await expect(a).toHaveClass(/game-window-fullscreen/)
+      await snapshotMenuCursor(page, 'fullscreen-ready')
       await canvas.focus(); await page.keyboard.press('F9')
       await expect(popup).toBeVisible()
       await expect(page.locator('#logs')).toContainText('menu-force-mutation:2:0')
+      await snapshotMenuCursor(page, 'second-popup-mutated')
       await expect(canvas).toHaveCSS('cursor', 'default')
       await expect(a.locator('.game-custom-cursor')).toHaveCount(0)
       await page.keyboard.press('Escape')
       await expect(page.locator('#logs')).toContainText('menu-force-popup-return:2:0')
+      await snapshotMenuCursor(page, 'second-popup-closed')
       await expect(a.locator('.game-custom-cursor')).toBeVisible()
       await expect(a.locator('.game-custom-cursor')).toHaveClass(/game-virtual-cursor/)
 

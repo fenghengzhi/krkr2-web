@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { transformWithOxc } from 'vite'
 import { evaluate } from '../helpers/browser-expression.ts'
+import { runFontWorker } from '../helpers/font-worker.ts'
 
 for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: vertical game faces select forms and preserve their glyph origins in the real Worker`, async ({
@@ -48,7 +49,7 @@ for (const backend of ['asyncify', 'jspi'])
 
 test('a vertical browser face keeps ideographs upright and rotates Latin glyphs', async ({
   page,
-}) => {
+}, testInfo) => {
   const modules = new Set([
     'src/backends/text/browser/graphics.ts',
     'src/backends/text/browser/families.ts',
@@ -56,6 +57,7 @@ test('a vertical browser face keeps ideographs upright and rotates Latin glyphs'
     'src/engine/graphics/vertical.ts',
     'src/formats/font/vertical-data.ts',
     'src/formats/image/bmp.ts',
+    'src/formats/image/selection.ts',
   ])
   await page.route('**/__vertical-test/**', async (route) => {
     const path = new URL(route.request().url()).pathname.slice('/__vertical-test/'.length)
@@ -67,9 +69,17 @@ test('a vertical browser face keeps ideographs upright and rotates Latin glyphs'
   })
   await page.goto('/')
   const bytes = [...(await readFile('tests/fixtures/text-layout/vert.ttf'))]
-  const result = await page.evaluate(async (bytes) => {
-    const code = `
-import {BrowserGraphics} from '${location.origin}/__vertical-test/src/backends/text/browser/graphics.ts';
+  const origin = new URL(page.url()).origin
+  const result = await runFontWorker<{
+    han: { width: number; height: number; alpha: number[] }
+    verticalHan: { width: number; height: number; alpha: number[] }
+    latin: { width: number; height: number; alpha: number[] }
+    verticalLatin: { width: number; height: number; alpha: number[] }
+    error?: string
+  }>(page, testInfo, {
+    name: 'vertical-font', modulePrefix: '/__vertical-test/', data: bytes,
+    source: `
+import {BrowserGraphics} from '${origin}/__vertical-test/src/backends/text/browser/graphics.ts';
 const box=p=>{let l=p.width,t=p.height,r=0,b=0;
  for(let y=0;y<p.height;y++)for(let x=0;x<p.width;x++)if(p.data[(y*p.width+x)*4+3]){l=Math.min(l,x);t=Math.min(t,y);r=Math.max(r,x+1);b=Math.max(b,y+1)}
  const alpha=[];for(let y=t;y<b;y++)for(let x=l;x<r;x++)alpha.push(p.data[(y*p.width+x)*4+3]);
@@ -78,33 +88,8 @@ self.onmessage=async({data})=>{const backend=new BrowserGraphics();
  try{const loaded=await backend.loadFont(new Uint8Array(data)),font={height:20,face:loaded.face,angle:0,bold:false,italic:false,underline:false,strikeout:false};
  const draw=(ch,vertical,angle=vertical?2700:0)=>box(backend.text(ch,20,0xffffff,{...font,face:(vertical?'@':'')+font.face,angle}));
  postMessage({han:draw('漢',false),verticalHan:draw('漢',true),latin:draw('A',false,2700),verticalLatin:draw('A',true)});
- }catch(e){postMessage({error:String(e)})}finally{backend.dispose()}};`
-    const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' })),
-      worker = new Worker(url, { type: 'module' })
-    try {
-      return await new Promise<{
-        han: { width: number; height: number; alpha: number[] }
-        verticalHan: { width: number; height: number; alpha: number[] }
-        latin: { width: number; height: number; alpha: number[] }
-        verticalLatin: { width: number; height: number; alpha: number[] }
-        error?: string
-      }>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Vertical Worker timed out')), 12000)
-        worker.onmessage = (e) => {
-          clearTimeout(timer)
-          resolve(e.data)
-        }
-        worker.onerror = (e) => {
-          clearTimeout(timer)
-          reject(new Error(e.message))
-        }
-        worker.postMessage(bytes)
-      })
-    } finally {
-      worker.terminate()
-      URL.revokeObjectURL(url)
-    }
-  }, bytes)
+ }catch(e){postMessage({error:String(e),stack:e.stack})}finally{backend.dispose()}};`,
+  })
   expect(result.error).toBeUndefined()
   expect(result.verticalHan).toEqual(result.han)
   // Rotated Canvas hinting is not the transpose of horizontal hinting. Compare

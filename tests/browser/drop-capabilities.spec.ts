@@ -6,6 +6,8 @@ const base = '/drop-capabilities-assets/', bundles = new Map<string, string>()
 let entry = ''
 declare global { interface Window {
   withDropItemAccessors<T>(values: Record<string, unknown>, capture: () => T): T
+  dropCapabilityJournal: { phase: string; state: 'start' | 'success' | 'error'; at: number; error?: unknown }[]
+  dropCapabilityDropped: number
 } }
 test.beforeAll(async () => {
   const result = await build({ configFile: false, envFile: false, logLevel: 'error',
@@ -75,42 +77,117 @@ test('native DataTransfer Files are captured synchronously, survive its clearing
 test('actual OPFS directory handles enumerate nested files and empty directories after event-time handle acquisition', async ({ page }, info) => {
   await mount(page)
   test.skip(!(await page.evaluate(() => typeof navigator.storage?.getDirectory === 'function')), 'OPFS directory handles unavailable')
-  const result = await page.evaluate(async (entry) => {
-    const { captureDrop, enumerateDrop } = await import(entry) as typeof import('../../src/player/drop-files.ts'),
-      root = await navigator.storage.getDirectory(), name = 'drop-' + crypto.randomUUID(),
-      folder = await root.getDirectoryHandle(name, { create: true })
-    try {
-      const nested = await folder.getDirectoryHandle('Nested', { create: true })
-      await nested.getDirectoryHandle('Empty', { create: true })
-      const text = await folder.getFileHandle('hello.txt', { create: true }), writer = await text.createWritable()
-      await writer.write(new Blob(['Hello λ\n'])); await writer.close()
-      const binary = await nested.getFileHandle('bytes.bin', { create: true }), binaryWriter = await binary.createWritable()
-      await binaryWriter.write(new Uint8Array([0,1,127,255])); await binaryWriter.close()
-      const transfer = new DataTransfer(); transfer.items.add(new File([], 'placeholder'))
-      const calls: boolean[] = []; let inDrop = true
-      const captured = window.withDropItemAccessors({
-        webkitGetAsEntry: () => null,
-        getAsFileSystemHandle: () => { calls.push(inDrop); return Promise.resolve(folder) },
-      }, () => captureDrop(transfer))
-      inDrop = false; transfer.items.clear()
-      const tree = await enumerateDrop(captured, { signal: new AbortController().signal }),
-        entries = await Promise.all(tree.entries.map(async (item) => ({ path: item.path, kind: item.kind,
-          ...(item.kind === 'file' ? { bytes: [...new Uint8Array(await item.source.arrayBuffer())] } : {}),
-        })))
-      entries.sort((a, b) => a.path.localeCompare(b.path))
-      return { calls, roots: tree.roots, name, entries,
-        evidence: 'Native OPFS FileSystemDirectoryHandle/getFile/values; DataTransfer accessor injected. Not external OS dragging.' }
-    } finally { await root.removeEntry(name, { recursive: true }) }
-  }, entry)
-  expect(result.calls).toEqual([true])
-  expect(result.roots).toEqual([{ name: result.name, kind: 'directory' }])
-  expect(result.entries).toHaveLength(5)
-  expect(result.entries).toContainEqual({ path: '', kind: 'directory' })
-  expect(result.entries).toContainEqual({ path: 'Nested', kind: 'directory' })
-  expect(result.entries).toContainEqual({ path: 'Nested/Empty', kind: 'directory' })
-  expect(result.entries).toContainEqual({ path: 'Nested/bytes.bin', kind: 'file', bytes: [0,1,127,255] })
-  expect(result.entries).toContainEqual({ path: 'hello.txt', kind: 'file', bytes: [72,101,108,108,111,32,206,187,10] })
-  await info.attach('actual-opfs-directory-capability', { body: JSON.stringify(result), contentType: 'application/json' })
+  const failures: unknown[] = []
+  try {
+    const result = await page.evaluate(async (entry) => {
+      // Preserve the first failing native operation. The old single evaluate
+      // stack could not distinguish getDirectory, writing, enumeration, payload
+      // reading or cleanup, and its finally could replace the primary error.
+      window.dropCapabilityDropped = 0
+      const journal: Window['dropCapabilityJournal'] = window.dropCapabilityJournal = [],
+        record = (value: Window['dropCapabilityJournal'][number]) => {
+          if (journal.length === 128) { journal.shift(); window.dropCapabilityDropped++ }
+          journal.push(value)
+        },
+        describe = (error: unknown) => error instanceof Error
+          ? { name: error.name, message: error.message, stack: error.stack?.slice(0, 4096) } : String(error),
+        phase = async <T>(name: string, operation: () => T | Promise<T>): Promise<T> => {
+          record({ phase: name, state: 'start', at: performance.now() })
+          try {
+            const value = await operation()
+            record({ phase: name, state: 'success', at: performance.now() })
+            return value
+          } catch (error) {
+            record({ phase: name, state: 'error', at: performance.now(), error: describe(error) })
+            throw error
+          }
+        },
+        write = async (directory: FileSystemDirectoryHandle, path: string, bytes: Blob | Uint8Array<ArrayBuffer>) => {
+          let writer: FileSystemWritableFileStream | undefined
+          try {
+            const file = await phase(`${path}:getFileHandle`, () => directory.getFileHandle(path, { create: true }))
+            writer = await phase(`${path}:createWritable`, () => file.createWritable())
+            const owned = writer
+            await phase(`${path}:write`, () => owned.write(bytes))
+            await phase(`${path}:close`, () => owned.close())
+            writer = undefined
+          } catch (primary) {
+            if (writer) {
+              const owned = writer
+              try { await phase(`${path}:abort-after-error`, () => owned.abort()) }
+              catch (cleanup) { throw new AggregateError([primary, cleanup], 'OPFS write and abort failed', { cause: primary }) }
+            }
+            throw primary
+          }
+        }, name = 'drop-' + crypto.randomUUID()
+      let root: FileSystemDirectoryHandle | undefined, folderCreated = false,
+        creationAttempted = false, failed = false, primary: unknown
+      try {
+        const { captureDrop, enumerateDrop } = await phase('import', () => import(entry)) as typeof import('../../src/player/drop-files.ts')
+        root = await phase('storage.getDirectory', () => navigator.storage.getDirectory())
+        const ownedRoot = root
+        creationAttempted = true
+        const folder = await phase('root.getDirectoryHandle', () => ownedRoot.getDirectoryHandle(name, { create: true }))
+        folderCreated = true
+        const nested = await phase('Nested:getDirectoryHandle', () => folder.getDirectoryHandle('Nested', { create: true }))
+        await phase('Nested/Empty:getDirectoryHandle', () => nested.getDirectoryHandle('Empty', { create: true }))
+        await write(folder, 'hello.txt', new Blob(['Hello λ\n']))
+        await write(nested, 'bytes.bin', new Uint8Array([0,1,127,255]))
+        const transfer = new DataTransfer(); transfer.items.add(new File([], 'placeholder'))
+        const calls: boolean[] = []; let inDrop = true
+        // This acquisition remains synchronous, before the event-time flag
+        // changes. Do not insert the asynchronous phase wrapper around it.
+        record({ phase: 'captureDrop', state: 'start', at: performance.now() })
+        const captured = window.withDropItemAccessors({
+          webkitGetAsEntry: () => null,
+          getAsFileSystemHandle: () => { calls.push(inDrop); return Promise.resolve(folder) },
+        }, () => captureDrop(transfer))
+        record({ phase: 'captureDrop', state: 'success', at: performance.now() })
+        inDrop = false; transfer.items.clear()
+        const tree = await phase('enumerateDrop', () => enumerateDrop(captured, { signal: new AbortController().signal })),
+          entries = await Promise.all(tree.entries.map(async (item) => ({ path: item.path, kind: item.kind,
+            ...(item.kind === 'file' ? { bytes: [...new Uint8Array(await phase(`${item.path}:arrayBuffer`, () => item.source.arrayBuffer()))] } : {}),
+          })))
+        entries.sort((a, b) => a.path.localeCompare(b.path))
+        return { calls, roots: tree.roots, name, entries,
+          evidence: 'Native OPFS FileSystemDirectoryHandle/getFile/values; DataTransfer accessor injected. Not external OS dragging.' }
+      } catch (error) {
+        failed = true; primary = error
+        record({ phase: 'scenario', state: 'error', at: performance.now(), error: describe(error) })
+        throw error
+      } finally {
+        if (root && creationAttempted) {
+          const ownedRoot = root
+          try { await phase('root.removeEntry', () => ownedRoot.removeEntry(name, { recursive: true })) }
+          catch (cleanup) {
+            // A rejected creation may have created no entry. All other native
+            // cleanup errors remain failures, including after a successful run.
+            if (!folderCreated && cleanup instanceof DOMException && cleanup.name === 'NotFoundError') {
+              record({ phase: 'cleanup:no-entry-after-failed-create', state: 'success', at: performance.now() })
+            } else if (failed) throw new AggregateError([primary, cleanup], 'OPFS capability and cleanup failed', { cause: primary })
+            else throw cleanup
+          }
+        }
+      }
+    }, entry)
+    expect(result.calls).toEqual([true])
+    expect(result.roots).toEqual([{ name: result.name, kind: 'directory' }])
+    expect(result.entries).toHaveLength(5)
+    expect(result.entries).toContainEqual({ path: '', kind: 'directory' })
+    expect(result.entries).toContainEqual({ path: 'Nested', kind: 'directory' })
+    expect(result.entries).toContainEqual({ path: 'Nested/Empty', kind: 'directory' })
+    expect(result.entries).toContainEqual({ path: 'Nested/bytes.bin', kind: 'file', bytes: [0,1,127,255] })
+    expect(result.entries).toContainEqual({ path: 'hello.txt', kind: 'file', bytes: [72,101,108,108,111,32,206,187,10] })
+    await info.attach('actual-opfs-directory-capability', { body: JSON.stringify(result), contentType: 'application/json' })
+  } catch (error) { failures.push(error) }
+  finally {
+    try { await info.attach('opfs-native-operations', { body: JSON.stringify(await page.evaluate(() => ({
+      origin: location.origin, secure: isSecureContext, journal: window.dropCapabilityJournal, dropped: window.dropCapabilityDropped,
+    })), null, 2), contentType: 'application/json' }) }
+    catch (error) { failures.push(error) }
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length) throw new AggregateError(failures, 'OPFS capability evidence failed', { cause: failures[0] })
 })
 
 test('actual legacy filesystem entries retain empty-directory metadata and read native file bytes', async ({ page }, info) => {
