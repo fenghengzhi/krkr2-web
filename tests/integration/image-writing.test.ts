@@ -7,9 +7,9 @@ test('saveLayerImage writes whole-image PNG/TLG variants and type tags through t
     'startup.tjs': String.raw`
 var window=new Window(),root=new Layer(window,null),layer=new Layer(window,root),loaded=new Layer(window,root);
 layer.setImageSize(2,1);layer.fillRect(0,0,1,1,0x00123456);layer.fillRect(1,0,1,1,0x80abcdef);layer.setProvincePixel(1,0,91);layer.type=ltAddAlpha;layer.setClip(1,0,1,1);
-var formats=["png","png24","tlg5","tlg524","tlg6","tlg624"],ok=true;
+var formats=["png","png24","tlg5","tlg524","tlg6","tlg624"],extensions=["png","png","tlg5","tlg5","tlg6","tlg6"],ok=true;
 for(var i=0;i<formats.count;i++){
- var format=formats[i],path="savedata/round-"+format+".data";layer.saveLayerImage(path,format);var tags=loaded.loadImages(path);
+ var format=formats[i],path="savedata/round-"+format+"."+extensions[i];layer.saveLayerImage(path,format);var tags=loaded.loadImages(path);
  ok=ok && loaded.imageWidth==2 && loaded.getMainPixel(0,0)==0x123456 && loaded.getMainPixel(1,0)==0xabcdef && loaded.getProvincePixel(1,0)==0;
  var alpha=format=="png24" || format=="tlg524" || format=="tlg624";ok=ok && loaded.getMaskPixel(0,0)==(alpha?255:0) && loaded.getMaskPixel(1,0)==(alpha?255:128);
  ok=ok && (format.indexOf("tlg")==0?tags.mode=="addalpha":tags===null);
@@ -22,6 +22,13 @@ layer.saveLayerImage("savedata/default.png");var flags=layer.clipLeft==1 && laye
     assert.equal(await session.evaluate('ok && flags'), '1')
     const files = session.exportSaves()
     assert.equal(files.length, 7)
+    assert.deepEqual(files.map((file) => file.path).sort(), [
+      'savedata/default.png', 'savedata/round-png.png', 'savedata/round-png24.png',
+      'savedata/round-tlg5.tlg5', 'savedata/round-tlg524.tlg5',
+      'savedata/round-tlg6.tlg6', 'savedata/round-tlg624.tlg6',
+    ])
+    // The writer's default remains BMP regardless of the destination suffix;
+    // this assertion intentionally does not load that file through PNG.
     assert.equal(
       Buffer.from(files.find((f) => f.path === 'savedata/default.png')!.bytes)
         .subarray(0, 2)

@@ -1,6 +1,35 @@
 import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect, type Page } from '@playwright/test'
+import { deflateSync } from 'node:zlib'
 import { tlgFixture, tlgSds, tlgTags, tlgU32 } from '../helpers/tlg-fixtures.ts'
+
+// The old TLG6 one-channel 17x1 vector contains these exact gray levels. PNG
+// is a registered grayscale rule handler; TLG remains a normal-image handler.
+// This independent fixture writer is not used to derive expected pixels.
+function grayscaleRulePng(): Buffer {
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(17, 0)
+  header.writeUInt32BE(1, 4)
+  header[8] = 8 // Gray8, no interlace; remaining IHDR fields are zero.
+  function chunk(name: string, bytes: Uint8Array): Buffer {
+    const result = Buffer.alloc(bytes.length + 12)
+    result.writeUInt32BE(bytes.length, 0)
+    result.write(name, 4, 'ascii')
+    result.set(bytes, 8)
+    let crc = 0xffffffff
+    for (const value of result.subarray(4, result.length - 4)) {
+      crc ^= value
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
+    }
+    result.writeUInt32BE((crc ^ 0xffffffff) >>> 0, result.length - 4)
+    return result
+  }
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.from([0, 0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48]))),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+}
 
 async function evaluate(page: Page, source: string, value: string) {
   await page.locator('#expression').fill(source)
@@ -44,7 +73,7 @@ const large = Buffer.concat([
 ])
 
 for (const backend of ['asyncify', 'jspi']) {
-  test(`${backend}: TLG images, SDS tags, alpha and grayscale transition rules render correctly`, async ({
+  test(`${backend}: TLG images preserve tags and alpha, TLG rules reject, and PNG grayscale rules render correctly`, async ({
     page,
   }) => {
     const errors: string[] = []
@@ -78,6 +107,7 @@ for (const backend of ['asyncify', 'jspi']) {
         mimeType: 'application/octet-stream',
         buffer: tlgFixture('6-1-gradient-17x1-auto'),
       },
+      { name: 'rule.png', mimeType: 'image/png', buffer: grayscaleRulePng() },
       {
         name: 'startup.tjs',
         mimeType: 'text/plain',
@@ -103,7 +133,19 @@ var tick=0,completed=0;five.onTransitionCompleted=function(dest,src){completed++
     ])
     await evaluate(
       page,
-      '(function(){six.visible=false;five.setImageSize(8,4);five.setSize(8,4);five.fillRect(0,0,8,4,0xffff0000);back.setImageSize(8,4);back.setSize(8,4);back.fillRect(0,0,8,4,0xff0000ff);five.beginTransition("universal",false,back,%[rule:"rule",vague:0,time:1000,selfupdate:true,callback:function(){return tick;}]);return 0;})()',
+      '(function(){six.visible=false;five.setImageSize(8,4);five.setSize(8,4);five.fillRect(0,0,8,4,0xffff0000);back.setImageSize(8,4);back.setSize(8,4);back.fillRect(0,0,8,4,0xff0000ff);return 0;})()',
+      '0',
+    )
+    await evaluate(page, 'System.assignMessage("TVPCannotLoadRuleGraphic","native-tlg-rule:%1")', '1')
+    await evaluate(
+      page,
+      '(function(){try{five.beginTransition("universal",false,back,%[rule:"rule.tlg6",vague:0,time:1000,selfupdate:true,callback:function(){return tick;}]);}catch(error){return error.message;}return "TLG_RULE_ACCEPTED";})()',
+      'native-tlg-rule:rule.tlg6',
+    )
+    await evaluate(page, 'completed', '0')
+    await evaluate(
+      page,
+      '(function(){five.beginTransition("universal",false,back,%[rule:"rule.png",vague:0,time:1000,selfupdate:true,callback:function(){return tick;}]);return 0;})()',
       '0',
     )
     await evaluate(page, '(function(){tick=50;five.update();return 0;})()', '0')

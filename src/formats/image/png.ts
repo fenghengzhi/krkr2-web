@@ -1,6 +1,7 @@
 import type { DecodedImage } from '../../engine/ports/graphics.ts'
 import { crc32 } from '../binary/crc32.ts'
 import { paeth } from './png-filter.ts'
+import { ImageDecodeError, type ImageDecodeSelection } from './selection.ts'
 
 const magic = [137, 80, 78, 71, 13, 10, 26, 10]
 const adam7 = [
@@ -43,6 +44,7 @@ function* pixels(
   palette: Uint8Array | undefined,
   transparent: Uint8Array | undefined,
   metadata: Map<string, string>,
+  mode?: ImageDecodeSelection['mode'],
 ): Generator<void, DecodedImage> {
   const { width, height, depth, type, channels } = h,
     image: DecodedImage = { width, height, data: new Uint8Array(width * height * 4) },
@@ -58,8 +60,9 @@ function* pixels(
     tr = transparent
       ? new DataView(transparent.buffer, transparent.byteOffset, transparent.byteLength)
       : undefined
-  if (type === 3) image.indices = new Uint8Array(width * height)
+  if (type === 3 && mode !== 'grayscale') image.indices = new Uint8Array(width * height)
   if (type === 0 && depth <= 8) image.grayscale = true
+  if (mode === 'grayscale') image.grayscale = true
   if (metadata.size) image.metadata = metadata
   let at = 0
   for (const pass of passes(h)) {
@@ -93,7 +96,7 @@ function* pixels(
           const index = readSample(row, x)
           if (!palette || index * 3 + 2 >= palette.length)
             throw new Error('PNG palette index out of range')
-          image.indices![pixel] = index
+          if (image.indices) image.indices[pixel] = index
           image.data[to] = palette[index * 3]!
           image.data[to + 1] = palette[index * 3 + 1]!
           image.data[to + 2] = palette[index * 3 + 2]!
@@ -117,6 +120,16 @@ function* pixels(
                 ? 0
                 : 255
         }
+        if (mode === 'grayscale') {
+          // Fixed GraphicsLoaderIntf passes (red=0, green=0) to libpng
+          // 1.0.6 for RGB(A), selecting B. Palette PNG uses TVP's manual
+          // BGR conversion instead. Gray/gray-alpha already contains gray.
+          const value = type === 3
+            ? (54 * image.data[to]! + 183 * image.data[to + 1]! + 19 * image.data[to + 2]!) >>> 8
+            : type === 2 || type === 6 ? image.data[to + 2]! : image.data[to]!
+          image.data[to] = image.data[to + 1] = image.data[to + 2] = value
+          image.data[to + 3] = 255
+        } else if (mode === 'palettized') image.data[to + 3] = 255
       }
       const swap = previous
       previous = row
@@ -128,7 +141,7 @@ function* pixels(
   return image
 }
 
-function* parse(bytes: Uint8Array): Generator<void, PngPlan> {
+function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode']): Generator<void, PngPlan> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     metadata = new Map<string, string>()
   let at = 8,
@@ -161,8 +174,6 @@ function* parse(bytes: Uint8Array): Generator<void, PngPlan> {
         depth = chunk[8]!,
         color = chunk[9]!,
         channels = ({ 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 } as Record<number, number>)[color]
-      if (!width || !height || width > 4096 || height > 4096)
-        throw new Error('PNG dimensions must be between 1 and 4096')
       if (
         !channels ||
         !(color === 0 ? [1, 2, 4, 8, 16] : color === 3 ? [1, 2, 4, 8] : [8, 16]).includes(depth) ||
@@ -171,6 +182,17 @@ function* parse(bytes: Uint8Array): Generator<void, PngPlan> {
         chunk[12]! > 1
       )
         throw new Error('Unsupported PNG image type')
+      if (mode === 'palettized' && depth > 8)
+        throw new ImageDecodeError('png', 'Unsupported color type for palattized image')
+      if (mode !== undefined && (width >= 65536 || height >= 65536))
+        throw new ImageDecodeError('png', 'Too large image')
+      if (!width || !height || width > 4096 || height > 4096)
+        throw new Error('PNG dimensions must be between 1 and 4096')
+      if (mode === 'palettized' && color !== 0 && color !== 3)
+        // The historical libpng caller does not reject this branch before
+        // writing RGB(A) rows to an 8-bit destination. Do not invent a native
+        // error or reproduce that unsafe write; retain an explicit Web gap.
+        throw new Error('Palettized PNG decoding requires a palette or grayscale source')
       header = { width, height, depth, type: color, channels, interlace: chunk[12]! }
     } else if (type === 'PLTE') {
       if (
@@ -263,7 +285,7 @@ function* parse(bytes: Uint8Array): Generator<void, PngPlan> {
     expandedLength,
     decode: (expanded) => {
       if (expanded.length !== expandedLength) throw new Error('PNG expanded size mismatch')
-      return pixels(h, expanded, palette, transparent, metadata)
+      return pixels(h, expanded, palette, transparent, metadata, mode)
     },
   }
 }
@@ -272,4 +294,18 @@ export function decodePng(bytes: Uint8Array): Generator<void, PngPlan> | undefin
   if (bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) return undefined
   if (magic.some((byte, index) => bytes[index] !== byte)) throw new Error('Invalid PNG signature')
   return parse(bytes)
+}
+
+/** No sniff/fallthrough: libpng reads all eight signature bytes first. */
+export function decodeSelectedPng(
+  bytes: Uint8Array,
+  mode: ImageDecodeSelection['mode'],
+): Generator<void, PngPlan> {
+  if (bytes.length < 8) throw new Error('Truncated PNG signature')
+  if (magic.some((byte, index) => bytes[index] !== byte)) {
+    const firstFourMatch = magic.slice(0, 4).every((byte, index) => bytes[index] === byte)
+    throw new ImageDecodeError('png', firstFourMatch
+      ? 'PNG file corrupted by ASCII conversion' : 'Not a PNG file')
+  }
+  return parse(bytes, mode)
 }

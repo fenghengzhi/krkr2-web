@@ -87,7 +87,6 @@ for (const stage of ['read', 'decode'] as const) {
     assert.equal(f.loader.snapshot().imageCacheEntries, 2)
     assert.equal(f.loader.snapshot().imageCachePending, 0)
     assert.equal(f.loader.snapshot().imageCacheBytes, 8)
-    assert.deepEqual([...(await f.loader.rule('scene.bmp')).data], [200, 100, 50, 64])
     broken = false
     const loaded = await f.loader.load('scene.bmp', 0x04ffffff)
     assert.deepEqual([...loaded.image.data], [227, 177, 152, 255])

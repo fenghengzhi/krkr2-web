@@ -1,3 +1,5 @@
+import type { ImageDecodeSelection } from '../../formats/image/selection.ts'
+
 export interface Pixels {
   width: number
   height: number
@@ -61,7 +63,8 @@ export interface RendererStatus {
   pending?: boolean
 }
 export interface GraphicsDecoder {
-  decode(bytes: Uint8Array): Promise<DecodedImage>
+  /** A selected script handler must never fall through to another image format. */
+  decode(bytes: Uint8Array, selection?: ImageDecodeSelection): Promise<DecodedImage>
   text(
     text: string,
     size: number,

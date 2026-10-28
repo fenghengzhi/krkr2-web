@@ -111,9 +111,9 @@ for (const backend of ['asyncify', 'jspi']) {
 var window=new Window();window.visible=true;window.setInnerSize(12,2);
 var root=new Layer(window,null),source=new Layer(window,root);root.setSize(12,2);root.fillRect(0,0,12,2,0xff000000);
 source.setImageSize(2,2);source.fillRect(0,0,1,1,0x00c86432);source.fillRect(1,0,1,1,0x800000ff);source.fillRect(0,1,1,1,0xff00ff00);source.fillRect(1,1,1,1,0x49ff0000);source.type=ltAddAlpha;source.setClip(1,0,1,2);
-var existing=Storages.isExistentStorage("savedata/encoded-png.img"),formats=["png","png24","tlg5","tlg524","tlg6","tlg624"],loaded=[],ok=true;
+var existing=Storages.isExistentStorage("savedata/encoded-png.png"),formats=["png","png24","tlg5","tlg524","tlg6","tlg624"],extensions=["png","png","tlg5","tlg5","tlg6","tlg6"],loaded=[],ok=true;
 for(var i=0;i<formats.count;i++){
- var format=formats[i],path="savedata/encoded-"+format+".img";if(!existing)source.saveLayerImage(path,format);
+ var format=formats[i],path="savedata/encoded-"+format+"."+extensions[i];if(!existing)source.saveLayerImage(path,format);
  var layer=new Layer(window,root),tags=layer.loadImages(path);layer.setSize(2,2);layer.setPos(i*2,0);layer.visible=true;loaded.add(layer);
  ok=ok && layer.getMainPixel(0,0)==0xc86432 && layer.getMainPixel(1,0)==0xff && (i%2?layer.getMaskPixel(1,0)==255:layer.getMaskPixel(1,0)==128) && (i<2?tags===null:tags.mode=="addalpha");
 }
@@ -137,9 +137,14 @@ Debug.message("saved-ready:"+string(existing)+":"+string(ok));
         files: { path: string; base64: string }[]
       }
     expect(backup.files).toHaveLength(6)
+    expect(backup.files.map((file) => file.path).sort()).toEqual([
+      'savedata/encoded-png.png', 'savedata/encoded-png24.png',
+      'savedata/encoded-tlg5.tlg5', 'savedata/encoded-tlg524.tlg5',
+      'savedata/encoded-tlg6.tlg6', 'savedata/encoded-tlg624.tlg6',
+    ])
     for (const file of backup.files) {
       const bytes = Buffer.from(file.base64, 'base64'),
-        opaque = /24\.img$/.test(file.path)
+        opaque = /24\.(?:png|tlg5|tlg6)$/.test(file.path)
       if (file.path.includes('-tlg')) {
         const image = finish(decodeTlg(bytes)!)
         expect([...image.data.subarray(0, 8)]).toEqual([

@@ -2,12 +2,15 @@ import type { Pixels } from '../../../engine/ports/graphics.ts'
 import { BinaryReader } from '../../binary/reader.ts'
 import { SlideDecoder } from './slide.ts'
 import { dimensions } from './size.ts'
+import { ImageDecodeError } from '../selection.ts'
 
-export function* readTlg5(input: BinaryReader): Generator<void, Pixels> {
+export function* readTlg5(input: BinaryReader, selected = false): Generator<void, Pixels> {
   const colors = input.u8(),
     width = input.u32(),
     height = input.u32(),
     blockHeight = input.u32()
+  if (selected && colors !== 3 && colors !== 4)
+    throw new ImageDecodeError('tlg', 'Unsupported color type.')
   dimensions(width, height)
   if (colors !== 3 && colors !== 4) throw new Error('Unsupported TLG5 color count')
   if (!blockHeight) throw new Error('Invalid TLG5 block height')

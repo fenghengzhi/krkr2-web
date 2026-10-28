@@ -45,7 +45,7 @@ for (const backend of ['asyncify', 'jspi']) {
         ['hero.png', 'main.png'],
         ['hero_m.png', 'mask.png'],
         ['hero_p.png', 'palette-2x1.png'],
-        ['palette.gif', 'palette-2x1.gif'],
+        ['palette.png', 'palette-2x1.png'],
         ['replacement.png', 'mask.png'],
       ].map(([name, fixture]) => ({
         name: name!,

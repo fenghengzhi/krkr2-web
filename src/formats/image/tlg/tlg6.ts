@@ -3,6 +3,7 @@ import { BinaryReader } from '../../binary/reader.ts'
 import { SlideDecoder } from './slide.ts'
 import { decodeGolomb } from './golomb.ts'
 import { dimensions } from './size.ts'
+import { ImageDecodeError } from '../selection.ts'
 
 function predict(left: number, above: number, diagonal: number, average: boolean): number {
   if (average) return (left + above + 1) >>> 1
@@ -11,10 +12,21 @@ function predict(left: number, above: number, diagonal: number, average: boolean
   return diagonal >= max ? min : diagonal < min ? max : left + above - diagonal
 }
 
-export function* readTlg6(input: BinaryReader): Generator<void, DecodedImage> {
+export function* readTlg6(input: BinaryReader, selected = false): Generator<void, DecodedImage> {
   const colors = input.u8()
-  if (colors !== 1 && colors !== 3 && colors !== 4) throw new Error('Unsupported TLG6 color count')
-  if (input.u8() || input.u8() || input.u8()) throw new Error('Unsupported TLG6 flags or table')
+  if (selected) {
+    // The original reads the four-byte mark before checking any field.
+    const flags = input.u8(), type = input.u8(), table = input.u8()
+    if (colors !== 1 && colors !== 3 && colors !== 4)
+      throw new ImageDecodeError('tlg', `Unsupported color count : ${colors}`)
+    if (flags) throw new ImageDecodeError('tlg', 'Data flag must be 0 (any flags are not yet supported)')
+    // Preserve the original reason's buf[1], even for the buf[2] condition.
+    if (type) throw new ImageDecodeError('tlg', `Unsupported color type : ${flags}`)
+    if (table) throw new ImageDecodeError('tlg', 'External golomb bit length table is not yet supported.')
+  } else {
+    if (colors !== 1 && colors !== 3 && colors !== 4) throw new Error('Unsupported TLG6 color count')
+    if (input.u8() || input.u8() || input.u8()) throw new Error('Unsupported TLG6 flags or table')
+  }
   const width = input.u32(),
     height = input.u32(),
     maxBits = input.u32()
@@ -32,7 +44,19 @@ export function* readTlg6(input: BinaryReader): Generator<void, DecodedImage> {
       planes: Uint8Array[] = []
     for (let c = 0; c < colors; c++) {
       const bits = input.u32()
-      if (bits >>> 30) throw new Error('Unsupported TLG6 entropy method')
+      if (selected) {
+        const count = bits & 0x3fffffff
+        if (count > maxBits) throw new Error('TLG6 bit length exceeds header maximum')
+        const payload = input.slice(Math.ceil(count / 8))
+        // Native's ReadBuffer precedes its method switch: underflow retains
+        // the stream error rather than becoming an entropy-format message.
+        if (bits >>> 30) throw new ImageDecodeError('tlg', 'Unsupported entropy coding method')
+        planes.push(yield* decodeGolomb(payload, count, width * rows))
+        continue
+      }
+      if (bits >>> 30) {
+        throw new Error('Unsupported TLG6 entropy method')
+      }
       if (bits > maxBits) throw new Error('TLG6 bit length exceeds header maximum')
       planes.push(yield* decodeGolomb(input.slice(Math.ceil(bits / 8)), bits, width * rows))
     }

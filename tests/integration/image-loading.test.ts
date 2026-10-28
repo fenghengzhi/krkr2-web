@@ -9,7 +9,7 @@ test('loadImages combines auto-path companions and metadata, and loadProvinceIma
     'art/hero.PNG': imageFixture('main.png'),
     'art/hero_m.png': imageFixture('mask.png'),
     'patch/hero_p.png': imageFixture('palette-2x1.png'),
-    'alternate.gif': imageFixture('palette-2x1.gif'),
+    'alternate.png': imageFixture('palette-2x1.png'),
     'tiny.png': imageFixture('png-0-8-0-1x1'),
     'plain.png': imageFixture('main.png'),
     'bad.png': imageFixture('main.png'),

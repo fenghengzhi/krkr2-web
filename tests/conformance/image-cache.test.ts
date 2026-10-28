@@ -11,6 +11,7 @@ import { SaveOverlay } from '../../src/engine/storage/save-overlay.ts'
 import { MemorySaveStore } from '../../src/engine/ports/saves.ts'
 import type { Resource } from '../../src/engine/ports/storage.ts'
 import type { DecodedImage } from '../../src/engine/ports/graphics.ts'
+import type { ImageDecodeSelection } from '../../src/formats/image/selection.ts'
 import { noColorKey } from '../../src/engine/graphics/loading.ts'
 
 const resource = (name: string, value = 1): Resource => ({
@@ -250,9 +251,9 @@ test('preloading honors positive/negative/full budgets, duplicates and front-of-
     assert.deepEqual(f.reads, limit === 0 ? ['a', 'b', 'c'] : ['a', 'b'])
     assert.equal(f.loader.snapshot().imageCacheBytes, limit === 0 ? 12 : 8)
     if (limit !== 0) {
-      await f.loader.rule('c')
-      await f.loader.rule('d')
-      await f.loader.rule('a')
+      await f.loader.load('c', noColorKey)
+      await f.loader.load('d', noColorKey)
+      await f.loader.load('a', noColorKey)
       assert.equal(f.reads.filter((n) => n === 'a').length, 1)
     }
   }
@@ -321,7 +322,8 @@ test('raw cache reuse preserves palette keys, companion updates and auto-path sw
     { now: () => 0, check() {}, yield: async () => {} },
   )
   await loader.touch(['a'])
-  assert.deepEqual(reads, [7, 4])
+  // TouchImages may discover the province name, but never reads its pixels.
+  assert.deepEqual(reads, [7])
   const keyed = await loader.load('a', 0x03000007)
   assert.equal(keyed.image.data[3], 0)
   keyed.image.indices![0] = 99
@@ -335,4 +337,63 @@ test('raw cache reuse preserves palette keys, companion updates and auto-path sw
   storage.removeAutoPath('patch/')
   assert.equal((await loader.load('a', noColorKey)).image.data[0], 7)
   assert.equal(reads.filter((n) => n === 7).length, 1)
+})
+
+test('canonical invalidation revokes every selected-mode flight without letting late results repopulate', async () => {
+  const normal: ImageDecodeSelection = { format: 'png', mode: 'normal' },
+    gray: ImageDecodeSelection = { format: 'png', mode: 'grayscale' },
+    oldNormal = deferred<DecodedImage>(), oldGray = deferred<DecodedImage>(),
+    freshNormal = deferred<DecodedImage>(), freshGray = deferred<DecodedImage>(),
+    old = resource('art/same.png'), fresh = resource('art/same.png'),
+    cache = new ImageCache((r, selection) => r === old
+      ? (selection?.mode === 'normal' ? oldNormal.promise : oldGray.promise)
+      : (selection?.mode === 'normal' ? freshNormal.promise : freshGray.promise))
+  const firstNormal = cache.read(old, normal), firstGray = cache.read(old, gray)
+  assert.equal(cache.snapshot().imageCachePending, 2)
+  cache.invalidate('art/same.png')
+  assert.equal(cache.snapshot().imageCachePending, 0)
+  const nextNormal = cache.read(fresh, normal), nextGray = cache.read(fresh, gray)
+  oldNormal.resolve(pixels(1)); oldGray.resolve(pixels(2))
+  await Promise.all([firstNormal, firstGray])
+  assert.equal(cache.snapshot().imageCachePending, 2)
+  assert.equal(cache.snapshot().imageCacheEntries, 0)
+  freshNormal.resolve(pixels(8)); freshGray.resolve(pixels(9))
+  await Promise.all([nextNormal, nextGray])
+  assert.equal((await cache.read(fresh, normal)).data[0], 8)
+  assert.equal((await cache.read(fresh, gray)).data[0], 9)
+  assert.equal(cache.snapshot().imageCacheEntries, 2)
+  cache.invalidate('art/same.png')
+  assert.equal(cache.snapshot().imageCacheEntries, 0)
+  assert.equal(cache.snapshot().imageCacheBytes, 0)
+})
+
+test('resource token replacement is checked independently for every cached decode mode', async () => {
+  const normal: ImageDecodeSelection = { format: 'bmp', mode: 'normal' },
+    palette: ImageDecodeSelection = { format: 'bmp', mode: 'palettized' },
+    original = resource('same.bmp', 1), replacement = resource('same.bmp', 9),
+    cache = new ImageCache(async (r, selection) => ({
+      ...pixels((await r.read())[0]),
+      ...(selection?.mode === 'palettized' ? { indices: Uint8Array.of(7) } : {}),
+    }))
+  const oldNormal = await cache.read(original, normal), oldPalette = await cache.read(original, palette)
+  assert.equal((await cache.read(replacement, normal)).data[0], 9)
+  assert.equal((await cache.read(replacement, palette)).data[0], 9)
+  assert.equal(oldNormal.data[0], 1)
+  assert.equal(oldPalette.data[0], 1)
+  assert.equal(cache.snapshot().imageCacheMisses, 4)
+  assert.equal(cache.snapshot().imageCacheEntries, 2)
+})
+
+test('disposing the cache rejects every selected-mode reader and retains no late source pixels', async () => {
+  const gate = deferred<DecodedImage>(), r = resource('same.png'), cache = new ImageCache(() => gate.promise),
+    normal = cache.read(r, { format: 'png', mode: 'normal' }),
+    grayscale = cache.read(r, { format: 'png', mode: 'grayscale' }),
+    assertions = [assert.rejects(normal, /disposed/), assert.rejects(grayscale, /disposed/)]
+  assert.equal(cache.snapshot().imageCachePending, 2)
+  cache.dispose()
+  gate.resolve(pixels())
+  await Promise.all(assertions)
+  assert.equal(cache.snapshot().imageCacheEntries, 0)
+  assert.equal(cache.snapshot().imageCachePending, 0)
+  assert.equal(cache.snapshot().imageCacheBytes, 0)
 })

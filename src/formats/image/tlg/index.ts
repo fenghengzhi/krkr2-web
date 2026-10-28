@@ -2,6 +2,7 @@ import type { DecodedImage } from '../../../engine/ports/graphics.ts'
 import { BinaryReader } from '../../binary/reader.ts'
 import { readTlg5 } from './tlg5.ts'
 import { readTlg6 } from './tlg6.ts'
+import { ImageDecodeError, type ImageDecodeSelection } from '../selection.ts'
 
 function signature(input: BinaryReader): string {
   return String.fromCharCode(...input.slice(11))
@@ -44,35 +45,53 @@ function* utf8(bytes: Uint8Array): Generator<void, string> {
   return value
 }
 
-function* tagString(input: BinaryReader): Generator<void, string> {
+function* tagString(input: BinaryReader, nativePart?: 'name' | 'value'): Generator<void, string> {
   let length = 0,
     digits = 0
   while (true) {
     const byte = input.u8()
-    if (byte === 58 && digits) break
-    if (byte < 48 || byte > 57 || ++digits > 7) throw new Error('Invalid TLG tag byte length')
+    if (byte === 58 && (digits || nativePart !== undefined)) break
+    if (byte < 48 || byte > 57) {
+      if (nativePart) throw new ImageDecodeError('tlg', `Malformed TLG SDS tag structure, missing colon after ${nativePart} length`)
+      throw new Error('Invalid TLG tag byte length')
+    }
+    if (++digits > 7) throw new Error('Invalid TLG tag byte length')
     length = length * 10 + byte - 48
   }
   return yield* utf8(input.slice(length))
 }
 
-function* raw(input: BinaryReader, magic = signature(input)): Generator<void, DecodedImage> {
+function* raw(
+  input: BinaryReader,
+  magic = signature(input),
+  mode?: ImageDecodeSelection['mode'],
+): Generator<void, DecodedImage> {
+  if (mode !== undefined) {
+    if (magic !== 'TLG5.0\x00raw\x1a' && magic !== 'TLG6.0\x00raw\x1a')
+      throw new ImageDecodeError('tlg', 'Invalid TLG header or unsupported TLG version.')
+    if (mode !== 'normal')
+      throw new ImageDecodeError('tlg', 'TLG cannot be used as universal transition rule, province(_p) or mask(_m) images.')
+  }
   const image =
     magic === 'TLG5.0\x00raw\x1a'
-      ? yield* readTlg5(input)
+      ? yield* readTlg5(input, mode !== undefined)
       : magic === 'TLG6.0\x00raw\x1a'
-        ? yield* readTlg6(input)
+        ? yield* readTlg6(input, mode !== undefined)
         : undefined
   if (!image) throw new Error('Unsupported TLG signature')
   if (input.remaining) throw new Error('Extra TLG image data')
   return image
 }
 
-function* read(bytes: Uint8Array): Generator<void, DecodedImage> {
+function* read(bytes: Uint8Array, mode?: ImageDecodeSelection['mode']): Generator<void, DecodedImage> {
   const input = new BinaryReader(bytes),
     magic = signature(input)
-  if (magic !== 'TLG0.0\x00sds\x1a') return yield* raw(input, magic)
-  const image = yield* raw(new BinaryReader(input.slice(input.u32())))
+  if (magic !== 'TLG0.0\x00sds\x1a') return yield* raw(input, magic, mode)
+  const rawLength = input.u32()
+  // Native reads the enclosed signature/mode before it uses rawLength to
+  // seek to metadata. A missing pixel body must not mask a mode rejection.
+  if (mode !== undefined && mode !== 'normal') return yield* raw(input, undefined, mode)
+  const image = yield* raw(new BinaryReader(input.slice(rawLength)), undefined, mode)
   let tagBytes = 0
   while (input.remaining) {
     const type = input.tag(),
@@ -82,10 +101,16 @@ function* read(bytes: Uint8Array): Generator<void, DecodedImage> {
       if (tagBytes > 1024 * 1024) throw new Error('TLG tags exceed 1 MiB')
       const tags = new BinaryReader(chunk)
       while (tags.remaining) {
-        const name = yield* tagString(tags)
-        if (tags.u8() !== 61) throw new Error('Missing TLG tag equals sign')
-        const value = yield* tagString(tags)
-        if (tags.u8() !== 44) throw new Error('Missing TLG tag comma')
+        const name = yield* tagString(tags, mode !== undefined ? 'name' : undefined)
+        if (tags.u8() !== 61) {
+          if (mode !== undefined) throw new ImageDecodeError('tlg', 'Malformed TLG SDS tag structure, missing equals after name')
+          throw new Error('Missing TLG tag equals sign')
+        }
+        const value = yield* tagString(tags, mode !== undefined ? 'value' : undefined)
+        if (tags.u8() !== 44) {
+          if (mode !== undefined) throw new ImageDecodeError('tlg', 'Malformed TLG SDS tag structure, missing comma after a tag')
+          throw new Error('Missing TLG tag comma')
+        }
         const metadata = (image.metadata ??= new Map())
         metadata.set(name, value)
         if (metadata.size > 4096) throw new Error('TLG tags exceed 4096 entries')
@@ -101,4 +126,9 @@ function* read(bytes: Uint8Array): Generator<void, DecodedImage> {
 export function decodeTlg(bytes: Uint8Array): Generator<void, DecodedImage> | undefined {
   if (bytes[0] !== 84 || bytes[1] !== 76 || bytes[2] !== 71) return undefined
   return read(bytes)
+}
+
+/** The caller selected TLG; even a foreign signature stays in this handler. */
+export function decodeSelectedTlg(bytes: Uint8Array, mode: ImageDecodeSelection['mode']): Generator<void, DecodedImage> {
+  return read(bytes, mode)
 }

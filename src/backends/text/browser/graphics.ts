@@ -6,6 +6,7 @@ import type {
   TextPixels,
 } from '../../../engine/ports/graphics.ts'
 import { decodeBmp } from '../../../formats/image/bmp.ts'
+import type { ImageDecodeSelection } from '../../../formats/image/selection.ts'
 import type { FontKernel, NativeFileFont } from '../freetype/face.ts'
 import { fontGeometry } from '../../../engine/graphics/font.ts'
 import { cssFontFamily } from './families.ts'
@@ -66,10 +67,20 @@ export class BrowserGraphics implements GraphicsDecoder {
       dispose,
     }
   }
-  async decode(bytes: Uint8Array): Promise<Pixels> {
-    const bmp = decodeBmp(bytes)
+  async decode(bytes: Uint8Array, selection?: ImageDecodeSelection): Promise<Pixels> {
+    // createImageBitmap sniffs bytes even when a Blob has a MIME type. Keep the
+    // selected handler boundary explicit before invoking that host decoder.
+    if (selection && !(
+      (selection.format === 'bmp' && bytes[0] === 0x42 && bytes[1] === 0x4d) ||
+      (selection.format === 'jpeg' && bytes[0] === 0xff && bytes[1] === 0xd8) ||
+      (selection.format === 'png' && [137, 80, 78, 71, 13, 10, 26, 10].every((value, i) => bytes[i] === value))
+    )) throw new Error('Selected graphics backend format does not match image bytes')
+    // A selected BMP already passed the portable decoder. Its host fallback
+    // may be OS/2 or another valid BMP variant that that decoder cannot read.
+    const bmp = !selection ? decodeBmp(bytes) : undefined
     if (bmp) return bmp
-    const image = await createImageBitmap(new Blob([Uint8Array.from(bytes).buffer]))
+    const type = selection ? { bmp: 'image/bmp', jpeg: 'image/jpeg', png: 'image/png', tlg: '', eri: '' }[selection.format] : ''
+    const image = await createImageBitmap(new Blob([Uint8Array.from(bytes).buffer], { type }))
     try {
       if (image.width > 4096 || image.height > 4096)
         throw new Error('Image exceeds 4096px dimension limit')

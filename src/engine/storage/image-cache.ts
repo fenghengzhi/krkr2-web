@@ -1,14 +1,17 @@
 import type { DecodedImage } from '../ports/graphics.ts'
 import type { Resource } from '../ports/storage.ts'
+import type { ImageDecodeSelection } from '../../formats/image/selection.ts'
 
 export const autoImageCacheBytes = 32 * 1024 * 1024
 export const maximumImageCacheBytes = 64 * 1024 * 1024
 interface Entry {
+  resourceName: string
   token: object
   image: DecodedImage
   bytes: number
 }
 interface Flight {
+  resourceName: string
   token: object
   promise: Promise<DecodedImage>
 }
@@ -52,7 +55,7 @@ export class ImageCache {
   private maximum = autoImageCacheBytes
   private hits = 0
   private misses = 0
-  constructor(private readonly decode: (resource: Resource) => Promise<DecodedImage>) {}
+  constructor(private readonly decode: (resource: Resource, selection?: ImageDecodeSelection) => Promise<DecodedImage>) {}
   get limit(): number {
     return this.maximum
   }
@@ -94,8 +97,10 @@ export class ImageCache {
     // a late result from repopulating the cache after this compact request.
   }
   invalidate(name: string): void {
-    this.remove(name)
-    this.flights.delete(name)
+    // The public invalidation name is the canonical resource, while each
+    // selected handler/mode owns a distinct decoded cache entry and flight.
+    for (const [key, entry] of this.entries) if (entry.resourceName === name) this.remove(key)
+    for (const [key, flight] of this.flights) if (flight.resourceName === name) this.flights.delete(key)
     this.epoch++
   }
   dispose(): void {
@@ -117,9 +122,9 @@ export class ImageCache {
       this.entries.set(name, entry)
     }
   }
-  private async base(resource: Resource, budget?: PreloadBudget): Promise<DecodedImage> {
+  private async base(resource: Resource, selection?: ImageDecodeSelection, budget?: PreloadBudget): Promise<DecodedImage> {
     if (this.disposed) throw new Error('Image cache is disposed')
-    const { name } = resource,
+    const name = JSON.stringify(selection ? [resource.name, selection.format, selection.mode] : [resource.name]),
       token = resource.cacheToken ?? resource,
       entry = this.entries.get(name)
     if (entry?.token === token) {
@@ -131,7 +136,7 @@ export class ImageCache {
     if (entry) this.remove(name)
     if (!this.maximum) {
       this.misses++
-      const image = await this.decode(resource)
+      const image = await this.decode(resource, selection)
       if (this.disposed) throw new Error('Image cache is disposed')
       decodedImageBytes(image)
       return image
@@ -143,9 +148,10 @@ export class ImageCache {
       this.misses++
       const epoch = this.epoch
       const pending: Flight = {
+        resourceName: resource.name,
         token,
         promise: Promise.resolve()
-          .then(() => this.decode(resource))
+          .then(() => this.decode(resource, selection))
           .then((image) => {
             if (this.disposed) throw new Error('Image cache is disposed')
             const size = decodedImageBytes(image)
@@ -173,7 +179,7 @@ export class ImageCache {
                   : {}),
               }
               this.remove(name)
-              this.entries.set(name, { token, image: stored, bytes: size })
+              this.entries.set(name, { resourceName: resource.name, token, image: stored, bytes: size })
               this.bytes += size
             }
             return image
@@ -194,12 +200,12 @@ export class ImageCache {
     budget.remaining = Math.max(0, budget.remaining - size)
     budget.protected.set(name, token)
   }
-  async read(resource: Resource): Promise<DecodedImage> {
+  async read(resource: Resource, selection?: ImageDecodeSelection, budget?: PreloadBudget): Promise<DecodedImage> {
     const cached = this.maximum > 0,
-      image = await this.base(resource)
+      image = await this.base(resource, selection, budget)
     return cached ? copy(image) : image
   }
-  async warm(resource: Resource, budget: PreloadBudget): Promise<void> {
-    await this.base(resource, budget)
+  async warm(resource: Resource, budget: PreloadBudget, selection?: ImageDecodeSelection): Promise<void> {
+    await this.base(resource, selection, budget)
   }
 }

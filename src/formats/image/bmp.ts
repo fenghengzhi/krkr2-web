@@ -1,4 +1,5 @@
 import type { DecodedImage, Pixels } from '../../engine/ports/graphics.ts'
+import { ImageDecodeError, type ImageDecodeSelection } from './selection.ts'
 const dither = [
   [0, 12, 2, 14],
   [8, 4, 10, 6],
@@ -125,4 +126,36 @@ export function decodeBmp(bytes: Uint8Array): DecodedImage | undefined {
       result.data[to + 3] = depth === 32 ? bytes[from + 3]! : 255
     }
   return result
+}
+
+/** Native BMP handler checks precede portable/host decoding. The direct BMP
+ * reader above deliberately retains its wider embedding/CUR contract. */
+export function decodeSelectedBmp(
+  bytes: Uint8Array,
+  mode: ImageDecodeSelection['mode'],
+): DecodedImage | undefined {
+  const need = (length: number) => {
+    if (bytes.length < length) throw new Error('Truncated BMP stream')
+  }
+  need(2)
+  if (bytes[0] !== 0x42 || bytes[1] !== 0x4d)
+    throw new ImageDecodeError('bmp', 'This is not a Windows BMP file or an OS/2 BMP file.')
+  need(18)
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+    dib = view.getUint32(14, true)
+  if (dib !== 12 && dib !== 40)
+    throw new ImageDecodeError('bmp', 'Non-supported header version.')
+  need(14 + dib)
+  const depth = view.getUint16(dib === 12 ? 24 : 28, true),
+    colors = depth <= 8 ? (dib === 12 ? 1 << depth : view.getUint32(46, true) || 1 << depth) : 0
+  // Native reads the palette before TVPInternalLoadBMP checks compression/mode.
+  need(14 + dib + colors * (dib === 12 ? 3 : 4))
+  const compression = dib === 12 ? 0 : view.getUint32(30, true)
+  if (compression === 3) throw new ImageDecodeError('bmp', 'BITFIELDS not supported.')
+  if (compression !== 0) throw new ImageDecodeError('bmp', 'Compressed BMP not supported.')
+  if (depth > 8 && mode === 'palettized')
+    throw new ImageDecodeError('bmp', 'Unsupported color mode for palettized image.')
+  // OS/2 and 15/16-bit BI_RGB are valid native branches, currently supplied by
+  // the same-format host. They must not fall through to another format sniff.
+  return dib === 40 ? decodeBmp(bytes) : undefined
 }

@@ -40,6 +40,7 @@ import {
   toPublicStoragePath,
 } from './storage/public-path.ts'
 import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
+import { decodeSelectedImage } from './graphics/image-decoder.ts'
 import { CursorStorage } from './storage/cursors.ts'
 import type { CursorAsset } from '../formats/cursor/index.ts'
 import { loadCursorBytes, windowsDesktopCursorProfile } from '../formats/cursor/load.ts'
@@ -301,13 +302,18 @@ export class EngineSession {
   private readonly project?: GameProject
   private readonly images = new ImageLoader(
     (name) => this.findResource(name),
-    (bytes) => this.decodeImage(bytes),
+    (bytes, selection) => decodeSelectedImage(bytes, selection, {
+      finish: (work) => this.finishGraphics(work),
+      inflate: (compressed, length) => this.deps.inflateImage(compressed, length),
+      host: (input, selected) => this.deps.graphics.decode(input, selected),
+    }),
     (work) => this.finishGraphics(work),
     {
       now: () => this.deps.now(),
       check: () => this.control.check(),
       yield: () => this.yieldGraphics(),
     },
+    (name) => getFullStoragePath(name, this.project?.directory),
   )
   private readonly cursors = new CursorStorage(
     (name) => this.findResource(name),
@@ -718,7 +724,15 @@ export class EngineSession {
           if (invalidation) this.invalidateLayer(id)
           else this.dirty = true
         },
-        (name) => this.images.rule(name),
+        async (name) => {
+          try { return await this.images.rule(name) }
+          catch (error) {
+            this.control.check()
+            if (error instanceof ExecutionCancelled) throw error
+            throw new TvpError('TVPCannotLoadRuleGraphic', [name],
+              `Cannot load transition rule: ${name}`, { cause: error })
+          }
+        },
         (error) => {
           if (!this.control.cancelled) this.fail(error)
         },

@@ -2,6 +2,10 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+2026-10-29 准备 [108 原版图像选择与加载模式](decisions/108-native-image-selection-and-modes.md)：按原后缀注册顺序选择 handler，携带三种加载模式到真实 decoder，隔离模式缓存，修正伴随资源查找顺序并接原生消息；PNG 灰度按固定 libpng 调用参数处理。新增 **45 常规 Node、每浏览器 4 定义**，候选尚待托管验证，协议 **41** 和已有 ABI／能力版本保持。107 的 TouchImages 审计更正为“发现省份名但不读取像素”。完整图像缓存／部分写入、JPEG 精确解码、历史回归与非插件目标仍未完成。
+
+108 固定回收 107 的 **9 原 ZIP、3,147,682 字节**全部匹配。run 仍 in_progress，主 build 和应用验证未报告；独立 Asyncify identity 原报告六十记录零 failure，不能代替整批结论。Win2022 beginMove 一项在 SC_MOVE 前因输入标签未确认失败，清理成功；Win2025 七项 observed。下轮补取，不实时刷新；以下保留历史批次当时状态。
+
 最新待核验批次：[Full test suite 40773899535](https://github.com/fenghengzhi/krkr2-web/actions/runs/40773899535)，精确提交 `ff9a73ed0213b50f03b342d5cb4f3cbb44955629`。107 的 **32 个文件**已整批推送，新增四项生成／编译预检及原二十四菜单定义的双模式、各三次有界诊断；普通 Node／浏览器新增定义为零。首次唯一查询为 **queued／conclusion=null**，只记录身份。原始响应保存在 `out/verification/github-actions/40773899535/initial-run-discovery.json`。下轮取回结果，不实时监控，没有本地执行验证；完整目标保持 active。
 
 2026-10-29 准备 [107 消息表构建修复与验证证据保全](decisions/107-message-build-and-verification-evidence.md)：修复原消息末尾行注释吞掉宏右括号的确定编译错误；新增四项生成／真实 C++ catalog 预检，独立构建也执行语法检查。菜单堆崩溃新增同次构建、双模式各三次、原二十四定义的有界诊断，保留完整原 core；不新增普通 Node／浏览器定义，不宣称根因已解决。待运行批次启用多项排队，原十四／三十天产物保存统一延长为九十天。协议 **41** 和 ABI／能力版本保持，候选尚待托管验证。

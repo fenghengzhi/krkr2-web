@@ -13,7 +13,7 @@ const bmp = (color: number) =>
 test('TJS cache property and preloading share canonical images without creating or mutating layers', async () => {
   const { session } = await headless({
     'art/main.png': imageFixture('main.png'),
-    '7.png': bmp(7),
+    '7.bmp': bmp(7),
     'broken.png': Uint8Array.of(1),
   })
   try {
