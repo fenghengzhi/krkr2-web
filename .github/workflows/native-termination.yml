@@ -31,4 +31,4 @@ jobs:
           name: native-termination-${{ matrix.os }}-${{ github.run_attempt }}
           path: out/verification/original-termination
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90

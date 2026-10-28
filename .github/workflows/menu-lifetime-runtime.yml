@@ -1,0 +1,86 @@
+name: Menu lifetime host runtime diagnosis
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  menu-lifetime-runtime:
+    name: Node 24.19.0 / ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [default, liftoff-only]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - name: Preserve exact runtime and prepare owned core evidence
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdb
+          mkdir -p out/native-menu-cores out/ci/menu-runtime
+          node --version > out/ci/menu-runtime/node-version.txt
+          node --v8-options > out/ci/menu-runtime/v8-options.txt
+          sha256sum "$(command -v node)" > out/ci/menu-runtime/node-sha256.txt
+          cp "$(command -v node)" out/ci/menu-runtime/node
+          cp .generated/wasm/manifest.json out/ci/menu-runtime/wasm-manifest.json
+          uname -a > out/ci/menu-runtime/kernel.txt
+          dpkg-query -W libc6 gdb > out/ci/menu-runtime/packages.txt
+          ldd "$(command -v node)" > out/ci/menu-runtime/linked-libraries.txt
+          gdb --version > out/ci/menu-runtime/gdb-version.txt
+          sudo sysctl -w "kernel.core_pattern=$GITHUB_WORKSPACE/out/native-menu-cores/core.%e.%p" > out/ci/menu-runtime/core-pattern.txt
+      - name: Observe all 24 definitions in three fixed independent processes
+        timeout-minutes: 20
+        run: |
+          ulimit -c unlimited
+          node scripts/run-menu-lifetime-diagnostic.mjs '${{ matrix.mode }}'
+      - name: Preserve hashes and bounded backtraces without deleting original cores
+        if: always()
+        timeout-minutes: 12
+        run: |
+          mkdir -p out/ci/menu-lifetime-cores
+          result=0
+          if compgen -G 'out/native-menu-cores/core.*' > /dev/null; then
+            # A core is failed diagnostic evidence even if a parent returned 0.
+            result=1
+            for core in out/native-menu-cores/core.*; do
+              name=$(basename "$core")
+              sha256sum "$core" >> out/ci/menu-lifetime-cores/core-sha256.txt
+              stat --printf='%n %s bytes\n' "$core" >> out/ci/menu-lifetime-cores/core-sizes.txt
+              if ! timeout --signal=TERM --kill-after=5s 90s gdb --batch \
+                -ex 'set pagination off' -ex 'set max-value-size 4096' -ex 'set print elements 32' \
+                -ex 'info sharedlibrary' -ex 'thread apply all bt full' \
+                "$(command -v node)" "$core" > "out/ci/menu-lifetime-cores/$name.backtrace" 2>&1; then
+                printf '%s backtrace-incomplete\n' "$name" >> out/ci/menu-lifetime-cores/incomplete.txt
+              fi
+            done
+          fi
+          exit "$result"
+      - name: Upload every repetition and exact runtime evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        timeout-minutes: 10
+        with:
+          name: menu-lifetime-runtime-${{ matrix.mode }}
+          path: out/ci/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
+      - name: Upload complete original menu process cores
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        timeout-minutes: 15
+        with:
+          name: menu-lifetime-native-cores-${{ matrix.mode }}
+          path: out/native-menu-cores/
+          if-no-files-found: ignore
+          retention-days: 90

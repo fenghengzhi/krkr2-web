@@ -345,4 +345,4 @@ jobs:
           name: native-cursor-${{ matrix.os }}-${{ github.run_attempt }}
           path: out/ci/native-cursor
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90

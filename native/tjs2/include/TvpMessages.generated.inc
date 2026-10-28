@@ -51,584 +51,728 @@ TJS_W("   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS\n")
 TJS_W("   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n")
 TJS_W("------------------------------------------------------------------------------\n")
 TJS_W("環境情報\n")
-  // important log (environment information, Debug.notice etc.) comes here)
+  // important log (environment information, Debug.notice etc.) comes here
+)
 
 // MsgIntf.h:79
 TVP_MESSAGE(TVPVersionInformation, false,
 TJS_W("吉里吉里[きりきり] 2 実行コア/%1 ")
 TJS_W("(Compiled on ") __DATE__ TJS_W(" ") __TIME__ TJS_W(") TJS2/%2 ")
-TJS_W("Copyright (C) 1997-2009 W.Dee and contributors All rights reserved."))
+TJS_W("Copyright (C) 1997-2009 W.Dee and contributors All rights reserved.")
+)
 
 // MsgIntf.h:85
 TVP_MESSAGE(TVPVersionInformation2, false,
-TJS_W("バージョン情報の詳細は Ctrl + F12 で閲覧できます"))
+TJS_W("バージョン情報の詳細は Ctrl + F12 で閲覧できます")
+)
 
 // MsgIntf.h:88
 TVP_MESSAGE(TVPDownloadPageURL, false,
-TJS_W("http://kikyou.info/tvp/"))
+TJS_W("http://kikyou.info/tvp/")
+)
 
 // MsgIntf.h:91
 TVP_MESSAGE(TVPInternalError, true,
-TJS_W("内部エラーが発生しました: at %1 line %2"))
+TJS_W("内部エラーが発生しました: at %1 line %2")
+)
 
 // MsgIntf.h:94
 TVP_MESSAGE(TVPInvalidParam, true,
-TJS_W("不正なパラメータです"))
+TJS_W("不正なパラメータです")
+)
 
 // MsgIntf.h:97
 TVP_MESSAGE(TVPWarnDebugOptionEnabled, true,
-TJS_W("-debug オプションが指定されているため、現在 吉里吉里はデバッグモードで動作しています。デバッグモードでは十分な実行速度が出ない場合があるので注意してください"))
+TJS_W("-debug オプションが指定されているため、現在 吉里吉里はデバッグモードで動作しています。デバッグモードでは十分な実行速度が出ない場合があるので注意してください")
+)
 
 // MsgIntf.h:100
 TVP_MESSAGE(TVPCommandLineParamIgnoredAndDefaultUsed, true,
-TJS_W("コマンドラインパラメータ %1 に指定された値 %2 は無効のためデフォルトの設定を用います"))
+TJS_W("コマンドラインパラメータ %1 に指定された値 %2 は無効のためデフォルトの設定を用います")
+)
 
 // MsgIntf.h:103
 TVP_MESSAGE(TVPInvalidCommandLineParam, true,
-TJS_W("コマンドラインパラメータ %1 に指定された値 %2 は無効です"))
+TJS_W("コマンドラインパラメータ %1 に指定された値 %2 は無効です")
+)
 
 // MsgIntf.h:106
 TVP_MESSAGE(TVPNotImplemented, true,
-TJS_W("未実装の機能を呼び出そうとしました"))
+TJS_W("未実装の機能を呼び出そうとしました")
+)
 
 // MsgIntf.h:109
 TVP_MESSAGE(TVPCannotOpenStorage, true,
-TJS_W("ストレージ %1 を開くことができません"))
+TJS_W("ストレージ %1 を開くことができません")
+)
 
 // MsgIntf.h:112
 TVP_MESSAGE(TVPCannotFindStorage, true,
-TJS_W("ストレージ %1 が見つかりません"))
+TJS_W("ストレージ %1 が見つかりません")
+)
 
 // MsgIntf.h:115
 TVP_MESSAGE(TVPCannotOpenStorageForWrite, true,
-TJS_W("ストレージ %1 を書き込み用に開くことができません。ファイルが書き込み禁止になっていないか、あるいはファイルに書き込み権限があるかどうか、あるいはそもそもそれが書き込み可能なメディアやファイルなのかを確認してください"))
+TJS_W("ストレージ %1 を書き込み用に開くことができません。ファイルが書き込み禁止になっていないか、あるいはファイルに書き込み権限があるかどうか、あるいはそもそもそれが書き込み可能なメディアやファイルなのかを確認してください")
+)
 
 // MsgIntf.h:118
 TVP_MESSAGE(TVPStorageInArchiveNotFound, true,
-TJS_W("ストレージ %1 がアーカイブ %2 の中に見つかりません"))
+TJS_W("ストレージ %1 がアーカイブ %2 の中に見つかりません")
+)
 
 // MsgIntf.h:121
 TVP_MESSAGE(TVPInvalidPathName, true,
-TJS_W("パス名 %1 は無効な形式です。形式が正しいかどうかを確認してください"))
+TJS_W("パス名 %1 は無効な形式です。形式が正しいかどうかを確認してください")
+)
 
 // MsgIntf.h:124
 TVP_MESSAGE(TVPUnsupportedMediaName, true,
-TJS_W("\"%1\" は対応していないメディアタイプです"))
+TJS_W("\"%1\" は対応していないメディアタイプです")
+)
 
 // MsgIntf.h:127
 TVP_MESSAGE(TVPCannotUnbindXP3EXE, true,
-TJS_W("%1 は実行可能ファイルに見えますが、これに結合されたアーカイブを発見できませんでした"))
+TJS_W("%1 は実行可能ファイルに見えますが、これに結合されたアーカイブを発見できませんでした")
+)
 
 // MsgIntf.h:130
 TVP_MESSAGE(TVPCannotFindXP3Mark, true,
-TJS_W("%1 は XP3 アーカイブではないか、対応できない形式です。アーカイブファイルを指定すべき場面で通常のファイルを指定した場合、あるいは対応できないアーカイブファイルを指定した場合などにこのエラーが発生しますので、確認してください"))
+TJS_W("%1 は XP3 アーカイブではないか、対応できない形式です。アーカイブファイルを指定すべき場面で通常のファイルを指定した場合、あるいは対応できないアーカイブファイルを指定した場合などにこのエラーが発生しますので、確認してください")
+)
 
 // MsgIntf.h:133
 TVP_MESSAGE(TVPMissingPathDelimiterAtLast, true,
-TJS_W("パス名の最後には '>' または '/' を指定してください (吉里吉里２ 2.19 beta 14 よりアーカイブの区切り記号が '#' から '>' に変わりました)"))
+TJS_W("パス名の最後には '>' または '/' を指定してください (吉里吉里２ 2.19 beta 14 よりアーカイブの区切り記号が '#' から '>' に変わりました)")
+)
 
 // MsgIntf.h:136
 TVP_MESSAGE(TVPFilenameContainsSharpWarn, true,
 TJS_W("(注意) '#' がファイル名 \"%1\" に含まれています。アーカイブの区切り文字は吉里吉里２ 2.19 beta 14 より'#' から '>' に変わりました。")
-	TJS_W("もしアーカイブの区切り文字のつもりで '#' を使用した場合は、お手数ですが '>' に変えてください"))
+	TJS_W("もしアーカイブの区切り文字のつもりで '#' を使用した場合は、お手数ですが '>' に変えてください")
+)
 
 // MsgIntf.h:140
 TVP_MESSAGE(TVPCannotGetLocalName, true,
-TJS_W("ストレージ名 %1 をローカルファイル名に変換できません。アーカイブファイル内のファイルや、ローカルファイルでないファイルはローカルファイル名に変換できません。"))
+TJS_W("ストレージ名 %1 をローカルファイル名に変換できません。アーカイブファイル内のファイルや、ローカルファイルでないファイルはローカルファイル名に変換できません。")
+)
 
 // MsgIntf.h:143
 TVP_MESSAGE(TVPReadError, true,
-TJS_W("読み込みエラーです。ファイルが破損している可能性や、デバイスからの読み込みに失敗した可能性があります"))
+TJS_W("読み込みエラーです。ファイルが破損している可能性や、デバイスからの読み込みに失敗した可能性があります")
+)
 
 // MsgIntf.h:146
 TVP_MESSAGE(TVPWriteError, true,
-TJS_W("書き込みエラーです"))
+TJS_W("書き込みエラーです")
+)
 
 // MsgIntf.h:149
 TVP_MESSAGE(TVPSeekError, true,
-TJS_W("シークに失敗しました。ファイルが破損している可能性や、デバイスからの読み込みに失敗した可能性があります"))
+TJS_W("シークに失敗しました。ファイルが破損している可能性や、デバイスからの読み込みに失敗した可能性があります")
+)
 
 // MsgIntf.h:152
 TVP_MESSAGE(TVPTruncateError, true,
-TJS_W("ファイルの長さを切り詰めるのに失敗しました"))
+TJS_W("ファイルの長さを切り詰めるのに失敗しました")
+)
 
 // MsgIntf.h:155
 TVP_MESSAGE(TVPInsufficientMemory, true,
-TJS_W("メモリ確保に失敗しました。"))
+TJS_W("メモリ確保に失敗しました。")
+)
 
 // MsgIntf.h:158
 TVP_MESSAGE(TVPUncompressionFailed, true,
-TJS_W("ファイルの展開に失敗しました。未対応の圧縮形式が指定されたか、あるいはファイルが破損している可能性があります"))
+TJS_W("ファイルの展開に失敗しました。未対応の圧縮形式が指定されたか、あるいはファイルが破損している可能性があります")
+)
 
 // MsgIntf.h:161
 TVP_MESSAGE(TVPCompressionFailed, true,
-TJS_W("ファイルの圧縮に失敗しました"))
+TJS_W("ファイルの圧縮に失敗しました")
+)
 
 // MsgIntf.h:164
 TVP_MESSAGE(TVPCannotWriteToArchive, true,
-TJS_W("アーカイブにデータを書き込むことはできません"))
+TJS_W("アーカイブにデータを書き込むことはできません")
+)
 
 // MsgIntf.h:167
 TVP_MESSAGE(TVPUnsupportedCipherMode, true,
-TJS_W("%1 は未対応の暗号化形式か、データが破損しています"))
+TJS_W("%1 は未対応の暗号化形式か、データが破損しています")
+)
 
 // MsgIntf.h:170
 TVP_MESSAGE(TVPUnsupportedModeString, true,
-TJS_W("認識できないモード文字列の指定です(%1)"))
+TJS_W("認識できないモード文字列の指定です(%1)")
+)
 
 // MsgIntf.h:173
 TVP_MESSAGE(TVPUnknownGraphicFormat, true,
-TJS_W("%1 は未知の画像形式です"))
+TJS_W("%1 は未知の画像形式です")
+)
 
 // MsgIntf.h:176
 TVP_MESSAGE(TVPCannotSuggestGraphicExtension, true,
-TJS_W("%1 について適切な拡張子を持ったファイルを見つけられませんでした"))
+TJS_W("%1 について適切な拡張子を持ったファイルを見つけられませんでした")
+)
 
 // MsgIntf.h:179
 TVP_MESSAGE(TVPMaskSizeMismatch, true,
-TJS_W("マスク画像のサイズがメイン画像のサイズと違います"))
+TJS_W("マスク画像のサイズがメイン画像のサイズと違います")
+)
 
 // MsgIntf.h:182
 TVP_MESSAGE(TVPProvinceSizeMismatch, true,
-TJS_W("領域画像 %1 はメイン画像とサイズが違います"))
+TJS_W("領域画像 %1 はメイン画像とサイズが違います")
+)
 
 // MsgIntf.h:185
 TVP_MESSAGE(TVPImageLoadError, true,
-TJS_W("画像読み込み中にエラーが発生しました/%1"))
+TJS_W("画像読み込み中にエラーが発生しました/%1")
+)
 
 // MsgIntf.h:188
 TVP_MESSAGE(TVPJPEGLoadError, true,
-TJS_W("JPEG 読み込み中にエラーが発生しました/%1"))
+TJS_W("JPEG 読み込み中にエラーが発生しました/%1")
+)
 
 // MsgIntf.h:191
 TVP_MESSAGE(TVPPNGLoadError, true,
-TJS_W("PNG 読み込み中にエラーが発生しました/%1"))
+TJS_W("PNG 読み込み中にエラーが発生しました/%1")
+)
 
 // MsgIntf.h:194
 TVP_MESSAGE(TVPERILoadError, true,
-TJS_W("ERI 読み込み中にエラーが発生しました/%1"))
+TJS_W("ERI 読み込み中にエラーが発生しました/%1")
+)
 
 // MsgIntf.h:197
 TVP_MESSAGE(TVPTLGLoadError, true,
-TJS_W("TLG 読み込み中にエラーが発生しました/%1"))
+TJS_W("TLG 読み込み中にエラーが発生しました/%1")
+)
 
 // MsgIntf.h:200
 TVP_MESSAGE(TVPInvalidImageSaveType, true,
-TJS_W("無効な保存画像形式です(%1)"))
+TJS_W("無効な保存画像形式です(%1)")
+)
 
 // MsgIntf.h:203
 TVP_MESSAGE(TVPInvalidOperationFor8BPP, true,
-TJS_W("8bpp 画像に対しては行えない操作を行おうとしました"))
+TJS_W("8bpp 画像に対しては行えない操作を行おうとしました")
+)
 
 // MsgIntf.h:206
 TVP_MESSAGE(TVPSpecifyWindow, true,
-TJS_W("Window クラスのオブジェクトを指定してください"))
+TJS_W("Window クラスのオブジェクトを指定してください")
+)
 
 // MsgIntf.h:209
 TVP_MESSAGE(TVPSpecifyLayer, true,
-TJS_W("Layer クラスのオブジェクトを指定してください"))
+TJS_W("Layer クラスのオブジェクトを指定してください")
+)
 
 // MsgIntf.h:212
 TVP_MESSAGE(TVPCannotCreateEmptyLayerImage, true,
-TJS_W("画像サイズの横幅あるいは縦幅を 0 以下の数に設定することはできません"))
+TJS_W("画像サイズの横幅あるいは縦幅を 0 以下の数に設定することはできません")
+)
 
 // MsgIntf.h:215
 TVP_MESSAGE(TVPCannotSetPrimaryInvisible, true,
-TJS_W("プライマリレイヤは不可視にできません"))
+TJS_W("プライマリレイヤは不可視にできません")
+)
 
 // MsgIntf.h:218
 TVP_MESSAGE(TVPCannotMovePrimary, true,
-TJS_W("プライマリレイヤは移動できません"))
+TJS_W("プライマリレイヤは移動できません")
+)
 
 // MsgIntf.h:221
 TVP_MESSAGE(TVPCannotSetParentSelf, true,
-TJS_W("自分自身を親とすることはできません"))
+TJS_W("自分自身を親とすることはできません")
+)
 
 // MsgIntf.h:224
 TVP_MESSAGE(TVPCannotMoveNextToSelfOrNotSiblings, true,
-TJS_W("自分自身の前後や親の異なるレイヤの前後に移動することはできません"))
+TJS_W("自分自身の前後や親の異なるレイヤの前後に移動することはできません")
+)
 
 // MsgIntf.h:227
 TVP_MESSAGE(TVPCannotMovePrimaryOrSiblingless, true,
-TJS_W("プライマリレイヤや兄弟の無いレイヤは前後に移動することはできません"))
+TJS_W("プライマリレイヤや兄弟の無いレイヤは前後に移動することはできません")
+)
 
 // MsgIntf.h:230
 TVP_MESSAGE(TVPCannotMoveToUnderOtherPrimaryLayer, true,
-TJS_W("別のプライマリレイヤ下にレイヤを移動することはできません"))
+TJS_W("別のプライマリレイヤ下にレイヤを移動することはできません")
+)
 
 // MsgIntf.h:233
 TVP_MESSAGE(TVPInvalidImagePosition, true,
-TJS_W("レイヤ領域に画像の無い領域が発生しました"))
+TJS_W("レイヤ領域に画像の無い領域が発生しました")
+)
 
 // MsgIntf.h:236
 TVP_MESSAGE(TVPCannotSetModeToDisabledOrModal, true,
-TJS_W("すでにモーダルなレイヤの親レイヤ、あるいは不可視/無効なレイヤをモーダルにすることはできません"))
+TJS_W("すでにモーダルなレイヤの親レイヤ、あるいは不可視/無効なレイヤをモーダルにすることはできません")
+)
 
 // MsgIntf.h:239
 TVP_MESSAGE(TVPNotDrawableLayerType, true,
-TJS_W("この type のレイヤでは描画や画像読み込みや画像サイズ/位置の変更/取得はできません"))
+TJS_W("この type のレイヤでは描画や画像読み込みや画像サイズ/位置の変更/取得はできません")
+)
 
 // MsgIntf.h:242
 TVP_MESSAGE(TVPSourceLayerHasNoImage, true,
-TJS_W("転送元レイヤは画像を持っていません"))
+TJS_W("転送元レイヤは画像を持っていません")
+)
 
 // MsgIntf.h:245
 TVP_MESSAGE(TVPUnsupportedLayerType, true,
-TJS_W("%1 はこの type のレイヤでは使用できません"))
+TJS_W("%1 はこの type のレイヤでは使用できません")
+)
 
 // MsgIntf.h:248
 TVP_MESSAGE(TVPNotDrawableFaceType, true,
-TJS_W("%1 ではこの face に描画できません"))
+TJS_W("%1 ではこの face に描画できません")
+)
 
 // MsgIntf.h:251
 TVP_MESSAGE(TVPCannotConvertLayerTypeUsingGivenDirection, true,
-TJS_W("指定されたレイヤタイプ変換はできません"))
+TJS_W("指定されたレイヤタイプ変換はできません")
+)
 
 // MsgIntf.h:254
 TVP_MESSAGE(TVPNegativeOpacityNotSupportedOnThisFace, true,
-TJS_W("負の不透明度はこの face では指定できません"))
+TJS_W("負の不透明度はこの face では指定できません")
+)
 
 // MsgIntf.h:257
 TVP_MESSAGE(TVPSrcRectOutOfBitmap, true,
-TJS_W("転送元がビットマップ外の領域を含んでいます。正しい範囲に収まるように転送元を指定してください"))
+TJS_W("転送元がビットマップ外の領域を含んでいます。正しい範囲に収まるように転送元を指定してください")
+)
 
 // MsgIntf.h:260
 TVP_MESSAGE(TVPBoxBlurAreaMustContainCenterPixel, true,
-TJS_W("矩形ブラーの範囲は必ず(0,0)をその中に含む必要があります。leftとrightが両方とも正の数値、あるいは両方とも負の数値という指定はできません(topとbottomに対しても同様)"))
+TJS_W("矩形ブラーの範囲は必ず(0,0)をその中に含む必要があります。leftとrightが両方とも正の数値、あるいは両方とも負の数値という指定はできません(topとbottomに対しても同様)")
+)
 
 // MsgIntf.h:263
 TVP_MESSAGE(TVPBoxBlurAreaMustBeSmallerThan16Million, true,
-TJS_W("矩形ブラーの範囲が大きすぎます。矩形ブラーの範囲は1677万以下である必要があります"))
+TJS_W("矩形ブラーの範囲が大きすぎます。矩形ブラーの範囲は1677万以下である必要があります")
+)
 
 // MsgIntf.h:266
 TVP_MESSAGE(TVPCannotChangeFocusInProcessingFocus, true,
-TJS_W("フォーカス変更処理中はフォーカスを新たに変更することはできません"))
+TJS_W("フォーカス変更処理中はフォーカスを新たに変更することはできません")
+)
 
 // MsgIntf.h:269
 TVP_MESSAGE(TVPWindowHasNoLayer, true,
-TJS_W("ウィンドウにレイヤがありません"))
+TJS_W("ウィンドウにレイヤがありません")
+)
 
 // MsgIntf.h:272
 TVP_MESSAGE(TVPWindowHasAlreadyPrimaryLayer, true,
-TJS_W("ウィンドウにはすでにプライマリレイヤがあります"))
+TJS_W("ウィンドウにはすでにプライマリレイヤがあります")
+)
 
 // MsgIntf.h:275
 TVP_MESSAGE(TVPSpecifiedEventNeedsParameter, true,
-TJS_W("イベント %1 にはパラメータが必要です"))
+TJS_W("イベント %1 にはパラメータが必要です")
+)
 
 // MsgIntf.h:278
 TVP_MESSAGE(TVPSpecifiedEventNeedsParameter2, true,
-TJS_W("イベント %1 にはパラメータ %2 が必要です"))
+TJS_W("イベント %1 にはパラメータ %2 が必要です")
+)
 
 // MsgIntf.h:281
 TVP_MESSAGE(TVPSpecifiedEventNameIsUnknown, true,
-TJS_W("イベント名 %1 は未知のイベント名です"))
+TJS_W("イベント名 %1 は未知のイベント名です")
+)
 
 // MsgIntf.h:284
 TVP_MESSAGE(TVPOutOfRectangle, true,
-TJS_W("矩形外を指定されました"))
+TJS_W("矩形外を指定されました")
+)
 
 // MsgIntf.h:287
 TVP_MESSAGE(TVPInvalidMethodInUpdating, true,
-TJS_W("画面更新中はこの機能を実行できません"))
+TJS_W("画面更新中はこの機能を実行できません")
+)
 
 // MsgIntf.h:290
 TVP_MESSAGE(TVPCannotCreateInstance, true,
-TJS_W("このクラスはインスタンスを作成できません"))
+TJS_W("このクラスはインスタンスを作成できません")
+)
 
 // MsgIntf.h:293
 TVP_MESSAGE(TVPUnknownWaveFormat, true,
-TJS_W("%1 は対応できない Wave 形式です"))
+TJS_W("%1 は対応できない Wave 形式です")
+)
 
 // MsgIntf.h:296
 TVP_MESSAGE(TVPSpecifyMenuItem, true,
-TJS_W("MenuItem クラスのオブジェクトを指定してください"))
+TJS_W("MenuItem クラスのオブジェクトを指定してください")
+)
 
 // MsgIntf.h:299
 TVP_MESSAGE(TVPCurrentTransitionMustBeStopping, true,
-TJS_W("現在のトランジションを停止させてから新しいトランジションを開始してください。同じレイヤに対して複数のトランジションを同時に実行しようとするとこのエラーが発生します"))
+TJS_W("現在のトランジションを停止させてから新しいトランジションを開始してください。同じレイヤに対して複数のトランジションを同時に実行しようとするとこのエラーが発生します")
+)
 
 // MsgIntf.h:302
 TVP_MESSAGE(TVPTransHandlerError, true,
-TJS_W("トランジションハンドラでエラーが発生しました : %1"))
+TJS_W("トランジションハンドラでエラーが発生しました : %1")
+)
 
 // MsgIntf.h:305
 TVP_MESSAGE(TVPTransAlreadyRegistered, true,
-TJS_W("トランジション %1 は既に登録されています"))
+TJS_W("トランジション %1 は既に登録されています")
+)
 
 // MsgIntf.h:308
 TVP_MESSAGE(TVPCannotFindTransHander, true,
-TJS_W("トランジションハンドラ %1 が見つかりません"))
+TJS_W("トランジションハンドラ %1 が見つかりません")
+)
 
 // MsgIntf.h:311
 TVP_MESSAGE(TVPSpecifyTransitionSource, true,
-TJS_W("トランジション元を指定してください"))
+TJS_W("トランジション元を指定してください")
+)
 
 // MsgIntf.h:314
 TVP_MESSAGE(TVPLayerCannotHaveImage, true,
-TJS_W("このレイヤは画像を持つことはできません"))
+TJS_W("このレイヤは画像を持つことはできません")
+)
 
 // MsgIntf.h:317
 TVP_MESSAGE(TVPTransitionSourceAndDestinationMustHaveImage, true,
-TJS_W("トランジション元とトランジション先はともに画像を持っている必要があります"))
+TJS_W("トランジション元とトランジション先はともに画像を持っている必要があります")
+)
 
 // MsgIntf.h:320
 TVP_MESSAGE(TVPCannotLoadRuleGraphic, true,
-TJS_W("ルール画像 %1 を読み込むことができません"))
+TJS_W("ルール画像 %1 を読み込むことができません")
+)
 
 // MsgIntf.h:323
 TVP_MESSAGE(TVPSpecifyOption, true,
-TJS_W("オプション %1 を指定してください"))
+TJS_W("オプション %1 を指定してください")
+)
 
 // MsgIntf.h:326
 TVP_MESSAGE(TVPTransitionLayerSizeMismatch, true,
-TJS_W("トランジション元(%1)とトランジション先(%2)のレイヤのサイズが一致しません"))
+TJS_W("トランジション元(%1)とトランジション先(%2)のレイヤのサイズが一致しません")
+)
 
 // MsgIntf.h:329
 TVP_MESSAGE(TVPTransitionMutualSource, true,
-TJS_W("トランジション元のトランジション元が自分自身です"))
+TJS_W("トランジション元のトランジション元が自分自身です")
+)
 
 // MsgIntf.h:332
 TVP_MESSAGE(TVPHoldDestinationAlphaParameterIsNowDeprecated, true,
-TJS_W("警告 : メソッド %1 の %2 番目に渡された hda パラメータは、吉里吉里２ 2.23 beta 2 より無視されるようになりました。代わりに Layer.holdAlpha プロパティを用いてください。"))
+TJS_W("警告 : メソッド %1 の %2 番目に渡された hda パラメータは、吉里吉里２ 2.23 beta 2 より無視されるようになりました。代わりに Layer.holdAlpha プロパティを用いてください。")
+)
 
 // MsgIntf.h:335
 TVP_MESSAGE(TVPCannotConnectMultipleWaveSoundBufferAtOnce, true,
-TJS_W("複数の WaveSoundBuffer を一つのフィルタで同時に使用することはできません"))
+TJS_W("複数の WaveSoundBuffer を一つのフィルタで同時に使用することはできません")
+)
 
 // MsgIntf.h:338
 TVP_MESSAGE(TVPInvalidWindowSizeMustBeIn64to32768, true,
-TJS_W("window は 64～32768 の範囲の 2 の累乗で無ければなりません"))
+TJS_W("window は 64～32768 の範囲の 2 の累乗で無ければなりません")
+)
 
 // MsgIntf.h:341
 TVP_MESSAGE(TVPInvalidOverlapCountMustBeIn2to32, true,
-TJS_W("overlap は 2～32 の範囲の 2 の累乗で無ければなりません"))
+TJS_W("overlap は 2～32 の範囲の 2 の累乗で無ければなりません")
+)
 
 // MsgIntf.h:344
 TVP_MESSAGE(TVPKAGNoLine, true,
-TJS_W("読み込もうとしたシナリオファイル %1 は空です"))
+TJS_W("読み込もうとしたシナリオファイル %1 は空です")
+)
 
 // MsgIntf.h:347
 TVP_MESSAGE(TVPKAGCannotOmmitFirstLabelName, true,
-TJS_W("シナリオファイルの最初のラベル名は省略できません"))
+TJS_W("シナリオファイルの最初のラベル名は省略できません")
+)
 
 // MsgIntf.h:350
 TVP_MESSAGE(TVPKAGLabelNotFound, true,
-TJS_W("シナリオファイル %1 内にラベル %2 が見つかりません"))
+TJS_W("シナリオファイル %1 内にラベル %2 が見つかりません")
+)
 
 // MsgIntf.h:353
 TVP_MESSAGE(TVPKAGInlineScriptNotEnd, true,
-TJS_W("[endscript] または @endscript が見つかりません"))
+TJS_W("[endscript] または @endscript が見つかりません")
+)
 
 // MsgIntf.h:356
 TVP_MESSAGE(TVPKAGSyntaxError, true,
-TJS_W("タグの文法エラーです。'[' や ']' の対応、\" と \" の対応、スペースの入れ忘れ、余分な改行、macro ～ endmacro の対応、必要な属性の不足などを確認してください"))
+TJS_W("タグの文法エラーです。'[' や ']' の対応、\" と \" の対応、スペースの入れ忘れ、余分な改行、macro ～ endmacro の対応、必要な属性の不足などを確認してください")
+)
 
 // MsgIntf.h:359
 TVP_MESSAGE(TVPKAGMacroEntityNotAvailable, true,
-TJS_W("マクロエンティティはマクロ外では使用できません"))
+TJS_W("マクロエンティティはマクロ外では使用できません")
+)
 
 // MsgIntf.h:362
 TVP_MESSAGE(TVPKAGCallStackUnderflow, true,
-TJS_W("return タグが call タグと対応していません ( return タグが多い )"))
+TJS_W("return タグが call タグと対応していません ( return タグが多い )")
+)
 
 // MsgIntf.h:365
 TVP_MESSAGE(TVPKAGReturnLostSync, true,
-TJS_W("シナリオファイルに変更があったため return の戻り先位置を特定できません"))
+TJS_W("シナリオファイルに変更があったため return の戻り先位置を特定できません")
+)
 
 // MsgIntf.h:368
 TVP_MESSAGE(TVPKAGSpecifyKAGParser, true,
-TJS_W("KAGParser クラスのオブジェクトを指定してください"))
+TJS_W("KAGParser クラスのオブジェクトを指定してください")
+)
 
 // MsgIntf.h:371
 TVP_MESSAGE(TVPKAGMalformedSaveData, true,
-TJS_W("栞データが異常です。データが破損している可能性があります"))
+TJS_W("栞データが異常です。データが破損している可能性があります")
+)
 
 // MsgIntf.h:374
 TVP_MESSAGE(TVPLabelOrScriptInMacro, true,
-TJS_W("ラベルや iscript はマクロ中に記述できません"))
+TJS_W("ラベルや iscript はマクロ中に記述できません")
+)
 
 // MsgIntf.h:377
 TVP_MESSAGE(TVPUnknownMacroName, true,
-TJS_W("マクロ \"%1\" は登録されていません"))
+TJS_W("マクロ \"%1\" は登録されていません")
+)
 
 // MsgImpl.h:24
 TVP_MESSAGE(TVPScriptExceptionRaised, true,
-TJS_W("スクリプトで例外が発生しました"))
+TJS_W("スクリプトで例外が発生しました")
+)
 
 // MsgImpl.h:27
 TVP_MESSAGE(TVPHardwareExceptionRaised, true,
-TJS_W("ハードウェア例外が発生しました"))
+TJS_W("ハードウェア例外が発生しました")
+)
 
 // MsgImpl.h:30
 TVP_MESSAGE(TVPMainCDPName, true,
-TJS_W("スクリプトエディタ (メイン)"))
+TJS_W("スクリプトエディタ (メイン)")
+)
 
 // MsgImpl.h:33
 TVP_MESSAGE(TVPExceptionCDPName, true,
-TJS_W("スクリプトエディタ (例外通知)"))
+TJS_W("スクリプトエディタ (例外通知)")
+)
 
 // MsgImpl.h:36
 TVP_MESSAGE(TVPCannnotLocateUIDLLForFolderSelection, true,
 TJS_W("フォルダ/アーカイブの選択画面を表示しようとしましたが ")
 		TJS_W("krdevui.dll が見つからないので表示できません.\n")
-		TJS_W("実行するフォルダ/アーカイブはコマンドラインの引数として指定してください"))
+		TJS_W("実行するフォルダ/アーカイブはコマンドラインの引数として指定してください")
+)
 
 // MsgImpl.h:41
 TVP_MESSAGE(TVPInvalidUIDLL, true,
-TJS_W("krdevui.dll が異常か、バージョンが一致しません"))
+TJS_W("krdevui.dll が異常か、バージョンが一致しません")
+)
 
 // MsgImpl.h:44
 TVP_MESSAGE(TVPInvalidBPP, true,
-TJS_W("無効な色深度です"))
+TJS_W("無効な色深度です")
+)
 
 // MsgImpl.h:47
 TVP_MESSAGE(TVPCannotLoadPlugin, true,
-TJS_W("プラグイン %1 を読み込めません"))
+TJS_W("プラグイン %1 を読み込めません")
+)
 
 // MsgImpl.h:50
 TVP_MESSAGE(TVPNotValidPlugin, true,
-TJS_W("%1 は有効なプラグインではありません"))
+TJS_W("%1 は有効なプラグインではありません")
+)
 
 // MsgImpl.h:53
 TVP_MESSAGE(TVPPluginUninitFailed, true,
-TJS_W("プラグインの解放に失敗しました"))
+TJS_W("プラグインの解放に失敗しました")
+)
 
 // MsgImpl.h:56
 TVP_MESSAGE(TVPCannnotLinkPluginWhilePluginLinking, true,
-TJS_W("プラグインの接続中に他のプラグインを接続することはできまません"))
+TJS_W("プラグインの接続中に他のプラグインを接続することはできまません")
+)
 
 // MsgImpl.h:59
 TVP_MESSAGE(TVPNotSusiePlugin, true,
-TJS_W("異常な Susie プラグインです"))
+TJS_W("異常な Susie プラグインです")
+)
 
 // MsgImpl.h:62
 TVP_MESSAGE(TVPSusiePluginError, true,
-TJS_W("Susie プラグインでエラーが発生しました/エラーコード %1"))
+TJS_W("Susie プラグインでエラーが発生しました/エラーコード %1")
+)
 
 // MsgImpl.h:65
 TVP_MESSAGE(TVPCannotReleasePlugin, true,
-TJS_W("指定されたプラグインは使用中のため解放できません"))
+TJS_W("指定されたプラグインは使用中のため解放できません")
+)
 
 // MsgImpl.h:68
 TVP_MESSAGE(TVPNotLoadedPlugin, true,
-TJS_W("%1 は読み込まれていません"))
+TJS_W("%1 は読み込まれていません")
+)
 
 // MsgImpl.h:71
 TVP_MESSAGE(TVPCannotAllocateBitmapBits, true,
-TJS_W("ビットマップ用メモリを確保できません/%1(size=%2)"))
+TJS_W("ビットマップ用メモリを確保できません/%1(size=%2)")
+)
 
 // MsgImpl.h:74
 TVP_MESSAGE(TVPScanLineRangeOver, true,
-TJS_W("スキャンライン %1 は範囲(0～%2)を超えています"))
+TJS_W("スキャンライン %1 は範囲(0～%2)を超えています")
+)
 
 // MsgImpl.h:77
 TVP_MESSAGE(TVPPluginError, true,
-TJS_W("プラグインでエラーが発生しました/%1"))
+TJS_W("プラグインでエラーが発生しました/%1")
+)
 
 // MsgImpl.h:80
 TVP_MESSAGE(TVPInvalidCDDADrive, true,
-TJS_W("指定されたドライブでは CD-DA を再生できません"))
+TJS_W("指定されたドライブでは CD-DA を再生できません")
+)
 
 // MsgImpl.h:83
 TVP_MESSAGE(TVPCDDADriveNotFound, true,
-TJS_W("CD-DA を再生できるドライブが見つかりません"))
+TJS_W("CD-DA を再生できるドライブが見つかりません")
+)
 
 // MsgImpl.h:86
 TVP_MESSAGE(TVPMCIError, true,
-TJS_W("MCI でエラーが発生しました : %1"))
+TJS_W("MCI でエラーが発生しました : %1")
+)
 
 // MsgImpl.h:89
 TVP_MESSAGE(TVPInvalidSMF, true,
-TJS_W("有効な SMF ファイルではありません : %1"))
+TJS_W("有効な SMF ファイルではありません : %1")
+)
 
 // MsgImpl.h:92
 TVP_MESSAGE(TVPMalformedMIDIMessage, true,
-TJS_W("指定されたメッセージは MIDI メッセージとして有効な形式ではありません"))
+TJS_W("指定されたメッセージは MIDI メッセージとして有効な形式ではありません")
+)
 
 // MsgImpl.h:95
 TVP_MESSAGE(TVPCannotInitDirectSound, true,
-TJS_W("DirectSound を初期化できません : %1"))
+TJS_W("DirectSound を初期化できません : %1")
+)
 
 // MsgImpl.h:98
 TVP_MESSAGE(TVPCannotCreateDSSecondaryBuffer, true,
-TJS_W("DirectSound セカンダリバッファを作成できません : %1/%2"))
+TJS_W("DirectSound セカンダリバッファを作成できません : %1/%2")
+)
 
 // MsgImpl.h:101
 TVP_MESSAGE(TVPInvalidLoopInformation, true,
-TJS_W("ループ情報 %1 は異常です"))
+TJS_W("ループ情報 %1 は異常です")
+)
 
 // MsgImpl.h:104
 TVP_MESSAGE(TVPNotChildMenuItem, true,
-TJS_W("指定されたメニュー項目はこのメニュー項目の子ではありません"))
+TJS_W("指定されたメニュー項目はこのメニュー項目の子ではありません")
+)
 
 // MsgImpl.h:107
 TVP_MESSAGE(TVPCannotInitDirectDraw, true,
-TJS_W("DirectDraw を初期化できません : %1"))
+TJS_W("DirectDraw を初期化できません : %1")
+)
 
 // MsgImpl.h:110
 TVP_MESSAGE(TVPCannotFindDisplayMode, true,
-TJS_W("適合する画面モードが見つかりません : %1"))
+TJS_W("適合する画面モードが見つかりません : %1")
+)
 
 // MsgImpl.h:113
 TVP_MESSAGE(TVPCannotSwitchToFullScreen, true,
-TJS_W("フルスクリーンに切り替えられません : %1"))
+TJS_W("フルスクリーンに切り替えられません : %1")
+)
 
 // MsgImpl.h:116
 TVP_MESSAGE(TVPInvalidPropertyInFullScreen, true,
-TJS_W("フルスクリーン中では操作できないプロパティを設定しようとしました"))
+TJS_W("フルスクリーン中では操作できないプロパティを設定しようとしました")
+)
 
 // MsgImpl.h:119
 TVP_MESSAGE(TVPInvalidMethodInFullScreen, true,
-TJS_W("フルスクリーン中では操作できないメソッドを呼び出そうとしました"))
+TJS_W("フルスクリーン中では操作できないメソッドを呼び出そうとしました")
+)
 
 // MsgImpl.h:122
 TVP_MESSAGE(TVPCannotLoadCursor, true,
-TJS_W("マウスカーソル %1 の読み込みに失敗しました"))
+TJS_W("マウスカーソル %1 の読み込みに失敗しました")
+)
 
 // MsgImpl.h:125
 TVP_MESSAGE(TVPCannotLoadKrMovieDLL, true,
 TJS_W("ビデオ/Shockwave Flash を再生するためには krmovie.dll / krflash.dll ")
-		TJS_W("が必要ですが 読み込むことができません"))
+		TJS_W("が必要ですが 読み込むことができません")
+)
 
 // MsgImpl.h:129
 TVP_MESSAGE(TVPInvalidKrMovieDLL, true,
-TJS_W("krmovie.dll/krflash.dll が異常か 対応できないバージョンです"))
+TJS_W("krmovie.dll/krflash.dll が異常か 対応できないバージョンです")
+)
 
 // MsgImpl.h:132
 TVP_MESSAGE(TVPErrorInKrMovieDLL, true,
-TJS_W("krmovie.dll/krflash.dll 内でエラーが発生しました/%1"))
+TJS_W("krmovie.dll/krflash.dll 内でエラーが発生しました/%1")
+)
 
 // MsgImpl.h:135
 TVP_MESSAGE(TVPWindowAlreadyMissing, true,
-TJS_W("ウィンドウはすでに存在していません"))
+TJS_W("ウィンドウはすでに存在していません")
+)
 
 // MsgImpl.h:138
 TVP_MESSAGE(TVPPrerenderedFontMappingFailed, true,
-TJS_W("レンダリング済みフォントのマッピングに失敗しました : %1"))
+TJS_W("レンダリング済みフォントのマッピングに失敗しました : %1")
+)
 
 // MsgImpl.h:141
 TVP_MESSAGE(TVPConfigFailOriginalFileCannotBeRewritten, false,
 TJS_W("%1 に書き込みできません。ソフトウェアが実行中のままになっていないか、あるいは")
-		TJS_W("書き込み権限があるかどうかを確認してください"))
+		TJS_W("書き込み権限があるかどうかを確認してください")
+)
 
 // MsgImpl.h:145
 TVP_MESSAGE(TVPConfigFailTempExeNotErased, true,
-TJS_W("%1 の終了を確認できないため、これを削除できませんでした(このファイルは削除して結構です)"))
+TJS_W("%1 の終了を確認できないため、これを削除できませんでした(このファイルは削除して結構です)")
+)
 
 // MsgImpl.h:148
 TVP_MESSAGE(TVPExecutionFail, false,
-TJS_W("%1 を実行できません"))
+TJS_W("%1 を実行できません")
+)
 
 // MsgImpl.h:151
 TVP_MESSAGE(TVPPluginUnboundFunctionError, true,
 TJS_W("プラグインから関数 %1 を要求されましたが、その関数は本体内に存在しません。プラグインと")
-			TJS_W("本体のバージョンが正しく対応しているか確認してください"))
+			TJS_W("本体のバージョンが正しく対応しているか確認してください")
+)
 
 // MsgImpl.h:155
 TVP_MESSAGE(TVPExceptionHadBeenOccured, true,
-TJS_W(" = (例外発生)"))
+TJS_W(" = (例外発生)")
+)
 
 // MsgImpl.h:158
 TVP_MESSAGE(TVPConsoleResult, true,
-TJS_W("コンソール : "))
+TJS_W("コンソール : ")
+)

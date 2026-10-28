@@ -58,4 +58,4 @@ jobs:
           name: variant-stack-${{ matrix.sanitizer }}-${{ github.run_attempt }}
           path: out/ci/variant-stack
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90

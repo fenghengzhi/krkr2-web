@@ -165,4 +165,4 @@ jobs:
           name: native-window-geometry-${{ matrix.os }}-${{ github.run_attempt }}
           path: out/ci/native-window-geometry/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90

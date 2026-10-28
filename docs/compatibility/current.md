@@ -1,5 +1,9 @@
 # 当前实现范围
 
+107 候选修复 [消息表构建与验证证据问题](../decisions/107-message-build-and-verification-evidence.md)：原消息末尾行注释不再吞掉宏右括号，主构建新增四项早期预检，独立 CMake 构建也检查真实 catalog 语法；菜单崩溃增加双模式、固定三次的原二十四定义诊断及完整 core 保存。当前尚待托管验证，协议 **41** 与已有能力版本保持。
+
+107 回收确认 104／105／106 均 failure。105／106 主 build 取消且无步骤报告，应用 skipped；独立 JSPI 编译日志明确报告宏错误，未执行 sweep。104 五个主浏览器作业合计 **2154 pass、202 fail、2 skip、363 未报告**，Node 独立事件流仍 **3308 pass、157 fail、21 未报告**。菜单 heap 根因、图像 handler／模式／伴随资源与错误合同、其他回归及真实游戏验收继续未完成。完整非插件目标仍 active，以下保留历史状态。
+
 106 实现提交 `e35f394d87b3aa48fd85c0281f9b9a8becd6dc1c` 已推送，[Actions 37368014184](https://github.com/fenghengzhi/krkr2-web/actions/runs/37368014184) 首次唯一查询为 pending／conclusion=null，只确认身份，尚无本批执行结论；结果下轮回收，完整非插件目标保持 active。
 
 106 候选补 [托管回归与原生错误边界](../decisions/106-hosted-regressions-and-text-errors.md)：应用事件泵持有真实私有上下文，原生容器工厂随引擎退休，文本流和全屏方法接入已确认的消息 holder；AVC 名义帧率与展示时间戳分开、参考视频按原容器核对。104 构建通过但 Node／浏览器有失败和缺失，menu-modal 的 native heap 崩溃根因未定；105 尚未报告执行。本批尚待验证，协议 **41**，完整非插件目标仍未完成。以下保留历史状态。

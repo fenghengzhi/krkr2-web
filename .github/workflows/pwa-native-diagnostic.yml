@@ -65,4 +65,4 @@ jobs:
           path: |
             out/ci/
             test-results/pwa/
-          retention-days: 30
+          retention-days: 90

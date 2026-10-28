@@ -139,4 +139,4 @@ jobs:
             out/ci/
             test-results/
             test-results-webkit-diagnostic/
-          retention-days: 14
+          retention-days: 90

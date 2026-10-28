@@ -42,4 +42,4 @@ jobs:
           path: |
             out/ci/
             out/verification/vm-console/
-          retention-days: 30
+          retention-days: 90

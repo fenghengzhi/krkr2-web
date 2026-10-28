@@ -1,9 +1,20 @@
 import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
+import { menuLifetimeError, menuLifetimeJournal, menuLifetimeJournalEnabled } from '../helpers/menu-lifetime-journal.ts'
 import { headless } from '../helpers/headless.ts'
 import type { MenuPopup, MenuView } from '../../src/engine/scene/menus.ts'
 
-const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
+const test = (name: string, run: () => Promise<void>) => {
+  if (menuLifetimeJournalEnabled) menuLifetimeJournal('definition:registered', { name })
+  return nodeTest(name, { timeout: 60000 }, !menuLifetimeJournalEnabled ? run : async () => {
+    menuLifetimeJournal('definition:start', { name })
+    try { await run(); menuLifetimeJournal('definition:pass', { name }) }
+    catch (error) {
+      menuLifetimeJournal('definition:fail', { name, error: menuLifetimeError(error) })
+      throw error
+    }
+  })
+}
 
 class Clock {
   time = 0
@@ -78,6 +89,7 @@ function run(){var result=group.popup(0,10,20);mark("run:after:"+result);return 
 `
 
 async function fixture(binary: boolean, body: string, duringStartup = false) {
+  if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:fixture-start', { binary, duringStartup })
   const clock = new Clock(),
     pending: Promise<unknown>[] = []
   const track = <T>(promise: Promise<T>): Pending<T> => {
@@ -181,6 +193,7 @@ async function fixture(binary: boolean, body: string, duringStartup = false) {
     return value
   }
   const stop = async () => {
+    if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:stop-before', { ownership: session.inspectOwnership() })
     await bounded(session.stop(), 'stop menu Session')
     await bounded(Promise.all(pending), 'settle cancelled menu operations')
     assert.equal(session.snapshot().state, 'stopped')
@@ -190,6 +203,7 @@ async function fixture(binary: boolean, body: string, duringStartup = false) {
       JSON.stringify(session.inspectOwnership()),
     )
     assert.equal(clock.tasks.size, 0)
+    if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:stop-after', { ownership: session.inspectOwnership() })
   }
   try {
     const starting = track(session.start())
@@ -198,6 +212,7 @@ async function fixture(binary: boolean, body: string, duringStartup = false) {
       await succeeded(starting, 'start menu fixture')
       await bounded(session.idle(), 'settle menu fixture startup')
     }
+    if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:fixture-complete', { binary, duringStartup, ownership: session.inspectOwnership() })
     return {
       ...harness,
       clock,
@@ -226,6 +241,15 @@ async function fixture(binary: boolean, body: string, duringStartup = false) {
       },
     }
   } catch (error) {
+    if (menuLifetimeJournalEnabled) {
+      menuLifetimeJournal('operation:fixture-fail', { error: menuLifetimeError(error) })
+      try { await stop() }
+      catch (cleanup) {
+        menuLifetimeJournal('operation:fixture-cleanup-fail', { error: menuLifetimeError(cleanup) })
+        throw new AggregateError([error, cleanup], 'Menu fixture setup and cleanup failed', { cause: error })
+      }
+      throw error
+    }
     await stop()
     throw error
   }
@@ -352,15 +376,28 @@ run=function(){var first=group.popup(0,10,20);mark("cancel:first:"+first);
     try {
       const opening = f.open(),
         first = await f.waitPopup('First popup', 1, opening)
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:popup-open', { which: 'first', identity: first, ownership: f.session.inspectOwnership() })
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:dismiss-before', { which: 'first', identity: first })
       f.session.menuDismiss(first)
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:dismiss-after', { which: 'first', ownership: f.session.inspectOwnership() })
       const second = await f.waitPopup('First popup', 1, opening, first.requestId)
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:popup-open', { which: 'second', identity: second, ownership: f.session.inspectOwnership() })
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:dismiss-before', { which: 'stale-first', identity: first })
       f.session.menuDismiss(first)
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:dismiss-after', { which: 'stale-first', ownership: f.session.inspectOwnership() })
       await succeeded(f.choose(f.menuId('First item'), first))
       assert.equal(f.popup()?.requestId, second.requestId)
       assert.equal(opening.settled(), false)
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:dismiss-before', { which: 'second', identity: second })
       f.session.menuDismiss(second)
-      assert.equal(await f.settled(opening), '1,0')
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:dismiss-after', { which: 'second', ownership: f.session.inspectOwnership() })
+      const result = await f.settled(opening)
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:final-return', { result, ownership: f.session.inspectOwnership() })
+      assert.equal(result, '1,0')
       assert.ok(!f.logs.includes('item:click'))
+    } catch (error) {
+      if (menuLifetimeJournalEnabled) menuLifetimeJournal('operation:ordinary-cancel-fail', { error: menuLifetimeError(error) })
+      throw error
     } finally {
       await f.stop()
     }

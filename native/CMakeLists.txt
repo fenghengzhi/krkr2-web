@@ -38,6 +38,11 @@ file(GLOB TJS_SOURCES CONFIGURE_DEPENDS "${TJS_ROOT}/*.cpp")
 add_executable(tjs ${TJS_SOURCES} ${PARSERS} "${CMAKE_CURRENT_BINARY_DIR}/parser/tjsDateWordMap.inc" tjs2/bridge.cpp tjs2/scripts.cpp tjs2/bytecode.cpp tjs2/execution.cpp tjs2/lifetime.cpp tjs2/tvp-messages.cpp)
 add_custom_target(tvp_message_catalog_check
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate-tvp-messages.py" --check
+  # Check the actual generated macro body before compiling the engine. A
+  # generator and its checked-in output can agree on the same syntax error.
+  COMMAND "${CMAKE_CXX_COMPILER}" -std=c++20 -fsyntax-only
+    "-I${TJS_ROOT}" "-I${CMAKE_CURRENT_SOURCE_DIR}/tjs2/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tests/native/tvp-message-catalog.cpp"
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
   VERBATIM)
 add_dependencies(tjs tvp_message_catalog_check)

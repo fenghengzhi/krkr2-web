@@ -43,4 +43,4 @@ jobs:
             out/ci/
             out/verification/activity/native-check.json
             test-results-native-activity/
-          retention-days: 14
+          retention-days: 90

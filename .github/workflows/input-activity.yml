@@ -72,4 +72,4 @@ jobs:
           path: |
             out/ci/
             test-results/
-          retention-days: 14
+          retention-days: 90

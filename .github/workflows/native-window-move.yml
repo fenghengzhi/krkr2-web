@@ -176,4 +176,4 @@ jobs:
           name: native-window-move-${{ matrix.os }}-${{ github.run_attempt }}
           path: out/ci/native-window-move/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90

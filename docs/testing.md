@@ -114,7 +114,9 @@ Playwright 1.63 的 Linux WebKit 在本次云端检查中不能创建 Worker Web
 
 每个作业完成后立即上传报告，不必等待同一浏览器的其他套件；GitHub reporter 同时提供错误注释。保留现有用例断言、超时和零自动重试。Chromium、Firefox 与原生生命周期使用 2 个 worker。在相同构建和 macOS 镜像上，媒体启动诊断双并发 6 次有 2 次失败，单并发 6 次全部通过；记录显示争用期间 Blob 读取和媒体加载明显延迟，见 [双并发记录](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809235409) 和 [单并发对照](https://github.com/fenghengzhi/krkr2-web/actions/runs/34809666778)。原有 WebKit 网络模拟排除仍由 PWA 配置明确控制。
 
-每个作业上传日志、JSON 报告以及可用的失败截图/trace，保留 14 天。`test-build` 含 commit、run ID 和运行次数，另含带哈希的 WASM manifest 与离线发布清单。Actions 详情页的 Artifacts 可下载这些文件；需要长期保存的阶段证据应另行归档。
+每个作业上传日志、JSON 报告以及可用的失败截图/trace，配置保留 90 天（仍受仓库／组织上限约束）。`test-build` 含 commit、run ID 和运行次数，另含带哈希的 WASM manifest 与离线发布清单。Actions 详情页的 Artifacts 可下载这些文件；需要长期保存的阶段证据应另行归档。原件缺失、取消或未报告均不计为通过。
+
+107 起，主 workflow 使用 `cancel-in-progress: false` 与 `queue: max` 保留等待中的批次；仍按大批推送、下轮取回结果，不实时轮询。消息表的四项生成／C++ 语法预检在内核缓存之前执行。独立菜单生命周期诊断用同次构建，在 default／liftoff-only 两模式下各固定三次执行原二十四个定义，并保留完整日志与可取得的原 core；它不增加普通测试定义，也不能用有限重复通过来证明历史堆崩溃已解决。
 
 两个 WebKit 常规产物分别命名为 `browser-results-webkit-browser-shard-1-of-2` 和 `browser-results-webkit-browser-shard-2-of-2`，其余产物名称保持原样。每份浏览器产物的 `out/ci/browser-job.json` 记录 project、suite、shard/index/total、worker 数、commit、run ID、attempt 和实际还原的 build-info；未分片的 shard 字段为 null。两片均通过 `prepare-tests` 获取同次运行的唯一 `test-build`。归档时保留独立目录、作业日志、JSON、trace 和原生崩溃清单，不能覆盖合并同名 `results.json`，也不能用一片成功替代完整 WebKit 结果。取消、超时、未报告或缺失结果仍分别记录；历史未分片产物与数字保持原样。首次分片运行尚未完成验证，不能提前声称解决了超时。
 

@@ -37,4 +37,4 @@ jobs:
         with:
           name: object-lifetime-${{ matrix.variant }}
           path: out/ci/
-          retention-days: 30
+          retention-days: 90

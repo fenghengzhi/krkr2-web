@@ -22,6 +22,8 @@ concurrency:
   group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ inputs.node-only && '-node-diagnostic' || inputs.runtime-only && '-runtime-diagnostic' || '' }}
   # Keep the running suite and its evidence when a follow-up fix is queued.
   cancel-in-progress: false
+  # Keep earlier pending batches too; the default single slot replaces them.
+  queue: max
 
 defaults:
   run:
@@ -50,6 +52,8 @@ jobs:
       - run: mkdir -p out/ci
       - name: Check pinned native TVP message catalog
         run: python3 scripts/generate-tvp-messages.py --check 2>&1 | tee out/ci/tvp-message-catalog.log
+      - name: Check generated message syntax and the original failure control
+        run: python3 tests/native/tvp-message-generation.py 2>&1 | tee out/ci/tvp-message-generation.log
       - name: Restore kernels built from the same native sources
         id: kernels
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -161,13 +165,13 @@ jobs:
           name: test-build
           path: ${{ runner.temp }}/test-build.tar.gz
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: build-logs
           path: out/ci/
-          retention-days: 14
+          retention-days: 90
 
   node:
     name: Node conformance and integration
@@ -255,7 +259,7 @@ jobs:
         with:
           name: node-results
           path: out/ci/
-          retention-days: 14
+          retention-days: 90
       - name: Preserve original Node core bytes
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -263,7 +267,7 @@ jobs:
           name: node-native-cores
           path: out/native-cores/
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 90
 
   browser:
     name: Browser / ${{ matrix.browser }} / ${{ matrix.suite }}${{ matrix.shardIndex && format(' / shard {0}/{1}', matrix.shardIndex, matrix.shardTotal) || '' }} (${{ matrix.os }})
@@ -500,7 +504,7 @@ jobs:
             out/ci/
             test-results/
             out/verification/graphics/
-          retention-days: 14
+          retention-days: 90
 
   native-activity:
     name: Chromium trusted lifecycle
@@ -524,7 +528,7 @@ jobs:
             out/ci/
             out/verification/activity/native-check.json
             test-results-native-activity/
-          retention-days: 14
+          retention-days: 90
 
   runtime:
     name: Direct runtime / three browsers
@@ -547,7 +551,7 @@ jobs:
           path: |
             out/ci/
             out/verification/vm-console/
-          retention-days: 14
+          retention-days: 90
 
   compatibility:
     name: Original KAG and release compatibility
@@ -561,7 +565,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -614,3 +618,9 @@ jobs:
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     needs: build
     uses: ./.github/workflows/layer-lifetime-runtime.yml
+
+  menu-lifetime-runtime-reference:
+    name: Menu lifetime host runtime diagnosis
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    needs: build
+    uses: ./.github/workflows/menu-lifetime-runtime.yml
