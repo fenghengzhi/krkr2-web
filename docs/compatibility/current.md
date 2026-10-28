@@ -1,5 +1,7 @@
 # 当前实现范围
 
+111 实现提交 `de046be70c7a9517e9b9d35a0a8baaf8afcac1d1` 已推送，[Actions 40785212878](https://github.com/fenghengzhi/krkr2-web/actions/runs/40785212878) 首次唯一查询为 pending／conclusion=null，仅确认身份，新增 17 常规 Node、每浏览器四个定义均待执行。下轮回收，完整非插件目标保持 active。
+
 111 候选接入 [浏览器生命周期与几何修复](../decisions/111-browser-lifecycle-and-geometry.md)：失败启动后的面板由页面管理，后台几何有限重试且保留真实宿主错误，退休请求不污染新会话；坐标、拖放、终止存档和异步图像测试按真实调用边界迁移。协议 **42** 和已有 ABI／能力版本保持。候选尚未验证；107 完整及部分主浏览器证据仍有 117 fail、472 未报告，108 Node 有 62 fail，109／110 pending。整体非插件目标保持 active，以下保留历史状态。
 
 110 实现提交 `260cb0aae2ef649b62962618911bbb3fd6698383` 已推送，[Actions 40781763654](https://github.com/fenghengzhi/krkr2-web/actions/runs/40781763654) 首次唯一查询为 pending／conclusion=null，只确认身份，尚无执行通过结论；下轮回收，完整非插件目标保持 active。

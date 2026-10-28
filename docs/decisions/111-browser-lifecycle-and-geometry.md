@@ -61,3 +61,7 @@ fonts／layer-cursor／multiwindow 的原 trace 显示：测试在真实画布�
 ## 未完成范围
 
 新候选尚无执行通过结论。109 的异常处理上下文／失活整理和 110 的成品缓存仍待结果；新回收的 WebKit OPFS、菜单光标、Library 启动、取消分片中的视频／音频失败及原 KAG 诊断缺失仍需继续定位。图像部分目的地写入、JPEG 原版精确性、历史堆崩溃、完整非插件功能与真实游戏验收均未完成。
+
+## 推送与交接
+
+实现提交 `de046be70c7a9517e9b9d35a0a8baaf8afcac1d1` 共 **31 个文件**，已推送到 `codex/migrated-window-attention`。[Full test suite 40785212878](https://github.com/fenghengzhi/krkr2-web/actions/runs/40785212878) 首次唯一身份查询为 **pending／conclusion=null**，精确 SHA、push 事件及 attempt 1 匹配。原响应保存在 `out/verification/github-actions/40785212878/initial-run-discovery.json`。本轮不再查询该运行的 jobs、日志或产物；下一轮补取 108／109／110 未报告范围并回收本批结果。静态交叉审查和 Git 差异检查不能代替托管执行通过。
