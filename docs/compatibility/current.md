@@ -1,5 +1,7 @@
 # 当前实现范围
 
+108 实现提交 `3e246bf771af3c2f84a1a4a94679449997a9016c` 已推送，[Actions 40776092450](https://github.com/fenghengzhi/krkr2-web/actions/runs/40776092450) 首次唯一查询为 pending／conclusion=null，尚无执行通过结论。下轮回收，不实时监控；完整非插件目标仍 active。
+
 108 候选接通 [原版图像选择与模式](../decisions/108-native-image-selection-and-modes.md)：后缀决定 handler，normal／grayscale／palettized 分别解码和缓存，伴随图按请求名查找，已核对错误分支进入原生消息。新增 45 个常规 Node、每浏览器四个定义，全部尚待执行。107 run 的固定快照仍 in_progress，应用结果未报告，Win2022 beginMove 一项输入确认前置失败保持。完整 processed cache、部分写入、JPEG 原版精确性、历史 heap 与整体非插件目标继续未完成；以下保留历史状态。
 
 107 实现提交 `ff9a73ed0213b50f03b342d5cb4f3cbb44955629` 已推送，[Actions 40773899535](https://github.com/fenghengzhi/krkr2-web/actions/runs/40773899535) 首次唯一查询为 queued／conclusion=null，只确认运行身份，尚无本批执行结论；下轮回收结果，完整非插件目标保持 active。

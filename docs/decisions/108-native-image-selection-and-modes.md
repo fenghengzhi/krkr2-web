@@ -39,3 +39,7 @@ ImageLoader 将选定的 format 和 normal／grayscale／palettized 模式传到
 本批不声称完整图像兼容：原版处理后缓存的请求／key／尺寸及省份名复用、main／mask 失败的部分目的地写入、原生 TJS 短读消息、更多 decoder 原因仍待实现。JPEG host 只提供 RGB，当前灰度是明确的 BT.601 Web 近似，尚不等于原 libjpeg Y 分量和数字错误；OS/2／15–16bit BMP 的 host 支持仍需各浏览器结果。原 PNG RGB8 palettized 分支没有安全地拒绝多字节行写入，本实现保留明确的 Web 不支持错误，不复制越界行为或编造原消息。完整目标、历史应用回归、菜单 heap 根因及真实游戏验收继续未完成。
 
 所有新增执行结果仍未报告。下轮补取 107 未报告范围并回收本批结果，不实时监控。
+
+## 推送与交接
+
+实现提交 `3e246bf771af3c2f84a1a4a94679449997a9016c` 共 28 个文件，已推送到 `codex/migrated-window-attention`。[Full test suite 40776092450](https://github.com/fenghengzhi/krkr2-web/actions/runs/40776092450) 的首次唯一身份查询为 **pending／conclusion=null**，精确 head SHA、push 事件及 attempt 1 匹配。原响应保存在 `out/verification/github-actions/40776092450/initial-run-discovery.json`。不再查询该运行的 jobs、日志或产物；下轮一次回收。静态交叉审查和 Git 差异检查不代替托管执行通过。
