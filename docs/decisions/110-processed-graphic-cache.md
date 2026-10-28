@@ -49,3 +49,7 @@ AutoPath add/remove 保留已存成品命中，普通 storage placement 查询�
 旧 cache／archive／project／KAG 测试按固定原合同迁移，先保留旧像素命中，再明确 clear 后验证新 placement；原补丁优先级、原 KAG 源程序、像素、存档重启、暂停／Stop 和所有权断言不删除。相关审计为 `110-processed-cache-audit.md`、`110-loader-audit.md`、`110-cache-fixture-migration.{json,md}`，位于 `out/verification/image-loading/`。
 
 本批仍无执行通过结论，也不声称图像或整体目标全部完成。原 main／mask 失败的部分目的地写入、历史 JPEG 精确像素／数字错误、TJS 短读消息、Web 与原版大小写／原子写入边界、历史 heap、浏览器实际回归及真实游戏验收继续未完成。下轮补取 107／108／109 未报告范围并回收本批结果，不实时监控。
+
+## 推送与交接
+
+实现提交 `260cb0aae2ef649b62962618911bbb3fd6698383` 共 24 个文件，已推送到 `codex/migrated-window-attention`。[Full test suite 40781763654](https://github.com/fenghengzhi/krkr2-web/actions/runs/40781763654) 首次唯一身份查询为 **pending／conclusion=null**，精确 head SHA、push 事件及 attempt 1 匹配。原响应保存在 `out/verification/github-actions/40781763654/initial-run-discovery.json`。本轮不再查询该运行的 jobs、日志或产物；静态交叉审查和 Git 差异检查不能代替托管执行通过。
