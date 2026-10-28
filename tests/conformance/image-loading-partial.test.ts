@@ -84,9 +84,9 @@ for (const stage of ['read', 'decode'] as const) {
       error.image.data.fill(0)
       return true
     })
-    assert.equal(f.loader.snapshot().imageCacheEntries, 2)
+    assert.equal(f.loader.snapshot().imageCacheEntries, 1)
     assert.equal(f.loader.snapshot().imageCachePending, 0)
-    assert.equal(f.loader.snapshot().imageCacheBytes, 8)
+    assert.equal(f.loader.snapshot().imageCacheBytes, 4)
     broken = false
     const loaded = await f.loader.load('scene.bmp', 0x04ffffff)
     assert.deepEqual([...loaded.image.data], [227, 177, 152, 255])
@@ -98,7 +98,8 @@ for (const stage of ['read', 'decode'] as const) {
     )
     assert.equal(f.decodes.filter((name) => name === 'scene.bmp').length, 1)
     assert.equal(f.decodes.filter((name) => name === 'scene_m.bmp').length, 1)
-    assert.equal(f.loader.snapshot().imageCacheEntries, 3)
+    assert.equal(f.loader.snapshot().imageCacheEntries, 2)
+    assert.equal(f.loader.snapshot().imageCacheBytes, 5)
     assert.equal(f.loader.snapshot().imageCachePending, 0)
   })
 }
@@ -129,8 +130,10 @@ for (const invalid of ['truecolor', 'oversized'] as const) {
       assert.deepEqual([...error.image.data], [200, 100, 50, 128])
       return true
     })
-    // These are valid decoded source images; only their use as this Province failed.
-    assert.equal(f.loader.snapshot().imageCacheEntries, 3)
+    // Invalid palettized conversion never inserts. A valid oversized plane is
+    // cached before the Layer's separate size check rejects its use.
+    assert.equal(f.loader.snapshot().imageCacheEntries, invalid === 'truecolor' ? 1 : 2)
+    assert.equal(f.loader.snapshot().imageCacheBytes, invalid === 'truecolor' ? 4 : 6)
     assert.equal(f.loader.snapshot().imageCachePending, 0)
     assert.equal((await f.loader.rule('scene_p.bmp')).width, invalid === 'oversized' ? 2 : 1)
   })
@@ -196,7 +199,7 @@ for (const source of ['scene.bmp', 'scene_m.bmp']) {
       return true
     })
     assert.equal(f.reads.includes('scene_p.bmp'), false)
-    assert.equal(f.loader.snapshot().imageCacheEntries, source === 'scene.bmp' ? 0 : 1)
+    assert.equal(f.loader.snapshot().imageCacheEntries, 0)
     assert.equal(f.loader.snapshot().imageCachePending, 0)
   })
 }

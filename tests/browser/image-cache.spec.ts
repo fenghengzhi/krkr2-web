@@ -2,7 +2,7 @@ import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect } from '@playwright/test'
 
 for (const backend of ['asyncify', 'jspi']) {
-  test(`${backend}: preloaded PNG/TLG copies survive mutation, overwrites and cache clearing`, async ({
+  test(`${backend}: preloaded processed PNG/TLG copies survive mutation, image-save invalidation and clearing`, async ({
     page,
   }) => {
     const errors: string[] = []
@@ -23,6 +23,8 @@ System.graphicCacheLimit=4096;var ret=System.touchImages(["missing", "savedata/r
 var a=new Layer(w,root),b=new Layer(w,root),c=new Layer(w,root),d=new Layer(w,root),layers=[a,b,c,d];
 for(var i=0;i<4;i++){layers[i].loadImages(i<2?"savedata/red.tlg":"savedata/green.png");layers[i].setSize(1,1);layers[i].setPos(i,0);layers[i].visible=true;}
 a.fillRect(0,0,1,1,0xff0000ff);var isolated=b.getMainPixel(0,0)==0xff0000;
+// Image-save opens clear all processed entries before encoding. Existing Layer
+// copies (including green) stay valid; the next red load observes the new save.
 src.fillRect(0,0,1,1,0xffffff00);src.saveLayerImage("savedata/red.tlg","tlg6");b.loadImages("savedata/red.tlg");
 System.clearGraphicCache();var preserved=a.getMainPixel(0,0)==0xff && b.getMainPixel(0,0)==0xffff00 && c.getMainPixel(0,0)==0xff00;
 System.graphicCacheLimit=0;d.loadImages("savedata/green.png");var disabled=System.graphicCacheLimit==0;
@@ -55,6 +57,9 @@ System.graphicCacheLimit=gcsAuto;Debug.message("cache-ready:"+string(isolated &&
       [0, 255, 0, 255],
     ])
     await page.locator('#stop').click()
+    await expect(page.locator('#status')).toHaveText('待机')
+    await expect(page.locator('#stage canvas')).toHaveCount(0)
+    await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
     expect(errors).toEqual([])
   })
 

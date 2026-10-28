@@ -243,13 +243,16 @@ test('mounted and saved resource versions stay stable until replacement and pres
   assert.deepEqual(changed, ['save/a.png', 'save/a.png'])
 })
 
-test('preloading honors positive/negative/full budgets, duplicates and front-of-list priority', async () => {
+test('processed preloading charges duplicate results and retouches the attempted prefix within a soft limit', async () => {
   for (const limit of [8, -4, 0]) {
     const f = loaderFixture()
     f.loader.setLimit(12)
     await f.loader.touch(['a', 'a', 'b', 'c'], limit)
-    assert.deepEqual(f.reads, limit === 0 ? ['a', 'b', 'c'] : ['a', 'b'])
-    assert.equal(f.loader.snapshot().imageCacheBytes, limit === 0 ? 12 : 8)
+    // Each successful 1x1 result charges four bytes, even when the second a
+    // is a hit. The two-image allowance is exhausted before b is attempted.
+    assert.deepEqual(f.reads, limit === 0 ? ['a', 'b'] : ['a'])
+    assert.equal(f.loader.snapshot().imageCacheBytes, limit === 0 ? 8 : 4)
+    assert.equal(f.loader.snapshot().imageCacheMisses, limit === 0 ? 2 : 1)
     if (limit !== 0) {
       await f.loader.load('c', noColorKey)
       await f.loader.load('d', noColorKey)
@@ -267,7 +270,11 @@ test('preloading honors positive/negative/full budgets, duplicates and front-of-
   f.loader.setLimit(3)
   await f.loader.touch(['a', 'b'])
   assert.deepEqual(f.reads, ['a'])
-  assert.equal(f.loader.snapshot().imageCacheBytes, 0)
+  assert.equal(f.loader.snapshot().imageCacheBytes, 4, 'A successful image may overshoot the native soft limit')
+  await f.loader.load('b', noColorKey)
+  await f.loader.load('a', noColorKey)
+  assert.deepEqual(f.reads, ['a', 'b', 'a'], 'A later miss evicts the old overshoot; retouch cannot protect or resurrect it')
+  assert.equal(f.loader.snapshot().imageCacheBytes, 4)
 })
 
 test('preload timeout finishes the current image, ignores missing/broken images and checks cancellation', async () => {
@@ -276,6 +283,7 @@ test('preload timeout finishes the current image, ignores missing/broken images 
   await f.loader.touch(['missing', 'a', 'b', 'c'], 0, 3)
   assert.deepEqual(f.reads, ['a'])
   assert.equal(f.loader.snapshot().imageCacheEntries, 1)
+  assert.equal(f.loader.snapshot().imageCacheMisses, 2, 'A missing processed request is still a miss')
   await f.loader.touch(['missing', 'b', 'c'])
   assert.deepEqual(f.reads, ['a', 'b', 'c'])
   assert.ok(f.yields > 0)
@@ -295,13 +303,14 @@ test('preload timeout finishes the current image, ignores missing/broken images 
   await assert.rejects(f.loader.touch(['a'], 0, -1), /Invalid/)
 })
 
-test('raw cache reuse preserves palette keys, companion updates and auto-path switches', async () => {
+test('processed keys isolate mutations and retain AutoPath hits until clear while resource mutations invalidate dependencies', async () => {
   const storage = new StorageResolver(),
     reads: number[] = [],
+    lookups: string[] = [],
     decode = async (bytes: Uint8Array) => {
       const n = bytes[0]!
       reads.push(n)
-      return { ...pixels(n), indices: Uint8Array.of(n) }
+      return { ...pixels(n), indices: Uint8Array.of(n), metadata: new Map([['source', String(n)]]) }
     }
   storage.mount([
     resource('base/a.png', 7),
@@ -311,6 +320,7 @@ test('raw cache reuse preserves palette keys, companion updates and auto-path sw
   storage.addAutoPath('base/')
   const loader = new ImageLoader(
     (name) => {
+      lookups.push(name)
       try {
         return storage.resolve(name)
       } catch {
@@ -326,17 +336,38 @@ test('raw cache reuse preserves palette keys, companion updates and auto-path sw
   assert.deepEqual(reads, [7])
   const keyed = await loader.load('a', 0x03000007)
   assert.equal(keyed.image.data[3], 0)
-  keyed.image.indices![0] = 99
-  const plain = await loader.load('A.PNG', noColorKey)
+  assert.equal(keyed.image.indices, undefined, 'Source palette indices are not retained in normal output')
+  keyed.image.data.fill(0)
+  keyed.image.metadata!.set('source', 'changed')
+  const again = await loader.load('a', 0x03000007)
+  assert.deepEqual([...again.image.data], [7, 2, 3, 0])
+  assert.equal(again.image.metadata!.get('source'), '7')
+  const plain = await loader.load('a.png', noColorKey)
   assert.equal(plain.image.data[3], 64)
   assert.equal(plain.province![0], 4)
+  assert.equal(loader.snapshot().imageCacheBytes, 13, 'Three RGBA requests plus one packed province byte; metadata is resident-only')
+  assert.deepEqual(reads, [7, 7, 4, 7], 'Bare name, explicit suffix and color key are independent processed requests')
   storage.mount([resource('base/a_p.png', 5)])
+  loader.invalidate('base/a_p.png') // Same explicit mutation notification used by Session.
   assert.equal((await loader.load('a', noColorKey)).province![0], 5)
   storage.addAutoPath('patch/')
+  loader.namespaceChanged()
+  assert.equal(storage.resolve('a.png').name, 'patch/a.png')
+  const beforeHit = lookups.length
+  assert.equal((await loader.load('a', noColorKey)).image.data[0], 7)
+  assert.equal(lookups.length, beforeHit, 'A processed hit does not resolve the new namespace or rediscover companions')
+  loader.clear()
   assert.equal((await loader.load('a', noColorKey)).image.data[0], 9)
   storage.removeAutoPath('patch/')
+  loader.namespaceChanged()
+  assert.equal((await loader.load('a', noColorKey)).image.data[0], 9)
+  loader.clear()
   assert.equal((await loader.load('a', noColorKey)).image.data[0], 7)
-  assert.equal(reads.filter((n) => n === 7).length, 1)
+  assert.deepEqual(reads, [7, 7, 4, 7, 7, 5, 9, 5, 7, 5])
+  loader.dispose()
+  assert.equal(loader.snapshot().imageCacheEntries, 0)
+  assert.equal(loader.snapshot().imageCacheBytes, 0)
+  assert.equal(loader.snapshot().imageCachePending, 0)
 })
 
 test('canonical invalidation revokes every selected-mode flight without letting late results repopulate', async () => {

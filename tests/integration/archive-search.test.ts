@@ -53,9 +53,10 @@ async function fixture(binary: boolean, store = new MemorySaveStore(), reverse =
   } catch (error) { await f.session.stop(); throw error }
 }
 
-const expected = (label: 'base' | 'patch' | 'patch2') => label === 'base'
-  ? `base|game://./data.xp3>system/patch-value.tjs|${patchColors.base}|game://./data.xp3>image/patch-probe.bmp`
-  : `${label}|game://./${label}.xp3>patch-value.tjs|${patchColors[label]}|game://./${label}.xp3>patch-probe.bmp`
+type PatchLabel = 'base' | 'patch' | 'patch2'
+const expected = (label: PatchLabel, pixel: PatchLabel = label) => label === 'base'
+  ? `base|game://./data.xp3>system/patch-value.tjs|${patchColors[pixel]}|game://./data.xp3>image/patch-probe.bmp`
+  : `${label}|game://./${label}.xp3>patch-value.tjs|${patchColors[pixel]}|game://./${label}.xp3>patch-probe.bmp`
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
@@ -69,13 +70,23 @@ for (const binary of [false, true]) {
         assert.equal(await f.session.evaluate('patchRead("duplicate1")'), expected('patch2'))
         assert.equal(f.session.snapshot().imageCacheMisses, first.imageCacheMisses)
         assert(f.session.snapshot().imageCacheHits > first.imageCacheHits)
-        assert.equal(await f.session.evaluate('patchRead("remove2")'), expected('patch'))
-        assert.equal(await f.session.evaluate('patchRead("remove1")'), expected('base'))
+        // Storage placement changes immediately. The same processed request
+        // keeps its old pixels until the explicit graphic-cache clear.
+        assert.equal(await f.session.evaluate('patchRead("remove2")'), expected('patch', 'patch2'))
+        assert.equal(f.session.snapshot().imageCacheMisses, first.imageCacheMisses)
+        await f.session.evaluate('System.clearGraphicCache()')
+        assert.equal(await f.session.evaluate('patchRead("")'), expected('patch'))
+        assert.equal(await f.session.evaluate('patchRead("remove1")'), expected('base', 'patch'))
+        await f.session.evaluate('System.clearGraphicCache()')
+        assert.equal(await f.session.evaluate('patchRead("")'), expected('base'))
         const base = f.session.snapshot()
         assert.equal(base.imageCacheMisses, first.imageCacheMisses + 2)
-        assert.equal(await f.session.evaluate('patchRead("add2")'), expected('patch2'))
-        assert.equal(f.session.snapshot().imageCacheMisses, base.imageCacheMisses, 'Revisiting the same canonical source reuses its own cache entry')
+        assert.equal(await f.session.evaluate('patchRead("add2")'), expected('patch2', 'base'))
+        assert.equal(f.session.snapshot().imageCacheMisses, base.imageCacheMisses, 'AutoPath changes preserve a finished request hit')
         assert(f.session.snapshot().imageCacheHits > base.imageCacheHits)
+        await f.session.evaluate('System.clearGraphicCache()')
+        assert.equal(await f.session.evaluate('patchRead("")'), expected('patch2'))
+        assert.equal(f.session.snapshot().imageCacheMisses, base.imageCacheMisses + 1)
         assert.equal(await f.session.evaluate('Scripts.evalStorage("data.xp3>system/patch-value.tjs")'), 'base')
         assert.equal(await f.session.evaluate('Scripts.evalStorage("patch4.xp3>patch-value.tjs")'), 'patch4')
         assert.equal(await f.session.evaluate('Storages.isExistentStorage("patch4.xp3")'), '1')

@@ -10,7 +10,7 @@ const exec = (session: EngineSession, source: string) =>
 const bmp = (color: number) =>
   encodeBmp({ width: 1, height: 1, data: Uint8Array.of(color, 0, 0, 255) })
 
-test('TJS cache property and preloading share canonical images without creating or mutating layers', async () => {
+test('TJS preloading retains finished requests independently of aliases and color keys without mutating layers', async () => {
   const { session } = await headless({
     'art/main.png': imageFixture('main.png'),
     '7.bmp': bmp(7),
@@ -25,9 +25,10 @@ test('TJS cache property and preloading share canonical images without creating 
     )
     assert.equal(await session.evaluate('result===void && System.graphicCacheLimit==4096'), '1')
     const initial = session.snapshot()
-    assert.equal(initial.imageCacheEntries, 2)
+    assert.equal(initial.imageCacheEntries, 3)
+    assert.equal(initial.imageCacheBytes, 20, 'Two distinct 2x1 normal requests and one 1x1 result; no metadata charge')
     assert.equal(initial.layers, 0)
-    assert.equal(initial.imageCacheMisses, 3)
+    assert.equal(initial.imageCacheMisses, 5, 'Missing and broken requests count, and aliases do not share processed keys')
     await exec(
       session,
       'var w=new Window(),root=new Layer(w,null),a=new Layer(w,root),b=new Layer(w,root);var tags=a.loadImages("main",0xc86432);tags.offs_x="changed";a.setMainPixel(0,0,0);a.setMaskPixel(1,0,0);var second=b.loadImages("main");',
@@ -38,7 +39,7 @@ test('TJS cache property and preloading share canonical images without creating 
       ),
       '1',
     )
-    assert.equal(session.snapshot().imageCacheMisses, initial.imageCacheMisses)
+    assert.equal(session.snapshot().imageCacheMisses, initial.imageCacheMisses + 1, 'The color-keyed result is a separate finished request')
     await exec(session, 'System.clearGraphicCache();')
     assert.equal(session.snapshot().imageCacheEntries, 0)
     assert.equal(
@@ -49,7 +50,7 @@ test('TJS cache property and preloading share canonical images without creating 
       session,
       'b.loadImages("main");System.graphicCacheLimit=0;b.loadImages("main");b.loadImages("main");',
     )
-    assert.equal(session.snapshot().imageCacheMisses, initial.imageCacheMisses + 3)
+    assert.equal(session.snapshot().imageCacheMisses, initial.imageCacheMisses + 4)
     assert.equal(session.snapshot().imageCacheEntries, 0)
     await exec(session, 'System.graphicCacheLimit=gcsAuto;')
     assert.equal(session.snapshot().imageCacheLimit, 32 * 1024 * 1024)
@@ -63,18 +64,18 @@ test('TJS cache property and preloading share canonical images without creating 
   }
 })
 
-test('TJS preload budgets protect the requested prefix and duplicate names do not consume capacity twice', async () => {
+test('TJS preload budgets charge duplicate output bytes and stop before the next request', async () => {
   const { session } = await headless({ 'a.bmp': bmp(1), 'b.bmp': bmp(2), 'c.bmp': bmp(3) })
   try {
     await exec(session, 'System.graphicCacheLimit=12;System.touchImages(["a","a","b","c"],-4);')
-    assert.equal(session.snapshot().imageCacheBytes, 8)
-    assert.equal(session.snapshot().imageCacheMisses, 2)
+    assert.equal(session.snapshot().imageCacheBytes, 4)
+    assert.equal(session.snapshot().imageCacheMisses, 1)
     await exec(session, 'System.clearGraphicCache();System.touchImages(["a","b","c"],4);')
     assert.equal(session.snapshot().imageCacheBytes, 4)
-    assert.equal(session.snapshot().imageCacheMisses, 3)
+    assert.equal(session.snapshot().imageCacheMisses, 2)
     await exec(session, 'System.clearGraphicCache();System.touchImages(["a","b","c"]);')
     assert.equal(session.snapshot().imageCacheBytes, 12)
-    assert.equal(session.snapshot().imageCacheMisses, 6)
+    assert.equal(session.snapshot().imageCacheMisses, 5)
   } finally {
     await session.stop()
   }
@@ -85,8 +86,10 @@ test('saved-image overwrites, imports and companion replacement invalidate cache
   try {
     await exec(
       session,
-      'Storages.addAutoPath("savedata/");var w=new Window(),a=new Layer(w,null),b=new Layer(w,a);a.loadImages("main");a.fillRect(0,0,1,1,0xff090000);a.saveLayerImage("savedata/main.bmp","bmp32");',
+      'Storages.addAutoPath("savedata/");var w=new Window(),a=new Layer(w,null),b=new Layer(w,a);a.loadImages("main");System.touchImages(["art/picture.bmp"]);a.fillRect(0,0,1,1,0xff090000);',
     )
+    assert.equal(session.snapshot().imageCacheEntries, 2)
+    await exec(session, 'a.saveLayerImage("savedata/main.bmp","bmp32");')
     assert.equal(session.snapshot().imageCacheEntries, 0)
     await exec(session, 'b.loadImages("MAIN");')
     assert.equal(await session.evaluate('b.getMainPixel(0,0)'), String(0x090000))

@@ -37,7 +37,8 @@ export class DropStorage {
   private waiters = new Set<(error: unknown) => void>()
   constructor(private readonly resolver: StorageResolver,
     private readonly savedNames: () => readonly string[],
-    private readonly checkpoint: () => Promise<void>) {}
+    private readonly checkpoint: () => Promise<void>,
+    private readonly beforePublish: () => void = () => {}) {}
 
   private check(valid?: () => boolean): void {
     if (this.disposed) throw new Error('Dropped storage is disposed')
@@ -166,6 +167,8 @@ export class DropStorage {
       // check and publication. A racing save is retained and rejects the drop.
       this.check(valid)
       if (this.resolver.hasTree(prefix, this.savedNames())) throw new Error('Drop namespace collided before commit')
+      // Keep namespace publication and image-cache revocation synchronous.
+      this.beforePublish()
       this.resolver.mount(resources, { directories: [...directories], readonlyRoots: [prefix] })
       this.batches++
       this.retained.files += charge.files; this.retained.directories += charge.directories

@@ -186,11 +186,11 @@ test('touch discovers province names without reading pixels and still validates 
 
 test('preload budget exhaustion finishes the current mask and does not start the next image', async () => {
   const f = fixture([['scene.png', 20], ['scene_m.png', 128], ['next.png', 9]])
-  f.loader.setLimit(5) // A one-pixel fixture includes its one-byte palette index.
+  f.loader.setLimit(4) // Only the successful RGBA bitmap counts toward preload.
   await f.loader.touch(['scene.png', 'next.png'])
   assert.deepEqual(f.reads, ['scene.png', 'scene_m.png'])
   assert.equal(f.queries.includes('next.png'), false)
-  assert.equal(f.loader.snapshot().imageCacheBytes, 5)
+  assert.equal(f.loader.snapshot().imageCacheBytes, 4)
 })
 
 test('normal, grayscale, palette and handler contexts cannot reuse one another through a shared resource', async () => {

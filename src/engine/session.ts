@@ -181,6 +181,8 @@ export interface SessionSnapshot {
   saveFiles: number
   pendingSaves: number
   imageCacheBytes: number
+  /** Owned processed payload/name/metadata accounting, not total VM heap. */
+  imageCacheResidentBytes: number
   imageCacheEntries: number
   imageCachePending: number
   imageCacheHits: number
@@ -537,7 +539,8 @@ export class EngineSession {
       this.storage.invalidateSearch()
     }, (path) => this.storage.assertWritable(path))
     this.dropped = new DropStorage(this.storage, () => this.saves.list().map((file) => file.name),
-      async () => { this.control.check(); await deps.yieldToHost(); this.control.check() })
+      async () => { this.control.check(); await deps.yieldToHost(); this.control.check() },
+      () => this.images.clear())
     this.diagnostics = new DebugLog(this.saves, deps.wallNow ?? Date.now, (entry) =>
       deps.event({ type: 'log', level: entry.level, text: entry.text }),
     )
@@ -724,8 +727,11 @@ export class EngineSession {
           if (invalidation) this.invalidateLayer(id)
           else this.dirty = true
         },
-        async (name) => {
-          try { return await this.images.rule(name) }
+        async (name, width, height) => {
+          try {
+            this.materializeLogs()
+            return await this.images.rule(name, width, height)
+          }
           catch (error) {
             this.control.check()
             if (error instanceof ExecutionCancelled) throw error
@@ -4488,7 +4494,7 @@ export class EngineSession {
           ['Storage auto paths', () => this.storage.invalidateSearch()],
         )
         if (level >= 15) listeners.push(
-          ['Source images', () => this.images.compact()],
+          ['Processed images', () => this.images.compact()],
           ['Font faces', () => this.fonts.compact()],
           ['Raster scratch', () => this.deps.graphics.compact?.()],
         )
@@ -4510,6 +4516,7 @@ export class EngineSession {
         const names = context.snapshot(args[0])
         if (names.type !== 'array' || names.items.some((name) => typeof name !== 'string'))
           throw new Error('System.touchImages requires an Array of names')
+        this.materializeLogs()
         await this.images.touch(names.items as string[], number(1), number(2))
         break
       }
@@ -4734,9 +4741,11 @@ export class EngineSession {
       }
       case 'Storages.addAutoPath':
         this.storage.addAutoPath(text(0))
+        this.images.namespaceChanged()
         break
       case 'Storages.removeAutoPath':
         this.storage.removeAutoPath(text(0))
+        this.images.namespaceChanged()
         break
       case 'Events.create': {
         const type = text(0),
@@ -5300,6 +5309,7 @@ export class EngineSession {
           record = this.layerObjects!.get(id),
           ticket = this.layers.beginImageLoad(id)
         try {
+          this.materializeLogs()
           const { image, province } = await cancelable(
             this.images.load(text(1), clipInteger(2) >>> 0),
             this.control,
@@ -5340,6 +5350,7 @@ export class EngineSession {
           record = this.layerObjects!.get(id),
           ticket = this.layers.beginProvinceImage(id)
         try {
+          this.materializeLogs()
           const province = await cancelable(
             this.images.province(text(1), ticket.width, ticket.height),
             this.control,
@@ -5727,15 +5738,18 @@ export class EngineSession {
         break
       }
       case 'Layer.saveImage': {
-        const path = storageWritePath(text(1), this.project?.directory)
-        this.storage.assertWritable(path)
         const id = number(0),
           layer = this.layers.get(id),
-          bytes = await this.imageWriter.encode(
-            this.layers.bitmap(id).pixels,
-            text(2),
-            layerImageMetadata(layer.type, layer.imageLeft, layer.imageTop),
-          )
+          pixels = this.layers.bitmap(id).pixels,
+          type = this.imageWriter.validateType(text(2)),
+          path = storageWritePath(text(1), this.project?.directory)
+        this.storage.assertWritable(path)
+        const metadata = layerImageMetadata(layer.type, layer.imageLeft, layer.imageTop)
+        // Native image saving clears the entire graphic cache after opening
+        // its output. Web saves are atomic: validated format/target/bitmap is
+        // our logical open boundary, before any encoder work can suspend/fail.
+        this.images.clear()
+        const bytes = await this.imageWriter.encode(pixels, type, metadata)
         this.control.check()
         this.saves.write(path, bytes)
         break

@@ -41,7 +41,7 @@ export class SceneTransitions {
     private readonly schedule: (callback: () => void, delay: number) => () => void,
     private readonly requestFrame: () => Promise<void>,
     private readonly changed: (layerId: number, invalidation?: boolean) => void,
-    private readonly readRule: (name: string) => Promise<Pixels>,
+    private readonly readRule: (name: string, width: number, height: number) => Promise<Pixels>,
     private readonly fail: (error: unknown) => void,
     private readonly owner?: (id: number) => ScriptWeakObject | undefined,
     private readonly isClosing: (id: number) => boolean = () => false,
@@ -127,7 +127,7 @@ export class SceneTransitions {
     if (kind === 'universal') {
       if (typeof args[6] !== 'string' || !args[6])
         throw new Error('Universal transition requires a rule image')
-      rule = await this.readRule(args[6])
+      rule = await this.readRule(args[6], a.width, a.height)
       if (!rule.width || !rule.height) throw new Error('Empty transition rule image')
     }
     if (this.disposed) throw new Error('Transition service is disposed')

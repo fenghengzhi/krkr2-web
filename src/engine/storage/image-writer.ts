@@ -48,12 +48,18 @@ export class ImageWriter {
     private readonly compress: (bytes: Uint8Array) => Promise<Uint8Array>,
     private readonly finish: <T>(work: Generator<void, T>) => Promise<T>,
   ) {}
+  validateType(type: string): string {
+    if (type.startsWith('.')) type = type.slice(1)
+    if (!['bmp', 'bmp8', 'bmp24', 'bmp32', 'png', 'png24', 'png32', 'tlg', 'tlg5', 'tlg6', 'tlg524', 'tlg624'].includes(type))
+      throw new Error(`Image output format is not implemented: ${type}`)
+    return type
+  }
   async encode(
     image: Pixels,
     type: string,
     metadata: ReadonlyMap<string, string>,
   ): Promise<Uint8Array> {
-    if (type.startsWith('.')) type = type.slice(1)
+    type = this.validateType(type)
     if (['bmp', 'bmp8', 'bmp24', 'bmp32'].includes(type)) return encodeBmp(image, type)
     if (['png', 'png24', 'png32'].includes(type)) {
       const plan = await this.finish(encodePng(image, type !== 'png24', metadata))

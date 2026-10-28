@@ -50,10 +50,10 @@ const expected = {
   patch2: { value: 'patch2.xp3>patch-value.tjs', image: 'patch2.xp3>patch-probe.bmp',
     scenario: 'patch2.xp3>first.ks', pixel: 0x778899, rgba: [119, 136, 153, 255] },
 } as const
-function state(label: Label, saved = false): string {
+function state(label: Label, saved = false, pixel: Label = label): string {
   const item = expected[label]
   return [label, saved ? 'saved' : label, 'game://./' + (saved ? 'patch-value.tjs' : item.value),
-    'game://./' + item.image, 'game://./' + item.scenario, item.pixel].join('|')
+    'game://./' + item.image, 'game://./' + item.scenario, expected[pixel].pixel].join('|')
 }
 
 async function pixels(surface: Locator, info: TestInfo, phase: string, label: Label) {
@@ -76,7 +76,7 @@ async function pixels(surface: Locator, info: TestInfo, phase: string, label: La
   try {
     await info.attach(`archive-patch-${phase}-pixels`, { body: JSON.stringify({
       expected: expected[label].rgba, readings,
-      observation: 'Actual rendered canvas screenshot, independently decoded PNG; no graphics-cache clearing',
+      observation: 'Actual rendered canvas screenshot, independently decoded PNG; retained hits and explicit cache-clear phases are checked separately',
     }), contentType: 'application/json' })
   } catch (error) { failures.push(error) }
   if (failures.length === 1) throw failures[0]
@@ -145,15 +145,21 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         await expect(page.locator('#library-games h3')).toHaveText(title)
         await expect(page.locator('#cancel-library')).toBeHidden()
 
-        await evaluate(page, 'archivePatchSwitch("patch2.xp3>","")', state('patch'))
+        await evaluate(page, 'archivePatchSwitch("patch2.xp3>","")', state('patch', false, 'patch2'))
         await expect(page.getByText('patch-first:patch', { exact: true })).toBeVisible()
+        await pixels(surface, info, 'removed-patch2-retained', 'patch2')
+        await evaluate(page, '(System.clearGraphicCache(),archivePatchDraw(),archivePatchState())', state('patch'))
         await pixels(surface, info, 'removed-patch2', 'patch')
-        await evaluate(page, 'archivePatchSwitch("patch.xp3>","")', state('base'))
+        await evaluate(page, 'archivePatchSwitch("patch.xp3>","")', state('base', false, 'patch'))
         await expect(page.getByText('patch-first:base', { exact: true })).toBeVisible()
+        await pixels(surface, info, 'removed-patch-retained', 'patch')
+        await evaluate(page, '(System.clearGraphicCache(),archivePatchDraw(),archivePatchState())', state('base'))
         await pixels(surface, info, 'removed-patch', 'base')
-        await evaluate(page, 'archivePatchSwitch("","patch.xp3>")', state('patch'))
+        await evaluate(page, 'archivePatchSwitch("","patch.xp3>")', state('patch', false, 'base'))
         await expect(page.getByText('patch-first:patch', { exact: true })).toHaveCount(2)
-        await pixels(surface, info, 'reused-patch-cache', 'patch')
+        await pixels(surface, info, 'readded-patch-retained', 'base')
+        await evaluate(page, '(System.clearGraphicCache(),archivePatchDraw(),archivePatchState())', state('patch'))
+        await pixels(surface, info, 'readded-patch-after-clear', 'patch')
         await evaluate(page, 'archivePatchSave()', state('patch', true))
         await expect(page.locator('#save-status')).toHaveText(/^\d+ 个存档文件，已保存到此浏览器/)
         await evaluate(page, '[Scripts.evalStorage("patch.xp3>patch-value.tjs"),Scripts.evalStorage("data.xp3>system/patch-value.tjs")].join("|")', 'patch|base')
