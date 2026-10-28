@@ -1,5 +1,7 @@
 # 当前实现范围
 
+112 提交 `22d09757467f30273546eed72255fa8f0d644f01` 已推送，[Actions 40787500591](https://github.com/fenghengzhi/krkr2-web/actions/runs/40787500591) 首次唯一查询为 pending／conclusion=null，仅记录身份，尚无执行结论。下轮回收，完整非插件目标保持 active。
+
 112 候选修正 [托管验证入口与失败证据](../decisions/112-hosted-verification-entrypoints.md)：补字体模块路由，保严格像素比较并增加独立捕获，修复重复 Stop 清理及按后端保留 KAG 结果；没有修改生产代码或新增测试定义，协议 **42** 保持。108 新取两份主报告仍有 48 fail，另三份无报告，109–111 pending。Library 回滚通过、重载后第二次启动失败的勘误已记录；整体目标未完成。
 
 111 实现提交 `de046be70c7a9517e9b9d35a0a8baaf8afcac1d1` 已推送，[Actions 40785212878](https://github.com/fenghengzhi/krkr2-web/actions/runs/40785212878) 首次唯一查询为 pending／conclusion=null，仅确认身份，新增 17 常规 Node、每浏览器四个定义均待执行。下轮回收，完整非插件目标保持 active。

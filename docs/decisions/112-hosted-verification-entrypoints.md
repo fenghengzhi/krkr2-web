@@ -47,3 +47,7 @@ OPFS 原件只显示一段 evaluate 内的 UnknownError，未指出具体原生�
 ## 验证与后续
 
 本批**新增 Node／浏览器定义均为零**，保留并恢复既有真实消费者验证，增加诊断与严格交叉检查。字体、截图及清理候选尚待托管执行；静态交叉审查不等于通过。109–111 的生产修复仍待结果，Library 恢复启动、ZIP 发布时序、菜单 marker、OPFS、WebKit readback 差异，以及完整非插件功能／真实游戏验收继续未完成。
+
+## 推送与交接
+
+候选提交 `22d09757467f30273546eed72255fa8f0d644f01` 共 **17 个文件**，已推送到 `codex/migrated-window-attention`。[Full test suite 40787500591](https://github.com/fenghengzhi/krkr2-web/actions/runs/40787500591) 首次唯一查询为 **pending／conclusion=null**，精确 head SHA、push 事件及 attempt 1 匹配。原响应保存在 `out/verification/github-actions/40787500591/initial-run-discovery.json`。本轮不再查询其 jobs、日志或产物；下一轮补取 108–111 未报告范围并回收本批结果。完整目标继续 active。
