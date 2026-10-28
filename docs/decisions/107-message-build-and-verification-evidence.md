@@ -47,3 +47,7 @@
 固定源及哈希、六类缺口、文件/API 方案和旧夹具迁移清单保存于 `out/verification/image-loading/107-image-handler-audit.md`、`107-image-handler-gaps.json` 和 `107-source/manifest.json`。它们是后续工作的依据，不是已实现或已验证清单。
 
 本批没有新增普通 Node／浏览器测试定义；新增四个早期生成／编译预检，以及原二十四个菜单定义的独立有界重复诊断。全部仍待托管执行。下轮回收本批结果，继续处理应用回归、未闭合的崩溃、图像合同、其他非插件缺口和真实游戏验收；整体目标保持 active。
+
+## 推送与下一轮交接
+
+实现提交 `ff9a73ed0213b50f03b342d5cb4f3cbb44955629` 共 32 个文件，已推送到 `codex/migrated-window-attention`。[Full test suite 40773899535](https://github.com/fenghengzhi/krkr2-web/actions/runs/40773899535) 的首次唯一发现为 **queued／conclusion=null**，精确 head SHA 与 push 事件吻合，attempt 1。原响应保存在 `out/verification/github-actions/40773899535/initial-run-discovery.json`。此后不取 jobs、不轮询日志或 artifacts；下轮再回收固定结果。静态审查与 Git 差异检查不能计为托管执行通过，本批所有执行结论仍未报告。
