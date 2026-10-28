@@ -1,5 +1,7 @@
 # 当前实现范围
 
+109 实现提交 `35c1f3f569fa2170196be04b97f5b785f3661eba` 已推送，[Actions 40779041112](https://github.com/fenghengzhi/krkr2-web/actions/runs/40779041112) 首次唯一查询为 pending／conclusion=null，仅记录身份，尚无本批执行结论；下轮回收，完整非插件目标保持 active。
+
 109 候选补 [事件回归与 portable BMP](../decisions/109-hosted-event-regressions-and-bmp.md)：修复私有事件泵污染未绑定 exceptionHandler 的调用上下文、图像替换后的显示矩形／偏移、同回合失活整理顺序，补 CORE／RGB555 原解码。`nativeSystem:6`，协议 **41**；新增 18 个常规 Node、每浏览器八个定义，尚待执行。107 构建通过但 Node 仍 29 fail、主浏览器未报告，108 尚未执行；完整缓存、JPEG、历史 heap 和整体非插件目标继续未完成。以下保留历史状态。
 
 108 实现提交 `3e246bf771af3c2f84a1a4a94679449997a9016c` 已推送，[Actions 40776092450](https://github.com/fenghengzhi/krkr2-web/actions/runs/40776092450) 首次唯一查询为 pending／conclusion=null，尚无执行通过结论。下轮回收，不实时监控；完整非插件目标仍 active。

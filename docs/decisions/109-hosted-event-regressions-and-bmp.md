@@ -41,3 +41,7 @@
 本轮完整审计 processed graphic cache，**尚未实现**。实际 key 包括规范请求、color key、mode、期望宽高，命中在存储查询之前；主图成功缓存后省份失败不移除主图，省份解码成功但外层尺寸失败也不等于缓存失败。原 TouchImages 对重复命中仍累计成品图字节，LRU 在插入前整理并可能多保留最后一图；universal rule 还传 `0x02ffffff` 和源图实际尺寸。完整安全边界、写入／AutoPath 失效、原始／实际内存计费及后续验收方案保存在 `109-processed-cache-audit.md`，不能用半套 `(name,key)` 缓存替代。
 
 本批新增 **18 常规 Node、每浏览器 8 定义**；旧 capability 拒绝矩阵增加版本 5，可信生命周期定义数量不变。所有新执行结论仍未报告。下轮补取 107／108 未报告范围并回收本批结果；继续处理实际回归、完整缓存、JPEG 精确性、历史 heap 和真实游戏验收，整体目标保持 active。
+
+## 推送与交接
+
+实现提交 `35c1f3f569fa2170196be04b97f5b785f3661eba` 共 30 个文件，已推送到 `codex/migrated-window-attention`。[Full test suite 40779041112](https://github.com/fenghengzhi/krkr2-web/actions/runs/40779041112) 的首次唯一身份查询为 **pending／conclusion=null**，精确 head SHA、push 事件及 attempt 1 匹配。原响应保存在 `out/verification/github-actions/40779041112/initial-run-discovery.json`。此后不查询本批 jobs、日志或产物，下轮回收；静态交叉审查与 Git 差异检查不能代替托管执行通过。
