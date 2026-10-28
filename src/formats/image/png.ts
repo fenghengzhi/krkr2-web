@@ -1,7 +1,7 @@
 import type { DecodedImage } from '../../engine/ports/graphics.ts'
 import { crc32 } from '../binary/crc32.ts'
 import { paeth } from './png-filter.ts'
-import { ImageDecodeError, type ImageDecodeSelection } from './selection.ts'
+import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from './selection.ts'
 
 const magic = [137, 80, 78, 71, 13, 10, 26, 10]
 const adam7 = [
@@ -45,6 +45,7 @@ function* pixels(
   transparent: Uint8Array | undefined,
   metadata: Map<string, string>,
   mode?: ImageDecodeSelection['mode'],
+  progress?: ImageDecodeProgress,
 ): Generator<void, DecodedImage> {
   const { width, height, depth, type, channels } = h,
     image: DecodedImage = { width, height, data: new Uint8Array(width * height * 4) },
@@ -134,6 +135,8 @@ function* pixels(
       const swap = previous
       previous = row
       row = swap
+      if (!h.interlace) progress?.row(y, image.data.subarray(y * width * 4, (y + 1) * width * 4),
+        image.indices?.subarray(y * width, (y + 1) * width))
       yield
     }
   }
@@ -141,7 +144,7 @@ function* pixels(
   return image
 }
 
-function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode']): Generator<void, PngPlan> {
+function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress): Generator<void, PngPlan> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     metadata = new Map<string, string>()
   let at = 8,
@@ -153,8 +156,23 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode']): Generat
     dataStop = 0,
     ended = false,
     dataStarted = false,
-    dataEnded = false
+    dataEnded = false,
+    tailFailed = false,
+    tailError: unknown
   while (at < bytes.length) {
+    // Eight remaining bytes identify a non-IDAT tail even when its CRC or
+    // declared payload is truncated. That read occurs in native png_read_end.
+    let afterData = !!progress && dataStarted && bytes.length - at >= 8 &&
+      String.fromCharCode(...bytes.subarray(at + 4, at + 8)) !== 'IDAT'
+    if (progress && !dataStarted && header && bytes.length - at >= 8 &&
+        String.fromCharCode(...bytes.subarray(at + 4, at + 8)) === 'IDAT' &&
+        (header.type !== 3 || palette)) {
+      // png_read_info stops after the first complete IDAT header. Even when
+      // its payload/CRC is short, native creates the destination before the
+      // ensuing png_read_row failure. No row is claimed from missing bytes.
+      progress.size(header.width, header.height)
+    }
+    try {
     if (bytes.length - at < 12) throw new Error('Truncated PNG chunk')
     const length = view.getUint32(at),
       start = at + 4,
@@ -162,6 +180,7 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode']): Generat
     if (length > bytes.length - at - 12) throw new Error('Truncated PNG chunk data')
     const type = String.fromCharCode(...bytes.subarray(start, start + 4)),
       chunk = bytes.subarray(start + 4, end)
+    afterData = dataStarted && type !== 'IDAT'
     if ((yield* crc32(bytes.subarray(start, end))) !== view.getUint32(end))
       throw new Error('PNG chunk CRC mismatch')
     at = end + 4
@@ -261,10 +280,21 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode']): Generat
         )
       } else if (!(bytes[start]! & 32)) throw new Error(`Unsupported PNG critical chunk: ${type}`)
     }
+    } catch (error) {
+      // png_read_end runs after noninterlaced row notifications, but before
+      // interlaced rows are copied. Retain the actual error object, not a new
+      // diagnosis; IDAT/inflate failure timing remains a separate boundary.
+      if (!progress || !afterData) throw error
+      tailFailed = true; tailError = error
+      break
+    }
     yield
   }
-  if (!header || !ended || at !== bytes.length || !total)
-    throw new Error('Truncated or extra PNG data')
+  if (!header) throw new Error('Truncated or extra PNG data')
+  if (!ended || at !== bytes.length || !total) {
+    if (!progress || !dataStarted || !total) throw new Error('Truncated or extra PNG data')
+    if (!tailFailed) { tailFailed = true; tailError = new Error('Truncated or extra PNG data') }
+  }
   const h = header,
     expandedLength = passes(h).reduce(
       (sum, p) => sum + (1 + Math.ceil((p.width * h.channels * h.depth) / 8)) * p.height,
@@ -285,7 +315,16 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode']): Generat
     expandedLength,
     decode: (expanded) => {
       if (expanded.length !== expandedLength) throw new Error('PNG expanded size mismatch')
-      return pixels(h, expanded, palette, transparent, metadata, mode)
+      return (function* (): Generator<void, DecodedImage> {
+        const image = yield* pixels(h, expanded, palette, transparent, metadata, mode, progress)
+        if (tailFailed) throw tailError
+        if (progress && h.interlace) for (let y = 0; y < h.height; y++) {
+          progress.row(y, image.data.subarray(y * h.width * 4, (y + 1) * h.width * 4),
+            image.indices?.subarray(y * h.width, (y + 1) * h.width))
+          yield
+        }
+        return image
+      })()
     },
   }
 }
@@ -300,6 +339,7 @@ export function decodePng(bytes: Uint8Array): Generator<void, PngPlan> | undefin
 export function decodeSelectedPng(
   bytes: Uint8Array,
   mode: ImageDecodeSelection['mode'],
+  progress?: ImageDecodeProgress,
 ): Generator<void, PngPlan> {
   if (bytes.length < 8) throw new Error('Truncated PNG signature')
   if (magic.some((byte, index) => bytes[index] !== byte)) {
@@ -307,5 +347,5 @@ export function decodeSelectedPng(
     throw new ImageDecodeError('png', firstFourMatch
       ? 'PNG file corrupted by ASCII conversion' : 'Not a PNG file')
   }
-  return parse(bytes, mode)
+  return parse(bytes, mode, progress)
 }

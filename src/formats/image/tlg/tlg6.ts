@@ -3,7 +3,7 @@ import { BinaryReader } from '../../binary/reader.ts'
 import { SlideDecoder } from './slide.ts'
 import { decodeGolomb } from './golomb.ts'
 import { dimensions } from './size.ts'
-import { ImageDecodeError } from '../selection.ts'
+import { ImageDecodeError, type ImageDecodeProgress } from '../selection.ts'
 
 function predict(left: number, above: number, diagonal: number, average: boolean): number {
   if (average) return (left + above + 1) >>> 1
@@ -12,7 +12,7 @@ function predict(left: number, above: number, diagonal: number, average: boolean
   return diagonal >= max ? min : diagonal < min ? max : left + above - diagonal
 }
 
-export function* readTlg6(input: BinaryReader, selected = false): Generator<void, DecodedImage> {
+export function* readTlg6(input: BinaryReader, selected = false, progress?: ImageDecodeProgress): Generator<void, DecodedImage> {
   const colors = input.u8()
   if (selected) {
     // The original reads the four-byte mark before checking any field.
@@ -31,6 +31,7 @@ export function* readTlg6(input: BinaryReader, selected = false): Generator<void
     height = input.u32(),
     maxBits = input.u32()
   dimensions(width, height)
+  progress?.size(width, height)
   const blocks = Math.ceil(width / 8),
     filters = yield* new SlideDecoder(true).decode(
       input.slice(input.u32()),
@@ -160,6 +161,7 @@ export function* readTlg6(input: BinaryReader, selected = false): Generator<void
           if (colors < 4) data[at + 3] = 255
         }
       }
+      progress?.row(y, data.subarray(y * width * 4, (y + 1) * width * 4))
       yield
     }
   }

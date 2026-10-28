@@ -314,16 +314,17 @@ export class EngineSession {
   private readonly project?: GameProject
   private readonly images = new ImageLoader(
     (name) => this.findResource(name),
-    (bytes, selection) => decodeSelectedImage(bytes, selection, {
-      finish: (work) => this.finishGraphics(work),
+    (bytes, selection, progress) => decodeSelectedImage(bytes, selection, {
+      finish: (work) => this.finishImageGraphics(work),
       inflate: (compressed, length) => this.deps.inflateImage(compressed, length),
       host: (input, selected) => this.deps.graphics.decode(input, selected),
-    }),
-    (work) => this.finishGraphics(work),
+    }, progress),
+    (work) => this.finishImageGraphics(work),
     {
       now: () => this.deps.now(),
       check: () => this.control.check(),
       yield: () => this.yieldGraphics(),
+      wait: () => this.control.paused ? this.control.wait() : undefined,
     },
     (name) => getFullStoragePath(name, this.project?.directory),
   )
@@ -4119,6 +4120,13 @@ export class EngineSession {
     await this.control.wait()
     this.control.check()
   }
+  private async finishImageGraphics<T>(work: Generator<void, T>): Promise<T> {
+    // Image I/O may settle while paused. Its next decode/publication phase
+    // waits here even when the image is too small to reach an 8 ms yield.
+    if (this.control.paused) await this.control.wait()
+    this.control.check()
+    return this.finishGraphics(work)
+  }
   private async finishGraphics<T>(work: Generator<void, T>): Promise<T> {
     let deadline = this.deps.now() + 8
     try {
@@ -5350,7 +5358,33 @@ export class EngineSession {
         try {
           this.materializeLogs()
           const { image, province } = await cancelable(
-            this.images.load(text(1), clipInteger(2) >>> 0),
+            this.images.load(text(1), clipInteger(2) >>> 0, {
+              size: (width, height) => {
+                this.control.check()
+                if (record.finished) throw new Error('Layer has been invalidated')
+                if (!this.layers.sizeImageLoad(ticket, width, height))
+                  throw new Error('Image load destination changed')
+              },
+              row: (y, rgba) => {
+                this.control.check()
+                if (record.finished) throw new Error('Layer has been invalidated')
+                if (!this.layers.rowImageLoad(ticket, y, rgba))
+                  throw new Error('Image load destination changed')
+              },
+              main: (image) => {
+                this.control.check()
+                if (record.finished) throw new Error('Layer has been invalidated')
+                const { width, height } = ticket.layer, previousWindow = this.layerWindow(id)
+                if (!this.layers.mainImageLoad(ticket, image))
+                  throw new Error('Image load destination changed')
+                // The normal-load phase's dimension clamp can request an
+                // update even if the following province load later fails.
+                if (ticket.layer.width !== width || ticket.layer.height !== height) {
+                  if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
+                  this.invalidateLayer(id)
+                }
+              },
+            }),
             this.control,
           )
           this.control.check()
@@ -5364,20 +5398,9 @@ export class EngineSession {
         } catch (error) {
           if (error instanceof ProvinceImageLoadError) {
             this.control.check()
-            // Native keeps the completed main image when its companion fails.
-            // A changed destination or stopped session must not receive it.
-            if (!record.finished) {
-              const { width, height } = ticket.layer, previousWindow = this.layerWindow(id)
-              // The failure skips LoadImages' final Update. Only a change to
-              // the Layer's display dimensions requests one during that load.
-              if (
-                this.layers.finishImageLoad(ticket, error.image) &&
-                (ticket.layer.width !== width || ticket.layer.height !== height)
-              ) {
-                if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
-                this.invalidateLayer(number(0))
-              }
-            }
+            // Normal processing already committed before province began.
+            // Failure deallocates only its still-owned province destination.
+            if (!record.finished) this.layers.failImageLoadProvince(ticket)
             throw error.cause
           }
           throw error

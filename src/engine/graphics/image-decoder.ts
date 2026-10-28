@@ -3,12 +3,28 @@ import { TvpError } from '../system/tvp-error.ts'
 import { decodeSelectedBmp } from '../../formats/image/bmp.ts'
 import { decodeSelectedPng } from '../../formats/image/png.ts'
 import { decodeSelectedTlg } from '../../formats/image/tlg/index.ts'
-import { ImageDecodeError, type ImageDecodeSelection } from '../../formats/image/selection.ts'
+import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from '../../formats/image/selection.ts'
 
 export interface SelectedImageDecoderDependencies {
   finish<T>(work: Generator<void, T>): Promise<T>
   inflate(compressed: Uint8Array, length: number): Promise<Uint8Array>
   host(bytes: Uint8Array, selection: ImageDecodeSelection): Promise<DecodedImage>
+}
+
+class ProgressFailure {
+  constructor(readonly cause: unknown) {}
+}
+
+function* publish(image: DecodedImage, progress?: ImageDecodeProgress): Generator<void, DecodedImage> {
+  if (progress) {
+    progress.size(image.width, image.height)
+    for (let y = 0; y < image.height; y++) {
+      progress.row(y, image.data.subarray(y * image.width * 4, (y + 1) * image.width * 4),
+        image.indices?.subarray(y * image.width, (y + 1) * image.width))
+      yield
+    }
+  }
+  return image
 }
 
 function* grayscale(image: DecodedImage, jpeg: boolean): Generator<void, DecodedImage> {
@@ -34,23 +50,35 @@ export async function decodeSelectedImage(
   bytes: Uint8Array,
   selection: ImageDecodeSelection,
   dependencies: SelectedImageDecoderDependencies,
+  observer?: ImageDecodeProgress,
 ): Promise<DecodedImage> {
-  const selected = Object.freeze({ format: selection.format, mode: selection.mode })
+  const selected = Object.freeze({ format: selection.format, mode: selection.mode }),
+    progress: ImageDecodeProgress | undefined = observer && {
+      size(width, height) {
+        try { observer.size(width, height) } catch (error) { throw new ProgressFailure(error) }
+      },
+      row(y, rgba, indices) {
+        try { observer.row(y, rgba, indices) } catch (error) { throw new ProgressFailure(error) }
+      },
+    }
   try {
     switch (selected.format) {
       case 'eri':
         throw new TvpError('TVPNotImplemented', [], 'ERI image decoding is not available')
       case 'bmp': {
-        const image = decodeSelectedBmp(bytes, selected.mode) ?? await dependencies.host(bytes, selected)
-        return selected.mode === 'grayscale' && !image.grayscale ? dependencies.finish(grayscale(image, false)) : image
+        const portable = decodeSelectedBmp(bytes, selected.mode, progress)
+        if (portable) return portable
+        let image = await dependencies.host(bytes, selected)
+        if (selected.mode === 'grayscale' && !image.grayscale) image = await dependencies.finish(grayscale(image, false))
+        return progress ? await dependencies.finish(publish(image, progress)) : image
       }
       case 'png': {
-        const plan = await dependencies.finish(decodeSelectedPng(bytes, selected.mode)),
+        const plan = await dependencies.finish(decodeSelectedPng(bytes, selected.mode, progress)),
           expanded = await dependencies.inflate(plan.compressed, plan.expandedLength)
         return await dependencies.finish(plan.decode(expanded))
       }
       case 'tlg':
-        return await dependencies.finish(decodeSelectedTlg(bytes, selected.mode))
+        return await dependencies.finish(decodeSelectedTlg(bytes, selected.mode, progress))
       case 'jpeg': {
         if (selected.mode === 'palettized')
           throw new ImageDecodeError('jpeg', 'JPEG does not support palettized image')
@@ -59,13 +87,15 @@ export async function decodeSelectedImage(
         if (bytes.length < 3) throw new Error('Truncated JPEG signature')
         if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff)
           throw new Error('Selected JPEG handler received a non-JPEG stream')
-        const image = await dependencies.host(bytes, selected)
-        return selected.mode === 'grayscale' ? dependencies.finish(grayscale(image, true)) : image
+        let image = await dependencies.host(bytes, selected)
+        if (selected.mode === 'grayscale') image = await dependencies.finish(grayscale(image, true))
+        return progress ? await dependencies.finish(publish(image, progress)) : image
       }
       default:
         throw new Error('Unknown selected image handler')
     }
   } catch (error) {
+    if (error instanceof ProgressFailure) throw error.cause
     if (!(error instanceof ImageDecodeError)) throw error
     const id = {
       bmp: 'TVPImageLoadError', jpeg: 'TVPJPEGLoadError', png: 'TVPPNGLoadError', tlg: 'TVPTLGLoadError',

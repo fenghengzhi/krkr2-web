@@ -63,8 +63,13 @@ export interface ProvinceImageLoad {
   readonly width: number
   readonly height: number
 }
-export interface LayerImageLoad extends ProvinceImageLoad {
-  readonly bitmapRevision: number
+export interface LayerImageLoad {
+  readonly layer: LayerState
+  bitmap: Bitmap
+  generation: number
+  width: number
+  height: number
+  bitmapRevision: number
 }
 const MAX_BYTES = 64 * 1024 * 1024
 const noImageTypes = new Set([0, 6, 7])
@@ -672,9 +677,75 @@ export class LayerTree {
       bitmapRevision: bitmap.revision,
     }
   }
+  private imageLoadMatches(load: LayerImageLoad): boolean {
+    return this.provinceLoadMatches(load) && load.bitmap.revision === load.bitmapRevision
+  }
+  private advanceImageLoad(load: LayerImageLoad): void {
+    const bitmap = load.layer.bitmap!
+    load.bitmap = bitmap
+    load.width = bitmap.width
+    load.height = bitmap.height
+    load.bitmapRevision = bitmap.revision
+    load.generation = load.layer.provinceGeneration
+  }
+  sizeImageLoad(load: LayerImageLoad, width: number, height: number): boolean {
+    if (!this.imageLoadMatches(load)) return false
+    dimension(width); dimension(height)
+    if (!width || !height) throw new Error('Invalid image load dimensions')
+    const layer = load.layer
+    this.budget(width * height * 4 - load.bitmap.bytes)
+    const bitmap = new Bitmap(width, height, 0)
+    // Native Recreate changes the pixel allocation only. Layer clip, display
+    // rectangle, province, offsets and ImageModified survive a decoder error.
+    bitmap.clip = { ...load.bitmap.clip }
+    layer.bitmap = bitmap
+    layer.revision++
+    this.advanceImageLoad(load)
+    return true
+  }
+  rowImageLoad(load: LayerImageLoad, y: number, rgba: Uint8Array): boolean {
+    if (!this.imageLoadMatches(load)) return false
+    if (!Number.isInteger(y) || y < 0 || y >= load.height || rgba.length !== load.width * 4)
+      throw new Error('Invalid image load row')
+    load.bitmap.pixels.data.set(rgba, y * load.width * 4)
+    load.bitmap.touch()
+    this.advanceImageLoad(load)
+    return true
+  }
+  mainImageLoad(load: LayerImageLoad, pixels: Pixels): boolean {
+    if (!this.imageLoadMatches(load)) return false
+    const layer = load.layer
+    dimension(pixels.width); dimension(pixels.height)
+    if (!pixels.width || !pixels.height || pixels.data.length !== pixels.width * pixels.height * 4)
+      throw new Error('Invalid RGBA image')
+    this.budget(pixels.data.length + (layer.province ? pixels.width * pixels.height : 0) - this.bytes(layer))
+    const province = this.resizedProvince(layer, pixels.width, pixels.height)
+    const bitmap = new Bitmap(pixels.width, pixels.height, 0)
+    bitmap.pixels.data.set(pixels.data)
+    layer.bitmap = bitmap
+    layer.province = province
+    layer.provinceGeneration++
+    // InternalSetImageSize/ChangeImageSize runs after normal processing and
+    // before the province attempt, including its clip reset and modified flag.
+    layer.width = Math.min(layer.width, pixels.width)
+    layer.height = Math.min(layer.height, pixels.height)
+    layer.imageLeft = Math.max(layer.imageLeft, layer.width - pixels.width)
+    layer.imageTop = Math.max(layer.imageTop, layer.height - pixels.height)
+    layer.imageModified = true
+    layer.revision++
+    this.advanceImageLoad(load)
+    return true
+  }
+  failImageLoadProvince(load: LayerImageLoad): boolean {
+    if (!this.imageLoadMatches(load)) return false
+    load.layer.province = undefined
+    load.layer.provinceGeneration++
+    load.layer.imageModified = true
+    this.advanceImageLoad(load)
+    return true
+  }
   finishImageLoad(load: LayerImageLoad, pixels: Pixels, province?: Uint8Array): boolean {
-    if (!this.provinceLoadMatches(load) || load.bitmap.revision !== load.bitmapRevision)
-      return false
+    if (!this.imageLoadMatches(load)) return false
     this.image(load.layer.id, pixels, province)
     return true
   }

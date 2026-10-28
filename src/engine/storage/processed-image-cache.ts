@@ -1,5 +1,6 @@
 import type { ImageDecodeSelection } from '../../formats/image/selection.ts'
 import type { Resource } from '../ports/storage.ts'
+import { ProcessedImageProgress, type ImageLoadProgress } from './image-load-progress.ts'
 
 export const autoImageCacheBytes = 32 * 1024 * 1024
 export const maximumImageCacheBytes = 64 * 1024 * 1024
@@ -25,6 +26,7 @@ export interface ProcessedImage {
 }
 export interface ProcessedImageObservations {
   observe(requestedName: string, resource?: Resource): void
+  readonly progress: ProcessedImageProgress
 }
 type Processor = (request: ProcessedImageRequest, observations: ProcessedImageObservations) =>
   ProcessedImage | Promise<ProcessedImage>
@@ -55,7 +57,8 @@ class Observations implements ProcessedImageObservations {
   private open = true
   retainable = true
   bytes = 0
-  constructor(private readonly tokenFor: (resource: Resource) => object) {}
+  constructor(private readonly tokenFor: (resource: Resource) => object,
+    readonly progress: ProcessedImageProgress) {}
   private addName(value: string): void {
     const name = identityName(value), container = name.includes('>') ? name.slice(0, name.indexOf('>')) : undefined
     for (const part of container === undefined ? [name] : [name, container]) {
@@ -128,9 +131,9 @@ function payloadBytes(image: ProcessedImage, request: ProcessedImageRequest): nu
   }
   return bytes
 }
-function copy(image: ProcessedImage): ProcessedImage {
+function copy(image: ProcessedImage, ownedData?: Uint8Array): ProcessedImage {
   // Avoid Buffer.slice(), inherited decoder workspaces and unknown extra fields.
-  return { mode: image.mode, width: image.width, height: image.height, data: new Uint8Array(image.data),
+  return { mode: image.mode, width: image.width, height: image.height, data: ownedData ?? new Uint8Array(image.data),
     ...(image.metadata ? { metadata: new Map(image.metadata) } : {}),
     ...(image.provinceName !== undefined ? { provinceName: image.provinceName } : {}) }
 }
@@ -148,13 +151,14 @@ export class ProcessedImageCache {
   private maximum = autoImageCacheBytes
   private logical = 0
   private resident = 0
+  private progressResident = 0
   private hits = 0
   private misses = 0
   constructor(private readonly processor: Processor) {}
   get limit(): number { return this.maximum }
   private live(): void { if (this.disposed) throw new Error('Processed image cache is disposed') }
   snapshot() {
-    return { imageCacheBytes: this.logical, imageCacheResidentBytes: this.resident,
+    return { imageCacheBytes: this.logical, imageCacheResidentBytes: this.disposed ? 0 : this.resident + this.progressResident,
       imageCacheEntries: this.entries.size, imageCachePending: this.disposed ? 0 : this.active.size,
       imageCacheHits: this.hits, imageCacheMisses: this.misses, imageCacheLimit: this.maximum }
   }
@@ -201,6 +205,7 @@ export class ProcessedImageCache {
     if (this.disposed) return
     this.disposed = true
     this.clear()
+    for (const flight of this.active) flight.observations.progress.retireReaders()
     // Do not race a synthetic disposed rejection against an in-flight decode:
     // its real failure (notably a late province error) must reach existing owners.
     // New reads are forbidden, and late successful results cannot be retained.
@@ -218,7 +223,7 @@ export class ProcessedImageCache {
     if (!token) { token = {}; this.identityTokens.set(identity, token) }
     return token
   }
-  async read(input: ProcessedImageRequest): Promise<ProcessedImage> {
+  async read(input: ProcessedImageRequest, progress?: ImageLoadProgress): Promise<ProcessedImage> {
     this.live()
     const request = requestCopy(input), key = requestKey(request), entry = this.maximum ? this.entries.get(key) : undefined
     if (entry) {
@@ -231,7 +236,17 @@ export class ProcessedImageCache {
     else {
       if (this.active.size >= maximumProcessedImagePending) throw new Error('Too many pending processed image loads')
       this.misses++
-      const generation = this.generation, observations = new Observations((resource) => this.token(resource))
+      const generation = this.generation,
+        partial = new ProcessedImageProgress((delta) => {
+          if (delta > 0) {
+            while (this.entries.size && this.resident + this.progressResident + delta > maximumImageCacheBytes)
+              this.oldest()
+            if (this.progressResident + delta > maximumImageCacheBytes)
+              throw new Error('Pending image progress exceeds 64 MiB budget')
+          }
+          this.progressResident += delta
+        }),
+        observations = new Observations((resource) => this.token(resource), partial)
       observations.observe(request.name)
       let retained = false
       const pending: Flight = { observations, promise: undefined! }
@@ -240,7 +255,11 @@ export class ProcessedImageCache {
         return this.processor(request, observations)
       }).then((result) => {
         this.live()
-        const payload = payloadBytes(result, request), image = copy(result)
+        const payload = payloadBytes(result, request), transferred = partial.transfer(result)
+        // A different processor result has no ownership relationship with the
+        // completed progress bitmap. Retire that bitmap before copying output.
+        if (!transferred) partial.release()
+        const image = copy(result, transferred)
         observations.seal()
         const resident = payload + key.length * 2 + observations.bytes
         if (this.maximum && generation === this.generation && this.flights.get(key) === pending && observations.retainable) {
@@ -248,16 +267,25 @@ export class ProcessedImageCache {
           // soft-limit trim. A hit never trims the resulting one-image overshoot.
           this.trimSoft()
           if (resident <= maximumImageCacheBytes) {
-            while (this.entries.size && (this.resident + resident > maximumImageCacheBytes ||
+            // The flight's progress bitmap is released in finally. Other live
+            // flights remain charged while deciding whether to retain output.
+            const otherProgress = this.progressResident - partial.bytes
+            while (this.entries.size && (this.resident + resident + otherProgress > maximumImageCacheBytes ||
               this.entries.size >= maximumProcessedImageEntries)) this.oldest()
-            this.entries.set(key, { image, logical: image.data.byteLength, resident, dependencies: observations })
-            this.logical += image.data.byteLength
-            this.resident += resident
-            retained = true
+            if (this.resident + resident + otherProgress <= maximumImageCacheBytes) {
+              // No await or external callback occurs across this ownership
+              // move. Entry and partial never own two copies of this buffer.
+              partial.release()
+              this.entries.set(key, { image, logical: image.data.byteLength, resident, dependencies: observations })
+              this.logical += image.data.byteLength
+              this.resident += resident
+              retained = true
+            }
           }
         }
         return image
       }).finally(() => {
+        partial.release()
         if (!retained) observations.disable()
         this.active.delete(pending)
         if (this.flights.get(key) === pending) this.flights.delete(key)
@@ -266,8 +294,11 @@ export class ProcessedImageCache {
       if (this.maximum) this.flights.set(key, pending)
       flight = pending
     }
-    const image = await flight.promise
-    this.live()
-    return copy(image)
+    const subscription = progress ? flight.observations.progress.subscribe(progress) : undefined
+    try {
+      const image = await (subscription ? Promise.race([flight.promise, subscription.failure]) : flight.promise)
+      this.live()
+      return copy(image)
+    } finally { subscription?.remove() }
   }
 }

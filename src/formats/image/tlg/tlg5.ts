@@ -2,9 +2,9 @@ import type { Pixels } from '../../../engine/ports/graphics.ts'
 import { BinaryReader } from '../../binary/reader.ts'
 import { SlideDecoder } from './slide.ts'
 import { dimensions } from './size.ts'
-import { ImageDecodeError } from '../selection.ts'
+import { ImageDecodeError, type ImageDecodeProgress } from '../selection.ts'
 
-export function* readTlg5(input: BinaryReader, selected = false): Generator<void, Pixels> {
+export function* readTlg5(input: BinaryReader, selected = false, progress?: ImageDecodeProgress): Generator<void, Pixels> {
   const colors = input.u8(),
     width = input.u32(),
     height = input.u32(),
@@ -19,6 +19,7 @@ export function* readTlg5(input: BinaryReader, selected = false): Generator<void
   for (let i = 0; i < count; i++) sizes.push(input.u32())
   const data = new Uint8Array(width * height * 4),
     slide = new SlideDecoder()
+  progress?.size(width, height)
   for (let yBase = 0, block = 0; yBase < height; yBase += blockHeight, block++) {
     const rows = Math.min(blockHeight, height - yBase),
       size = width * rows,
@@ -54,6 +55,7 @@ export function* readTlg5(input: BinaryReader, selected = false): Generator<void
           data[at + 3] = alpha + (y ? data[above + 3]! : 0)
         } else data[at + 3] = 255
       }
+      progress?.row(y, data.subarray(y * width * 4, (y + 1) * width * 4))
       yield
     }
   }

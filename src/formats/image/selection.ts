@@ -4,6 +4,14 @@ export interface ImageDecodeSelection {
   readonly mode: 'normal' | 'grayscale' | 'palettized'
 }
 
+/** Synchronous selected-decoder output. Rows are borrowed RGBA/index views;
+ * consume or copy them before returning. A row is reported only after its
+ * complete conversion, matching the native scanline(-1) notification. */
+export interface ImageDecodeProgress {
+  size(width: number, height: number): void
+  row(y: number, rgba: Uint8Array, indices?: Uint8Array): void
+}
+
 /** Only an explicit decoder branch with a known native message reason.
  * Short reads, host failures, cancellation and Web budgets are not this type. */
 export class ImageDecodeError extends Error {

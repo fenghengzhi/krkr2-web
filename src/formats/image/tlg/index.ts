@@ -2,7 +2,7 @@ import type { DecodedImage } from '../../../engine/ports/graphics.ts'
 import { BinaryReader } from '../../binary/reader.ts'
 import { readTlg5 } from './tlg5.ts'
 import { readTlg6 } from './tlg6.ts'
-import { ImageDecodeError, type ImageDecodeSelection } from '../selection.ts'
+import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from '../selection.ts'
 
 function signature(input: BinaryReader): string {
   return String.fromCharCode(...input.slice(11))
@@ -65,6 +65,7 @@ function* raw(
   input: BinaryReader,
   magic = signature(input),
   mode?: ImageDecodeSelection['mode'],
+  progress?: ImageDecodeProgress,
 ): Generator<void, DecodedImage> {
   if (mode !== undefined) {
     if (magic !== 'TLG5.0\x00raw\x1a' && magic !== 'TLG6.0\x00raw\x1a')
@@ -74,24 +75,27 @@ function* raw(
   }
   const image =
     magic === 'TLG5.0\x00raw\x1a'
-      ? yield* readTlg5(input, mode !== undefined)
+      ? yield* readTlg5(input, mode !== undefined, progress)
       : magic === 'TLG6.0\x00raw\x1a'
-        ? yield* readTlg6(input, mode !== undefined)
+        ? yield* readTlg6(input, mode !== undefined, progress)
         : undefined
   if (!image) throw new Error('Unsupported TLG signature')
   if (input.remaining) throw new Error('Extra TLG image data')
   return image
 }
 
-function* read(bytes: Uint8Array, mode?: ImageDecodeSelection['mode']): Generator<void, DecodedImage> {
+function* read(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress): Generator<void, DecodedImage> {
   const input = new BinaryReader(bytes),
     magic = signature(input)
-  if (magic !== 'TLG0.0\x00sds\x1a') return yield* raw(input, magic, mode)
+  if (magic !== 'TLG0.0\x00sds\x1a') return yield* raw(input, magic, mode, progress)
   const rawLength = input.u32()
   // Native reads the enclosed signature/mode before it uses rawLength to
   // seek to metadata. A missing pixel body must not mask a mode rejection.
-  if (mode !== undefined && mode !== 'normal') return yield* raw(input, undefined, mode)
-  const image = yield* raw(new BinaryReader(input.slice(rawLength)), undefined, mode)
+  if (mode !== undefined && mode !== 'normal') return yield* raw(input, undefined, mode, progress)
+  // A truncated SDS body must reach the raw decoder's real size/row boundary.
+  // Do not reject its advertised full length before any raw bytes are read.
+  const image = yield* raw(new BinaryReader(input.slice(progress ? Math.min(rawLength, input.remaining) : rawLength)), undefined, mode, progress)
+  if (progress && rawLength > bytes.length - 15) throw new Error('Truncated or invalid binary data')
   let tagBytes = 0
   while (input.remaining) {
     const type = input.tag(),
@@ -129,6 +133,6 @@ export function decodeTlg(bytes: Uint8Array): Generator<void, DecodedImage> | un
 }
 
 /** The caller selected TLG; even a foreign signature stays in this handler. */
-export function decodeSelectedTlg(bytes: Uint8Array, mode: ImageDecodeSelection['mode']): Generator<void, DecodedImage> {
-  return read(bytes, mode)
+export function decodeSelectedTlg(bytes: Uint8Array, mode: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress): Generator<void, DecodedImage> {
+  return read(bytes, mode, progress)
 }

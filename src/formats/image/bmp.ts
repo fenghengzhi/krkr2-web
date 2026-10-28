@@ -1,5 +1,5 @@
 import type { DecodedImage, Pixels } from '../../engine/ports/graphics.ts'
-import { ImageDecodeError, type ImageDecodeSelection } from './selection.ts'
+import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from './selection.ts'
 const dither = [
   [0, 12, 2, 14],
   [8, 4, 10, 6],
@@ -77,6 +77,7 @@ export function encodeBmp(image: Pixels, mode = 'bmp'): Uint8Array {
 function decodeBitmap(
   bytes: Uint8Array,
   mode?: ImageDecodeSelection['mode'],
+  progress?: ImageDecodeProgress,
 ): DecodedImage | undefined {
   if (bytes[0] !== 0x42 || bytes[1] !== 0x4d) return undefined
   if (bytes.length < 18) throw new Error('Truncated BMP header')
@@ -115,7 +116,7 @@ function decodeBitmap(
     colors > 1 << Math.min(depth, 8) ||
     palette + colors * paletteBytes > bytes.length ||
     (mode === undefined && palette + colors * paletteBytes > offset) ||
-    offset + stride * height > bytes.length
+    (!progress && offset + stride * height > bytes.length)
   )
     throw new Error('Truncated BMP pixels or palette')
   const result: DecodedImage = {
@@ -125,7 +126,14 @@ function decodeBitmap(
     ...(depth <= 8 && mode !== 'grayscale' ? { indices: new Uint8Array(width * height) } : {}),
     ...(mode === 'grayscale' ? { grayscale: true } : {}),
   }
-  for (let y = 0; y < height; y++)
+  progress?.size(width, height)
+  for (let sourceY = 0; sourceY < height; sourceY++) {
+    // The fixed native loader reads up to eight complete file-order rows
+    // before exposing any row in that batch, including bottom-up images.
+    if (progress && sourceY % 8 === 0 &&
+        offset + (sourceY + Math.min(8, height - sourceY)) * stride > bytes.length)
+      throw new Error('Truncated BMP pixels or palette')
+    const y = progress && signedHeight > 0 ? height - 1 - sourceY : sourceY
     for (let x = 0; x < width; x++) {
       const from =
           offset + (signedHeight > 0 ? height - 1 - y : y) * stride +
@@ -170,6 +178,9 @@ function decodeBitmap(
         result.data[to + 3] = depth === 32 ? bytes[from + 3]! : 255
       }
     }
+    progress?.row(y, result.data.subarray(y * width * 4, (y + 1) * width * 4),
+      result.indices?.subarray(y * width, (y + 1) * width))
+  }
   return result
 }
 
@@ -184,6 +195,7 @@ export function decodeBmp(bytes: Uint8Array): DecodedImage | undefined {
 export function decodeSelectedBmp(
   bytes: Uint8Array,
   mode: ImageDecodeSelection['mode'],
+  progress?: ImageDecodeProgress,
 ): DecodedImage | undefined {
   const need = (length: number) => {
     if (bytes.length < length) throw new Error('Truncated BMP stream')
@@ -209,5 +221,5 @@ export function decodeSelectedBmp(
   if (compression !== 0) throw new ImageDecodeError('bmp', 'Compressed BMP not supported.')
   if (depth > 8 && mode === 'palettized')
     throw new ImageDecodeError('bmp', 'Unsupported color mode for palettized image.')
-  return decodeBitmap(bytes, mode)
+  return decodeBitmap(bytes, mode, progress)
 }

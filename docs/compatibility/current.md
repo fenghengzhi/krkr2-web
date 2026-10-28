@@ -1,5 +1,9 @@
 # 当前实现范围
 
+113 候选补 [图像加载的部分写入与失败边界](../decisions/113-image-load-partial-writes.md)：主图／mask 失败保留已完成行及原 Layer 中间态，正常处理先于省份调整尺寸／clip；缓存区分活动 partial 与完成结果，保留暂停、Stop 和目的地归属保护。新增 **56 常规 Node、每浏览器 4 定义**，协议 **42** 保持，全部尚待托管执行。PNG 流式错误前缀、JPEG 原生失败进度和 ERI 仍有明确缺口。
+
+113 固定回收确认 108 终态 failure，主浏览器有 138 fail、440 未报告；109 Node 为 **3585 pass／27 fail**，原 62 个失败中 35 个已在同名用例通过。109 可信生命周期 19/19、Chromium／Firefox 兼容各 32/32，主浏览器和 WebKit 兼容未报告；110–112 仍 pending。下轮继续回收和修复，历史失败、取消及未比较范围保留，完整非插件目标保持 active。
+
 112 提交 `22d09757467f30273546eed72255fa8f0d644f01` 已推送，[Actions 40787500591](https://github.com/fenghengzhi/krkr2-web/actions/runs/40787500591) 首次唯一查询为 pending／conclusion=null，仅记录身份，尚无执行结论。下轮回收，完整非插件目标保持 active。
 
 112 候选修正 [托管验证入口与失败证据](../decisions/112-hosted-verification-entrypoints.md)：补字体模块路由，保严格像素比较并增加独立捕获，修复重复 Stop 清理及按后端保留 KAG 结果；没有修改生产代码或新增测试定义，协议 **42** 保持。108 新取两份主报告仍有 48 fail，另三份无报告，109–111 pending。Library 回滚通过、重载后第二次启动失败的勘误已记录；整体目标未完成。
