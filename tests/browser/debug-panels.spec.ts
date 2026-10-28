@@ -94,8 +94,23 @@ Debug.message("focus-game-ready");
     await expect(page.locator('#choose-files')).toBeEnabled()
     await expect(page.locator('#debug-console')).toBeHidden()
     await page.locator('#toggle-console').click()
+    await expect(page.locator('#debug-console')).toBeVisible()
+    await expect(page.locator('#toggle-console')).toHaveAttribute('aria-expanded', 'true')
     await expect(page.locator('#logs')).toContainText('hidden-failure')
     await expect(page.locator('#evaluate')).toBeDisabled()
+    await expect(page.locator('#stop')).toBeDisabled()
+    await expect.poll(() => page.workers().filter((worker) => worker.url().includes('session.worker')).length).toBe(0)
+    for (const panel of ['controller', 'console']) {
+      // With the Player retired, both page panels still open and close while
+      // retaining the original failure diagnostics and disabled VM controls.
+      if (panel === 'controller') await page.locator('#toggle-controller').click()
+      await expect(page.locator('#debug-' + panel)).toBeVisible()
+      await page.locator('#toggle-' + panel).click()
+      await expect(page.locator('#debug-' + panel)).toBeHidden()
+      await page.locator('#toggle-' + panel).click()
+      await expect(page.locator('#debug-' + panel)).toBeVisible()
+      await expect(page.locator('#status')).toHaveText('运行失败')
+    }
     await page.locator('#files').setInputFiles({
       name: 'startup.tjs',
       mimeType: 'text/plain',

@@ -2,6 +2,14 @@ import type { Rect } from './graphics.ts'
 import type { MenuSnapshot } from '../scene/menus.ts'
 import type { WindowView } from '../scene/window.ts'
 
+/** Local transport lifetime ended; unrelated host failures retain their identity. */
+export class WindowGeometryRetiredError extends Error {
+  constructor() {
+    super('Window geometry is retired')
+    this.name = 'WindowGeometryRetiredError'
+  }
+}
+
 /** Rectangles share the logical outer-window origin; page fitting is not here.
  * Pointer/IME/cursor transport remains viewport-local, not outer-local. */
 export interface WindowGeometry {

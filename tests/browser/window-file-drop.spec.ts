@@ -60,12 +60,13 @@ function readonlyDrop(){
 `
 
 type DropFile = { name: string; bytes: Uint8Array }
-type DropProof = { requests: number; replies: Array<{ type?: string; value?: { status?: string } }>; events: unknown[] }
+type DropProof = { requests: number; replies: Array<{ type?: string; value?: { status?: string } }>; events: unknown[];
+  feedback: Array<{ requested: string[]; observed: string; effectAllowed: string; dragoverPrevented: boolean }> }
 declare global { interface Window { fileDropProof: DropProof } }
 
 async function observe(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const proof: DropProof = { requests: 0, replies: [], events: [] }, ids = new Set<string>(),
+    const proof: DropProof = { requests: 0, replies: [], events: [], feedback: [] }, ids = new Set<string>(),
       NativeWorker = window.Worker, post = NativeWorker.prototype.postMessage
     window.fileDropProof = proof
     window.Worker = new Proxy(NativeWorker, {
@@ -97,19 +98,37 @@ async function observe(page: Page): Promise<void> {
 
 /** Real File capabilities enter the actual App handler. The DragEvent itself
  * is authored by Playwright, not a physical OS file-manager gesture. */
-async function drop(target: Locator, files: readonly DropFile[]): Promise<{ prevented: boolean; effect: string }> {
+async function drop(target: Locator, files: readonly DropFile[]): Promise<{ prevented: boolean; requestedEffect: string }> {
   return target.evaluate((element, files) => {
     const transfer = new DataTransfer()
     transfer.effectAllowed = 'copy'
     for (const file of files) transfer.items.add(new File([new Uint8Array(file.bytes)], file.name))
-    element.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer }))
-    const event = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })
-    element.dispatchEvent(event)
-    const result = { prevented: event.defaultPrevented, effect: transfer.dropEffect }
-    // Protected-mode lifetime must not be replaced by consulting DataTransfer
-    // later, after the FIFO reaches this item.
-    transfer.items.clear()
-    return result
+    const accessor = Object.getOwnPropertyDescriptor(DataTransfer.prototype, 'dropEffect'), requested: string[] = []
+    if (!accessor?.get || !accessor.set) throw new Error('Native DataTransfer dropEffect accessor is unavailable')
+    // Blink creates a script-constructed DataTransfer in copy/paste mode, where
+    // its native dropEffect setter intentionally ignores assignments. Observe
+    // the real App assignment on this instance and delegate to that setter;
+    // never fabricate the native getter or replace the actual File capabilities.
+    Object.defineProperty(transfer, 'dropEffect', { configurable: true,
+      get: () => accessor.get!.call(transfer),
+      set: (value: string) => { requested.push(value); accessor.set!.call(transfer, value) },
+    })
+    try {
+      const over = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer })
+      element.dispatchEvent(over)
+      window.fileDropProof.feedback.push({ requested: [...requested], observed: transfer.dropEffect,
+        effectAllowed: transfer.effectAllowed, dragoverPrevented: over.defaultPrevented })
+      if (!over.defaultPrevented || requested.length !== 1)
+        throw new Error('Expected one live Window dragover feedback assignment')
+      const event = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })
+      element.dispatchEvent(event)
+      return { prevented: event.defaultPrevented, requestedEffect: requested[0]! }
+    } finally {
+      Reflect.deleteProperty(transfer, 'dropEffect')
+      // Protected-mode lifetime must not be replaced by consulting DataTransfer
+      // later, after the FIFO reaches this item.
+      transfer.items.clear()
+    }
   }, files.map((file) => ({ name: file.name, bytes: [...file.bytes] })))
 }
 
@@ -142,7 +161,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
         { name: 'pixels.bmp', bytes: solidBmp(0x123456) }, { name: 'same.txt', bytes: Buffer.from('second') }]
     try {
       await evaluate(page, '(dropA.focusable=false,dropB.bringToFront(),0)', '0')
-      expect(await drop(canvas, files)).toEqual({ prevented: true, effect: 'copy' })
+      expect(await drop(canvas, files)).toEqual({ prevented: true, requestedEffect: 'copy' })
       await waitAdmission(page, 1)
       await expect(page.getByText('file-drop:1:A:same.txt|pixels.bmp|same.txt:second|bmp:1193046|first 雪', { exact: true })).toBeVisible()
       await evaluate(page, '(dropEvents[0].paths[0]!==dropEvents[0].paths[2])+"|"+unexpectedLayerDrops+"|"+int(Storages.isExistentStorage("same.txt"))', '1|0|0')
@@ -155,7 +174,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       }).toEqual([18, 52, 86, 255])
       await info.attach('file-drop-bmp-display', { body: png!, contentType: 'image/png' })
       const archive = xp3Fixture({ 'value.tjs': '42' }).bytes
-      expect(await drop(canvas, [{ name: 'bundle.xp3', bytes: archive }])).toEqual({ prevented: true, effect: 'copy' })
+      expect(await drop(canvas, [{ name: 'bundle.xp3', bytes: archive }])).toEqual({ prevented: true, requestedEffect: 'copy' })
       await waitAdmission(page, 2)
       await expect(page.getByText('file-drop:2:A:bundle.xp3:archive:42', { exact: true })).toBeVisible()
       await evaluate(page, 'int(Storages.isExistentStorage("value.tjs"))', '0')
@@ -206,18 +225,18 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
     try {
       await page.locator('#pause').click()
       await expect(page.locator('#pause')).toHaveText('继续')
-      expect(await drop(canvas, file)).toEqual({ prevented: true, effect: 'none' })
+      expect(await drop(canvas, file)).toEqual({ prevented: true, requestedEffect: 'none' })
       await page.locator('#pause').click()
       await expect(page.locator('#pause')).toHaveText('暂停')
       await evaluate(page, '(dropA.visible=false,0)', '0')
       await expect(a).toBeHidden()
-      expect(await drop(canvas, file)).toEqual({ prevented: true, effect: 'none' })
+      expect(await drop(canvas, file)).toEqual({ prevented: true, requestedEffect: 'none' })
       await evaluate(page, '(dropA.visible=true,0)', '0')
       await expect(a).toBeVisible()
       await a.getByText('Drop tools', { exact: true }).click()
       // An owned menu control is not a Window file target; it cannot consume
       // Files as script input or let them navigate the page away.
-      expect(await drop(a.locator('.game-window-menu'), file)).toEqual({ prevented: true, effect: 'none' })
+      expect(await drop(a.locator('.game-window-menu'), file)).toEqual({ prevented: true, requestedEffect: 'none' })
       await page.keyboard.press('Escape')
       const oldCanvas = await canvas.elementHandle()
       expect(oldCanvas).not.toBeNull()

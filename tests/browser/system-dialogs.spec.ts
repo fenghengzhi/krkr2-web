@@ -3,6 +3,17 @@ import { evaluate } from '../helpers/browser-expression.ts'
 import { httpServer } from '../helpers/http-server.ts'
 import { remoteArchive } from '../helpers/remote-archive.ts'
 import { centralRecords } from '../helpers/zip-fixtures.ts'
+import { installWorkerRpcObservation, observeWorkerRpc } from '../helpers/worker-rpc-observation.ts'
+
+test.beforeEach(async ({ page }) => { await installWorkerRpcObservation(page) })
+test.afterEach(async ({ page }, info) => {
+  // Retain the exact RPC methods still awaiting replies at Worker retirement.
+  // This is passive evidence for the intermittent disposed-client error; the
+  // existing dialog, focus, cleanup and no-error assertions remain unchanged.
+  if (!page.isClosed()) await info.attach('dialog-session-worker-rpc', {
+    body: JSON.stringify(await observeWorkerRpc(page), null, 2), contentType: 'application/json',
+  })
+})
 
 type Flow = 'inform' | 'input' | 'nested'
 

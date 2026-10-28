@@ -389,6 +389,7 @@ test.describe('native System display through public Players and actual Session W
     page,
   }, info) => {
     await observeSystemEmbeddingAcquisitions(page)
+    await observeSystemDisplay(page)
     const setup = await openSystemColorsEmbedding(page, 'asyncify', bundle),
       rejected = await rejectInvalidSystemDisplayPlayers(page, bundle.entry)
     await info.attach('invalid-system-display-acquisitions', {
@@ -417,17 +418,21 @@ test.describe('native System display through public Players and actual Session W
     expect(observerFailure.errors).toEqual([])
     expect(observerFailure.after.created.Worker).toBe(observerFailure.before.created.Worker)
     expect(setup.workers).toHaveLength(0)
+    const failures: unknown[] = []
     try {
       const [fresh] = await startSystemDisplayPlayers(page, bundle.entry, 'asyncify', false, [{}])
       expect(fresh!.actual).toBe(systemDisplayExpected(await readSystemDisplayDom(page, 0)))
       expect(fresh!.checks).toBe('6|6|6|6|6')
       expect(fresh!.errors).toEqual([])
-    } finally {
+    } catch (error) { failures.push(error) }
+    try {
       expect(await stopSystemDisplayPlayers(page)).toEqual([
         { disposed: true, liveWindows: 0, errors: [] },
       ])
       await expect.poll(() => setup.workers.every(({ closed }) => closed)).toBe(true)
       expect(setup.errors).toEqual([])
-    }
+    } catch (error) { failures.push(error) }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'System display startup or cleanup failed', { cause: failures[0] })
   })
 })

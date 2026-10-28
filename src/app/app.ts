@@ -156,7 +156,10 @@ export function mountApp(root: HTMLDivElement): void {
         !stopRequested,
     )
     gameFonts.state(!clipboardSelecting && !stopRequested)
-    if (snapshot) debugVisibility = snapshot.debug
+    // A failed startup retains its diagnostic snapshot after retiring the
+    // Player. The page then owns the panels, so the frozen snapshot must not
+    // undo the user's attempt to reopen the failure log.
+    if (snapshot && player) debugVisibility = snapshot.debug
     for (const panel of ['console', 'controller'] as const) {
       const target = el('debug-' + panel),
         toggle = el('toggle-' + panel)
@@ -323,6 +326,7 @@ export function mountApp(root: HTMLDivElement): void {
       el('stage').replaceChildren(canvas)
       const windows: GameWindows = createGameWindows(el('stage'), canvas, (action) => {
         if (current !== generation || !windows.get(action.windowId, action.surfaceEpoch)) return
+        if (action.type === 'geometry' && stopRequested) return
         if (action.type === 'activate') instance.focusWindow(action.windowId, action.surfaceEpoch)
         else {
           const session = instance.session
@@ -338,7 +342,14 @@ export function mountApp(root: HTMLDivElement): void {
                     : action.type === 'geometry'
                       ? session.refreshWindowGeometry(action.windowId)
                       : session.exitFullScreen(action.windowId)
-          void operation.catch(report)
+          void operation.catch((error) => {
+            // ResizeObserver refreshes belong to this exact live page surface.
+            // Stop/replacement can retire them before their RPC reply arrives;
+            // they have no script caller to resume or report a failure to.
+            if (action.type === 'geometry' && (current !== generation || player !== instance ||
+                stopRequested || session.isDisposed || !windows.get(action.windowId, action.surfaceEpoch))) return
+            report(error)
+          })
         }
       })
       launchWindows = windows

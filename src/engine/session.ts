@@ -75,6 +75,7 @@ import { ModalLoop } from './scheduler/modal-loop.ts'
 import { WindowModals } from './scene/window-modal.ts'
 import { WindowMoves } from './scene/window-move.ts'
 import type { WindowGeometry, WindowGeometryPort, WindowGeometryRequest, WindowGeometryScroll } from './ports/window-geometry.ts'
+import { WindowGeometryRetiredError } from './ports/window-geometry.ts'
 import { HeadlessWindowGeometry, scrollWindowGeometry, validateWindowGeometry } from './scene/window-geometry.ts'
 import type { WindowMoveMessage, WindowMoveRequest } from './ports/window-move.ts'
 import type { WindowPopupMessage } from './ports/window-popup.ts'
@@ -274,6 +275,15 @@ export interface SessionDependencies {
   yieldToHost: () => Promise<void>
   schedule: (callback: () => void, delay: number) => () => void
   event: (event: EngineEvent) => void
+}
+
+/** A measured candidate lost its destination/signature while the host awaited.
+ * Script transactions still reject it; background refresh may measure again. */
+class StaleWindowGeometry extends Error {
+  constructor() {
+    super('Window geometry destination changed')
+    this.name = 'StaleWindowGeometry'
+  }
 }
 
 export class EngineSession {
@@ -3101,7 +3111,7 @@ export class EngineSession {
   private async commitWindowGeometry(window: WindowRecord, candidate: WindowState,
     operation: WindowGeometryRequest['operation'], size?: WindowGeometryRequest['size'], resetScroll = false): Promise<void> {
     this.control.check()
-    if (this.registeredWindow(window.id) !== window) throw new Error('Window geometry destination changed')
+    if (this.registeredWindow(window.id) !== window) throw new StaleWindowGeometry()
     const requestId = this.nextGeometryRequest++
     if (!Number.isSafeInteger(this.nextGeometryRequest)) throw new Error('Window geometry identities exhausted')
     this.geometryRequests.set(window.id, requestId)
@@ -3117,7 +3127,7 @@ export class EngineSession {
         this.control.check()
         if (this.registeredWindow(window.id) !== window || this.geometryRequests.get(window.id) !== requestId ||
             this.windowGeometrySignature(window, candidate) !== signature)
-          throw new Error('Window geometry destination changed')
+          throw new StaleWindowGeometry()
       },
       before = window.state.geometry, beforeFullscreen = window.state.fullScreen
     let geometry: WindowGeometry
@@ -3156,6 +3166,15 @@ export class EngineSession {
       this.queueResize(window)
     this.invalidateWindow(window.id)
   }
+  private windowGeometryResetsScroll(window: WindowRecord): boolean {
+    const old = window.state.geometry,
+      primaryId = this.inputControllers.get(window.id)?.root() ?? 0,
+      primary = this.layers.has(primaryId) ? this.layers.get(primaryId) : undefined,
+      actual = old?.actualZoom ?? { numer: window.state.zoomNumer, denom: window.state.zoomDenom }
+    return !!old && (this.geometryPrimaryIds.get(window.id) !== primaryId ||
+      old.paintBox.width !== deviceMulDiv(primary?.width ?? 0, actual.numer, actual.denom) ||
+      old.paintBox.height !== deviceMulDiv(primary?.height ?? 0, actual.numer, actual.denom))
+  }
   private ensureWindowGeometry(window: WindowRecord): Promise<void> {
     const transaction = this.geometryTransactions.get(window.id)
     if (transaction) return transaction.catch(() => {}).then(() => {
@@ -3166,12 +3185,8 @@ export class EngineSession {
     const pending = this.geometryPending.get(window.id)
     if (pending) return pending
     const old = window.state.geometry,
-      primaryId = this.inputControllers.get(window.id)?.root() ?? 0,
-      primary = this.layers.has(primaryId) ? this.layers.get(primaryId) : undefined,
-      actual = old?.actualZoom ?? { numer: window.state.zoomNumer, denom: window.state.zoomDenom },
-      reset = !!old && (this.geometryPrimaryIds.get(window.id) !== primaryId || old.paintBox.width !== deviceMulDiv(primary?.width ?? 0, actual.numer, actual.denom) ||
-        old.paintBox.height !== deviceMulDiv(primary?.height ?? 0, actual.numer, actual.denom)),
-      work = this.measureWindowGeometry(window, window.state.copy(), old ? 'content' : 'create', undefined, reset)
+      work = this.measureWindowGeometry(window, window.state.copy(), old ? 'content' : 'create', undefined,
+        this.windowGeometryResetsScroll(window))
         .finally(() => { if (this.geometryPending.get(window.id) === work) this.geometryPending.delete(window.id) })
     this.geometryPending.set(window.id, work)
     return work
@@ -3219,13 +3234,37 @@ export class EngineSession {
   /** A new surface needs its own measured epoch without replaying stale size
    * values captured before an in-flight script geometry transaction. */
   async refreshWindowGeometry(windowId: number): Promise<void> {
-    while (this.geometryTransactions.has(windowId))
-      await this.geometryTransactions.get(windowId)!.catch(() => {})
-    if (this.control.cancelled) return
-    const window = this.registeredWindow(windowId)
-    if (!window) return
-    await this.measureWindowGeometry(window, window.state.copy(), 'content')
-    this.present()
+    // Each host observation measures after earlier transactions settle. It may
+    // belong to a replacement surface, so sharing the old result would lose its
+    // epoch. One fresh retry bounds continuously changing Layer signatures.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      while (this.geometryTransactions.has(windowId))
+        await this.geometryTransactions.get(windowId)!.catch(() => {})
+      if (this.control.cancelled) return
+      const window = this.registeredWindow(windowId)
+      if (!window) return
+      try {
+        // A refresh may win the race against the waiting script checkpoint.
+        // Committing its signature must also honor that checkpoint's reset.
+        await this.measureWindowGeometry(window, window.state.copy(), 'content', undefined,
+          this.windowGeometryResetsScroll(window))
+      } catch (error) {
+        // ResizeObserver notifications are observations, not script setters.
+        // A Layer/menu mutation can invalidate this candidate while its own
+        // geometry checkpoint waits for our host reply. Measure the current
+        // signature rather than reporting the expected stale observation.
+        if (this.control.cancelled) return
+        if (error instanceof StaleWindowGeometry) {
+          if (this.registeredWindow(windowId) !== window) return
+          continue
+        }
+        if (error instanceof WindowGeometryRetiredError && this.registeredWindow(windowId) !== window) return
+        throw error
+      }
+      if (this.control.cancelled || this.registeredWindow(windowId) !== window) return
+      this.present()
+      return
+    }
   }
   private async setWindowProperty(window: WindowRecord, property: string, value: string | number,
     script = false): Promise<void> {

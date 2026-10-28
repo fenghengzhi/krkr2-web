@@ -20,7 +20,7 @@ export function createCursorCompositionFixture() {
     assets = new Map([[2, selected]]),
     errors: string[] = [], packets: InputPacket[] = [],
     pointers: { windowId: number; x: number; y: number; sequence?: number }[] = [],
-    observed: { windowId: number; x: number; y: number }[] = [], abort = new AbortController(),
+    observed: { type: 'mousemove' | 'mouseleave'; windowId: number; x: number; y: number; trusted: boolean }[] = [], abort = new AbortController(),
     surfaces = new Map<number, {
       epoch: number; root: HTMLDivElement; canvas: HTMLCanvasElement; plane: HTMLDivElement;
       view: WindowView; background?: string
@@ -42,11 +42,12 @@ export function createCursorCompositionFixture() {
     frames: [{ images: [image(0xffffff, 255)] }], sequence: [0], rates: [0], durationJiffies: 0,
     imageCount: 1, decodedBytes: 320 }
   assets.set(6, selectCursorAsset(staticAnimation, () => 0))
-  window.addEventListener('mousemove', (event) => {
-    if (!(event.target instanceof HTMLCanvasElement)) return
-    const id = Number(event.target.id.match(/^cursor-surface-(\d+)$/)?.[1])
-    if (id) observed.push({ windowId: id, x: event.clientX, y: event.clientY })
-  }, { capture: true, passive: true, signal: abort.signal })
+  for (const type of ['mousemove', 'mouseleave'] as const)
+    window.addEventListener(type, (event) => {
+      if (!(event.target instanceof HTMLCanvasElement)) return
+      const id = Number(event.target.id.match(/^cursor-surface-(\d+)$/)?.[1])
+      if (id) observed.push({ type, windowId: id, x: event.clientX, y: event.clientY, trusted: event.isTrusted })
+    }, { capture: true, passive: true, signal: abort.signal })
   const input = new BrowserInputCoordinator(async (packet) => { packets.push(packet) }, async () => {},
     (x, y, windowId, sequence) => { pointers.push({ x, y, windowId, sequence }) },
     (error) => errors.push(String(error)), {

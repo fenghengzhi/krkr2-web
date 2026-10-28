@@ -1,12 +1,42 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 
-type PopupDomEvidence = { dropped: number; events: Record<string, unknown>[] }
+type PopupDomEvidence = { dropped: number; events: Record<string, unknown>[];
+  geometry: { requests: Record<string, unknown>[]; replies: Record<string, unknown>[] } }
 declare global { interface Window { popupDomEvidence?: PopupDomEvidence } }
 
 export async function observePopupDom(page: Page) {
   await page.addInitScript(() => {
-    const evidence: PopupDomEvidence = { dropped: 0, events: [] }
+    const evidence: PopupDomEvidence = { dropped: 0, events: [], geometry: { requests: [], replies: [] } },
+      geometryIds = new Set<string>(), NativeWorker = window.Worker, post = NativeWorker.prototype.postMessage
     window.popupDomEvidence = evidence
+    // Passively retain the startup ResizeObserver RPC boundary. Historical
+    // popup failures reached all input assertions but already had a geometry
+    // error before the ready marker; DOM input evidence alone cannot place it.
+    window.Worker = new Proxy(NativeWorker, {
+      construct(target, args, newTarget) {
+        const worker = Reflect.construct(target, args, newTarget) as Worker
+        worker.addEventListener('message', (event) => {
+          if (!geometryIds.delete(event.data?.id)) return
+          if (evidence.geometry.replies.length >= 128) { evidence.dropped++; return }
+          evidence.geometry.replies.push({ at: performance.now(), reply: structuredClone(event.data) })
+        })
+        return worker
+      },
+    })
+    NativeWorker.prototype.postMessage = new Proxy(post, {
+      apply(target, receiver, args) {
+        const packet = args[0] as { id?: string; type?: string; argumentList?: Array<{ value?: unknown }> }
+        if (packet?.type === 'APPLY' && packet.argumentList?.[0]?.value === 'refreshWindowGeometry') {
+          if (evidence.geometry.requests.length >= 128) evidence.dropped++
+          else {
+            if (packet.id) geometryIds.add(packet.id)
+            evidence.geometry.requests.push({ at: performance.now(), id: packet.id,
+              windowId: packet.argumentList[1]?.value })
+          }
+        }
+        return Reflect.apply(target, receiver, args)
+      },
+    })
     const record = (event: Event) => {
       if (evidence.events.length >= 512) { evidence.dropped++; return }
       const target = event.target instanceof Element ? event.target : null,

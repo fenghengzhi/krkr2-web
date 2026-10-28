@@ -1,7 +1,11 @@
-import test from 'node:test'
+import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
 import { headless } from '../helpers/headless.ts'
 import type { SessionDependencies } from '../../src/engine/session.ts'
+import { pngInflateGate } from '../helpers/image-decoder-gate.ts'
+import { cursorPng } from '../helpers/cursor-fixtures.ts'
+
+const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
 
 function clock() {
   let time = 0,
@@ -26,20 +30,6 @@ function clock() {
   }
 }
 
-function gate() {
-  let enter!: () => void, release!: () => void
-  return {
-    entered: new Promise<void>((resolve) => {
-      enter = resolve
-    }),
-    released: new Promise<void>((resolve) => {
-      release = resolve
-    }),
-    enter: () => enter(),
-    release: () => release(),
-  }
-}
-
 async function fixture(
   binary: boolean,
   body: string,
@@ -49,7 +39,7 @@ async function fixture(
     harness = await headless(
       {
         'startup.tjs': '',
-        'redraw-gate.bin': new Uint8Array([1]),
+        'redraw-gate.png': cursorPng(4, 4, Array(4 * 4 * 4).fill(0)),
         'fairness.tjs': String.raw`
 var win=new Window();win.visible=true;win.setInnerSize(8,4);
 var root=new Layer(win,null);root.setSize(8,4);
@@ -120,25 +110,16 @@ root.update();
   })
 
   test(`${mode}: an unrelated asynchronous paint preserves the overdue Layer's deadline`, async () => {
-    const blocker = gate(),
+    const blocker = pngInflateGate(4 * (4 * 4 + 1)),
       f = await fixture(
         binary,
         String.raw`
 root.onPaint=function(){aPaints++;Debug.message("fair-a:"+aPaints);if(aPaints<4)root.update();};
-other.onPaint=function(){Debug.message("fair-b:entered");other.loadImages("redraw-gate.bin");Debug.message("fair-b:returned");};
+other.onPaint=function(){Debug.message("fair-b:entered");other.loadImages("redraw-gate.png");Debug.message("fair-b:returned");};
 root.update();
 `,
         {
-          graphics: {
-            async decode() {
-              blocker.enter()
-              await blocker.released
-              return { width: 4, height: 4, data: new Uint8Array(4 * 4 * 4) }
-            },
-            text() {
-              throw new Error('Unexpected text drawing')
-            },
-          },
+          inflateImage: blocker.inflate,
         },
       )
     let operation: Promise<unknown> | undefined
@@ -162,8 +143,10 @@ root.update();
       assert.equal(f.timer.pending, 1)
     } finally {
       blocker.release()
-      await operation?.catch(() => {})
-      await f.stop()
+      try { await f.stop() } finally {
+        await operation?.catch(() => {})
+        await blocker.drain()
+      }
     }
   })
 

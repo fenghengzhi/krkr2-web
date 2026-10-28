@@ -1,32 +1,30 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { headless } from '../helpers/headless.ts'
+import { inflateImage } from '../../src/backends/files/blob-source.ts'
+import { cursorPng } from '../helpers/cursor-fixtures.ts'
 
 test('image names without extensions resolve through auto-paths without changing file lookup', async () => {
-  const decoded: string[] = []
+  const decoded: number[][] = []
   const { session } = await headless(
     {
-      'pictures/face.PNG': 'image-bytes',
+      'pictures/face.PNG': cursorPng(1, 1, [255, 0, 0, 255]),
       'startup.tjs': String.raw`
 Storages.addAutoPath("pictures/");
 var window=new Window(),root=new Layer(window,null);root.loadImages("face");
 `,
     },
     {
-      graphics: {
-        decode: async (bytes) => {
-          decoded.push(new TextDecoder().decode(bytes))
-          return { width: 1, height: 1, data: new Uint8Array([255, 0, 0, 255]) }
-        },
-        text: () => {
-          throw new Error('Unexpected text drawing')
-        },
+      inflateImage: async (bytes, length) => {
+        const expanded = await inflateImage(bytes, length)
+        decoded.push([...expanded])
+        return expanded
       },
     },
   )
   try {
     await session.start()
-    assert.deepEqual(decoded, ['image-bytes'])
+    assert.deepEqual(decoded, [[0, 255, 0, 0, 255]])
     assert.equal(
       await session.evaluate('root.imageWidth==1 && root.getMainPixel(0,0)==0xff0000'),
       '1',

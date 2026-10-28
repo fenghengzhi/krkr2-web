@@ -4,11 +4,22 @@ import { headless } from '../helpers/headless.ts'
 import { HeadlessWindowGeometry } from '../../src/engine/scene/window-geometry.ts'
 import type { WindowGeometry, WindowGeometryRequest, WindowGeometryScroll } from '../../src/engine/ports/window-geometry.ts'
 import type { FrameLayer } from '../../src/engine/ports/graphics.ts'
+import type { LayerTree } from '../../src/engine/scene/layers.ts'
 
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void
   const promise = new Promise<T>((a, b) => { resolve = a; reject = b })
   return { promise, resolve, reject }
+}
+async function until(predicate: () => boolean): Promise<void> {
+  const deadline = performance.now() + 10000
+  while (!predicate()) {
+    if (performance.now() >= deadline) throw new Error('Timed out waiting for the real geometry mutation')
+    await new Promise<void>((resolve) => setTimeout(resolve, 1))
+  }
+}
+function owned<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
+  return promise.then((value) => ({ status: 'fulfilled', value }), (reason: unknown) => ({ status: 'rejected', reason }))
 }
 class MeasuredHost extends HeadlessWindowGeometry {
   readonly requests: WindowGeometryRequest[] = []
@@ -18,8 +29,12 @@ class MeasuredHost extends HeadlessWindowGeometry {
   failNext = false
   holdNext = false
   releaseHeld?: () => void
+  rejectHeld?: (error: unknown) => void
+  beforeReply?: (request: WindowGeometryRequest) => void
   hostClosed = false
+  surfaceEpoch = 7
   override async measure(request: WindowGeometryRequest): Promise<WindowGeometry> {
+    const epoch = this.surfaceEpoch
     this.requests.push(structuredClone(request))
     if (this.failNext) { this.failNext = false; throw new Error('Measured host refused transaction') }
     if (this.holdNext) {
@@ -27,7 +42,8 @@ class MeasuredHost extends HeadlessWindowGeometry {
       this.entered.resolve()
       await new Promise<void>((resolve, reject) => {
         this.waiting.add(reject)
-        this.releaseHeld = () => { this.waiting.delete(reject); this.releaseHeld = undefined; resolve() }
+        this.releaseHeld = () => { this.waiting.delete(reject); this.releaseHeld = undefined; this.rejectHeld = undefined; resolve() }
+        this.rejectHeld = (error) => { this.waiting.delete(reject); this.releaseHeld = undefined; this.rejectHeld = undefined; reject(error) }
       })
     }
     // Declared test-host measurements: 4px side/bottom, 26px top, optional
@@ -47,7 +63,8 @@ class MeasuredHost extends HeadlessWindowGeometry {
       x = request.resetScroll ? 0 : Math.min(maxX, v.geometry?.scroll.x ?? 0),
       y = request.resetScroll ? 0 : Math.min(maxY, v.geometry?.scroll.y ?? 0)
     assert.equal(v.zoomNumer, 1); assert.equal(v.zoomDenom, 1)
-    return { revision: request.revision, surfaceEpoch: 7, platform: 'dom',
+    this.beforeReply?.(request)
+    return { revision: request.revision, surfaceEpoch: epoch, platform: 'dom',
       outer: { x: 0, y: 0, width, height }, client, inner, viewport,
       paintBox: { x: viewport.x + v.layerLeft - x, y: viewport.y + v.layerTop - y,
         width: request.primary.width, height: request.primary.height },
@@ -62,7 +79,7 @@ class MeasuredHost extends HeadlessWindowGeometry {
   override dispose() {
     this.hostClosed = true
     for (const reject of this.waiting) reject(new Error('Measured host closed'))
-    this.waiting.clear(); this.releaseHeld = undefined
+    this.waiting.clear(); this.releaseHeld = undefined; this.rejectHeld = undefined
     super.dispose()
   }
 }
@@ -215,6 +232,157 @@ for (const binary of [false, true]) {
     assert.equal(f.host.observers.size, 0)
     assert.equal(f.session.snapshot().state, 'stopped')
     assert(Object.values(f.session.inspectOwnership()).every((value) => value === 0))
+  })
+  test(mode + ': a background refresh retries its obsolete primary geometry without rejecting the waiting script checkpoint', { timeout: 60000 }, async () => {
+    const f = await fixture(binary), rootId = Number(await f.session.evaluate('root.__id')),
+      layers = (f.session as unknown as { layers: LayerTree }).layers
+    let refresh: Promise<PromiseSettledResult<void>> | undefined, script: Promise<PromiseSettledResult<string>> | undefined
+    try {
+      const initial = f.view().geometry!
+      f.host.emit({ windowId: f.id, surfaceEpoch: initial.surfaceEpoch, baseRevision: initial.revision,
+        sequence: 1, x: 17, y: 23 })
+      assert.deepEqual([f.view().geometry!.scroll.x, f.view().geometry!.scroll.y], [17, 23])
+      f.host.holdNext = true
+      refresh = owned(f.session.refreshWindowGeometry(f.id))
+      await f.host.entered.promise
+      const before = f.host.requests.length, oldRevision = f.view().geometry!.revision
+      assert.deepEqual(f.host.requests.at(-1)!.primary, { width: 200, height: 160 })
+      assert.equal(f.host.requests.at(-1)!.resetScroll, false)
+      script = owned(f.exec('root.setSize(180,140)'))
+      // The real TJS call mutates the primary before waiting for geometry;
+      // this reads that live destination, without issuing a second queued VM call.
+      await until(() => layers.get(rootId).width === 180 && layers.get(rootId).height === 140)
+      assert.equal(f.host.requests.length, before)
+      assert.equal(f.view().geometry!.revision, oldRevision)
+      f.host.releaseHeld!()
+      assert.equal((await refresh).status, 'fulfilled')
+      assert.equal((await script).status, 'fulfilled')
+      assert.deepEqual(f.host.requests.at(-1)!.primary, { width: 180, height: 140 })
+      assert.equal(f.host.requests.at(-1)!.resetScroll, true)
+      assert.deepEqual([f.view().geometry!.paintBox.width, f.view().geometry!.paintBox.height], [180, 140])
+      assert.deepEqual([f.view().geometry!.scroll.x, f.view().geometry!.scroll.y], [0, 0],
+        'A background commit must preserve the real primary resize scroll reset')
+      assert.ok(f.view().geometry!.revision > oldRevision)
+      assert.equal(f.logs.some((line) => line.includes('Window geometry destination changed')), false)
+    } finally {
+      f.host.releaseHeld?.()
+      await f.session.stop()
+      if (refresh) await refresh
+      if (script) await script
+    }
+    assert(Object.values(f.session.inspectOwnership()).every((value) => value === 0))
+  })
+  for (const outcome of ['resolve', 'reject'] as const) {
+    test(mode + ': a replacement surface refresh measures its own epoch after an overlapping old refresh ' + outcome, { timeout: 60000 }, async () => {
+      const f = await fixture(binary), cause = new Error('old surface measurement failed')
+      let oldRefresh: Promise<PromiseSettledResult<void>> | undefined,
+        replacement: Promise<PromiseSettledResult<void>> | undefined
+      try {
+        const before = f.host.requests.length
+        f.host.holdNext = true
+        oldRefresh = owned(f.session.refreshWindowGeometry(f.id))
+        await f.host.entered.promise
+        f.host.surfaceEpoch = 8
+        replacement = owned(f.session.refreshWindowGeometry(f.id))
+        assert.equal(f.host.requests.length, before + 1, 'The new surface waits for the old transaction')
+        if (outcome === 'resolve') f.host.releaseHeld!()
+        else f.host.rejectHeld!(cause)
+        const old = await oldRefresh
+        assert.equal(old.status, outcome === 'resolve' ? 'fulfilled' : 'rejected')
+        if (old.status === 'rejected') assert.equal(old.reason, cause)
+        assert.equal((await replacement).status, 'fulfilled')
+        assert.equal(f.host.requests.length, before + 2, 'The new surface owns a distinct measurement')
+        assert.equal(f.view().geometry!.surfaceEpoch, 8)
+        assert.equal(f.view().geometry!.revision, f.host.requests.at(-1)!.revision)
+      } finally {
+        f.host.releaseHeld?.()
+        try { await f.session.stop() } finally {
+          if (oldRefresh) await oldRefresh
+          if (replacement) await replacement
+        }
+      }
+    })
+  }
+  test(mode + ': retiring a Window abandons its background refresh and cannot restore its old presentation', { timeout: 60000 }, async () => {
+    const f = await fixture(binary)
+    let refresh: Promise<PromiseSettledResult<void>> | undefined
+    try {
+      f.host.holdNext = true
+      refresh = owned(f.session.refreshWindowGeometry(f.id))
+      await f.host.entered.promise
+      await f.exec('invalidate win')
+      f.host.releaseHeld!()
+      assert.equal((await refresh).status, 'fulfilled')
+      assert.equal(f.session.snapshot().windows?.some((window) => window.id === f.id), false)
+      assert.equal(f.logs.some((line) => line.includes('Window geometry destination changed')), false)
+    } finally { f.host.releaseHeld?.(); await f.session.stop(); if (refresh) await refresh }
+  })
+  test(mode + ': a live background host failure is still reported with its original cause', { timeout: 60000 }, async () => {
+    const f = await fixture(binary)
+    try {
+      const before = f.view().geometry!
+      f.host.failNext = true
+      await assert.rejects(f.session.refreshWindowGeometry(f.id), /Measured host refused transaction/)
+      assert.deepEqual(f.view().geometry, before)
+      await f.session.refreshWindowGeometry(f.id)
+      assert.ok(f.view().geometry!.revision > before.revision)
+    } finally { await f.session.stop() }
+  })
+  test(mode + ': repeated background signature changes are bounded and a script checkpoint still measures the latest state', { timeout: 60000 }, async () => {
+    const f = await fixture(binary), rootId = Number(await f.session.evaluate('root.__id')),
+      layers = (f.session as unknown as { layers: LayerTree }).layers
+    let changed = 0
+    try {
+      const before = f.host.requests.length, revision = f.view().geometry!.revision
+      // A live host-side change at each await boundary models continuous
+      // geometry invalidation. It must not leave a background RPC retrying forever.
+      f.host.beforeReply = () => { layers.resize(rootId, 200 - ++changed * 10, 160) }
+      await f.session.refreshWindowGeometry(f.id)
+      assert.equal(changed, 2)
+      assert.equal(f.host.requests.length, before + 2)
+      assert.equal(f.view().geometry!.revision, revision, 'Neither obsolete result gained presentation authority')
+      f.host.beforeReply = undefined
+      await f.exec('win.update()')
+      assert.deepEqual(f.host.requests.at(-1)!.primary, { width: 180, height: 160 })
+      assert.equal(f.view().geometry!.paintBox.width, 180)
+      assert.ok(f.view().geometry!.revision > revision)
+    } finally { f.host.beforeReply = undefined; await f.session.stop() }
+  })
+  test(mode + ': a real host rejection keeps its identity even if the Window retired while it was pending', { timeout: 60000 }, async () => {
+    const f = await fixture(binary), cause = new Error('real late host measurement failure')
+    let refresh: Promise<PromiseSettledResult<void>> | undefined
+    try {
+      f.host.holdNext = true
+      refresh = owned(f.session.refreshWindowGeometry(f.id))
+      await f.host.entered.promise
+      await f.exec('invalidate win')
+      f.host.rejectHeld!(cause)
+      const outcome = await refresh
+      assert.equal(outcome.status, 'rejected')
+      if (outcome.status === 'rejected') assert.equal(outcome.reason, cause)
+    } finally { f.host.releaseHeld?.(); await f.session.stop(); if (refresh) await refresh }
+  })
+  test(mode + ': Stop owns cancellation of a background refresh and preserves complete cleanup', { timeout: 60000 }, async () => {
+    const f = await fixture(binary), failures: unknown[] = []
+    let refresh: Promise<PromiseSettledResult<void>> | undefined
+    try {
+      f.host.holdNext = true
+      refresh = owned(f.session.refreshWindowGeometry(f.id))
+      await f.host.entered.promise
+      await f.session.stop()
+      assert.equal((await refresh).status, 'fulfilled')
+      assert.equal(f.host.waiting.size, 0)
+      assert.equal(f.host.observers.size, 0)
+      assert.equal(f.session.snapshot().state, 'stopped')
+      assert(Object.values(f.session.inspectOwnership()).every((value) => value === 0))
+    } catch (error) { failures.push(error) }
+    finally {
+      f.host.releaseHeld?.()
+      try { await f.session.stop() } catch (error) { if (!failures.includes(error)) failures.push(error) }
+      if (refresh) await refresh
+    }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'Background geometry cancellation or cleanup failed', { cause: failures[0] })
   })
   test(mode + ': fullscreen uses saved inner requests and restores outer, sunken and normalized logical zoom', { timeout: 60000 }, async () => {
     const program = 'System.exitOnWindowClose=false;var w=new Window();w.setInnerSize(80,60);w.setSize(160,90);w.setPos(10,20);w.innerSunken=true;w.setZoom(10,8);w.visible=true;',

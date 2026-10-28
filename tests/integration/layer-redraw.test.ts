@@ -1,7 +1,11 @@
-import test from 'node:test'
+import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
 import { headless } from '../helpers/headless.ts'
 import type { SessionDependencies } from '../../src/engine/session.ts'
+import { pngInflateGate } from '../helpers/image-decoder-gate.ts'
+import { cursorPng } from '../helpers/cursor-fixtures.ts'
+
+const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
 
 function frameClock() {
   let now = 0,
@@ -35,7 +39,7 @@ async function fixture(binary: boolean, body = '', overrides: Partial<SessionDep
     harness = await headless(
       {
         'startup.tjs': '',
-        'paint-image.bin': new Uint8Array([1]),
+        'paint-image.png': cursorPng(8, 4, Array(8 * 4 * 4).fill(0)),
         'redraw.tjs': String.raw`
 var win=new Window();win.visible=true;win.setInnerSize(8,4);
 var root=new Layer(win,null);root.setSize(8,4);root.fillRect(0,0,8,4,0xff202020);
@@ -336,39 +340,26 @@ root.update();
   })
 
   test(`${mode}: an asynchronous paint resumes once, and its failure cancels deferred redraw`, async () => {
-    let enter!: () => void, release!: () => void
-    const entered = new Promise<void>((resolve) => {
-        enter = resolve
-      }),
-      gate = new Promise<void>((resolve) => {
-        release = resolve
-      })
+    const blocker = pngInflateGate(4 * (8 * 4 + 1)), { entered, release } = blocker
     const { session, execute, painted, clock, stop } = await fixture(
       binary,
       String.raw`
 root.onPaint=function(){
   paints++;Debug.message("paint:entered");root.update();
-  root.loadImages("paint-image.bin");
+  root.loadImages("paint-image.png");
   Debug.message("paint:resumed");throw new global.Exception("paint-failure");
 };
 `,
       {
-        graphics: {
-          async decode() {
-            enter()
-            await gate
-            return { width: 8, height: 4, data: new Uint8Array(8 * 4 * 4) }
-          },
-          text() {
-            throw new Error('Unexpected text drawing')
-          },
-        },
+        inflateImage: blocker.inflate,
       },
     )
+    let operation: Promise<string> | undefined
     try {
-      // The mounted unknown-format image makes the actual graphics host suspend.
-      const operation = execute('root.update();')
+      // The selected PNG suspends at its real zlib dependency, before scanline decode.
+      operation = execute('root.update();')
       const rejected = assert.rejects(operation, /paint-failure/)
+      void rejected.catch(() => {}) // Observe even if an earlier gate assertion fails.
       await Promise.race([entered, operation])
       assert.deepEqual(painted(), ['paint:entered'])
       assert.equal(clock.pending, 1)
@@ -379,45 +370,34 @@ root.onPaint=function(){
       assert.equal(session.snapshot().state, 'failed')
     } finally {
       release()
-      await stop()
+      try { await stop() } finally {
+        await operation?.catch(() => {})
+        await blocker.drain()
+      }
     }
   })
 
   test(`${mode}: an explicit paint that suspends replaces an earlier delayed frame without a stale wake`, async () => {
-    let enter!: () => void, release!: () => void
-    const entered = new Promise<void>((resolve) => {
-        enter = resolve
-      }),
-      gate = new Promise<void>((resolve) => {
-        release = resolve
-      })
+    const blocker = pngInflateGate(4 * (8 * 4 + 1)), { entered, release } = blocker
     const { execute, painted, clock, advance, stop } = await fixture(
       binary,
       String.raw`
 root.onPaint=function(){
   paints++;Debug.message("paint:"+paints);
   if(paints<5)root.update();
-  if(paints==3){root.loadImages("paint-image.bin");Debug.message("paint:resumed");}
+  if(paints==3){root.loadImages("paint-image.png");Debug.message("paint:resumed");}
 };
 root.update();
 `,
       {
-        graphics: {
-          async decode() {
-            enter()
-            await gate
-            return { width: 8, height: 4, data: new Uint8Array(8 * 4 * 4) }
-          },
-          text() {
-            throw new Error('Unexpected text drawing')
-          },
-        },
+        inflateImage: blocker.inflate,
       },
     )
+    let operation: Promise<string> | undefined
     try {
       assert.deepEqual(painted(), ['paint:1', 'paint:2'])
       assert.equal(clock.pending, 2)
-      const operation = execute('root.update();')
+      operation = execute('root.update();')
       await Promise.race([entered, operation])
       assert.deepEqual(painted(), ['paint:1', 'paint:2', 'paint:3'])
       assert.equal(clock.pending, 1)
@@ -434,18 +414,15 @@ root.update();
       assert.equal(clock.pending, 1)
     } finally {
       release()
-      await stop()
+      try { await stop() } finally {
+        await operation?.catch(() => {})
+        await blocker.drain()
+      }
     }
   })
 
   test(`${mode}: a queued redraw rechecks background visibility after an unrelated suspended call`, async () => {
-    let enter!: () => void, release!: () => void
-    const entered = new Promise<void>((resolve) => {
-        enter = resolve
-      }),
-      gate = new Promise<void>((resolve) => {
-        release = resolve
-      })
+    const blocker = pngInflateGate(4 * (8 * 4 + 1)), { entered, release } = blocker
     const { session, execute, painted, clock, advance, stop } = await fixture(
       binary,
       String.raw`
@@ -453,21 +430,13 @@ root.onPaint=function(){paints++;Debug.message("paint:"+paints);if(paints<4)root
 root.update();
 `,
       {
-        graphics: {
-          async decode() {
-            enter()
-            await gate
-            return { width: 8, height: 4, data: new Uint8Array(8 * 4 * 4) }
-          },
-          text() {
-            throw new Error('Unexpected text drawing')
-          },
-        },
+        inflateImage: blocker.inflate,
       },
     )
+    let operation: Promise<string> | undefined
     try {
       assert.deepEqual(painted(), ['paint:1', 'paint:2'])
-      const operation = execute('root.loadImages("paint-image.bin");')
+      operation = execute('root.loadImages("paint-image.png");')
       await Promise.race([entered, operation])
       clock.advance(16)
       session.setActivity({ sequence: 1, state: 'hidden', pauseWhenHidden: false })
@@ -484,18 +453,15 @@ root.update();
       assert.equal(clock.pending, 1)
     } finally {
       release()
-      await stop()
+      try { await stop() } finally {
+        await operation?.catch(() => {})
+        await blocker.drain()
+      }
     }
   })
 
   test(`${mode}: an old queued wake cannot unlock a newer request from the same Layer`, async () => {
-    let enter!: () => void, release!: () => void
-    const entered = new Promise<void>((resolve) => {
-        enter = resolve
-      }),
-      gate = new Promise<void>((resolve) => {
-        release = resolve
-      })
+    const blocker = pngInflateGate(4 * (8 * 4 + 1)), { entered, release } = blocker
     const { session, execute, painted, clock, advance, stop } = await fixture(
       binary,
       String.raw`
@@ -503,21 +469,13 @@ root.onPaint=function(){paints++;Debug.message("paint:"+paints);if(paints<5)root
 root.update();
 `,
       {
-        graphics: {
-          async decode() {
-            enter()
-            await gate
-            return { width: 8, height: 4, data: new Uint8Array(8 * 4 * 4) }
-          },
-          text() {
-            throw new Error('Unexpected text drawing')
-          },
-        },
+        inflateImage: blocker.inflate,
       },
     )
+    let operation: Promise<string> | undefined
     try {
       assert.deepEqual(painted(), ['paint:1', 'paint:2'])
-      const operation = execute('root.loadImages("paint-image.bin");root.update();')
+      operation = execute('root.loadImages("paint-image.png");root.update();')
       await Promise.race([entered, operation])
       // The first generation's wake waits behind the suspended script. Its
       // explicit update then consumes that request and paint:2 creates a new one.
@@ -534,7 +492,10 @@ root.update();
       assert.equal(clock.pending, 1)
     } finally {
       release()
-      await stop()
+      try { await stop() } finally {
+        await operation?.catch(() => {})
+        await blocker.drain()
+      }
     }
   })
 }

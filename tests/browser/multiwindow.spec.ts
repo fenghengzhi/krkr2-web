@@ -1,9 +1,10 @@
 import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
+import { evaluateAtPointer, observeCanvasPointers } from '../helpers/pointer-observation.ts'
 
 const source = String.raw`
 var allowA=true,allowB=true,queryTrace="",activationTrace="";
-var windowClicks=[],layerClicks=[],windowKeys=[],layerKeys=[],windowText=[],releasedX=0;
+var windowClicks=[],layerClicks=[],cursorClicks=[],windowKeys=[],layerKeys=[],windowText=[],releasedX=0;
 class SurfaceWindow extends Window {
   var tag,color;
   function SurfaceWindow(tag,width,height,left,top,color){
@@ -45,6 +46,7 @@ class SurfaceControl extends Layer {
   function onMouseDown(x,y,button,shift){focus();}
   function onClick(x,y){
     global.layerClicks.add(tag+":"+x+","+y);
+    global.cursorClicks.add(tag+":"+this.parent.cursorX+","+this.parent.cursorY+";"+this.cursorX+","+this.cursorY);
     Debug.message("surface-layer-click="+global.layerClicks.join("|"));
   }
   function onKeyDown(key,shift,process){
@@ -240,7 +242,8 @@ for (const backend of ['asyncify', 'jspi']) {
 
     test(`${mode}: real canvas and title input stays with its Window and leaving the game releases physical keys`, async ({
       page,
-    }) => {
+    }, info) => {
+      await observeCanvasPointers(page)
       const { a, b, canvasA, canvasB, stop } = await launch(page, backend, binary, false)
       try {
         await clickLogical(canvasB, 20.5, 15.5)
@@ -301,13 +304,32 @@ for (const backend of ['asyncify', 'jspi']) {
         ).toBeVisible()
         await expect(b).toHaveAttribute('data-active', 'true')
         await expect(a).toHaveAttribute('data-active', 'false')
-        // B's later physical position and distinct zoom/offset must not replace
-        // A's last observed position when reading either primary or child Layer.
-        await evaluate(
+        // Preserve the original native coordinates at each actual click. A
+        // subsequent departure is another physical sample, not the old click.
+        await evaluateAtPointer(page, 'cursorClicks.count+":"+[cursorClicks[2],cursorClicks[3]].join("|")', '4:A:12,7;4,3|B:21,13;11,7')
+        const proof = await page.evaluate(() => window.canvasPointerProof),
+          aId = Number(await a.getAttribute('data-window-id')),
+          bId = Number(await b.getAttribute('data-window-id')),
+          lastA = [...proof.events].reverse().find((event) => event.windowId === aId)!,
+          lastB = [...proof.events].reverse().find((event) => event.windowId === bId)!
+        expect(proof.overflow).toBe(0)
+        expect(lastA.trusted && lastB.trusted).toBe(true)
+        expect(lastA.type).toBe('mouseleave')
+        expect(lastB.type).toBe('mousemove')
+        // Independent literal native projections: A has offset(6,8), 320x192
+        // destination for 160x96; B offset(8,11),180x120 for120x80.
+        const ax = Math.trunc(Math.trunc(lastA.x - 6) * 160 / 320),
+          ay = Math.trunc(Math.trunc(lastA.y - 8) * 96 / 192),
+          bx = Math.trunc(Math.trunc(lastB.x - 8) * 120 / 180),
+          by = Math.trunc(Math.trunc(lastB.y - 11) * 80 / 120)
+        expect([ax, ay, bx, by]).toEqual([127, 11, 21, 13])
+        await evaluateAtPointer(
           page,
           'rootA.cursorX+","+rootA.cursorY+";"+controlA.cursorX+","+controlA.cursorY+";"+rootB.cursorX+","+rootB.cursorY+";"+controlB.cursorX+","+controlB.cursorY',
-          '12,7;4,3;21,13;11,7',
+          `${ax},${ay};${ax - 8},${ay - 4};${bx},${by};${bx - 10},${by - 6}`,
         )
+        await info.attach('native-cursor-physical-samples', { body: JSON.stringify({ proof, lastA, lastB,
+          expected: { ax, ay, bx, by }, scope: 'Real canvas move/leave observations; console query does not move the pointer' }), contentType: 'application/json' })
       } finally {
         await stop()
       }

@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test'
 
 export interface WorkerRpcObservation {
   workers: { name: string; url: string; calls: number; replies: number; duplicateReplies: number;
+    terminated: number; pending: { id: string; method: string }[]; droppedPending: number;
     errors: { method: string; message: string }[] }[]
 }
 type ObservedWindow = Window & { observeSessionWorkerRpc(): WorkerRpcObservation }
@@ -17,7 +18,8 @@ export async function installWorkerRpcObservation(page: Page): Promise<void> {
         super(url, options)
         if (!options?.name?.startsWith('krkr2-session-')) return
         const record: WorkerRpcObservation['workers'][number] = {
-          name: options.name, url: String(url), calls: 0, replies: 0, duplicateReplies: 0, errors: [],
+          name: options.name, url: String(url), calls: 0, replies: 0, duplicateReplies: 0,
+          terminated: 0, pending: [], droppedPending: 0, errors: [],
         }, calls = new Map<string, { method: string; replies: number }>(), post = this.postMessage
         observations.push(record)
         this.postMessage = function (this: Worker, message: unknown, transfer?: Transferable[] | StructuredSerializeOptions) {
@@ -25,12 +27,23 @@ export async function installWorkerRpcObservation(page: Page): Promise<void> {
           if (typeof request?.id === 'string' && request.type === 'APPLY') {
             record.calls++
             if (calls.size >= 2048) calls.delete(calls.keys().next().value!)
-            calls.set(request.id, { method: String(request.argumentList?.[0]?.value ?? 'unknown'), replies: 0 })
+            const method = String(request.argumentList?.[0]?.value ?? 'unknown')
+            calls.set(request.id, { method, replies: 0 })
+            if (record.pending.length >= 2048) { record.pending.shift(); record.droppedPending++ }
+            record.pending.push({ id: request.id, method })
           }
           Reflect.apply(post, this, transfer === undefined ? [message] : [message, transfer])
         } as Worker['postMessage']
+        const terminate = this.terminate
+        this.terminate = function (this: Worker) {
+          const result = Reflect.apply(terminate, this, [])
+          record.terminated++
+          return result
+        }
         this.addEventListener('message', ({ data }: MessageEvent) => {
           if (typeof data?.id !== 'string') return
+          const pending = record.pending.findIndex((call) => call.id === data.id)
+          if (pending !== -1) record.pending.splice(pending, 1)
           const call = calls.get(data.id)
           if (!call) return
           record.replies++
@@ -45,7 +58,9 @@ export async function installWorkerRpcObservation(page: Page): Promise<void> {
       }
     }
     ;(window as unknown as ObservedWindow).observeSessionWorkerRpc = () => ({
-      workers: observations.map((record) => ({ ...record, errors: record.errors.map((error) => ({ ...error })) })),
+      workers: observations.map((record) => ({ ...record,
+        pending: record.pending.map((call) => ({ ...call })),
+        errors: record.errors.map((error) => ({ ...error })) })),
     })
   })
 }

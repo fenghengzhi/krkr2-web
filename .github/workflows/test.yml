@@ -307,7 +307,8 @@ jobs:
             headed: '0'
             workers: '1'
           # Each headed Firefox worker owns its display on a separate runner.
-          # Keep file order and assertion deadlines; do not share a physical
+          # Four hosted shards reduce unreported tails in failure-heavy runs.
+          # Preserve file order and assertion deadlines; never share a physical
           # pointer between two headed browser processes on one Xvfb server.
           - browser: firefox
             suite: browser
@@ -315,14 +316,28 @@ jobs:
             headed: '1'
             workers: '1'
             shardIndex: '1'
-            shardTotal: '2'
+            shardTotal: '4'
           - browser: firefox
             suite: browser
             os: ubuntu-24.04
             headed: '1'
             workers: '1'
             shardIndex: '2'
-            shardTotal: '2'
+            shardTotal: '4'
+          - browser: firefox
+            suite: browser
+            os: ubuntu-24.04
+            headed: '1'
+            workers: '1'
+            shardIndex: '3'
+            shardTotal: '4'
+          - browser: firefox
+            suite: browser
+            os: ubuntu-24.04
+            headed: '1'
+            workers: '1'
+            shardIndex: '4'
+            shardTotal: '4'
           # Keep each file's existing execution order and one worker per Mac.
           - browser: webkit
             suite: browser
@@ -330,14 +345,28 @@ jobs:
             headed: '0'
             workers: '1'
             shardIndex: '1'
-            shardTotal: '2'
+            shardTotal: '4'
           - browser: webkit
             suite: browser
             os: macos-15
             headed: '0'
             workers: '1'
             shardIndex: '2'
-            shardTotal: '2'
+            shardTotal: '4'
+          - browser: webkit
+            suite: browser
+            os: macos-15
+            headed: '0'
+            workers: '1'
+            shardIndex: '3'
+            shardTotal: '4'
+          - browser: webkit
+            suite: browser
+            os: macos-15
+            headed: '0'
+            workers: '1'
+            shardIndex: '4'
+            shardTotal: '4'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -359,7 +388,7 @@ jobs:
           const total = process.env.KRKR_TEST_SHARD_TOTAL
           if ((index || total) &&
               (!['webkit', 'firefox'].includes(project) || suite !== 'browser' ||
-               !['1', '2'].includes(index) || total !== '2')) {
+               !['1', '2', '3', '4'].includes(index) || total !== '4')) {
             throw new Error('Unexpected browser shard selection')
           }
           writeFileSync('out/ci/browser-job.json', JSON.stringify({

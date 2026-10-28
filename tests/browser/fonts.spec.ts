@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { injectActivity, visibility } from '../helpers/activity-browser.ts'
 import { pointerPixel } from '../helpers/pointer-pixel.ts'
+import { evaluateAtPointer, observeCanvasPointers } from '../helpers/pointer-observation.ts'
 const file = async (name: string) => ({
   name,
   mimeType: 'application/octet-stream',
@@ -55,9 +56,10 @@ Debug.message("fonts-ready");
   })
   test(`${backend}: physical cursor bypasses blocked script input and ignores hidden movement`, async ({
     page,
-  }) => {
+  }, info) => {
     await page.setViewportSize({ width: 1280, height: 1200 })
     await injectActivity(page)
+    await observeCanvasPointers(page)
     await page.goto(`/?backend=${backend}`)
     await page.locator('#files').setInputFiles({
       name: 'startup.tjs',
@@ -80,13 +82,24 @@ var last="";w.onKeyDown=function(){last=a.cursorX+","+a.cursorY;};System.eventDi
     const position = await pointerPixel(canvas, 90, 60)
     await page.mouse.move(position.x, position.y)
     await page.keyboard.up('a')
-    await evaluate(page, 'a.cursorX+","+a.cursorY', '90,60')
-    await evaluate(page, 'System.eventDisabled=false', '0')
-    await evaluate(page, 'last', '90,60')
+    // Console mouse clicks are physical departures too. Query the original
+    // sampled point through the UI without another mouse move or page scroll.
+    await evaluateAtPointer(page, 'a.cursorX+","+a.cursorY', '90,60')
+    await evaluateAtPointer(page, 'System.eventDisabled=false', '0')
+    await evaluateAtPointer(page, 'last', '90,60')
     await visibility(page, 'hidden')
-    await page.mouse.move(box.x + box.width * 0.1, box.y + box.height * 0.1)
+    const hiddenPoint = await pointerPixel(canvas, 12, 8)
+    await page.mouse.move(hiddenPoint.x, hiddenPoint.y)
     await visibility(page, 'visible')
-    await evaluate(page, 'a.cursorX+","+a.cursorY', '90,60')
+    await evaluateAtPointer(page, 'a.cursorX+","+a.cursorY', '90,60')
+    const proof = await page.evaluate(() => window.canvasPointerProof)
+    expect(proof.overflow).toBe(0)
+    expect(proof.events.every((event) => event.trusted)).toBe(true)
+    expect(proof.events.at(-1)?.type).toBe('mousemove')
+    expect(proof.events.at(-1)?.visibility).toBe('hidden')
+    expect(Math.trunc(proof.events.at(-1)!.x)).toBe(12)
+    expect(Math.trunc(proof.events.at(-1)!.y)).toBe(8)
+    await info.attach('physical-cursor-observations', { body: JSON.stringify(proof), contentType: 'application/json' })
     await page.locator('#stop').click()
   })
 }

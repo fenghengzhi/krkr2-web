@@ -1,5 +1,7 @@
 # 当前实现范围
 
+111 候选接入 [浏览器生命周期与几何修复](../decisions/111-browser-lifecycle-and-geometry.md)：失败启动后的面板由页面管理，后台几何有限重试且保留真实宿主错误，退休请求不污染新会话；坐标、拖放、终止存档和异步图像测试按真实调用边界迁移。协议 **42** 和已有 ABI／能力版本保持。候选尚未验证；107 完整及部分主浏览器证据仍有 117 fail、472 未报告，108 Node 有 62 fail，109／110 pending。整体非插件目标保持 active，以下保留历史状态。
+
 110 实现提交 `260cb0aae2ef649b62962618911bbb3fd6698383` 已推送，[Actions 40781763654](https://github.com/fenghengzhi/krkr2-web/actions/runs/40781763654) 首次唯一查询为 pending／conclusion=null，只确认身份，尚无执行通过结论；下轮回收，完整非插件目标保持 active。
 
 110 候选接入 [成品图像缓存](../decisions/110-processed-graphic-cache.md)：原五元 key 在 lookup 前命中，normal 存完成处理的 RGBA 和省份名，其他模式存真实 8 位平面；接完整预加载、LRU、规则尺寸、写图全清与安全失效。协议 **42**，新增 52 个常规 Node、每浏览器四个定义，均待执行。107 已回收的两份主浏览器报告仍有 40 fail，其余三份未报告，108／109 尚未执行；部分目的地写入、JPEG、历史 heap 和完整非插件目标继续未完成。以下保留历史状态。

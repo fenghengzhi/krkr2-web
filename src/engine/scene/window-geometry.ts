@@ -1,5 +1,6 @@
 import type { Rect } from '../ports/graphics.ts'
 import type { WindowGeometry, WindowGeometryPort, WindowGeometryRequest, WindowGeometryScroll } from '../ports/window-geometry.ts'
+import { WindowGeometryRetiredError } from '../ports/window-geometry.ts'
 import { deviceMulDiv } from './draw-device.ts'
 
 export const windowGeometryLimit = 4096
@@ -73,7 +74,7 @@ export class HeadlessWindowGeometry implements WindowGeometryPort {
   private closed = false
   private retired = new Set<number>()
   async measure(request: WindowGeometryRequest): Promise<WindowGeometry> {
-    if (this.closed || this.retired.has(request.windowId)) throw new Error('Window geometry is retired')
+    if (this.closed || this.retired.has(request.windowId)) throw new WindowGeometryRetiredError()
     const view = request.view, prior = view.geometry ?? initialWindowGeometry(view.width, view.height),
       inset = view.innerSunken && !view.fullScreen ? 2 : 0,
       limit = (n: number, min: number, max: number) => Math.max(1, min, Math.min(max || windowGeometryLimit, n)),

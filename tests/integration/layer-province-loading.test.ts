@@ -1,22 +1,15 @@
 import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
-import type { DecodedImage, GraphicsDecoder } from '../../src/engine/ports/graphics.ts'
+import type { SessionDependencies } from '../../src/engine/session.ts'
+import { ExecutionCancelled } from '../../src/engine/scheduler/control.ts'
 import type { LayerTree } from '../../src/engine/scene/layers.ts'
 import type { ImageLoader } from '../../src/engine/storage/images.ts'
 import { encodeBmp } from '../../src/formats/image/bmp.ts'
 import { headless } from '../helpers/headless.ts'
 import { imageFixture } from '../helpers/image-fixtures.ts'
+import { pngInflateGate, provinceGatePng } from '../helpers/image-decoder-gate.ts'
 
 const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
-
-function deferred<T>() {
-  let resolve!: (value: T) => void, reject!: (error: Error) => void
-  const promise = new Promise<T>((done, fail) => {
-    resolve = done
-    reject = fail
-  })
-  return { promise, resolve, reject }
-}
 
 async function within<T>(promise: Promise<T>, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -39,34 +32,7 @@ function observe<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
   )
 }
 
-function indexed(): DecodedImage {
-  return {
-    width: 2,
-    height: 1,
-    data: new Uint8Array([200, 100, 50, 255, 10, 20, 30, 0]),
-    indices: new Uint8Array([7, 19]),
-  }
-}
-
-function decoderGate() {
-  const entered = deferred<void>(),
-    result = deferred<DecodedImage>()
-  let calls = 0
-  const graphics: GraphicsDecoder = {
-    async decode(bytes) {
-      assert.equal(new TextDecoder().decode(bytes), 'province-decoder-gate')
-      calls++
-      entered.resolve()
-      return result.promise
-    },
-    text() {
-      throw new Error('Unexpected text drawing')
-    },
-  }
-  return { entered: entered.promise, result, graphics, calls: () => calls }
-}
-
-async function fixture(binary: boolean, graphics?: GraphicsDecoder) {
+async function fixture(binary: boolean, inflateImage?: SessionDependencies['inflateImage']) {
   const harness = await headless(
     {
       'startup.tjs': '',
@@ -77,10 +43,11 @@ async function fixture(binary: boolean, graphics?: GraphicsDecoder) {
       ),
       'oversized.bmp': encodeBmp({ width: 4, height: 1, data: new Uint8Array(4 * 4) }, 'bmp8'),
       'invalid.bmp': new Uint8Array([0x42, 0x4d]),
-      'pending.bin': 'province-decoder-gate',
+      'pending.png': provinceGatePng(),
       'province-loading.tjs': String.raw`
 System.exitOnWindowClose=false;
 System.assignMessage("TVPProvinceSizeMismatch","province-loading:size:%1");
+System.assignMessage("TVPCannotOpenStorage","province-loading:open:%1");
 var win=new Window();win.setInnerSize(2,2);
 var root=new Layer(win,null),layer=new Layer(win,root);
 root.setSize(2,2);root.setImageSize(2,2);
@@ -117,7 +84,7 @@ function retireWithProvince(){
   retiringFont=layer.font;
   retiringFont.finalize=function(){
     global.finalizerCalls++;
-    var result=global.layer.loadProvinceImage("pending.bin");
+    var result=global.layer.loadProvinceImage("pending.png");
     global.finalizerProvince=global.provinceValues();
     global.finalizerOther=global.otherPlanes();
     global.finalizerReturn=result===void;
@@ -126,7 +93,7 @@ function retireWithProvince(){
 }
 `,
     },
-    graphics ? { graphics } : {},
+    inflateImage ? { inflateImage } : {},
   )
   const { session } = harness,
     internal = session as unknown as { layers: LayerTree; images: ImageLoader },
@@ -214,8 +181,8 @@ for (const binary of [false, true]) {
   })
 
   test(`${mode}: a suspended first province load owns a zero plane until its real indexed decode returns`, async () => {
-    const gate = decoderGate(),
-      f = await fixture(binary, gate.graphics)
+    const gate = pngInflateGate(3),
+      f = await fixture(binary, gate.inflate)
     let loading: Promise<PromiseSettledResult<string>> | undefined
     try {
       await f.execute(
@@ -223,13 +190,13 @@ for (const binary of [false, true]) {
       )
       assert.equal(f.layers.get(f.id).province, undefined)
       assert.equal(f.session.snapshot().bitmapBytes, 40)
-      loading = observe(f.load('pending.bin'))
+      loading = observe(f.load('pending.png'))
       await within(gate.entered, 'province decoder entry')
       assert.equal(gate.calls(), 1)
       assert.deepEqual([...f.layers.get(f.id).province!.data], [0, 0, 0, 0, 0, 0])
       assert.equal(f.layers.get(f.id).imageModified, true)
       assert.equal(f.session.snapshot().bitmapBytes, 46)
-      gate.result.resolve(indexed())
+      gate.release()
       assert.equal((await within(loading, 'province load completion')).status, 'fulfilled')
       assert.equal(await f.session.evaluate('loadResult'), 'void')
       assert.equal(await f.session.evaluate('provinceValues()'), '7,19,7,7,19,7')
@@ -237,15 +204,18 @@ for (const binary of [false, true]) {
       assert.equal(f.session.snapshot().handles, f.handles)
       await f.otherPlanesPreserved()
     } finally {
-      gate.result.resolve(indexed())
-      await f.stop()
-      if (loading) await loading
+      gate.release()
+      try { await f.stop() } finally {
+        if (loading) await loading
+        await gate.drain()
+        await Promise.all(f.loads)
+      }
     }
   })
 
   test(`${mode}: an actual cached Font finalizer can load Province before Layer image release`, async () => {
-    const gate = decoderGate(),
-      f = await fixture(binary, gate.graphics)
+    const gate = pngInflateGate(3),
+      f = await fixture(binary, gate.inflate)
     let retiring: Promise<PromiseSettledResult<string>> | undefined
     try {
       retiring = observe(f.session.evaluate('retireWithProvince()'))
@@ -253,7 +223,7 @@ for (const binary of [false, true]) {
       assert.equal(f.session.inspectOwnership().closingLayers, 1)
       assert.equal(f.session.inspectOwnership().fontSources, 1)
       assert.equal(f.session.snapshot().bitmapBytes, 46)
-      gate.result.resolve(indexed())
+      gate.release()
       const completed = await within(retiring, 'Layer invalidation after the Font load')
       assert.equal(completed.status, 'fulfilled')
       assert.equal(await f.session.evaluate('finalizerCalls+","+int(finalizerReturn)'), '1,1')
@@ -271,15 +241,18 @@ for (const binary of [false, true]) {
       assert.equal(f.session.snapshot().bitmapBytes, 0)
       assert.equal(f.session.inspectOwnership().layerSources, 0)
     } finally {
-      gate.result.resolve(indexed())
-      await f.stop()
-      if (retiring) await retiring
+      gate.release()
+      try { await f.stop() } finally {
+        if (retiring) await retiring
+        await gate.drain()
+        await Promise.all(f.loads)
+      }
     }
   })
 
   for (const [name, message] of [
-    ['missing.png', /Image resource not found/],
-    ['invalid.bmp', /Truncated BMP header/],
+    ['missing.png', 'province-loading:open:game://./missing.png'],
+    ['invalid.bmp', 'Truncated BMP stream'],
     ['oversized.bmp', 'province-loading:size:oversized.bmp'],
   ] as const) {
     test(`${mode}: ${name} province-load failure removes the old plane while preserving main, mask and clip`, async () => {
@@ -287,8 +260,7 @@ for (const binary of [false, true]) {
       try {
         await f.load(name)
         assert.equal(await f.session.evaluate('loadResult'), 'failed')
-        if (typeof message === 'string') assert.equal(await f.session.evaluate('loadError'), message)
-        else assert.match(await f.session.evaluate('loadError'), message)
+        assert.equal(await f.session.evaluate('loadError'), message)
         assert.equal(await f.session.evaluate('provinceValues()'), '0,0,0,0,0,0')
         assert.equal(await f.session.evaluate('int(layer.imageModified)'), '1')
         assert.equal(f.layers.get(f.id).province, undefined)
@@ -302,11 +274,11 @@ for (const binary of [false, true]) {
 
   for (const outcome of ['resolve', 'reject'] as const) {
     test(`${mode}: a late ${outcome} cannot replace or clear a host-side province write made during decode`, async () => {
-      const gate = decoderGate(),
-        f = await fixture(binary, gate.graphics)
+      const gate = pngInflateGate(3),
+        f = await fixture(binary, gate.inflate)
       let loading: Promise<PromiseSettledResult<string>> | undefined
       try {
-        loading = observe(f.load('pending.bin'))
+        loading = observe(f.load('pending.png'))
         await within(gate.entered, 'province decoder entry')
         assert.deepEqual([...f.layers.get(f.id).province!.data], [91, 0, 0, 0, 0, 92])
         // The VM serializes evaluate calls. Exercise an actual host-side plane
@@ -314,7 +286,7 @@ for (const binary of [false, true]) {
         // not pretend a second TJS script can run concurrently in that VM.
         assert.equal(f.layers.setPixel(f.id, 1, 0, 173, 'province'), true)
         const newer = f.layers.get(f.id).province
-        if (outcome === 'resolve') gate.result.resolve(indexed())
+        if (outcome === 'resolve') gate.release()
         else gate.result.reject(new Error('late province decode failure'))
         assert.equal(
           (await within(loading, 'obsolete province load completion')).status,
@@ -332,18 +304,22 @@ for (const binary of [false, true]) {
         assert.equal(f.session.snapshot().bitmapBytes, 46)
         await f.otherPlanesPreserved()
       } finally {
-        gate.result.resolve(indexed())
-        await f.stop()
-        if (loading) await loading
+        gate.release()
+        try { await f.stop() } finally {
+          if (loading) await loading
+          await gate.drain()
+          await Promise.all(f.loads)
+        }
       }
     })
 
     test(`${mode}: Stop releases a suspended province load before a late decoder ${outcome}`, async () => {
-      const gate = decoderGate(),
-        f = await fixture(binary, gate.graphics)
+      const gate = pngInflateGate(3),
+        f = await fixture(binary, gate.inflate),
+        lateFailure = new Error('late stopped province decode failure')
       let loading: Promise<PromiseSettledResult<string>> | undefined
       try {
-        loading = observe(f.load('pending.bin'))
+        loading = observe(f.load('pending.png'))
         await within(gate.entered, 'province decoder entry')
         assert.equal(f.session.snapshot().bitmapBytes, 46)
         // Stop must complete while this external decoder remains unsettled.
@@ -354,25 +330,27 @@ for (const binary of [false, true]) {
           assert.match(String(cancelled.reason), /Execution cancelled/)
         f.stopped()
         assert.equal(f.logs.includes('province-load-settled'), false)
-        if (outcome === 'resolve') gate.result.resolve(indexed())
-        else gate.result.reject(new Error('late stopped province decode failure'))
+        if (outcome === 'resolve') gate.release()
+        else gate.result.reject(lateFailure)
         assert.equal(f.loads.length, 1)
         const abandoned = await within(f.loads[0]!, 'the abandoned complete province loader')
         assert.equal(abandoned.status, 'rejected')
-        if (abandoned.status === 'rejected')
-          assert.match(
-            String(abandoned.reason),
-            outcome === 'resolve'
-              ? /Image cache is disposed/
-              : /late stopped province decode failure/,
-          )
+        if (abandoned.status === 'rejected') {
+          // With a real PNG, successful late inflation next enters the
+          // production scanline generator's cancellation checkpoint. The
+          // old fake complete-image callback skipped that actual decode stage.
+          if (outcome === 'resolve') assert.ok(abandoned.reason instanceof ExecutionCancelled)
+          else assert.equal(abandoned.reason, lateFailure)
+        }
         f.stopped()
         assert.equal(f.logs.includes('province-load-settled'), false)
       } finally {
-        gate.result.resolve(indexed())
-        await f.stop()
-        if (loading) await loading
-        await Promise.all(f.loads)
+        gate.release()
+        try { await f.stop() } finally {
+          if (loading) await loading
+          await gate.drain()
+          await Promise.all(f.loads)
+        }
       }
     })
   }

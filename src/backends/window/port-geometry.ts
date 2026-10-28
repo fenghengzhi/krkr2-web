@@ -1,4 +1,5 @@
 import type { WindowGeometry, WindowGeometryPort, WindowGeometryRequest, WindowGeometryScroll } from '../../engine/ports/window-geometry.ts'
+import { WindowGeometryRetiredError } from '../../engine/ports/window-geometry.ts'
 import { copyWindowGeometry } from '../../engine/scene/window-geometry.ts'
 import type { WindowGeometryMessage } from '../../protocol/window-geometry.ts'
 
@@ -18,7 +19,7 @@ export class PortWindowGeometry implements WindowGeometryPort {
     port.start()
   }
   measure(request: WindowGeometryRequest): Promise<WindowGeometry> {
-    if (this.closed || this.retired.has(request.windowId)) return Promise.reject(new Error('Window geometry is retired'))
+    if (this.closed || this.retired.has(request.windowId)) return Promise.reject(new WindowGeometryRetiredError())
     if (this.pending.has(request.requestId)) return Promise.reject(new Error('Duplicate geometry request'))
     return new Promise((resolve, reject) => {
       this.pending.set(request.requestId, { request, resolve, reject })
@@ -63,7 +64,7 @@ export class PortWindowGeometry implements WindowGeometryPort {
     this.retired.add(windowId)
     for (const [id, pending] of this.pending) if (pending.request.windowId === windowId) {
       this.pending.delete(id)
-      pending.reject(new Error('Window geometry is retired'))
+      pending.reject(new WindowGeometryRetiredError())
     }
     this.port.postMessage({ type: 'retire', generation: this.generation, windowId } satisfies WindowGeometryMessage)
   }

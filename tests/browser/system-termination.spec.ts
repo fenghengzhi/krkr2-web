@@ -53,7 +53,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
     const failures: unknown[] = []
     let stop: (() => Promise<void>) | undefined
     try {
-      let game = await launchWindowAttention(page, backend, binary, source, [], true)
+      const game = await launchWindowAttention(page, backend, binary, source, [], true)
       stop = game.stop
       for (const [method, key] of [['terminate', 'F8'], ['exit', 'F9']] as const) {
         await page.locator('#clear-log').click()
@@ -74,8 +74,12 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
         await expect(page.getByText('termination:return:1', { exact: true })).toHaveCount(method === 'terminate' ? 1 : 0)
         await info.attach('termination-' + method, { body: await page.locator('#logs').innerText(), contentType: 'text/plain' })
         await expect(page.locator('#logs .error')).toHaveCount(0)
-        game = await launchWindowAttention(page, backend, binary, source, [], true)
-        stop = game.stop
+        // Restart the exact imported files. launchWindowAttention adds a new
+        // script marker on each call, intentionally giving that changed game
+        // a different persistent-save identity.
+        await page.locator('#restart').click()
+        await expect(page.locator('#status')).toHaveText('运行中')
+        await expect(page.locator('#evaluate')).toBeEnabled()
         await evaluate(page, 'terminationSaved()', method)
       }
     } catch (error) { failures.push(error) }

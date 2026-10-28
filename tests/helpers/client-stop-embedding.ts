@@ -102,7 +102,7 @@ interface StopBoundaryObservation {
 declare global {
   interface Window {
     clientStopBoundary: {
-      arm(operation: 'stop' | 'cancel'): void
+      arm(operation: 'stop' | 'cancel' | 'refreshWindowGeometry'): void
       read(): StopBoundaryObservation
     }
   }
@@ -122,7 +122,7 @@ export async function observeClientStopBoundary(page: Page) {
       records = new WeakMap<Worker, StopBoundaryObservation['workers'][number]>(),
       channels: StopBoundaryObservation['channels'] = [],
       ports = new WeakMap<MessagePort, { channel: number; index: 0 | 1 }>()
-    let armed: 'stop' | 'cancel' | undefined,
+    let armed: 'stop' | 'cancel' | 'refreshWindowGeometry' | undefined,
       held: { worker: Worker; id: string; operation: string } | undefined
     window.clientStopBoundary = {
       arm(operation) {

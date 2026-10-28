@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
+import { evaluateAtPointer, observeCanvasPointers } from '../helpers/pointer-observation.ts'
 
 const source = String.raw`
 System.exitOnWindowClose=false;
@@ -221,6 +222,7 @@ for (const backend of ['asyncify', 'jspi']) {
 
     test(`${variant}: immediate physical takeover and delayed actual Worker snapshots cannot revive a cursor marker`, async ({ page }, info) => {
       await installCursorGate(page)
+      await observeCanvasPointers(page)
       const game = await launchWindowAttention(page, backend, binary, source),
         a = game.surface('Cursor A'), primary: unknown[] = []
       try {
@@ -256,7 +258,7 @@ for (const backend of ['asyncify', 'jspi']) {
         await expect(a.locator('.game-virtual-cursor')).toHaveCount(0)
         await page.evaluate(() => window.layerCursorGate.release())
         await expect(page.getByText(completion, { exact: true })).toBeVisible()
-        await evaluate(page, 'cursorChild.cursorX>=66 && cursorChild.cursorX<=68 && cursorChild.cursorY>=30 && cursorChild.cursorY<=32', '1')
+        await evaluateAtPointer(page, 'cursorChild.cursorX>=66 && cursorChild.cursorX<=68 && cursorChild.cursorY>=30 && cursorChild.cursorY<=32', '1')
         await evaluate(page, '(cursorChild.setCursorPos(10,12),0)', '0')
         await expectCursor(a, 33, 26)
         const old = await a.locator('.game-virtual-cursor').elementHandle()
@@ -270,7 +272,10 @@ for (const backend of ['asyncify', 'jspi']) {
         expect(evidence.holding).toBe(false)
         expect(evidence.held).toBe(0)
         expect(evidence.delivered).toContain(evidence.captured[0]!.sequence)
-        await info.attach('cursor-original-event-delay', { contentType: 'application/json', body: JSON.stringify(evidence) })
+        const physical = await page.evaluate(() => window.canvasPointerProof)
+        expect(physical.overflow).toBe(0)
+        expect(physical.events.every((event) => event.trusted)).toBe(true)
+        await info.attach('cursor-original-event-delay', { contentType: 'application/json', body: JSON.stringify({ ...evidence, physical }) })
       } catch (error) { primary.push(error); throw error }
       finally {
         await preserveCleanup(primary, async () => {

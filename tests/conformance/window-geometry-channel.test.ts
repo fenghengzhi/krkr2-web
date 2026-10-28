@@ -5,6 +5,7 @@ import { PortWindowGeometry } from '../../src/backends/window/port-geometry.ts'
 import { WindowState } from '../../src/engine/scene/window.ts'
 import { HeadlessWindowGeometry } from '../../src/engine/scene/window-geometry.ts'
 import type { WindowGeometry, WindowGeometryRequest, WindowGeometryScroll } from '../../src/engine/ports/window-geometry.ts'
+import { WindowGeometryRetiredError } from '../../src/engine/ports/window-geometry.ts'
 
 const test = (name: string, run: (context: TestContext) => Promise<void>) => nodeTest(name, { timeout: 30000 }, run)
 const request = (id = 1): WindowGeometryRequest => ({ requestId: id, revision: id, windowId: 7,
@@ -107,10 +108,25 @@ test('geometry worker retirement rejects its request and cancels only that Windo
       if (value.windowId !== 7) return measured(value, epoch)
       signal.addEventListener('abort', () => aborted.resolve(), { once: true })
       entered.resolve(); return late.promise
-    } }), pending = f.backend.measure(request()), rejected = assert.rejects(pending, /retired/)
+    } }), pending = f.backend.measure(request()), rejected = assert.rejects(pending, WindowGeometryRetiredError)
   await bounded(entered.promise)
   f.backend.retire(7)
   await bounded(rejected); await bounded(aborted.promise)
   late.resolve(await measured(request()))
   assert.equal((await bounded(f.backend.measure({ ...request(2), windowId: 8 }))).surfaceEpoch, 3)
+})
+
+test('a host error cannot claim local retirement just by using the same message text', async (context) => {
+  const f = fixture(context, { get: () => ({ surfaceEpoch: 3 }),
+    measureGeometry: async () => { throw new Error('Window geometry is retired') } })
+  await assert.rejects(bounded(f.backend.measure(request())), (error: unknown) => {
+    assert.ok(error instanceof Error)
+    assert.equal(error.message, 'Window geometry is retired')
+    assert.equal(error instanceof WindowGeometryRetiredError, false)
+    return true
+  })
+  const headless = new HeadlessWindowGeometry()
+  headless.retire(7)
+  try { await assert.rejects(headless.measure(request()), WindowGeometryRetiredError) }
+  finally { headless.dispose() }
 })

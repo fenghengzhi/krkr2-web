@@ -2,9 +2,48 @@ import { test, expect } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 import { maintenanceSource, observeMaintenance } from '../helpers/system-maintenance-browser.ts'
+import { observeClientStopBoundary } from '../helpers/client-stop-embedding.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) {
   const mode = `${backend}/${binary ? 'bytecode' : 'source'}`
+  test(`${mode}: Stop retires an actual DOM geometry refresh with a withheld completed Worker reply`, async ({ page }, info) => {
+    test.setTimeout(90000)
+    await observeClientStopBoundary(page)
+    const game = await launchWindowAttention(page, backend, binary, `
+System.exitOnWindowClose=false;
+var win=new Window();win.caption="Geometry retirement";win.setInnerSize(80,48);win.visible=true;
+var root=new Layer(win,null);root.setSize(80,48);root.fillRect(0,0,80,48,0xff234567);
+`), failures: unknown[] = []
+    try {
+      const surface = game.surface('Geometry retirement')
+      await expect(surface).toHaveAttribute('data-geometry-revision', /^[1-9][0-9]*$/)
+      await page.evaluate(() => window.clientStopBoundary.arm('refreshWindowGeometry'))
+      // Change real CSS used by both the live header and its measurement tree.
+      // The actual ResizeObserver initiates the refresh; only its completed
+      // Worker reply is withheld, leaving an owned RPC pending during Stop.
+      await page.addStyleTag({ content: '.game-window-header { height: 46px !important; }' })
+      await expect.poll(() => page.evaluate(() => window.clientStopBoundary.read().workers
+        .flatMap((worker) => worker.held).filter((reply) => reply.operation === 'refreshWindowGeometry').length)).toBe(1)
+      await page.locator('#stop').dispatchEvent('click')
+      await game.stop()
+      await expect.poll(() => page.workers().filter((worker) => worker.url().includes('session.worker')).length).toBe(0)
+      const proof = await page.evaluate(() => window.clientStopBoundary.read()),
+        workers = proof.workers.filter((worker) => worker.name.startsWith('krkr2-session-'))
+      expect(workers).toHaveLength(1)
+      expect(workers[0]!.terminated).toBe(1)
+      expect(workers[0]!.held).toEqual([
+        expect.objectContaining({ operation: 'refreshWindowGeometry', type: 'RAW' }),
+      ])
+      await expect(page.locator('#logs .error')).toHaveCount(0)
+    } catch (error) { failures.push(error) }
+    try { await game.stop() } catch (error) { failures.push(error) }
+    try { await info.attach('geometry-refresh-stop-boundary', {
+      body: JSON.stringify(await page.evaluate(() => window.clientStopBoundary.read()), null, 2),
+      contentType: 'application/json',
+    }) } catch (error) { failures.push(error) }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'Geometry retirement or cleanup failed', { cause: failures[0] })
+  })
   test(`${mode}: actual startup applies no-window policy to controller visibility, registered hidden Windows and errors`, async ({ page }, info) => {
     test.setTimeout(120000)
     await page.goto(`/?backend=${backend}`)
@@ -35,7 +74,13 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
         if (scenario.name === 'disabled-policy') await evaluate(page, 'int(System.exitOnNoWindowStartup)+","+int(Debug.controller.visible)', '0,0')
         if (scenario.name === 'hidden-window') await evaluate(page, 'int(System.exitOnNoWindowStartup)+","+int(hidden.visible)', '1,0')
         observations.push({ name: scenario.name, status: await page.locator('#status').innerText(), logs: await page.locator('#logs').innerText() })
-        if (scenario.state !== '待机') {
+        if (scenario.state === '运行失败') {
+          // Failed startup already retires the Player while preserving its
+          // failure state. There is no running session left to stop.
+          await expect(page.locator('#stop')).toBeDisabled()
+          await expect(page.locator('#choose-files')).toBeEnabled()
+          await expect(page.locator('.game-window[data-window-id]')).toHaveCount(0)
+        } else if (scenario.state !== '待机') {
           if (!await page.locator('#debug-controller').isVisible()) await page.locator('#toggle-controller').click()
           await page.locator('#stop').click(); await expect(page.locator('#status')).toHaveText('待机')
         }
