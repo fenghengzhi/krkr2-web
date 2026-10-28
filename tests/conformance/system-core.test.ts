@@ -14,7 +14,7 @@ test('System conformance uses a kernel advertising native System and preserved C
   const manifest: WasmManifest = JSON.parse(
     readFileSync(resolve('.generated/wasm/manifest.json'), 'utf8'),
   )
-  assert.equal(manifest.capabilities?.nativeSystem, 5)
+  assert.equal(manifest.capabilities?.nativeSystem, 6)
   assert.equal(manifest.capabilities?.nativeClipboard, 1)
 })
 

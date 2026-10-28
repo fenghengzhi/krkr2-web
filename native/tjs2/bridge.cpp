@@ -1137,6 +1137,31 @@ public:
     }
 };
 
+// ScriptMgnIntf invokes a retrieved exception-handler closure with null
+// objthis. A script call inside the event pump would inherit its private
+// Dictionary instead. Keep this call on the current TJS stack: the closure
+// preserves its bound receiver, or falls back to its function object.
+class SystemInvokeExceptionHandler final : public tTJSNativeClassMethod {
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    SystemInvokeExceptionHandler() : tTJSNativeClassMethod(noOp) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(count != 2) return TJS_E_BADPARAMCOUNT;
+        if(args[0]->Type() != tvtObject) return TJS_E_INVALIDTYPE;
+        krkr::ExecutionFrame delegation(2);
+        const auto callback = args[0]->AsObjectClosureNoAddRef();
+        tTJSVariant response;
+        // The fixed dispatcher reads the fresh result; it does not turn a
+        // negative dispatch status into a new exception. Thrown errors escape.
+        callback.FuncCall(0, nullptr, nullptr, &response, 1, args + 1, nullptr);
+        if(result) *result = response;
+        return TJS_S_OK;
+    }
+};
+
 // SystemIntf assigns the registered native message holder even when the return
 // value is unused. Unknown IDs return zero; no new holder is manufactured.
 class SystemAssignMessage final : public tTJSNativeClassMethod {
@@ -1826,6 +1851,7 @@ API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix
         object->RegisterNCM(u"shellExecute", new SystemShellExecute(vm), u"System", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"doCompact", new SystemCompact(vm), u"System", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"__applicationEvent", new SystemApplicationEvent(vm), u"System", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"__invokeExceptionHandler", new SystemInvokeExceptionHandler(), u"System", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"assignMessage", new SystemAssignMessage(), u"System", nitMethod, TJS_STATICMEMBER);
     }
     if(storages) {

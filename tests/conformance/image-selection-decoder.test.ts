@@ -147,7 +147,7 @@ test('BMP grayscale uses native scalar weights and drops alpha without replacing
   assert.equal(gray.indices, undefined)
 })
 
-test('valid native BMP portable gaps pass only the selected BMP mode to the host', async () => {
+test('native CORE BMP grayscale decodes portably without a host fallback', async () => {
   const core = Buffer.alloc(30)
   core.write('BM')
   core.writeUInt32LE(26, 10)
@@ -157,14 +157,7 @@ test('valid native BMP portable gaps pass only the selected BMP mode to the host
   core.writeUInt16LE(1, 22)
   core.writeUInt16LE(24, 24)
   core.set([50, 100, 200], 26)
-  let calls = 0
-  const result = await decode(core, 'bmp', 'grayscale', { async host(bytes, selection) {
-    calls++
-    assert.equal(bytes, core)
-    assert.deepEqual(selection, { format: 'bmp', mode: 'grayscale' })
-    return { width: 1, height: 1, data: Uint8Array.of(200, 100, 50, 255) }
-  } })
-  assert.equal(calls, 1)
+  const result = await decode(core, 'bmp', 'grayscale')
   assert.deepEqual([...result.data], [117, 117, 117, 255])
 })
 

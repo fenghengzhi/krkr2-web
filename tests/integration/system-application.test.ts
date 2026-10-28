@@ -88,13 +88,15 @@ for (const binary of [false, true]) {
       await f.post(false).completion
       assert.equal(await f.session.evaluate('reads'), '1')
       assert.equal(await f.trace(), '')
-      assert.equal(f.logs.filter((line) => line === 'Error in retrieving System.onActivate/onDeactivate : application getter failed').length, 1)
+      // Native lookup catches eTJS, whose message includes the VM's prefix;
+      // the later TJS exceptionHandler still receives the original value.
+      assert.equal(f.logs.filter((line) => line === 'Error in retrieving System.onActivate/onDeactivate : script exception : application getter failed').length, 1)
       assert.equal(f.session.snapshot().eventDisabled, false)
       await f.exec('var globalReads=0;property brokenSystem{getter(){globalReads++;throw new Exception("global System getter failed");}};&global.System=&brokenSystem;')
       await f.post(true).completion
       await f.exec('&global.System=originalSystem')
       assert.equal(await f.session.evaluate('globalReads'), '1')
-      assert.equal(f.logs.filter((line) => line === 'Error in retrieving System.onActivate/onDeactivate : global System getter failed').length, 1)
+      assert.equal(f.logs.filter((line) => line === 'Error in retrieving System.onActivate/onDeactivate : script exception : global System getter failed').length, 1)
       await f.exec('&System.onDeactivate=function(){throw new Exception("application callback failed");}')
       await f.post(false).completion
       assert.equal(await f.trace(), 'handled:application callback failed')

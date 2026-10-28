@@ -2,6 +2,10 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+2026-10-29 准备 [109 托管事件回归与 portable BMP](decisions/109-hosted-event-regressions-and-bmp.md)：按原 native closure 规则调用 exceptionHandler，修正新主图的显示几何及回合内失活整理顺序；补 CORE／RGB555 的真实 portable 解码，修订三类不再匹配真实调用边界的夹具。新增 **18 常规 Node、每浏览器 8 定义**，`nativeSystem:6`，协议 **41** 和 ABI 保持。完整 processed cache 的下一步合同已审计但未实现，整体目标仍未完成。
+
+109 固定回收 **30 原 ZIP、299,316,342 字节**全部匹配。107 主构建成功，Node 完整 **3520 pass／29 fail／3549**；主浏览器仍未报告。菜单双模式六次共 144 观察完整，不代表旧 SIGABRT 根因闭合。兼容三浏览器合计 89 pass、1 fail、6 未报告；可信生命周期 18 pass／1 fail。108 仍 pending、零 jobs／artifacts。下轮补取，不实时刷新；以下保留历史批次当时状态。
+
 最新待核验批次：[Full test suite 40776092450](https://github.com/fenghengzhi/krkr2-web/actions/runs/40776092450)，精确提交 `3e246bf771af3c2f84a1a4a94679449997a9016c`。108 的 **28 个文件**已整批推送，新增 **45 常规 Node、每浏览器 4 定义**。首次唯一查询为 **pending／conclusion=null**，只确认身份，原响应已保存。下轮补取 107 未报告范围并回收本批结果，不实时监控；没有本地执行验证，完整目标保持 active。
 
 2026-10-29 准备 [108 原版图像选择与加载模式](decisions/108-native-image-selection-and-modes.md)：按原后缀注册顺序选择 handler，携带三种加载模式到真实 decoder，隔离模式缓存，修正伴随资源查找顺序并接原生消息；PNG 灰度按固定 libpng 调用参数处理。新增 **45 常规 Node、每浏览器 4 定义**，候选尚待托管验证，协议 **41** 和已有 ABI／能力版本保持。107 的 TouchImages 审计更正为“发现省份名但不读取像素”。完整图像缓存／部分写入、JPEG 精确解码、历史回归与非插件目标仍未完成。

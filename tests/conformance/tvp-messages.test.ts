@@ -203,7 +203,7 @@ rejected+=System.assignMessage("TVPNotARealMessage","must-not-create");`)
       await assert.rejects(f.run('["queued"].save("tail");throw new Exception("script-primary");'), (failure: unknown) => {
         assert(failure instanceof AggregateError); assert.equal(failure.errors.length, 2)
         const [primary, write] = failure.errors
-        assert(primary instanceof ScriptError); assert.equal(primary.message, 'script-primary')
+        assert(primary instanceof ScriptError); assert.equal(primary.message, 'script exception : script-primary')
         assert(write instanceof ScriptError); assert.equal(write.message, 'tail:tail'); assert.equal(write.cause, writeError)
         assert.equal(failure.cause, primary); return true
       })

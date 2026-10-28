@@ -1,6 +1,6 @@
 import nodeTest from 'node:test'
 import assert from 'node:assert/strict'
-import type { DecodedImage, GraphicsDecoder } from '../../src/engine/ports/graphics.ts'
+import type { SessionDependencies } from '../../src/engine/session.ts'
 import type { LayerTree } from '../../src/engine/scene/layers.ts'
 import {
   ProvinceImageLoadError,
@@ -9,6 +9,7 @@ import {
 } from '../../src/engine/storage/images.ts'
 import { encodeBmp } from '../../src/formats/image/bmp.ts'
 import { headless } from '../helpers/headless.ts'
+import { imageFixture } from '../helpers/image-fixtures.ts'
 
 const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
 
@@ -47,32 +48,31 @@ const masked = [200, 100, 50, 64, 40, 80, 120, 192],
 
 function decoderGate() {
   const entered = deferred<void>(),
-    result = deferred<DecodedImage>()
-  let calls = 0
-  const graphics: GraphicsDecoder = {
-    async decode(bytes) {
-      assert.equal(new TextDecoder().decode(bytes), 'province-companion-decoder-gate')
+    result = deferred<Uint8Array>()
+  let calls = 0, expandedLength = 0
+  const inflate: SessionDependencies['inflateImage'] = async (bytes, length) => {
+      // The main and mask are actual BMPs. Only the selected indexed PNG
+      // province reaches this real codec dependency; no unknown-format host
+      // fallback is needed to suspend its decoder.
+      assert.ok(bytes.length > 0)
+      expandedLength = length
       calls++
       entered.resolve()
       return result.promise
-    },
-    text() {
-      throw new Error('Unexpected text drawing')
-    },
   }
   return {
     entered: entered.promise,
     result,
-    graphics,
+    inflate,
     calls: () => calls,
     release() {
       // Safe even if setup failed before the decoder acquired this promise.
-      result.resolve({ width: 1, height: 1, data: new Uint8Array(4), grayscale: true })
+      result.resolve(new Uint8Array(expandedLength))
     },
   }
 }
 
-async function fixture(binary: boolean, graphics?: GraphicsDecoder) {
+async function fixture(binary: boolean, inflateImage?: SessionDependencies['inflateImage']) {
   const frames: Array<Array<{ id: number; width: number; height: number; pixels: number[] }>> = [],
     main = encodeBmp({
       width: 2,
@@ -92,7 +92,7 @@ async function fixture(binary: boolean, graphics?: GraphicsDecoder) {
         'broken_p.bmp': new Uint8Array([0x42, 0x4d]),
         'pending.bmp': main,
         'pending_m.bmp': mask,
-        'pending_p.png': 'province-companion-decoder-gate',
+        'pending_p.png': imageFixture('palette-2x1.png'),
         'province-companion.tjs': String.raw`
 System.exitOnWindowClose=false;
 var win=new Window(),root=new Layer(win,null),layer=new Layer(win,root);
@@ -124,7 +124,7 @@ function loadedPixels(){
 `,
       },
       {
-        ...(graphics ? { graphics } : {}),
+        ...(inflateImage ? { inflateImage } : {}),
         renderer: {
           present(layers) {
             // Copy at the presentation boundary: later bitmap writes must not
@@ -243,7 +243,7 @@ for (const binary of [false, true]) {
         const oldBitmap = f.layers.bitmap(f.id)
         await f.load('broken.bmp', key)
         assert.equal(await f.session.evaluate('loadResult'), 'failed')
-        assert.match(await f.session.evaluate('loadError'), /Truncated BMP header/)
+        assert.match(await f.session.evaluate('loadError'), /Truncated BMP stream/)
         assert.equal(await f.session.evaluate('loadedPixels()'), tjsPixels.join(','))
         assert.equal(await f.session.evaluate('geometry()'), '7,9,2,1,2,1,0,0,0,0,2,1')
         assert.equal(await f.session.evaluate('int(layer.imageModified)'), '1')
@@ -253,7 +253,7 @@ for (const binary of [false, true]) {
         assert.equal(f.session.snapshot().bitmapBytes, 8)
         assert.equal(f.session.snapshot().handles, f.handles)
         assert.equal(f.loads.length, 1)
-        partialFailure(await f.loads[0]!, /Truncated BMP header/, [...pixels])
+        partialFailure(await f.loads[0]!, /Truncated BMP stream/, [...pixels])
       } finally {
         await f.stop()
       }
@@ -285,7 +285,7 @@ for (const binary of [false, true]) {
           )
         else assert.equal(f.frames.at(-1), previous)
         assert.equal(await f.session.evaluate('loadResult'), 'failed')
-        assert.match(await f.session.evaluate('loadError'), /Truncated BMP header/)
+        assert.match(await f.session.evaluate('loadError'), /Truncated BMP stream/)
         assert.deepEqual([...f.layers.bitmap(f.id).pixels.data], matted)
         assert.equal(f.layers.get(f.id).province, undefined)
         assert.equal(await f.session.evaluate('geometry()'), '7,9,2,1,2,1,0,0,0,0,2,1')
@@ -300,7 +300,7 @@ for (const binary of [false, true]) {
   for (const mutation of ['main pixel write', 'Province replacement'] as const) {
     test(`${mode}: a late _p failure preserves a host-side ${mutation} made while the real loadImages call is suspended`, async () => {
       const gate = decoderGate(),
-        f = await fixture(binary, gate.graphics)
+        f = await fixture(binary, gate.inflate)
       let loading: Promise<PromiseSettledResult<string>> | undefined
       try {
         loading = observe(f.load('pending.bmp'))
@@ -347,7 +347,7 @@ for (const binary of [false, true]) {
 
   test(`${mode}: Stop releases a suspended loadImages before its late _p failure without committing or reviving images`, async () => {
     const gate = decoderGate(),
-      f = await fixture(binary, gate.graphics)
+      f = await fixture(binary, gate.inflate)
     let loading: Promise<PromiseSettledResult<string>> | undefined
     try {
       loading = observe(f.load('pending.bmp'))

@@ -71,18 +71,28 @@ export function encodeBmp(image: Pixels, mode = 'bmp'): Uint8Array {
   return result
 }
 
-/** Decode the uncompressed Windows BMP variants used by KiriKiri's image
- * writer. In 32-bit BI_RGB files the fourth byte is the TVP mask channel. */
-export function decodeBmp(bytes: Uint8Array): DecodedImage | undefined {
+/** Decode BI_RGB pixels without invoking a platform codec. A selected CORE
+ * handler uses the fixed loader's four-byte palette behavior; direct embedding
+ * reads the standard three-byte CORE palette. */
+function decodeBitmap(
+  bytes: Uint8Array,
+  mode?: ImageDecodeSelection['mode'],
+): DecodedImage | undefined {
   if (bytes[0] !== 0x42 || bytes[1] !== 0x4d) return undefined
-  if (bytes.length < 54) throw new Error('Truncated BMP header')
+  if (bytes.length < 18) throw new Error('Truncated BMP header')
   const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
-    dib = header.getUint32(14, true),
-    depth = header.getUint16(28, true),
-    compression = header.getUint32(30, true)
-  if (dib < 40 || compression !== 0 || ![1, 4, 8, 24, 32].includes(depth)) return undefined
-  const width = header.getInt32(18, true),
-    signedHeight = header.getInt32(22, true),
+    dib = header.getUint32(14, true)
+  // Retain the old direct Windows-header short-read boundary. CORE is the
+  // newly supported shorter header and must be allowed to end at byte 26.
+  if (dib !== 12 && bytes.length < 54) throw new Error('Truncated BMP header')
+  if (dib !== 12 && dib < 40) return undefined
+  if (bytes.length < 26) throw new Error('Truncated BMP header')
+  const core = dib === 12,
+    depth = header.getUint16(core ? 24 : 28, true),
+    compression = core ? 0 : header.getUint32(30, true)
+  if (compression !== 0 || ![1, 4, 8, 15, 16, 24, 32].includes(depth)) return undefined
+  const width = core ? header.getUint16(18, true) : header.getInt32(18, true),
+    signedHeight = core ? header.getUint16(20, true) : header.getInt32(22, true),
     height = Math.abs(signedHeight),
     offset = header.getUint32(10, true),
     stride = Math.ceil((width * depth) / 32) * 4
@@ -91,14 +101,20 @@ export function decodeBmp(bytes: Uint8Array): DecodedImage | undefined {
     height <= 0 ||
     width > 4096 ||
     height > 4096 ||
-    header.getUint16(26, true) !== 1
+    header.getUint16(core ? 22 : 26, true) !== 1
   )
     throw new Error('Invalid BMP dimensions or planes')
-  const colors = depth <= 8 ? header.getUint32(46, true) || 1 << depth : 0,
-    palette = 14 + dib
+  // The original pitches a depth=15 row using 15*width but reads width whole
+  // 16-bit words. Do not normalize its pitch or emulate reads past that row.
+  if (depth === 15 && stride < width * 2)
+    throw new Error('BMP 15-bit row cannot contain its declared pixel words')
+  const colors = depth <= 8 ? (core ? 1 << depth : header.getUint32(46, true) || 1 << depth) : 0,
+    palette = 14 + dib,
+    paletteBytes = core && mode === undefined ? 3 : 4
   if (
     colors > 1 << Math.min(depth, 8) ||
-    palette + colors * 4 > offset ||
+    palette + colors * paletteBytes > bytes.length ||
+    (mode === undefined && palette + colors * paletteBytes > offset) ||
     offset + stride * height > bytes.length
   )
     throw new Error('Truncated BMP pixels or palette')
@@ -106,26 +122,61 @@ export function decodeBmp(bytes: Uint8Array): DecodedImage | undefined {
     width,
     height,
     data: new Uint8Array(width * height * 4),
-    ...(depth <= 8 ? { indices: new Uint8Array(width * height) } : {}),
+    ...(depth <= 8 && mode !== 'grayscale' ? { indices: new Uint8Array(width * height) } : {}),
+    ...(mode === 'grayscale' ? { grayscale: true } : {}),
   }
   for (let y = 0; y < height; y++)
     for (let x = 0; x < width; x++) {
       const from =
-          offset + (signedHeight > 0 ? height - 1 - y : y) * stride + Math.floor((x * depth) / 8),
+          offset + (signedHeight > 0 ? height - 1 - y : y) * stride +
+          (depth === 15 || depth === 16 ? x * 2 : Math.floor((x * depth) / 8)),
         to = (y * width + x) * 4
       let at = from
       if (depth <= 8) {
         const index = (bytes[from]! >>> (8 - depth - ((x * depth) & 7))) & ((1 << depth) - 1)
+        if (result.indices) result.indices[y * width + x] = index
+        if (mode === 'palettized') {
+          // Native's palettized destination contains the index, not a palette
+          // lookup. Keep that byte even if a short declared palette lacks it.
+          result.data[to] = result.data[to + 1] = result.data[to + 2] = index
+          result.data[to + 3] = 255
+          continue
+        }
         if (index >= colors) throw new Error('BMP palette index is outside the palette')
-        at = palette + index * 4
-        result.indices![y * width + x] = index
+        at = palette + index * paletteBytes
       }
-      result.data[to] = bytes[at + 2]!
-      result.data[to + 1] = bytes[at + 1]!
-      result.data[to + 2] = bytes[at]!
-      result.data[to + 3] = depth === 32 ? bytes[from + 3]! : 255
+      if (depth === 15 || depth === 16) {
+        const word = header.getUint16(from, true),
+          r = (word >>> 10) & 31, g = (word >>> 5) & 31, b = word & 31
+        if (mode === 'grayscale') {
+          // TVPBLConvert15BitTo8Bit is a distinct fixed-point conversion,
+          // not TVP's 8-bit grayscale applied to expanded RGB555.
+          const gray = (r * 56 + g * 187 + b * 21) >>> 5
+          result.data[to] = result.data[to + 1] = result.data[to + 2] = gray
+        } else {
+          result.data[to] = (r << 3) | (r >>> 2)
+          result.data[to + 1] = (g << 3) | (g >>> 2)
+          result.data[to + 2] = (b << 3) | (b >>> 2)
+        }
+        result.data[to + 3] = 255
+      } else if (mode === 'grayscale') {
+        const gray = (54 * bytes[at + 2]! + 183 * bytes[at + 1]! + 19 * bytes[at]!) >>> 8
+        result.data[to] = result.data[to + 1] = result.data[to + 2] = gray
+        result.data[to + 3] = 255
+      } else {
+        result.data[to] = bytes[at + 2]!
+        result.data[to + 1] = bytes[at + 1]!
+        result.data[to + 2] = bytes[at]!
+        result.data[to + 3] = depth === 32 ? bytes[from + 3]! : 255
+      }
     }
   return result
+}
+
+/** Direct uncompressed BMP decoding. Existing 32-bit BI_RGB alpha remains the
+ * TVP mask channel. CORE uses its standard BGR triples on this direct API. */
+export function decodeBmp(bytes: Uint8Array): DecodedImage | undefined {
+  return decodeBitmap(bytes)
 }
 
 /** Native BMP handler checks precede portable/host decoding. The direct BMP
@@ -148,14 +199,15 @@ export function decodeSelectedBmp(
   need(14 + dib)
   const depth = view.getUint16(dib === 12 ? 24 : 28, true),
     colors = depth <= 8 ? (dib === 12 ? 1 << depth : view.getUint32(46, true) || 1 << depth) : 0
-  // Native reads the palette before TVPInternalLoadBMP checks compression/mode.
-  need(14 + dib + colors * (dib === 12 ? 3 : 4))
+  // GraphicsLoaderIntf's CORE branch memset clears biSize. Both its palette
+  // allocation and its internal palette reader therefore use four bytes, not
+  // the three bytes dictated by the CORE file format. Read first, then seek to
+  // bfOffBits: palette data may overlap pixels, but it must be in this stream.
+  need(14 + dib + colors * 4)
   const compression = dib === 12 ? 0 : view.getUint32(30, true)
   if (compression === 3) throw new ImageDecodeError('bmp', 'BITFIELDS not supported.')
   if (compression !== 0) throw new ImageDecodeError('bmp', 'Compressed BMP not supported.')
   if (depth > 8 && mode === 'palettized')
     throw new ImageDecodeError('bmp', 'Unsupported color mode for palettized image.')
-  // OS/2 and 15/16-bit BI_RGB are valid native branches, currently supplied by
-  // the same-format host. They must not fall through to another format sniff.
-  return dib === 40 ? decodeBmp(bytes) : undefined
+  return decodeBitmap(bytes, mode)
 }

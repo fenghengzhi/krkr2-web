@@ -1,9 +1,12 @@
 /** Keep nested callback execution inside TJS; queue and registry live in TypeScript. */
 export const systemEventsBridge = String.raw`
-function __krkrMakeSystemEventPump(application){
- var context=%[application:application];
+function __krkrMakeSystemEventPump(application,invoke){
+ var context=%[application:application,invoke:invoke];
  return function(token,activation=void){
-  if(activation!==void){this.application(activation);return;}
+  if(activation!==void){
+   if(!activation)global.__host("System.applicationCompact");
+   this.application(activation);return;
+  }
   try{
     while(true){
       var available=global.__host("System.eventNext",token);
@@ -27,9 +30,10 @@ function __krkrMakeSystemEventPump(application){
         var handled=false,message=describe(error);
         try{
           // Read the closure first, as the native exception dispatcher does.
-          // Calling the member directly supplies System as objthis.
+          // Native invocation preserves bound objthis and the function-object
+          // fallback, without inheriting this pump's private Dictionary.
           var handler=global.System.exceptionHandler;
-          if(typeof handler=="Object" && handler!==null)handled=!!handler(error);
+          if(typeof handler=="Object" && handler!==null)handled=!!this.invoke(handler,error);
         }
         catch(handlerError){message+="; exception handler: "+describe(handlerError);handled=false;}
         global.__host("System.eventError",message,int(handled));
@@ -52,7 +56,8 @@ function __krkrMakeSystemEventPump(application){
   global.__host("System.eventEnd",token);
  } incontextof context;
 }
-global.__host("System.bindEvents",__krkrMakeSystemEventPump(System.__applicationEvent));
+global.__host("System.bindEvents",__krkrMakeSystemEventPump(System.__applicationEvent,System.__invokeExceptionHandler));
 delete System.__applicationEvent;
+delete System.__invokeExceptionHandler;
 delete global.__krkrMakeSystemEventPump;
 `

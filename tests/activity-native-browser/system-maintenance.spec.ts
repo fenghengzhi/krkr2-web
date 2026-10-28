@@ -17,7 +17,16 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       await page.locator('#pause-background').uncheck()
       game = await launchWindowAttention(page, backend, binary, maintenanceSource, [], true)
       await page.bringToFront(); await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true)
-      const before = await page.evaluate(() => window.maintenanceProof.entries.length)
+      // Flush the observer's BroadcastChannel before choosing each baseline.
+      // An older callback message still in transit must not be paired with a
+      // later compact from the next actual focus change.
+      const baseline = async (name: string) => {
+        const marker = `maintenance:baseline:${name}`
+        await evaluate(page, `(Debug.message(${JSON.stringify(marker)}),0)`, '0')
+        await expect.poll(() => page.evaluate((marker) => window.maintenanceProof.entries.some((entry) => entry.kind === 'debug' && entry.text === marker), marker)).toBe(true)
+        return page.evaluate((marker) => window.maintenanceProof.entries.findIndex((entry) => entry.kind === 'debug' && entry.text === marker) + 1, marker)
+      }
+      const before = await baseline('enabled')
       other = await page.context().newPage(); await other.setContent('<button>Owned other page</button>')
       await other.bringToFront(); await other.getByRole('button').click()
       await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false)
@@ -28,7 +37,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       expect(compact).toBeDefined(); expect(callback).toBeDefined(); expect(compact!.sequence).toBeLessThan(callback!.sequence)
       await page.bringToFront(); await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true)
       await evaluate(page, '(System.eventDisabled=true,0)', '0')
-      const disabled = await page.evaluate(() => window.maintenanceProof.entries.length)
+      const disabled = await baseline('disabled')
       await other.bringToFront(); await other.getByRole('button').click()
       await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false)
       await expect.poll(() => page.evaluate((after) => window.maintenanceProof.entries.slice(after).some((entry) => entry.kind === 'compact' && entry.level === 10), disabled)).toBe(true)

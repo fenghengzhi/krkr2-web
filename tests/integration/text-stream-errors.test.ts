@@ -25,7 +25,7 @@ function simple(text: string): Uint8Array {
   return output
 }
 const source = String.raw`
-var loaded=["preserved"],decodedCount=0,queuedMessage="";
+var loaded=["preserved"],decodedCount=0,queuedMessage="",queuedExists=-1;
 function readFailure(which,name,mode=""){
   global.loaded=["preserved"];
   try{
@@ -49,7 +49,9 @@ function queueCompression(){
   // assignMessage is native, so this changes the holder without flushing the
   // writer first. The next genuine storage call performs its queued write.
   System.assignMessage("TVPCompressionFailed","late-compression:%%:%1");
-  try{Storages.isExistentStorage("savedata/queued.txt");}catch(error){global.queuedMessage=error.message;}
+  // The original read-only Storages method may skip a discarded result.
+  // Consume it so this is a real host call and queued-write flush boundary.
+  try{global.queuedExists=Storages.isExistentStorage("savedata/queued.txt");}catch(error){global.queuedMessage=error.message;}
   return global.queuedMessage;
 }
 `
@@ -181,6 +183,7 @@ for (const binary of [false, true]) {
     } }, async (f) => {
       readFailedSave = () => f.session.exportSaves().some((file) => file.path === 'savedata/queued.txt')
       assert.equal(await f.session.evaluate('queueCompression()'), 'late-compression:%%:%1')
+      assert.equal(await f.session.evaluate('queuedExists'), '-1')
       assert.equal(exposedFailedSave, false)
       assert.deepEqual(attempts, [
         { text: 'persist after retry\r\n', mode: 'z' },

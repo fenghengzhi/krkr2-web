@@ -640,7 +640,13 @@ export class LayerTree {
     layer.bitmap = bitmap
     layer.province = plane
     layer.provinceGeneration++
-    this.resizeImage(id, pixels.width, pixels.height)
+    // LoadImages calls InternalSetImageSize even though its new MainImage
+    // already has these dimensions. SetImageSize's same-size early return
+    // would leave the old display rectangle and offsets outside that image.
+    layer.width = Math.min(layer.width, pixels.width)
+    layer.height = Math.min(layer.height, pixels.height)
+    layer.imageLeft = Math.max(layer.imageLeft, layer.width - pixels.width)
+    layer.imageTop = Math.max(layer.imageTop, layer.height - pixels.height)
     layer.imageModified = true
     layer.revision++
   }

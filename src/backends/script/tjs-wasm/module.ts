@@ -62,7 +62,7 @@ export interface WasmManifest {
     windowObjectLifetime?: number
     nativeReleaseState?: number
     nativeClipboard?: number
-    /** Version 2 includes the fixed System.toActualColor method binding. */
+    /** Version 6 preserves native exception-handler closure invocation context. */
     nativeSystem?: number
     /** Math.RandomGenerator's default seed uses the host entropy source. */
     nativeRandom?: number

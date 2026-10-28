@@ -42,7 +42,7 @@ export async function decodeSelectedImage(
         throw new TvpError('TVPNotImplemented', [], 'ERI image decoding is not available')
       case 'bmp': {
         const image = decodeSelectedBmp(bytes, selected.mode) ?? await dependencies.host(bytes, selected)
-        return selected.mode === 'grayscale' ? dependencies.finish(grayscale(image, false)) : image
+        return selected.mode === 'grayscale' && !image.grayscale ? dependencies.finish(grayscale(image, false)) : image
       }
       case 'png': {
         const plan = await dependencies.finish(decodeSelectedPng(bytes, selected.mode)),

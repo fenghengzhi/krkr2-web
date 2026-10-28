@@ -4351,6 +4351,12 @@ export class EngineSession {
       if (typeof args[0] !== 'string') throw new Error('System.getArgument requires an option name')
       return { kind: 'value', value: this.systemArguments.get(args[0]) }
     }
+    if (operation === 'System.applicationCompact') {
+      // A deactivation can be admitted while this event round is suspended.
+      // Drain its original native compact callback on the same TJS stack
+      // before onDeactivate, even when the queued outer entry has not run.
+      return this.takeAutomaticCompact()
+    }
     if (operation === 'System.applicationReadError') {
       if (typeof args[0] !== 'string') throw new Error('Invalid application event lookup diagnostic')
       this.log(args[0])
