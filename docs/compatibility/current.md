@@ -1,5 +1,7 @@
 # 当前实现范围
 
+115 提交 `5784993da5a6e5d48fc0e7cd92ad133ddab57930` 已推送，[Actions 40798634885](https://github.com/fenghengzhi/krkr2-web/actions/runs/40798634885) 首次唯一查询为pending／conclusion=null，仅记录身份；新内核、应用回归和原生差分尚无执行结论。下批回收，完整非插件目标保持active。
+
 115 候选接入 [PNG pull 解压与原始写入阶段](../decisions/115-png-pull-inflation-and-write-phases.md)：实际 App/headless使用独立zlib WASM，IDAT按实际消费检查CRC，主图raw写入和完成后的key／mask绑定分开；暂停、Stop、缓存归属与离线资产接通。新增17常规Node、每浏览器4定义、30项同源C差分，均尚待托管执行。协议42及原ABI保持，图像模块独立ABI1；原二进制身份、palette特殊路径及完整非插件目标仍未闭合。
 
 115固定结果证实110新增52成品缓存定义通过，但110仍有27旧夹具失败和1条启动几何错误；109终态主浏览器136 fail、428未报告。111–114仍pending，原PNG参考未执行。所有历史失败和未比较范围保留，完整目标继续active。

@@ -49,3 +49,7 @@
 ## 后续仍需完成
 
 下批先回收本批与此前未完成运行的固定结果，修订真实差异。原 `deelibpng` 二进制身份、palette key／palette+tRNS 灰度的特殊行为、部分头部／ancillary 非法输入和 TJSReadError 消息映射、JPEG 原生失败进度、ERI、统一会话内存预留、历史几何／媒体／菜单／heap 回归及真实游戏验收仍未闭合。整体验收目标保持 active，不以这 30 项差分替代完整非插件范围。
+
+## 推送与交接
+
+实现提交 `5784993da5a6e5d48fc0e7cd92ad133ddab57930` 共 **47 个文件**，已推送到 `codex/migrated-window-attention`。[Full test suite 40798634885](https://github.com/fenghengzhi/krkr2-web/actions/runs/40798634885) 首次唯一查询为 **pending／conclusion=null**，精确 head SHA、push、workflow 路径及 attempt 1 匹配。原响应保存在 `out/verification/github-actions/40798634885/initial-run-discovery.json`。不再查询其 jobs、日志或产物；下一批固定回收110尚未报告范围及111–115结果，已终态109不再刷新。完整目标继续active。
