@@ -1,5 +1,6 @@
-import { test, expect, type Locator, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
+import { installWorkerRpcObservation, observeWorkerRpc, type WorkerRpcObservation } from '../helpers/worker-rpc-observation.ts'
 
 const source = String.raw`
 System.exitOnWindowClose=false;
@@ -23,15 +24,25 @@ crossPopup.onClick=function(){global.toolsB.popup(0,20,20);Debug.message("inacti
 Debug.message("multiwindow-menus-ready");
 `
 
-async function launch(page: Page, backend: string, binary: boolean) {
+async function launch(page: Page, backend: string, binary: boolean, info: TestInfo) {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
+  await installWorkerRpcObservation(page)
   await page.addInitScript(() => {
     const listeners = new Set<unknown>(),
       menuRequests: string[] = [],
       add = window.addEventListener,
       remove = window.removeEventListener,
       post = Worker.prototype.postMessage
+    let beforeStop: WorkerRpcObservation | undefined
+    // Read synchronously on the actual Stop activation. An extra awaited
+    // page.evaluate before clicking could let the very pending reply under
+    // investigation settle before the original Stop race occurs.
+    window.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element) || !event.target.closest('#stop')) return
+      const read = Reflect.get(window, 'observeSessionWorkerRpc') as (() => WorkerRpcObservation) | undefined
+      if (read && beforeStop === undefined) beforeStop = read()
+    }, { capture: true, passive: true })
     const capture = (options: unknown) =>
       options === true ||
       (typeof options === 'object' && options !== null && Reflect.get(options, 'capture') === true)
@@ -65,6 +76,7 @@ async function launch(page: Page, backend: string, binary: boolean) {
     Reflect.set(window, 'multiwindowMenuEvidence', {
       listeners: () => listeners.size,
       requests: () => [...menuRequests],
+      beforeStop: () => beforeStop,
     })
   })
   await page.goto(`/?backend=${backend}`)
@@ -99,17 +111,33 @@ async function launch(page: Page, backend: string, binary: boolean) {
     b,
     baselineListeners,
     async stop(popupOpen = false) {
-      if (popupOpen) {
-        // Invoke the real app stop control while the popup owns pointer input.
-        await page.locator('#stop').dispatchEvent('click')
-      } else await page.locator('#stop').click()
-      await expect(page.locator('#status')).toHaveText('待机')
-      await expect(page.locator('.game-window[data-window-id]')).toHaveCount(0)
-      await expect(page.locator('.game-menu-overlay')).toHaveCount(0)
-      await expect(page.locator('.game-menu-popup')).toHaveCount(0)
-      await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
-      await expect(page.locator('#logs')).not.toContainText('RPC client has been disposed')
-      expect(errors).toEqual([])
+      const failures: unknown[] = []
+      try {
+        if (popupOpen) {
+          // Invoke the real app stop control while the popup owns pointer input.
+          await page.locator('#stop').dispatchEvent('click')
+        } else await page.locator('#stop').click()
+        await expect(page.locator('#status')).toHaveText('待机')
+        await expect(page.locator('.game-window[data-window-id]')).toHaveCount(0)
+        await expect(page.locator('.game-menu-overlay')).toHaveCount(0)
+        await expect(page.locator('.game-menu-popup')).toHaveCount(0)
+        await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
+        await expect(page.locator('#logs')).not.toContainText('RPC client has been disposed')
+        expect(errors).toEqual([])
+      } catch (error) { failures.push(error) }
+      try {
+        // The historical log contained only an error string, not the method
+        // whose reply outlived Stop. Preserve actual pending/reply metadata;
+        // do not infer that every disposal error came from a geometry refresh.
+        await info.attach('multiwindow-menu-stop-rpc', { contentType: 'application/json', body: JSON.stringify({
+          backend, binary, popupOpen,
+          before: await page.evaluate(() => Reflect.get(window, 'multiwindowMenuEvidence').beforeStop()),
+          after: await observeWorkerRpc(page),
+          menuRequests: await requests(page), logs: await page.locator('#logs').innerText(), pageErrors: errors,
+        }, null, 2) })
+      } catch (error) { failures.push(error) }
+      if (failures.length === 1) throw failures[0]
+      if (failures.length) throw new AggregateError(failures, 'Menu Stop assertion or RPC evidence failed', { cause: failures[0] })
     },
   }
 }
@@ -126,15 +154,23 @@ async function shortcut(page: Page, surface: Locator, owner: string, count: numb
   await expect(page.getByText(`menu-${owner}=${count}`, { exact: true })).toBeVisible()
 }
 
+async function menuScenario(run: () => Promise<void>, cleanup: () => Promise<void>) {
+  const failures: unknown[] = []
+  try { await run() } catch (error) { failures.push(error) }
+  try { await cleanup() } catch (error) { failures.push(error) }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length) throw new AggregateError(failures, 'Menu scenario and Stop evidence failed', { cause: failures[0] })
+}
+
 for (const backend of ['asyncify', 'jspi']) {
   for (const binary of [false, true]) {
     const mode = `${backend}/${binary ? 'bytecode' : 'source'}`
 
     test(`${mode}: each Window owns its menu and the shared shortcut follows the visible active Window`, async ({
       page,
-    }) => {
-      const { a, b, stop } = await launch(page, backend, binary)
-      try {
+    }, info) => {
+      const { a, b, stop } = await launch(page, backend, binary, info)
+      await menuScenario(async () => {
         await expect(a.getByRole('button', { name: 'Popup A', exact: true })).toBeVisible()
         await expect(b.getByRole('button', { name: 'Popup B', exact: true })).toBeVisible()
         await a.getByText('Tools A', { exact: true }).click()
@@ -160,16 +196,14 @@ for (const backend of ['asyncify', 'jspi']) {
         await expect(b).toBeHidden()
         await shortcut(page, a, 'A', 3)
         await evaluate(page, 'countA+","+countB', '3,3')
-      } finally {
-        await stop()
-      }
+      }, () => stop())
     })
 
     test(`${mode}: popup selection and dismissal stay with their owner and stale popup nodes cannot select a new popup`, async ({
       page,
-    }) => {
-      const { a, b, stop } = await launch(page, backend, binary)
-      try {
+    }, info) => {
+      const { a, b, stop } = await launch(page, backend, binary, info)
+      await menuScenario(async () => {
         await a.getByRole('button', { name: 'Popup A', exact: true }).click()
         const popup = page.locator('.game-menu-popup')
         await expect(popup).toHaveCount(1)
@@ -243,17 +277,15 @@ for (const backend of ['asyncify', 'jspi']) {
         await expect(popup).toHaveCount(0)
         await expect(page.locator('#expression')).toBeFocused()
         await evaluate(page, 'countA+","+countB', '2,1')
-      } finally {
-        await stop((await page.locator('.game-menu-popup').count()) > 0)
-      }
+      }, async () => stop((await page.locator('.game-menu-popup').count()) > 0))
     })
 
     test(`${mode}: retiring one Window disposes its menu listeners and stale callbacks while the other survives and stop clears its popup`, async ({
       page,
-    }) => {
-      const { a, b, baselineListeners, stop } = await launch(page, backend, binary)
+    }, info) => {
+      const { a, b, baselineListeners, stop } = await launch(page, backend, binary, info)
       let stopped = false
-      try {
+      await menuScenario(async () => {
         const twoWindowListeners = await listenerCount(page)
         expect(twoWindowListeners).toBeGreaterThanOrEqual(baselineListeners + 2)
         await a.getByText('Tools A', { exact: true }).click()
@@ -294,9 +326,9 @@ for (const backend of ['asyncify', 'jspi']) {
         )
         await page.keyboard.press('Shift+F6')
         expect(await requests(page)).toEqual(afterStop)
-      } finally {
+      }, async () => {
         if (!stopped) await stop((await page.locator('.game-menu-popup').count()) > 0)
-      }
+      })
     })
   }
 }

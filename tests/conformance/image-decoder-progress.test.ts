@@ -77,16 +77,18 @@ test('selected PNG/BMP progress retains every independent full RGBA and index re
     assert.deepEqual(observed.sizes, [[entry.width, entry.height]], entry.name)
     assert.equal(observed.rows.length, entry.height, entry.name)
     assert.equal(new Set(observed.rows.map((row) => row.y)).size, entry.height)
+    const rgba = entry.name === 'transparent-rgb.png'
+      ? Uint8Array.from([0x12, 0x56, 0x9a, 255, 0x12, 0x56, 0x9a, 255])
+      : new Uint8Array(imageBytes.subarray(entry.rgbaOffset, entry.rgbaOffset + entry.width * entry.height * 4))
     for (const row of observed.rows) {
-      const offset = entry.rgbaOffset + row.y * entry.width * 4
-      assert.deepEqual(row.data, [...imageBytes.subarray(offset, offset + entry.width * 4)], entry.name)
+      const offset = row.y * entry.width * 4
+      assert.deepEqual(row.data, [...rgba.subarray(offset, offset + entry.width * 4)], entry.name)
       if (entry.indicesOffset !== undefined) {
         const at = entry.indicesOffset + row.y * entry.width
         assert.deepEqual(row.indices, [...imageBytes.subarray(at, at + entry.width)], entry.name)
       }
     }
-    assert.deepEqual(image.data, new Uint8Array(imageBytes.subarray(entry.rgbaOffset,
-      entry.rgbaOffset + entry.width * entry.height * 4)))
+    assert.deepEqual(image.data, rgba)
   }
 })
 

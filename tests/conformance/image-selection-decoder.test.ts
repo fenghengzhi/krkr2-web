@@ -87,7 +87,12 @@ test('selected normal PNG/BMP retain every independent RGBA/index/metadata refer
       pixels = entry.width * entry.height
     assert.equal(image.width, entry.width, entry.name)
     assert.equal(image.height, entry.height, entry.name)
-    assert.deepEqual(Buffer.from(image.data), imageBytes.subarray(entry.rgbaOffset, entry.rgbaOffset + pixels * 4), entry.name)
+    // This existing fixture is a standard PNG tRNS oracle. The fixed native
+    // RGB branch does not request expansion; keep its source bytes unchanged.
+    const rgba = entry.name === 'transparent-rgb.png'
+      ? Buffer.from([0x12, 0x56, 0x9a, 255, 0x12, 0x56, 0x9a, 255])
+      : imageBytes.subarray(entry.rgbaOffset, entry.rgbaOffset + pixels * 4)
+    assert.deepEqual(Buffer.from(image.data), rgba, entry.name)
     assert.deepEqual(image.indices && Buffer.from(image.indices), entry.indicesOffset === undefined ? undefined
       : imageBytes.subarray(entry.indicesOffset, entry.indicesOffset + pixels), entry.name)
     assert.equal(!!image.grayscale, entry.grayscale, entry.name)

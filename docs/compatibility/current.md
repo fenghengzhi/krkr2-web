@@ -1,5 +1,9 @@
 # 当前实现范围
 
+114 候选修正 [原版 PNG 透明规则与元数据](../decisions/114-native-png-transparency-and-metadata.md)：selected RGB tRNS 不自动透明，元数据按原读取阶段、警告和 signed 转换处理；通用 PNG 路径保持标准行为。新增 **16 常规 Node、每浏览器 4 定义**与固定上游 libpng C 参考，协议 **42** 保持，全部尚待托管验证。流式错误前缀、palette 旧库边界、JPEG 和 ERI 仍有缺口。
+
+114 固定结果中，109 三份主浏览器报告有61 fail、两个第二分片未报告，三浏览器原 KAG 兼容已96/96；110–113仍pending。TLG三条原失败已由trace定位为结果读取问题，菜单Stop RPC和attention启动失败未定位。历史失败和未比较范围保留，完整非插件目标继续active。
+
 113 提交 `2f38ee94b686cbfa487f6137ea44d026af53cd16` 已推送，[Actions 40791060043](https://github.com/fenghengzhi/krkr2-web/actions/runs/40791060043) 首次唯一查询为 pending／conclusion=null，仅确认运行身份，新增定义和候选修复尚无执行结论。下批回收，完整非插件目标保持 active。
 
 113 候选补 [图像加载的部分写入与失败边界](../decisions/113-image-load-partial-writes.md)：主图／mask 失败保留已完成行及原 Layer 中间态，正常处理先于省份调整尺寸／clip；缓存区分活动 partial 与完成结果，保留暂停、Stop 和目的地归属保护。新增 **56 常规 Node、每浏览器 4 定义**，协议 **42** 保持，全部尚待托管执行。PNG 流式错误前缀、JPEG 原生失败进度和 ERI 仍有明确缺口。

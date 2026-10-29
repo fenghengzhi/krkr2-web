@@ -594,7 +594,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, png-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -653,3 +653,26 @@ jobs:
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     needs: build
     uses: ./.github/workflows/menu-lifetime-runtime.yml
+
+  png-reference:
+    name: Fixed libpng 1.0.6 loader reference
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the original-width C and zlib build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib lib32z1-dev
+      - name: Compile pinned libpng sources and record original loader calls
+        run: python3 scripts/run-native-png-reference.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: native-png-reference
+          path: out/verification/native-png/
+          if-no-files-found: error
+          retention-days: 90

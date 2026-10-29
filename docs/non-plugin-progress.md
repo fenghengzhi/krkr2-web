@@ -2,6 +2,10 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+2026-10-29 准备 [114 原版 PNG 透明规则与元数据](decisions/114-native-png-transparency-and-metadata.md)：selected RGB tRNS 保持原版不透明，oFFs／pHYs 与 vpAg 分别遵循真实阶段、警告和 signed 转换；新增固定 libpng 1.0.6 C 参考，修正已证实的 TLG 结果读取并保留菜单 Stop RPC 证据。新增 **16 常规 Node、每浏览器 4 定义**；协议 **42** 保持，均待托管执行。流式错误前缀、palette 旧库边界及整体非插件验收仍未完成。
+
+114 固定回收 **33 原 ZIP、417,496,309 字节**全部匹配。109 三份主浏览器报告合计 **1816 pass、61 fail、2 skip**，两份第二分片未报告；三浏览器兼容各32/32、合计96/96。旧 Node 27 fail 保留，110–113 pending。菜单新失败在 Stop 清理，attention 新失败在启动 ready，不能越过原证据归因；下批回收，不实时刷新。
+
 最新待核验批次：[Full test suite 40791060043](https://github.com/fenghengzhi/krkr2-web/actions/runs/40791060043)，精确提交 `2f38ee94b686cbfa487f6137ea44d026af53cd16`。113 的 **21 个文件**已整批推送，新增 **56 常规 Node、每浏览器 4 定义**。首次唯一查询为 **pending／conclusion=null**，只确认身份并保存原响应；不再查询新运行 jobs、日志或产物。下批补取 109 未报告范围及 110–113 结果，不实时监控，没有本地执行验证；完整目标保持 active。
 
 2026-10-29 准备 [113 图像加载的部分写入与失败边界](decisions/113-image-load-partial-writes.md)：解码按真实完成行保留主图／mask 部分写入，区分正常处理完成、省份与最终更新；保护暂停、Stop 和更改后的目的地，partial/cache 共享驻留限额并在成功时转移 buffer 归属。新增 **56 常规 Node、每浏览器 4 定义**，另修正旧省份六项中间态断言；协议 **42** 保持，均待托管验证。PNG 流式错误前缀、JPEG 原生失败进度、ERI 和整体非插件验收仍未完成。

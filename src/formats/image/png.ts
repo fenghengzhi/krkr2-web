@@ -117,7 +117,10 @@ function* pixels(
           image.data[to + 3] =
             type === 6
               ? scale(readSample(row, source + 3))
-              : tr && r === tr.getUint16(0) && g === tr.getUint16(2) && b === tr.getUint16(4)
+              // The selected native RGB handler enables BGR/filler, but not
+              // libpng's EXPAND flag. Only the generic PNG API expands RGB
+              // tRNS; gray's separate native branch still enables EXPAND.
+              : mode === undefined && tr && r === tr.getUint16(0) && g === tr.getUint16(2) && b === tr.getUint16(4)
                 ? 0
                 : 255
         }
@@ -181,7 +184,15 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
     const type = String.fromCharCode(...bytes.subarray(start, start + 4)),
       chunk = bytes.subarray(start + 4, end)
     afterData = dataStarted && type !== 'IDAT'
-    if ((yield* crc32(bytes.subarray(start, end))) !== view.getUint32(end))
+    const nativePosition = mode !== undefined &&
+      (type === 'oFFs' || type === 'pHYs' || type.toLowerCase() === 'vpag'),
+      ancillaryPosition = nativePosition && !!(bytes[start]! & 32),
+      validCrc = (yield* crc32(bytes.subarray(start, end))) === view.getUint32(end)
+    // A short vpAg is unrecognized by the callback. A critical variant then
+    // fails before its CRC is consumed; ancillary variants are ignored.
+    if (nativePosition && type.toLowerCase() === 'vpag' && length < 9 && !ancillaryPosition)
+      throw new ImageDecodeError('png', `${type}: unknown critical chunk`)
+    if (!validCrc && !ancillaryPosition)
       throw new Error('PNG chunk CRC mismatch')
     at = end + 4
     if (!header && type !== 'IHDR') throw new Error('PNG must start with IHDR')
@@ -254,17 +265,27 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
         break
       }
       if (type === 'oFFs' || type === 'pHYs' || type.toLowerCase() === 'vpag') {
-        if (length !== 9) throw new Error('Invalid PNG position metadata')
+        const vpag = type.toLowerCase() === 'vpag',
+          prefix = type === 'oFFs' ? 'offs' : type === 'pHYs' ? 'reso' : 'vpag'
+        if (mode !== undefined) {
+          // libpng's known handlers warn and ignore invalid/duplicate/tail
+          // oFFs/pHYs. The custom vpAg callback accepts >=9 bytes and runs
+          // before CRC checking, so an ancillary CRC warning keeps its data.
+          if (vpag ? length < 9 :
+            dataStarted || length !== 9 || !validCrc || metadata.has(prefix + '_x')) {
+            yield
+            continue
+          }
+        } else if (length !== 9) throw new Error('Invalid PNG position metadata')
         const values = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength),
-          prefix = type === 'oFFs' ? 'offs' : type === 'pHYs' ? 'reso' : 'vpag',
           unit = chunk[8]!
         metadata.set(
           prefix + (prefix === 'vpag' ? '_w' : '_x'),
-          String(type === 'oFFs' ? values.getInt32(0) : values.getUint32(0)),
+          String(type === 'oFFs' || mode !== undefined ? values.getInt32(0) : values.getUint32(0)),
         )
         metadata.set(
           prefix + (prefix === 'vpag' ? '_h' : '_y'),
-          String(type === 'oFFs' ? values.getInt32(4) : values.getUint32(4)),
+          String(type === 'oFFs' || mode !== undefined ? values.getInt32(4) : values.getUint32(4)),
         )
         metadata.set(
           prefix + '_unit',

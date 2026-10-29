@@ -2,6 +2,7 @@ import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
 import { test, expect, type Page } from '@playwright/test'
 import { deflateSync } from 'node:zlib'
 import { tlgFixture, tlgSds, tlgTags, tlgU32 } from '../helpers/tlg-fixtures.ts'
+import { evaluate } from '../helpers/browser-expression.ts'
 
 // The old TLG6 one-channel 17x1 vector contains these exact gray levels. PNG
 // is a registered grayscale rule handler; TLG remains a normal-image handler.
@@ -31,11 +32,6 @@ function grayscaleRulePng(): Buffer {
   ])
 }
 
-async function evaluate(page: Page, source: string, value: string) {
-  await page.locator('#expression').fill(source)
-  await page.locator('#evaluate').click()
-  await expect(page.locator('#logs p span').last()).toHaveText(value)
-}
 async function sample(page: Page) {
   const image = await page.locator('canvas').screenshot()
   return page.evaluate(
