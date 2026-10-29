@@ -43,3 +43,7 @@
 ## 后续
 
 下一批先回收112尚未报告范围及113–117结果；已终态111不再刷新。两类Node原生崩溃、未解决浏览器回归、PNG其他ancillary／低位灰度边界与原二进制身份、JPEG原生失败进度、ERI、统一内存预算和真实游戏验收仍需完成。完整非插件目标保持active。
+
+## 推送与交接
+
+实现提交 `32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd` 共 **31个文件**，已推送到 `codex/migrated-window-attention`。[Full test suite 40805119639](https://github.com/fenghengzhi/krkr2-web/actions/runs/40805119639) 首次唯一查询为 **pending／conclusion=null**，精确SHA、push、workflow路径及attempt 1匹配。原响应保存在 `out/verification/github-actions/40805119639/initial-run-discovery.json`。不再查询新运行jobs、日志或产物，下批固定回收112未报告范围及113–117结果，完整目标保持active。

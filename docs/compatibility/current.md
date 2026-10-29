@@ -1,5 +1,7 @@
 # 当前实现范围
 
+117提交 `32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd` 已推送，[Actions 40805119639](https://github.com/fenghengzhi/krkr2-web/actions/runs/40805119639)首次唯一查询为pending／conclusion=null，仅记录身份。新增应用、差分与崩溃对照均尚无执行结论，下批回收，完整非插件目标保持active。
+
 117候选补[PNG调色板行为与托管运行时对照](../decisions/117-png-palette-and-hosted-runtime-controls.md)：索引键保留文件tRNS，palette灰度按原BGR(A)字节三步长转换，无tRNS索引键保定义前缀／Web安全零尾；通用PNG保持。新增15常规Node、每浏览器4定义及30项C对照，均待执行。固定111 runtime双臂诊断独立于主环境，Stop和音轨时钟候选修复保留原断言。
 
 117固定结果：111终态主浏览器109 fail／2 skip，Node旧SIGTRAP证据保留；112另有malloc SIGABRT和14未报告定义，不能与前者合并或按已报pass宣布通过。113–116仍pending，原PNG参考尚无执行。整体非插件目标继续active。
