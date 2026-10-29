@@ -43,3 +43,7 @@ BMP 按原版最多八个文件顺序行整组读取，组不完整时不发布�
 以下仍是明确缺口：整块 inflate 接口不能提供 zlib 失败前的可信行前缀，IDAT CRC／压缩消费时机尚非完整 libpng 流式等价；host JPEG 失败没有原生 header／scanline 进度及完整数值诊断；ERI 仍明确不支持；部分原生短读消息和畸形输入细节未对齐。当前工作不等于所有图片格式完全兼容。
 
 下一批先取回本批与前面未完成运行的固定结果，按真实失败继续修订；视频 readback、菜单 marker、OPFS、历史 heap、其余非插件接口与真实游戏验收仍未完成。整体验收目标保持 active，不因单批提交或排队而结束。
+
+## 推送与交接
+
+候选提交 `2f38ee94b686cbfa487f6137ea44d026af53cd16` 共 **21 个文件**，已推送到 `codex/migrated-window-attention`。[Full test suite 40791060043](https://github.com/fenghengzhi/krkr2-web/actions/runs/40791060043) 首次唯一查询为 **pending／conclusion=null**，精确 head SHA、push 事件、workflow 路径及 attempt 1 匹配。原响应保存在 `out/verification/github-actions/40791060043/initial-run-discovery.json`。本批不再查询其 jobs、日志或产物；下批补取 109 未报告范围及 110–113 结果，已终态 108 不需要刷新。完整目标继续 active。

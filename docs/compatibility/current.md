@@ -1,5 +1,7 @@
 # 当前实现范围
 
+113 提交 `2f38ee94b686cbfa487f6137ea44d026af53cd16` 已推送，[Actions 40791060043](https://github.com/fenghengzhi/krkr2-web/actions/runs/40791060043) 首次唯一查询为 pending／conclusion=null，仅确认运行身份，新增定义和候选修复尚无执行结论。下批回收，完整非插件目标保持 active。
+
 113 候选补 [图像加载的部分写入与失败边界](../decisions/113-image-load-partial-writes.md)：主图／mask 失败保留已完成行及原 Layer 中间态，正常处理先于省份调整尺寸／clip；缓存区分活动 partial 与完成结果，保留暂停、Stop 和目的地归属保护。新增 **56 常规 Node、每浏览器 4 定义**，协议 **42** 保持，全部尚待托管执行。PNG 流式错误前缀、JPEG 原生失败进度和 ERI 仍有明确缺口。
 
 113 固定回收确认 108 终态 failure，主浏览器有 138 fail、440 未报告；109 Node 为 **3585 pass／27 fail**，原 62 个失败中 35 个已在同名用例通过。109 可信生命周期 19/19、Chromium／Firefox 兼容各 32/32，主浏览器和 WebKit 兼容未报告；110–112 仍 pending。下轮继续回收和修复，历史失败、取消及未比较范围保留，完整非插件目标保持 active。
