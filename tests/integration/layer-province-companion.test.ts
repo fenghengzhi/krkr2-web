@@ -8,6 +8,8 @@ import {
   type LoadedImage,
 } from '../../src/engine/storage/images.ts'
 import { encodeBmp } from '../../src/formats/image/bmp.ts'
+import { ImageReadError } from '../../src/formats/image/read-error.ts'
+import { TjsError } from '../../src/engine/system/tjs-error.ts'
 import { headless } from '../helpers/headless.ts'
 import { imageFixture } from '../helpers/image-fixtures.ts'
 import { pngInflateGate } from '../helpers/image-decoder-gate.ts'
@@ -61,6 +63,7 @@ async function fixture(binary: boolean, imageInflater?: SessionDependencies['ima
         'pending_p.png': imageFixture('palette-2x1.png'),
         'province-companion.tjs': String.raw`
 System.exitOnWindowClose=false;
+System.assignMessage("TJSReadError","province-companion:short-read");
 var win=new Window(),root=new Layer(win,null),layer=new Layer(win,root);
 win.focusable=false;win.setInnerSize(16,12);win.visible=true;
 root.type=ltBinder;root.setSize(16,12);layer.visible=true;
@@ -182,11 +185,18 @@ function partialFailure(
   result: PromiseSettledResult<LoadedImage>,
   cause: RegExp,
   pixels: number[],
+  shortRead = false,
 ) {
   assert.equal(result.status, 'rejected')
   if (result.status !== 'rejected') return
   assert.ok(result.reason instanceof ProvinceImageLoadError)
   assert.match(String(result.reason.cause), cause)
+  if (shortRead) {
+    assert.ok(result.reason.cause instanceof TjsError)
+    assert.deepEqual(result.reason.cause.tjsMessage, { id: 'TJSReadError' })
+    assert.ok(result.reason.cause.cause instanceof ImageReadError)
+    assert.equal(result.reason.cause.cause.format, 'bmp')
+  }
   assert.deepEqual(
     {
       width: result.reason.image.width,
@@ -210,7 +220,7 @@ for (const binary of [false, true]) {
         const oldBitmap = f.layers.bitmap(f.id)
         await f.load('broken.bmp', key)
         assert.equal(await f.session.evaluate('loadResult'), 'failed')
-        assert.match(await f.session.evaluate('loadError'), /Truncated BMP stream/)
+        assert.equal(await f.session.evaluate('loadError'), 'province-companion:short-read')
         assert.equal(await f.session.evaluate('loadedPixels()'), tjsPixels.join(','))
         assert.equal(await f.session.evaluate('geometry()'), '7,9,2,1,2,1,0,0,0,0,2,1')
         assert.equal(await f.session.evaluate('int(layer.imageModified)'), '1')
@@ -220,7 +230,7 @@ for (const binary of [false, true]) {
         assert.equal(f.session.snapshot().bitmapBytes, 8)
         assert.equal(f.session.snapshot().handles, f.handles)
         assert.equal(f.loads.length, 1)
-        partialFailure(await f.loads[0]!, /Truncated BMP stream/, [...pixels])
+        partialFailure(await f.loads[0]!, /Truncated BMP stream/, [...pixels], true)
       } finally {
         await f.stop()
       }
@@ -252,7 +262,7 @@ for (const binary of [false, true]) {
           )
         else assert.equal(f.frames.at(-1), previous)
         assert.equal(await f.session.evaluate('loadResult'), 'failed')
-        assert.match(await f.session.evaluate('loadError'), /Truncated BMP stream/)
+        assert.equal(await f.session.evaluate('loadError'), 'province-companion:short-read')
         assert.deepEqual([...f.layers.bitmap(f.id).pixels.data], matted)
         assert.equal(f.layers.get(f.id).province, undefined)
         assert.equal(await f.session.evaluate('geometry()'), '7,9,2,1,2,1,0,0,0,0,2,1')

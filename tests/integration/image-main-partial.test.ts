@@ -40,7 +40,7 @@ async function fixture(binary: boolean, overrides: Partial<SessionDependencies> 
       frames.push(layers.map(({ id, pixels }) => ({ id, width: pixels.width, height: pixels.height, data: [...pixels.data] })))
     }, dispose() {} }, ...overrides,
   }), files: Record<string, string | Uint8Array> = {
-    ...imagePartialFiles(), 'partial.tjs': imagePartialSource,
+    ...imagePartialFiles(), 'partial.tjs': imagePartialSource + '\nSystem.assignMessage("TJSReadError","partial-stream-short-read");',
     'startup.tjs': binary
       ? 'Scripts.compileStorage("partial.tjs","savedata/partial.cjs",false,true,false);Scripts.execStorage("savedata/partial.cjs");'
       : 'Scripts.execStorage("partial.tjs");',
@@ -114,7 +114,7 @@ for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
   test(`${mode}: failures before the native size callback preserve every image plane and request no paint`, { timeout: 60000 }, async () => {
     await using(binary, async (f) => {
-      for (const [name, error] of [['early.bmp', 'Truncated BMP stream'], ['early.png', 'partial-png:IHDR: CRC error']] as const) {
+      for (const [name, error] of [['early.bmp', 'partial-stream-short-read'], ['early.png', 'partial-png:IHDR: CRC error']] as const) {
         const before = state(f), paints = await f.session.evaluate('partialPaints')
         assert.equal(await f.load(name), 'failed:' + error)
         retainedState(f, before)
@@ -132,7 +132,7 @@ for (const binary of [false, true]) {
       ] as const) {
         await f.reset()
         const before = state(f)
-        assert.equal(await f.load(name, '0x112233'), 'failed:Truncated BMP pixels or palette')
+        assert.equal(await f.load(name, '0x112233'), 'failed:partial-stream-short-read')
         assert.notEqual(f.layers.bitmap(f.id), before.bitmap)
         pixels(f, width, height, (y) => bottomUp ? y >= height - 8 : y < 8, (x) => x === 0 ? 0 : 255)
         retainedState(f, before)
@@ -142,7 +142,7 @@ for (const binary of [false, true]) {
   })
   test(`${mode}: a mask size or pre-size read failure retains the complete new main and all old Layer metadata`, { timeout: 60000 }, async () => {
     await using(binary, async (f) => {
-      for (const [name, error] of [['mask-size.bmp', 'partial-mask-size'], ['mask-read.bmp', 'Truncated BMP stream']] as const) {
+      for (const [name, error] of [['mask-size.bmp', 'partial-mask-size'], ['mask-read.bmp', 'partial-stream-short-read']] as const) {
         await f.reset()
         const before = state(f)
         assert.equal(await f.load(name, 'clAlphaMat+0xffffff'), 'failed:' + error)
@@ -155,7 +155,7 @@ for (const binary of [false, true]) {
   test(`${mode}: a truncated mask changes only completed alpha rows and never applies the later color matte`, { timeout: 60000 }, async () => {
     await using(binary, async (f) => {
       const before = state(f)
-      assert.equal(await f.load('mask-truncated.bmp', 'clAlphaMat+0xffffff'), 'failed:Truncated BMP pixels or palette')
+      assert.equal(await f.load('mask-truncated.bmp', 'clAlphaMat+0xffffff'), 'failed:partial-stream-short-read')
       pixels(f, 5, 17, () => true, (_x, y) => y < 8 ? 64 + y * 4 : 255)
       retainedState(f, before)
       assert.equal(f.session.snapshot().imageCacheEntries, 0)
@@ -167,7 +167,7 @@ for (const binary of [false, true]) {
     await using(binary, async (f) => {
       for (const [name, error, rows] of [
         ['png-tail.png', 'partial-png:IEND: CRC error', 17],
-        ['png-tail-short.png', 'PNG stream short read', 17],
+        ['png-tail-short.png', 'partial-stream-short-read', 17],
       ] as const) {
         await f.reset()
         const before = state(f)
@@ -192,9 +192,9 @@ for (const binary of [false, true]) {
   })
   test(`${mode}: failed processed images are reread rather than cached, while a completed request is privately reusable`, { timeout: 60000 }, async () => {
     await using(binary, async (f) => {
-      assert.equal(await f.load('main-truncated.bmp'), 'failed:Truncated BMP pixels or palette')
+      assert.equal(await f.load('main-truncated.bmp'), 'failed:partial-stream-short-read')
       assert.equal(f.session.snapshot().imageCacheEntries, 0)
-      assert.equal(await f.load('main-truncated.bmp'), 'failed:Truncated BMP pixels or palette')
+      assert.equal(await f.load('main-truncated.bmp'), 'failed:partial-stream-short-read')
       assert.equal(f.reads.get('main-truncated.bmp'), 2)
       assert.equal(f.session.snapshot().imageCacheEntries, 0)
       assert.equal(await f.load('plain.bmp'), 'null:')

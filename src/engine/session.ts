@@ -8,6 +8,7 @@ import { unavailableHelp, type HelpPort } from './ports/help.ts'
 import { getWebLocalName, openHelpDocument } from './system/help.ts'
 import { SystemMaintenance } from './system/maintenance.ts'
 import { TvpError } from './system/tvp-error.ts'
+import { TjsError } from './system/tjs-error.ts'
 import { mapTextStreamError } from './system/text-stream-error.ts'
 import type { TvpMessageId } from './system/tvp-message-ids.ts'
 import { ScriptTextEncoding } from './script/text-encoding.ts'
@@ -1379,6 +1380,13 @@ export class EngineSession {
     })
   }
   private errorText(error: unknown): string {
+    if (error instanceof TjsError && this.runtime?.formatTjsMessage) {
+      try { return this.runtime.formatTjsMessage(error.tjsMessage) }
+      catch (formatError) {
+        const detail = formatError instanceof Error ? formatError.message : String(formatError)
+        return `${error.message}; TJS message formatting failed: ${detail}`
+      }
+    }
     if (error instanceof TvpError && this.runtime?.formatTvpMessage) {
       try { return this.runtime.formatTvpMessage(error.tvpMessage) }
       catch (formatError) {

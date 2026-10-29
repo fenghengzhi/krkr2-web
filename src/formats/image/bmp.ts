@@ -1,5 +1,6 @@
 import type { DecodedImage, Pixels } from '../../engine/ports/graphics.ts'
 import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from './selection.ts'
+import { ImageReadError } from './read-error.ts'
 const dither = [
   [0, 12, 2, 14],
   [8, 4, 10, 6],
@@ -116,7 +117,7 @@ function decodeBitmap(
     colors > 1 << Math.min(depth, 8) ||
     palette + colors * paletteBytes > bytes.length ||
     (mode === undefined && palette + colors * paletteBytes > offset) ||
-    (!progress && offset + stride * height > bytes.length)
+    (mode === undefined && !progress && offset + stride * height > bytes.length)
   )
     throw new Error('Truncated BMP pixels or palette')
   const result: DecodedImage = {
@@ -130,10 +131,13 @@ function decodeBitmap(
   for (let sourceY = 0; sourceY < height; sourceY++) {
     // The fixed native loader reads up to eight complete file-order rows
     // before exposing any row in that batch, including bottom-up images.
-    if (progress && sourceY % 8 === 0 &&
-        offset + (sourceY + Math.min(8, height - sourceY)) * stride > bytes.length)
-      throw new Error('Truncated BMP pixels or palette')
-    const y = progress && signedHeight > 0 ? height - 1 - sourceY : sourceY
+    if (mode !== undefined && sourceY % 8 === 0) {
+      const start = offset + sourceY * stride, requested = Math.min(8, height - sourceY) * stride,
+        available = Math.max(0, bytes.length - start)
+      if (requested > available)
+        throw new ImageReadError('bmp', start, requested, available, 'Truncated BMP pixels or palette')
+    }
+    const y = mode !== undefined && signedHeight > 0 ? height - 1 - sourceY : sourceY
     for (let x = 0; x < width; x++) {
       const from =
           offset + (signedHeight > 0 ? height - 1 - y : y) * stride +
@@ -197,25 +201,29 @@ export function decodeSelectedBmp(
   mode: ImageDecodeSelection['mode'],
   progress?: ImageDecodeProgress,
 ): DecodedImage | undefined {
-  const need = (length: number) => {
-    if (bytes.length < length) throw new Error('Truncated BMP stream')
+  const need = (offset: number, length: number) => {
+    const available = Math.max(0, bytes.length - offset)
+    if (length > available) throw new ImageReadError('bmp', offset, length, available, 'Truncated BMP stream')
   }
-  need(2)
+  need(0, 2)
   if (bytes[0] !== 0x42 || bytes[1] !== 0x4d)
     throw new ImageDecodeError('bmp', 'This is not a Windows BMP file or an OS/2 BMP file.')
-  need(18)
+  for (const [offset, length] of [[2, 4], [6, 2], [8, 2], [10, 4], [14, 4]]) need(offset!, length!)
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     dib = view.getUint32(14, true)
   if (dib !== 12 && dib !== 40)
     throw new ImageDecodeError('bmp', 'Non-supported header version.')
-  need(14 + dib)
+  for (const [offset, length] of dib === 12 ? [[18, 2], [20, 2], [22, 2], [24, 2]]
+    : [[18, 4], [22, 4], [26, 2], [28, 2], [30, 4], [34, 4], [38, 4], [42, 4], [46, 4], [50, 4]])
+    need(offset!, length!)
   const depth = view.getUint16(dib === 12 ? 24 : 28, true),
     colors = depth <= 8 ? (dib === 12 ? 1 << depth : view.getUint32(46, true) || 1 << depth) : 0
   // GraphicsLoaderIntf's CORE branch memset clears biSize. Both its palette
   // allocation and its internal palette reader therefore use four bytes, not
   // the three bytes dictated by the CORE file format. Read first, then seek to
   // bfOffBits: palette data may overlap pixels, but it must be in this stream.
-  need(14 + dib + colors * 4)
+  if (colors > 1 << Math.min(depth, 8)) throw new Error('BMP palette exceeds the selected depth')
+  need(14 + dib, colors * 4)
   const compression = dib === 12 ? 0 : view.getUint32(30, true)
   if (compression === 3) throw new ImageDecodeError('bmp', 'BITFIELDS not supported.')
   if (compression !== 0) throw new ImageDecodeError('bmp', 'Compressed BMP not supported.')

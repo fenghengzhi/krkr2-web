@@ -1,10 +1,12 @@
 import type { DecodedImage } from '../ports/graphics.ts'
 import { TvpError } from '../system/tvp-error.ts'
+import { TjsError } from '../system/tjs-error.ts'
 import { decodeSelectedBmp } from '../../formats/image/bmp.ts'
 import { decodeSelectedPng, prepareSelectedPngStream } from '../../formats/image/png.ts'
 import { decodeSelectedTlg } from '../../formats/image/tlg/index.ts'
 import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from '../../formats/image/selection.ts'
 import type { ImageInflater } from '../ports/image-inflater.ts'
+import { ImageReadError } from '../../formats/image/read-error.ts'
 
 export interface SelectedImageDecoderDependencies {
   finish<T>(work: Generator<void, T>): Promise<T>
@@ -15,6 +17,40 @@ export interface SelectedImageDecoderDependencies {
 
 class ProgressFailure {
   constructor(readonly cause: unknown) {}
+}
+class InflaterFailure {
+  constructor(readonly cause: unknown) {}
+}
+function original(error: unknown): unknown {
+  return error instanceof ProgressFailure || error instanceof InflaterFailure ? error.cause : error
+}
+function codecError(error: unknown): unknown {
+  if (error instanceof ImageReadError)
+    return new TjsError('TJSReadError', error.message, { cause: error })
+  if (error instanceof ImageDecodeError) {
+    const id = {
+      bmp: 'TVPImageLoadError', jpeg: 'TVPJPEGLoadError', png: 'TVPPNGLoadError', tlg: 'TVPTLGLoadError',
+    } as const
+    return new TvpError(id[error.format], [error.reason], error.message, { cause: error })
+  }
+  return error
+}
+function codec<T>(read: () => T): T {
+  try { return read() }
+  catch (error) { throw codecError(error) }
+}
+function* codecWork<T>(create: () => Generator<void, T>): Generator<void, T> {
+  // Only the codec's own reads/validation are translated. The scheduler and
+  // asynchronous host dependencies remain outside this boundary, including
+  // errors a scheduler injects at the yield. Close the delegated work on Stop.
+  const work = codec(create)
+  try {
+    for (;;) {
+      const next = codec(() => work.next())
+      if (next.done) return next.value
+      yield
+    }
+  } finally { work.return(undefined as T) }
 }
 
 function* publish(image: DecodedImage, progress?: ImageDecodeProgress): Generator<void, DecodedImage> {
@@ -71,7 +107,7 @@ export async function decodeSelectedImage(
       case 'eri':
         throw new TvpError('TVPNotImplemented', [], 'ERI image decoding is not available')
       case 'bmp': {
-        const portable = decodeSelectedBmp(bytes, selected.mode, progress)
+        const portable = codec(() => decodeSelectedBmp(bytes, selected.mode, progress))
         if (portable) return portable
         let image = await dependencies.host(bytes, selected)
         if (selected.mode === 'grayscale' && !image.grayscale) image = await dependencies.finish(grayscale(image, false))
@@ -79,29 +115,36 @@ export async function decodeSelectedImage(
       }
       case 'png': {
         if (dependencies.openInflater) {
-          const plan = await dependencies.finish(prepareSelectedPngStream(bytes, selected.mode, progress)),
+          const plan = await dependencies.finish(codecWork(() => prepareSelectedPngStream(bytes, selected.mode, progress))),
             inflater = await dependencies.openInflater(bytes, plan.expandedLength)
+          const guarded: ImageInflater = {
+            step(input, output) {
+              try { return inflater.step(input, output) }
+              catch (error) { throw new InflaterFailure(error) }
+            },
+            close() { inflater.close() },
+          }
           let failed: { error: unknown } | undefined
-          try { return await dependencies.finish(plan.decode(inflater)) }
+          try { return await dependencies.finish(codecWork(() => plan.decode(guarded))) }
           catch (error) { failed = { error }; throw error }
           finally {
             try { inflater.close() }
             catch (cleanup) {
               if (!failed) throw cleanup
-              const primary = failed.error instanceof ProgressFailure ? failed.error.cause : failed.error
+              const primary = original(failed.error)
               throw new AggregateError([primary, cleanup], 'PNG decoding and inflater cleanup failed', { cause: primary })
             }
           }
         }
-        const plan = await dependencies.finish(decodeSelectedPng(bytes, selected.mode, progress)),
+        const plan = await dependencies.finish(codecWork(() => decodeSelectedPng(bytes, selected.mode, progress))),
           expanded = await dependencies.inflate(plan.compressed, plan.expandedLength)
-        return await dependencies.finish(plan.decode(expanded))
+        return await dependencies.finish(codecWork(() => plan.decode(expanded)))
       }
       case 'tlg':
-        return await dependencies.finish(decodeSelectedTlg(bytes, selected.mode, progress))
+        return await dependencies.finish(codecWork(() => decodeSelectedTlg(bytes, selected.mode, progress)))
       case 'jpeg': {
         if (selected.mode === 'palettized')
-          throw new ImageDecodeError('jpeg', 'JPEG does not support palettized image')
+          throw codecError(new ImageDecodeError('jpeg', 'JPEG does not support palettized image'))
         // A host must never accept PNG/GIF/etc. under a chosen JPEG extension.
         // Exact libjpeg numeric diagnostics remain a separate compatibility gap.
         if (bytes.length < 3) throw new Error('Truncated JPEG signature')
@@ -115,11 +158,6 @@ export async function decodeSelectedImage(
         throw new Error('Unknown selected image handler')
     }
   } catch (error) {
-    if (error instanceof ProgressFailure) throw error.cause
-    if (!(error instanceof ImageDecodeError)) throw error
-    const id = {
-      bmp: 'TVPImageLoadError', jpeg: 'TVPJPEGLoadError', png: 'TVPPNGLoadError', tlg: 'TVPTLGLoadError',
-    } as const
-    throw new TvpError(id[error.format], [error.reason], error.message, { cause: error })
+    throw original(error)
   }
 }

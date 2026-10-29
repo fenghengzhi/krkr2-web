@@ -1,12 +1,13 @@
 import { crc32 } from '../binary/crc32.ts'
 import { ImageDecodeError } from './selection.ts'
+import { ImageReadError } from './read-error.ts'
 import type { ImageInflater } from '../../engine/ports/image-inflater.ts'
 
 /** A native ReadBuffer short read is distinct from a libpng codec error.
  * TJSReadError holder mapping is still separate from this portable boundary. */
-export class PngStreamReadError extends Error {
-  constructor(readonly offset: number, readonly requested: number, readonly actual: number) {
-    super('PNG stream short read')
+export class PngStreamReadError extends ImageReadError {
+  constructor(offset: number, requested: number, actual: number) {
+    super('png', offset, requested, actual, 'PNG stream short read')
     this.name = 'PngStreamReadError'
   }
 }

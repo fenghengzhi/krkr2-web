@@ -3,6 +3,7 @@ import { crc32 } from '../binary/crc32.ts'
 import { paeth } from './png-filter.ts'
 import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from './selection.ts'
 import { PngPull, PngStreamReadError } from './png-pull.ts'
+import { ImageReadError } from './read-error.ts'
 import type { ImageInflater } from '../../engine/ports/image-inflater.ts'
 
 const magic = [137, 80, 78, 71, 13, 10, 26, 10]
@@ -227,6 +228,14 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
   streaming = false): Generator<void, PngPlan | PngStreamPlan> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     metadata = new Map<string, string>()
+  const need = (offset: number, requested: number, diagnostic: string, audited = true) => {
+    const actual = Math.max(0, bytes.length - offset)
+    if (requested > actual) {
+      if (!audited) throw new Error(diagnostic)
+      throw streaming ? new PngStreamReadError(offset, requested, actual)
+        : new ImageReadError('png', offset, requested, actual, diagnostic)
+    }
+  }
   let at = 8,
     header: Header | undefined,
     palette: Uint8Array | undefined,
@@ -239,34 +248,83 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
     dataEnded = false,
     tailFailed = false,
     tailError: unknown
-  while (at < bytes.length) {
-    if (streaming && !dataStarted && bytes.length - at >= 8 &&
-        String.fromCharCode(...bytes.subarray(at + 4, at + 8)) === 'IDAT') {
-      if (!header || (header.type === 3 && !palette))
-        throw new ImageDecodeError('png', header ? 'Missing PLTE before IDAT' : 'Missing IHDR before IDAT')
-      progress?.size(header.width, header.height)
-      return streamPlan(bytes, at, header, palette, transparent, metadata, mode!, progress)
-    }
+  while (at < bytes.length || (mode !== undefined && !ended)) {
     // Eight remaining bytes identify a non-IDAT tail even when its CRC or
     // declared payload is truncated. That read occurs in native png_read_end.
-    let afterData = !!progress && dataStarted && bytes.length - at >= 8 &&
-      String.fromCharCode(...bytes.subarray(at + 4, at + 8)) !== 'IDAT'
+    let afterData = !!progress && dataStarted &&
+      ((mode !== undefined && bytes.length - at < 8) || (bytes.length - at >= 8 &&
+        String.fromCharCode(...bytes.subarray(at + 4, at + 8)) !== 'IDAT'))
+    try {
+    if (mode !== undefined) {
+      // These are separate source reads in png_read_info. Do not require a
+      // payload/CRC before dispatching a handler that can reject its header.
+      need(at, 4, 'Truncated PNG chunk')
+      need(at + 4, 4, 'Truncated PNG chunk')
+      const type = String.fromCharCode(...bytes.subarray(at + 4, at + 8)), length = view.getUint32(at)
+      if (type === 'IHDR') {
+        if (header) throw new ImageDecodeError('png', 'Out of place IHDR')
+        if (length !== 13) throw new ImageDecodeError('png', 'Invalid IHDR chunk')
+      } else if (type === 'IEND' && (!header || !dataStarted)) {
+        throw new ImageDecodeError('png', 'No image in file')
+      } else if (type === 'PLTE') {
+        if (!header) throw new ImageDecodeError('png', 'Missing IHDR before PLTE')
+        if (!dataStarted && palette) throw new ImageDecodeError('png', 'Duplicate PLTE chunk')
+        if (!dataStarted && header.type === 3 && length % 3)
+          throw new ImageDecodeError('png', 'Invalid palette chunk')
+        // Preserve the Web palette bound before a potentially enormous triple
+        // loop; this is not presented as a native ReadBuffer diagnosis.
+        if (length > 768) throw new Error('Invalid PNG palette')
+      } else if (type === 'IDAT') {
+        if (!header || (header.type === 3 && !palette))
+          throw new ImageDecodeError('png', header ? 'Missing PLTE before IDAT' : 'Missing IHDR before IDAT')
+        if (streaming) {
+          progress?.size(header.width, header.height)
+          return streamPlan(bytes, at, header, palette, transparent, metadata, mode, progress)
+        }
+      } else if (!header && ['tRNS', 'oFFs', 'pHYs'].includes(type)) {
+        throw new ImageDecodeError('png', `Missing IHDR before ${type === 'pHYs' ? 'pHYS' : type}`)
+      }
+    } else if (bytes.length - at < 12) throw new Error('Truncated PNG chunk')
     if (progress && !dataStarted && header && bytes.length - at >= 8 &&
         String.fromCharCode(...bytes.subarray(at + 4, at + 8)) === 'IDAT' &&
         (header.type !== 3 || palette)) {
-      // png_read_info stops after the first complete IDAT header. Even when
-      // its payload/CRC is short, native creates the destination before the
-      // ensuing png_read_row failure. No row is claimed from missing bytes.
+      // A complete first IDAT header reaches native size before reading the
+      // actual compressed bytes. The legacy bulk path retains that boundary.
       progress.size(header.width, header.height)
     }
-    try {
-    if (bytes.length - at < 12) throw new Error('Truncated PNG chunk')
     const length = view.getUint32(at),
       start = at + 4,
       end = start + 4 + length
-    if (length > bytes.length - at - 12) throw new Error('Truncated PNG chunk data')
-    const type = String.fromCharCode(...bytes.subarray(start, start + 4)),
-      chunk = bytes.subarray(start + 4, end)
+    const type = String.fromCharCode(...bytes.subarray(start, start + 4))
+    if (mode !== undefined) {
+      // Do not claim the read granularity of unimplemented ancillary handlers.
+      // Their existing plain validation failure remains an explicit gap. The
+      // original unknown-chunk callback, in contrast, reads one payload buffer.
+      const otherKnown = ['gAMA', 'cHRM', 'sBIT', 'sRGB', 'bKGD', 'hIST', 'iCCP', 'sPLT',
+        'tIME', 'sCAL', 'pCAL', 'tEXt', 'zTXt', 'iTXt'].includes(type),
+        paletteTriples = type === 'PLTE' && !dataStarted && header?.type === 3 && length % 3 === 0,
+        transparencySkip = type === 'tRNS' && (dataStarted || !!transparent ||
+          (header?.type === 3 ? !length || (!!palette && length > palette.length / 3)
+            : header?.type === 0 ? length !== 2 : header?.type === 2 ? length !== 6 : true)),
+        skipped = type === 'IDAT' || type === 'IEND' || transparencySkip ||
+          ((type === 'oFFs' || type === 'pHYs') && (length !== 9 || dataStarted ||
+            metadata.has(type === 'oFFs' ? 'offs_x' : 'reso_x'))),
+        audited = /^[A-Za-z]{4}$/.test(type) && !otherKnown && (type !== 'PLTE' || paletteTriples || dataStarted),
+        batch = paletteTriples ? 3 : skipped || (type === 'PLTE' && dataStarted) ? 8192 : length
+      for (let offset = start + 4; offset < end;) {
+        const requested = Math.min(batch, end - offset)
+        need(offset, requested, bytes.length - at < 12 ? 'Truncated PNG chunk' : 'Truncated PNG chunk data', audited)
+        offset += requested
+        yield
+      }
+      // The configured native unknown-chunk callback receives payload bytes
+      // before CRC. An unrecognized critical chunk therefore rejects here.
+      if (!(bytes[start]! & 32) && !['IHDR', 'PLTE', 'IDAT', 'IEND'].includes(type) &&
+          !(type.toLowerCase() === 'vpag' && length >= 9))
+        throw new ImageDecodeError('png', `${type}: unknown critical chunk`)
+      need(end, 4, 'Truncated PNG chunk', audited)
+    } else if (length > bytes.length - at - 12) throw new Error('Truncated PNG chunk data')
+    const chunk = bytes.subarray(start + 4, end)
     afterData = dataStarted && type !== 'IDAT'
     const nativePosition = mode !== undefined &&
       (type === 'oFFs' || type === 'pHYs' || type.toLowerCase() === 'vpag'),
@@ -452,7 +510,7 @@ export function decodeSelectedPng(
   mode: ImageDecodeSelection['mode'],
   progress?: ImageDecodeProgress,
 ): Generator<void, PngPlan> {
-  if (bytes.length < 8) throw new Error('Truncated PNG signature')
+  if (bytes.length < 8) throw new ImageReadError('png', 0, 8, bytes.length, 'Truncated PNG signature')
   if (magic.some((byte, index) => bytes[index] !== byte)) {
     const firstFourMatch = magic.slice(0, 4).every((byte, index) => bytes[index] === byte)
     throw new ImageDecodeError('png', firstFourMatch

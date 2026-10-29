@@ -1,5 +1,9 @@
 # 当前实现范围
 
+116 候选补 [原版图像短读错误](../decisions/116-native-image-read-errors.md)：selected BMP／PNG／TLG 的真实源短读进入当前原生 TJSReadError holder，保留结构化原因和已有部分写入；宿主、预算、格式和回调错误保持独立。`nativeMessages:2`，协议42／TJS ABI5保持，新增36常规Node、每浏览器4定义均待托管验证。
+
+116 固定证据中，111的27个旧Node夹具失败已通过，但新的Node WASM JIT SIGTRAP留下8个未报告定义，不能把3673 pass当整批通过。完整core与旧malloc崩溃分开保存；111可信生命周期19/19、KAG96/96，七个主浏览器作业未报告。110已终态failure；112–115仍pending。原失败和未比较范围保留，完整非插件目标未完成。
+
 115 提交 `5784993da5a6e5d48fc0e7cd92ad133ddab57930` 已推送，[Actions 40798634885](https://github.com/fenghengzhi/krkr2-web/actions/runs/40798634885) 首次唯一查询为pending／conclusion=null，仅记录身份；新内核、应用回归和原生差分尚无执行结论。下批回收，完整非插件目标保持active。
 
 115 候选接入 [PNG pull 解压与原始写入阶段](../decisions/115-png-pull-inflation-and-write-phases.md)：实际 App/headless使用独立zlib WASM，IDAT按实际消费检查CRC，主图raw写入和完成后的key／mask绑定分开；暂停、Stop、缓存归属与离线资产接通。新增17常规Node、每浏览器4定义、30项同源C差分，均尚待托管执行。协议42及原ABI保持，图像模块独立ABI1；原二进制身份、palette特殊路径及完整非插件目标仍未闭合。

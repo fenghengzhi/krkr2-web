@@ -1,15 +1,23 @@
 export class BinaryReader {
   private readonly view: DataView
   position = 0
-  constructor(readonly bytes: Uint8Array) {
+  constructor(readonly bytes: Uint8Array,
+    private readonly shortRead?: (offset: number, requested: number, actual: number) => Error) {
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   }
   get remaining(): number {
     return this.bytes.length - this.position
   }
   private take(size: number): number {
-    if (!Number.isSafeInteger(size) || size < 0 || size > this.remaining)
+    if (!Number.isSafeInteger(size) || size < 0)
       throw new Error('Truncated or invalid binary data')
+    const available = this.shortRead ? Math.max(0, this.remaining) : this.remaining
+    if (size > available) {
+      if (!this.shortRead) throw new Error('Truncated or invalid binary data')
+      const offset = this.position
+      this.position += available
+      throw this.shortRead(offset, size, available)
+    }
     const start = this.position
     this.position += size
     return start

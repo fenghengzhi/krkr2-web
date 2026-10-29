@@ -110,7 +110,7 @@ manifest.capabilities = {
   nativeClipboard: 1,
   nativeSystem: 6,
   nativeRandom: 1,
-  nativeMessages: 1,
+  nativeMessages: 2,
   nativeStorages: 2,
   nativeTextStreams: 2,
   nativeHelp: 1,

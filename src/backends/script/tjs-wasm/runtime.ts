@@ -18,6 +18,7 @@ import {
 } from '../../../engine/script/runtime.ts'
 import { ExecutionControl } from '../../../engine/scheduler/control.ts'
 import { TvpError, type TvpMessage } from '../../../engine/system/tvp-error.ts'
+import { TjsError, type TjsMessage } from '../../../engine/system/tjs-error.ts'
 import type { ModuleFactory, ModuleOptions, NativeModule } from './module.ts'
 
 let nextRuntime = 1
@@ -104,8 +105,9 @@ export class TjsWasmRuntime implements ScriptRuntime {
         runtime.call('krkr_random_source_version') !== 1)
       throw new Error('TJS WASM is missing native random entropy support')
     if (typeof runtime.module._krkr_native_messages_version !== 'function' ||
-        runtime.call('krkr_native_messages_version') !== 1 ||
-        typeof runtime.module._krkr_format_tvp_message !== 'function')
+        runtime.call('krkr_native_messages_version') !== 2 ||
+        typeof runtime.module._krkr_format_tvp_message !== 'function' ||
+        typeof runtime.module._krkr_format_tjs_message !== 'function')
       throw new Error('TJS WASM is missing native TVP message support')
     runtime.vm = runtime.call('krkr_create', Number(options.debugMode === true))
     if (!runtime.vm) throw new Error('TJS VM initialization failed')
@@ -740,12 +742,40 @@ export class TjsWasmRuntime implements ScriptRuntime {
     this.assertAlive(true)
     return this.formatTvpMessageText(message)
   }
+  private buildTjsMessage(message: TjsMessage): number {
+    if (!message || message.id !== 'TJSReadError' || 'args' in message)
+      throw new Error('Invalid typed TJS message')
+    const pointer = this.call('krkr_reply_new', 11)
+    try {
+      const name = this.textPointer(message.id)
+      try { this.call('krkr_reply_name', pointer, name) }
+      finally { this.call('free', name) }
+      return pointer
+    } catch (error) {
+      this.call('krkr_reply_delete', pointer)
+      throw error
+    }
+  }
+  private formatTjsMessageText(message: TjsMessage): string {
+    const request = this.buildTjsMessage(message)
+    try {
+      const value = this.consumeReply(this.call('krkr_format_tjs_message', request))
+      if (typeof value !== 'string') throw new Error('Invalid native TJS message result')
+      return value
+    } finally { this.call('krkr_reply_delete', request) }
+  }
+  formatTjsMessage(message: TjsMessage): string {
+    this.assertAlive(true)
+    return this.formatTjsMessageText(message)
+  }
   private materializeError(error: unknown): unknown {
     // This pure formatter is also safe after krkr_destroy: the module's holder
     // catalog survives its VM, and no VM pointer/handle is consulted here.
-    if (error instanceof TvpError) {
+    if (error instanceof TvpError || error instanceof TjsError) {
       try {
-        return new ScriptError(this.formatTvpMessageText(error.tvpMessage), '', 0, '', { cause: error })
+        const message = error instanceof TvpError ? this.formatTvpMessageText(error.tvpMessage)
+          : this.formatTjsMessageText(error.tjsMessage)
+        return new ScriptError(message, '', 0, '', { cause: error })
       } catch (formatting) {
         // A translated holder can itself exceed the formatting budget. Keep
         // that failure visible together with the original operation descriptor.
@@ -757,6 +787,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
   }
   private buildErrorReply(error: unknown): number {
     if (error instanceof TvpError) return this.buildTvpMessage(error.tvpMessage)
+    if (error instanceof TjsError) return this.buildTjsMessage(error.tjsMessage)
     const pointer = this.call('krkr_reply_new', 1)
     try {
       this.writeValue(this.call('krkr_reply_value', pointer), error instanceof Error ? error.message : String(error))
@@ -779,6 +810,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
       const operation = this.readText(name, length)
       const context: HostContext = {
         formatTvpMessage: (message) => this.formatTvpMessage(message),
+        formatTjsMessage: (message) => this.formatTjsMessage(message),
         retain: (object) => this.retain(object),
         release: (object) => this.release(object),
         snapshot: (object) => this.snapshot(object),

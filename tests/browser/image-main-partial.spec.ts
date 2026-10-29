@@ -27,7 +27,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: failed main and mask decoders retain native partial pixels before successful Layer finalization`, async ({ page }, info) => {
     test.setTimeout(90000)
     const failures: unknown[] = [], observations: unknown[] = []
-    const game = await launchWindowAttention(page, backend, binary, imagePartialSource,
+    const game = await launchWindowAttention(page, backend, binary,
+      imagePartialSource + '\nSystem.assignMessage("TJSReadError","partial-stream-short-read");',
       Object.entries(imagePartialFiles()).map(([name, buffer]) => ({ name, mimeType: 'application/octet-stream', buffer }))),
       canvas = game.surface('Image partial').locator('canvas[data-window-id]'),
       initial = '0,0,3,2,7,19,-2,-1,1,1,2,2', partial = '0,0,3,2,5,17,-2,-1,1,1,2,2'
@@ -42,11 +43,11 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect(canvas).toHaveJSProperty('width', 20)
       await expect(canvas).toHaveJSProperty('height', 24)
       await evaluate(page, 'partialGeometry()', initial)
-      await evaluate(page, 'partialLoad("early.bmp")', 'failed:Truncated BMP stream')
+      await evaluate(page, 'partialLoad("early.bmp")', 'failed:partial-stream-short-read')
       await evaluate(page, 'partialGeometry()', initial)
       await evaluate(page, 'partialPlaneState()', '1193046,74,91,0,0')
 
-      await evaluate(page, `partialLoad("main-truncated.bmp",${partialKey})`, 'failed:Truncated BMP pixels or palette')
+      await evaluate(page, `partialLoad("main-truncated.bmp",${partialKey})`, 'failed:partial-stream-short-read')
       await evaluate(page, 'partialGeometry()', partial)
       await evaluate(page, 'partialPlaneState()', `${partialColor},255,91,0,0`)
       await evaluate(page, '[partialLayer.getMainPixel(1,7),partialLayer.getMaskPixel(0,7),partialLayer.getMainPixel(1,8),partialLayer.getMaskPixel(1,8)].join(",")', `${partialColor},0,0,0`)
@@ -55,7 +56,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await evaluate(page, '(resetPartialImage(),0)', '0')
       // A failed mask has already bound its first complete eight rows. Alpha
       // matting must not run after that failure; the main RGB stays original.
-      await evaluate(page, 'partialLoad("mask-truncated.bmp",0x04ffffff)', 'failed:Truncated BMP pixels or palette')
+      await evaluate(page, 'partialLoad("mask-truncated.bmp",0x04ffffff)', 'failed:partial-stream-short-read')
       await evaluate(page, 'partialGeometry()', partial)
       await evaluate(page, 'partialPlaneState()', `${partialColor},64,91,0,0`)
       await evaluate(page, '[partialLayer.getMainPixel(1,7),partialLayer.getMaskPixel(1,7),partialLayer.getMainPixel(1,8),partialLayer.getMaskPixel(1,8)].join(",")', `${partialColor},92,${partialColor},255`)

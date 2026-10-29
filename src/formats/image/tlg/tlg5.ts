@@ -16,7 +16,8 @@ export function* readTlg5(input: BinaryReader, selected = false, progress?: Imag
   if (!blockHeight) throw new Error('Invalid TLG5 block height')
   const count = Math.ceil(height / blockHeight),
     sizes: number[] = []
-  for (let i = 0; i < count; i++) sizes.push(input.u32())
+  if (selected) input.position += count * 4
+  else for (let i = 0; i < count; i++) sizes.push(input.u32())
   const data = new Uint8Array(width * height * 4),
     slide = new SlideDecoder()
   progress?.size(width, height)
@@ -32,7 +33,7 @@ export function* readTlg5(input: BinaryReader, selected = false, progress?: Imag
       else if (flag === 1 && bytes.length === size) planes.push(bytes)
       else throw new Error('Invalid TLG5 plane encoding or length')
     }
-    if (input.position - start !== sizes[block]) throw new Error('Invalid TLG5 block size')
+    if (!selected && input.position - start !== sizes[block]) throw new Error('Invalid TLG5 block size')
     for (let row = 0; row < rows; row++) {
       let red = 0,
         green = 0,

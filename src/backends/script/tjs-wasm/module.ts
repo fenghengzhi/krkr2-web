@@ -66,7 +66,7 @@ export interface WasmManifest {
     nativeSystem?: number
     /** Math.RandomGenerator's default seed uses the host entropy source. */
     nativeRandom?: number
-    /** Original TVP holders and typed, late-formatted host errors. */
+    /** Version 2 adds the private literal TJSReadError descriptor to TVP holders. */
     nativeMessages?: number
     nativeStorages?: number
     /** Distinct, suspendable text writer preflight before native allocation. */

@@ -30,6 +30,7 @@
 #include "WebHost.h"
 #include "NativeOwnership.h"
 #include "TvpMessages.h"
+#include "TjsMessages.h"
 
 using namespace TJS;
 namespace TJS {
@@ -44,7 +45,7 @@ unsigned TJSGetLiveDispatchObjects();
 namespace {
 bool shuttingDown = false;
 struct Reply {
-    int kind = 0; // value, error, invoke, source, bytecode; 10 = typed TVP error
+    int kind = 0; // value/error/invoke/source/bytecode; 10 = TVP, 11 = literal TJS error
     tTJSVariant value;
     std::vector<tTJSVariant> args;
     ttstr name;
@@ -67,9 +68,15 @@ ttstr formatTvpReply(const Reply& reply) {
     }
     return krkr::formatTvpMessage(reply.name.c_str(), parameters, reply.args.size());
 }
+ttstr formatTjsReply(const Reply& reply) {
+    if(reply.kind != 11 || !reply.args.empty())
+        TJS_eTJSError(u"Invalid typed TJS message arguments");
+    return krkr::formatTjsMessage(reply.name.c_str());
+}
 void throwReplyError(const Reply& reply) {
     if(reply.kind == 1) TJS_eTJSError(ttstr(reply.value));
     if(reply.kind == 10) TJS_eTJSError(formatTvpReply(reply));
+    if(reply.kind == 11) TJS_eTJSError(formatTjsReply(reply));
 }
 
 struct Vm;
@@ -1718,7 +1725,7 @@ API void krkr_destroy(Vm* vm) { delete vm; }
 API void krkr_set_console(Vm* vm, int enabled) { vm->engine->SetConsoleOutput(enabled ? vm->console.get() : nullptr); }
 API int krkr_abi_version() { return 5; }
 API int krkr_random_source_version() { return 1; }
-API int krkr_native_messages_version() { return 1; }
+API int krkr_native_messages_version() { return 2; }
 // No VM entry, release drain or CleanupErrors scope: this may be called by a
 // host logger while a script import is suspended, without consuming its errors.
 API Reply* krkr_format_tvp_message(const Reply* request) {
@@ -1726,6 +1733,22 @@ API Reply* krkr_format_tvp_message(const Reply* request) {
     try {
         if(!request) TJS_eTJSError(u"Missing typed TVP message");
         reply->value = formatTvpReply(*request);
+    } catch(const eTJS& error) {
+        reply->kind = 1;
+        reply->value = error.GetMessage();
+    } catch(const std::exception& error) {
+        reply->kind = 1;
+        reply->value = ttstr(error.what());
+    }
+    return reply.release();
+}
+// Same non-reentrant lifetime as the TVP formatter, but no substitution and no
+// access to the TVP catalog. In particular TJSReadError != TVPReadError.
+API Reply* krkr_format_tjs_message(const Reply* request) {
+    auto reply = std::make_unique<Reply>();
+    try {
+        if(!request) TJS_eTJSError(u"Missing typed TJS message");
+        reply->value = formatTjsReply(*request);
     } catch(const eTJS& error) {
         reply->kind = 1;
         reply->value = error.GetMessage();

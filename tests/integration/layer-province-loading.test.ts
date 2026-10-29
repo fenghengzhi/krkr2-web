@@ -48,6 +48,7 @@ async function fixture(binary: boolean, imageInflater?: SessionDependencies['ima
 System.exitOnWindowClose=false;
 System.assignMessage("TVPProvinceSizeMismatch","province-loading:size:%1");
 System.assignMessage("TVPCannotOpenStorage","province-loading:open:%1");
+System.assignMessage("TJSReadError","province-loading:short-read");
 var win=new Window();win.setInnerSize(2,2);
 var root=new Layer(win,null),layer=new Layer(win,root);
 root.setSize(2,2);root.setImageSize(2,2);
@@ -252,7 +253,7 @@ for (const binary of [false, true]) {
 
   for (const [name, message] of [
     ['missing.png', 'province-loading:open:game://./missing.png'],
-    ['invalid.bmp', 'Truncated BMP stream'],
+    ['invalid.bmp', 'province-loading:short-read'],
     ['oversized.bmp', 'province-loading:size:oversized.bmp'],
   ] as const) {
     test(`${mode}: ${name} province-load failure removes the old plane while preserving main, mask and clip`, async () => {

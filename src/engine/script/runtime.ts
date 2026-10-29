@@ -1,4 +1,5 @@
 import type { TvpMessage } from '../system/tvp-error.ts'
+import type { TjsMessage } from '../system/tjs-error.ts'
 
 export interface ScriptObject {
   readonly type: 'object'
@@ -134,6 +135,8 @@ export interface HostContext {
   /** Pure native holder formatting; never invokes TJS or drains releases.
    * Optional only for explicit host-only fixtures without a native runtime. */
   formatTvpMessage?(message: TvpMessage): string
+  /** Literal-only existing TJS holder; same no-VM-entry formatting boundary. */
+  formatTjsMessage?(message: TjsMessage): string
   retain(object: ScriptObject): ScriptObject
   release(object: ScriptObject): void
   /** Explicit, bounded copy of native Array/Dictionary data, without invoking properties.

@@ -58,6 +58,7 @@ test('a vertical browser face keeps ideographs upright and rotates Latin glyphs'
     'src/formats/font/vertical-data.ts',
     'src/formats/image/bmp.ts',
     'src/formats/image/selection.ts',
+    'src/formats/image/read-error.ts',
   ])
   await page.route('**/__vertical-test/**', async (route) => {
     const path = new URL(route.request().url()).pathname.slice('/__vertical-test/'.length)

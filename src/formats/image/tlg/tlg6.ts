@@ -13,10 +13,11 @@ function predict(left: number, above: number, diagonal: number, average: boolean
 }
 
 export function* readTlg6(input: BinaryReader, selected = false, progress?: ImageDecodeProgress): Generator<void, DecodedImage> {
-  const colors = input.u8()
+  const mark = selected ? input.slice(4) : undefined,
+    colors = mark ? mark[0]! : input.u8()
   if (selected) {
     // The original reads the four-byte mark before checking any field.
-    const flags = input.u8(), type = input.u8(), table = input.u8()
+    const flags = mark![1]!, type = mark![2]!, table = mark![3]!
     if (colors !== 1 && colors !== 3 && colors !== 4)
       throw new ImageDecodeError('tlg', `Unsupported color count : ${colors}`)
     if (flags) throw new ImageDecodeError('tlg', 'Data flag must be 0 (any flags are not yet supported)')

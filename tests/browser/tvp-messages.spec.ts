@@ -165,7 +165,7 @@ for (const backend of ['asyncify', 'jspi']) {
         const response = await route.fetch(), originalBytes = await response.body()
         if (!response.ok() || !originalBytes.equals(bytes)) throw new Error('Native TVP message manifest source mismatch')
         const original = JSON.parse(bytes.toString('utf8')) as WasmManifest, served = structuredClone(original)
-        if (served.capabilities?.nativeMessages !== 1) throw new Error('Hosted build does not advertise nativeMessages=1')
+        if (served.capabilities?.nativeMessages !== 2) throw new Error('Hosted build does not advertise nativeMessages=2')
         if (supplied === undefined) delete served.capabilities.nativeMessages
         else served.capabilities.nativeMessages = supplied
         intercepted.push({ original, served })
@@ -173,7 +173,7 @@ for (const backend of ['asyncify', 'jspi']) {
       } catch (error) { errors.push(String(error)); await route.abort('failed') }
     })
     try {
-      for (const [attempt, version] of ([undefined, 0, 2] as const).entries()) {
+      for (const [attempt, version] of ([undefined, 0, 1, 3] as const).entries()) {
         supplied = version
         await page.locator('#files').setInputFiles({ name: 'startup.tjs', mimeType: 'text/plain',
           buffer: Buffer.from('Debug.message("tvp-message-gate-started:"+int(System.assignMessage("TVPCannotOpenStorage","gate:%1")));') })
@@ -186,7 +186,7 @@ for (const backend of ['asyncify', 'jspi']) {
         await expect.poll(() => workers.map((worker) => worker.closed)).toEqual(Array<boolean>(attempt + 1).fill(true))
         expect(intercepted).toHaveLength(attempt + 1)
         const current = intercepted.at(-1)!
-        expect({ ...current.served, capabilities: { ...current.served.capabilities, nativeMessages: 1 } }).toEqual(current.original)
+        expect({ ...current.served, capabilities: { ...current.served.capabilities, nativeMessages: 2 } }).toEqual(current.original)
         expect(errors).toEqual([])
         await page.locator('#clear-log').click()
       }
@@ -199,7 +199,7 @@ try{var rows=[];rows.load("gate-absent.txt");}catch(error){Debug.message("tvp-me
       await expect(page.getByText('tvp-message-gate-consumer:restored[gate-absent.txt]', { exact: true })).toBeVisible()
       await expect(page.locator('#evaluate')).toBeEnabled()
       await expect(page.locator('#logs .error')).toHaveCount(0)
-      expect(workers).toHaveLength(4)
+      expect(workers).toHaveLength(5)
       expect(errors).toEqual([])
     } catch (error) { failures.push(error) }
     try { await info.attach('native-tvp-messages-loader-gate', { contentType: 'application/json', body: JSON.stringify({

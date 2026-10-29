@@ -8,6 +8,7 @@ import type { ModuleFactory, NativeModule, WasmManifest, WasmVariant } from '../
 import { isScriptObject, ScriptError, type HostHandler } from '../../src/engine/script/runtime.ts'
 import { ExecutionControl } from '../../src/engine/scheduler/control.ts'
 import { TvpError, type TvpMessage } from '../../src/engine/system/tvp-error.ts'
+import { TjsError, type TjsMessage } from '../../src/engine/system/tjs-error.ts'
 import { registeredTvpMessageIds, constantTvpMessageIds, type TvpMessageId } from '../../src/engine/system/tvp-message-ids.ts'
 
 const variant = (process.env.KRKR_MESSAGES_VARIANT ?? 'asyncify') as WasmVariant
@@ -55,14 +56,15 @@ async function using(binary: boolean, body: (f: Awaited<ReturnType<typeof fixtur
   if (errors.length) throw new AggregateError(errors, 'TVP messages or cleanup failed')
 }
 
-test(`${variant}: native message capability and both private exports are required before VM creation`, { timeout: 60000 }, async () => {
-  assert.equal(manifest.capabilities?.nativeMessages, 1)
-  for (const version of [undefined, 0, 2, 'formatter'] as const) {
+test(`${variant}: native message capability and both TVP/TJS private formatters are required before VM creation`, { timeout: 60000 }, async () => {
+  assert.equal(manifest.capabilities?.nativeMessages, 2)
+  for (const version of [undefined, 0, 1, 3, 'formatter', 'tjs-formatter'] as const) {
     let created = false
     const altered: ModuleFactory = async (options) => {
       const module = await factory(options)
       if (version === undefined) delete module._krkr_native_messages_version
       else if (version === 'formatter') delete module._krkr_format_tvp_message
+      else if (version === 'tjs-formatter') delete module._krkr_format_tjs_message
       else module._krkr_native_messages_version = () => version
       module._krkr_create = () => { created = true; return 0 }
       return module
@@ -75,6 +77,165 @@ test(`${variant}: native message capability and both private exports are require
 
 for (const binary of [false, true]) {
   const mode = `${variant}/${binary ? 'bytecode' : 'source'}`
+  test(`${mode}: TJSReadError is a distinct literal holder resolved when the typed reply is consumed`, { timeout: 60000 }, async () => {
+    await using(binary, async (f) => {
+      const cause = Object.freeze({ offset: 17, requested: 8, actual: 3 }),
+        typed = new TjsError('TJSReadError', 'structured read diagnostic', { cause }),
+        literal = 'read:%s:%1:%%:日本語', plain = Object.assign(new Error('plain read failure'), { tjsMessage: typed.tjsMessage })
+      assert.equal(typed.cause, cause)
+      assert(Object.isFrozen(typed.tjsMessage))
+      assert.equal(f.vm.formatTjsMessage({ id: 'TJSReadError' }), 'Read error')
+      await f.assign('TVPReadError', 'separate-tvp-read')
+      await f.run('System.assignMessage("TJSReadError","old-read");')
+      f.setHandler((operation, args) => {
+        if (operation === 'Messages.invoke') {
+          assert(isScriptObject(args[0])); return { kind: 'invoke', callback: args[0], args: [] }
+        }
+        if (operation === 'Messages.plainRead') throw plain
+        throw typed
+      })
+      await f.run(`function literalRead(){System.assignMessage("TJSReadError",${JSON.stringify(literal)});__host("Messages.read");}`)
+      assert.equal(await f.run('(function(){try{__host("Messages.invoke",literalRead);}catch(e){return e.message;}})()', true), literal)
+      await assert.rejects(f.run('literalRead();'), (error: unknown) => {
+        assert(error instanceof ScriptError)
+        assert.equal(error.message, literal)
+        assert.match(error.source, /tvp-messages/); assert(error.line > 0); assert.match(error.trace, /literalRead|tvp-messages/)
+        return true
+      })
+      assert.equal(f.vm.formatTjsMessage({ id: 'TJSReadError' }), literal)
+      assert.equal(f.vm.formatTvpMessage({ id: 'TVPReadError', args: [] }), 'separate-tvp-read')
+      assert.equal(await f.run('(function(){try{__host("Messages.plainRead");}catch(e){return e.message;}})()', true), 'plain read failure')
+      for (const message of [{ id: 'TVPReadError' }, { id: 'TJSWriteError' },
+        { id: 'TJSReadError\0tail' }, { id: 'TJSReadError', args: ['ignored'] }])
+        assert.throws(() => f.vm.formatTjsMessage(message as unknown as TjsMessage), /Invalid typed TJS message/)
+      assert.throws(() => new TjsError('TJSWriteError' as 'TJSReadError'), /Invalid native TJS/)
+      // Bypass the JS validator to establish the native whitelist and zero-arg
+      // contract independently. No object conversion or script can run here.
+      for (const [kind, name, argument] of [[10, 'TJSReadError', false], [11, 'TVPReadError', false],
+        [11, 'TJSReadError', true]] as const) {
+        const request = Number(f.module._krkr_reply_new!(kind)), pointer = Number(f.module._malloc!((name.length + 1) * 2))
+        let reply = 0
+        try {
+          assert(pointer)
+          f.module.HEAPU16.set(Uint16Array.from([...name].map((char) => char.charCodeAt(0)).concat(0)), pointer >>> 1)
+          f.module._krkr_reply_name!(request, pointer)
+          if (argument) f.module._krkr_reply_arg!(request)
+          reply = Number(f.module._krkr_format_tjs_message!(request))
+          assert(reply); assert.equal(Number(f.module._krkr_reply_kind!(reply)), 1)
+        } finally {
+          if (reply) f.module._krkr_reply_delete!(reply)
+          f.module._free!(pointer); f.module._krkr_reply_delete!(request)
+        }
+      }
+      await f.vm.collect(); assert.equal(f.vm.inspect().handles, 0)
+    })
+  })
+
+  test(`${mode}: literal TJS errors cross storage preflights and queued writes without losing the original cause`, { timeout: 60000 }, async () => {
+    await using(binary, async (f) => {
+      const shortRead = new TjsError('TJSReadError', 'read backend detail', { cause: { offset: 8, requested: 16, actual: 5 } }),
+        calls: string[] = []
+      let allowWrite = false, rejectWrite = true
+      f.setHandler((operation, args) => {
+        calls.push(operation)
+        if (allowWrite && ['Storage.validateTextWrite', 'Storage.validateWrite'].includes(operation))
+          return { kind: 'value', value: args[0] }
+        if (allowWrite && !rejectWrite && ['Storage.writeText', 'Storage.writeBinary'].includes(operation))
+          return { kind: 'value', value: undefined }
+        throw shortRead
+      })
+      await f.run('System.assignMessage("TJSReadError","stream-literal:%1:%%");')
+      for (const [source, operation] of [
+        ['[].load("missing");', 'Storage.readText'], ['[].loadStruct("missing");', 'Storage.readBinary'],
+        ['["x"].save("missing");', 'Storage.validateTextWrite'], ['["x"].saveStruct("missing","b");', 'Storage.validateWrite'],
+      ]) {
+        assert.equal(await f.run(`(function(){try{${source}}catch(e){return e.message;}})()`, true), 'stream-literal:%1:%%')
+        assert.equal(calls.at(-1), operation)
+      }
+      assert.equal(calls.length, 4)
+      allowWrite = true
+      await assert.rejects(f.run('["queued"].save("tail");System.assignMessage("TJSReadError","tail-literal:%s:%1:%%");'), (error: unknown) => {
+        assert(error instanceof ScriptError); assert.equal(error.message, 'tail-literal:%s:%1:%%')
+        assert.equal(error.cause, shortRead); return true
+      })
+      rejectWrite = false; await f.vm.flush(); rejectWrite = true
+      await assert.rejects(f.run('["queued"].saveStruct("tail","b");throw new Exception("primary-read-test");'), (error: unknown) => {
+        assert(error instanceof AggregateError)
+        const [primary, tail] = error.errors
+        assert(primary instanceof ScriptError); assert.equal(primary.message, 'script exception : primary-read-test')
+        assert(tail instanceof ScriptError); assert.equal(tail.message, 'tail-literal:%s:%1:%%')
+        assert.equal(tail.cause, shortRead); assert.equal(error.cause, primary); return true
+      })
+      rejectWrite = false; await f.vm.flush(); await f.vm.collect()
+      assert.equal(f.vm.inspect().handles, 0); assert.equal(f.vm.inspect().pendingHandles, 0)
+    })
+  })
+
+  test(`${mode}: literal TJS descriptors survive collect, console and terminal owner error paths`, { timeout: 60000 }, async () => {
+    await using(binary, async (f) => {
+      const typed = new TjsError('TJSReadError', 'observer read diagnostic')
+      await f.run('System.assignMessage("TJSReadError","collected:%1:%%");class ReadFinalizer{function finalize(){__host("Messages.readFinalizer");}}')
+      f.setHandler(() => { throw typed })
+      const finalizer = await f.run('new ReadFinalizer()', true)
+      assert(isScriptObject(finalizer)); f.vm.release(finalizer)
+      await assert.rejects(f.vm.collect(), /collected:%1:%%/)
+      assert.equal(f.vm.inspect().pendingHandles, 0); assert.equal(f.vm.inspect().handles, 0)
+      f.vm.setConsoleOutput(() => { throw typed })
+      assert.equal(await f.run('(function(){try{__host("Runtime.console","line");}catch(e){return e.message;}})()', true), 'collected:%1:%%')
+      await assert.rejects(f.run('function readPrimary(){return missingReadPrimary;}readPrimary();'), /missingReadPrimary/)
+      f.vm.setConsoleOutput(null)
+      await f.run('class ReadOwner{};var retainedReadOwner=new ReadOwner();System.assignMessage("TJSReadError","terminal:%s:%1:%%");')
+      const owner = await f.run('retainedReadOwner', true)
+      assert(isScriptObject(owner))
+      f.vm.observe(owner, () => { throw typed }); f.vm.release(owner)
+      assert.throws(() => f.vm.dispose(), (error: unknown) => {
+        assert(error instanceof ScriptError); assert.equal(error.message, 'terminal:%s:%1:%%')
+        assert.equal(error.cause, typed); return true
+      })
+      assert.throws(() => f.vm.formatTjsMessage({ id: 'TJSReadError' }), /disposed/)
+    })
+  })
+
+  test(`${mode}: pure TJS literal formatting is non-reentrant and isolated between simultaneous suspended runtimes`, { timeout: 60000 }, async () => {
+    const first = await fixture(binary), errors: unknown[] = [], entered = gate(), release = gate()
+    let second: Awaited<ReturnType<typeof fixture>> | undefined, pending: Promise<unknown> | undefined, firstClosed = false
+    try {
+      second = await fixture(binary)
+      await first.run('System.assignMessage("TJSReadError","first:%1:%%");')
+      await second.run('System.assignMessage("TJSReadError","second:%s:%%");')
+      let caught = false
+      first.setHandler(async (operation, args, context) => {
+        if (operation === 'Messages.caught') { caught = true; return { kind: 'value', value: undefined } }
+        assert.equal(operation, 'Messages.suspendedRead'); assert(isScriptObject(args[0]))
+        context.release(context.retain(args[0]))
+        const before = first.vm.inspect().pendingHandles
+        assert(before > 0)
+        assert.equal(context.formatTjsMessage?.({ id: 'TJSReadError' }), 'first:%1:%%')
+        assert.equal(first.vm.inspect().pendingHandles, before)
+        entered.release(); await release.promise
+        throw new TjsError('TJSReadError', 'late read error')
+      })
+      pending = first.run('try{__host("Messages.suspendedRead",%[value:1]);}catch(e){__host("Messages.caught");}').then(
+        (value) => value, (error: unknown) => error)
+      await entered.promise
+      first.control.pause()
+      assert.equal(first.vm.formatTjsMessage({ id: 'TJSReadError' }), 'first:%1:%%')
+      await second.run('System.assignMessage("TJSReadError","second-new:%1");')
+      assert.equal(second.vm.formatTjsMessage({ id: 'TJSReadError' }), 'second-new:%1')
+      first.control.cancel(); release.release()
+      const cancelled = await pending
+      assert(cancelled instanceof Error); assert.match(cancelled.message, /cancelled/i); assert.equal(caught, false)
+      first.close(); firstClosed = true
+      second.setHandler(() => { throw new TjsError('TJSReadError', 'second diagnostic') })
+      assert.equal(await second.run('(function(){try{__host("Messages.read");}catch(e){return e.message;}})()', true), 'second-new:%1')
+    } catch (error) { errors.push(error) }
+    finally { first.control.cancel(); release.release(); if (pending) await pending }
+    try { if (!firstClosed) first.close() } catch (error) { errors.push(error) }
+    try { second?.close() } catch (error) { errors.push(error) }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Literal message isolation or cleanup failed', { cause: errors[0] })
+  })
+
   test(`${mode}: all fixed TVP holders use the real assignMessage mapper and constants remain unassignable`, { timeout: 60000 }, async () => {
     await using(binary, async (f) => {
       assert.equal(registeredTvpMessageIds.length, 138); assert.equal(constantTvpMessageIds.length, 6)

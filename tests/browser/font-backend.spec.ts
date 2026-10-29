@@ -17,6 +17,7 @@ async function runWorker(page: Page, testInfo: TestInfo, body: string, data: unk
     'src/engine/scheduler/control.ts',
     'src/formats/image/bmp.ts',
     'src/formats/image/selection.ts',
+    'src/formats/image/read-error.ts',
   ])
   await page.route('**/__font-test/**', async (route) => {
     const path = new URL(route.request().url()).pathname.slice('/__font-test/'.length)
