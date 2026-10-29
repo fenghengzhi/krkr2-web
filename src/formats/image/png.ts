@@ -2,6 +2,8 @@ import type { DecodedImage } from '../../engine/ports/graphics.ts'
 import { crc32 } from '../binary/crc32.ts'
 import { paeth } from './png-filter.ts'
 import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from './selection.ts'
+import { PngPull, PngStreamReadError } from './png-pull.ts'
+import type { ImageInflater } from '../../engine/ports/image-inflater.ts'
 
 const magic = [137, 80, 78, 71, 13, 10, 26, 10]
 const adam7 = [
@@ -17,6 +19,11 @@ export interface PngPlan {
   compressed: Uint8Array
   expandedLength: number
   decode(expanded: Uint8Array): Generator<void, DecodedImage>
+}
+export interface PngStreamPlan {
+  expandedLength: number
+  readonly phase: 'read_row' | 'read_image' | 'read_end' | 'complete'
+  decode(inflater: ImageInflater): Generator<void, DecodedImage>
 }
 interface Header {
   width: number
@@ -40,12 +47,14 @@ function passes(h: Header) {
 }
 function* pixels(
   h: Header,
-  bytes: Uint8Array,
+  bytes: Uint8Array | undefined,
   palette: Uint8Array | undefined,
   transparent: Uint8Array | undefined,
   metadata: Map<string, string>,
   mode?: ImageDecodeSelection['mode'],
   progress?: ImageDecodeProgress,
+  rowSource?: (length: number) => Generator<void, Uint8Array>,
+  finishRow?: (last: boolean) => Generator<void, void>,
 ): Generator<void, DecodedImage> {
   const { width, height, depth, type, channels } = h,
     image: DecodedImage = { width, height, data: new Uint8Array(width * height * 4) },
@@ -66,19 +75,22 @@ function* pixels(
   if (mode === 'grayscale') image.grayscale = true
   if (metadata.size) image.metadata = metadata
   let at = 0
-  for (const pass of passes(h)) {
+  const imagePasses = passes(h)
+  for (const pass of imagePasses) {
     const stride = Math.ceil((pass.width * channels * depth) / 8)
     let previous = new Uint8Array(stride),
       row = new Uint8Array(stride)
     for (let y = 0; y < pass.height; y++) {
-      const filter = bytes[at++]!
-      if (filter > 4) throw new Error('Unsupported PNG scanline filter')
+      const packet = rowSource ? (yield* rowSource(stride + 1)) : bytes!.subarray(at, at + stride + 1),
+        filter = packet[0]!
+      if (filter > 4 && !rowSource) throw new Error('Unsupported PNG scanline filter')
+      at += stride + 1
       for (let x = 0; x < stride; x++) {
         const a = x >= bpp ? row[x - bpp]! : 0,
           b = previous[x]!,
           c = x >= bpp ? previous[x - bpp]! : 0
         row[x] =
-          bytes[at++]! +
+          packet[x + 1]! +
           (filter === 1
             ? a
             : filter === 2
@@ -89,6 +101,9 @@ function* pixels(
                   ? paeth(a, b, c)
                   : 0)
       }
+      // libpng 1.0.6 warns for an unknown filter and sets the first sample
+      // byte to zero; it does not reject the completed filtered row.
+      if (filter > 4) row[0] = 0
       for (let x = 0; x < pass.width; x++) {
         const pixel = (pass.y + y * pass.dy) * width + pass.x + x * pass.dx,
           to = pixel * 4,
@@ -138,16 +153,78 @@ function* pixels(
       const swap = previous
       previous = row
       row = swap
+      if (rowSource && !h.interlace && !(mode === 'grayscale' && h.type === 3))
+        progress?.write?.(y, image.data.subarray(y * width * 4, (y + 1) * width * 4),
+          image.indices?.subarray(y * width, (y + 1) * width))
+      if (finishRow) yield* finishRow(pass === imagePasses.at(-1) && y === pass.height - 1)
       if (!h.interlace) progress?.row(y, image.data.subarray(y * width * 4, (y + 1) * width * 4),
         image.indices?.subarray(y * width, (y + 1) * width))
       yield
     }
   }
-  if (at !== bytes.length) throw new Error('PNG expanded size mismatch')
+  if (bytes && at !== bytes.length) throw new Error('PNG expanded size mismatch')
   return image
 }
 
-function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress): Generator<void, PngPlan> {
+function streamPlan(bytes: Uint8Array, start: number, h: Header, palette: Uint8Array | undefined,
+  transparent: Uint8Array | undefined, metadata: Map<string, string>, mode: ImageDecodeSelection['mode'],
+  progress: ImageDecodeProgress | undefined): PngStreamPlan {
+  let phase: PngStreamPlan['phase'] = h.interlace ? 'read_image' : 'read_row', started = false
+  return {
+    expandedLength: passes(h).reduce((sum, pass) => sum +
+      (1 + Math.ceil(pass.width * h.channels * h.depth / 8)) * pass.height, 0),
+    get phase() { return phase },
+    *decode(inflater) {
+      if (started) throw new Error('PNG stream plan was already consumed')
+      started = true
+      const source = new PngPull(bytes, start, inflater),
+        image = yield* pixels(h, undefined, palette, transparent, metadata, mode, progress,
+          (length) => source.row(length), (last) => source.finishRow(last))
+      phase = 'read_end'
+      yield* source.endImageData()
+      while (true) {
+        const length = source.u32(), name = source.take(4), type = String.fromCharCode(...name),
+          ancillary = !!(name[0]! & 32), vpag = type.toLowerCase() === 'vpag'
+        if (type === 'IDAT') throw new ImageDecodeError('png', "Too many IDAT's found")
+        if (type === 'IHDR') throw new ImageDecodeError('png', 'Out of place IHDR')
+        const data = source.take(length)
+        if (vpag && length >= 9) {
+          // The original unknown-chunk callback precedes its CRC check.
+          const view = new DataView(data.buffer, data.byteOffset, data.byteLength), unit = data[8]!
+          metadata.set('vpag_w', String(view.getInt32(0)))
+          metadata.set('vpag_h', String(view.getInt32(4)))
+          metadata.set('vpag_unit', unit === 0 ? 'pixel' : unit === 1 ? 'micrometer' : 'unknown')
+        } else if (!ancillary && type !== 'IEND' && type !== 'PLTE') {
+          throw new ImageDecodeError('png', `${type}: unknown critical chunk`)
+        }
+        const nameChecksum = yield* crc32(name), checksum = yield* crc32(data, nameChecksum),
+          valid = source.u32() === checksum
+        if (!valid && !ancillary) throw new ImageDecodeError('png', `${type}: CRC error`)
+        // Known ancillary tail metadata and PLTE only warn/consume. IEND may
+        // have extra payload in the old reader; bytes after IEND are not read.
+        if (type === 'IEND') break
+        yield
+      }
+      if (h.interlace && progress) for (let y = 0; y < h.height; y++) {
+        const rgba = image.data.subarray(y * h.width * 4, (y + 1) * h.width * 4),
+          indices = image.indices?.subarray(y * h.width, (y + 1) * h.width)
+        progress.write?.(y, rgba, indices)
+        progress.row(y, rgba, indices)
+        yield
+      }
+      if (metadata.size) image.metadata = metadata
+      phase = 'complete'
+      return image
+    },
+  }
+}
+
+function parse(bytes: Uint8Array, mode: ImageDecodeSelection['mode'], progress: ImageDecodeProgress | undefined,
+  streaming: true): Generator<void, PngStreamPlan>
+function parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress,
+  streaming?: false): Generator<void, PngPlan>
+function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress,
+  streaming = false): Generator<void, PngPlan | PngStreamPlan> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     metadata = new Map<string, string>()
   let at = 8,
@@ -163,6 +240,13 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
     tailFailed = false,
     tailError: unknown
   while (at < bytes.length) {
+    if (streaming && !dataStarted && bytes.length - at >= 8 &&
+        String.fromCharCode(...bytes.subarray(at + 4, at + 8)) === 'IDAT') {
+      if (!header || (header.type === 3 && !palette))
+        throw new ImageDecodeError('png', header ? 'Missing PLTE before IDAT' : 'Missing IHDR before IDAT')
+      progress?.size(header.width, header.height)
+      return streamPlan(bytes, at, header, palette, transparent, metadata, mode!, progress)
+    }
     // Eight remaining bytes identify a non-IDAT tail even when its CRC or
     // declared payload is truncated. That read occurs in native png_read_end.
     let afterData = !!progress && dataStarted && bytes.length - at >= 8 &&
@@ -192,9 +276,15 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
     // fails before its CRC is consumed; ancillary variants are ignored.
     if (nativePosition && type.toLowerCase() === 'vpag' && length < 9 && !ancillaryPosition)
       throw new ImageDecodeError('png', `${type}: unknown critical chunk`)
-    if (!validCrc && !ancillaryPosition)
+    if (!validCrc && !ancillaryPosition && !(streaming && (bytes[start]! & 32))) {
+      if (streaming) throw new ImageDecodeError('png', `${type}: CRC error`)
       throw new Error('PNG chunk CRC mismatch')
+    }
     at = end + 4
+    if (streaming && !validCrc && (bytes[start]! & 32) && type.toLowerCase() !== 'vpag') {
+      yield
+      continue
+    }
     if (!header && type !== 'IHDR') throw new Error('PNG must start with IHDR')
     if (type === 'IHDR') {
       if (header || length !== 13) throw new Error('Invalid PNG header')
@@ -369,4 +459,17 @@ export function decodeSelectedPng(
       ? 'PNG file corrupted by ASCII conversion' : 'Not a PNG file')
   }
   return parse(bytes, mode, progress)
+}
+
+/** Stops at the first IDAT header. No compressed payload or IDAT CRC is read
+ * until the caller has acquired its owned pull inflater. */
+export function prepareSelectedPngStream(bytes: Uint8Array, mode: ImageDecodeSelection['mode'],
+  progress?: ImageDecodeProgress): Generator<void, PngStreamPlan> {
+  if (bytes.length < 8) throw new PngStreamReadError(0, 8, bytes.length)
+  if (bytes.length > 64 * 1024 * 1024) throw new Error('PNG source exceeds 64 MiB budget')
+  if (magic.some((value, index) => bytes[index] !== value)) {
+    const firstFour = magic.slice(0, 4).every((value, index) => bytes[index] === value)
+    throw new ImageDecodeError('png', firstFour ? 'PNG file corrupted by ASCII conversion' : 'Not a PNG file')
+  }
+  return parse(bytes, mode, progress, true)
 }

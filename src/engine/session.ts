@@ -41,6 +41,7 @@ import {
 } from './storage/public-path.ts'
 import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
 import { decodeSelectedImage } from './graphics/image-decoder.ts'
+import type { ImageInflaterProvider } from './ports/image-inflater.ts'
 import { CursorStorage } from './storage/cursors.ts'
 import type { CursorAsset } from '../formats/cursor/index.ts'
 import { loadCursorBytes, windowsDesktopCursorProfile } from '../formats/cursor/load.ts'
@@ -253,6 +254,9 @@ export interface SessionDependencies {
   ) => Promise<ScriptRuntime>
   graphics: GraphicsDecoder
   inflateImage: Inflater
+  /** Selected PNGs use controlled pull inflation; generic image embeddings may
+   * retain the older complete-buffer dependency when this is absent. */
+  imageInflater?: ImageInflaterProvider
   deflateImage: (bytes: Uint8Array) => Promise<Uint8Array>
   renderer: Renderer
   decodeScript: (
@@ -317,6 +321,18 @@ export class EngineSession {
     (bytes, selection, progress) => decodeSelectedImage(bytes, selection, {
       finish: (work) => this.finishImageGraphics(work),
       inflate: (compressed, length) => this.deps.inflateImage(compressed, length),
+      ...(this.deps.imageInflater ? { openInflater: async (source: Uint8Array, length: number) => {
+        const inflater = await this.deps.imageInflater!.open(source, length)
+        try {
+          if (this.control.paused) await this.control.wait()
+          this.control.check()
+          return inflater
+        } catch (error) {
+          try { inflater.close() }
+          catch (cleanup) { throw new AggregateError([error, cleanup], 'Image inflater admission and cleanup failed', { cause: error }) }
+          throw error
+        }
+      } } : {}),
       host: (input, selected) => this.deps.graphics.decode(input, selected),
     }, progress),
     (work) => this.finishImageGraphics(work),
@@ -592,6 +608,7 @@ export class EngineSession {
         () => this.windowUpdates.finish(),
         () => { this.physicalScreen = undefined; this.hiddenCursorPositions.clear() },
         () => this.images.dispose(),
+        () => deps.imageInflater?.dispose(),
         () => this.dropped.dispose(),
         () => this.storage.dispose(),
         () => this.closeCursors(),

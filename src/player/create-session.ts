@@ -22,7 +22,9 @@ import { PortClipboardBackend } from '../backends/clipboard/port-backend.ts'
 import { PortHelpBackend } from '../backends/help/port-backend.ts'
 import { PortWindowGeometry } from '../backends/window/port-geometry.ts'
 import type { InitializeRequest, SessionEvent } from '../protocol/session.ts'
-import { fontManifestFile } from './build-info.ts'
+import { fontManifestFile, imageZlibManifestFile } from './build-info.ts'
+import { loadImageZlibKernel } from '../backends/image-zlib/module.ts'
+import { LazyImageInflaterProvider } from '../engine/graphics/image-inflater-provider.ts'
 import { loadFontKernel } from '../backends/text/freetype/module.ts'
 import { copyGameProject, type GameProject } from '../engine/storage/project.ts'
 
@@ -57,6 +59,8 @@ export function createSession(request: InitializeRequest, project?: GameProject)
       loadFontKernel(new URL('../' + fontManifestFile, request.manifestUrl).href, session.control),
     ),
     inflateImage,
+    imageInflater: new LazyImageInflaterProvider(() => loadImageZlibKernel(
+      new URL('../' + imageZlibManifestFile, request.manifestUrl).href, session.control), () => session.control),
     deflateImage,
     now: () => performance.now(),
     schedule: (callback, delay) => {

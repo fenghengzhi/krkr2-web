@@ -9,6 +9,9 @@ export interface ImageDecodeSelection {
  * complete conversion, matching the native scanline(-1) notification. */
 export interface ImageDecodeProgress {
   size(width: number, height: number): void
+  /** A transformed caller row was written, before scanline completion. PNG's
+   * final trailer check can still fail here. No key or tiling is implied. */
+  write?(y: number, rgba: Uint8Array, indices?: Uint8Array): void
   row(y: number, rgba: Uint8Array, indices?: Uint8Array): void
 }
 

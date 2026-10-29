@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { deflateSync } from 'node:zlib'
-import type { SessionDependencies } from '../../src/engine/session.ts'
-import { inflateImage } from '../../src/backends/files/blob-source.ts'
+import type { ImageInflater, ImageInflaterProvider } from '../../src/engine/ports/image-inflater.ts'
+import { ExecutionCancelled } from '../../src/engine/scheduler/control.ts'
+import { createHeadlessImageInflaterProvider } from './image-zlib.ts'
 
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: Error) => void
@@ -9,29 +10,67 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-/** Holds the real selected PNG's zlib dependency, then delegates to production
- * inflation. It never manufactures decoded pixels or bypasses format selection. */
+/** Holds admission of an already opened real PNG inflater. The returned stream
+ * uses the production WASM step; this gate never manufactures expanded bytes. */
 export function pngInflateGate(expectedLength?: number) {
   const entered = deferred<void>(), result = deferred<void>(),
-    operations: Array<Promise<PromiseSettledResult<Uint8Array>>> = []
-  let calls = 0
-  const inflate: SessionDependencies['inflateImage'] = (bytes, length) => {
-    const operation = (async () => {
-      assert.ok(bytes.length > 0)
-      if (expectedLength !== undefined) assert.equal(length, expectedLength)
-      calls++
-      entered.resolve()
-      await result.promise
-      return inflateImage(bytes, length)
-    })()
-    operations.push(operation.then(
-      (value): PromiseFulfilledResult<Uint8Array> => ({ status: 'fulfilled', value }),
-      (reason: unknown): PromiseRejectedResult => ({ status: 'rejected', reason }),
-    ))
-    return operation
+    operations: Array<Promise<PromiseSettledResult<ImageInflater>>> = [],
+    actual = createHeadlessImageInflaterProvider(), active = new Set<ImageInflater>(), cleanupErrors: unknown[] = []
+  let calls = 0, closed = 0, disposed = false
+  const provider: ImageInflaterProvider = {
+    open(bytes, length) {
+      const operation = (async () => {
+        if (disposed) throw new ExecutionCancelled()
+        assert.deepEqual([...bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+        if (expectedLength !== undefined) assert.equal(length, expectedLength)
+        const stream = await actual.open(bytes, length)
+        if (disposed) {
+          try { stream.close() } catch (cleanup) { cleanupErrors.push(cleanup) }
+          throw new ExecutionCancelled()
+        }
+        let finished = false
+        const owned: ImageInflater = {
+          step(input, output) { return stream.step(input, output) },
+          close() {
+            if (finished) return
+            finished = true; active.delete(owned); closed++
+            stream.close()
+          },
+        }
+        active.add(owned); calls++; entered.resolve()
+        try {
+          // Keep an already owned operation pending across Stop. A real late
+          // rejection retains its exact identity; late success cannot revive it.
+          await result.promise
+          if (disposed) throw new ExecutionCancelled()
+          return owned
+        } catch (error) {
+          try { owned.close() } catch (cleanup) { cleanupErrors.push(cleanup) }
+          throw error
+        }
+      })()
+      operations.push(operation.then(
+        (value): PromiseFulfilledResult<ImageInflater> => ({ status: 'fulfilled', value }),
+        (reason: unknown): PromiseRejectedResult => ({ status: 'rejected', reason }),
+      ))
+      return operation
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      const errors: unknown[] = []
+      for (const stream of [...active]) try { stream.close() } catch (error) { errors.push(error) }
+      try { actual.dispose() } catch (error) { errors.push(error) }
+      if (errors.length) throw new AggregateError(errors, 'Image inflater gate cleanup failed')
+    },
   }
-  return { entered: entered.promise, result, inflate, calls: () => calls,
-    release: () => result.resolve(), drain: () => Promise.all(operations) }
+  return { entered: entered.promise, result, provider, calls: () => calls,
+    active: () => active.size, closed: () => closed,
+    release: () => result.resolve(), drain: async () => {
+      const settled = await Promise.all(operations)
+      if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Late image inflater gate cleanup failed')
+      return settled
+    } }
 }
 
 /** Original province scenario: two real palette indices 7 and 19. The source

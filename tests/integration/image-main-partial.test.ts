@@ -114,7 +114,7 @@ for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
   test(`${mode}: failures before the native size callback preserve every image plane and request no paint`, { timeout: 60000 }, async () => {
     await using(binary, async (f) => {
-      for (const [name, error] of [['early.bmp', 'Truncated BMP stream'], ['early.png', 'PNG chunk CRC mismatch']] as const) {
+      for (const [name, error] of [['early.bmp', 'Truncated BMP stream'], ['early.png', 'partial-png:IHDR: CRC error']] as const) {
         const before = state(f), paints = await f.session.evaluate('partialPaints')
         assert.equal(await f.load(name), 'failed:' + error)
         retainedState(f, before)
@@ -163,12 +163,11 @@ for (const binary of [false, true]) {
       assert.equal(f.reads.get('mask-truncated_m.bmp'), 1)
     })
   })
-  test(`${mode}: PNG bad filters and trailing chunk failures preserve their actual completed rows without post-load geometry effects`, { timeout: 60000 }, async () => {
+  test(`${mode}: PNG read-end failures preserve completed rows while a native bad-filter warning still completes the image`, { timeout: 60000 }, async () => {
     await using(binary, async (f) => {
       for (const [name, error, rows] of [
-        ['png-filter.png', 'Unsupported PNG scanline filter', 8],
-        ['png-tail.png', 'PNG chunk CRC mismatch', 17],
-        ['png-tail-short.png', 'Truncated PNG chunk', 17],
+        ['png-tail.png', 'partial-png:IEND: CRC error', 17],
+        ['png-tail-short.png', 'PNG stream short read', 17],
       ] as const) {
         await f.reset()
         const before = state(f)
@@ -177,6 +176,18 @@ for (const binary of [false, true]) {
         retainedState(f, before)
         assert.equal(f.session.snapshot().imageCacheEntries, 0)
       }
+      await f.reset()
+      const before = state(f), expected = new Uint8Array(5 * 17 * 4)
+      assert.equal(await f.load('png-filter.png', '0x112233'), 'null:')
+      for (let y = 0; y < 17; y++) for (let x = 0; x < 5; x++)
+        expected.set(x === 0 ? y === 8 ? [0,34,51,255] : [17,34,51,0] : [200,100,50,255], (y * 5 + x) * 4)
+      assert.deepEqual(f.layers.bitmap(f.id).pixels.data, expected,
+        'libpng warns, clears the first source sample of the bad-filter row, and completes its keying')
+      assert.deepEqual(f.layers.bitmap(f.id).clip, { x: 0, y: 0, width: 5, height: 17 })
+      assert.equal(f.layers.get(f.id).province, undefined)
+      assert.equal(f.layers.get(f.id).imageModified, true)
+      assert(f.frames.length > before.frames)
+      assert.equal(f.session.snapshot().imageCacheEntries, 1)
     })
   })
   test(`${mode}: failed processed images are reread rather than cached, while a completed request is privately reusable`, { timeout: 60000 }, async () => {
@@ -217,7 +228,7 @@ for (const binary of [false, true]) {
           assert.deepEqual(['success.bmp', 'success_m.bmp', 'success_p.png'].map((name) => f.reads.get(name)), [1,1,1])
           assert(f.frames.length > before.frames)
         })
-      }, { inflateImage: gate.inflate })
+      }, { imageInflater: gate.provider })
     } finally { gate.release() }
   })
   test(`${mode}: pausing during real PNG inflation retains the sized blank main until resume publishes rows`, { timeout: 60000 }, async () => {
@@ -239,7 +250,7 @@ for (const binary of [false, true]) {
           pixels(f, 5, 17, () => true)
           assert.equal(f.layers.get(f.id).province, undefined)
         }, () => { if (f.session.snapshot().state === 'paused') f.session.resume() })
-      }, { inflateImage: gate.inflate })
+      }, { imageInflater: gate.provider })
     } finally { gate.release() }
   })
   test(`${mode}: Stop abandons a real suspended PNG without publishing late rows or restoring its retired cache`, { timeout: 60000 }, async () => {
@@ -252,6 +263,8 @@ for (const binary of [false, true]) {
           const bitmap = f.layers.bitmap(f.id), blank = [...bitmap.pixels.data]
           pixels(f, 5, 17, () => false)
           await within(f.session.stop(), 'Stop before the underlying inflate gate is released')
+          assert.equal(gate.active(), 0)
+          assert.equal(gate.closed(), 1)
           assert.equal(f.session.snapshot().state, 'stopped')
           assert.equal(f.session.snapshot().bitmapBytes, 0)
           assert.equal(f.layers.has(f.id), false)
@@ -270,7 +283,7 @@ for (const binary of [false, true]) {
           assert.equal(f.layers.has(f.id), false)
           assert.equal(f.logs.includes('partial-after-stop'), false)
         })
-      }, { inflateImage: gate.inflate })
+      }, { imageInflater: gate.provider })
     } finally { gate.release() }
   })
   test(`${mode}: a host bitmap write while PNG inflation is pending invalidates that destination and is not overwritten by late decoded rows`, { timeout: 60000 }, async () => {
@@ -293,7 +306,7 @@ for (const binary of [false, true]) {
           retainedState(f, before)
           assert.equal(bitmap.getPixel(1, 1, 'main'), 0xabcdef)
         })
-      }, { inflateImage: gate.inflate })
+      }, { imageInflater: gate.provider })
     } finally { gate.release() }
   })
 }

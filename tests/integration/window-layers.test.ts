@@ -1,11 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { headless } from '../helpers/headless.ts'
-import { inflateImage } from '../../src/backends/files/blob-source.ts'
 import { cursorPng } from '../helpers/cursor-fixtures.ts'
+import { createHeadlessImageInflaterProvider } from '../helpers/image-zlib.ts'
 
 test('image names without extensions resolve through auto-paths without changing file lookup', async () => {
-  const decoded: number[][] = []
+  const decoded: number[][] = [], actual = createHeadlessImageInflaterProvider()
   const { session } = await headless(
     {
       'pictures/face.PNG': cursorPng(1, 1, [255, 0, 0, 255]),
@@ -15,10 +15,20 @@ var window=new Window(),root=new Layer(window,null);root.loadImages("face");
 `,
     },
     {
-      inflateImage: async (bytes, length) => {
-        const expanded = await inflateImage(bytes, length)
-        decoded.push([...expanded])
-        return expanded
+      imageInflater: {
+        async open(source, length) {
+          const stream = await actual.open(source, length), expanded: number[] = []
+          decoded.push(expanded)
+          return {
+            step(input, output) {
+              const result = stream.step(input, output)
+              expanded.push(...output.subarray(0, result.outputUsed))
+              return result
+            },
+            close() { stream.close() },
+          }
+        },
+        dispose() { actual.dispose() },
       },
     },
   )

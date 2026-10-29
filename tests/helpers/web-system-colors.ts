@@ -140,6 +140,9 @@ export async function buildSystemColorsEmbedding() {
     fontManifestHash = createHash('sha256')
       .update(await readFile(resolve('.generated/fonts/manifest.json')))
       .digest('hex'),
+    imageZlibManifestHash = createHash('sha256')
+      .update(await readFile(resolve('.generated/image-zlib/manifest.json')))
+      .digest('hex'),
     id = 'virtual:system-colors-embedding',
     resolvedId = '\0system-colors-embedding',
     result = await build({
@@ -171,6 +174,9 @@ export async function buildSystemColorsEmbedding() {
         __KRKR_FONT_MANIFEST_FILE__: JSON.stringify(
           `fonts/manifest-${fontManifestHash.slice(0, 16)}.json`,
         ),
+        __KRKR_IMAGE_ZLIB_MANIFEST_FILE__: JSON.stringify(
+          `image-zlib/manifest-${imageZlibManifestHash.slice(0, 16)}.json`,
+        ),
       },
       worker: { format: 'es' },
       build: {
@@ -200,7 +206,7 @@ export async function buildSystemColorsEmbedding() {
   }
   if (!entry || ![...bundles.keys()].some((file) => /session\.worker-.*\.js$/.test(file)))
     throw new Error('The color embedding must export createPlayer and emit its real Session Worker')
-  return { base, bundles, hashes, entry, wasmManifestHash, fontManifestHash }
+  return { base, bundles, hashes, entry, wasmManifestHash, fontManifestHash, imageZlibManifestHash }
 }
 
 export async function openSystemColorsEmbedding(

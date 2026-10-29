@@ -210,6 +210,7 @@ export class ImageLoader {
     let sized = false
     const observer: ImageDecodeProgress | undefined = progress ? {
       size: (width, height) => { this.scheduler.check(); progress.size(width, height); sized = true },
+      write: (y, rgba, indices) => { this.scheduler.check(); progress.write?.(y, rgba, indices) },
       row: (y, rgba, indices) => { this.scheduler.check(); progress.row(y, rgba, indices) },
     } : undefined
     const image = await this.decode(bytes, { format: selected.format, mode }, observer)
@@ -241,6 +242,20 @@ export class ImageLoader {
           if (!image || image.width !== w || image.height !== h)
             throw new TvpError('TVPMaskSizeMismatch', [], 'Companion mask size mismatch')
         } else observations.progress.size(w, h)
+      },
+      write: (y, rgba, indices) => {
+        // png_read_row can write transformed samples before its finish-row
+        // checks fail. Main owns those bytes already; mask still owns only a
+        // private temporary row and cannot bind alpha until row completion.
+        if (mask) return
+        if (!sourceWidth || !Number.isInteger(y) || y < 0 || y >= sourceHeight || rgba.length !== sourceWidth * 4 ||
+            (indices && indices.length !== sourceWidth)) throw new Error('Invalid decoded image row')
+        const image = observations.progress.image!,
+          row = image.data.slice(y * image.width * 4, (y + 1) * image.width * 4)
+        row.set(rgba)
+        // Preserve any as-yet-unwritten horizontal extension. RGB/palette
+        // keying and both tiling directions belong only to completion below.
+        observations.progress.row(y, row)
       },
       row: (y, rgba, indices) => {
         if (!sourceWidth || !Number.isInteger(y) || y < 0 || y >= sourceHeight || rgba.length !== sourceWidth * 4 ||

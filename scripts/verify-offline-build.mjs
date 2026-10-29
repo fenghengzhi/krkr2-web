@@ -106,6 +106,20 @@ export async function verifyOfflineBuild(directory, base = '/') {
   }
   for (const name of ['LICENSE.TXT', 'FTL.TXT', 'CREDITS.txt'])
     assert(listed.includes('licenses/freetype/' + name))
+  const imageZlibBytes = await read('image-zlib/manifest.json'),
+    imageZlibPath = `image-zlib/manifest-${hash(imageZlibBytes).slice(0, 16)}.json`,
+    imageZlib = JSON.parse(imageZlibBytes)
+  assert.deepEqual(await read(imageZlibPath), imageZlibBytes)
+  assert.equal(imageZlib.abi, 1)
+  assert.equal(imageZlib.library, 'zlib')
+  assert.equal(imageZlib.version, '1.3.2')
+  for (const asset of Object.values(imageZlib.assets)) {
+    const bytes = await read(`image-zlib/${asset.file}`)
+    assert.equal(bytes.length, asset.bytes)
+    assert.equal(hash(bytes), asset.sha256)
+  }
+  for (const name of ['LICENSE.txt', 'CREDITS.txt'])
+    assert(listed.includes('licenses/image-zlib/' + name))
   assert(listed.some((path) => /session\.worker.*\.js$/.test(path)))
   assert(listed.some((path) => /library\.worker.*\.js$/.test(path)))
   assert(listed.some((path) => /mixer\.worklet.*\.js$/.test(path)))
@@ -117,6 +131,7 @@ export async function verifyOfflineBuild(directory, base = '/') {
     bytes,
     wasmManifest: wasmPath,
     fontManifest: fontPath,
+    imageZlibManifest: imageZlibPath,
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)

@@ -7,6 +7,7 @@ checking contracts. A child exit0 is only a report, never a passing assertion.
 """
 from pathlib import Path
 import hashlib
+import io
 import itertools
 import json
 import os
@@ -14,12 +15,19 @@ import platform
 import struct
 import subprocess
 import sys
+import tarfile
 import urllib.request
 import zlib
+from native_png_stream_fixtures import create_stream_cases
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / 'out/verification/native-png'
 SOURCE_MANIFEST = ROOT / 'tests/native/png-reference-source.json'
+ZLIB_MANIFEST = ROOT / 'native/image-zlib/source.json'
+STREAM_MANIFEST = ROOT / 'tests/native/png-stream-cases.json'
+ZLIB_C = ['adler32.c', 'compress.c', 'crc32.c', 'deflate.c', 'gzclose.c', 'gzlib.c',
+          'gzread.c', 'gzwrite.c', 'infback.c', 'inffast.c', 'inflate.c', 'inftrees.c',
+          'trees.c', 'uncompr.c', 'zutil.c']
 
 
 def sha(data):
@@ -145,14 +153,107 @@ def fetch_sources(manifest, target):
     save(OUTPUT / 'source-inventory.json', inventory)
 
 
+def fetch_zlib(manifest, target):
+    """Use the same pinned archive as the WASM port, with native zconf.h.
+
+    Extract selected regular root files only; never unpack arbitrary archive
+    paths, symlinks or executables into the checkout.
+    """
+    if manifest.get('library') != 'zlib' or manifest.get('version') != '1.3.2':
+        raise RuntimeError('Unexpected pinned PNG zlib source')
+    with urllib.request.urlopen(manifest['url'], timeout=45) as response:
+        raw = response.read(16 * 1024 * 1024)
+    archive_hash = hashlib.sha512(raw).hexdigest()
+    (OUTPUT / 'zlib-source.tar.gz').write_bytes(raw)
+    if archive_hash != manifest['sha512']:
+        raise RuntimeError('Pinned zlib archive SHA512 mismatch')
+    target.mkdir()
+    files = {}
+    prefix = 'zlib-' + manifest['version'] + '/'
+    with tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz') as archive:
+        for item in archive.getmembers():
+            if not item.name.startswith(prefix):
+                continue
+            name = item.name[len(prefix):]
+            if '/' in name or not name or not item.isfile() or not (name.endswith('.h') or name in ZLIB_C or name in ('LICENSE', 'README')):
+                continue
+            if name in files or item.size > 2 * 1024 * 1024:
+                raise RuntimeError('Unexpected zlib source entry: ' + name)
+            source = archive.extractfile(item)
+            if source is None:
+                raise RuntimeError('Unreadable zlib source entry: ' + name)
+            with source:
+                data = source.read()
+            with (target / name).open('xb') as destination:
+                destination.write(data)
+            files[name] = {'bytes': len(data), 'sha256': sha(data)}
+    if not all(name in files for name in ZLIB_C + ['zlib.h', 'zconf.h']):
+        raise RuntimeError('Pinned zlib source archive is incomplete')
+    save(OUTPUT / 'zlib-source.json', {'library': 'zlib', 'version': manifest['version'],
+        'url': manifest['url'], 'archiveSha512': archive_hash, 'files': files,
+        'configuration': 'Original archive zconf.h with gcc -m32 -DHAVE_UNISTD_H=1 on Linux. WASM uses the same C sources and Emscripten port zconf.h; configuration hashes are recorded separately.'})
+
+
+def stream_structure(case, record):
+    errors = []
+    def need(condition, message):
+        if not condition:
+            errors.append(message)
+    width, height = case['width'], case['height']
+    need(record.get('sizeCallback') is True, 'Stream fixture never reached its valid size callback')
+    need(record.get('width') == width and record.get('height') == height and record.get('rowbytes') == width * 4,
+         'Stream destination dimensions/stride differ')
+    need(record.get('cleanup') == {'unsafeFrees': 0, 'liveAllocations': 0, 'liveBytes': 0}, 'Stream reference cleanup is not clean')
+    count = record.get('rowsComplete')
+    need(isinstance(count, int) and 0 <= count <= height, 'Invalid completed row count')
+    destination = record.get('destination') or {}
+    need(destination.get('initialByte') == 165 and destination.get('width') == width and destination.get('height') == height,
+         'Missing initialized normal destination observation')
+    rgba = destination.get('rgba')
+    need(isinstance(rgba, list) and len(rgba) == width * height * 4, 'Raw destination RGBA missing')
+    if isinstance(rgba, list) and isinstance(count, int):
+        need(record.get('rgba') == rgba[:count * width * 4], 'Complete row prefix is inconsistent with raw destination')
+    expected = case['expected']['rgba']
+    if expected is not None:
+        need(record.get('status') == 'complete' and record.get('decodeComplete') is True and count == height,
+             'Valid stream control did not complete')
+        need(rgba == expected, 'Valid stream control RGBA differs')
+    else:
+        # Do not predict a malformed stream's completed rows or whether an
+        # original warning still permits successful completion.
+        need(record.get('status') in ('complete', 'error'), 'Malformed-stream observation did not settle')
+        if record.get('status') == 'error':
+            need((record.get('error') or {}).get('kind') in ('libpng', 'stream-short-read'), 'Probe infrastructure failed instead of decoding the stream')
+    offset = 0
+    for read in record.get('reads', []):
+        actual, requested = read.get('actual'), read.get('requested')
+        if not isinstance(actual, int) or not isinstance(requested, int) or not 0 <= actual <= requested:
+            need(False, 'Invalid native read length'); continue
+        need(read.get('offset') == offset, 'Native read cursor is discontinuous')
+        offset += actual
+    need(offset == record.get('bytesRead') and offset <= case['bytes'], 'Native read cursor exceeds the retained input')
+    snapshots = record.get('destinationSnapshots', [])
+    need(bool(snapshots), 'No destination snapshots were retained')
+    for index, snapshot in enumerate(snapshots):
+        need(snapshot.get('id') == index + 1 and len(snapshot.get('bgra', [])) == width * height * 4,
+             'Incomplete native destination snapshot')
+    need(bool(snapshots) and snapshots[0].get('event') == 'destination-created' and
+         snapshots[0].get('bgra') == [165] * (width * height * 4), 'Destination sentinel was not established')
+    return errors
+
+
 def compare(case, record):
     errors = []
     def need(condition, text):
         if not condition:
             errors.append(text)
-    need(record.get('schema') == 1 and record.get('libpng') == '1.0.6', 'Wrong reference ABI/version')
+    need(record.get('schema') == 2 and record.get('libpng') == '1.0.6', 'Wrong reference ABI/version')
+    need(record.get('zlibCompile') == '1.3.2' and record.get('zlibRuntime') == '1.3.2', 'Reference did not use the pinned same-source zlib')
     need(record.get('pngLongBytes') == 4 and record.get('pointerBytes') == 4, 'Original32bit ABI not established')
     need(record.get('droppedEvents') == 0, 'Dropped reference events')
+    need(record.get('droppedSnapshots') == 0 and record.get('droppedReads') == 0, 'Dropped destination/read evidence')
+    if case.get('streamReference'):
+        return errors + stream_structure(case, record)
     if case['observeOnly']:
         # Unsafe output is evidence, not a successful native rendering result.
         if case['id'].startswith('palette-no-trns-key-'):
@@ -195,17 +296,28 @@ def compare(case, record):
 
 def run():
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    environment = {'schema': 1, 'scope': 'Pinned upstream libpng1.0.6 and fixed loader normal calls; not original Windows deelibpng binary identity',
+    environment = {'schema': 2, 'scope': 'Pinned upstream libpng1.0.6 and fixed loader normal calls with the WASM kernel same-source zlib1.3.2; not original Windows deelibpng/zlib binary identity. Raw-write snapshots cover normal main RGBA only, not mask temporary buffers or manual palette-gray conversion.',
                    'platform': platform.platform(), 'machine': platform.machine(), 'python': sys.version,
                    'commit': os.environ.get('GITHUB_SHA'), 'runId': os.environ.get('GITHUB_RUN_ID'),
                    'attempt': os.environ.get('GITHUB_RUN_ATTEMPT'), 'runner': os.environ.get('RUNNER_ENVIRONMENT'),
                    'zlibFixtureRuntime': zlib.ZLIB_RUNTIME_VERSION,
                    'probeSha256': sha((ROOT / 'tests/native/png-reference.c').read_bytes()),
-                   'driverSha256': sha(Path(__file__).read_bytes()), 'sourceManifestSha256': sha(SOURCE_MANIFEST.read_bytes())}
+                   'driverSha256': sha(Path(__file__).read_bytes()), 'sourceManifestSha256': sha(SOURCE_MANIFEST.read_bytes()),
+                   'streamFixtureSha256': sha((ROOT / 'scripts/native_png_stream_fixtures.py').read_bytes()),
+                   'streamManifestSha256': sha(STREAM_MANIFEST.read_bytes()),
+                   'zlibManifestSha256': sha(ZLIB_MANIFEST.read_bytes())}
     save(OUTPUT / 'environment.json', environment)
     manifest = json.loads(SOURCE_MANIFEST.read_text())
     save(OUTPUT / 'source-manifest.json', manifest)
-    cases = fixtures()
+    stream_manifest = json.loads(STREAM_MANIFEST.read_text())
+    zlib_manifest = json.loads(ZLIB_MANIFEST.read_text())
+    save(OUTPUT / 'stream-manifest.json', stream_manifest)
+    save(OUTPUT / 'zlib-manifest.json', zlib_manifest)
+    legacy_cases = fixtures()
+    stream_cases = create_stream_cases(stream_manifest)
+    if len(legacy_cases) != 47 or len(stream_cases) != 30 or sum(c['expected']['rgba'] is not None for c in stream_cases) != 9:
+        raise RuntimeError('PNG reference case inventory differs from 47 legacy plus 30 stream observations (9 valid controls)')
+    cases = legacy_cases + stream_cases
     if len({c['id'] for c in cases}) != len(cases):
         raise RuntimeError('Duplicate case ID')
     inputs = OUTPUT / 'inputs'; inputs.mkdir()
@@ -218,11 +330,13 @@ def run():
         inventory.append(case)
     save(OUTPUT / 'case-manifest.json', inventory)
     source = OUTPUT / 'source'; fetch_sources(manifest, source)
+    zlib_source = OUTPUT / 'zlib-source'; fetch_zlib(zlib_manifest, zlib_source)
     binary = OUTPUT / 'png-reference'
-    command = ['gcc', '-m32', '-std=gnu11', '-O0', '-g', '-DPNG_USER_MEM_SUPPORTED', '-DPNG_NO_ASSEMBLER_CODE',
-               '-I' + str(source), str(ROOT / 'tests/native/png-reference.c')]
+    command = ['gcc', '-m32', '-std=gnu11', '-O0', '-g', '-DHAVE_UNISTD_H=1', '-DPNG_USER_MEM_SUPPORTED', '-DPNG_NO_ASSEMBLER_CODE',
+               '-I' + str(zlib_source), '-I' + str(source), str(ROOT / 'tests/native/png-reference.c')]
     command += [str(source / x['file']) for x in manifest['files'] if x['file'].endswith('.c')]
-    command += ['-lz', '-lm', '-o', str(binary)]
+    command += [str(zlib_source / name) for name in ZLIB_C]
+    command += ['-lm', '-o', str(binary)]
     version = subprocess.run(['gcc', '--version'], capture_output=True, check=False, timeout=15)
     (OUTPUT / 'compiler.txt').write_bytes(version.stdout + version.stderr)
     save(OUTPUT / 'build-command.json', command)
@@ -248,12 +362,13 @@ def run():
             result['exitCode'] = child.returncode
             if child.returncode:
                 raise RuntimeError('Reference process exited ' + str(child.returncode))
-            if len(child.stdout) > 1024 * 1024:
-                raise RuntimeError('Reference report exceeds 1MiB')
+            if len(child.stdout) > 16 * 1024 * 1024:
+                raise RuntimeError('Reference report exceeds 16MiB')
             record = json.loads(child.stdout)
             result['record'] = record
             result['mismatches'] = compare(case, record)
             result['classification'] = ('reference-mismatch' if result['mismatches'] else
+                'stream-reference-observed' if case.get('streamReference') else
                 'observation-only-unsafe' if case['observeOnly'] and (record['cleanup']['unsafeFrees'] or record['cleanup']['liveAllocations'] or record.get('rgba') is None) else
                 'observation-only' if case['observeOnly'] else
                 'expected-native-error-with-leak' if case['expected']['nativeErrorLeak'] else 'contract-matched')
@@ -285,7 +400,10 @@ def run():
                 'Original tRNS control did not match its contract' if not control or control['classification'] != 'contract-matched' else
                 'Candidate pixels are absent or deliberately unobserved for unsafe layout',
             'transparencyState': record.get('transparencyState'), 'cleanup': record.get('cleanup')})
-    summary = {'schema': 1, 'planned': len(cases), 'reported': len(results),
+    summary = {'schema': 2, 'planned': len(cases), 'reported': len(results),
+        'streamReferences': sum(r['classification'] == 'stream-reference-observed' for r in results),
+        'streamReferencePlanned': len(stream_cases), 'streamValidControls': 9,
+        'streamPolicy': 'Malformed row counts, raw bytes, error phases and warnings are recorded without predicted answers; the separate hosted WASM differential must compare all 30 references. Observed is not a product pass.',
         'cleanMatchedContracts': sum(r['classification'] == 'contract-matched' for r in results),
         'expectedNativeErrorLeaks': sum(r['classification'] == 'expected-native-error-with-leak' for r in results),
         'expectedNativeErrorLeakCases': [{'id': c['id'], 'expected': c['expected']['nativeErrorLeak'],

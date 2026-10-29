@@ -61,14 +61,14 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await evaluate(page, '[partialLayer.getMainPixel(1,7),partialLayer.getMaskPixel(1,7),partialLayer.getMainPixel(1,8),partialLayer.getMaskPixel(1,8)].join(",")', `${partialColor},92,${partialColor},255`)
 
       await evaluate(page, '(resetPartialImage(),0)', '0')
-      await evaluate(page, `partialLoad("png-tail.png",${partialKey})`, 'failed:PNG chunk CRC mismatch')
+      await evaluate(page, `partialLoad("png-tail.png",${partialKey})`, 'failed:partial-png:IEND: CRC error')
       await evaluate(page, 'partialGeometry()', partial)
       await evaluate(page, 'partialPlaneState()', `${partialColor},255,91,0,0`)
       await evaluate(page, '[partialLayer.getMainPixel(1,16),partialLayer.getMaskPixel(0,16),partialLayer.getMaskPixel(1,16)].join(",")', `${partialColor},0,255`)
       await showPartial(17)
       // A failed normal image is never a successful processed cache entry.
       await evaluate(page, '(resetPartialImage(),0)', '0')
-      await evaluate(page, `partialLoad("png-tail.png",${partialKey})`, 'failed:PNG chunk CRC mismatch')
+      await evaluate(page, `partialLoad("png-tail.png",${partialKey})`, 'failed:partial-png:IEND: CRC error')
       await evaluate(page, 'partialGeometry()', partial)
     } catch (error) { failures.push(error) }
     try { await info.attach('partial-main-display', { contentType: 'application/json',

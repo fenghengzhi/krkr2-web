@@ -119,7 +119,7 @@ other.onPaint=function(){Debug.message("fair-b:entered");other.loadImages("redra
 root.update();
 `,
         {
-          inflateImage: blocker.inflate,
+          imageInflater: blocker.provider,
         },
       )
     let operation: Promise<unknown> | undefined

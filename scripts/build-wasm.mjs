@@ -36,7 +36,7 @@ function hashSources(directory) {
   )) {
     const path = `${directory}/${entry.name}`
     // Independently built font kernels do not change the TJS binary inputs.
-    if (path === 'native/fonts' || path === 'third_party/unicode') continue
+    if (path === 'native/fonts' || path === 'native/image-zlib' || path === 'third_party/unicode') continue
     if (entry.isDirectory()) hashSources(path)
     else if (/\.(c|cc|cpp|h|hpp|inc|y|py|in|txt)$/.test(entry.name)) {
       sourceHasher.update(path + '\0').update(readFileSync(resolve(root, path)))
@@ -128,4 +128,7 @@ manifest.toolchain = readFileSync(
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 console.log(`WASM manifest: ${manifestPath}`)
 // Allocation diagnostics exercise only TJS; no font kernel is loaded there.
-if (!allocatorDiagnostic) run(process.execPath, ['scripts/build-fonts.mjs'])
+if (!allocatorDiagnostic) {
+  run(process.execPath, ['scripts/build-fonts.mjs'])
+  run(process.execPath, ['scripts/build-image-zlib.mjs'])
+}

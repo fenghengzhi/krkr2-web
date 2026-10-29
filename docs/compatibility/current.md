@@ -1,5 +1,9 @@
 # 当前实现范围
 
+115 候选接入 [PNG pull 解压与原始写入阶段](../decisions/115-png-pull-inflation-and-write-phases.md)：实际 App/headless使用独立zlib WASM，IDAT按实际消费检查CRC，主图raw写入和完成后的key／mask绑定分开；暂停、Stop、缓存归属与离线资产接通。新增17常规Node、每浏览器4定义、30项同源C差分，均尚待托管执行。协议42及原ABI保持，图像模块独立ABI1；原二进制身份、palette特殊路径及完整非插件目标仍未闭合。
+
+115固定结果证实110新增52成品缓存定义通过，但110仍有27旧夹具失败和1条启动几何错误；109终态主浏览器136 fail、428未报告。111–114仍pending，原PNG参考未执行。所有历史失败和未比较范围保留，完整目标继续active。
+
 114 提交 `cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f` 已推送，[Actions 40794100263](https://github.com/fenghengzhi/krkr2-web/actions/runs/40794100263) 首次唯一查询为 pending／conclusion=null，仅记录运行身份，候选和新增原生参考尚无执行结论。下批回收，完整非插件目标保持 active。
 
 114 候选修正 [原版 PNG 透明规则与元数据](../decisions/114-native-png-transparency-and-metadata.md)：selected RGB tRNS 不自动透明，元数据按原读取阶段、警告和 signed 转换处理；通用 PNG 路径保持标准行为。新增 **16 常规 Node、每浏览器 4 定义**与固定上游 libpng C 参考，协议 **42** 保持，全部尚待托管验证。流式错误前缀、palette 旧库边界、JPEG 和 ERI 仍有缺口。

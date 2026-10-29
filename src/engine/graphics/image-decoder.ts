@@ -1,13 +1,15 @@
 import type { DecodedImage } from '../ports/graphics.ts'
 import { TvpError } from '../system/tvp-error.ts'
 import { decodeSelectedBmp } from '../../formats/image/bmp.ts'
-import { decodeSelectedPng } from '../../formats/image/png.ts'
+import { decodeSelectedPng, prepareSelectedPngStream } from '../../formats/image/png.ts'
 import { decodeSelectedTlg } from '../../formats/image/tlg/index.ts'
 import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from '../../formats/image/selection.ts'
+import type { ImageInflater } from '../ports/image-inflater.ts'
 
 export interface SelectedImageDecoderDependencies {
   finish<T>(work: Generator<void, T>): Promise<T>
   inflate(compressed: Uint8Array, length: number): Promise<Uint8Array>
+  openInflater?(source: Uint8Array, expandedLength: number): Promise<ImageInflater>
   host(bytes: Uint8Array, selection: ImageDecodeSelection): Promise<DecodedImage>
 }
 
@@ -60,6 +62,9 @@ export async function decodeSelectedImage(
       row(y, rgba, indices) {
         try { observer.row(y, rgba, indices) } catch (error) { throw new ProgressFailure(error) }
       },
+      write(y, rgba, indices) {
+        try { observer.write?.(y, rgba, indices) } catch (error) { throw new ProgressFailure(error) }
+      },
     }
   try {
     switch (selected.format) {
@@ -73,6 +78,21 @@ export async function decodeSelectedImage(
         return progress ? await dependencies.finish(publish(image, progress)) : image
       }
       case 'png': {
+        if (dependencies.openInflater) {
+          const plan = await dependencies.finish(prepareSelectedPngStream(bytes, selected.mode, progress)),
+            inflater = await dependencies.openInflater(bytes, plan.expandedLength)
+          let failed: { error: unknown } | undefined
+          try { return await dependencies.finish(plan.decode(inflater)) }
+          catch (error) { failed = { error }; throw error }
+          finally {
+            try { inflater.close() }
+            catch (cleanup) {
+              if (!failed) throw cleanup
+              const primary = failed.error instanceof ProgressFailure ? failed.error.cause : failed.error
+              throw new AggregateError([primary, cleanup], 'PNG decoding and inflater cleanup failed', { cause: primary })
+            }
+          }
+        }
         const plan = await dependencies.finish(decodeSelectedPng(bytes, selected.mode, progress)),
           expanded = await dependencies.inflate(plan.compressed, plan.expandedLength)
         return await dependencies.finish(plan.decode(expanded))

@@ -61,7 +61,8 @@ jobs:
           path: |
             .generated
             public/licenses/freetype
-          key: kernels-v1-${{ runner.os }}-${{ runner.arch }}-emsdk-6.0.9-${{ hashFiles('native/**', 'third_party/**', 'scripts/build-wasm.mjs', 'scripts/build-fonts.mjs', 'scripts/generate-tvp-messages.py') }}
+            public/licenses/image-zlib
+          key: kernels-v1-${{ runner.os }}-${{ runner.arch }}-emsdk-6.0.9-${{ hashFiles('native/**', 'third_party/**', 'scripts/build-wasm.mjs', 'scripts/build-fonts.mjs', 'scripts/build-image-zlib.mjs', 'scripts/generate-tvp-messages.py') }}
       - name: Install native build tools
         if: steps.kernels.outputs.cache-hit != 'true'
         run: |
@@ -126,6 +127,7 @@ jobs:
           path: |
             .generated
             public/licenses/freetype
+            public/licenses/image-zlib
           key: ${{ steps.kernels.outputs.cache-primary-key }}
       - name: Check types and production release
         run: npm run build 2>&1 | tee out/ci/build.log
@@ -594,7 +596,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, png-reference]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, png-reference, png-stream-comparison]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -674,5 +676,30 @@ jobs:
         with:
           name: native-png-reference
           path: out/verification/native-png/
+          if-no-files-found: error
+          retention-days: 90
+
+  png-stream-comparison:
+    name: PNG pull decoder and native write phases
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    needs: [build, png-reference]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-png-reference
+          path: out/verification/native-png/
+      - name: Compare full destination bytes and actual completion phases
+        run: node --import tsx tests/probes/png-stream-compare.ts out/verification/native-png
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: png-stream-comparison
+          path: out/verification/png-stream-comparison/
           if-no-files-found: error
           retention-days: 90

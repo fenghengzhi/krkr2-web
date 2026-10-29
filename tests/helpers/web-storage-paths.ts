@@ -11,7 +11,7 @@ const base = '/storage-paths-embedding-assets/'
 export async function buildStorageEmbedding() {
   const manifestHashes = Object.fromEntries(
       await Promise.all(
-        ['wasm', 'fonts'].map(async (kind) => [
+        ['wasm', 'fonts', 'image-zlib'].map(async (kind) => [
           kind,
           createHash('sha256')
             .update(await readFile(resolve(`.generated/${kind}/manifest.json`)))
@@ -50,6 +50,9 @@ export async function buildStorageEmbedding() {
         ),
         __KRKR_FONT_MANIFEST_FILE__: JSON.stringify(
           `fonts/manifest-${manifestHashes.fonts.slice(0, 16)}.json`,
+        ),
+        __KRKR_IMAGE_ZLIB_MANIFEST_FILE__: JSON.stringify(
+          `image-zlib/manifest-${manifestHashes['image-zlib'].slice(0, 16)}.json`,
         ),
       },
       worker: { format: 'es' },

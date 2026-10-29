@@ -351,7 +351,7 @@ root.onPaint=function(){
 };
 `,
       {
-        inflateImage: blocker.inflate,
+        imageInflater: blocker.provider,
       },
     )
     let operation: Promise<string> | undefined
@@ -390,7 +390,7 @@ root.onPaint=function(){
 root.update();
 `,
       {
-        inflateImage: blocker.inflate,
+        imageInflater: blocker.provider,
       },
     )
     let operation: Promise<string> | undefined
@@ -430,7 +430,7 @@ root.onPaint=function(){paints++;Debug.message("paint:"+paints);if(paints<4)root
 root.update();
 `,
       {
-        inflateImage: blocker.inflate,
+        imageInflater: blocker.provider,
       },
     )
     let operation: Promise<string> | undefined
@@ -469,7 +469,7 @@ root.onPaint=function(){paints++;Debug.message("paint:"+paints);if(paints<5)root
 root.update();
 `,
       {
-        inflateImage: blocker.inflate,
+        imageInflater: blocker.provider,
       },
     )
     let operation: Promise<string> | undefined

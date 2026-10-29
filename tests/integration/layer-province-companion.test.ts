@@ -10,17 +10,9 @@ import {
 import { encodeBmp } from '../../src/formats/image/bmp.ts'
 import { headless } from '../helpers/headless.ts'
 import { imageFixture } from '../helpers/image-fixtures.ts'
+import { pngInflateGate } from '../helpers/image-decoder-gate.ts'
 
 const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
-
-function deferred<T>() {
-  let resolve!: (value: T) => void, reject!: (error: Error) => void
-  const promise = new Promise<T>((done, fail) => {
-    resolve = done
-    reject = fail
-  })
-  return { promise, resolve, reject }
-}
 
 async function within<T>(promise: Promise<T>, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -46,33 +38,7 @@ function observe<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
 const masked = [200, 100, 50, 64, 40, 80, 120, 192],
   matted = [241, 216, 203, 255, 93, 123, 153, 255]
 
-function decoderGate() {
-  const entered = deferred<void>(),
-    result = deferred<Uint8Array>()
-  let calls = 0, expandedLength = 0
-  const inflate: SessionDependencies['inflateImage'] = async (bytes, length) => {
-      // The main and mask are actual BMPs. Only the selected indexed PNG
-      // province reaches this real codec dependency; no unknown-format host
-      // fallback is needed to suspend its decoder.
-      assert.ok(bytes.length > 0)
-      expandedLength = length
-      calls++
-      entered.resolve()
-      return result.promise
-  }
-  return {
-    entered: entered.promise,
-    result,
-    inflate,
-    calls: () => calls,
-    release() {
-      // Safe even if setup failed before the decoder acquired this promise.
-      result.resolve(new Uint8Array(expandedLength))
-    },
-  }
-}
-
-async function fixture(binary: boolean, inflateImage?: SessionDependencies['inflateImage']) {
+async function fixture(binary: boolean, imageInflater?: SessionDependencies['imageInflater']) {
   const frames: Array<Array<{ id: number; width: number; height: number; pixels: number[] }>> = [],
     main = encodeBmp({
       width: 2,
@@ -124,7 +90,7 @@ function loadedPixels(){
 `,
       },
       {
-        ...(inflateImage ? { inflateImage } : {}),
+        ...(imageInflater ? { imageInflater } : {}),
         renderer: {
           present(layers) {
             // Copy at the presentation boundary: later bitmap writes must not
@@ -300,8 +266,8 @@ for (const binary of [false, true]) {
 
   for (const mutation of ['main pixel write', 'Province replacement'] as const) {
     test(`${mode}: a late _p failure preserves a host-side ${mutation} made while the real loadImages call is suspended`, async () => {
-      const gate = decoderGate(),
-        f = await fixture(binary, gate.inflate), failures: unknown[] = []
+      const gate = pngInflateGate(),
+        f = await fixture(binary, gate.provider), failures: unknown[] = []
       let loading: Promise<PromiseSettledResult<string>> | undefined
       try {
         loading = observe(f.load('pending.bmp'))
@@ -351,6 +317,7 @@ for (const binary of [false, true]) {
         try {
           if (loading) await within(loading, 'companion invocation cleanup')
           await within(Promise.all(f.loads), 'companion loaders cleanup')
+          await within(gate.drain(), 'companion inflater cleanup')
         } catch (error) { failures.push(error) }
       }
       if (failures.length === 1) throw failures[0]
@@ -359,8 +326,8 @@ for (const binary of [false, true]) {
   }
 
   test(`${mode}: Stop releases the already completed main and suspended province without late failure reviving either plane`, async () => {
-    const gate = decoderGate(),
-      f = await fixture(binary, gate.inflate), failures: unknown[] = []
+    const gate = pngInflateGate(),
+      f = await fixture(binary, gate.provider), failures: unknown[] = []
     let loading: Promise<PromiseSettledResult<string>> | undefined
     try {
       loading = observe(f.load('pending.bmp'))
@@ -371,6 +338,8 @@ for (const binary of [false, true]) {
       assert.equal(f.layers.get(f.id).imageModified, true)
       // The external decoder is deliberately still pending when Stop returns.
       await within(f.session.stop(), 'Stop while companion decoder is held')
+      assert.equal(gate.active(), 0)
+      assert.equal(gate.closed(), 1)
       const cancelled = await within(loading, 'cancelled loadImages invocation')
       assert.equal(cancelled.status, 'rejected')
       if (cancelled.status === 'rejected')
@@ -395,6 +364,7 @@ for (const binary of [false, true]) {
       try {
         if (loading) await within(loading, 'stopped companion invocation cleanup')
         await within(Promise.all(f.loads), 'stopped companion loaders cleanup')
+        await within(gate.drain(), 'stopped companion inflater cleanup')
       } catch (error) { failures.push(error) }
     }
     if (failures.length === 1) throw failures[0]

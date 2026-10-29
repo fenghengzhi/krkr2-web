@@ -353,7 +353,7 @@ test.describe('public createPlayer System dataPath embedding', () => {
   const base = '/system-core-embedding-assets/',
     bundles = new Map<string, { body: Buffer; contentType: string }>(),
     hashes: { file: string; sha256: string }[] = []
-  let entry: string, wasmManifestHash: string, fontManifestHash: string
+  let entry: string, wasmManifestHash: string, fontManifestHash: string, imageZlibManifestHash: string
 
   test.beforeAll(async () => {
     wasmManifestHash = createHash('sha256')
@@ -361,6 +361,9 @@ test.describe('public createPlayer System dataPath embedding', () => {
       .digest('hex')
     fontManifestHash = createHash('sha256')
       .update(await readFile(resolve('.generated/fonts/manifest.json')))
+      .digest('hex')
+    imageZlibManifestHash = createHash('sha256')
+      .update(await readFile(resolve('.generated/image-zlib/manifest.json')))
       .digest('hex')
     const id = 'virtual:system-core-embedding',
       resolvedId = '\0system-core-embedding',
@@ -393,6 +396,9 @@ test.describe('public createPlayer System dataPath embedding', () => {
           ),
           __KRKR_FONT_MANIFEST_FILE__: JSON.stringify(
             `fonts/manifest-${fontManifestHash.slice(0, 16)}.json`,
+          ),
+          __KRKR_IMAGE_ZLIB_MANIFEST_FILE__: JSON.stringify(
+            `image-zlib/manifest-${imageZlibManifestHash.slice(0, 16)}.json`,
           ),
         },
         worker: { format: 'es' },
@@ -516,6 +522,7 @@ test.describe('public createPlayer System dataPath embedding', () => {
                 'Separately Vite-compiled real createPlayer/createGameWindows source and RPC Worker; actual hosted WASM/font artifacts and real IndexedDB',
               wasmManifestHash,
               fontManifestHash,
+              imageZlibManifestHash,
               hashes,
               configured,
               results,
@@ -543,7 +550,7 @@ test.describe('public createPlayer System dataPath embedding', () => {
     await info.attach('public-system-datapath-rejected-acquisitions', {
       contentType: 'application/json',
       body: JSON.stringify(
-        { paths, rejected, wasmManifestHash, fontManifestHash, hashes },
+        { paths, rejected, wasmManifestHash, fontManifestHash, imageZlibManifestHash, hashes },
         null,
         2,
       ),

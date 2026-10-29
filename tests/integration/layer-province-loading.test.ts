@@ -32,7 +32,7 @@ function observe<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
   )
 }
 
-async function fixture(binary: boolean, inflateImage?: SessionDependencies['inflateImage']) {
+async function fixture(binary: boolean, imageInflater?: SessionDependencies['imageInflater']) {
   const harness = await headless(
     {
       'startup.tjs': '',
@@ -93,7 +93,7 @@ function retireWithProvince(){
 }
 `,
     },
-    inflateImage ? { inflateImage } : {},
+    imageInflater ? { imageInflater } : {},
   )
   const { session } = harness,
     internal = session as unknown as { layers: LayerTree; images: ImageLoader },
@@ -182,7 +182,7 @@ for (const binary of [false, true]) {
 
   test(`${mode}: a suspended first province load owns a zero plane until its real indexed decode returns`, async () => {
     const gate = pngInflateGate(3),
-      f = await fixture(binary, gate.inflate)
+      f = await fixture(binary, gate.provider)
     let loading: Promise<PromiseSettledResult<string>> | undefined
     try {
       await f.execute(
@@ -215,7 +215,7 @@ for (const binary of [false, true]) {
 
   test(`${mode}: an actual cached Font finalizer can load Province before Layer image release`, async () => {
     const gate = pngInflateGate(3),
-      f = await fixture(binary, gate.inflate)
+      f = await fixture(binary, gate.provider)
     let retiring: Promise<PromiseSettledResult<string>> | undefined
     try {
       retiring = observe(f.session.evaluate('retireWithProvince()'))
@@ -275,7 +275,7 @@ for (const binary of [false, true]) {
   for (const outcome of ['resolve', 'reject'] as const) {
     test(`${mode}: a late ${outcome} cannot replace or clear a host-side province write made during decode`, async () => {
       const gate = pngInflateGate(3),
-        f = await fixture(binary, gate.inflate)
+        f = await fixture(binary, gate.provider)
       let loading: Promise<PromiseSettledResult<string>> | undefined
       try {
         loading = observe(f.load('pending.png'))
@@ -315,7 +315,7 @@ for (const binary of [false, true]) {
 
     test(`${mode}: Stop releases a suspended province load before a late decoder ${outcome}`, async () => {
       const gate = pngInflateGate(3),
-        f = await fixture(binary, gate.inflate),
+        f = await fixture(binary, gate.provider),
         lateFailure = new Error('late stopped province decode failure')
       let loading: Promise<PromiseSettledResult<string>> | undefined
       try {
@@ -324,6 +324,8 @@ for (const binary of [false, true]) {
         assert.equal(f.session.snapshot().bitmapBytes, 46)
         // Stop must complete while this external decoder remains unsettled.
         await within(f.session.stop(), 'Stop while province decoder is held')
+        assert.equal(gate.active(), 0)
+        assert.equal(gate.closed(), 1)
         const cancelled = await within(loading, 'cancelled province invocation')
         assert.equal(cancelled.status, 'rejected')
         if (cancelled.status === 'rejected')
@@ -336,9 +338,8 @@ for (const binary of [false, true]) {
         const abandoned = await within(f.loads[0]!, 'the abandoned complete province loader')
         assert.equal(abandoned.status, 'rejected')
         if (abandoned.status === 'rejected') {
-          // With a real PNG, successful late inflation next enters the
-          // production scanline generator's cancellation checkpoint. The
-          // old fake complete-image callback skipped that actual decode stage.
+          // The already opened real inflater was retired by Stop. Resolving
+          // its gate cannot return a live stream or publish any later pixels.
           if (outcome === 'resolve') assert.ok(abandoned.reason instanceof ExecutionCancelled)
           else assert.equal(abandoned.reason, lateFailure)
         }
