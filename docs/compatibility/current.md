@@ -1,5 +1,7 @@
 # 当前实现范围
 
+116 提交 `2f22e878502353c9c8e93e72e78c34c7d306ae1e` 已推送，[Actions 40801785412](https://github.com/fenghengzhi/krkr2-web/actions/runs/40801785412) 首次唯一查询为pending／conclusion=null，仅记录身份；新增定义尚无执行结论。下批回收，完整非插件目标保持active。
+
 116 候选补 [原版图像短读错误](../decisions/116-native-image-read-errors.md)：selected BMP／PNG／TLG 的真实源短读进入当前原生 TJSReadError holder，保留结构化原因和已有部分写入；宿主、预算、格式和回调错误保持独立。`nativeMessages:2`，协议42／TJS ABI5保持，新增36常规Node、每浏览器4定义均待托管验证。
 
 116 固定证据中，111的27个旧Node夹具失败已通过，但新的Node WASM JIT SIGTRAP留下8个未报告定义，不能把3673 pass当整批通过。完整core与旧malloc崩溃分开保存；111可信生命周期19/19、KAG96/96，七个主浏览器作业未报告。110已终态failure；112–115仍pending。原失败和未比较范围保留，完整非插件目标未完成。

@@ -37,3 +37,7 @@ runtime、普通 host 调用、预检、排队写入、collect／console／dispo
 新增 **36 个常规 Node 定义**：10 个源读取与错误来源边界、6 个 PNG 头部／读取边界、8 个原生 VM 消息定义、12 个 source／bytecode 真实消费者；新增 **每浏览器 4 个定义**。既有消息文件自动进入原 JSPI sweep，两个浏览器能力门禁扩展旧版本拒绝。旧 partial／province 夹具只迁移已改变的真实 VM 消息预期，保留像素、中间态、缓存、暂停和 Stop 断言。字体 Worker 文件路由补入新增的 BMP 运行时依赖。
 
 这些定义均未在本地执行，静态复核不是通过证据。下批先取回未完成运行，继续处理真实差异；Node 新 SIGTRAP、历史 heap／几何／菜单／媒体回归、PNG 特殊 palette 路径与原二进制身份、JPEG 原生失败进度、ERI、统一内存预算和完整游戏验收仍需完成。
+
+## 推送与交接
+
+实现提交 `2f22e878502353c9c8e93e72e78c34c7d306ae1e` 共 **35 个文件**，已推送到 `codex/migrated-window-attention`。[Full test suite 40801785412](https://github.com/fenghengzhi/krkr2-web/actions/runs/40801785412) 首次唯一查询为 **pending／conclusion=null**；精确 SHA、push、workflow 路径与 attempt 1 匹配。原响应保存在 `out/verification/github-actions/40801785412/initial-run-discovery.json`。不再查询新运行的 jobs、日志或产物，下批固定回收111尚未报告范围及112–116结果；已终态110不再刷新。完整目标继续active。

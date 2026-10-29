@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+最新待核验批次：[Full test suite 40801785412](https://github.com/fenghengzhi/krkr2-web/actions/runs/40801785412)，精确提交 `2f22e878502353c9c8e93e72e78c34c7d306ae1e`。116 的 **35 个文件**已整批推送，新增 **36 常规Node、每浏览器4定义**。首次唯一查询为 **pending／conclusion=null**，仅记录身份并保存原响应。下批固定回收111未报告范围及112–116结果，已终态110不再刷新；没有本地执行验证，完整目标保持active。
+
 2026-10-29 准备 [116 原版图像短读错误](decisions/116-native-image-read-errors.md)：BMP／PNG／TLG 真实源读取不足保留精确原因，并通过当前原生 `TJSReadError` holder 返回；宿主、解码、预算和消费者错误独立保留，部分像素和原 Layer 状态不被错误完成。`nativeMessages:2`，协议42、TJS ABI5保持。新增36常规Node、每浏览器4定义，均尚待托管执行。
 
 116 固定回收 **68 原 ZIP、909,737,714 字节**全部匹配。110已终态failure，主浏览器135 fail、421未报告。111原27个Node夹具失败已逐项通过，但出现新的Node WASM JIT **SIGTRAP**：3681实际定义中3673 pass、8未报告，另有一个失败文件容器；完整core和托管回溯保留，与旧malloc SIGABRT分开。111可信生命周期19/19、KAG96/96；Firefox两分片尚有2个font失败，七个主浏览器作业未报告。112–115仍pending，原PNG参考未执行；整体非插件目标继续active。
