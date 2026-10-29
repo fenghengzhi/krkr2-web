@@ -45,3 +45,7 @@ WebKit 新 layer-attention 失败在等待启动 ready 时，尚未执行 attent
 PNG 全量 inflate 仍缺可控的压缩消费／部分输出合同。原 `png_read_finish_row` 还可能在最后一行原始像素写入之后、scanline 完成通知之前读取 trailer 或下个 IDAT CRC 并失败；只添加浏览器流式 chunk callback 不足以证明等价。后续需要可验证的 pull 式解码状态、原始写入与完成通知分离，以及暂停／Stop／预算的完整消费者验收。
 
 palette key setter 与 grayscale palette+tRNS 的旧库行为、JPEG 原生失败进度、ERI、部分短读消息、历史 heap／媒体／菜单等失败和真实游戏验收仍未闭合。保持完整非插件目标 active，下批先取回这批及前面未完成运行的固定结果，再按实际证据修订。
+
+## 推送与交接
+
+实现提交 `cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f` 共 **16 个文件**，已推送到 `codex/migrated-window-attention`。[Full test suite 40794100263](https://github.com/fenghengzhi/krkr2-web/actions/runs/40794100263) 首次唯一查询为 **pending／conclusion=null**，精确 head SHA、push 事件、workflow 路径和 attempt 1 均匹配。原响应保存在 `out/verification/github-actions/40794100263/initial-run-discovery.json`。不再查询本次 jobs、日志或产物；下一批补取 109 未报告范围及 110–114 结果，不实时监控。完整目标继续 active。
