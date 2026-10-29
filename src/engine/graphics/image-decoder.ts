@@ -90,7 +90,10 @@ export async function decodeSelectedImage(
   dependencies: SelectedImageDecoderDependencies,
   observer?: ImageDecodeProgress,
 ): Promise<DecodedImage> {
-  const selected = Object.freeze({ format: selection.format, mode: selection.mode }),
+  const { format, mode, paletteKey } = selection
+  if (paletteKey !== undefined && (mode !== 'normal' || !Number.isInteger(paletteKey) || paletteKey < 0 || paletteKey > 255))
+    throw new Error('Invalid selected image palette key')
+  const selected = Object.freeze({ format, mode, ...(paletteKey === undefined ? {} : { paletteKey }) }),
     progress: ImageDecodeProgress | undefined = observer && {
       size(width, height) {
         try { observer.size(width, height) } catch (error) { throw new ProgressFailure(error) }
@@ -115,7 +118,7 @@ export async function decodeSelectedImage(
       }
       case 'png': {
         if (dependencies.openInflater) {
-          const plan = await dependencies.finish(codecWork(() => prepareSelectedPngStream(bytes, selected.mode, progress))),
+          const plan = await dependencies.finish(codecWork(() => prepareSelectedPngStream(bytes, selected.mode, progress, selected.paletteKey))),
             inflater = await dependencies.openInflater(bytes, plan.expandedLength)
           const guarded: ImageInflater = {
             step(input, output) {
@@ -136,7 +139,7 @@ export async function decodeSelectedImage(
             }
           }
         }
-        const plan = await dependencies.finish(codecWork(() => decodeSelectedPng(bytes, selected.mode, progress))),
+        const plan = await dependencies.finish(codecWork(() => decodeSelectedPng(bytes, selected.mode, progress, selected.paletteKey))),
           expanded = await dependencies.inflate(plan.compressed, plan.expandedLength)
         return await dependencies.finish(codecWork(() => plan.decode(expanded)))
       }

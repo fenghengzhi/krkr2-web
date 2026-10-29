@@ -79,7 +79,8 @@ test('normalized request spelling, color key and mode each define separate proce
   for (let repeat = 0; repeat < 2; repeat++) {
     await f.loader.load('a.png', noColorKey)
     await f.loader.load('alias.png', noColorKey)
-    assert.equal((await f.loader.load('a.png', 0x03000003)).image.data[3], 0)
+    assert.equal((await f.loader.load('a.png', 0x03000003)).image.data[3], 255,
+      'PNG key requests are distinct cache entries even when its handler retains the same alpha')
     await f.loader.rule('a.png')
     assert.deepEqual([...(await f.loader.province('a.png', 1, 1))], [3])
   }

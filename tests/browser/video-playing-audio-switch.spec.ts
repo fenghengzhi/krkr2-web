@@ -6,7 +6,7 @@ import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia } from '../helpers/video-audio-probe.ts'
 
 interface ClockObservation { element: number; position: number; paused: boolean }
-interface SwitchProbe { freezes: ClockObservation[]; resumes: ClockObservation[] }
+interface SwitchProbe { freezes: ClockObservation[]; resumes: ClockObservation[]; seeks: (ClockObservation & { requested: number })[] }
 declare global { interface Window { playingAudioSwitch: SwitchProbe } }
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
@@ -15,7 +15,7 @@ for (const container of ['numbered-fragmented', 'numbered-interleaved']) {
     test.setTimeout(120000)
     await installVideoAudioProbe(page)
     await page.addInitScript(() => {
-      const probe: SwitchProbe = { freezes: [], resumes: [] }, ids = new WeakMap<HTMLMediaElement, number>(),
+      const probe: SwitchProbe = { freezes: [], resumes: [], seeks: [] }, ids = new WeakMap<HTMLMediaElement, number>(),
         pause = HTMLMediaElement.prototype.pause, play = HTMLMediaElement.prototype.play
       let serial = 0
       window.playingAudioSwitch = probe
@@ -23,6 +23,13 @@ for (const container of ['numbered-fragmented', 'numbered-interleaved']) {
         if (!ids.has(element)) ids.set(element, ++serial)
         return { element: ids.get(element)!, position: element.currentTime, paused: element.paused }
       }
+      const clock = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime')!
+      Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', { ...clock,
+        set(this: HTMLMediaElement, requested: number) {
+          if (this instanceof HTMLVideoElement) probe.seeks.push({ ...observation(this), requested })
+          clock.set!.call(this, requested)
+        },
+      })
       HTMLMediaElement.prototype.pause = function () {
         const moving = this instanceof HTMLVideoElement && !!this.dataset.videoId && !this.paused
         pause.call(this)
@@ -55,7 +62,7 @@ movie.open("numbered.mp4");movie.pause();movie.frame=12;
           expect(await page.locator('video[data-video-id]').evaluate((node) => (node as HTMLVideoElement).currentTime))
             .toBeGreaterThan(previous + 0.02)
         }).toPass({ timeout: 12000 })
-        await page.evaluate(() => { window.playingAudioSwitch.freezes = []; window.playingAudioSwitch.resumes = [] })
+        await page.evaluate(() => { window.playingAudioSwitch.freezes = []; window.playingAudioSwitch.resumes = []; window.playingAudioSwitch.seeks = [] })
         await evaluate(page, `(movie.enabledAudioStream=${stream},movie.enabledAudioStream+"|"+movie.status)`, `${stream}|play`)
         const proof = await page.evaluate(() => window.playingAudioSwitch)
         expect(proof.freezes).toHaveLength(1)
@@ -64,6 +71,8 @@ movie.open("numbered.mp4");movie.pause();movie.frame=12;
         expect(frozen.position).toBeGreaterThan(1)
         expect(resumed).toBeDefined()
         expect(resumed!.paused).toBe(true)
+        expect(proof.seeks.filter((value) => value.element === resumed!.element).map((value) => value.requested))
+          .toEqual([frozen.position])
         expect(Math.abs(resumed!.position - frozen.position)).toBeLessThanOrEqual(0.000001)
         await expect.poll(() => page.locator('video[data-video-id]').evaluate((node) => (node as HTMLVideoElement).currentTime))
           .toBeGreaterThan(frozen.position + 0.02)
@@ -81,8 +90,9 @@ movie.open("numbered.mp4");movie.pause();movie.frame=12;
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
     try { await info.attach('playing-audio-switch-clocks', { contentType: 'application/json', body: JSON.stringify({
-      scope: 'Passive actual pause/play clock observations; playback is not required to freeze the preceding frame pixels.',
-      backend, binary, container, readings, media: await observeVideoMedia(page), logs: await page.locator('#logs').innerText(),
+      scope: 'Passive actual pause/play and forwarded currentTime setter observations; the frozen seconds must reach the new element unchanged.',
+      backend, binary, container, readings, latest: await page.evaluate(() => window.playingAudioSwitch),
+      media: await observeVideoMedia(page), logs: await page.locator('#logs').innerText(),
     }) }) } catch (error) { failures.push(error) }
     try {
       await game.stop()

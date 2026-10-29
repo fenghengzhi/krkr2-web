@@ -1,4 +1,4 @@
-/* Hosted-only reference for TVPLoadPNG's normal branch and metadata callbacks.
+/* Hosted-only reference for TVPLoadPNG's normal/palette-gray branches and metadata callbacks.
  * Call order is from krkrz/krkr2 dec49af97e174d31059c3ccd7efc700ba3c6b788,
  * GraphicsLoaderIntf.cpp:1028-1358. This executes pinned upstream libpng1.0.6;
  * it is not a claim about the identity of the original deelibpng.lib binary.
@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <limits.h>
 #include <zlib.h>
+#include "palette-converter.h"
 
 _Static_assert(sizeof(png_uint_32) == 4, "Use the original 32-bit png long ABI");
 _Static_assert(sizeof(png_int_32) == 4, "Use the original 32-bit png signed ABI");
@@ -41,6 +42,8 @@ typedef struct {
     size_t input_size, offset;
     unsigned width, height, rowbytes, rows_complete, read_calls;
     int depth, color, interlace, channels, output_depth, keyidx;
+    int palette_reference, grayscale, manual_gray;
+    unsigned destination_stride, comparison_prefix;
     int original_trns, info_trans_before, decoder_trans_before;
     int info_trans_after, decoder_trans_after;
     int size_called, decoded, failed, unsafe_pixels, unsafe_frees, warnings;
@@ -62,7 +65,7 @@ static Context *active;
  * Adam7 decodes into a separate private buffer until read_end succeeds. */
 static unsigned snapshot(Context *c, const char *name, int row) {
     DestinationSnapshot *s;
-    if (!c->destination || c->unsafe_pixels) return 0;
+    if (!c->destination || (c->unsafe_pixels && !c->palette_reference)) return 0;
     if (c->snapshot_count == MAX_SNAPSHOTS) { c->dropped_snapshots++; return 0; }
     s = (DestinationSnapshot *)malloc(sizeof(*s) + c->destination_bytes);
     if (!s) { c->dropped_snapshots++; return 0; }
@@ -188,6 +191,12 @@ static void header_metadata(Context *c) {
         meta(c, "reso_unit", unit == PNG_RESOLUTION_METER ? "meter" : "unknown");
     }
 }
+/* Fixed tvpgl.c TVPBLConvert24BitTo8Bit_c: three-byte BGR stepping,
+ * deliberately even when libpng expanded the palette into four-byte BGRA.
+ * Only the first 3*width initialized source bytes are read. */
+static void palette_gray(unsigned char *destination, const unsigned char *source, unsigned width) {
+    TVPBLConvert24BitTo8Bit_c(destination, source, (int)width);
+}
 static void decode(Context *c) {
     png_uint_32 width, height; int depth, color, interlace, compression, filter;
     unsigned y;
@@ -211,7 +220,14 @@ static void decode(Context *c) {
     if (depth == 16) png_set_strip_16(c->png);
     c->phase = "header_metadata"; header_metadata(c);
     c->phase = "normal_transforms";
-    /* These are the original normal-mode calls, not a reconstructed decoder. */
+    /* These are the original mode-specific calls, not an intended key fix. */
+    if (c->grayscale) {
+        if (color != PNG_COLOR_TYPE_PALETTE) fail(c, "probe-scope", "Palette-gray reference requires a palette source");
+        png_set_palette_to_rgb(c->png);
+        png_set_bgr(c->png);
+        if (depth < 8) png_set_packing(c->png);
+        c->manual_gray = 1;
+    } else {
     if (color == PNG_COLOR_TYPE_PALETTE) {
         if (c->keyidx == -1) {
             if (png_get_valid(c->png, c->info, PNG_INFO_tRNS)) {
@@ -225,7 +241,6 @@ static void decode(Context *c) {
             color = PNG_COLOR_TYPE_RGB_ALPHA;
         }
     }
-    c->info_trans_after = c->info->num_trans; c->decoder_trans_after = c->png->num_trans;
     switch (color) {
         case PNG_COLOR_TYPE_GRAY_ALPHA:
             png_set_gray_to_rgb(c->png); color = PNG_COLOR_TYPE_RGB_ALPHA;
@@ -238,36 +253,49 @@ static void decode(Context *c) {
             png_set_bgr(c->png); png_set_filler(c->png, 0xff, PNG_FILLER_AFTER); break;
         default: fail(c, "loader", "Unsupported color type");
     }
+    }
+    c->info_trans_after = c->info->num_trans; c->decoder_trans_after = c->png->num_trans;
     if (width >= 65536 || height >= 65536) fail(c, "loader", "Too large image");
     if (!width || !height || width > 32 || height > 32) fail(c, "probe-budget", "Fixture exceeds 32x32");
     c->phase = "read_update_info"; event(c, "call", "png_read_update_info");
     png_read_update_info(c->png, c->info);
     c->rowbytes = png_get_rowbytes(c->png, c->info);
     c->channels = png_get_channels(c->png, c->info); c->output_depth = png_get_bit_depth(c->png, c->info);
-    c->unsafe_pixels = (c->color == PNG_COLOR_TYPE_PALETTE && !c->original_trns && c->keyidx != -1) || c->rowbytes != width * 4;
+    c->unsafe_pixels = !c->manual_gray &&
+        ((c->color == PNG_COLOR_TYPE_PALETTE && !c->original_trns && c->keyidx != -1) || c->rowbytes != width * 4);
     c->phase = "size_callback"; c->size_called = 1; event(c, "size", "%ux%u rowbytes=%u", c->width, c->height, c->rowbytes);
     if (c->rowbytes > 4096) fail(c, "probe-budget", "Row exceeds probe budget");
-    c->destination_bytes = (size_t)width * height * 4;
+    c->destination_stride = width * (c->grayscale ? 1 : 4);
+    c->comparison_prefix = c->grayscale ? width : c->rowbytes;
+    if (c->palette_reference && ((!c->grayscale && c->rowbytes != width * 3 && c->rowbytes != width * 4) ||
+        (c->grayscale && c->rowbytes < width * 3))) fail(c, "probe-scope", "Unexpected palette source row layout");
+    c->destination_bytes = (size_t)c->destination_stride * height;
     if (c->destination_bytes > MAX_DESTINATION_BYTES) fail(c, "probe-budget", "Destination exceeds probe budget");
     c->destination = (unsigned char *)malloc(c->destination_bytes);
     if (!c->destination) fail(c, "allocation", "Destination allocation failed");
     memset(c->destination, DESTINATION_SENTINEL, c->destination_bytes);
-    if (interlace == PNG_INTERLACE_NONE && !c->unsafe_pixels) c->pixels = c->destination;
+    if (interlace == PNG_INTERLACE_NONE && !c->manual_gray && (!c->unsafe_pixels || c->palette_reference)) c->pixels = c->destination;
     else {
-        c->pixels = (unsigned char *)malloc((size_t)c->rowbytes * height);
+        size_t temporary = (size_t)c->rowbytes * (c->manual_gray && interlace == PNG_INTERLACE_NONE ? 1 : height);
+        c->pixels = (unsigned char *)malloc(temporary);
         if (!c->pixels) fail(c, "allocation", "Row allocation failed");
-        memset(c->pixels, DESTINATION_SENTINEL, (size_t)c->rowbytes * height);
+        memset(c->pixels, DESTINATION_SENTINEL, temporary);
     }
     snapshot(c, "destination-created", -1);
     if (interlace == PNG_INTERLACE_NONE) {
         for (y = 0; y < height; y++) {
             c->current_row = (int)y; c->phase = "read_row"; event(c, "scanline-acquire", "%u", y);
             snapshot(c, "row-call-before", (int)y);
-            png_read_row(c->png, c->pixels + (size_t)y * c->rowbytes, NULL);
+            png_read_row(c->png, c->manual_gray ? c->pixels :
+                c->pixels + (size_t)y * (c->pixels == c->destination ? c->destination_stride : c->rowbytes), NULL);
             /* png_combine_row can have written the destination before
              * png_read_finish_row raises a trailer/deflate error. Reaching
              * this point is separate evidence of a completed public row. */
             snapshot(c, "row-call-returned", (int)y);
+            if (c->manual_gray) {
+                palette_gray(c->destination + (size_t)y * c->destination_stride, c->pixels, width);
+                snapshot(c, "manual-gray-converted", (int)y);
+            }
             c->rows_complete++; event(c, "scanline-commit", "%u", y);
             snapshot(c, "row-complete", (int)y);
         }
@@ -290,7 +318,10 @@ static void decode(Context *c) {
         snapshot(c, "read-end-returned", -1);
         c->phase = "interlace_publish";
         for (y = 0; y < height; y++) {
-            if (!c->unsafe_pixels) memcpy(c->destination + (size_t)y * width * 4, c->pixels + (size_t)y * c->rowbytes, width * 4);
+            if (c->manual_gray)
+                palette_gray(c->destination + (size_t)y * c->destination_stride, c->pixels + (size_t)y * c->rowbytes, width);
+            else if (!c->unsafe_pixels || c->palette_reference)
+                memcpy(c->destination + (size_t)y * c->destination_stride, c->pixels + (size_t)y * c->rowbytes, c->rowbytes);
             c->rows_complete++; event(c, "scanline-commit", "%u", y);
             snapshot(c, "interlace-row-published", (int)y);
         }
@@ -324,26 +355,44 @@ static void output(Context *c) {
     printf(",\"pngLongBytes\":%u,\"pointerBytes\":%u,\"keyidx\":%d,\"width\":%u,\"height\":%u,\"bitDepth\":%d,\"colorType\":%d,\"interlace\":%d,\"rowbytes\":%u,\"channels\":%d,\"outputDepth\":%d,\"rowsComplete\":%u,\"sizeCallback\":%s,\"decodeComplete\":%s",
         (unsigned)sizeof(png_uint_32), (unsigned)sizeof(void *), c->keyidx, c->width, c->height, c->depth, c->color, c->interlace, c->rowbytes, c->channels, c->output_depth, c->rows_complete, c->size_called ? "true" : "false", c->decoded ? "true" : "false");
     printf(",\"transparencyState\":{\"originalInfoValid\":%s,\"infoBefore\":%d,\"decoderBefore\":%d,\"infoAfterSetter\":%d,\"decoderAfterSetter\":%d}", c->original_trns ? "true" : "false", c->info_trans_before, c->decoder_trans_before, c->info_trans_after, c->decoder_trans_after);
-    printf(",\"pixelObservation\":"); json_string(c->unsafe_pixels ? "unsafe-native-destination-layout; rowbytes only; pixel bytes not inspected" : "complete rows only");
+    printf(",\"paletteReference\":%s,\"mode\":", c->palette_reference ? "true" : "false"); json_string(c->grayscale ? "grayscale" : "normal");
+    printf(",\"pixelObservation\":"); json_string(c->manual_gray ? "defined manual grayscale destination" :
+        c->unsafe_pixels && c->palette_reference ? "defined BGR prefix only; original destination tail excluded" :
+        c->unsafe_pixels ? "unsafe-native-destination-layout; rowbytes only; pixel bytes not inspected" : "complete rows only");
     printf(",\"bgra\":");
-    if (c->unsafe_pixels) printf("null");
+    if (c->grayscale || c->unsafe_pixels) printf("null");
     else json_bytes(c->destination, (size_t)c->rows_complete * c->width * 4, 0);
     printf(",\"rgba\":");
-    if (c->unsafe_pixels) printf("null");
+    if (c->grayscale || c->unsafe_pixels) printf("null");
     else json_bytes(c->destination, (size_t)c->rows_complete * c->width * 4, 1);
     printf(",\"destination\":");
-    if (!c->destination || c->unsafe_pixels) printf("null");
+    if (!c->destination || (c->unsafe_pixels && !c->palette_reference)) printf("null");
     else {
-        printf("{\"initialByte\":%u,\"width\":%u,\"height\":%u,\"scope\":\"normal-main-destination; excludes mask temporary and manual palette-gray\",\"bgra\":", DESTINATION_SENTINEL, c->width, c->height);
-        json_bytes(c->destination, c->destination_bytes, 0); printf(",\"rgba\":");
-        json_bytes(c->destination, c->destination_bytes, 1); putchar('}');
+        size_t at;
+        printf("{\"initialByte\":%u,\"width\":%u,\"height\":%u,\"pixelBytes\":%u,\"rowStride\":%u,\"comparisonPrefixBytes\":%u,\"excludedTailBytesPerRow\":%u,\"scope\":",
+            DESTINATION_SENTINEL, c->width, c->height, c->grayscale ? 1 : 4, c->destination_stride, c->comparison_prefix,
+            c->destination_stride - c->comparison_prefix);
+        json_string(!c->palette_reference ? "normal-main-destination; excludes mask temporary and manual palette-gray" :
+            c->grayscale ? "manual-palette-gray caller destination; private temporary is not the destination" :
+            c->unsafe_pixels ? "normal-palette-key defined BGR prefix; original unwritten tail excluded" :
+            "normal-palette complete defined caller destination");
+        printf(",\"bytes\":");
+        json_bytes(c->destination, c->destination_bytes, 0);
+        printf(",\"comparisonMask\":[");
+        for (at = 0; at < c->destination_bytes; at++) printf("%s%d", at ? "," : "", at % c->destination_stride < c->comparison_prefix);
+        printf("],\"bgra\":");
+        if (c->grayscale) printf("null"); else json_bytes(c->destination, c->destination_bytes, 0);
+        printf(",\"rgba\":");
+        if (c->grayscale) printf("null"); else json_bytes(c->destination, c->destination_bytes, 1);
+        putchar('}');
     }
     printf(",\"destinationSnapshots\":[");
     for (i = 0; i < c->snapshot_count; i++) {
         DestinationSnapshot *s = c->snapshots[i];
         printf("%s{\"id\":%u,\"traceSequence\":%u,\"eventSequence\":%u,\"inputOffset\":%lu,\"row\":%d,\"rowsComplete\":%u,\"phase\":", i ? "," : "", i + 1, s->trace_sequence, s->event_sequence, (unsigned long)s->input_offset, s->row, s->rows_complete);
-        json_string(s->phase); printf(",\"event\":"); json_string(s->event); printf(",\"bgra\":");
-        json_bytes(s->data, s->bytes, 0); putchar('}');
+        json_string(s->phase); printf(",\"event\":"); json_string(s->event); printf(",\"bytes\":");
+        json_bytes(s->data, s->bytes, 0); printf(",\"bgra\":");
+        if (c->grayscale) printf("null"); else json_bytes(s->data, s->bytes, 0); putchar('}');
     }
     printf("],\"reads\":[");
     for (i = 0; i < c->read_count; i++) {
@@ -366,9 +415,13 @@ int main(int argc, char **argv) {
     if (!actions || strcmp(actions, "true") || !hosted || strcmp(hosted, "github-hosted")) {
         fprintf(stderr, "Native PNG reference runs only on GitHub-hosted Actions.\n"); return 2;
     }
-    if (argc != 3) { fprintf(stderr, "usage: png-reference input.png keyidx\n"); return 2; }
+    if (argc != 3 && argc != 5) { fprintf(stderr, "usage: png-reference input.png keyidx [normal|grayscale palette]\n"); return 2; }
     c = (Context *)calloc(1, sizeof(Context)); if (!c) return 2; active = c; c->current_row = -1;
     c->phase = "input"; c->keyidx = atoi(argv[2]);
+    if (argc == 5) {
+        if (strcmp(argv[4], "palette") || (strcmp(argv[3], "normal") && strcmp(argv[3], "grayscale"))) { free(c); return 2; }
+        c->palette_reference = 1; c->grayscale = !strcmp(argv[3], "grayscale");
+    }
     file = fopen(argv[1], "rb"); if (!file) { perror("input"); free(c); return 2; }
     if (fseek(file, 0, SEEK_END) || (length = ftell(file)) < 0 || length > 65536 || fseek(file, 0, SEEK_SET)) { fclose(file); free(c); return 2; }
     c->input_size = (size_t)length; c->input = (unsigned char *)malloc(c->input_size ? c->input_size : 1);

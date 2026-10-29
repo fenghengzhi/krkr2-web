@@ -41,8 +41,17 @@ export async function launchWindowAttention(
     page.locator('.game-window[data-window-id]').filter({
       has: page.locator('.game-window-title', { hasText: new RegExp(`^${caption}$`) }),
     })
+  const waitForStopped = async () => {
+    await expect(page.locator('#status')).toHaveText('待机')
+    await expect(page.locator('.game-window[data-window-id]')).toHaveCount(0)
+    await expect(page.locator('.game-text-input')).toHaveCount(0)
+    await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
+    await expect(page.locator('#logs')).not.toContainText('RPC client has been disposed')
+    expect(errors).toEqual([])
+  }
   return {
     surface,
+    waitForStopped,
     async stop() {
       // A failed assertion can leave a native modal open, making page controls
       // inert. Use its real Stop action so cleanup cannot hide that failure
@@ -53,12 +62,7 @@ export async function launchWindowAttention(
       })
       if (await dialogStop.count()) await dialogStop.last().click()
       else if (await page.locator('#stop').isEnabled()) await page.locator('#stop').click()
-      await expect(page.locator('#status')).toHaveText('待机')
-      await expect(page.locator('.game-window[data-window-id]')).toHaveCount(0)
-      await expect(page.locator('.game-text-input')).toHaveCount(0)
-      await expect(page.locator('#logs')).not.toContainText('Worker did not stop in time')
-      await expect(page.locator('#logs')).not.toContainText('RPC client has been disposed')
-      expect(errors).toEqual([])
+      await waitForStopped()
     },
   }
 }

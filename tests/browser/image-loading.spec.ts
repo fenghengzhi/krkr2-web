@@ -73,8 +73,8 @@ Debug.message("images-ready:"+string(tags.offs_x=="12" && tags.offs_y=="-7" && t
     expect(await sample(page)).toEqual([
       [0, 0, 0, 255],
       [101, 51, 26, 255],
-      [255, 0, 0, 255],
       [0, 0, 0, 255],
+      [255, 0, 0, 255],
     ])
     const bounds = (await page.locator('canvas').boundingBox())!
     await page.locator('canvas').click({ position: { x: bounds.width / 8, y: bounds.height / 2 } })
@@ -96,8 +96,8 @@ Debug.message("images-ready:"+string(tags.offs_x=="12" && tags.offs_y=="-7" && t
     expect(await sample(page)).toEqual([
       [255, 255, 255, 255],
       [228, 178, 153, 255],
-      [255, 0, 0, 255],
       [0, 0, 0, 255],
+      [255, 0, 0, 255],
     ])
     await page.locator('#stop').click()
     expect(errors).toEqual([])

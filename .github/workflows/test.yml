@@ -596,7 +596,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, png-reference, png-stream-comparison]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-reference, png-stream-comparison, png-palette-comparison]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -656,6 +656,14 @@ jobs:
     needs: build
     uses: ./.github/workflows/menu-lifetime-runtime.yml
 
+  activity-wrapper-runtime-reference:
+    name: Fixed batch111 activity wrapper runtime diagnosis
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/activity-wrapper-runtime.yml
+
   png-reference:
     name: Fixed libpng 1.0.6 loader reference
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
@@ -701,5 +709,30 @@ jobs:
         with:
           name: png-stream-comparison
           path: out/verification/png-stream-comparison/
+          if-no-files-found: error
+          retention-days: 90
+
+  png-palette-comparison:
+    name: PNG palette transforms and native row layout
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    needs: [build, png-reference]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-png-reference
+          path: out/verification/native-png/
+      - name: Compare defined palette output bytes and safe initialized tails
+        run: node --import tsx tests/probes/png-palette-compare.ts out/verification/native-png
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: png-palette-comparison
+          path: out/verification/png-palette-comparison/
           if-no-files-found: error
           retention-days: 90

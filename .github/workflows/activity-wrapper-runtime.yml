@@ -1,0 +1,213 @@
+name: Fixed batch111 activity wrapper runtime diagnosis
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  activity-wrapper-runtime:
+    name: Fixed111 Node 24.19.0 / ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [default, no-wasm-code-gc]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: diagnostic
+          persist-credentials: false
+      - name: Preserve the complete fixed plan before acquisition
+        run: |
+          mkdir -p evidence/cores evidence/runtime evidence/acquisition
+          cp diagnostic/scripts/activity-wrapper-reference.json evidence/reference.json
+          cp diagnostic/scripts/run-activity-wrapper-diagnostic.mjs evidence/runtime/
+          python3 - <<'PY'
+          import json
+          reference = json.load(open('evidence/reference.json'))
+          json.dump({'mode': '${{ matrix.mode }}', 'source': reference['commit'],
+            'plan': [{'repetition': n, 'definitions': reference['definitions']} for n in range(1, 17)],
+            'planned': 240, 'registered': 0, 'dequeued': 0, 'completed': 0, 'unreported': 240,
+            'state': 'acquisition-pending', 'passingResult': False},
+            open('evidence/acquisition-plan.json', 'w'), indent=2)
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: de046be70c7a9517e9b9d35a0a8baaf8afcac1d1
+          path: fixture
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+      - name: Recover only the exact archived batch111 build
+        timeout-minutes: 8
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, tarfile, urllib.request, zipfile
+          reference = json.load(open('evidence/reference.json'))
+          artifact = reference['artifact']
+          root = pathlib.Path('fixture').resolve()
+          assert subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip() == reference['commit']
+          def sha(data): return hashlib.sha256(data).hexdigest()
+          observed = {}
+          for name, expected in reference['sourceSha256'].items():
+              observed[name] = sha((root / name).read_bytes())
+              assert observed[name] == expected, ('source-hash', name, observed[name])
+          json.dump(observed, open('evidence/acquisition/source-hashes.json', 'w'), indent=2)
+          api = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/artifacts/{artifact['id']}"
+          headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json',
+                     'X-GitHub-Api-Version': '2022-11-28'}
+          # A future hosted run reads this one pinned ID, never 'latest successful'.
+          with urllib.request.urlopen(urllib.request.Request(api, headers=headers), timeout=60) as response:
+              metadata = json.load(response)
+          json.dump(metadata, open('evidence/acquisition/artifact-api.json', 'w'), indent=2)
+          assert str(metadata['id']) == artifact['id'] and metadata['name'] == artifact['name']
+          assert metadata['size_in_bytes'] == artifact['bytes'] and metadata['digest'] == 'sha256:' + artifact['sha256']
+          assert metadata['expired'] is False
+          assert str(metadata['workflow_run']['id']) == reference['runId']
+          assert metadata['workflow_run']['head_sha'] == reference['commit']
+          # Strip credentials on GitHub's signed cross-host archive redirect.
+          class ArchiveRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                  new = super().redirect_request(req, fp, code, msg, hdrs, newurl)
+                  if new is not None: new.remove_header('Authorization')
+                  return new
+          archive = pathlib.Path('evidence/acquisition/test-build.zip')
+          with urllib.request.build_opener(ArchiveRedirect()).open(urllib.request.Request(api + '/zip', headers=headers), timeout=60) as response, archive.open('wb') as output:
+              count = 0
+              while block := response.read(1024 * 1024):
+                  count += len(block)
+                  assert count <= artifact['bytes'], 'Archive larger than pinned original'
+                  output.write(block)
+          assert archive.stat().st_size == artifact['bytes'] and sha(archive.read_bytes()) == artifact['sha256']
+          with zipfile.ZipFile(archive) as source:
+              names = source.namelist()
+              assert names == ['test-build.tar.gz'], names
+              info = source.getinfo(names[0])
+              assert info.file_size <= 128 * 1024 * 1024, 'Unexpected build tar size'
+              packed = source.read(names[0])
+          assert sha(packed) == artifact['tarSha256']
+          tarpath = pathlib.Path('evidence/acquisition/test-build.tar.gz')
+          tarpath.write_bytes(packed)
+          wanted = reference['buildSha256']
+          found = set()
+          with tarfile.open(tarpath) as source:
+              for item in source:
+                  name = item.name.removeprefix('./')
+                  if name not in wanted: continue
+                  assert name not in found and item.isfile() and 0 <= item.size <= 16 * 1024 * 1024, name
+                  data = source.extractfile(item).read()
+                  assert sha(data) == wanted[name], ('build-hash', name)
+                  destination = root / name
+                  assert destination.resolve().is_relative_to(root)
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  destination.write_bytes(data)
+                  found.add(name)
+          assert found == set(wanted), ('missing-build-assets', set(wanted) - found)
+          json.dump({'verified': True, 'source': reference['commit'], 'run': reference['runId'],
+                     'artifact': artifact, 'restored': sorted(found)}, open('evidence/acquisition/verified.json', 'w'), indent=2)
+          PY
+      - name: Install the fixed lockfile without changing it
+        timeout-minutes: 8
+        working-directory: fixture
+        run: |
+          npm ci > ../evidence/acquisition/npm-ci.log 2>&1
+          git diff --exit-code -- package.json package-lock.json
+      - name: Preserve exact runtime and enable owned full cores
+        timeout-minutes: 8
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdb
+          node --version > evidence/runtime/node-version.txt
+          sha256sum "$(command -v node)" > evidence/runtime/node-sha256.txt
+          cp "$(command -v node)" evidence/runtime/node
+          readelf -n "$(command -v node)" > evidence/runtime/node-build-id.txt
+          cp -R fixture/.generated evidence/runtime/generated
+          git -C fixture archive HEAD > evidence/runtime/fixed-source.tar
+          uname -a > evidence/runtime/kernel.txt
+          dpkg-query -W libc6 gdb > evidence/runtime/packages.txt
+          ldd "$(command -v node)" > evidence/runtime/linked-libraries.txt
+          gdb --version > evidence/runtime/gdb-version.txt
+          sudo sysctl -w "kernel.core_pattern=$GITHUB_WORKSPACE/evidence/cores/core.%e.%p" > evidence/runtime/core-pattern.txt
+      - name: Observe sixteen fixed fresh processes without retrying failures
+        timeout-minutes: 25
+        run: |
+          ulimit -c unlimited
+          node diagnostic/scripts/run-activity-wrapper-diagnostic.mjs '${{ matrix.mode }}' fixture evidence
+      - name: Preserve acquisition failures and journals still owned at interruption
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, shutil
+          root = pathlib.Path('evidence')
+          root.mkdir(exist_ok=True)
+          live = pathlib.Path('fixture/out/ci')
+          if live.exists(): shutil.copytree(live, root / 'unretired-ci', dirs_exist_ok=True)
+          if not (root / 'summary.json').exists():
+              plan = json.load(open(root / 'acquisition-plan.json')) if (root / 'acquisition-plan.json').exists() else {'planned': 240, 'unreported': 240}
+              plan.update(state='driver-not-started-or-no-summary', passingResult=False)
+              json.dump(plan, open(root / 'not-started.json', 'w'), indent=2)
+          PY
+      - name: Hash complete cores and collect bounded backtraces
+        if: always()
+        timeout-minutes: 15
+        run: |
+          mkdir -p evidence/backtraces
+          result=0
+          for core in evidence/cores/core.*; do
+            [ -f "$core" ] || continue
+            result=1
+            name=$(basename "$core")
+            sha256sum "$core" >> evidence/backtraces/core-sha256.txt
+            stat --printf='%n %s bytes\n' "$core" >> evidence/backtraces/core-sizes.txt
+            if ! timeout --signal=TERM --kill-after=5s 30s gdb --batch \
+              -ex 'set pagination off' -ex 'set max-value-size 4096' -ex 'set print elements 32' \
+              -ex 'info sharedlibrary' -ex 'thread apply all bt full' \
+              evidence/runtime/node "$core" > "evidence/backtraces/$name.txt" 2>&1; then
+              printf '%s backtrace-incomplete\n' "$name" >> evidence/backtraces/incomplete.txt
+            fi
+          done
+          python3 - <<'PY'
+          import json, pathlib
+          root = pathlib.Path('evidence/backtraces')
+          observations = []
+          for path in sorted(root.glob('core.*.txt')):
+              text = path.read_text(errors='replace')
+              observations.append({'file': path.name,
+                'threadIsolationEraseAssertion': 'jit_page_->allocations_.erase(addr) == 1' in text,
+                'wrapperReleaseFrames': 'WasmImportWrapperCache' in text and 'FreeDeadCode' in text,
+                'sigtrap': 'SIGTRAP' in text, 'sigabrt': 'SIGABRT' in text})
+          json.dump({'claim': 'Observed crash signatures, not causal proof or a repaired main runtime',
+                     'cores': observations}, open(root / 'signatures.json', 'w'), indent=2)
+          PY
+          exit "$result"
+      - name: Upload every observation and exact source/runtime
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        timeout-minutes: 10
+        with:
+          name: activity-wrapper-runtime-${{ matrix.mode }}
+          path: |
+            evidence/
+            !evidence/cores/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload full original wrapper cores separately
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        timeout-minutes: 15
+        with:
+          name: activity-wrapper-native-cores-${{ matrix.mode }}
+          path: evidence/cores/
+          if-no-files-found: ignore
+          retention-days: 90

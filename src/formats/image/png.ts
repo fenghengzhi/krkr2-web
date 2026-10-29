@@ -46,6 +46,44 @@ function passes(h: Header) {
     }))
     .filter((p) => p.width && p.height)
 }
+/** Interpret libpng's actual BGR(A) byte row before the loader's copy or
+ * manual 24-to-8 conversion. RGBA is only this engine's transport format. */
+function selectedPaletteRow(image: DecodedImage, y: number, h: Header, transparent: Uint8Array | undefined,
+  mode: ImageDecodeSelection['mode'] | undefined, paletteKey: number | undefined): void {
+  if (h.type !== 3 || mode === undefined || mode === 'palettized') return
+  const start = y * h.width * 4, data = image.data, alpha = !!transparent?.length
+  if (mode === 'grayscale') {
+    const channels = alpha ? 4 : 3,
+      nativeByte = (offset: number) => {
+        const pixel = Math.floor(offset / channels), lane = offset % channels
+        return data[start + pixel * 4 + (lane === 0 ? 2 : lane === 2 ? 0 : lane)]!
+      }
+    // Backwards writes cannot overwrite an earlier three-byte source group.
+    // A tRNS-expanded row is BGRA, but the native manual converter still
+    // walks BGR triples, including alpha and shifted channels after pixel 0.
+    for (let x = h.width - 1; x >= 0; x--) {
+      const from = x * 3, to = start + x * 4,
+        value = (54 * nativeByte(from + 2) + 183 * nativeByte(from + 1) + 19 * nativeByte(from)) >>> 8
+      data[to] = data[to + 1] = data[to + 2] = value
+      data[to + 3] = 255
+    }
+  } else if (paletteKey !== undefined && !alpha) {
+    // The old info-only tRNS setter does not update the reader. With no file
+    // tRNS, libpng writes exactly 3W BGR bytes into a 4W destination row.
+    // Preserve that defined prefix. The Web's fresh bitmap has zeroed tail
+    // bytes; those zeros are a safety policy, not a native uninitialized oracle.
+    for (let x = 0; x < h.width; x++) {
+      const from = start + x * 4, to = start + x * 3,
+        r = data[from]!, g = data[from + 1]!, b = data[from + 2]!
+      data[to] = b; data[to + 1] = g; data[to + 2] = r
+    }
+    data.fill(0, start + h.width * 3, start + h.width * 4)
+    for (let x = 0; x < h.width; x++) {
+      const at = start + x * 4, b = data[at]!
+      data[at] = data[at + 2]!; data[at + 2] = b
+    }
+  }
+}
 function* pixels(
   h: Header,
   bytes: Uint8Array | undefined,
@@ -56,6 +94,7 @@ function* pixels(
   progress?: ImageDecodeProgress,
   rowSource?: (length: number) => Generator<void, Uint8Array>,
   finishRow?: (last: boolean) => Generator<void, void>,
+  paletteKey?: number,
 ): Generator<void, DecodedImage> {
   const { width, height, depth, type, channels } = h,
     image: DecodedImage = { width, height, data: new Uint8Array(width * height * 4) },
@@ -140,13 +179,11 @@ function* pixels(
                 ? 0
                 : 255
         }
-        if (mode === 'grayscale') {
+        if (mode === 'grayscale' && type !== 3) {
           // Fixed GraphicsLoaderIntf passes (red=0, green=0) to libpng
           // 1.0.6 for RGB(A), selecting B. Palette PNG uses TVP's manual
           // BGR conversion instead. Gray/gray-alpha already contains gray.
-          const value = type === 3
-            ? (54 * image.data[to]! + 183 * image.data[to + 1]! + 19 * image.data[to + 2]!) >>> 8
-            : type === 2 || type === 6 ? image.data[to + 2]! : image.data[to]!
+          const value = type === 2 || type === 6 ? image.data[to + 2]! : image.data[to]!
           image.data[to] = image.data[to + 1] = image.data[to + 2] = value
           image.data[to + 3] = 255
         } else if (mode === 'palettized') image.data[to + 3] = 255
@@ -154,10 +191,12 @@ function* pixels(
       const swap = previous
       previous = row
       row = swap
+      if (!h.interlace && mode === 'normal') selectedPaletteRow(image, y, h, transparent, mode, paletteKey)
       if (rowSource && !h.interlace && !(mode === 'grayscale' && h.type === 3))
         progress?.write?.(y, image.data.subarray(y * width * 4, (y + 1) * width * 4),
           image.indices?.subarray(y * width, (y + 1) * width))
       if (finishRow) yield* finishRow(pass === imagePasses.at(-1) && y === pass.height - 1)
+      if (!h.interlace && mode === 'grayscale') selectedPaletteRow(image, y, h, transparent, mode, paletteKey)
       if (!h.interlace) progress?.row(y, image.data.subarray(y * width * 4, (y + 1) * width * 4),
         image.indices?.subarray(y * width, (y + 1) * width))
       yield
@@ -169,7 +208,7 @@ function* pixels(
 
 function streamPlan(bytes: Uint8Array, start: number, h: Header, palette: Uint8Array | undefined,
   transparent: Uint8Array | undefined, metadata: Map<string, string>, mode: ImageDecodeSelection['mode'],
-  progress: ImageDecodeProgress | undefined): PngStreamPlan {
+  progress: ImageDecodeProgress | undefined, paletteKey?: number): PngStreamPlan {
   let phase: PngStreamPlan['phase'] = h.interlace ? 'read_image' : 'read_row', started = false
   return {
     expandedLength: passes(h).reduce((sum, pass) => sum +
@@ -180,7 +219,7 @@ function streamPlan(bytes: Uint8Array, start: number, h: Header, palette: Uint8A
       started = true
       const source = new PngPull(bytes, start, inflater),
         image = yield* pixels(h, undefined, palette, transparent, metadata, mode, progress,
-          (length) => source.row(length), (last) => source.finishRow(last))
+          (length) => source.row(length), (last) => source.finishRow(last), paletteKey)
       phase = 'read_end'
       yield* source.endImageData()
       while (true) {
@@ -206,11 +245,12 @@ function streamPlan(bytes: Uint8Array, start: number, h: Header, palette: Uint8A
         if (type === 'IEND') break
         yield
       }
-      if (h.interlace && progress) for (let y = 0; y < h.height; y++) {
+      if (h.interlace) for (let y = 0; y < h.height; y++) {
+        selectedPaletteRow(image, y, h, transparent, mode, paletteKey)
         const rgba = image.data.subarray(y * h.width * 4, (y + 1) * h.width * 4),
           indices = image.indices?.subarray(y * h.width, (y + 1) * h.width)
-        progress.write?.(y, rgba, indices)
-        progress.row(y, rgba, indices)
+        progress?.write?.(y, rgba, indices)
+        progress?.row(y, rgba, indices)
         yield
       }
       if (metadata.size) image.metadata = metadata
@@ -221,11 +261,11 @@ function streamPlan(bytes: Uint8Array, start: number, h: Header, palette: Uint8A
 }
 
 function parse(bytes: Uint8Array, mode: ImageDecodeSelection['mode'], progress: ImageDecodeProgress | undefined,
-  streaming: true): Generator<void, PngStreamPlan>
+  streaming: true, paletteKey?: number): Generator<void, PngStreamPlan>
 function parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress,
-  streaming?: false): Generator<void, PngPlan>
+  streaming?: false, paletteKey?: number): Generator<void, PngPlan>
 function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress,
-  streaming = false): Generator<void, PngPlan | PngStreamPlan> {
+  streaming = false, paletteKey?: number): Generator<void, PngPlan | PngStreamPlan> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     metadata = new Map<string, string>()
   const need = (offset: number, requested: number, diagnostic: string, audited = true) => {
@@ -279,7 +319,7 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
           throw new ImageDecodeError('png', header ? 'Missing PLTE before IDAT' : 'Missing IHDR before IDAT')
         if (streaming) {
           progress?.size(header.width, header.height)
-          return streamPlan(bytes, at, header, palette, transparent, metadata, mode, progress)
+          return streamPlan(bytes, at, header, palette, transparent, metadata, mode, progress, paletteKey)
         }
       } else if (!header && ['tRNS', 'oFFs', 'pHYs'].includes(type)) {
         throw new ImageDecodeError('png', `Missing IHDR before ${type === 'pHYs' ? 'pHYS' : type}`)
@@ -485,10 +525,11 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
     decode: (expanded) => {
       if (expanded.length !== expandedLength) throw new Error('PNG expanded size mismatch')
       return (function* (): Generator<void, DecodedImage> {
-        const image = yield* pixels(h, expanded, palette, transparent, metadata, mode, progress)
+        const image = yield* pixels(h, expanded, palette, transparent, metadata, mode, progress, undefined, undefined, paletteKey)
         if (tailFailed) throw tailError
-        if (progress && h.interlace) for (let y = 0; y < h.height; y++) {
-          progress.row(y, image.data.subarray(y * h.width * 4, (y + 1) * h.width * 4),
+        if (h.interlace) for (let y = 0; y < h.height; y++) {
+          selectedPaletteRow(image, y, h, transparent, mode, paletteKey)
+          progress?.row(y, image.data.subarray(y * h.width * 4, (y + 1) * h.width * 4),
             image.indices?.subarray(y * h.width, (y + 1) * h.width))
           yield
         }
@@ -509,6 +550,7 @@ export function decodeSelectedPng(
   bytes: Uint8Array,
   mode: ImageDecodeSelection['mode'],
   progress?: ImageDecodeProgress,
+  paletteKey?: number,
 ): Generator<void, PngPlan> {
   if (bytes.length < 8) throw new ImageReadError('png', 0, 8, bytes.length, 'Truncated PNG signature')
   if (magic.some((byte, index) => bytes[index] !== byte)) {
@@ -516,18 +558,18 @@ export function decodeSelectedPng(
     throw new ImageDecodeError('png', firstFourMatch
       ? 'PNG file corrupted by ASCII conversion' : 'Not a PNG file')
   }
-  return parse(bytes, mode, progress)
+  return parse(bytes, mode, progress, false, paletteKey)
 }
 
 /** Stops at the first IDAT header. No compressed payload or IDAT CRC is read
  * until the caller has acquired its owned pull inflater. */
 export function prepareSelectedPngStream(bytes: Uint8Array, mode: ImageDecodeSelection['mode'],
-  progress?: ImageDecodeProgress): Generator<void, PngStreamPlan> {
+  progress?: ImageDecodeProgress, paletteKey?: number): Generator<void, PngStreamPlan> {
   if (bytes.length < 8) throw new PngStreamReadError(0, 8, bytes.length)
   if (bytes.length > 64 * 1024 * 1024) throw new Error('PNG source exceeds 64 MiB budget')
   if (magic.some((value, index) => bytes[index] !== value)) {
     const firstFour = magic.slice(0, 4).every((value, index) => bytes[index] === value)
     throw new ImageDecodeError('png', firstFour ? 'PNG file corrupted by ASCII conversion' : 'Not a PNG file')
   }
-  return parse(bytes, mode, progress, true)
+  return parse(bytes, mode, progress, true, paletteKey)
 }

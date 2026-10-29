@@ -14,6 +14,7 @@ System.exitOnWindowClose=false;
 var win=new Window();win.caption="Geometry retirement";win.setInnerSize(80,48);win.visible=true;
 var root=new Layer(win,null);root.setSize(80,48);root.fillRect(0,0,80,48,0xff234567);
 `), failures: unknown[] = []
+    let stopRequested = false
     try {
       const surface = game.surface('Geometry retirement')
       await expect(surface).toHaveAttribute('data-geometry-revision', /^[1-9][0-9]*$/)
@@ -25,7 +26,10 @@ var root=new Layer(win,null);root.setSize(80,48);root.fillRect(0,0,80,48,0xff234
       await expect.poll(() => page.evaluate(() => window.clientStopBoundary.read().workers
         .flatMap((worker) => worker.held).filter((reply) => reply.operation === 'refreshWindowGeometry').length)).toBe(1)
       await page.locator('#stop').dispatchEvent('click')
-      await game.stop()
+      stopRequested = true
+      // The request is already in flight. A second click can race the button
+      // becoming disabled after shutdown and prevent the retirement assertions.
+      await game.waitForStopped()
       await expect.poll(() => page.workers().filter((worker) => worker.url().includes('session.worker')).length).toBe(0)
       const proof = await page.evaluate(() => window.clientStopBoundary.read()),
         workers = proof.workers.filter((worker) => worker.name.startsWith('krkr2-session-'))
@@ -36,7 +40,10 @@ var root=new Layer(win,null);root.setSize(80,48);root.fillRect(0,0,80,48,0xff234
       ])
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
-    try { await game.stop() } catch (error) { failures.push(error) }
+    try {
+      if (stopRequested) await game.waitForStopped()
+      else await game.stop()
+    } catch (error) { failures.push(error) }
     try { await info.attach('geometry-refresh-stop-boundary', {
       body: JSON.stringify(await page.evaluate(() => window.clientStopBoundary.read()), null, 2),
       contentType: 'application/json',

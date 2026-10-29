@@ -2,6 +2,8 @@
 export interface ImageDecodeSelection {
   readonly format: 'bmp' | 'jpeg' | 'png' | 'tlg' | 'eri'
   readonly mode: 'normal' | 'grayscale' | 'palettized'
+  /** Original clPalIdx low byte, interpreted by the selected normal handler. */
+  readonly paletteKey?: number
 }
 
 /** Synchronous selected-decoder output. Rows are borrowed RGBA/index views;

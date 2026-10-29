@@ -201,7 +201,8 @@ export class ImageLoader {
     this.scheduler.check()
     return image
   }
-  private async decodeSelected(selected: SelectedImage, mode: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress): Promise<DecodedImage> {
+  private async decodeSelected(selected: SelectedImage, mode: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress,
+    paletteKey?: number): Promise<DecodedImage> {
     this.scheduler.check()
     const bytes = await selected.resource.read()
     let waiting = this.scheduler.wait?.()
@@ -213,7 +214,8 @@ export class ImageLoader {
       write: (y, rgba, indices) => { this.scheduler.check(); progress.write?.(y, rgba, indices) },
       row: (y, rgba, indices) => { this.scheduler.check(); progress.row(y, rgba, indices) },
     } : undefined
-    const image = await this.decode(bytes, { format: selected.format, mode }, observer)
+    const image = await this.decode(bytes, { format: selected.format, mode,
+      ...(paletteKey === undefined ? {} : { paletteKey }) }, observer)
     waiting = this.scheduler.wait?.()
     if (waiting) await waiting
     this.scheduler.check()
@@ -229,7 +231,8 @@ export class ImageLoader {
     }
     return image
   }
-  private progress(request: ProcessedImageRequest, observations: ProcessedImageObservations, mask = false): ImageDecodeProgress {
+  private progress(request: ProcessedImageRequest, observations: ProcessedImageObservations, mask = false,
+    format?: ImageDecodeSelection['format']): ImageDecodeProgress {
     let sourceWidth = 0, sourceHeight = 0
     return {
       size: (width, height) => {
@@ -273,7 +276,10 @@ export class ImageLoader {
               row[to + 3] = rgba[from + 3]!
               if (request.key >>> 24 === 0)
                 row[to + 3] = ((row[to]! << 16) | (row[to + 1]! << 8) | row[to + 2]!) === request.key ? 0 : 255
-              else if (request.key >>> 24 === 3 && indices)
+              // PNG's original handler owns clPalIdx. Its tRNS setter does
+              // not implement generic index masking, and partial raw rows
+              // already carry the handler's actual packed output layout.
+              else if (request.key >>> 24 === 3 && indices && format !== 'png')
                 row[to + 3] = indices[sourceX] === (request.key & 255) ? 0 : 255
             }
           }
@@ -285,12 +291,13 @@ export class ImageLoader {
   private async process(request: ProcessedImageRequest, observations: ProcessedImageObservations): Promise<ProcessedImage> {
     const selected = await this.resolveSelected(request.name, observations),
       decoded = await this.decodeSelected(selected, request.mode,
-        request.mode === 'normal' ? this.progress(request, observations) : undefined)
+        request.mode === 'normal' ? this.progress(request, observations, false, selected.format) : undefined,
+        request.mode === 'normal' && request.key >>> 24 === 3 ? request.key & 255 : undefined)
     if (request.mode !== 'normal')
       return this.finish(planeImage(decoded, request.mode, request.width, request.height))
     const image: DecodedImage = { ...observations.progress.image!,
       ...(decoded.metadata ? { metadata: decoded.metadata } : {}) }
-    // RGB/palette keys already apply at each completed row. Adaptive keying
+    // Handler palette semantics and completed-row RGB keys already apply. Adaptive keying
     // starts only after the selected handler has completed, including its tail.
     await this.finish(observations.progress.finish(applyImageKey(image,
       request.key === 0x01ffffff ? request.key : noColorKey)))

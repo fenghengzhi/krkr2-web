@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "commit": "de046be70c7a9517e9b9d35a0a8baaf8afcac1d1",
+  "runId": "40785212878",
+  "attempt": "1",
+  "artifact": {
+    "id": "12864023410",
+    "name": "test-build",
+    "bytes": 12462568,
+    "sha256": "2368e814954b4b70791b2458df27df381f08f437d6851f8846857718f760ff13",
+    "tarSha256": "9a2816b17501a1ad3402100327306a58293b74a1f8a3fdd44b5b11ec6d3c7a34"
+  },
+  "node": { "version": "v24.19.0", "v8": "13.6.233.17-node.51", "sha256": "bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12" },
+  "sourceSha256": {
+    "tests/integration/activity.test.ts": "8cb631c8e94f0eaecff1940f1ab091837013bfb8e9f2be1e7ec1ae12dad793e1",
+    "tests/helpers/headless.ts": "aec0ebdbd3d498baf10e504aa08020bae82d4f2c8bc3b1ca0bf30cd578bbef83",
+    "src/backends/script/tjs-wasm/runtime.ts": "155435ceee78a173e7db2e0b4ac97cf548c30cf51a1659c6568a12bfd96275f1",
+    "src/backends/script/tjs-wasm/module.ts": "4e236fb9eaccc8813cc9e754e5bcca8b7bce47369a74f80d5b7f1adf5c1981c0",
+    "src/engine/session.ts": "ad1ab11e47a765902fa31c03815b4a50bc45657753bdf8f0c77d24e29da3001c",
+    "package.json": "263584191ba203cf836b6f610125308e8978c89c6bb5e6aaecbd4b05b6a6b28c",
+    "package-lock.json": "da82be99237dc38c8b5a355f6f91e721adc818f801074cc0103dcebcfd94d289",
+    "scripts/record-node-test-process.mjs": "397403f44bc60c1db2c5aa0ddea0dd020a71dc22408b24cf6c713604a1779ac1",
+    "scripts/record-node-test-events.mjs": "429c44a930918a65ad9a67b948ac785188f8eab5ac5b2168e1ddd067b15cb950"
+  },
+  "buildSha256": {
+    "out/ci/build-info.json": "335cddd6da86620335260acf079bcb02c833904f19a00399b9affcf4381f8a91",
+    ".generated/fonts/manifest.json": "c7b8fe50f4fe17318f1b68df3724b948ac47a441a14f70228164d230439cb41f",
+    ".generated/fonts/font-3a8ca0c1befb4453.mjs": "3a8ca0c1befb4453f7bb055aa85f53a9a27246d94a856dfd4d7e537327fb64e8",
+    ".generated/fonts/font-d4118bb881544184.wasm": "d4118bb881544184fa8ccddaa2ca128b5a7c5e5ded5c0e1a22e6d378ebf4c842",
+    ".generated/wasm/manifest.json": "94250cdce7d6857d5d974bf7a2f9a0c1f9b428c8a0e60c14c78af04b45ace91d",
+    ".generated/wasm/tjs-asyncify-05f4f43a25acded5.wasm": "05f4f43a25acded572c6b592600546bd3e4e017eb08c555027e6d35d7829c48a",
+    ".generated/wasm/tjs-asyncify-8b8b1e78371d0e0d.mjs": "8b8b1e78371d0e0d20c24b612ba2342671cdd0bb7c17a54386809e9ebaa9697d",
+    ".generated/wasm/tjs-jspi-a49ca7ebec71a9cf.wasm": "a49ca7ebec71a9cf45c83e0e10a2dd86127961f9c2ecb8425ac73e98109bace2",
+    ".generated/wasm/tjs-jspi-35df7fc9a959d7be.mjs": "35df7fc9a959d7bec697486b8a3f5b5efcee9b4619a34d961869a0af55863a54"
+  },
+  "definitions": [
+    "freeze suspends media request budgets before sending pause commands and ignores stale states",
+    "page suspension preserves modified VM state and user pause across reordered signals",
+    "background continuation still blocks input and stops at freeze or pagehide",
+    "a hidden startup waits for visibility and can be cancelled without executing game code",
+    "a resource completion during background pause resumes exactly once in the original VM",
+    "queued input before hiding is discarded rather than replayed after the blocking script",
+    "resuming and immediately pausing again cannot release a waiter into the suspended VM",
+    "page suspension removes queued timer ticks while preserving the next remaining deadline",
+    "startup: asynchronous script completion respects pause and cancellation",
+    "error: asynchronous script completion respects pause and cancellation",
+    "cancel: asynchronous script completion respects pause and cancellation",
+    "background save commit finishes without reentering blocked TJS",
+    "background save commit failure retains exportable bytes",
+    "an in-flight mouse callback cannot recreate stale capture after pause",
+    "an in-flight touch callback cannot recreate stale capture after pause"
+  ]
+}

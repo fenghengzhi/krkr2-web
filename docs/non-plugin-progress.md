@@ -2,6 +2,10 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+2026-10-29 准备 [117 PNG调色板行为与托管运行时对照](decisions/117-png-palette-and-hosted-runtime-controls.md)：PNG索引键交handler解释，保文件tRNS，复现定义的packed BGR前缀和palette灰度实际三字节步长，明确排除原未初始化尾。新增15常规Node、每浏览器4定义及30项独立C对照，原77合同保留。修单场景二次Stop竞争，音轨切换直接保留DOM秒数，原阈值不变；独立固定111崩溃诊断两臂共480项既有定义观察。均待托管执行，完整目标未完成。
+
+117固定回收 **62原ZIP、712,209,187字节**全部匹配。111终态failure，主浏览器2835为2724 pass／109 fail／2 skip，未报告0；原SIGTRAP与8未报告Node定义保留。112另发生malloc SIGABRT，完整core保留，3681实际定义中3667 pass／14未报告；build和可信生命周期19/19成功，主浏览器无结果。113–116仍pending，原PNG参考尚未执行。下一批回收112未报告及113–117，已终态111不再刷新。
+
 最新待核验批次：[Full test suite 40801785412](https://github.com/fenghengzhi/krkr2-web/actions/runs/40801785412)，精确提交 `2f22e878502353c9c8e93e72e78c34c7d306ae1e`。116 的 **35 个文件**已整批推送，新增 **36 常规Node、每浏览器4定义**。首次唯一查询为 **pending／conclusion=null**，仅记录身份并保存原响应。下批固定回收111未报告范围及112–116结果，已终态110不再刷新；没有本地执行验证，完整目标保持active。
 
 2026-10-29 准备 [116 原版图像短读错误](decisions/116-native-image-read-errors.md)：BMP／PNG／TLG 真实源读取不足保留精确原因，并通过当前原生 `TJSReadError` holder 返回；宿主、解码、预算和消费者错误独立保留，部分像素和原 Layer 状态不被错误完成。`nativeMessages:2`，协议42、TJS ABI5保持。新增36常规Node、每浏览器4定义，均尚待托管执行。

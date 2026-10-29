@@ -19,12 +19,14 @@ import tarfile
 import urllib.request
 import zlib
 from native_png_stream_fixtures import create_stream_cases
+from native_png_palette_fixtures import create_palette_cases
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / 'out/verification/native-png'
 SOURCE_MANIFEST = ROOT / 'tests/native/png-reference-source.json'
 ZLIB_MANIFEST = ROOT / 'native/image-zlib/source.json'
 STREAM_MANIFEST = ROOT / 'tests/native/png-stream-cases.json'
+PALETTE_MANIFEST = ROOT / 'tests/native/png-palette-cases.json'
 ZLIB_C = ['adler32.c', 'compress.c', 'crc32.c', 'deflate.c', 'gzclose.c', 'gzlib.c',
           'gzread.c', 'gzwrite.c', 'infback.c', 'inffast.c', 'inflate.c', 'inftrees.c',
           'trees.c', 'uncompr.c', 'zutil.c']
@@ -134,11 +136,11 @@ def fixtures():
     return cases
 
 
-def fetch_sources(manifest, target):
+def fetch_sources(manifest, target, extras=()):
     target.mkdir()
     inventory = []
     items = list(manifest['files']) + [dict(manifest['fixedLoader'], file='GraphicsLoaderIntf.cpp'),
-                                      dict(manifest['originalHeader'], file='original-PNG.H')]
+                                      dict(manifest['originalHeader'], file='original-PNG.H')] + list(extras)
     for item in items:
         with urllib.request.urlopen(item['url'], timeout=45) as response:
             raw = response.read(2 * 1024 * 1024)
@@ -151,6 +153,22 @@ def fetch_sources(manifest, target):
             save(OUTPUT / 'source-inventory.json', inventory)
             raise RuntimeError('Pinned source mismatch: ' + item['file'])
     save(OUTPUT / 'source-inventory.json', inventory)
+
+
+def extract_palette_converter(source, expected):
+    # Exact fixed-source lines, not a rewritten or product-side gray algorithm.
+    raw = (source / 'tvpgl.c').read_bytes()
+    if sha(raw) != expected['sha256']:
+        raise RuntimeError('Palette converter source identity mismatch')
+    snippet = b''.join(raw.splitlines(keepends=True)[10321:10343])
+    if not snippet.startswith(b'# define compose_grayscale') or b'TVPBLConvert24BitTo8Bit_c' not in snippet or not snippet.rstrip().endswith(b'}'):
+        raise RuntimeError('Fixed palette converter extraction no longer matches its source range')
+    header = (b'typedef unsigned char tjs_uint8;\ntypedef int tjs_int;\n'
+              b'#define TVP_GL_FUNC_DECL(result, name, args) static result name args\n' + snippet +
+              b'\n#undef TVP_GL_FUNC_DECL\n#undef compose_grayscale\n')
+    (source / 'palette-converter.h').write_bytes(header)
+    save(OUTPUT / 'palette-converter-extract.json', {'source': expected,
+        'range': [10322, 10343], 'snippetSha256': sha(snippet), 'headerSha256': sha(header)})
 
 
 def fetch_zlib(manifest, target):
@@ -242,6 +260,57 @@ def stream_structure(case, record):
     return errors
 
 
+def palette_structure(case, record):
+    errors = []
+    def need(condition, message):
+        if not condition:
+            errors.append(message)
+    width, height = case['width'], case['height']
+    stride, prefix = case['destinationStride'], case['comparisonPrefixBytes']
+    need(record.get('paletteReference') is True and record.get('mode') == case['mode'], 'Wrong palette reference mode')
+    need(record.get('keyidx') == case['keyidx'] and record.get('sizeCallback') is True, 'Missing palette key/size observation')
+    need(record.get('width') == width and record.get('height') == height, 'Palette dimensions differ')
+    expected_rowbytes = width * (4 if case['definition'].get('trns') or (case['mode'] == 'normal' and case['keyidx'] == -1) else 3)
+    need(record.get('rowbytes') == expected_rowbytes, 'Palette libpng transformed row width differs')
+    need((record.get('transparencyState') or {}).get('originalInfoValid') is bool(case['definition'].get('trns')),
+         'Palette original tRNS state differs')
+    need(record.get('cleanup') == {'unsafeFrees': 0, 'liveAllocations': 0, 'liveBytes': 0}, 'Palette reference cleanup was not clean')
+    count = record.get('rowsComplete')
+    need(isinstance(count, int) and 0 <= count <= height, 'Invalid palette completed row count')
+    destination = record.get('destination') or {}
+    need(destination.get('initialByte') == 165 and destination.get('rowStride') == stride and
+         destination.get('comparisonPrefixBytes') == prefix and destination.get('excludedTailBytesPerRow') == stride - prefix,
+         'Palette destination layout contract differs')
+    raw, mask = destination.get('bytes'), destination.get('comparisonMask')
+    expected_mask = [int(at % stride < prefix) for at in range(stride * height)]
+    need(isinstance(raw, list) and len(raw) == stride * height and mask == expected_mask,
+         'Missing palette byte plane or incorrect exclusion mask')
+    if isinstance(raw, list) and len(raw) == len(expected_mask):
+        need(all(value == 165 for value, compare in zip(raw, expected_mask) if not compare),
+             'The reference wrote outside its defined prefix into the sentinel tail')
+        if case['expected']['destination'] is not None:
+            need(all(a == b for a, b, compare in zip(raw, case['expected']['destination'], expected_mask) if compare),
+                 'Independent valid palette bytes differ within the defined domain')
+    if case['expected']['destination'] is not None:
+        need(record.get('status') == 'complete' and record.get('decodeComplete') is True and count == height,
+             'Valid palette control did not complete')
+    else:
+        # Every non-control in this separate palette matrix corrupts either
+        # Adler32 or the critical IEND CRC. These are required codec failures;
+        # their phase, raw destination and completed row count remain observed.
+        need(record.get('status') == 'error' and record.get('decodeComplete') is False,
+             'Corrupt palette checksum incorrectly completed')
+        need((record.get('error') or {}).get('kind') == 'libpng',
+             'Palette checksum failure was not reported by libpng')
+    snapshots = record.get('destinationSnapshots', [])
+    need(bool(snapshots), 'Palette destination snapshots are absent')
+    for index, snapshot in enumerate(snapshots):
+        need(snapshot.get('id') == index + 1 and len(snapshot.get('bytes', [])) == stride * height,
+             'Incomplete palette destination snapshot')
+    need(bool(snapshots) and snapshots[0].get('bytes') == [165] * (stride * height), 'Palette destination was not initialized')
+    return errors
+
+
 def compare(case, record):
     errors = []
     def need(condition, text):
@@ -252,6 +321,8 @@ def compare(case, record):
     need(record.get('pngLongBytes') == 4 and record.get('pointerBytes') == 4, 'Original32bit ABI not established')
     need(record.get('droppedEvents') == 0, 'Dropped reference events')
     need(record.get('droppedSnapshots') == 0 and record.get('droppedReads') == 0, 'Dropped destination/read evidence')
+    if case.get('paletteReference'):
+        return errors + palette_structure(case, record)
     if case.get('streamReference'):
         return errors + stream_structure(case, record)
     if case['observeOnly']:
@@ -296,7 +367,7 @@ def compare(case, record):
 
 def run():
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    environment = {'schema': 2, 'scope': 'Pinned upstream libpng1.0.6 and fixed loader normal calls with the WASM kernel same-source zlib1.3.2; not original Windows deelibpng/zlib binary identity. Raw-write snapshots cover normal main RGBA only, not mask temporary buffers or manual palette-gray conversion.',
+    environment = {'schema': 2, 'scope': 'Pinned upstream libpng1.0.6 and fixed loader normal/palette-gray calls with the WASM kernel same-source zlib1.3.2; not original Windows deelibpng/zlib binary identity. Normal stream snapshots remain unchanged. The separate palette route records exact manual-gray output or the defined BGR prefix with its uninitialized original tail explicitly excluded.',
                    'platform': platform.platform(), 'machine': platform.machine(), 'python': sys.version,
                    'commit': os.environ.get('GITHUB_SHA'), 'runId': os.environ.get('GITHUB_RUN_ID'),
                    'attempt': os.environ.get('GITHUB_RUN_ATTEMPT'), 'runner': os.environ.get('RUNNER_ENVIRONMENT'),
@@ -305,19 +376,26 @@ def run():
                    'driverSha256': sha(Path(__file__).read_bytes()), 'sourceManifestSha256': sha(SOURCE_MANIFEST.read_bytes()),
                    'streamFixtureSha256': sha((ROOT / 'scripts/native_png_stream_fixtures.py').read_bytes()),
                    'streamManifestSha256': sha(STREAM_MANIFEST.read_bytes()),
+                   'paletteFixtureSha256': sha((ROOT / 'scripts/native_png_palette_fixtures.py').read_bytes()),
+                   'paletteManifestSha256': sha(PALETTE_MANIFEST.read_bytes()),
                    'zlibManifestSha256': sha(ZLIB_MANIFEST.read_bytes())}
     save(OUTPUT / 'environment.json', environment)
     manifest = json.loads(SOURCE_MANIFEST.read_text())
     save(OUTPUT / 'source-manifest.json', manifest)
     stream_manifest = json.loads(STREAM_MANIFEST.read_text())
+    palette_manifest = json.loads(PALETTE_MANIFEST.read_text())
     zlib_manifest = json.loads(ZLIB_MANIFEST.read_text())
     save(OUTPUT / 'stream-manifest.json', stream_manifest)
+    save(OUTPUT / 'palette-manifest.json', palette_manifest)
     save(OUTPUT / 'zlib-manifest.json', zlib_manifest)
     legacy_cases = fixtures()
     stream_cases = create_stream_cases(stream_manifest)
+    palette_cases = create_palette_cases(palette_manifest)
     if len(legacy_cases) != 47 or len(stream_cases) != 30 or sum(c['expected']['rgba'] is not None for c in stream_cases) != 9:
         raise RuntimeError('PNG reference case inventory differs from 47 legacy plus 30 stream observations (9 valid controls)')
-    cases = legacy_cases + stream_cases
+    if len(palette_cases) != 30 or sum(c['expected']['destination'] is not None for c in palette_cases) != 20:
+        raise RuntimeError('PNG palette inventory differs from 30 observations with 20 valid controls')
+    cases = legacy_cases + stream_cases + palette_cases
     if len({c['id'] for c in cases}) != len(cases):
         raise RuntimeError('Duplicate case ID')
     inputs = OUTPUT / 'inputs'; inputs.mkdir()
@@ -329,7 +407,8 @@ def run():
         case.update({'path': str(path.relative_to(OUTPUT)), 'bytes': len(data), 'sha256': sha(data)})
         inventory.append(case)
     save(OUTPUT / 'case-manifest.json', inventory)
-    source = OUTPUT / 'source'; fetch_sources(manifest, source)
+    source = OUTPUT / 'source'; fetch_sources(manifest, source, [palette_manifest['converterSource']])
+    extract_palette_converter(source, palette_manifest['converterSource'])
     zlib_source = OUTPUT / 'zlib-source'; fetch_zlib(zlib_manifest, zlib_source)
     binary = OUTPUT / 'png-reference'
     command = ['gcc', '-m32', '-std=gnu11', '-O0', '-g', '-DHAVE_UNISTD_H=1', '-DPNG_USER_MEM_SUPPORTED', '-DPNG_NO_ASSEMBLER_CODE',
@@ -354,6 +433,8 @@ def run():
     results = []; rawdir = OUTPUT / 'raw'; rawdir.mkdir()
     for case in cases:
         command = [str(binary), str(OUTPUT / case['path']), str(case['keyidx'])]
+        if case.get('paletteReference'):
+            command += [case['mode'], 'palette']
         result = {'id': case['id'], 'inputSha256': case['sha256'], 'observeOnly': case['observeOnly'], 'command': command}
         try:
             child = subprocess.run(command, capture_output=True, check=False, timeout=10)
@@ -368,6 +449,8 @@ def run():
             result['record'] = record
             result['mismatches'] = compare(case, record)
             result['classification'] = ('reference-mismatch' if result['mismatches'] else
+                'palette-prefix-observed' if case.get('paletteReference') and case['prefixOnly'] else
+                'palette-defined-observed' if case.get('paletteReference') else
                 'stream-reference-observed' if case.get('streamReference') else
                 'observation-only-unsafe' if case['observeOnly'] and (record['cleanup']['unsafeFrees'] or record['cleanup']['liveAllocations'] or record.get('rgba') is None) else
                 'observation-only' if case['observeOnly'] else
@@ -401,6 +484,11 @@ def run():
                 'Candidate pixels are absent or deliberately unobserved for unsafe layout',
             'transparencyState': record.get('transparencyState'), 'cleanup': record.get('cleanup')})
     summary = {'schema': 2, 'planned': len(cases), 'reported': len(results),
+        'previousReferencePlanned': len(legacy_cases) + len(stream_cases),
+        'paletteReferencePlanned': len(palette_cases), 'paletteValidControls': 20,
+        'paletteReferences': sum(r['classification'] in ('palette-prefix-observed', 'palette-defined-observed') for r in results),
+        'palettePrefixOnly': [c['id'] for c in palette_cases if c['prefixOnly']],
+        'palettePolicy': 'Reference-only observations. For normal indexed keys without file tRNS, compare only the defined 3W-byte BGR row prefix. The untouched W-byte tail is excluded from native equality; a Web zero-tail policy is separate. All 77 prior cases retain their original checks/classifications.',
         'streamReferences': sum(r['classification'] == 'stream-reference-observed' for r in results),
         'streamReferencePlanned': len(stream_cases), 'streamValidControls': 9,
         'streamPolicy': 'Malformed row counts, raw bytes, error phases and warnings are recorded without predicted answers; the separate hosted WASM differential must compare all 30 references. Observed is not a product pass.',
@@ -413,7 +501,7 @@ def run():
         'failures': [r['id'] for r in results if r['mismatches']],
         'paletteObservations': palette_observations,
         'scope': environment['scope'], 'productDecoderExecuted': False,
-        'unsafePolicy': 'Palette without original tRNS and with keyidx only reports rowbytes; no pixel bytes inspected. Refused unknown frees and retained library allocations are explicit evidence, never silently accepted as native cleanup.'}
+        'unsafePolicy': 'The six legacy observation-only cases retain their prior policy: palette without original tRNS and with keyidx only reports rowbytes; no pixel bytes inspected. The separate palette-reference route compares only the explicitly defined prefix and excludes its original unwritten tail. Refused unknown frees and retained library allocations are explicit evidence, never silently accepted as native cleanup.'}
     save(OUTPUT / 'summary.json', summary)
     print(json.dumps(summary, ensure_ascii=False))
     return 1 if summary['failures'] or summary['reported'] != summary['planned'] else 0

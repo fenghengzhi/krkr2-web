@@ -177,7 +177,8 @@ test('PNG native grayscale distinguishes RGB blue coefficient from palette TVP w
     assert.equal(image.grayscale, true)
   }
   const palette = await decode(imageFixture('palette-2x1.png'), 'png', 'grayscale')
-  assert.deepEqual([...palette.data], [53, 53, 53, 255, 53, 53, 53, 255])
+  // Expanded BGRA [0,0,255,0,0,0,255,255] is read as two BGR triples.
+  assert.deepEqual([...palette.data], [53, 53, 53, 255, 0, 0, 0, 255])
   assert.equal(palette.indices, undefined)
   const grayAlpha = await decode(png(4, 8, [17, 0, 149, 71]), 'png', 'grayscale')
   assert.deepEqual([...grayAlpha.data], [17, 17, 17, 255, 149, 149, 149, 255])

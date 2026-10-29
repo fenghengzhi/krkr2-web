@@ -186,12 +186,15 @@ try {
     manifest = json<ImageZlibManifest>(generated, 'manifest.json'),
     source = json<{ archiveSha512: string; files: Record<string, HashEntry> }>(reference, 'zlib-source.json'),
     fixtures = json<Fixture[]>(reference, 'case-manifest.json').filter((item) => item.streamReference),
-    summary = json<{ failures: string[]; planned: number; reported: number; streamReferences: number }>(reference, 'summary.json')
+    summary = json<{ failures: string[]; planned: number; reported: number; streamReferences: number;
+      previousReferencePlanned: number; paletteReferencePlanned: number; paletteReferences: number }>(reference, 'summary.json')
   planned = fixtures.length
   assert.equal(environment.commit, process.env.GITHUB_SHA, 'Reference belongs to a different source revision')
   assert.equal(planned, 30); assert.equal(new Set(fixtures.map((item) => item.id)).size, planned)
   assert.equal(fixtures.filter((item) => item.definition.control).length, 9)
-  assert.equal(summary.planned, 77); assert.equal(summary.reported, 77)
+  assert.equal(summary.planned, 107); assert.equal(summary.reported, 107)
+  assert.equal(summary.previousReferencePlanned, 77)
+  assert.equal(summary.paletteReferencePlanned, 30); assert.equal(summary.paletteReferences, 30)
   assert.deepEqual(summary.failures, []); assert.equal(summary.streamReferences, 30)
   validateImageZlibManifest(manifest)
   assert.equal(source.archiveSha512, manifest.source.archiveSha512)

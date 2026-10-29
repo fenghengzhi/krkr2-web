@@ -1,5 +1,9 @@
 # 当前实现范围
 
+117候选补[PNG调色板行为与托管运行时对照](../decisions/117-png-palette-and-hosted-runtime-controls.md)：索引键保留文件tRNS，palette灰度按原BGR(A)字节三步长转换，无tRNS索引键保定义前缀／Web安全零尾；通用PNG保持。新增15常规Node、每浏览器4定义及30项C对照，均待执行。固定111 runtime双臂诊断独立于主环境，Stop和音轨时钟候选修复保留原断言。
+
+117固定结果：111终态主浏览器109 fail／2 skip，Node旧SIGTRAP证据保留；112另有malloc SIGABRT和14未报告定义，不能与前者合并或按已报pass宣布通过。113–116仍pending，原PNG参考尚无执行。整体非插件目标继续active。
+
 116 提交 `2f22e878502353c9c8e93e72e78c34c7d306ae1e` 已推送，[Actions 40801785412](https://github.com/fenghengzhi/krkr2-web/actions/runs/40801785412) 首次唯一查询为pending／conclusion=null，仅记录身份；新增定义尚无执行结论。下批回收，完整非插件目标保持active。
 
 116 候选补 [原版图像短读错误](../decisions/116-native-image-read-errors.md)：selected BMP／PNG／TLG 的真实源短读进入当前原生 TJSReadError holder，保留结构化原因和已有部分写入；宿主、预算、格式和回调错误保持独立。`nativeMessages:2`，协议42／TJS ABI5保持，新增36常规Node、每浏览器4定义均待托管验证。

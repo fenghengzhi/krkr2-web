@@ -126,13 +126,14 @@ test('adaptive keying completes before a later companion lookup failure', async 
   assert.deepEqual(target.pixels(), [...rgba(7, 0)])
 })
 
-test('palette keying uses source indices in completed rows even when colors are identical', async () => {
+test('PNG delegates palette keys to its handler and preserves completed row alpha even when source indices match', async () => {
   const target = sink(), cause = new Error('palette tail'), row = Uint8Array.from([...rgba(7, 80), ...rgba(7, 90)]),
-    f = fixture(async (_name, _selection, progress) => {
+    f = fixture(async (_name, selection, progress) => {
+      assert.deepEqual(selection, { format: 'png', mode: 'normal', paletteKey: 3 })
       progress.size(2, 1); progress.row(0, row, Uint8Array.of(3, 4)); throw cause
     })
   await assert.rejects(f.loader.load('a.png', 0x03000003, target.target), (error) => error === cause)
-  assert.deepEqual(target.pixels(), [...rgba(7, 0), ...rgba(7, 255)])
+  assert.deepEqual(target.pixels(), [...rgba(7, 80), ...rgba(7, 90)])
 })
 
 test('an exact-flight join replays current partial pixels without re-reading and keeps the shared raw rejection', async () => {

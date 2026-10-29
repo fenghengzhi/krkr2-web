@@ -644,10 +644,15 @@ export class WebVideoHost {
   private async seek(movie: Movie, position: number): Promise<void> {
     if (!Number.isFinite(position) || position < 0 || position > movie.element.duration * 1000)
       throw new Error('Video position is outside the stream')
+    return this.seekSeconds(movie, position / 1000)
+  }
+  private async seekSeconds(movie: Movie, time: number): Promise<void> {
+    if (!Number.isFinite(time) || time < 0 || time > movie.element.duration)
+      throw new Error('Video position is outside the stream')
     movie.seeking = true
     this.cancelFrame(movie)
     try {
-      const time = position / 1000, playing = !movie.element.paused
+      const playing = !movie.element.paused
       if (Math.abs(movie.element.currentTime - time) > 1e-8)
         await this.wait(
           movie,
@@ -670,18 +675,19 @@ export class WebVideoHost {
       this.arm(movie)
     }
   }
-  private async seekClockPresented(movie: Movie, position: number, current: () => void): Promise<void> {
+  private async seekClockPresented(movie: Movie, position: number, current: () => void, exactSeconds?: number): Promise<void> {
     current()
+    const seek = () => exactSeconds === undefined ? this.seek(movie, position) : this.seekSeconds(movie, exactSeconds)
     // A true no-op has no seek event or new compositor submission to await.
     if (!movie.element.seeking && movie.element.readyState >= 2 &&
         Math.abs(movie.element.currentTime * 1000 - position) <= 0.00001 &&
         movie.presentedTime !== undefined) {
-      await this.seek(movie, position)
+      await seek()
       current()
       return
     }
     await waitForClockPresentation(movie.element, position, movie.presentedFrames ?? 0,
-      movie.abort.signal, current, () => this.seek(movie, position),
+      movie.abort.signal, current, seek,
       (expired) => this.timeouts.start(15000, expired), (metadata) => {
         movie.presentedTime = metadata.mediaTime * 1000
         movie.presentedFrames = metadata.presentedFrames
@@ -738,7 +744,8 @@ export class WebVideoHost {
       } catch (error) { done(error) }
     })
   }
-  private async seekRetainedFrame(movie: Movie, position: number, expected: Pixels, historicalPresentation?: number): Promise<void> {
+  private async seekRetainedFrame(movie: Movie, position: number, expected: Pixels, historicalPresentation?: number,
+    exactSeconds?: number): Promise<void> {
     const sameImage = () => {
         const actual = this.decodedPixels(movie)
         if (actual.width !== expected.width || actual.height !== expected.height ||
@@ -804,7 +811,8 @@ export class WebVideoHost {
       cancelTimeout = this.timeouts.start(15000, () => done(new Error('Video retained frame timed out')))
       try {
         request()
-        void this.seek(movie, position).then(() => {
+        const seek = exactSeconds === undefined ? this.seek(movie, position) : this.seekSeconds(movie, exactSeconds)
+        void seek.then(() => {
           sought = true
           observations.push({ phase: 'seeked', position: movie.element.currentTime * 1000,
             readyState: movie.element.readyState })
@@ -1084,7 +1092,10 @@ export class WebVideoHost {
       const progressing = movie.status === 'play' && !movie.element.paused
       movie.element.pause()
       this.cancelFrame(movie)
-      const position = movie.element.currentTime * 1000,
+      // Keep the original DOM seconds for the new element's setter. A
+      // seconds -> milliseconds -> seconds roundtrip can lose one ULP and
+      // move a quantized paused clock to the preceding microsecond.
+      const clockSeconds = movie.element.currentTime, position = clockSeconds * 1000,
         bytes = movie.element.videoWidth * movie.element.videoHeight * 4
       // Paused playback reserves both complete readbacks before allocation.
       // Decoder/GPU memory and delayed GC are separate from these buffers.
@@ -1109,7 +1120,7 @@ export class WebVideoHost {
           Math.abs(candidate.element.duration - movie.element.duration) > 0.001))
         throw new Error('Selected audio track changed the video presentation timeline')
       this.applySettings(candidate, settings)
-      if (retained) await this.seekRetainedFrame(candidate, position, retained, movie.presentedTime)
+      if (retained) await this.seekRetainedFrame(candidate, position, retained, movie.presentedTime, clockSeconds)
       else {
         // During playback the latest displayed frame can precede the media
         // clock. A new decoder seeking that clock may present its next frame;
@@ -1119,7 +1130,7 @@ export class WebVideoHost {
         // pixel. A video switch intentionally changes the image and may change
         // its dimensions/cadence. Never clamp its clock or claim the old image
         // as a fresh selected-track presentation; an unsupported seek rolls back.
-        await this.seekClockPresented(candidate, position, () => this.stageCurrent(stage))
+        await this.seekClockPresented(candidate, position, () => this.stageCurrent(stage), clockSeconds)
       }
       this.stageCurrent(stage)
       candidate.periodArmed = movie.periodArmed

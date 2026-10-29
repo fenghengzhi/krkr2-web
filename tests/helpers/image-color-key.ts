@@ -25,8 +25,9 @@ const black = [0, 0, 0, 255],
   companionDisplay = [black, originalDisplay[1]] as const,
   keyed = [0xc86432, 0, 0xc96533, 255, 0, 0] as const,
   keyedDisplay = [black, [201, 101, 51, 255]] as const,
-  palette = [0xff0000, 255, 0xff0000, 0, 0, 0] as const,
-  paletteDisplay = [red, black] as const,
+  // The selected PNG handler keeps its file tRNS even with clPalIdx.
+  palette = [0xff0000, 0, 0xff0000, 255, 0, 0] as const,
+  paletteDisplay = [black, red] as const,
   matted = [0xffffff, 255, 0xe4b299, 255, 0, 1] as const,
   mattedDisplay = [
     [255, 255, 255, 255],
