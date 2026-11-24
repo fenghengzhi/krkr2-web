@@ -34,6 +34,11 @@ root.setSize(${width},1);root.fillRect(0,0,${width},1,0xff000000);
 fore.setImageSize(${width},1);fore.setSize(${width},1);fore.type=${options.type ?? 'ltOpaque'};fore.visible=true;
 back.setImageSize(${width},1);back.setSize(${width},1);back.type=ltAlpha;
 saved.setImageSize(${width},1);saved.setSize(${width},1);
+// Complete returns a full leaf's MainImage even while it is transitioning.
+// A seen child outside the copied rectangle selects actual completion without
+// contributing pixels, so these assertions still inspect the transition plane.
+var completionChild=new Layer(win,fore);completionChild.setImageSize(1,1);completionChild.setSize(1,1);
+completionChild.setPos(${width},0);completionChild.fillRect(0,0,1,1,0);completionChild.visible=true;
 for(var x=0;x<${width};x++){
   fore.setMainPixel(x,0,0);fore.setMaskPixel(x,0,19);
   back.setMainPixel(x,0,0xffffff);back.setMaskPixel(x,0,${options.sourceMask ?? 1});
@@ -89,7 +94,8 @@ function sample(next){
       },
     }
   } catch (error) {
-    await session.stop()
+    try { await session.stop() }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Transition setup and cleanup failed', { cause: error }) }
     throw error
   }
 }
@@ -183,14 +189,15 @@ for (const binary of [false, true]) {
   })
 
   for (const type of ['ltAlpha', 'ltAddAlpha'])
-    test(`${mode}: ${type} retains its existing transition path independently of drawing face`, async () => {
+    test(`${mode}: ${type} selects its native transition kernel independently of drawing face`, async () => {
       const f = await fixture(binary, {
         type,
         sourceMask: 255,
         afterBegin: 'fore.setMaskPixel(0,0,255);fore.setMaskPixel(1,0,255);fore.face=dfOpaque;',
       })
       try {
-        assert.equal(await f.session.evaluate('sample(500)'), '8355711:255,8355711:255')
+        const rgb = type === 'ltAlpha' ? 0xa7a7a7 : 0x7e7e7e
+        assert.equal(await f.session.evaluate('sample(500)'), [rgb + ':255', rgb + ':255'].join(','))
       } finally {
         await f.stop()
       }

@@ -19,6 +19,18 @@ const graphics: GraphicsDecoder = {
 }
 const setup =
   'var w=new Window();w.visible=true;var a=new Layer(w,null),b=new Layer(w,a);a.setSize(32,32);b.setSize(32,32);a.type=ltAlpha;b.type=ltAlpha;a.font.height=8;b.font.height=8;'
+test('Layer draws successive system glyphs at their raster advance while reporting the layout width', async () => {
+  const { session } = await headless({ 'startup.tjs': setup + String.raw`
+a.fillRect(0,0,32,32,0);a.font.bold=true;a.drawText(0,0,"AA",0xffffff);
+` }, { graphics: { ...graphics, measure: (text) => ({
+    width: text.length * 13, drawAdvance: text.length * 10, height: 8, ascent: 6,
+  }) } })
+  try {
+    await session.start()
+    assert.equal(await session.evaluate('a.font.getTextWidth("AA")'), '26')
+    assert.equal(await session.evaluate('[a.getMaskPixel(0,1),a.getMaskPixel(10,1),a.getMaskPixel(13,1)].join(",")'), '255,255,0')
+  } finally { await session.stop() }
+})
 test('font mappings share complete settings across layers, restore on settings changes and survive failed replacement', async () => {
   const { session } = await headless(
     { 'startup.tjs': setup, 'font.tft': fixture('coverage-v1.tft'), 'bad.tft': new Uint8Array(40) },

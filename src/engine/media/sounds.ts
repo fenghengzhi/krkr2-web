@@ -378,6 +378,14 @@ export class SoundService {
       if (typeof input[i] !== 'number') throw new Error('Expected a converted sound coordinate')
       return Math.fround(input[i])
     }
+    const fadeParameters = () => {
+      if (input.length < 2) throw new TjsError('TJSBadParamCount')
+      const narrowed = (at: number) => typeof input[at] === 'bigint'
+        ? Number(BigInt.asIntN(32, input[at])) : numeric(at) | 0
+      const target = narrowed(0), time = narrowed(1), delay = input[2] === undefined ? 0 : narrowed(2)
+      if (time <= 0 || delay < 0) throw new TvpError('TVPInvalidParam')
+      return { target, time, delay }
+    }
     const callbacks: Callback[] = []
     let value: ScriptValue
     const apply = async (command: AudioCommand) => {
@@ -583,14 +591,18 @@ export class SoundService {
         this.cancelEvents(sound)
         callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
       }
+    } else if (method === 'prepareFade') {
+      const { target, time, delay } = fadeParameters()
+      value = scriptList([BigInt(target), BigInt(time), BigInt(delay)])
     } else if (method === 'fade') {
+      const { target, time, delay } = fadeParameters()
       await this.prepare(sound)
       await apply({
         op: 'fade',
         id: sound.id,
-        target: numeric(0),
-        time: numeric(1),
-        delay: numeric(2),
+        target,
+        time,
+        delay,
       })
     } else if (method === 'stopFade') {
       if (sound.ready) await apply({ op: 'stopFade', id: sound.id, finish: !!numeric(0) })

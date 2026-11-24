@@ -84,7 +84,7 @@ front.onTransitionCompleted=function(){global.completed++;};front.beginTransitio
     await session.start()
     const frontId = Number(await session.evaluate('front.__id')), backId = Number(await session.evaluate('back.__id'))
     await advance(40)
-    assert.deepEqual(surface.lastLayers.find((layer) => layer.id === -frontId)?.pixels, [153, 0, 102, 255, 153, 0, 102, 255])
+    assert.deepEqual(surface.lastLayers.find((layer) => layer.id === -frontId)?.pixels, [122, 0, 132, 255, 122, 0, 132, 255])
     surface.change('lost')
     assert.equal(scheduled.size, 0)
     now = 1040
@@ -97,7 +97,7 @@ front.onTransitionCompleted=function(){global.completed++;};front.beginTransitio
     // evaluation of an unrelated variable to fabricate a pending frame.
     assert.equal(await session.evaluate('(function(){global.front.update();global.window.update();return global.completed;})()'), '0')
     assert.equal(await session.evaluate('completed'), '0')
-    assert.deepEqual(surface.lastLayers.find((layer) => layer.id === -frontId)?.pixels, [3, 0, 252, 255, 3, 0, 252, 255])
+    assert.deepEqual(surface.lastLayers.find((layer) => layer.id === -frontId)?.pixels, [1, 0, 253, 255, 1, 0, 253, 255])
     await advance(1100)
     assert.equal(await session.evaluate('(function(){global.front.update();global.window.update();return global.completed;})()'), '1')
     assert.equal(await session.evaluate('completed'), '1')

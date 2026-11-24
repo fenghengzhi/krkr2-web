@@ -56,7 +56,7 @@ import { createWindowRegion, copyWindowRegion, WindowRegions, type WindowRegion 
 import { deviceInt, deviceMulDiv, drawDeviceGeometry, fromPrimary, paintBoxPoint, toPrimary } from './scene/draw-device.ts'
 import { LayerService } from './scene/layer-objects.ts'
 import { captureVideoMixingBitmap } from './media/video-mixing.ts'
-import type { DecodedImage, GraphicsDecoder, Renderer, RendererStatus } from './ports/graphics.ts'
+import type { DecodedImage, GraphicsDecoder, Pixels, Renderer, RendererStatus } from './ports/graphics.ts'
 import type { ArchiveReader, Inflater, Resource } from './ports/storage.ts'
 import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts'
 import { SaveOverlay } from './storage/save-overlay.ts'
@@ -1570,12 +1570,12 @@ export class EngineSession {
       Math.max(0, deadline - this.deps.now()),
     )
   }
-  private *prepareFrame(source?: number | readonly number[], explicit = false): InputOperation {
+  private *prepareFrame(source?: number | readonly number[], explicit = false, draw?: () => void): InputOperation {
     if (source === undefined) {
       yield* this.deliverWindowUpdates(false)
       return
     }
-    if (this.preparingFrame && !explicit) return
+    if (this.preparingFrame && !explicit) { draw?.(); return }
     const wasPreparing = this.preparingFrame
     this.preparingFrame = true
     const layers = this.layers,
@@ -1613,7 +1613,8 @@ export class EngineSession {
           ? this.layers.get(roots[0]!).windowId : undefined
       for (const root of roots) yield* visit(root, true)
       if (this.transitions?.active && (!windowPass || updateWindow !== undefined))
-        yield* this.transitions.advance(updateWindow)
+        yield* this.transitions.advance(updateWindow, typeof source === 'number' ? source : undefined, draw)
+      else draw?.()
       for (const root of roots) yield* visit(root, false)
     } finally {
       this.preparingFrame = wasPreparing
@@ -5766,7 +5767,14 @@ export class EngineSession {
         const session = this
         return this.inputs!.start(
           (function* () {
-            yield* session.prepareFrame(source)
+            // Complete's full-image leaf shortcut precedes BeforeCompletion:
+            // it copies MainImage without consuming onPaint or transition time.
+            let pixels: Pixels
+            if (session.composer.snapshotNeedsCompletion(source)) {
+              // InternalComplete draws the final transition phase before
+              // AfterCompletion exchanges owners and invokes the game callback.
+              yield* session.prepareFrame(source, false, () => { pixels = session.composer.snapshot(source, true) })
+            } else pixels = session.composer.snapshot(source)
             // onPaint can change the destination's clip or replace its image.
             // Keep the original clipped request, but use the current image and
             // its bounds, as native MainImage->CopyRect does after Complete.
@@ -5774,7 +5782,7 @@ export class EngineSession {
               session.layers
                 .bitmap(id)
                 .copyPixels(
-                  session.composer.snapshot(source),
+                  pixels!,
                   target.x,
                   target.y,
                   clippedSource,

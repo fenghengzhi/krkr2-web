@@ -1,11 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  opaqueTransition,
   transitionPixels,
   type TransitionFrame,
 } from '../../src/engine/graphics/transition.ts'
-import { opaqueUniversalOpacity } from '../../src/engine/graphics/transition-opaque.ts'
+import { universalOpacity } from '../../src/engine/graphics/transition-blend.ts'
 import { LayerTree } from '../../src/engine/scene/layers.ts'
 import { SceneComposer } from '../../src/engine/scene/composer.ts'
 
@@ -72,23 +71,23 @@ test('opaque universal distinguishes the strict copy threshold from opacity 255'
     [...transitionPixels(before, after, { ...frame, kind: 'universal', rule }).data],
     [255, 255, 255, 203, 254, 254, 254, 0, 127, 127, 127, 0, 3, 3, 3, 0, 0, 0, 0, 19],
   )
-  assert.equal(opaqueUniversalOpacity(64, 64, 0), 255)
-  assert.equal(opaqueUniversalOpacity(65, 64, 0), 256)
+  assert.equal(universalOpacity(64, 64, 0), 255)
+  assert.equal(universalOpacity(65, 64, 0), 256)
 })
 
 test('zero-vague universal performs a strict threshold copy without division', () => {
-  assert.equal(opaqueUniversalOpacity(127, 0, 126), 256)
-  assert.equal(opaqueUniversalOpacity(127, 0, 127), -1)
-  assert.equal(opaqueUniversalOpacity(127, 0, 128), -1)
+  assert.equal(universalOpacity(127, 0, 126), 256)
+  assert.equal(universalOpacity(127, 0, 127), -1)
+  assert.equal(universalOpacity(127, 0, 128), -1)
 })
 
 test('universal switches from source copies to unconditional table blending at vague 512', () => {
-  assert.equal(opaqueUniversalOpacity(543, 511, 31), 256)
-  assert.equal(opaqueUniversalOpacity(543, 511, 32), 255)
-  assert.equal(opaqueUniversalOpacity(544, 512, 31), 255)
-  assert.equal(opaqueUniversalOpacity(544, 512, 32), 255)
-  assert.equal(opaqueUniversalOpacity(32, 512, 32), 0)
-  assert.equal(opaqueUniversalOpacity(65500, 65535, 255), 254)
+  assert.equal(universalOpacity(543, 511, 31), 256)
+  assert.equal(universalOpacity(543, 511, 32), 255)
+  assert.equal(universalOpacity(544, 512, 31), 255)
+  assert.equal(universalOpacity(544, 512, 32), 255)
+  assert.equal(universalOpacity(32, 512, 32), 0)
+  assert.equal(universalOpacity(65500, 65535, 255), 254)
 })
 
 test('opaque universal retains tiled rule lookup and exact final copies', () => {
@@ -107,21 +106,14 @@ test('opaque universal retains tiled rule lookup and exact final copies', () => 
 })
 
 test('transition kernels select the captured destination display type independently of pixel alpha', () => {
-  for (const destinationType of [0, 1, 3, 4, 5, 8, 9, 10, 11])
-    assert.equal(opaqueTransition({ ...frame, destinationType }), true)
-  for (const destinationType of [2, 12, ...Array.from({ length: 16 }, (_, i) => i + 13)])
-    assert.equal(opaqueTransition({ ...frame, destinationType }), false)
-  assert.equal(opaqueTransition({ ...frame, kind: 'scroll' }), false)
-  for (const destinationType of [2, 12])
-    assert.deepEqual(
-      [
-        ...transitionPixels(image(0, 0, 0, 255), image(255, 255, 255, 255), {
-          ...frame,
-          destinationType,
-        }).data,
-      ],
-      [127, 127, 127, 255],
-    )
+  for (const destinationType of [0, 1, 3, 4, 5, 8, 9, 10, 11, 2, 12, ...Array.from({ length: 16 }, (_, i) => i + 13)]) {
+    const output = transitionPixels(image(0, 0, 0, 255), image(255, 255, 255, 255), { ...frame, destinationType })
+    // At phase 127 the original straight-alpha table weights the incoming
+    // RGB by 168/256. AddAlpha applies 127/256 to all four stored channels.
+    const expected = destinationType === 12 ? [126, 126, 126, 255]
+      : destinationType === 2 || destinationType >= 13 ? [167, 167, 167, 255] : [126, 126, 126, 0]
+    assert.deepEqual([...output.data], expected, `display type ${destinationType}`)
+  }
 })
 
 for (const children of [false, true])
@@ -138,6 +130,13 @@ for (const children of [false, true])
     layers.set(destination, 'visible', 1)
     layers.fill(destination, { x: 0, y: 0, width: 1, height: 1 }, 0x13000000)
     layers.fill(source, { x: 0, y: 0, width: 1, height: 1 }, 0x01ffffff)
+    // A seen child counts even outside the copy rectangle. Otherwise native
+    // Complete returns the untransitioned full MainImage directly.
+    const completionChild = layers.create(destination)
+    layers.resizeImage(completionChild, 1, 1)
+    layers.resize(completionChild, 1, 1)
+    layers.position(completionChild, 1, 0)
+    layers.set(completionChild, 'visible', 1)
     const composer = new SceneComposer(layers, (id) =>
       id === destination ? { ...frame, destination, source, children } : undefined,
     )

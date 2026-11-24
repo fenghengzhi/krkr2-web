@@ -41,6 +41,7 @@ test('a snapshot paints pending source layers before copying their pixels', asyn
   const { session } = await headless({
     'startup.tjs': String.raw`
 var window=new Window(),root=new Layer(window,null),target=new Layer(window,root),painted=0;
+var completionChild=new Layer(window,root);completionChild.setSize(1,1);completionChild.setPos(root.width,0);completionChild.visible=true;
 root.onPaint=function(){painted++;root.fillRect(0,0,1,1,0xff123456);};root.callOnPaint=true;
 target.piledCopy(0,0,root,0,0,1,1);
 `,

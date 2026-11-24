@@ -65,7 +65,7 @@ var tick=0,completed=0;fore.onTransitionCompleted=function(dest,src){completed++
       '0',
     )
     await evaluate(page, '(function(){tick=500;fore.update();return 0;})()', '0')
-    expect(await sample(page, 0.25, 0.5)).toEqual([128, 0, 127, 255])
+    expect(await sample(page, 0.25, 0.5)).toEqual([87, 0, 167, 255])
     await evaluate(page, '(function(){tick=1000;fore.update();return 0;})()', '0')
     await evaluate(page, 'completed==1 && root.children[0]===back && !fore.visible', '1')
     expect(await sample(page, 0.25, 0.5)).toEqual([0, 0, 255, 255])

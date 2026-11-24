@@ -1,6 +1,6 @@
 import type { Pixels } from '../ports/graphics.ts'
-import { usesAlpha } from './blend.ts'
-import { blendOpaqueTransitionPixel, opaqueUniversalOpacity } from './transition-opaque.ts'
+import { autoFace } from './blend.ts'
+import { blendTransitionPixel, universalOpacity } from './transition-blend.ts'
 export interface TransitionFrame {
   token: number
   destination: number
@@ -17,11 +17,23 @@ export interface TransitionFrame {
   from: number
   stay: number
 }
-export const opaqueTransition = (frame: TransitionFrame): boolean =>
-  frame.kind !== 'scroll' && !usesAlpha(frame.destinationType)
-
-/** Opaque fade inputs/results are raw image planes. Other transitions retain
- * the premultiplied representation until their own kernels are calibrated. */
+/** Copy the clipped rectangle from one scrolling plane. Vertical moves
+ * cover complete rows, so their complete span fits in a single typed copy. */
+function copyScrollPlane(source: Pixels, target: Uint8Array, horizontal: boolean, offset: number): void {
+  const extent = horizontal ? source.width : source.height
+  const count = extent - Math.abs(offset)
+  if (count <= 0) return
+  if (!offset) { target.set(source.data); return }
+  const from = Math.max(-offset, 0), to = Math.max(offset, 0), stride = source.width * 4
+  if (!horizontal) {
+    target.set(source.data.subarray(from * stride, (from + count) * stride), to * stride)
+    return
+  }
+  for (let row = 0; row < source.data.length; row += stride)
+    target.set(source.data.subarray(row + from * 4, row + (from + count) * 4), row + to * 4)
+}
+/** TVP handlers consume raw source planes and select the kernel from the
+ * captured destination display type. Presentation converts the resulting plane. */
 export function transitionPixels(
   before: Pixels,
   after: Pixels,
@@ -34,7 +46,7 @@ export function transitionPixels(
   const progress = Math.max(0, Math.min(1, transition.phase))
   const horizontal = transition.from === 0 || transition.from === 2, length = horizontal ? width : height,
     phaseMax = transition.kind === 'scroll' ? length : 255 + (transition.kind === 'universal' ? transition.vague : 0),
-    phase = transition.pixelPhase ?? Math.floor(progress * phaseMax), opaque = opaqueTransition(transition)
+    phase = transition.pixelPhase ?? Math.floor(progress * phaseMax), face = autoFace(transition.destinationType)
   if (!phase) {
     result.data.set(before.data)
     return result
@@ -43,28 +55,25 @@ export function transitionPixels(
     result.data.set(after.data)
     return result
   }
-  const direction = transition.from < 2 ? 1 : -1,
-    oldOffset = transition.stay === 1 ? 0 : direction * phase,
-    newOffset = transition.stay === 2 ? 0 : direction * (phase - length)
+  if (transition.kind === 'scroll') {
+    const direction = transition.from < 2 ? 1 : -1
+    const oldOffset = transition.stay === 1 ? 0 : direction * phase
+    const newOffset = transition.stay === 2 ? 0 : direction * (phase - length)
+    // The moving layer covers the stationary one in the two stay modes.
+    if (transition.stay === 2) {
+      copyScrollPlane(after, result.data, horizontal, newOffset)
+      copyScrollPlane(before, result.data, horizontal, oldOffset)
+    } else {
+      copyScrollPlane(before, result.data, horizontal, oldOffset)
+      copyScrollPlane(after, result.data, horizontal, newOffset)
+    }
+    return result
+  }
+  const switchRule = transition.kind === 'universal' && transition.vague < 512
   for (let y = 0; y < height; y++)
     for (let x = 0; x < width; x++) {
       const offset = (y * width + x) * 4
-      if (transition.kind === 'scroll') {
-        const point = horizontal ? x : y,
-          oldPoint = point - oldOffset,
-          newPoint = point - newOffset
-        const newValid = newPoint >= 0 && newPoint < length,
-          oldValid = oldPoint >= 0 && oldPoint < length
-        const useNew = transition.stay === 2 ? !oldValid : newValid
-        const location = useNew ? newPoint : oldPoint,
-          source = useNew ? after : before
-        if (location >= 0 && location < length) {
-          const at = (horizontal ? y * width + location : location * width + x) * 4
-          result.data.set(source.data.subarray(at, at + 4), offset)
-        }
-        continue
-      }
-      let amount = phase / 255
+      let opacity = phase
       if (transition.kind === 'universal') {
         const rule = transition.rule
         if (!rule?.width || !rule.height)
@@ -72,28 +81,10 @@ export function transitionPixels(
         const at = ((y % rule.height) * rule.width + (x % rule.width)) * 4
         const threshold =
           (rule.data[at]! * 54 + rule.data[at + 1]! * 183 + rule.data[at + 2]! * 19) >> 8
-        if (opaque) {
-          blendOpaqueTransitionPixel(
-            result.data,
-            offset,
-            before.data,
-            after.data,
-            opaqueUniversalOpacity(phase, transition.vague, threshold),
-          )
-          continue
-        }
-        amount = transition.vague
-          ? Math.max(0, Math.min(1, (phase - threshold) / transition.vague))
-          : Number(threshold < phase)
+        opacity = universalOpacity(phase, transition.vague, threshold)
       }
-      if (opaque) {
-        blendOpaqueTransitionPixel(result.data, offset, before.data, after.data, phase)
-        continue
-      }
-      for (let channel = 0; channel < 4; channel++)
-        result.data[offset + channel] = Math.round(
-          before.data[offset + channel]! * (1 - amount) + after.data[offset + channel]! * amount,
-        )
+      blendTransitionPixel(result.data, offset, before.data, after.data, opacity, face,
+        transition.kind, switchRule)
     }
   return result
 }

@@ -845,9 +845,32 @@ export class WebVideoHost {
       const cancel = () => done(new Error('Video operation cancelled'))
       movie.abort.signal.addEventListener('abort', cancel, { once: true })
       if (movie.abort.signal.aborted) return cancel()
-      cancelTimeout = this.timeouts.start(15000, () =>
-        done(new Error('Video first frame timed out')),
-      )
+      cancelTimeout = this.timeouts.start(15000, () => {
+        // Preserve the actual stalled phase before rollback retires the
+        // candidate. These observations never release the presentation gate:
+        // loadeddata/decoded counters alone do not prove a submitted frame.
+        let observation: unknown
+        try {
+          const element = movie.element, rect = element.getBoundingClientRect(),
+            style = getComputedStyle(element), container = getComputedStyle(movie.container),
+            quality = element.getVideoPlaybackQuality?.()
+          observation = { phase: 'load-first-frame', loaded, presented, callbackHandle: callback,
+            id: movie.id, epoch: movie.epoch, windowId: movie.windowId, mode: movie.settings.mode,
+            videoStream: movie.settings.enabledVideoStream, audioStream: movie.settings.enabledAudioStream,
+            currentTime: element.currentTime, seeking: element.seeking, paused: element.paused,
+            readyState: element.readyState, networkState: element.networkState,
+            width: element.videoWidth, height: element.videoHeight, connected: element.isConnected,
+            documentVisibility: element.ownerDocument.visibilityState,
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            videoStyle: { display: style.display, visibility: style.visibility, opacity: style.opacity },
+            containerStyle: { display: container.display, visibility: container.visibility, opacity: container.opacity },
+            presentedTime: movie.presentedTime, presentedFrames: movie.presentedFrames,
+            independentTime: element.dataset.presentedTime, independentFrames: element.dataset.presentedFrames,
+            quality: quality && { total: quality.totalVideoFrames, dropped: quality.droppedVideoFrames,
+              creationTime: quality.creationTime } }
+        } catch (error) { observation = { observationError: String(error) } }
+        done(new Error('Video first frame timed out; ' + JSON.stringify(observation)))
+      })
       try {
         callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
           movie.presentedTime = metadata.mediaTime * 1000

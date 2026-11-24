@@ -710,7 +710,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, eri-reference, kag-bookmarks]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, eri-reference, original-sound-wine, kag-bookmarks]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -908,6 +908,45 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  original-sound-wine:
+    name: Original SDK sound with a software audio endpoint (Wine)
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - name: Prepare the same SLI and WAVE project as the Windows comparison
+        id: prepare_sound
+        run: node --import tsx tests/probes/sli-sdk.ts prepare --wine-pulse
+      - name: Start a 32-bit Wine environment and a stereo output device
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends wine wine32:i386 libpulse0:i386 pulseaudio pulseaudio-utils xvfb xauth
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=krkr_sdk_output rate=48000 channels=2
+          pactl set-default-sink krkr_sdk_output
+          pactl info > out/verification/original-sound-wine/pulse-info.txt
+      - name: Run the original engine against the software output
+        run: xvfb-run -a python3 tests/probes/original-sound-wine.py
+      - name: Compare the original script observations
+        if: ${{ !cancelled() && steps.prepare_sound.outcome == 'success' }}
+        run: node --import tsx tests/probes/sli-sdk.ts compare --wine-pulse
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-sound-wine
+          path: out/verification/original-sound-wine/
+          if-no-files-found: error
+          retention-days: 90
+
   eri-reference:
     name: Original 2.32r2 SDK ERI pixels (${{ matrix.corpus }})
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
@@ -996,6 +1035,16 @@ jobs:
       - name: Preserve and compare original transition option observations
         if: ${{ !cancelled() && steps.prepare_transition.outcome == 'success' }}
         run: node --import tsx tests/probes/transition-sdk.ts compare
+      - name: Prepare literal alpha transition pixel controls
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
+        id: prepare_transition_alpha
+        run: node --import tsx tests/probes/transition-alpha-sdk.ts prepare
+      - name: Observe original live alpha and PS transition pixels
+        if: ${{ !cancelled() && steps.prepare_transition_alpha.outcome == 'success' }}
+        run: ./tests/probes/original-eri.ps1 -Project transition-alpha
+      - name: Preserve and compare original alpha transition pixels
+        if: ${{ !cancelled() && steps.prepare_transition_alpha.outcome == 'success' }}
+        run: node --import tsx tests/probes/transition-alpha-sdk.ts compare
       - name: Prepare the original KAG introduction and its layout observer
         if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
         id: prepare_kag_intro

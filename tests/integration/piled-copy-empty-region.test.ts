@@ -10,6 +10,10 @@ var win=new Window(),root=new Layer(win,null);
 var source=new Layer(win,root),target=new Layer(win,root);
 source.setSize(4,2);source.setImageSize(4,2);
 target.setSize(4,2);target.setImageSize(4,2);
+// These cases exercise Complete/onPaint after clipping. A full-image leaf
+// bypasses that path; the seen child is wholly outside the requested pixels.
+var completionChild=new Layer(win,source);completionChild.setImageSize(1,1);completionChild.setSize(1,1);
+completionChild.setPos(4,0);completionChild.fillRect(0,0,1,1,0);completionChild.visible=true;
 source.fillRect(0,0,4,2,0x80112233);
 for(var y=0;y<2;y++)for(var x=0;x<4;x++){
   source.setMainPixel(x,y,0x010000*(1+x)+y);source.setMaskPixel(x,y,100+x+y);

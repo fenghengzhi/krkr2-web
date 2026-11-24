@@ -6,7 +6,7 @@ import { xp3Fixture } from '../helpers/xp3-fixtures.ts'
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: packaged CUE tracks play through CDDASoundBuffer and the AudioWorklet`, async ({ page }, info) => {
     test.setTimeout(60000)
-    const errors: string[] = []
+    const errors: string[] = [], failures: unknown[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !await page.evaluate(() => 'Suspending' in WebAssembly), 'JSPI unavailable')
@@ -29,12 +29,14 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await evaluate(page, 'cdOpen("audio/disc.wav")', 'stop,3000,0,2,16')
       expect(errors).toEqual([])
       await expect(page.locator('#logs .error')).toHaveCount(0)
-    } finally {
-      try { await info.attach('cdda-player-log', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }) }
-      finally {
-        await page.locator('#stop').dispatchEvent('click')
-        await expect(page.locator('#status')).toHaveText('待机')
-        await expect.poll(() => page.workers().filter((worker) => worker.url().includes('session.worker')).length).toBe(0)
-      }
-    }
+    } catch (error) { failures.push(error) }
+    try { await info.attach('cdda-player-log', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }) }
+    catch (error) { failures.push(error) }
+    try {
+      await page.locator('#stop').dispatchEvent('click')
+      await expect(page.locator('#status')).toHaveText('待机')
+      await expect.poll(() => page.workers().filter((worker) => worker.url().includes('session.worker')).length).toBe(0)
+    } catch (error) { failures.push(error) }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'CDDA packaged playback or cleanup failed', { cause: failures[0] })
   })

@@ -3,12 +3,12 @@ import { wave } from './audio.ts'
 /** The same real TJS controls run in the pinned Windows SDK and the Web VM.
  * These exact floats are authored IEEE-754 values, not product calculations. */
 export const wavePositionExpected: Readonly<Record<string, string>> = {
-  'position-default': '0,0,0,0,unload',
+  'position-default': '+0.0,+0.0,+0.0,0,unload',
   'position-real': '1,1,1,1,1,1,1',
-  'position-arguments': 'wave-args|wave-args|wave-args|wave-real|4,5,6|1|0,0,0',
+  'position-arguments': 'wave-args|wave-args|wave-args|wave-real|4,5,6|1|+0.0,+0.0,+0.0',
   'position-properties': '1,1,1|wave-real|1,1,1',
   'position-pan-before': '1,2,3|1,1,1|7,8,9|1,1,1|50000|1',
-  'position-independent': '1,2,3|4,5,6|0,0|1|0,0,0',
+  'position-independent': '1,2,3|4,5,6|0,0|1|+0.0,+0.0,+0.0',
   'position-playback': '1,1|7,8,9|7,8,9|unload|7,8,9|stop|7,8,9',
   'position-callback': '7,8,9|25000|play|1',
 }

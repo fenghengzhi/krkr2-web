@@ -360,11 +360,13 @@ export class AudioMixer {
       } else if (command.op === 'fade') {
         if (command.time <= 0 || command.delay < 0)
           throw new Error('Fade requires positive time and non-negative delay')
-        const target = clamp(command.target, 0, 100000)
+        // Native Fade keeps the signed target for its delta; SetVolume clamps
+        // only each actual update and the eventual target assignment.
+        const target = command.target
         voice.fade = {
           target,
           delta: Math.trunc(((target - settings.volume) * 60) / command.time),
-          count: Math.max(1, Math.floor(command.time / 60)),
+          count: Math.floor(command.time / 60),
           delay: command.delay,
           next: voice.clock + 0.06,
         }
@@ -375,7 +377,7 @@ export class AudioMixer {
   }
   private finishFade(voice: Voice, finish: boolean): void {
     if (!voice.fade) return
-    if (finish) voice.settings.volume = voice.fade.target
+    if (finish) voice.settings.volume = clamp(voice.fade.target, 0, 100000)
     voice.fade = undefined
     this.event(voice, 'fade')
   }
@@ -672,8 +674,8 @@ export class AudioMixer {
         if (voice.fade && voice.clock + 1e-10 >= voice.fade.next) {
           voice.fade.next += 0.06
           if (voice.fade.delay > 0) voice.fade.delay = Math.max(0, voice.fade.delay - 60)
-          else if (voice.fade.count <= 1) this.finishFade(voice, true)
-          else {
+          else if (voice.fade.count === 1) this.finishFade(voice, true)
+          else if (voice.fade.count > 1) {
             voice.fade.count--
             settings.volume = clamp(settings.volume + voice.fade.delta, 0, 100000)
           }

@@ -17,7 +17,14 @@ class __SoundBase {
   function open(name){__soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[string(name)],__soundKind=="wave"?global.WaveSoundBuffer.__snapshotPhaseVocoderFilters(__filters):void);}
   function play(){__soundRun("play",[]);}
   function stop(){__soundRun("stop",[]);}
-  function fade(to,time,delay=0){__soundRun("stopFade",[false]);__soundRun("fade",[int(to),int(time),int(delay)]);}
+  function fade(args*){
+    if(args.count<2){__soundRun("prepareFade",[]);return;}
+    // Convert and validate before cancelling the old fade. Its immediate
+    // completion callback may reenter the same buffer before the new fade.
+    var to=int(args[0]),time=int(args[1]),delay=args.count<3||args[2]===void?0:int(args[2]);
+    var parameters=__soundRun("prepareFade",[to,time,delay]);
+    __soundRun("stopFade",[false]);__soundRun("fade",parameters);
+  }
   function stopFade(){__soundRun("stopFade",[true]);}
   function onStatusChanged(status){if(__soundOwner!==null&&typeof __soundOwner.action!="undefined")__soundOwner.action(%[type:"onStatusChanged",target:this,status:status]);}
   function onFadeCompleted(){if(__soundOwner!==null&&typeof __soundOwner.action!="undefined")__soundOwner.action(%[type:"onFadeCompleted",target:this]);}

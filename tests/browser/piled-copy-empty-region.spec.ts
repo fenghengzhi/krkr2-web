@@ -7,6 +7,10 @@ var root=new Layer(win,null);root.setSize(4,2);root.fillRect(0,0,4,2,0xff000000)
 var source=new Layer(win,root),target=new Layer(win,root);
 source.setSize(4,2);source.setImageSize(4,2);
 target.setSize(4,2);target.setImageSize(4,2);
+// Force native Complete rather than its full-image leaf shortcut, while this
+// seen child's rectangle contributes no pixels to any requested source region.
+var completionChild=new Layer(win,source);completionChild.setImageSize(1,1);completionChild.setSize(1,1);
+completionChild.setPos(4,0);completionChild.fillRect(0,0,1,1,0);completionChild.visible=true;
 for(var y=0;y<2;y++)for(var x=0;x<4;x++){
   source.setMainPixel(x,y,0x010000*(1+x)+y);source.setMaskPixel(x,y,100+x+y);
 }

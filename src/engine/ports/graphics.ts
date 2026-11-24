@@ -72,7 +72,9 @@ export interface GraphicsDecoder {
     font?: FontSpec,
     options?: TextOptions,
   ): TextPixels
-  measure?(text: string, font: FontSpec): { width: number; height: number; ascent?: number }
+  /** Some system-font backends use a different advance for the drawn glyph
+   * than the width reported to the script, particularly for synthetic bold. */
+  measure?(text: string, font: FontSpec): { width: number; height: number; ascent?: number; drawAdvance?: number }
   loadFont?(bytes: Uint8Array): Promise<LoadedFont>
   measureGlyph?(character: string, font: FontSpec): GlyphMetrics
   glyph?(character: string, font: FontSpec, antialiased: boolean): RasterGlyph | undefined

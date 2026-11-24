@@ -39,6 +39,33 @@ const check=(condition,message)=>{if(!condition)throw new Error(message)};
 self.onmessage=async({data})=>{try{${body}}catch(e){postMessage({error:String(e),stack:e.stack})}};`,
   })
 }
+test('system bold measures dialogue and places glyphs using distinct regular-face advances', async ({ page }, info) => {
+  const result = await runWorker(page, info, `
+const backend=new BrowserGraphics(), ref=new OffscreenCanvas(1,1).getContext('2d');
+let cases=0, distinct=false;
+try {
+ for(const height of [24,40,96]){
+  const spec={...font,face:'serif',height,bold:true};ref.font=height+'px serif';
+  for(const text of ['Introduction to Kirikiri and','Exit','Wi Wi','A'+String.fromCharCode(0)+'B']){
+   let width=0,pen=0;
+   for(let i=0;i<text.length && text.charCodeAt(i);i++){
+    const m=ref.measureText(text[i]), regular=Math.round(m.width), box=m.fontBoundingBoxAscent+m.fontBoundingBoxDescent;
+    width+=regular+Math.floor((Number.isFinite(box)&&box>0?Math.round(box):height)/50)+1;
+    pen+=regular+Math.floor(regular/50)+1;
+   }
+   const got=backend.measure(text,spec);
+   check(got.width===width && got.drawAdvance===pen,'system advances '+[height,text,width,got.width,pen,got.drawAdvance]);
+   distinct ||= width!==pen;
+   cases++;
+  }
+  check(backend.measureGlyph('i',spec).advance===Math.round(ref.measureText('i').width),'glyph bounds use regular advance');
+ }
+} finally {backend.dispose();}
+postMessage({cases,distinct});
+`, {})
+  expect(result).toEqual({ cases: 12, distinct: true })
+})
+
 test('Worker file glyphs match native coverage and missing glyphs use browser fallback only where allowed', async ({
   page,
 }, testInfo) => {

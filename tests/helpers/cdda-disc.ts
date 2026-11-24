@@ -4,7 +4,7 @@ export function cddaGame(binary: boolean): Record<string, string | Uint8Array> {
   const rate = 44100, firstFrames = rate * 2, secondFrames = rate
   return {
     'startup.tjs': binary
-      ? 'Scripts.compileStorage("disc-player.tjs","savedata/disc-player.cjs",false,true,false);Scripts.execStorage("savedata/disc-player.cjs");'
+      ? 'Scripts.compileStorage("disc-player.tjs",System.dataPath+"disc-player.cjs",false,true,false);Scripts.execStorage(System.dataPath+"disc-player.cjs");'
       : 'Scripts.execStorage("disc-player.tjs");',
     'disc-player.tjs': `
 System.exitOnNoWindowStartup=false;

@@ -37,6 +37,60 @@ test('a complete leaf snapshot preserves low-alpha RGB bytes without premultipli
   layers.resizeImage(root, 1, 1)
   layers.fill(root, { x: 0, y: 0, width: 1, height: 1 }, 0x01010203)
   assert.deepEqual([...new SceneComposer(layers).snapshot(root).data], [1, 2, 3, 1])
+  const source = layers.create(0), child = layers.create(root)
+  layers.resizeImage(source, 1, 1)
+  layers.fill(source, { x: 0, y: 0, width: 1, height: 1 }, 0xffc9cacb)
+  layers.resize(child, 0, 0)
+  layers.position(child, 20, 20)
+  for (const children of [false, true]) {
+    const composer = new SceneComposer(layers, (id) => id === root ? {
+      token: 1, destination: root, source, destinationType: 1, children,
+      kind: 'crossfade', phase: 0.5, vague: 0, from: 0, stay: 0,
+    } : undefined)
+    layers.set(child, 'visible', 0)
+    assert.deepEqual([...composer.snapshot(root).data], [1, 2, 3, 1])
+    layers.set(child, 'visible', 1); layers.set(child, 'opacity', 0)
+    assert.deepEqual([...composer.snapshot(root).data], [1, 2, 3, 1])
+    layers.set(child, 'opacity', 255)
+    // Native seen-count includes this zero-size, off-rectangle child. It is
+    // enough to require completion, while contributing no image of its own.
+    assert.deepEqual([...composer.snapshot(root).data], [100, 101, 102, 0])
+  }
+})
+test('a snapshot keeps the raw parent plane beside a child fading to another layer', () => {
+  const layers = new LayerTree(), root = layers.create(0), parent = layers.create(root),
+    front = layers.create(parent), back = layers.create(parent)
+  for (const id of [root, parent, front, back]) {
+    const width = id === front || id === back ? 1 : 2
+    layers.resizeImage(id, width, 1)
+    layers.resize(id, width, 1)
+  }
+  layers.set(front, 'visible', 1)
+  layers.fill(parent, { x: 0, y: 0, width: 2, height: 1 }, 0x01123456)
+  layers.fill(front, { x: 0, y: 0, width: 1, height: 1 }, 0xffff0000)
+  layers.fill(back, { x: 0, y: 0, width: 1, height: 1 }, 0xff0000ff)
+  const composer = new SceneComposer(layers, (id) => id === front ? {
+    token: 1, destination: front, source: back, destinationType: 2, children: false,
+    kind: 'crossfade', phase: 0.5, vague: 0, from: 0, stay: 0,
+  } : undefined)
+  assert.deepEqual([...composer.snapshot(parent).data], [87, 0, 167, 255, 18, 52, 86, 1])
+  const third = layers.create(parent)
+  layers.resizeImage(third, 1, 1); layers.resize(third, 1, 1)
+  layers.fill(third, { x: 0, y: 0, width: 1, height: 1 }, 0xff00ff00)
+  for (const children of [false, true]) {
+    const nested = new SceneComposer(layers, (id) => id === front ? {
+      token: 1, destination: front, source: back, destinationType: 2, children,
+      kind: 'crossfade', phase: 0.5, vague: 0, from: 0, stay: 0,
+    } : id === back ? {
+      token: 2, destination: back, source: third, destinationType: 2, children: false,
+      kind: 'crossfade', phase: 0.5, vague: 0, from: 0, stay: 0,
+    } : undefined)
+    // Main-only source sampling reads back.MainImage. With children it calls
+    // Complete(back), whose full-leaf shortcut returns that same original.
+    // An external parent's actual Draw still displays front's transition.
+    assert.deepEqual([...nested.snapshot(back).data], [0, 0, 255, 255])
+    assert.deepEqual([...nested.snapshot(parent).data], [87, 0, 167, 255, 18, 52, 86, 1])
+  }
 })
 test('transition kernels preserve endpoints, tiled rules and scroll coverage', () => {
   const before = solid(255, 0, 0),
@@ -63,7 +117,7 @@ test('transition kernels preserve endpoints, tiled rules and scroll coverage', (
   )
   assert.deepEqual(
     [...transitionPixels(before, after, frame).data],
-    [128, 0, 127, 255, 128, 0, 127, 255],
+    [87, 0, 167, 255, 87, 0, 167, 255],
   )
   const rule = { width: 2, height: 1, data: new Uint8Array([0, 0, 0, 255, 255, 255, 255, 255]) }
   assert.deepEqual(
@@ -90,6 +144,23 @@ test('transition kernels preserve endpoints, tiled rules and scroll coverage', (
       const output = transitionPixels(before, after, { ...frame, kind: 'scroll', from, stay })
       for (let at = 3; at < output.data.length; at += 4) assert.equal(output.data[at], 255)
     }
+})
+test('scroll rectangles preserve raw channels and the moving plane wins each stay overlap', () => {
+  const pixel = (value: number) => [value, 255 - value, value + 1, value === 130 ? 0 : value]
+  const leftOrTop = [[130, 10, 20], [130, 20, 30], [110, 10, 20]]
+  const rightOrBottom = [[20, 30, 110], [10, 20, 110], [20, 30, 130]]
+  for (const from of [0, 1, 2, 3]) {
+    const horizontal = from === 0 || from === 2
+    const image = (values: number[]) => ({
+      width: horizontal ? 3 : 1, height: horizontal ? 1 : 3, data: Uint8Array.from(values.flatMap(pixel)),
+    })
+    for (const [stay, expected] of (from < 2 ? leftOrTop : rightOrBottom).entries()) {
+      const frame: TransitionFrame = { token: 1, destination: 1, source: 2, destinationType: 2, children: false,
+        kind: 'scroll', phase: 1 / 3, pixelPhase: 1, vague: 0, from, stay }
+      const result = transitionPixels(image([10, 20, 30]), image([110, 120, 130]), frame)
+      assert.deepEqual([...result.data], expected.flatMap(pixel), `from=${from}, stay=${stay}`)
+    }
+  }
 })
 test('structural exchanges keep a single primary tree for siblings and ancestors', () => {
   for (const withChildren of [false, true])

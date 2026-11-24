@@ -27,6 +27,7 @@ class TestConductor extends BaseConductor {
   function onStop() { stopped=true; Debug.message("Conductor result="+result); }
 }
 var conductor=new TestConductor();
+property mp { getter(){return global.conductor.macroParams;} }
 conductor.loadScenario("verification.ks");
 conductor.startProcess();
 `

@@ -5,7 +5,7 @@ import { dirname, resolve, sep } from 'node:path'
 import { inflateSync } from 'node:zlib'
 import { adler32, readXp3 } from '../../src/formats/xp3/archive.ts'
 import { kagIntroSource, kagIntroStateExpression, kagIntroLayoutExpression,
-  kagIntroLayoutFields } from '../helpers/kag-intro-observation.ts'
+  kagIntroLayoutFields, kagIntroFontMetricExpression, kagIntroFontMetricFields } from '../helpers/kag-intro-observation.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -46,6 +46,10 @@ function introObserve(){
         if(candidate && state==global.introPrevious){
           global.introRecord("state|"+state);
           global.introRecord("layout|"+${kagIntroLayoutExpression});
+          // Save the original game state first. This separate temporary Font
+          // does not change the active message Font or replay its scenario.
+          try{global.introRecord("font-metrics|"+${kagIntroFontMetricExpression});}
+          catch(e){global.introRecord("font-metrics-error|"+e.message);}
           global.introRecord("done|"+(fields[1]=="1"?"initial-automatic-page":"initial-three-link-choice"));
           done=true;
         }
@@ -144,18 +148,27 @@ if (process.argv[2] === 'prepare') {
     state: string; exitCode: number | null; commit: string; timedOut: boolean }
   const states = lines.filter((line) => line.startsWith('state|')).map((line) => line.slice(6).split('|'))
   const layouts = lines.filter((line) => line.startsWith('layout|')).map((line) => line.slice(7).split('|'))
+  const fontMetricLines = lines.filter((line) => line.startsWith('font-metrics|')),
+    fontMetricRows = fontMetricLines[0]?.slice('font-metrics|'.length).split(';').map((row) => row.split(',')),
+    fontMetricErrors = lines.filter((line) => line.startsWith('font-metrics-error|')).map((line) => line.slice('font-metrics-error|'.length)),
+    fontMetricsComplete = fontMetricLines.length === 1 && fontMetricErrors.length === 0 &&
+      fontMetricRows?.length === 4 && fontMetricRows.every((row) => row.length === kagIntroFontMetricFields.length &&
+        row.every((value) => value.length > 0 && Number.isFinite(Number(value))))
   const classification = lines.find((line) => line.startsWith('done|'))?.slice(5)
   const state = states[0], classified = classification === 'initial-three-link-choice'
     ? state?.[1] === '0' && state[6] === '0' && state[7] === '3'
     : classification === 'initial-automatic-page' && state?.[1] === '1' && state[3] === '1' && state[10] !== 'p'
   const observed = processResult.state === 'observed' && processResult.exitCode === 0 && !processResult.timedOut &&
-    processResult.commit === manifest.commit && lines.length === 4 && lines[0] === 'start' &&
+    processResult.commit === manifest.commit && lines.length === 5 && lines[0] === 'start' &&
     states.length === 1 && states[0]!.length === 11 && states[0]![0] === '*syokai_start' &&
     layouts.length === 1 && layouts[0]!.length === kagIntroLayoutFields.length &&
     classified
   save('observation.json', { commit: manifest.commit, observed, classification, state: states[0],
     layout: layouts[0] && Object.fromEntries(kagIntroLayoutFields.map((name, index) => [name, layouts[0]![index]])),
     observationsSha256: sha(bytes), lines, process: processResult,
+    fontMetricsComplete, fontMetricErrors, fontMetricFields: kagIntroFontMetricFields,
+    fontMetrics: fontMetricRows?.map((row) => Object.fromEntries(kagIntroFontMetricFields.map((key, index) => [key, Number(row[index])]))),
     scope: 'Original SDK initial layout only. Both a three-link menu and an automatic page wait are recorded as observations; neither is a complete native gameplay or Web font-metric equivalence claim. No input was injected.' })
   assert(observed, 'Incomplete original Introduction initial-layout observation')
+  assert(fontMetricsComplete, 'Incomplete separate original Introduction font measurement')
 } else throw new Error('Expected prepare or native')

@@ -33,9 +33,9 @@ fore.beginTransition("crossfade",true,back,%[time:1000,selfupdate:true,callback:
     await session.start()
     assert.deepEqual(pixels, [255, 0, 0, 255])
     await session.evaluate('(function(){tick=500;fore.update();return 0;})()')
-    assert.deepEqual(pixels, [128, 0, 127, 255])
+    assert.deepEqual(pixels, [87, 0, 167, 255])
     await session.evaluate('(function(){tick=250;fore.update();return 0;})()')
-    assert.deepEqual(pixels, [192, 0, 63, 255])
+    assert.deepEqual(pixels, [179, 0, 75, 255])
     await session.evaluate('(function(){tick=1000;fore.update();return 0;})()')
     assert.equal(
       await session.evaluate(
@@ -114,7 +114,7 @@ fore.beginTransition("crossfade",true,back,%[time:100]);
     await session.start()
     const foreId = Number(await session.evaluate('fore.__id')), backId = Number(await session.evaluate('back.__id'))
     await advance(40)
-    assert.deepEqual(lastLayers.find((layer) => layer.id === -foreId)?.pixels, [153, 0, 102, 255, 153, 0, 102, 255])
+    assert.deepEqual(lastLayers.find((layer) => layer.id === -foreId)?.pixels, [122, 0, 132, 255, 122, 0, 132, 255])
     session.pause()
     assert.equal(scheduled.size, 0)
     now = 1000
@@ -125,7 +125,7 @@ fore.beginTransition("crossfade",true,back,%[time:100]);
     // 99/100 ms boundary without waiting for a later automatic frame.
     assert.equal(await session.evaluate('(function(){global.fore.update();global.window.update();return global.done;})()'), '0')
     assert.equal(await session.evaluate('done'), '0')
-    assert.deepEqual(lastLayers.find((layer) => layer.id === -foreId)?.pixels, [3, 0, 252, 255, 3, 0, 252, 255])
+    assert.deepEqual(lastLayers.find((layer) => layer.id === -foreId)?.pixels, [1, 0, 253, 255, 1, 0, 253, 255])
     await advance(1060)
     assert.equal(await session.evaluate('(function(){global.fore.update();global.window.update();return global.done;})()'), '1')
     assert.equal(await session.evaluate('done'), '1')

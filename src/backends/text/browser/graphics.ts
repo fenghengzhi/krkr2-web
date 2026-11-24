@@ -99,33 +99,33 @@ export class BrowserGraphics implements GraphicsDecoder {
   private font(spec: FontSpec): string {
     return `${spec.italic ? 'italic ' : ''}${spec.bold ? 'bold ' : ''}${Math.abs(spec.height)}px ${cssFontStack(spec.face)}`
   }
-  measure(text: string, font: FontSpec): { width: number; height: number; ascent: number } {
+  measure(text: string, font: FontSpec): { width: number; height: number; ascent: number; drawAdvance: number } {
     if (text.length > 8192) throw new Error('Text exceeds measurement budget')
-    const native = this.nativeFaces.get(font.face)
+    const height = Math.abs(font.height), native = this.nativeFaces.get(font.face)
     if (native) {
       let width = 0
       for (let i = 0; i < text.length && text.charCodeAt(i); i++)
         width += native.advance(text[i]!, font)
-      return { width, height: Math.abs(font.height), ascent: native.ascent(Math.abs(font.height)) }
-    }
-    if (isVerticalFace(font)) {
-      const horizontal = { ...font, face: font.face.replace(/^@/, ''), verticalFace: false },
-        base = this.measure('', horizontal)
-      let width = 0
-      for (let i = 0; i < text.length && text.charCodeAt(i); i++)
-        width += browserVerticalGlyph(text[i]!).upright
-          ? Math.abs(font.height)
-          : this.measure(text[i]!, horizontal).width
-      return { ...base, width }
+      return { width, height, ascent: native.ascent(height), drawAdvance: width }
     }
     const context = this.measurement
     context.font = this.font(font)
-    const metrics = context.measureText(text)
-    return {
-      width: metrics.width,
-      height: Math.abs(font.height),
-      ascent: metrics.fontBoundingBoxAscent ?? Math.abs(font.height) * 0.8,
+    const first = context.measureText(text[0] ?? '')
+    const ascent = first.fontBoundingBoxAscent ?? height * 0.8
+    if (font.bold) context.font = this.font({ ...font, bold: false })
+    const vertical = isVerticalFace(font)
+    let width = 0, drawAdvance = 0
+    for (let i = 0; i < text.length && text.charCodeAt(i); i++) {
+      const character = text[i]!, metrics = i === 0 && !font.bold ? first : context.measureText(character)
+      const regularWidth = vertical && browserVerticalGlyph(character).upright ? height : Math.round(metrics.width)
+      const box = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent
+      const cellHeight = Number.isFinite(box) && box > 0 ? Math.round(box) : height
+      // GDI measures one UTF-16 unit in the regular-weight face. GetTextWidth
+      // adds an overhang based on cell height; the raster pen uses cell width.
+      width += regularWidth + (font.bold ? Math.floor(cellHeight / 50) + 1 : 0)
+      drawAdvance += regularWidth + (font.bold ? Math.floor(regularWidth / 50) + 1 : 0)
     }
+    return { width, height, ascent, drawAdvance }
   }
   measureGlyph(character: string, font: FontSpec) {
     const native = this.nativeFaces.get(font.face)
@@ -161,6 +161,9 @@ export class BrowserGraphics implements GraphicsDecoder {
           x1 = Math.max(x1, x + 1)
           y1 = Math.max(y1, y + 1)
         }
+    // The separate glyph-bounds query offsets the styled ink using the
+    // regular face's advance, without either bold overhang.
+    const advance = this.measure(character, font.bold ? { ...font, bold: false } : font).width
     const empty = x0 === raster.width
     let left = empty ? 0 : x0 + (raster.left ?? 0),
       top = empty ? Math.trunc(baseline) : y0 + (raster.top ?? 0),
@@ -168,7 +171,7 @@ export class BrowserGraphics implements GraphicsDecoder {
       bottom = empty ? Math.trunc(baseline) : y1 + (raster.top ?? 0)
     const line = (y: number) => {
       left = Math.min(left, 0)
-      right = Math.max(right, Math.ceil(m.width))
+      right = Math.max(right, advance)
       top = Math.min(top, Math.floor(y))
       bottom = Math.max(bottom, Math.ceil(y + Math.max(1, size / 16)))
     }
@@ -179,7 +182,7 @@ export class BrowserGraphics implements GraphicsDecoder {
       top,
       right,
       bottom,
-      advance: Math.round(isVerticalFace(font) ? this.measure(character, font).width : m.width),
+      advance,
       rasterSamples: raster.width * raster.height,
     }
   }
@@ -216,7 +219,7 @@ export class BrowserGraphics implements GraphicsDecoder {
           left: raster.left ?? 0,
           top: raster.top ?? 0,
           coverage,
-          advance: Math.round(this.measure(character, fallback).width),
+          advance: this.measure(character, fallback).drawAdvance,
         }
       }
       const fallback = { ...font, face: 'sans-serif', faceIsFileName: false, angle: 0 },
@@ -238,7 +241,7 @@ export class BrowserGraphics implements GraphicsDecoder {
           fontGeometry(font.angle, native.ascent(Math.abs(font.height))).ascentX,
         top: raster.top ?? 0,
         coverage,
-        advance: Math.round(this.measure(character, fallback).width),
+        advance: this.measure(character, fallback).drawAdvance,
       }
     }
     return native.glyph(character, font, antialiased)
@@ -293,7 +296,7 @@ export class BrowserGraphics implements GraphicsDecoder {
       if (right - left > 4096 || bottom - top > 4096 || bytes > 64 * 1024 * 1024)
         throw new Error('Vertical text exceeds raster budget')
       const advance = geometry.advance(
-        Math.round(shape.upright ? size : this.measure(text[i]!, horizontal).width),
+        this.measure(text[i]!, spec).drawAdvance,
       )
       x += advance.x
       y += advance.y

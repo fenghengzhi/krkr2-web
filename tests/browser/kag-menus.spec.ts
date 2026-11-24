@@ -41,7 +41,11 @@ class Parser extends KAGParser {
   function Parser(){super.KAGParser();debugLevel=tkdlNone;}
   function onScenarioLoad(name){return "[macro name=say][emb exp=mp.text][endmacro][say text=A][if exp=true]B[endif]\\";}
 }
-var parser=new Parser();parser.loadScenario("virtual.ks");var output="",tag;
+var parser=new Parser();
+// The original KAG Initialize.tjs exposes mp as a global property. A bare
+// KAGParser does not install that framework alias for expression evaluation.
+property mp { getter(){return global.parser.macroParams;} }
+parser.loadScenario("virtual.ks");var output="",tag;
 while((tag=parser.getNextTag())!==void) if(tag.tagname=="ch")output+=tag.text;
 Debug.message("KAG="+output);
 var window=new Window(), tools=new MenuItem(window,"Tools(&T)"), item=new MenuItem(window,"Count");window.visible=true;

@@ -4,12 +4,14 @@ import { test, expect, observeVideoFrames } from '../helpers/video-presentation-
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia } from '../helpers/video-audio-probe.ts'
 import { captureHandoff, installHandoffReadbacks } from '../helpers/video-handoff-capture.ts'
+import { installVideoSeekRegistrations, observeVideoSeekRegistrations } from '../helpers/video-seek-registration.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
 for (const container of ['numbered-multitrack', 'numbered-interleaved']) {
   test(`${backend}/${binary ? 'bytecode' : 'source'}/${container}: audio handoff preserves every decoded and drawn byte at a frozen clock`, async ({ page }, info) => {
     test.setTimeout(90000)
     const failures: unknown[] = [], readings: unknown[] = [], rawReadbacks: unknown[] = [], gpuComparisons: unknown[] = []
+    await installVideoSeekRegistrations(page)
     await observeVideoFrames(page)
     await installVideoAudioProbe(page)
     await installHandoffReadbacks(page)
@@ -101,7 +103,8 @@ movie.enabledAudioStream=1;
     catch (error) { failures.push(error) }
     try { await info.attach('numbered-complete-frame-handoff', { contentType: 'application/json', body: JSON.stringify({
       backend, binary, container, readings, rawReadbacks, gpuComparisons,
-      media: await observeVideoMedia(page), logs: await page.locator('#logs').innerText(),
+      media: await observeVideoMedia(page), registrations: await observeVideoSeekRegistrations(page),
+      logs: await page.locator('#logs').innerText(),
     }) }) } catch (error) { failures.push(error) }
     try {
       const modalStop = page.locator('dialog[open]:visible').getByRole('button', { name: '停止游戏', exact: true })

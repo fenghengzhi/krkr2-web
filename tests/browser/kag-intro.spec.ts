@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 import { observeStartup, attachStartup } from '../helpers/startup-observation.ts'
 import { kagIntroSource as source, kagIntroStateExpression as stateExpression,
-  kagIntroLayoutExpression, kagIntroLayoutFields } from '../helpers/kag-intro-observation.ts'
+  kagIntroLayoutExpression, kagIntroLayoutFields,
+  kagIntroFontMetricExpression, kagIntroFontMetricFields } from '../helpers/kag-intro-observation.ts'
 
 let packageRequest: Promise<Buffer> | undefined
 function originalPackage(): Promise<Buffer> {
@@ -28,12 +29,15 @@ for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: original Introduction package completes its first route with bookmark and refresh restoration`, async ({ page }, info) => {
     test.setTimeout(180000)
     const errors: string[] = [], failures: unknown[] = [], steps: string[] = [], observations: unknown[] = [], inputs: unknown[] = [], consoleReads: unknown[] = []
-    let evaluation = 0, loaded = false, exited = false, previousState = '', waitObservations = 0, startupRead = true
+    let evaluation = 0, loaded = false, exited = false, previousState = '', waitObservations = 0, startupRead = true, fontMetricsObserved = false
+    let fontMetricFailure: unknown
     const evidence: Record<string, unknown> = {
       source, backend, browser: info.project.name, steps, observations, inputs, consoleReads, pageErrors: errors,
       scope: 'Runs the pinned Introduction to Kirikiri and KAG distribution sample through its original menu, page waits, bookmark methods and Exit link. Imports one unchanged XP3 and executes its original source scripts with the selected WASM backend.',
       importedFiles: ['kag3_intro.xp3'], originalScenarioUnmodified: true,
       layoutFields: kagIntroLayoutFields,
+      fontMetricFields: kagIntroFontMetricFields,
+      fontMetricScope: 'One separate never-shown Layer/Font is created after the original wait and layout are recorded, then destroyed. It measures normal/bold at 24/40 without changing the game message Font. Whole-string and per-code-unit widths are separate observations.',
       waitEvidence: 'lastTagName is the original Conductor field also consulted by MainWindow.showPageBreakAndClear; automatic pagination is recorded but never accepted as an explicit [p] reading checkpoint.',
     }
     page.on('pageerror', (error) => errors.push(error.message))
@@ -80,6 +84,23 @@ for (const backend of ['asyncify', 'jspi'])
           expect(layout).toHaveLength(kagIntroLayoutFields.length)
           observation.layout = Object.fromEntries(kagIntroLayoutFields.map((key, index) => [key, layout[index]]))
         } catch (error) { observation.layoutError = String(error) }
+        if (!fontMetricsObserved) {
+          fontMetricsObserved = true
+          try {
+            const raw = await read(kagIntroFontMetricExpression), rows = raw.split(';').map((row) => row.split(','))
+            observation.fontMetricsRaw = raw
+            expect(rows).toHaveLength(4)
+            for (const row of rows) {
+              expect(row).toHaveLength(kagIntroFontMetricFields.length)
+              expect(row.every((value) => value.length > 0 && Number.isFinite(Number(value)))).toBe(true)
+            }
+            observation.fontMetrics = rows.map((row) => Object.fromEntries(kagIntroFontMetricFields.map((key, index) => [key, Number(row[index])])))
+            observation.fontMetricsComplete = true
+          } catch (error) {
+            fontMetricFailure = error
+            observation.fontMetricsComplete = false; observation.fontMetricsError = String(error)
+          }
+        }
       }
       return result
     }
@@ -231,6 +252,9 @@ for (const backend of ['asyncify', 'jspi'])
       steps.push('original-exit-stopped-session')
       await info.attach('original-exit', { body: await page.screenshot({ fullPage: true, timeout: 5000 }), contentType: 'image/png' })
     } catch (error) { failures.push(error) }
+    // Keep a gameplay failure first, while never treating a missing separate
+    // measurement as a successful font comparison.
+    if (fontMetricFailure !== undefined) failures.push(fontMetricFailure)
     try {
       evidence.exitedThroughOriginalLink = exited
       evidence.status = await page.locator('#status').textContent()

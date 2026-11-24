@@ -260,9 +260,10 @@ export class SceneTransitions {
     }
     return undefined
   }
-  *advance(windowId?: number): InputOperation {
-    if (this.advancing || this.pausedAt !== undefined || this.disposed) return
+  *advance(windowId?: number, subtree?: number, draw?: () => void): InputOperation {
+    if (this.advancing || this.pausedAt !== undefined || this.disposed) { draw?.(); return }
     this.advancing = true
+    const ending = draw ? [] as Transition[] : undefined
     try {
       for (const state of [...this.states.values()]) {
         if (this.states.get(state.destination) !== state) continue
@@ -272,7 +273,10 @@ export class SceneTransitions {
           continue
         }
         if (windowId !== undefined && this.layers.get(state.destination).windowId !== windowId) continue
-        if (!this.layers.property(state.destination, 'nodeVisible')) {
+        // A synchronous Layer.Complete visits its own tree, not unrelated
+        // sibling/window transitions. Window completion retains its full pass.
+        if (subtree !== undefined && !this.layers.contains(subtree, state.destination)) continue
+        if (!state.selfupdate && !this.layers.property(state.destination, 'nodeVisible')) {
           yield* this.finish(state.destination)
           continue
         }
@@ -292,8 +296,14 @@ export class SceneTransitions {
         // This phase is already part of the active completion. Rendering its
         // new pixels does not itself post another native Window update event.
         this.changed(state.destination, false)
-        if (state.phase === 1) yield* this.finish(state.destination)
+        if (state.phase === 1) {
+          if (ending) ending.push(state)
+          else yield* this.finish(state.destination)
+        }
       }
+      draw?.()
+      if (ending) for (const state of ending)
+        if (this.states.get(state.destination) === state) yield* this.finish(state.destination)
     } finally {
       this.advancing = false
     }

@@ -356,7 +356,8 @@ export class FontService {
               dy = advance.y
             } else {
               if (!graphics.measure) throw new Error('Font metrics require a graphics backend')
-              const width = Math.round(graphics.measure(text[i]!, prepared).width),
+              const metrics = graphics.measure(text[i]!, prepared),
+                width = Math.round(metrics.drawAdvance ?? metrics.width),
                 raster = graphics.text(text[i]!, Math.abs(spec.height), 0xffffff, prepared, {
                   ...options,
                   shadowLevel: 0,

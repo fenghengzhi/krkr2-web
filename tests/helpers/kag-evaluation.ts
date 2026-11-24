@@ -8,6 +8,7 @@ export const kagEvaluationFiles = {
 }
 export const kagEvaluationExpected: Readonly<Record<string, string>> = {
   'expression-scope': 'GEI<global>[global]|parser|0',
+  'expression-closure': '<0>|parser',
   'expression-write': 'changed|changed|parser',
   'expression-macro': 'Alice|global|Alice|after|1',
   'expression-reentry': '<callback-global>|callback-global|callback-local|1|1',
@@ -20,7 +21,7 @@ class EvaluationParser extends KAGParser {
   function EvaluationParser(){super.KAGParser();debugLevel=tkdlNone;}
   function onScenarioLoad(name){return body;}
   function onScript(source,name,line){
-    scriptCalls++;callbackOwner=this!==global;kagEvalValue="callback-local";
+    scriptCalls++;callbackOwner=this instanceof "EvaluationParser";kagEvalValue="callback-local";
     global.kagEvalValue="callback-global";
     nestedValue=nested.getNextTag().value;
     Scripts.exec(source,name,line);
@@ -40,9 +41,15 @@ function kagEvaluateRun(id,p,q){
   var first,result,d;
   switch(id){
     case "expression-scope":
-      p.body="[if exp='kagEvalFlag && this===global']G[else]P[endif][if exp=false]N[elsif exp=\"kagEvalValue=='global'\"]E[else]N[endif][ignore exp='!kagEvalFlag']I[endignore][emit cond='this===global' value=&kagEvalValue][emb exp=\"'['+kagEvalValue+']'\"]\\";
+      p.body="[if exp=kagEvalFlag]G[else]P[endif][if exp=false]N[elsif exp=\"kagEvalValue=='global'\"]E[else]N[endif][ignore exp='!kagEvalFlag']I[endignore][emit cond=\"kagEvalValue=='global'\" value=&kagEvalValue][emb exp=\"'['+kagEvalValue+']'\"]\\";
       p.loadScenario("scope-live.ks");
       return kagEvalDrain(p)+"|"+p.kagEvalValue+"|"+int(p.kagEvalFlag);
+    case "expression-closure":
+      // TJS === compares both dispatch and bound ObjThis. Its this register
+      // and the global opcode do not construct the same closure, even when
+      // unqualified member lookup resolves against the global object.
+      p.body="[emit value=&'int(this===global)']\\";p.loadScenario("scope-live.ks");
+      return kagEvalDrain(p)+"|"+p.kagEvalValue;
     case "expression-write":
       p.body="[emit value=&\"kagEvalValue='changed'\" cond=\"kagEvalValue=='changed'\"]\\";
       p.loadScenario("scope-live.ks");first=p.getNextTag().value;
@@ -55,7 +62,7 @@ function kagEvaluateRun(id,p,q){
       return result+"|"+kagEvalDrain(p)+"|"+int(p.macroParams===null);
     case "expression-reentry":
       global.kagEvalFlag=false;
-      q.body="[emit value=&kagEvalValue cond='this===global']\\";q.loadScenario("scope-nested.ks");p.nested=q;
+      q.body="[emit value=&kagEvalValue cond=\"kagEvalValue=='callback-global'\"]\\";q.loadScenario("scope-nested.ks");p.nested=q;
       p.body="[iscript]\nglobal.kagEvalFlag=true;\n[endscript]\n[emit value=&kagEvalValue cond=kagEvalFlag]\\";
       p.loadScenario("scope-live.ks");
       return kagEvalDrain(p)+"|"+p.nestedValue+"|"+p.kagEvalValue+"|"+p.scriptCalls+"|"+int(p.callbackOwner);
