@@ -57,8 +57,8 @@ async function using(binary: boolean, body: (f: Awaited<ReturnType<typeof fixtur
 }
 
 test(`${variant}: native message capability and both TVP/TJS private formatters are required before VM creation`, { timeout: 60000 }, async () => {
-  assert.equal(manifest.capabilities?.nativeMessages, 2)
-  for (const version of [undefined, 0, 1, 3, 'formatter', 'tjs-formatter'] as const) {
+  assert.equal(manifest.capabilities?.nativeMessages, 3)
+  for (const version of [undefined, 0, 1, 2, 4, 'formatter', 'tjs-formatter'] as const) {
     let created = false
     const altered: ModuleFactory = async (options) => {
       const module = await factory(options)
@@ -105,14 +105,20 @@ for (const binary of [false, true]) {
       assert.equal(f.vm.formatTjsMessage({ id: 'TJSReadError' }), literal)
       assert.equal(f.vm.formatTvpMessage({ id: 'TVPReadError', args: [] }), 'separate-tvp-read')
       assert.equal(await f.run('(function(){try{__host("Messages.plainRead");}catch(e){return e.message;}})()', true), 'plain read failure')
+      const countMessage = '引数:%s:%1:%%'
+      await f.run(`System.assignMessage("TJSBadParamCount",${JSON.stringify(countMessage)});`)
+      f.setHandler(() => { throw new TjsError('TJSBadParamCount') })
+      assert.equal(await f.run('(function(){try{__host("Messages.count");}catch(e){return e.message;}})()', true), countMessage)
+      assert.equal(f.vm.formatTjsMessage({ id: 'TJSBadParamCount' }), countMessage)
+      assert.equal(f.vm.formatTjsMessage({ id: 'TJSReadError' }), literal)
       for (const message of [{ id: 'TVPReadError' }, { id: 'TJSWriteError' },
-        { id: 'TJSReadError\0tail' }, { id: 'TJSReadError', args: ['ignored'] }])
+        { id: 'TJSReadError\0tail' }, { id: 'TJSReadError', args: ['ignored'] }, { id: 'TJSBadParamCount', args: ['ignored'] }])
         assert.throws(() => f.vm.formatTjsMessage(message as unknown as TjsMessage), /Invalid typed TJS message/)
       assert.throws(() => new TjsError('TJSWriteError' as 'TJSReadError'), /Invalid native TJS/)
       // Bypass the JS validator to establish the native whitelist and zero-arg
       // contract independently. No object conversion or script can run here.
       for (const [kind, name, argument] of [[10, 'TJSReadError', false], [11, 'TVPReadError', false],
-        [11, 'TJSReadError', true]] as const) {
+        [11, 'TJSReadError', true], [11, 'TJSBadParamCount', true]] as const) {
         const request = Number(f.module._krkr_reply_new!(kind)), pointer = Number(f.module._malloc!((name.length + 1) * 2))
         let reply = 0
         try {

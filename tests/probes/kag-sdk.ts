@@ -12,36 +12,58 @@ const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('he
 const read = (name: string) => readFileSync(resolve(game, name))
 const save = (name: string, value: unknown) => writeFileSync(resolve(output, name), JSON.stringify(value, null, 2) + '\n')
 const nativeFile = 'native-bookmark.tjs'
+const controlsFile = 'kag-controls.tjs'
 if (process.argv[2] === 'prepare') {
   assert.equal(process.env.RUNNER_OS, 'Windows')
   mkdirSync(game, { recursive: true })
   for (const [name, source] of Object.entries(kagFiles)) writeFileSync(resolve(game, name), textBytes(source))
+  const controls = textBytes(kagControlSource)
+  writeFileSync(resolve(game, controlsFile), controls)
   const startup = textBytes([
     'System.exitOnNoWindowStartup=false;',
     'var records=[];function record(s){records.add(s);records.save("native-events.txt");}',
-    'record("start");System.exceptionHandler=function(e){record("fatal|"+e.message);System.exit();return true;};',
-    kagControlSource, ...Object.keys(kagExpected).map((id) => `record("${id}|"+kagObserve("${id}"));`),
+    'var progress=[];function mark(s){progress.add(s);progress.save("native-progress.txt");}',
+    'record("start");mark("setup:begin");System.exceptionHandler=function(e){record("fatal|"+e.message);mark("fatal|"+e.message);System.exit();return true;};',
+    // Keep authored controls out of startup's initial compilation unit. A
+    // syntax error is then recorded after the minimal journal is installed.
+    `try{Scripts.execStorage("${controlsFile}");mark("setup:end");`,
+    ...Object.keys(kagExpected).map((id) => `mark("control:begin:${id}");record("${id}|"+kagObserve("${id}"));mark("control:end:${id}");`),
+    'mark("bookmark:begin");',
     `var bookmark=kagSavePoint();(Dictionary.saveStruct incontextof bookmark)("${nativeFile}");`,
-    'record("done");System.exit();',
+    'mark("bookmark:end");record("done");',
+    '}catch(error){record("fatal|"+error.message);mark("fatal|"+error.message);}',
+    'mark("exit:requested");System.exit();',
   ].join('\n'))
   writeFileSync(resolve(game, 'startup.tjs'), startup)
-  save('inputs.json', { commit: process.env.GITHUB_SHA, inputs: Object.keys(kagFiles).map((name) => ({ name, sha256: sha(read(name)) })), startup: sha(startup) })
+  save('inputs.json', { commit: process.env.GITHUB_SHA, inputs: Object.keys(kagFiles).map((name) => ({ name, sha256: sha(read(name)) })),
+    startup: sha(startup), controls: { name: controlsFile, bytes: controls.length, sha256: sha(controls) } })
 } else if (process.argv[2] === 'native') {
   const manifest = JSON.parse(readFileSync(resolve(output, 'inputs.json'), 'utf8'))
   assert.equal(manifest.commit, process.env.GITHUB_SHA)
   for (const [name, source] of Object.entries(kagFiles)) assert.deepEqual(read(name), textBytes(source))
   assert.equal(manifest.startup, sha(read('startup.tjs')))
+  assert.equal(manifest.controls.name, controlsFile)
+  assert.equal(manifest.controls.bytes, read(controlsFile).length)
+  assert.equal(manifest.controls.sha256, sha(read(controlsFile)))
+  assert.deepEqual(read(controlsFile), textBytes(kagControlSource))
   const raw = existsSync(resolve(game, 'native-events.txt')) ? read('native-events.txt') : Buffer.alloc(0)
   const lines = raw.toString(raw[0] === 255 && raw[1] === 254 ? 'utf16le' : 'utf8').replace(/^\ufeff/, '').trimEnd().split(/\r?\n/)
   const sdk = JSON.parse(readFileSync(resolve(output, 'sdk-process.json'), 'utf8').replace(/^\ufeff/, ''))
+  const progressRaw = existsSync(resolve(game, 'native-progress.txt')) ? read('native-progress.txt') : Buffer.alloc(0),
+    progress = progressRaw.toString(progressRaw[0] === 255 && progressRaw[1] === 254 ? 'utf16le' : 'utf8')
+      .replace(/^\ufeff/, '').trimEnd().split(/\r?\n/).filter(Boolean)
   const results = Object.entries(kagExpected).map(([id, expected]) => {
     const found = lines.filter((line) => line.startsWith(id + '|')).map((line) => line.slice(id.length + 1))
-    return { id, expected, found, matched: found.length === 1 && found[0] === expected }
+    const matched = found.length === 1 && found[0] === expected
+    return { id, expected, found, matched, state: !found.length ? 'unreported' : matched ? 'matched' : 'mismatched' }
   })
   const bookmark = existsSync(resolve(game, nativeFile)) ? read(nativeFile) : undefined
   const complete = sdk.state === 'observed' && sdk.exitCode === 0 && sdk.commit === manifest.commit && !!bookmark?.length &&
     lines.length === results.length + 2 && lines[0] === 'start' && lines.at(-1) === 'done' && results.every((r) => r.matched)
-  save('comparison.json', { commit: manifest.commit, complete, results, observationsSha256: sha(raw), bookmarkSha256: bookmark && sha(bookmark) })
+  save('comparison.json', { commit: manifest.commit, complete, results, observationsSha256: sha(raw), bookmarkSha256: bookmark && sha(bookmark),
+    progress, progressSha256: sha(progressRaw), lastPhase: progress.at(-1),
+    unreported: results.filter((result) => result.state === 'unreported').map((result) => result.id),
+    scope: 'The separate progress journal localizes a non-returning control; it never turns a timeout or absent result into a native semantic result.' })
   assert(complete, 'Incomplete original SDK scenario or bookmark observations')
 } else if (process.argv[2] === 'web') {
   const native = JSON.parse(readFileSync(resolve(output, 'comparison.json'), 'utf8')) as {

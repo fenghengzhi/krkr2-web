@@ -66,7 +66,7 @@ export interface WasmManifest {
     nativeSystem?: number
     /** Math.RandomGenerator's default seed uses the host entropy source. */
     nativeRandom?: number
-    /** Version 2 adds the private literal TJSReadError descriptor to TVP holders. */
+    /** Version 3 also resolves native bad-argument counts through the current literal holder. */
     nativeMessages?: number
     /** Original raw-octet MIDI method argument/conversion policy. */
     nativeMidi?: number

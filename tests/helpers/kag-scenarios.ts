@@ -1,4 +1,5 @@
 import { kagEvaluationFiles, kagEvaluationExpected, kagEvaluationSource } from './kag-evaluation.ts'
+import { kagRoutingFiles, kagRoutingExpected, kagRoutingSource } from './kag-routing.ts'
 
 /** Shared TJS controls for the 2.32r2 SDK and the Web runtime. The SDK
  * produces its own macro bookmark from a real call into another storage. */
@@ -7,6 +8,7 @@ export const kagFiles = {
   'chapter.ks': '*chapter\n[observe actor=%actor]\\\n[return]\\\n',
   'empty.ks': '',
   ...kagEvaluationFiles,
+  ...kagRoutingFiles,
 }
 
 export const kagExpected: Readonly<Record<string, string>> = {
@@ -24,6 +26,7 @@ export const kagExpected: Readonly<Record<string, string>> = {
   'bad-lexer': 'bad-tag', 'return-underflow': 'no-call', 'erase-unknown': 'no-macro:<missing>',
   'bad-save-depth': 'bad-save', 'assign-object': 'bad-parser', 'changed-holder': 'changed:<*absent>:<chapter.ks>',
   ...kagEvaluationExpected,
+  ...kagRoutingExpected,
 }
 
 export const kagControlSource = String.raw`
@@ -64,6 +67,7 @@ function kagResumePoint(d){
 }
 function kagObserve(id){
   if(id.indexOf("expression-")==0){try{return kagEvaluateObserve(id);}catch(e){return e.message;}}
+  if(id.indexOf("routing-")==0){try{return kagRoutingObserve(id);}catch(e){return e.message;}}
   kagHolders();
   var p=new RefParser(),q=new RefParser(),r=new RefParser(),n="case-live.ks",result="",d;
   p.clear();
@@ -135,4 +139,4 @@ function kagObserve(id){
     return "unexpected success";
   }catch(e){return e.message;}
 }
-` + kagEvaluationSource
+` + kagEvaluationSource + kagRoutingSource

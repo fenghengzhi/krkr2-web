@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { sliInvalidNames, sliNativeFiles, sliNativeSource } from '../helpers/sli-native-fixtures.ts'
 import { wavePrecisionFiles } from '../helpers/extensible-wave.ts'
+import { wavePositionExpected, wavePositionFiles, wavePositionSource } from '../helpers/wave-position.ts'
 
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted'); assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/sli'), game = resolve(output, 'game')
@@ -12,8 +13,8 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   ...Object.fromEntries(sliInvalidNames.map((name) => [name, 'sli:<' + name + '.sli>'])),
   changed: 'changed:<bad-smooth.wav.sli>', reopen: 'open',
   '12-in-16.wav': 'open|48000', '20-in-24.wav': 'open|48000', '24-in-32.wav': 'open|48000',
-  'foreign-guid.wav': 'wave:<foreign-guid.wav>' }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision }
+  'foreign-guid.wav': 'wave:<foreign-guid.wav>', ...wavePositionExpected }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -23,6 +24,9 @@ if (process.argv[2] === 'prepare') {
     'var rows=[];function record(s){rows.add(s);rows.save("native-events.txt");}',
     'record("start");System.exceptionHandler=function(e){record("fatal|"+e.message);System.exit();return true;};',
     sliNativeSource,
+    wavePositionSource,
+    ...Object.keys(wavePositionExpected).map((name) =>
+      `try{record("${name}|"+wavePositionObserve("${name}"));}catch(e){record("${name}|unexpected-error:"+e.message);}`),
     'System.assignMessage("TVPInvalidLoopInformation","sli:<%1>");record("open|"+sliTryOpen("native.wav"));',
     String.raw`try{var n=["start",'"quoted"',"path\\tone","日本語","selected","later"],positions=[];
       for(var i=0;i<n.count;i++){positions.add(sliSound.labels[n[i]].samplePosition);}
@@ -52,6 +56,7 @@ if (process.argv[2] === 'prepare') {
   })
   const complete = sdk.commit === manifest.commit && sdk.state === 'observed' && sdk.exitCode === 0 &&
     lines.length === results.length + 2 && lines[0] === 'start' && lines.at(-1) === 'done' && results.every((r) => r.matched)
-  save('comparison.json', { commit: manifest.commit, complete, observationSha256: digest(raw), results })
+  save('comparison.json', { commit: manifest.commit, complete, observationSha256: digest(raw), results,
+    wavePositionScope: 'Default ordinary sound mode: float coordinates, pan capability lifecycle and script errors. Device-dependent open/play failures remain failed observations, not spatial-rendering evidence or passing skips.' })
   assert(complete, 'SLI file or label dictionary observations differed')
 } else throw new Error('Expected prepare or compare')

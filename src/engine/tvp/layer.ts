@@ -26,10 +26,30 @@ class Layer {
   function finalize() {}
   function __syncTree() {}
   property __fontData {getter(){return __host("Layer.state",__id).fontData;}}
-  function __transitionTick(token){var clock=__host("Transition.callback",token);if(clock!==void)__host("Transition.tick",token,clock());}
-  function beginTransition(name,withchildren=true,transsrc=null,options=%[]){
-    if(transsrc===null)throw new Exception("Transition source is required");
-    __host("Transition.begin",__host("Layer.identity",this),string(name),int(withchildren),__host("Layer.identity",transsrc),options.time,options.vague,options.rule,options.from,options.stay,int(options.selfupdate),options.callback,%[destination:this,source:transsrc,callback:options.callback]);
+  function __transitionTick(token){
+    var clock=__host("Transition.callback",token);
+    if(clock!==void)__host("Transition.tick",token,__host("Transition.clockValue",clock));
+  }
+  function beginTransition(args*){
+    var destination=__host("Layer.identity",this);
+    if(args.count<1)__host("Transition.missingArguments");
+    var name=string(args[0]), children=args.count<2 || args[1]===void ? true : !!args[1];
+    var source=args.count<3 || args[2]===void ? null : __host("Transition.closure",args[2]);
+    var id=__host("Layer.transitionSource",source);
+    var options=args.count<4 || args[3]===void ? null : __host("Transition.closure",args[3]);
+    __host("Transition.check",destination,name,children,id);
+    var selfupdate=__host("Transition.option",options,"selfupdate"), clock=__host("Transition.option",options,"callback");
+    var geometry=__host("Transition.geometry",destination,name,children,id);
+    var time=__host("Transition.option",options,"time"),vague,rule,from,stay;
+    if(name=="universal"){
+      vague=__host("Transition.option",options,"vague");
+      rule=__host("Transition.option",options,"rule");
+    }else if(name=="scroll"){
+      from=__host("Transition.option",options,"from");
+      stay=__host("Transition.option",options,"stay");
+    }
+    __host("Transition.begin",destination,name,children,id,time,vague,rule,from,stay,selfupdate,clock,
+      %[destination:this,source:source,callback:clock],geometry[0],geometry[1],geometry[2]);
   }
   function stopTransition(){__host("Transition.stop",__id);}
   function onClick(x,y) {

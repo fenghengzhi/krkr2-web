@@ -258,7 +258,9 @@ export class KagParser {
   }
   private advance(token: LexedTag): void {
     if (token.lineCommand) this.nextLine()
-    else this.curPos = token.end
+    // Native TVP_KAG_STEP_NEXT advances the live cursor. A callback can have
+    // loaded another scenario or moved to another label before it returns.
+    else this.curPos++
   }
   private recordText(text: string): void {
     if (!this.recording) return
@@ -448,10 +450,15 @@ export class KagParser {
         ) {
           if (kind === 'return') yield* this.popCall(values.storage, values.target)
           else {
-            this.advance(token)
-            if (kind === 'call') this.pushCall()
+            // Jump restarts parsing without consuming the old tag; call
+            // first advances the live cursor and captures that return point.
+            if (kind === 'call') { this.advance(token); this.pushCall() }
             yield* this.goTo(values.storage, values.target)
           }
+          // Native goto parse_start checks EOF/no scenario before interrupt.
+          // In particular, onJump may clear the scenario and request a later
+          // interrupt; that pending interrupt belongs to a future load.
+          if (!this.scenario || this.curLine >= this.scenario.lines.length) return
           continue
         }
       } else if (kind === 'macro') {

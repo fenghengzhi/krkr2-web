@@ -5268,6 +5268,12 @@ export class EngineSession {
       case 'Layer.identity':
         value = BigInt(this.layerObjects!.cast(args[0]).id)
         break
+      case 'Layer.transitionSource': {
+        const source = args[0], id = isScriptObject(source) ? this.runtime!.nativeLifetimeIdentifier(source, 'Layer.invalidate') : undefined
+        if (id === undefined) throw new TvpError('TVPSpecifyLayer')
+        value = BigInt(this.layerObjects!.get(id).id)
+        break
+      }
       case 'Layer.relation':
         value = this.layerObjects!.relation(number(0), text(1))
         break

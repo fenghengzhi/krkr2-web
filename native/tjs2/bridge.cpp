@@ -617,6 +617,42 @@ tTJSBinaryStream* createBinaryWrite(const ttstr& name, const ttstr& mode) {
     return new HostBinaryWrite(target, mode);
 }
 
+// Read an option on the caller's TJS stack, preserving its bound receiver.
+// Layer reads its two common options directly. The individual transition
+// providers instead turn failed property reads/conversions into unavailable options.
+static tjs_error readTransitionOption(tTJSVariant& owner, const ttstr& key, tTJSVariant* result) {
+    const bool common = key == u"selfupdate" || key == u"callback";
+    const bool required = key == u"time" || key == u"rule";
+    if(!common && !required && key != u"vague" && key != u"from" && key != u"stay")
+        return TJS_E_MEMBERNOTFOUND;
+    tTJSVariant value;
+    try {
+        const auto options = owner.AsObjectClosureNoAddRef();
+        if(TJS_SUCCEEDED(options.PropGet(0, key.c_str(), nullptr, &value, nullptr)) && value.Type() != tvtVoid) {
+            if(key == u"callback") {
+                value.AsObjectClosureNoAddRef();
+                if(result) *result = value;
+            } else if(key == u"rule") {
+                const ttstr text(value);
+                if(result) *result = text;
+            } else {
+                const auto number = value.AsInteger();
+                if(result) *result = key == u"selfupdate" ? static_cast<tjs_int64>(static_cast<tjs_int>(number) != 0) : number;
+            }
+            return TJS_S_OK;
+        }
+    } catch(const krkr::ExecutionLimitError&) {
+        throw;
+    } catch(const eTJS&) {
+        if(common) throw;
+        // Script errors in a provider's GetAsNumber/GetAsString return failure.
+        // ExecutionCancelled is a silent exception, outside this catch.
+    }
+    if(required) TJS_eTJSError(krkr::formatTvpMessage(u"TVPSpecifyOption", &key, 1));
+    if(result) result->Clear();
+    return TJS_S_OK;
+}
+
 class HostFunction final : public tTJSDispatch {
     Vm* vm;
 public:
@@ -627,6 +663,26 @@ public:
         if(shuttingDown) return TJS_E_INVALIDOBJECT;
         if(count < 1) return TJS_E_BADPARAMCOUNT;
         ttstr name(*args[0]);
+        if(name == u"Transition.closure") {
+            if(count != 2) return TJS_E_BADPARAMCOUNT;
+            args[1]->AsObjectClosureNoAddRef();
+            if(result) *result = *args[1];
+            return TJS_S_OK;
+        }
+        if(name == u"Transition.option") {
+            if(count != 3) return TJS_E_BADPARAMCOUNT;
+            return readTransitionOption(*args[1], ttstr(*args[2]), result);
+        }
+        if(name == u"Transition.clockValue") {
+            if(count != 2) return TJS_E_BADPARAMCOUNT;
+            tTJSVariant tick;
+            // GetTransTick ignores a dispatch failure. A real exception from
+            // the callback still propagates, and an untouched void tick is 0.
+            args[1]->AsObjectClosureNoAddRef().FuncCall(0, nullptr, nullptr, &tick, 0, nullptr, nullptr);
+            const auto number = tick.AsInteger();
+            if(result) *result = number;
+            return TJS_S_OK;
+        }
         std::unique_ptr<Reply> reply(dispatch_host(vm, name.c_str(), name.GetLen(), count - 1, args + 1));
         if(!reply) TJS_eTJSError(u"Host returned no response");
         resolveReply(vm, *reply, result);
@@ -1753,7 +1809,7 @@ API void krkr_destroy(Vm* vm) { delete vm; }
 API void krkr_set_console(Vm* vm, int enabled) { vm->engine->SetConsoleOutput(enabled ? vm->console.get() : nullptr); }
 API int krkr_abi_version() { return 5; }
 API int krkr_random_source_version() { return 1; }
-API int krkr_native_messages_version() { return 2; }
+API int krkr_native_messages_version() { return 3; }
 API int krkr_native_midi_version() { return 1; }
 // No VM entry, release drain or CleanupErrors scope: this may be called by a
 // host logger while a script import is suspended, without consuming its errors.

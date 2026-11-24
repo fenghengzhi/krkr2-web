@@ -30,6 +30,14 @@ class __SoundBase {
 }
 class WaveSoundBuffer extends __SoundBase {
   function WaveSoundBuffer(owner){super.__SoundBase("wave",owner);}
+  function setPos(args*) {
+    // Native checks the argument count before converting any component and
+    // commits all three D3DVALUE coordinates only after those conversions.
+    if(args.count<3){__soundRun("setPos",[]);return;}
+    var x=real(args[0]),y=real(args[1]),z=real(args[2]);
+    __soundRun("setPos",[x,y,z]);
+  }
+  ${['posX', 'posY', 'posZ'].map((name) => `property ${name}{getter(){return __soundRun("get",["${name}"]);}setter(value){__soundRun("set",["${name}",real(value)]);}}`).join('\n')}
   property globalVolume{getter(){return __host("Sound.global","volume");}setter(value){__host("Sound.global","volume",int(value));}}
   property globalFocusMode{getter(){return __host("Sound.global","focusMode");}setter(value){__host("Sound.global","focusMode",int(value));}}
 }

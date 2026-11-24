@@ -63,9 +63,10 @@ void initializeTvpMessages() { (void)messages(); }
 bool hasTvpMessage(const tjs_char* id) { return findMessage(id) != nullptr; }
 
 TJS::ttstr formatTjsMessage(const tjs_char* id) {
-    if(!id || TJS::TJS_strcmp(id, u"TJSReadError") != 0)
-        TJS::TJS_eTJSError(u"Unknown private TJS message ID");
-    const auto* text = static_cast<const tjs_char*>(::TJSReadError);
+    const tjs_char* text = nullptr;
+    if(id && TJS::TJS_strcmp(id, u"TJSReadError") == 0) text = ::TJSReadError;
+    else if(id && TJS::TJS_strcmp(id, u"TJSBadParamCount") == 0) text = ::TJSBadParamCount;
+    else TJS::TJS_eTJSError(u"Unknown private TJS message ID");
     TemporaryMemory temporary;
     temporary.reserve(TJS::TJS_strlen(text) + 1, sizeof(tjs_char));
     return TJS::ttstr(text);

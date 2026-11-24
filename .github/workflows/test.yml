@@ -986,6 +986,16 @@ jobs:
       - name: Compare the SLI and WAVE format observations
         if: ${{ !cancelled() && steps.prepare_sli.outcome == 'success' }}
         run: node --import tsx tests/probes/sli-sdk.ts compare
+      - name: Prepare safe original transition option controls
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
+        id: prepare_transition
+        run: node --import tsx tests/probes/transition-sdk.ts prepare
+      - name: Observe original Layer transition option reads and errors
+        if: ${{ !cancelled() && steps.prepare_transition.outcome == 'success' }}
+        run: ./tests/probes/original-eri.ps1 -Project transition
+      - name: Preserve and compare original transition option observations
+        if: ${{ !cancelled() && steps.prepare_transition.outcome == 'success' }}
+        run: node --import tsx tests/probes/transition-sdk.ts compare
       - name: Prepare the original KAG introduction and its layout observer
         if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
         id: prepare_kag_intro

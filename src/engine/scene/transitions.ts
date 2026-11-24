@@ -1,5 +1,6 @@
 import {
   isScriptObject,
+  scriptList,
   type HostContext,
   type HostReply,
   type ScriptObject,
@@ -10,8 +11,11 @@ import type { InputController, InputOperation } from '../input/controller.ts'
 import type { TransitionFrame } from '../graphics/transition.ts'
 import type { Pixels } from '../ports/graphics.ts'
 import type { LayerTree } from './layers.ts'
+import { TvpError } from '../system/tvp-error.ts'
+import { TjsError } from '../system/tjs-error.ts'
 interface Transition extends TransitionFrame {
   duration: number
+  phaseMax: number
   started?: number
   callback?: ScriptObject
   /** The actual engine stores all three owning references in one VM Dictionary.
@@ -62,6 +66,29 @@ export class SceneTransitions {
   private token(token: number): Transition | undefined {
     return [...this.states.values()].find((state) => state.token === token)
   }
+  private checkStart(destination: number, source: number, kind: string): void {
+    if (this.disposed) throw new Error('Transition service is disposed')
+    if (this.shuttingDown(destination) || this.shuttingDown(source)) throw new Error('Transition layer is shutting down')
+    if (this.states.has(destination)) throw new TvpError('TVPCurrentTransitionMustBeStopping')
+    if (this.states.get(source)?.source === destination) throw new TvpError('TVPTransitionMutualSource')
+    if (!['crossfade', 'universal', 'scroll'].includes(kind)) throw new TvpError('TVPCannotFindTransHander', [kind])
+    // The renderer follows chains of source layers. Keep its existing guard
+    // for self-references and longer cycles as well as the native mutual case.
+    const seen = new Set([destination])
+    for (let current: number | undefined = source; current !== undefined; current = this.states.get(current)?.source) {
+      if (seen.has(current)) throw new Error('Cyclic transition sources')
+      seen.add(current)
+    }
+  }
+  private geometry(destination: number, source: number, children: boolean): { width: number; height: number } {
+    const dest = this.layers.get(destination), src = this.layers.get(source),
+      a = children ? dest : dest.bitmap, b = children ? src : src.bitmap
+    if (!a || !b) throw new TvpError('TVPTransitionSourceAndDestinationMustHaveImage')
+    if (a.width !== b.width || a.height !== b.height)
+      throw new TvpError('TVPTransitionLayerSizeMismatch', [`${b.width}x${b.height}`, `${a.width}x${a.height}`])
+    if (!a.width || !a.height) throw new Error('Empty transition image')
+    return { width: a.width, height: a.height }
+  }
   async host(name: string, args: ScriptValue[]): Promise<HostReply> {
     const value = (value: ScriptValue): HostReply => ({ kind: 'value', value })
     const numeric = (index: number, fallback?: number) => {
@@ -89,52 +116,41 @@ export class SceneTransitions {
       if (state) state.tick = Math.trunc(tick)
       return value(undefined)
     }
+    if (name === 'Transition.missingArguments') throw new TjsError('TJSBadParamCount')
     const destination = numeric(0)
     if (name === 'Transition.stop') return this.start(this.finish(destination))
-    if (name !== 'Transition.begin') throw new Error(`Unsupported transition operation: ${name}`)
-    if (this.disposed) throw new Error('Transition service is disposed')
-    const source = numeric(3),
-      dest = this.layers.get(destination),
-      src = this.layers.get(source),
-      kind = String(args[1]),
-      children = !!numeric(2)
-    if (!['crossfade', 'universal', 'scroll'].includes(kind))
-      throw new Error(`Transition is not implemented: ${kind}`)
-    if (this.states.has(destination))
-      throw new Error('Stop the current transition before beginning another')
-    const seen = new Set([destination])
-    for (let current = source; ;) {
-      if (seen.has(current)) throw new Error('Cyclic transition sources')
-      seen.add(current)
-      const state = this.states.get(current)
-      if (!state) break
-      current = state.source
+    const source = numeric(3), kind = String(args[1]), children = !!numeric(2)
+    this.checkStart(destination, source, kind)
+    if (name === 'Transition.check') return value(undefined)
+    const current = this.geometry(destination, source, children)
+    if (name === 'Transition.geometry') {
+      const type = this.layers.get(destination).type
+      return value(scriptList([BigInt(current.width), BigInt(current.height), BigInt(type === 6 || type === 7 ? 0 : type)]))
     }
-    const a = children ? dest : this.layers.bitmap(destination),
-      b = children ? src : this.layers.bitmap(source)
-    if (!a.width || !a.height || a.width !== b.width || a.height !== b.height)
-      throw new Error('Transition source and destination sizes must match')
-    const duration = Math.max(2, Math.trunc(numeric(4))),
+    if (name !== 'Transition.begin') throw new Error(`Unsupported transition operation: ${name}`)
+    // The original passes these values to the provider before reading time,
+    // rule or direction. Those script getters may change layer properties.
+    const width = numeric(12), height = numeric(13), destinationType = numeric(14),
+      duration = Math.max(2, Math.trunc(numeric(4))),
       vague = Math.trunc(numeric(5, 64)),
       from = Math.trunc(numeric(7, 0)),
       stay = Math.trunc(numeric(8, 0)),
       selfupdate = !!numeric(9, 0)
     if (vague < 0 || vague > 65535 || ![0, 1, 2, 3].includes(from) || ![0, 1, 2].includes(stay))
       throw new Error('Transition options are outside their supported range')
-    if (args[10] !== undefined && !isScriptObject(args[10]))
+    if (args[10] !== undefined && args[10] !== null && !isScriptObject(args[10]))
       throw new Error('Transition clock must be callable')
     let rule: Pixels | undefined
     if (kind === 'universal') {
-      if (typeof args[6] !== 'string' || !args[6])
-        throw new Error('Universal transition requires a rule image')
-      rule = await this.readRule(args[6], a.width, a.height)
+      if (typeof args[6] !== 'string') throw new TvpError('TVPSpecifyOption', ['rule'])
+      rule = await this.readRule(args[6], width, height)
       if (!rule.width || !rule.height) throw new Error('Empty transition rule image')
+      // A rule load can suspend. A getter or a newly started transition must
+      // not let a stale request replace a live owner or publish a wrong-sized rule.
+      this.checkStart(destination, source, kind)
+      const latest = this.geometry(destination, source, children)
+      if (latest.width !== current.width || latest.height !== current.height) throw new Error('Layer resized while loading a transition rule')
     }
-    if (this.disposed) throw new Error('Transition service is disposed')
-    if (!this.layers.has(destination) || !this.layers.has(source))
-      throw new Error('Transition layer has expired')
-    if (this.shuttingDown(destination) || this.shuttingDown(source))
-      throw new Error('Transition layer is shutting down')
     const destinationOwner = this.owner?.(destination),
       sourceOwner = this.owner?.(source)
     if (
@@ -144,16 +160,18 @@ export class SceneTransitions {
       throw new Error('Transition ownership state is unavailable')
     const owned = this.owner ? this.objects.retain(args[11] as ScriptObject) : undefined,
       callback = !owned && isScriptObject(args[10]) ? this.objects.retain(args[10]) : undefined,
-      hasCallback = isScriptObject(args[10]),
+      hasCallback = args[10] !== undefined,
       state: Transition = {
         token: this.next++,
         destination,
         source,
-        destinationType: dest.type === 6 || dest.type === 7 ? 0 : dest.type,
+        destinationType,
         children,
         kind: kind as Transition['kind'],
         phase: 0,
         pixelPhase: 0,
+        phaseMax: kind === 'scroll' ? (from === 0 || from === 2 ? width : height)
+          : 255 + (kind === 'universal' ? vague : 0),
         vague,
         rule,
         from,
@@ -263,12 +281,14 @@ export class SceneTransitions {
         if (this.states.get(state.destination) !== state) continue
         const tick = state.hasCallback ? state.tick : this.now()
         state.started ??= tick
-        state.phase = Math.max(0, Math.min(1, (tick - state.started) / state.duration))
-        const phaseMax = 255 + (state.kind === 'universal' ? state.vague : 0)
-        state.pixelPhase = Math.max(
-          0,
-          Math.min(phaseMax, Math.floor(((tick - state.started) * phaseMax) / state.duration)),
-        )
+        const elapsed = Math.max(0, Math.min(state.duration, tick - state.started))
+        state.phase = elapsed / state.duration
+        // Calculate in native order. Scaling an already-normalized float can
+        // move the boundary one column/row early or late at an exact tick.
+        const scaled = elapsed * state.phaseMax
+        state.pixelPhase = Number.isSafeInteger(elapsed) && !Number.isSafeInteger(scaled)
+          ? Number(BigInt(elapsed) * BigInt(state.phaseMax) / BigInt(state.duration))
+          : Math.floor(scaled / state.duration)
         // This phase is already part of the active completion. Rendering its
         // new pixels does not itself post another native Window update event.
         this.changed(state.destination, false)

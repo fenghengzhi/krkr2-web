@@ -32,12 +32,10 @@ export function transitionPixels(
   const { width, height } = before,
     result = { width, height, data: new Uint8Array(before.data.length) }
   const progress = Math.max(0, Math.min(1, transition.phase))
-  const opaque = opaqueTransition(transition),
-    phase =
-      opaque && transition.pixelPhase !== undefined
-        ? transition.pixelPhase
-        : Math.floor(progress * (255 + (transition.kind === 'universal' ? transition.vague : 0)))
-  if (!progress || (opaque && !phase)) {
+  const horizontal = transition.from === 0 || transition.from === 2, length = horizontal ? width : height,
+    phaseMax = transition.kind === 'scroll' ? length : 255 + (transition.kind === 'universal' ? transition.vague : 0),
+    phase = transition.pixelPhase ?? Math.floor(progress * phaseMax), opaque = opaqueTransition(transition)
+  if (!phase) {
     result.data.set(before.data)
     return result
   }
@@ -45,12 +43,9 @@ export function transitionPixels(
     result.data.set(after.data)
     return result
   }
-  const horizontal = transition.from === 0 || transition.from === 2
-  const length = horizontal ? width : height,
-    shift = Math.floor(length * progress),
-    direction = transition.from < 2 ? 1 : -1
-  const oldOffset = transition.stay === 1 ? 0 : direction * shift,
-    newOffset = transition.stay === 2 ? 0 : direction * (shift - length)
+  const direction = transition.from < 2 ? 1 : -1,
+    oldOffset = transition.stay === 1 ? 0 : direction * phase,
+    newOffset = transition.stay === 2 ? 0 : direction * (phase - length)
   for (let y = 0; y < height; y++)
     for (let x = 0; x < width; x++) {
       const offset = (y * width + x) * 4
@@ -69,7 +64,7 @@ export function transitionPixels(
         }
         continue
       }
-      let amount = Math.floor(progress * 255) / 255
+      let amount = phase / 255
       if (transition.kind === 'universal') {
         const rule = transition.rule
         if (!rule?.width || !rule.height)

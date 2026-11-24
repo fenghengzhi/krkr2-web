@@ -18,7 +18,7 @@ import {
 } from '../../../engine/script/runtime.ts'
 import { ExecutionControl } from '../../../engine/scheduler/control.ts'
 import { TvpError, type TvpMessage } from '../../../engine/system/tvp-error.ts'
-import { TjsError, type TjsMessage } from '../../../engine/system/tjs-error.ts'
+import { TjsError, isTjsMessageId, type TjsMessage } from '../../../engine/system/tjs-error.ts'
 import type { ModuleFactory, ModuleOptions, NativeModule } from './module.ts'
 
 let nextRuntime = 1
@@ -105,7 +105,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
         runtime.call('krkr_random_source_version') !== 1)
       throw new Error('TJS WASM is missing native random entropy support')
     if (typeof runtime.module._krkr_native_messages_version !== 'function' ||
-        runtime.call('krkr_native_messages_version') !== 2 ||
+        runtime.call('krkr_native_messages_version') !== 3 ||
         typeof runtime.module._krkr_format_tvp_message !== 'function' ||
         typeof runtime.module._krkr_format_tjs_message !== 'function')
       throw new Error('TJS WASM is missing native TVP message support')
@@ -748,7 +748,7 @@ export class TjsWasmRuntime implements ScriptRuntime {
     return this.formatTvpMessageText(message)
   }
   private buildTjsMessage(message: TjsMessage): number {
-    if (!message || message.id !== 'TJSReadError' || 'args' in message)
+    if (!message || !isTjsMessageId(message.id) || 'args' in message)
       throw new Error('Invalid typed TJS message')
     const pointer = this.call('krkr_reply_new', 11)
     try {

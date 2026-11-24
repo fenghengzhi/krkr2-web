@@ -10,6 +10,7 @@ import {
   type LoopInfo,
 } from '../ports/audio.ts'
 import { TvpError } from '../system/tvp-error.ts'
+import { TjsError } from '../system/tjs-error.ts'
 import {
   isScriptObject,
   scriptList,
@@ -38,6 +39,8 @@ interface Sound {
   inflight: Set<Promise<AudioResult>>
   version: number
   labels: ScriptValue
+  position: [number, number, number]
+  canControlPan: boolean
   filters?: PhaseVocoderConnection
   cdda?: CddaSelection
   preparedCdda?: { token: number; selection: CddaSelection }
@@ -249,6 +252,8 @@ export class SoundService {
           inflight: new Set(),
           version: 0,
           labels: scriptRecord({}),
+          position: [0, 0, 0],
+          canControlPan: false,
           snapshot: {
             id,
             epoch: 0,
@@ -366,6 +371,13 @@ export class SoundService {
         throw new Error('Invalid sound argument')
       return value
     }
+    const positionAxis = (name: string) => name === 'posX' ? 0 : name === 'posY' ? 1 : name === 'posZ' ? 2 : undefined
+    const coordinate = (i: number) => {
+      // TJS has already performed AsReal, including its native conversion
+      // error. D3DVALUE is float32; it has no integer or finite-value clamp.
+      if (typeof input[i] !== 'number') throw new Error('Expected a converted sound coordinate')
+      return Math.fround(input[i])
+    }
     const callbacks: Callback[] = []
     let value: ScriptValue
     const apply = async (command: AudioCommand) => {
@@ -385,7 +397,12 @@ export class SoundService {
         })
       }
     }
-    if (method === 'prepareCdda') {
+    if (method === 'setPos') {
+      if (sound.kind !== 'wave') throw new Error('Position requires a WaveSoundBuffer')
+      if (input.length < 3) throw new TjsError('TJSBadParamCount')
+      const x = coordinate(0), y = coordinate(1), z = coordinate(2)
+      sound.position[0] = x; sound.position[1] = y; sound.position[2] = z
+    } else if (method === 'prepareCdda') {
       if (sound.kind !== 'cdda') throw new Error('Invalid CDDA owner')
       sound.preparedCdda = undefined
       const version = sound.version
@@ -557,6 +574,11 @@ export class SoundService {
         throw new Error(`Imported CDDA track ${sound.cdda.track} is absent or is a data track`)
       const previous = sound.snapshot.status
       if (sound.ready) await apply({ op: method, id: sound.id })
+      // Native creates the secondary buffer at StartPlay, not open. Our
+      // ordinary software output supports pan, and has no DirectSound3D
+      // interface. Stop/unload retain this capability just as native Clear.
+      if (method === 'play' && sound.kind === 'wave' && sound.snapshot.status === 'play')
+        sound.canControlPan = true
       if (sound.snapshot.status !== previous) {
         this.cancelEvents(sound)
         callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
@@ -575,6 +597,8 @@ export class SoundService {
     } else if (method === 'get') {
       const property = text(0)
       if (property === 'labels') return this.result(sound.labels, callbacks)
+      const axis = positionAxis(property)
+      if (axis !== undefined && sound.kind === 'wave') return this.result(sound.position[axis], callbacks)
       if (sound.ready) {
         const result = await this.voiceCommand(sound, { op: 'inspect', id: sound.id })
         if (result.snapshot) sound.snapshot = result.snapshot
@@ -599,7 +623,15 @@ export class SoundService {
       else throw new Error(`Unsupported sound property: ${property}`)
     } else if (method === 'set') {
       const property = text(0)
-      let setting = numeric(1)
+      const axis = positionAxis(property)
+      if (axis !== undefined && sound.kind === 'wave') {
+        sound.position[axis] = coordinate(1)
+        return this.result(undefined, callbacks)
+      }
+      // WaveImpl takes a tjs_int, after the public setter's TJS integer
+      // conversion. Preserve its low 32 bits before applying the pan clamp.
+      let setting = sound.kind === 'wave' && property === 'pan' && typeof input[1] === 'bigint'
+        ? Number(BigInt.asIntN(32, input[1])) : numeric(1)
       if (property === 'volume' || property === 'volume2')
         setting = Math.max(0, Math.min(100000, setting))
       if (property === 'pan') setting = Math.max(-100000, Math.min(100000, setting))
@@ -607,10 +639,21 @@ export class SoundService {
       const key = property === 'samplePosition' || property === 'position' ? 'position' : property
       if (!['volume', 'volume2', 'pan', 'looping', 'paused', 'frequency', 'position'].includes(key))
         throw new Error(`Unsupported sound property: ${property}`)
+      const resetPosition = sound.kind === 'wave' && key === 'pan' &&
+        sound.snapshot.pan !== setting && !sound.canControlPan
       if (sound.ready)
         await apply({ op: 'set', id: sound.id, property: key as 'volume', value: setting })
       else if (key === 'paused' || key === 'looping') sound.snapshot[key] = !!setting
       else sound.snapshot[key as 'volume'] = setting
+      if (resetPosition) {
+        // WaveImpl::SetPan also does this before a secondary buffer exists,
+        // even with the default 3D option disabled. The inverse does not hold:
+        // setPos never changes pan or invents a spatial-to-stereo conversion.
+        let x = Math.fround(setting / 100000)
+        x = Math.fround(x * (x * 0.003))
+        sound.position[0] = setting < 0 ? -x : x
+        sound.position[1] = Math.fround(0.001); sound.position[2] = 0
+      }
     } else throw new Error(`Unsupported sound method: ${method}`)
     return this.result(value, callbacks)
   }

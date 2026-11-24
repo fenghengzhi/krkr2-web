@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { kagControlSource, kagFiles } from '../helpers/kag-scenarios.ts'
 import { kagEvaluationExpected } from '../helpers/kag-evaluation.ts'
+import { kagRoutingExpected } from '../helpers/kag-routing.ts'
 
 const result = 'Alice|1|Alice|live|1|Alice|live|finished|0|1'
 const script = kagControlSource + String.raw`
@@ -39,7 +40,7 @@ for (const backend of ['asyncify', 'jspi']) for (const mode of ['source', 'bytec
     }
     try {
       await start()
-      for (const [id, expected] of Object.entries(kagEvaluationExpected))
+      for (const [id, expected] of Object.entries({ ...kagEvaluationExpected, ...kagRoutingExpected }))
         await evaluate(page, `kagObserve(${JSON.stringify(id)})`, expected)
       if (process.env.KRKR_KAG_SDK_IMPORT === '1')
         await evaluate(page, 'readBookmark("sdk-bookmark.tjs")', result)

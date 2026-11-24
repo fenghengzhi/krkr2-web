@@ -36,41 +36,57 @@ function kagEvalDrain(parser){
   }
   return output;
 }
+function kagEvaluateRun(id,p,q){
+  var first,result,d;
+  switch(id){
+    case "expression-scope":
+      p.body="[if exp='kagEvalFlag && this===global']G[else]P[endif][if exp=false]N[elsif exp=\"kagEvalValue=='global'\"]E[else]N[endif][ignore exp='!kagEvalFlag']I[endignore][emit cond='this===global' value=&kagEvalValue][emb exp=\"'['+kagEvalValue+']'\"]\\";
+      p.loadScenario("scope-live.ks");
+      return kagEvalDrain(p)+"|"+p.kagEvalValue+"|"+int(p.kagEvalFlag);
+    case "expression-write":
+      p.body="[emit value=&\"kagEvalValue='changed'\" cond=\"kagEvalValue=='changed'\"]\\";
+      p.loadScenario("scope-live.ks");first=p.getNextTag().value;
+      return first+"|"+global.kagEvalValue+"|"+p.kagEvalValue;
+    case "expression-macro":
+      p.body="[macro name=scope][emit formal=%actor value=&kagEvalValue cond=kagEvalFlag][emb exp=kagEvalValue][endmacro][scope actor=Alice]\\";
+      p.loadScenario("scope-live.ks");first=p.getNextTag();
+      result=first.formal+"|"+first.value+"|"+p.macroParams.actor;
+      global.kagEvalValue="after";
+      return result+"|"+kagEvalDrain(p)+"|"+int(p.macroParams===null);
+    case "expression-reentry":
+      global.kagEvalFlag=false;
+      q.body="[emit value=&kagEvalValue cond='this===global']\\";q.loadScenario("scope-nested.ks");p.nested=q;
+      p.body="[iscript]\nglobal.kagEvalFlag=true;\n[endscript]\n[emit value=&kagEvalValue cond=kagEvalFlag]\\";
+      p.loadScenario("scope-live.ks");
+      return kagEvalDrain(p)+"|"+p.nestedValue+"|"+p.kagEvalValue+"|"+p.scriptCalls+"|"+int(p.callbackOwner);
+    case "expression-bookmark":
+      global.kagEvalValue="before";global.kagEvalFlag=false;p.loadScenario("scope-entry.ks");
+      first=p.getNextTag();result=first.formal+"|"+first.value;
+      d=p.store();(Dictionary.saveStruct incontextof d)("scope-bookmark.tjs");
+      global.kagEvalValue="restored";global.kagEvalFlag=true;
+      q.restore(Scripts.evalStorage("scope-bookmark.tjs"));first=q.getNextTag();
+      result+="|"+first.formal+"|"+first.value+"|"+q.callStackDepth;
+      return result+"|"+kagEvalDrain(q)+"|"+q.callStackDepth+"|"+int(q.macroParams===null);
+  }
+  throw new Exception("Unknown KAG evaluation control");
+}
+function kagEvaluationRetire(p,q){
+  var errors=[];
+  try{if(isvalid p)invalidate p;}catch(e){errors.add(e.message);}
+  try{if(isvalid q)invalidate q;}catch(e){errors.add(e.message);}
+  return errors;
+}
 function kagEvaluateObserve(id){
   global.kagEvalValue="global";global.kagEvalFlag=true;
-  var p=new EvaluationParser(),q=new EvaluationParser(),first,result,d;
-  try{
-    switch(id){
-      case "expression-scope":
-        p.body="[if exp='kagEvalFlag && this===global']G[else]P[endif][if exp=false]N[elsif exp=\"kagEvalValue=='global'\"]E[else]N[endif][ignore exp='!kagEvalFlag']I[endignore][emit cond='this===global' value=&kagEvalValue][emb exp=\"'['+kagEvalValue+']'\"]\\";
-        p.loadScenario("scope-live.ks");
-        return kagEvalDrain(p)+"|"+p.kagEvalValue+"|"+int(p.kagEvalFlag);
-      case "expression-write":
-        p.body="[emit value=&\"kagEvalValue='changed'\" cond=\"kagEvalValue=='changed'\"]\\";
-        p.loadScenario("scope-live.ks");first=p.getNextTag().value;
-        return first+"|"+global.kagEvalValue+"|"+p.kagEvalValue;
-      case "expression-macro":
-        p.body="[macro name=scope][emit formal=%actor value=&kagEvalValue cond=kagEvalFlag][emb exp=kagEvalValue][endmacro][scope actor=Alice]\\";
-        p.loadScenario("scope-live.ks");first=p.getNextTag();
-        result=first.formal+"|"+first.value+"|"+p.macroParams.actor;
-        global.kagEvalValue="after";
-        return result+"|"+kagEvalDrain(p)+"|"+int(p.macroParams===null);
-      case "expression-reentry":
-        global.kagEvalFlag=false;
-        q.body="[emit value=&kagEvalValue cond='this===global']\\";q.loadScenario("scope-nested.ks");p.nested=q;
-        p.body="[iscript]\nglobal.kagEvalFlag=true;\n[endscript]\n[emit value=&kagEvalValue cond=kagEvalFlag]\\";
-        p.loadScenario("scope-live.ks");
-        return kagEvalDrain(p)+"|"+p.nestedValue+"|"+p.kagEvalValue+"|"+p.scriptCalls+"|"+int(p.callbackOwner);
-      case "expression-bookmark":
-        global.kagEvalValue="before";global.kagEvalFlag=false;p.loadScenario("scope-entry.ks");
-        first=p.getNextTag();result=first.formal+"|"+first.value;
-        d=p.store();(Dictionary.saveStruct incontextof d)("scope-bookmark.tjs");
-        global.kagEvalValue="restored";global.kagEvalFlag=true;
-        q.restore(Scripts.evalStorage("scope-bookmark.tjs"));first=q.getNextTag();
-        result+="|"+first.formal+"|"+first.value+"|"+q.callStackDepth;
-        return result+"|"+kagEvalDrain(q)+"|"+q.callStackDepth+"|"+int(q.macroParams===null);
-    }
-    throw new Exception("Unknown KAG evaluation control");
-  }finally{invalidate p;invalidate q;}
+  var p=void,q=void,result,cleanup;
+  try{p=new EvaluationParser();q=new EvaluationParser();result=kagEvaluateRun(id,p,q);}
+  catch(error){
+    cleanup=kagEvaluationRetire(p,q);
+    if(cleanup.count)throw new Exception(error.message+" | KAG cleanup: "+cleanup.join(" | "));
+    throw error;
+  }
+  cleanup=kagEvaluationRetire(p,q);
+  if(cleanup.count)throw new Exception("KAG cleanup: "+cleanup.join(" | "));
+  return result;
 }
 `
