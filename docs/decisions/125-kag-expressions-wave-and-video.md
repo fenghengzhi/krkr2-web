@@ -27,3 +27,5 @@ WebKit 的八个暂停切换音轨失败里，默认画布读回均有 129 个�
 - 122 已终态失败。已报告的常规浏览器、库与离线用例共 2,848 项，其中 2,778 项通过、68 项失败、2 项跳过。WebKit 第四常规分片与兼容作业已取消。Node 有 3,861 项通过、40 项失败、2 项未报告。[122 运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45482636479)
 - 123 已终态失败，124 在本次取回时仍在运行，两批的主构建均已失败，应用验收跳过。两批各有 59 项 ERI 原版图像对照、8 项 MIDI 打开文件对照和 8 项 SLI 对照匹配。Windows 2022 与 2025 的窗口移动各 7 项都取得完整观察。[123 运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45486961680) · [124 运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45491545439)
 - 本次三个运行共列出 103 份 ZIP，字节数与 SHA-256 全部匹配，总计 1,027,737,572 字节。历史失败、取消与未报告范围按提交保留。
+
+本批实现提交 `c96145ec5f8e40a47592b1daadf3b6e406742c35` 已推送，首次登记时全套验证正在运行。下批取回 124 的剩余结果和本次验证，优先核实发布构建、原版 KAG 书签和介绍路线、游戏音频与暂停影片的整帧比较。[125 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45494717147)
