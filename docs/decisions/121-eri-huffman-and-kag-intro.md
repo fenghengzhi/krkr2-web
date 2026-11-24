@@ -21,3 +21,11 @@ Windows 原版 SDK 对照本批计划运行 36 个手工场景和 10 个作者�
 两批 JPEG 逐项比较均为 43/43，PNG 流式及调色板逐项比较均为 30/30、30/30。119 的原版 ERI 对照 11/11 匹配。120 的手工组 24/24、作者工具组 3/3 匹配。119 的 Windows 2022 窗口移动参考在 `caption-left-up` 场景中收到正确位置、目标和按钮状态，但原始中性移动消息的额外标签为 0，未触发按下和同步移动命令。120 同系统 7 个场景全部完成观察。本批在准备阶段单独发送禁止合并的移动消息，在窗口过程记录日志前读取该消息标签，并保留单次按下及目标确认。消息合并是针对这份日志采取的修正方向，成效须以新运行判断。[移动参考](../../tests/native/window-move.cpp) · [Windows MOUSEINPUT 说明](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-mouseinput)
 
 算术熵编码、有损 ERI、其余非插件运行时差异及完整游戏验收仍未闭合。本批新增代码和验收均待 GitHub-hosted Actions 执行。
+
+## 批次交接
+
+本轮取回三个运行在快照中列出的全部 52 份 ZIP，合计 1,045,208,731 字节，大小与 GitHub 公布的 SHA-256 均吻合。119 的低位 PNG 产物首次下载返回 HTTP 503，单独重取后校验一致，原响应也已保留。119 的整套运行终态失败。120 取回时仍在运行，尚未完成的作业保留到下批取回。
+
+119 的历史回收已交付全部 95 份缺件。75 份原产物 ZIP 已核对大小与摘要，另有 20 份原失败日志，合计 630,434,572 字节。下载的回收包为 630,747,936 字节，SHA-256 为 `33afd46db3b58032c6e345e8d10bbb0f6bff567299318822724ebca6d21f4e3b`。原日志证实 114 的错误是引擎配置无法识别全局 `structuredClone`，115 已出现同一 PNG 回调的 TS7006，116–118 的原生编译器报告 `TJS::TJSReadError` 未声明。既有失败记录继续保留。[历史归档回收](https://github.com/fenghengzhi/krkr2-web/actions/runs/45473098039)
+
+20 个文件已随实现提交 `894f62165b9cc848b30aba1453be4c754329fe56` 推送。首次登记为排队中。新增 10 个常规 Node 定义及每个浏览器 6 个定义。原始登记页和匹配记录位于 `out/verification/github-actions/121-initial-894f62165b9cc848b30aba1453be4c754329fe56/`。下批取回这次运行和第 120 批在快照时尚未终止的作业。[第 121 批全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45478711947)
