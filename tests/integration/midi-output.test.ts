@@ -84,6 +84,7 @@ for (const binary of [false, true]) {
 
   test(`${label}: raw FF00 crosses separate native calls at 50ms and Stop cancels the owned wait`, { timeout: 60000 }, async () => {
     await using(binary, async ({ session, clock, audio }) => {
+      await audio.command({ op: 'pauseAll', paused: true })
       const before = new Set(clock.tasks), completed = session.evaluate('midiOutputDelayPair()')
       const observed = completed.then((value) => ({ status: 'fulfilled' as const, value }),
         (reason: unknown) => ({ status: 'rejected' as const, reason }))
@@ -94,6 +95,8 @@ for (const binary of [false, true]) {
       clock.advance(1)
       assert.deepEqual(await observed, { status: 'fulfilled', value: 'delivered' })
       assert.deepEqual(audio.delivered[1], { at: 50, message: { kind: 'short', status: 0x90, data: [69, 100] } })
+      assert.equal(audio.mixer.hasClockWork, false, 'paused rendering does not suspend the MIDI host deadline')
+      await audio.command({ op: 'pauseAll', paused: false })
       clock.advance(20); await session.idle(); assert(audio.mixer.peak > 0.001)
       await session.evaluate('midiOutputSilence()')
       const waitingAt = clock.now + 50, previous = new Set(clock.tasks), count = audio.delivered.length,

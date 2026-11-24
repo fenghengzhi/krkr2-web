@@ -1,6 +1,6 @@
 # 当前实现范围
 
-第 123 批增加原版 `KAGParser` 宏参数字典的书签读写、跨解析器的剧本缓存和原版标签错误消息。游戏音频增加 SLI 条件选择和直接 MIDI 输出的字节与等待规则。托管验收将原 SDK 实际写出的书签交给同批 Web 播放器。122 的 ERI 手工及作者工具场景分别 49/49、10/10 匹配，MIDI 文件打开场景 8/8 匹配。[123 兼容范围](../decisions/123-kag-bookmarks-and-game-audio.md)
+第 123 批增加原版 `KAGParser` 宏参数字典的书签读写、跨解析器的剧本缓存和原版标签错误消息。游戏音频增加 SLI 条件选择和直接 MIDI 输出的字节与等待规则。托管验收将原 SDK 实际写出的书签交给同批 Web 播放器。实现提交为 `63602e7d7f1444668d528fa48c55a2e680ca3576`，首次登记为等待运行。122 的 ERI 手工及作者工具场景分别 49/49、10/10 匹配，MIDI 文件打开场景 8/8 匹配。[123 兼容范围](../decisions/123-kag-bookmarks-and-game-audio.md) · [123 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45486961680)
 
 第 122 批的播放器接入无损算术 ERI，支持帧 1、4 的真彩色和帧 2 的 8 位灰度／索引图。MIDI 增加打开文件时的原版错误消息、零值节拍的恢复和分段音源重置。当前原版逐像素证据来自 121 的 46 个 ERI 场景。122 的完整实现提交为 `03ebffb4dde2acc451a1ac5c1d76cced5ffe01ba`，首次登记为运行中。[兼容范围与验收](../decisions/122-eri-arithmetic-and-midi.md) · [122 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45482636479)
 
