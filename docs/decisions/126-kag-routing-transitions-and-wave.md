@@ -25,3 +25,5 @@ KAG 游戏可以在 `onJump` 或 `onCall` 回调里加载另一个剧本或跳�
 - 这两个运行当时列出的 47 份 ZIP 已逐份核实字节数与 SHA-256，共 413,615,461 字节。
 
 第 126 批增加 8 个常规 Node 测试和每个浏览器项目 12 个测试。Windows 原版作业执行 41 个 KAG 场景、20 个 SLI／WAVE 场景和 21 个转场选项场景。下批取回本批报告后，先核对发布构建、原版书签及 Web 读档，再核对介绍游戏的实际交互路线。[托管工作流](../../.github/workflows/test.yml)
+
+实现提交 `ed9628ce0f01502c56545de48b0cf07d862cc218` 已推送。首次登记时，GitHub 托管全套验证正在排队。[126 运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45497700733)
