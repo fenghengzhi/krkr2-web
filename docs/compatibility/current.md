@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 118 批已提交至 `0ff9f1080ac82bb37258ddb96aa6045b40e284e0`。首次登记时托管运行已开始，尚无结论。下次批量回收结果。[Actions 45469186113](https://github.com/fenghengzhi/krkr2-web/actions/runs/45469186113)
+
 第 118 批将播放器通过 `.jpg`、`.jpeg` 和 `.jif` 加载的游戏图像接到独立 IJG 6b 内核。灰度遮罩请求 JPEG 的亮度输出，损坏文件遵循原数值错误和结束标记恢复规则。当前比较基准是原配置的标量 C 实现，Borland 优化二进制的像素一致性仍待核实。新实现、离线资产和 113 的构建修复均待托管验证。[118 实现与边界](../decisions/118-native-jpeg-and-hosted-build-recovery.md)
 
 117提交 `32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd` 已推送，[Actions 40805119639](https://github.com/fenghengzhi/krkr2-web/actions/runs/40805119639)首次唯一查询为pending／conclusion=null，仅记录身份。新增应用、差分与崩溃对照均尚无执行结论，下批回收，完整非插件目标保持active。

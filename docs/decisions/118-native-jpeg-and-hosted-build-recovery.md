@@ -45,3 +45,7 @@
 112 的两个 WebKit ZIP 失败暴露了旧观测量的含义。页面资源数先计入外层 ZIP，无法表示惰性索引已经发布。替换后的用例在有效 ZIP 的中央目录尾部请求待决时 Stop，核对请求取消、Worker 和 RPC 清零，再用同一 URL 正常启动并校验游戏像素。项目根的另一个 WebKit trace 已显示 root 选项被选中，第二次目录上传随后一直没有完成。报告中的空值发生于整个测试超时后的清理阶段。本批保留原目录、根目录和存档断言，给真正的上传操作设定单独时限并保存 input/change 与 Worker 证据，原因仍待定位。
 
 下一批回收 113 尚未报告的结果和 114–118。后续工作还包括 ERI、PNG 附加块和低位灰度、跨组件内存预算、未通过的浏览器场景以及真实游戏从启动、游玩、存读档到退出的验收。完整非插件目标继续进行。
+
+## 推送与交接
+
+实现提交 `0ff9f1080ac82bb37258ddb96aa6045b40e284e0` 共 46 个文件，已推送到 `codex/migrated-window-attention`。对新运行只查询一次以登记身份，push、完整 SHA、分支、工作流路径与 attempt 1 均匹配。该时点为 `in_progress`，结论为 null。原始响应保存在 `out/verification/github-actions/45469186113/initial-run-discovery.json`，作业、日志与产物留到下一批回收。[Full test suite 45469186113](https://github.com/fenghengzhi/krkr2-web/actions/runs/45469186113)
