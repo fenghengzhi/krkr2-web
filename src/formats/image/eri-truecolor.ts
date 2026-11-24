@@ -1,9 +1,10 @@
 /* Lossless ERINA frame 1/4/8 reconstruction, derived from ERINA-Library 1.0A
  * Copyright (C) 2000-2002 Leshade Entis, Entis-soft. See the attribution and
  * distribution terms in docs/decisions/119-eri-png-and-hosted-codecs.md.
- * This module does not implement arithmetic or lossy image coding. */
+ * This module does not implement lossy image coding. */
 import { ImageDecodeError } from './selection.ts'
 import { ERI_HUFFMAN_BYTES, EriHuffmanData, EriHuffmanTree, readEriOperation } from './eri-huffman.ts'
+import { ERI_ARITHMETIC_BYTES, EriArithmeticDecoder } from './eri-arithmetic.ts'
 
 export interface EriBitSource {
   next(): number
@@ -157,11 +158,13 @@ function* restoreBlock(state: BlockRestoration, bx: number, by: number,
   yield
 }
 
-/** Decode into a private byte image in entropy row order. RGB(A) channels
- * remain physical B,G,R,A until the caller applies KRKR's final conversion.
- * Padded edge samples still participate in the original predictor state. */
-export function* decodeEriGammaTruecolor(bits: EriBitSource, shape: EriTruecolorShape): Generator<void, Uint8Array> {
-  const { width, height, channels, degree, enhanced, continuous } = shape
+/** Frame1/4 Gamma or arithmetic entropy shares the original predictor and
+ * operation layouts. RGB(A) remains private physical B,G,R,A until KRKR's
+ * final conversion; padded edge samples still update predictor state. */
+export function* decodeEriPredictiveTruecolor(bits: EriBitSource, shape: EriTruecolorShape,
+  arithmeticBits?: number): Generator<void, Uint8Array> {
+  const { width, height, channels, degree, enhanced } = shape,
+    arithmetic = arithmeticBits !== undefined, continuous = arithmetic || shape.continuous
   if (!Number.isInteger(degree) || degree < 1 || degree > 8)
     throw new Error('ERI truecolor block degree exceeds the safe Web range')
   const size = 2 ** degree, area = size * size, samples = area * channels,
@@ -169,6 +172,7 @@ export function* decodeEriGammaTruecolor(bits: EriBitSource, shape: EriTruecolor
     pixelBytes = width * height * 4,
     workBytes = pixelBytes + samples * 8 + (enhanced && channels >= 3 ? area * 16 : 0)
       + (across + 1) * size * channels * 4 + (continuous && channels >= 3 ? blocks : 0)
+      + (arithmetic ? ERI_ARITHMETIC_BYTES : 0)
   if (!Number.isSafeInteger(workBytes) || workBytes > 96 * 1024 * 1024)
     throw new Error('ERI truecolor exceeds the 96 MiB owned work budget')
   const image = new Uint8Array(pixelBytes), encoded = new Int32Array(samples), block = new Int32Array(samples),
@@ -176,7 +180,7 @@ export function* decodeEriGammaTruecolor(bits: EriBitSource, shape: EriTruecolor
     maps = enhanced && channels >= 3 ? yield* arrangements(size) : [],
     operationBits = enhanced ? 6 : 4,
     operations = continuous && channels >= 3 ? new Uint8Array(blocks) : undefined,
-    runs = new GammaRuns(bits),
+    runs = arithmetic ? undefined : new GammaRuns(bits),
     restoration: BlockRestoration = { width, height, channels, size, area, image, block, columns, previousLine }
   if (operations) for (let i = 0; i < operations.length; i++) {
     operations[i] = bits.take(operationBits)
@@ -184,13 +188,19 @@ export function* decodeEriGammaTruecolor(bits: EriBitSource, shape: EriTruecolor
   }
   // This delimiter precedes either the shared run context or the first block.
   if (bits.next() !== 0) failed()
-  if (continuous) runs.initialize()
+  // Arithmetic headers always pre-read the operation table and initialize
+  // their symbol-width model only after the same native separator check.
+  const arithmeticDecoder = arithmeticBits === undefined ? undefined : new EriArithmeticDecoder(bits, arithmeticBits)
+  if (continuous && runs) runs.initialize()
   for (let by = 0; by < down; by++) {
     columns.fill(0)
     for (let bx = 0; bx < across; bx++) {
       const operation = channels < 3 ? 0 : operations ? operations[by * across + bx]! : bits.take(operationBits)
-      if (!continuous) runs.initialize()
-      yield* runs.read(encoded)
+      if (arithmeticDecoder) yield* arithmeticDecoder.read(encoded)
+      else {
+        if (!continuous) runs!.initialize()
+        yield* runs!.read(encoded)
+      }
       // The original 64-entry static table defines 50 initializers; the last
       // 14 entries are zero-initialized rather than invalid opcodes.
       const color = enhanced && channels >= 3 ? operation < 50 ? enhancedColors[operation % 10]! : 0 : operation,

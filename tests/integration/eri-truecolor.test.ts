@@ -5,11 +5,12 @@ import { headless } from '../helpers/headless.ts'
 import { eriTruecolorFiles, eriTruecolorSource, eriTruecolorCases, eriTrueRgb,
   eriTrueGray, eriTruecolorError } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanFiles, eriHuffmanCases, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
+import { eriArithmeticFiles, eriArithmeticCases } from '../helpers/eri-arithmetic-fixtures.ts'
 import { eriKey1 } from '../helpers/eri-fixtures.ts'
 
 async function using(binary: boolean, run: (f: Awaited<ReturnType<typeof headless>>, reads: Map<string, number>,
-  frames: { id: number; data: number[] }[][]) => Promise<void>) {
-  const files: Record<string, string | Uint8Array> = { ...eriTruecolorFiles(), ...eriHuffmanFiles(), 'truecolor.tjs': eriTruecolorSource,
+  frames: { id: number; data: number[] }[][]) => Promise<void>, extraFiles: Record<string, Uint8Array> = {}) {
+  const files: Record<string, string | Uint8Array> = { ...eriTruecolorFiles(), ...eriHuffmanFiles(), ...extraFiles, 'truecolor.tjs': eriTruecolorSource,
     'startup.tjs': binary ? 'Scripts.compileStorage("truecolor.tjs","savedata/truecolor.cjs",false,true,false);Scripts.execStorage("savedata/truecolor.cjs");'
       : 'Scripts.execStorage("truecolor.tjs");' }, reads = new Map<string, number>(),
     frames: { id: number; data: number[] }[][] = [], failures: unknown[] = [],
@@ -40,6 +41,58 @@ async function using(binary: boolean, run: (f: Awaited<ReturnType<typeof headles
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
+  test(`${mode}: arithmetic ERI reaches real Layers, keyed cache destinations and companion-mask failure recovery`, { timeout: 60000 }, async () => {
+    await using(binary, async ({ session }, reads, frames) => {
+      const id = Number(await session.evaluate('tcImage.__id'))
+      for (const item of eriArithmeticCases) {
+        assert.equal(await session.evaluate(`tcLoad(tcImage,"${item.name}",clNone)`), 'ok')
+        assert.equal(await session.evaluate('tcPixels(tcImage)'), item.rgba.join(','), item.name)
+        assert.deepEqual(frames.at(-1)!.find((layer) => layer.id === id)!.data, item.rgba, item.name)
+        const hits = session.snapshot().imageCacheHits
+        assert.equal(await session.evaluate(`tcLoad(tcCopy,"${item.name}",clNone)`), 'ok')
+        assert.equal(session.snapshot().imageCacheHits, hits + 1)
+        await session.evaluate('(tcImage.setMainPixel(0,0,0xabcdef),tcImage.setMaskPixel(0,0,17),0)')
+        assert.equal(await session.evaluate('tcPixels(tcCopy)'), item.rgba.join(','))
+        assert.equal(await session.evaluate(`tcLoad(tcImage,"${item.name}",clNone)`), 'ok')
+        assert.equal(await session.evaluate('tcPixels(tcImage)'), item.rgba.join(','))
+        assert.equal(reads.get(item.name), 1)
+        if (item.indexed) {
+          assert(item.indices, 'Indexed arithmetic fixture must declare independent palette indices')
+          const keyed = item.rgba.map((value, at) => at % 4 === 3 && item.indices![at >> 2] === 1 ? 0 : value)
+          assert.equal(await session.evaluate(`tcLoad(tcImage,"${item.name}",clPalIdx+1)`), 'ok')
+          assert.equal(await session.evaluate('tcPixels(tcImage)'), keyed.join(','))
+          assert.equal(await session.evaluate(`tcLoad(tcImage,"${item.name}",clPalIdx+255)`), 'ok')
+          assert.equal(await session.evaluate('tcPixels(tcImage)'), item.rgba.join(','))
+        } else if (item.input.frame === 2) {
+          assert.equal(await session.evaluate(`tcLoad(tcImage,"${item.name}",clPalIdx+1)`), 'ok')
+          assert.equal(await session.evaluate('tcPixels(tcImage)'), item.rgba.join(','), 'True gray ignores palette keys')
+        }
+      }
+      assert.equal(await session.evaluate('tcLoad(tcImage,"ar-rgb8-table.eri",clPalIdx+1)'), 'ok')
+      assert.equal(await session.evaluate('tcPixels(tcImage)'), eriTrueRgb.join(','))
+      const keyed = eriTrueRgb.map((value, at) => at === 3 ? 0 : value)
+      assert.equal(await session.evaluate('tcLoad(tcImage,"ar-rgb8-table.eri",0x0a141e)'), 'ok')
+      assert.equal(await session.evaluate('tcPixels(tcImage)'), keyed.join(','))
+      const mask = eriTrueRgb.map((value, at) => at % 4 === 3 ? eriTrueGray[at >> 2]! : value)
+      assert.equal(await session.evaluate('tcLoad(tcCopy,"ar-mask.eri",clNone)'), 'ok')
+      assert.equal(await session.evaluate('tcPixels(tcCopy)'), mask.join(','))
+      await session.evaluate('(System.clearGraphicCache(),0)')
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const before = frames.length
+        assert.equal(await session.evaluate('tcLoad(tcImage,"ar-mask-bad.eri",clNone)'), `eri-true:<${eriTruecolorError}>`)
+        assert.equal(await session.evaluate('tcPixels(tcImage)'), eriTrueRgb.join(','))
+        assert.equal(await session.evaluate('tcPixels(tcCopy)'), mask.join(','))
+        assert.equal(frames.length, before, 'Failed companion mask publishes no final Layer update')
+        assert.equal(session.snapshot().imageCacheEntries, 0)
+        assert.equal(reads.get('ar-mask-bad.eri'), attempt)
+        assert.equal(reads.get('ar-mask-bad_m.eri'), attempt)
+      }
+      assert.equal(await session.evaluate('tcLoad(tcImage,"ar-mask.eri",clNone)'), 'ok')
+      assert.equal(await session.evaluate('tcPixels(tcImage)'), mask.join(','))
+      assert.deepEqual(frames.at(-1)!.find((layer) => layer.id === id)!.data, mask)
+      assert.equal(reads.get('ar-mask_m.eri'), 2)
+    }, eriArithmeticFiles())
+  })
   test(`${mode}: Huffman ERI reaches Layer pixels, invalidates on clear and recovers from a failed companion mask`, { timeout: 60000 }, async () => {
     await using(binary, async ({ session }, reads) => {
       for (const item of [...eriHuffmanCases, ...eriHuffmanPaletteCases]) {

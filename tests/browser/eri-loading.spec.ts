@@ -10,6 +10,7 @@ import {
   eriTruecolorCases, eriTruecolorError, eriTruecolorFiles, eriTruecolorSource, eriTrueGray, eriTrueRgb, eriTrueRgba,
 } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanCases, eriHuffmanFiles, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
+import { eriArithmeticCases, eriArithmeticFiles } from '../helpers/eri-arithmetic-fixtures.ts'
 
 async function frame(canvas: Locator) {
   return canvas.evaluate((element) => {
@@ -100,33 +101,62 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
 const colorSuites = [
   { title: 'truecolor ERI', prefix: 'tc', cases: eriTruecolorCases, files: eriTruecolorFiles, alpha: 'tc-rgba-v1-independent.eri' },
   { title: 'Huffman ERI', prefix: 'hc', cases: eriHuffmanCases, files: eriHuffmanFiles, alpha: 'hc-rgba-inline.eri' },
+  { title: 'arithmetic ERI', prefix: 'ar', cases: eriArithmeticCases, files: eriArithmeticFiles, alpha: 'ar-rgba8-table.eri' },
 ]
+// The arithmetic corpus also has 2x2 and 3x2 images. Present the loaded image and
+// its actual mask at their own dimensions, without stretching canvas pixels.
+const arithmeticSource = eriTruecolorSource + String.raw`
+function tcShowSizedMask(){
+  var image=global.tcImage,mask=global.tcMask,w=image.imageWidth,h=image.imageHeight;
+  global.tcWindow.setInnerSize(w,h*2);global.tcRoot.setSize(w,h*2);image.setSize(w,h);
+  mask.setImageSize(w,h);mask.setSize(w,h);mask.top=h;
+  for(var y=0;y<h;y++)for(var x=0;x<w;x++)mask.setMainPixel(x,y,image.getMaskPixel(x,y)*0x010101);
+  return 0;
+}
+`
 for (const suite of colorSuites) for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: ${suite.title} in visible Layers and companion masks`, async ({ page }, info) => {
     test.setTimeout(120000)
-    const game = await launchWindowAttention(page, backend, binary, eriTruecolorSource,
+    const game = await launchWindowAttention(page, backend, binary, suite.prefix === 'ar' ? arithmeticSource : eriTruecolorSource,
       Object.entries(suite.files()).map(([name, bytes]) => ({ name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) })))
     const canvas = game.surface('ERI truecolor').locator('canvas[data-window-id]')
     const failures: unknown[] = [], observed: string[] = []
-    const display = async (name: string, key: string, rgba: readonly number[]) => {
+    const display = async (name: string, key: string, rgba: readonly number[], width = 3) => {
       await evaluate(page, `tcLoad(tcImage,"${name}",${key})`, 'ok')
       await evaluate(page, 'tcPixels(tcImage)', rgba.join(','))
-      await evaluate(page, 'tcShowMask()', '0')
-      await expect.poll(() => frame(canvas)).toEqual(expectedFrame(rgba))
+      await evaluate(page, suite.prefix === 'ar' ? 'tcShowSizedMask()' : 'tcShowMask()', '0')
+      await expect.poll(() => frame(canvas)).toEqual(expectedFrame(rgba, width))
       observed.push(name + ' ' + key)
     }
     try {
-      for (const item of suite.cases.filter((item) => item.width === 3 && item.height === 3))
-        await display(item.name, 'clNone', item.rgba)
+      for (const item of suite.cases.filter((item) => suite.prefix === 'ar' || item.width === 3 && item.height === 3))
+        await display(item.name, 'clNone', item.rgba, item.width)
+      if (suite.prefix === 'ar') {
+        for (const item of eriArithmeticCases) {
+          if (item.indexed) {
+            expect(item.indices, 'Indexed arithmetic fixture declares independent indices').toBeDefined()
+            const keyed = item.rgba.map((value, at) => at % 4 === 3 && item.indices![at >> 2] === 1 ? 0 : value)
+            await display(item.name, 'clPalIdx+1', keyed, item.width)
+            await display(item.name, 'clPalIdx+255', item.rgba, item.width)
+          } else if (item.input.frame === 2) await display(item.name, 'clPalIdx+1', item.rgba, item.width)
+        }
+        await display('ar-rgb8-table.eri', 'clPalIdx+1', eriTrueRgb)
+        await evaluate(page, 'tcLoad(tcCopy,"ar-rgb8-table.eri",clNone)', 'ok')
+        await evaluate(page, '(tcImage.setMainPixel(0,0,0xabcdef),tcImage.setMaskPixel(0,0,17),0)', '0')
+        await evaluate(page, 'tcPixels(tcCopy)', eriTrueRgb.join(','))
+        await display('ar-rgb8-table.eri', 'clNone', eriTrueRgb)
+      }
       await display(suite.alpha, '0x0a141e', eriTrueRgba.map((v, i) => i % 4 === 3 ? (i === 3 ? 0 : 255) : v))
       const mask = eriTrueRgb.map((v, i) => i % 4 === 3 ? eriTrueGray[i >> 2]! : v)
       const name = suite.prefix + '-mask'
       await display(name + '.eri', 'clNone', mask)
       await evaluate(page, `tcLoad(tcCopy,"${name}.eri",clNone)`, 'ok')
       await evaluate(page, '(System.clearGraphicCache(),0)', '0')
-      await evaluate(page, `tcLoad(tcImage,"${name}-bad.eri",clNone)`, `eri-true:<${eriTruecolorError}>`)
-      await evaluate(page, 'tcPixels(tcImage)', eriTrueRgb.join(','))
-      await evaluate(page, 'tcPixels(tcCopy)', mask.join(','))
+      for (let attempt = 0; attempt < (suite.prefix === 'ar' ? 2 : 1); attempt++) {
+        await evaluate(page, `tcLoad(tcImage,"${name}-bad.eri",clNone)`, `eri-true:<${eriTruecolorError}>`)
+        await evaluate(page, 'tcPixels(tcImage)', eriTrueRgb.join(','))
+        await evaluate(page, 'tcPixels(tcCopy)', mask.join(','))
+      }
       await display(name + '.eri', 'clNone', mask)
       if (suite.prefix === 'hc') {
         for (const item of eriHuffmanPaletteCases) {

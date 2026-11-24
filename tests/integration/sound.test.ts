@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { headless } from '../helpers/headless.ts'
 import { AudioClock, wave, midi } from '../helpers/audio.ts'
 import { HeadlessAudioBackend } from '../../src/backends/audio/headless.ts'
+import { midiOpenCases, midiOpenSource } from '../helpers/midi-contract.ts'
 
 async function setup(source: string) {
   const clock = new AudioClock(),
@@ -88,6 +89,31 @@ test('MIDI buffers play through the same sample clock and stop cleans all schedu
   assert.equal(clock.tasks.size, 0)
   assert.equal(session.snapshot().handles, 0)
 })
+
+for (const binary of [false, true]) {
+  test(`${binary ? 'bytecode' : 'source'}: MIDI open reports the current native message and recovers on the same sound object`, { timeout: 60000 }, async () => {
+    const { session, audio, clock } = await setup(binary
+      ? 'Scripts.compileStorage("midi-contract.tjs","savedata/midi-contract.cjs",false,true,false);Scripts.execStorage("savedata/midi-contract.cjs");'
+      : 'Scripts.execStorage("midi-contract.tjs");')
+    const failures: unknown[] = [], cases = midiOpenCases(), files = [...cases.map(({ id, bytes }) => ({ name: id + '.mid', bytes })),
+      { name: 'midi-contract.tjs', bytes: new TextEncoder().encode(midiOpenSource) }]
+    try {
+      session.mount(files.map(({ name, bytes }) => ({ name, size: bytes.length, async read() { return bytes } })))
+      await session.start()
+      for (const entry of cases) assert.equal(await session.evaluate(`openMidiFile("${entry.id}.mid")`), entry.expected, entry.id)
+      await session.evaluate('System.assignMessage("TVPInvalidSMF","changed:%1")')
+      assert.equal(await session.evaluate('openMidiFile("wrong-id.mid")'), 'changed:MThd not found')
+      assert.equal(await session.evaluate('openMidiFile("complete.mid")'), 'opened')
+      await session.evaluate('(midiMusic.play(),0)')
+      clock.advance(40); await session.idle()
+      assert(audio.mixer.peak > 0.001)
+    } catch (error) { failures.push(error) }
+    try { await session.stop(); assert.equal(clock.tasks.size, 0) }
+    catch (error) { failures.push(error) }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'MIDI open or cleanup failed', { cause: failures[0] })
+  })
+}
 
 test('audio loop failures reach the session and all audio work can still be released', async () => {
   const { session, clock, logs } = await setup(

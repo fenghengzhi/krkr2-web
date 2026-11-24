@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { wave, midi } from '../helpers/audio.ts'
+import { midiOpenCases, midiOpenSource } from '../helpers/midi-contract.ts'
 import { readFileSync } from 'node:fs'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { installWorkerRpcObservation, observeWorkerRpc } from '../helpers/worker-rpc-observation.ts'
@@ -15,7 +16,9 @@ for (const backend of ['asyncify', 'jspi']) {
       backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)),
       'JSPI unavailable',
     )
+    const midiCases = midiOpenCases()
     const source = String.raw`
+${midiOpenSource}
 class Sound extends WaveSoundBuffer {
   function Sound(){super.WaveSoundBuffer(null);}
   function onStatusChanged(status){Debug.message("wave="+status);}
@@ -46,8 +49,11 @@ var music=new MIDISoundBuffer(null);music.open("tone.mid");music.looping=true;
       {
         name: 'tone.mid',
         mimeType: 'audio/midi',
-        buffer: Buffer.from(midi([[0, 0x90, 69, 100, 0x83, 0x60, 0x80, 69, 0, 0, 0xff, 0x2f, 0]])),
+        buffer: Buffer.from(midi([[0, 0xf0, 3, 0x43, 0x10, 0x4c, 0, 0xf7, 5, 0, 0, 0x7e, 0, 0xf7,
+          0, 0xf2, 0, 0, 0, 0xff, 0x51, 3, 0, 0, 0,
+          0, 0x90, 69, 100, 0x83, 0x60, 0x80, 69, 0, 0, 0xff, 0x2f, 0]])),
       },
+      ...midiCases.map(({ id, bytes }) => ({ name: id + '.mid', mimeType: 'audio/midi', buffer: Buffer.from(bytes) })),
     ])
     // setInputFiles does not supply user activation. Loading must finish even
     // if autoplay is suspended, before the separate explicit unlock gesture.
@@ -79,6 +85,9 @@ var music=new MIDISoundBuffer(null);music.open("tone.mid");music.looping=true;
     await expect
       .poll(() => page.locator('#sound-level').evaluate((el) => (el as HTMLMeterElement).value))
       .toBeGreaterThan(0.01)
+    const opens = [...midiCases, midiCases[0]!]
+    await evaluate(page, '[' + opens.map(({ id }) => `openMidiFile("${id}.mid")`).join(',') + '].join("|")',
+      opens.map(({ expected }) => expected).join('|'))
     await page.locator('#sound-toggle').click()
     await expect(page.locator('#sound-status')).toHaveText('声音已静音。')
     await page.locator('#stop').click()

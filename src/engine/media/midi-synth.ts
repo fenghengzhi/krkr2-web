@@ -32,6 +32,17 @@ const channel = (): Channel => ({
   modulation: 0,
 })
 const tau = 2 * Math.PI
+// Payloads preceding EOX in the reset messages recognized by the original
+// Win32 MIDI sequencer. GS mode set carries more data after its address.
+const gsReset = [0x41, 0x10, 0x42, 0x12, 0x40, 0, 0x7f, 0, 0x41]
+const gsModeSet = [0x41, 0x10, 0x42, 0x12, 0, 0, 0x7f]
+const xgOn = [0x43, 0x10, 0x4c, 0, 0, 0x7e, 0]
+function resetsModule(payload: number[]): boolean {
+  const matches = (bytes: number[]) => bytes.every((value, at) => payload[at] === value)
+  return (payload.length === 4 && payload[0] === 0x7e && payload[2] === 9 && (payload[3] === 1 || payload[3] === 3)) ||
+    (payload.length === gsReset.length && matches(gsReset)) || matches(gsModeSet) ||
+    (payload.length === xgOn.length && matches(xgOn))
+}
 
 /** Browser-resident procedural instrument bank. MIDI sequencing and controller
  * behavior are separate from timbre; a sample-bank backend can replace this. */
@@ -41,6 +52,7 @@ export class MidiSynth {
   private cursor = 0
   private time = 0
   private noise = 0x12345678
+  private exclusive?: number[]
   left = 0
   right = 0
   constructor(private readonly asset?: MidiAsset) {}
@@ -50,6 +62,7 @@ export class MidiSynth {
   reset(): void {
     this.channels = Array.from({ length: 16 }, channel)
     this.notes = []
+    this.exclusive = undefined
     this.cursor = 0
     this.time = 0
   }
@@ -75,13 +88,25 @@ export class MidiSynth {
       a = data[0] ?? 0,
       b = data[1] ?? 0,
       c = this.channels[id]!
-    if (status === 0xf0) {
-      if (data[0] === 0x7e && data[2] === 9 && (data[3] === 1 || data[3] === 3)) {
-        this.channels = Array.from({ length: 16 }, channel)
-        this.notes = []
+    if (status === 0xf0 || status === 0xf7) {
+      if (status === 0xf0) this.exclusive = []
+      for (const value of data) {
+        if (value === 0xf0) this.exclusive = []
+        else if (value === 0xf7) {
+          if (this.exclusive && resetsModule(this.exclusive)) {
+            this.channels = Array.from({ length: 16 }, channel)
+            this.notes = []
+          }
+          this.exclusive = undefined
+        } else if (value < 0x80 && this.exclusive && this.exclusive.length < 10) {
+          // Keep one byte beyond the longest exact match. Arbitrary bulk
+          // dumps can span F7 events without growing retained synth state.
+          this.exclusive.push(value)
+        } else if (value >= 0x80 && value < 0xf8) this.exclusive = undefined
       }
       return
     }
+    if (status < 0xf8) this.exclusive = undefined
     if (kind === 0x90 && b) {
       if (this.notes.length >= 128) this.notes.shift()
       this.notes.push({

@@ -6,6 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { ImageJpegKernel } from '../../src/backends/image-jpeg/kernel.ts'
+import type { ImageJpegStep } from '../../src/engine/ports/image-jpeg.ts'
 import { validateImageJpegManifest, type ImageJpegFactory, type ImageJpegManifest } from '../../src/backends/image-jpeg/module.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -73,7 +74,7 @@ function observe(entry: Case, input: Uint8Array, kernel: ImageJpegKernel): Actua
     decoder = kernel.open(entry.mode, entry.precision)
     for (let count = 0; count < 10000; count++) {
       const offered = needsInput ? input.subarray(at, Math.min(input.length, at + 8192)) : new Uint8Array(),
-        step = decoder.step(offered, at + offered.length === input.length)
+        step: ImageJpegStep = decoder.step(offered, at + offered.length === input.length)
       assert(Number.isInteger(step.inputUsed) && step.inputUsed >= 0 && step.inputUsed <= offered.length)
       at += step.inputUsed; actual.offeredBytes += offered.length; actual.inputUsed = at
       needsInput = step.needsInput; actual.phase = step.phase
@@ -89,7 +90,7 @@ function observe(entry: Case, input: Uint8Array, kernel: ImageJpegKernel): Actua
         destination = new Uint8Array(step.width * step.height * (entry.mode === 'normal' ? 4 : 1)).fill(165)
       } else if (step.status === 'rows') {
         assert(destination); assert.equal(actual.sizes, 1)
-        const start = step.startRow, count = step.rowCount
+        const start: number | undefined = step.startRow, count: number | undefined = step.rowCount
         assert(typeof start === 'number' && typeof count === 'number' && Number.isInteger(start) && Number.isInteger(count))
         assert.equal(start, actual.rowsComplete); assert(count > 0 && start + count <= actual.height)
         assert(step.data instanceof Uint8Array); assert.equal(step.data.length, actual.width * count * 4)

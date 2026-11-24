@@ -927,7 +927,8 @@ jobs:
         with:
           node-version: '24.19.0'
           cache: npm
-      - run: npm ci
+      - id: install_eri_reference
+        run: npm ci
       - name: Prepare the owned image fixtures and record input hashes
         id: prepare_eri
         run: node --import tsx tests/probes/eri-sdk.ts prepare
@@ -939,8 +940,24 @@ jobs:
       - name: Run the portable ERI contracts against the same checkout
         if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.prepare_eri.outcome == 'success' }}
         run: |
-          node --import tsx --test --test-reporter=tap tests/conformance/eri-native.test.ts tests/conformance/eri-truecolor.test.ts tests/conformance/eri-huffman.test.ts |
+          node --import tsx --test --test-reporter=tap tests/conformance/eri-native.test.ts tests/conformance/eri-truecolor.test.ts tests/conformance/eri-huffman.test.ts tests/conformance/eri-arithmetic.test.ts |
             Tee-Object -FilePath out/verification/native-eri/conformance.tap
+          exit $LASTEXITCODE
+      - name: Prepare MIDI open controls for the original SDK
+        id: prepare_midi
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
+        run: node --import tsx tests/probes/midi-sdk.ts prepare
+      - name: Observe the original MIDI file and stream message holders
+        if: ${{ !cancelled() && steps.prepare_midi.outcome == 'success' }}
+        run: ./tests/probes/original-eri.ps1 -Project midi
+      - name: Compare MIDI observations and run sequencer contracts
+        if: ${{ !cancelled() && steps.prepare_midi.outcome == 'success' }}
+        run: |
+          node --import tsx tests/probes/midi-sdk.ts compare
+          $comparison = $LASTEXITCODE
+          node --import tsx --test --test-reporter=tap tests/conformance/midi-native.test.ts |
+            Tee-Object -FilePath out/verification/native-eri/midi/conformance.tap
+          if ($comparison -ne 0) { exit $comparison }
           exit $LASTEXITCODE
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()

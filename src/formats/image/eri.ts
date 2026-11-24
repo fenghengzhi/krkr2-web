@@ -1,9 +1,10 @@
 import type { DecodedImage } from '../../engine/ports/graphics.ts'
 import { ImageDecodeError, type ImageDecodeProgress, type ImageDecodeSelection } from './selection.ts'
-import { decodeEriGammaTruecolor, decodeEriHuffmanTruecolor } from './eri-truecolor.ts'
+import { decodeEriPredictiveTruecolor, decodeEriHuffmanTruecolor } from './eri-truecolor.ts'
 import { decodeEriHuffmanIndices } from './eri-huffman.ts'
+import { decodeEriArithmeticIndices } from './eri-arithmetic.ts'
 
-/* ERI lossless RL-MTF-G palette and Gamma/Huffman truecolor decoder.
+/* ERI lossless RL-MTF-G, Gamma, Huffman and arithmetic image decoder.
  * Written for this engine from the ERINA-Library 1.0A format/algorithm source,
  * Copyright (C) 2000-2002 Leshade Entis, Entis-soft. The original SDK is not
  * bundled here. Source, license and the older fixed KRKR headers are recorded
@@ -260,12 +261,11 @@ export function* decodeSelectedEri(bytes: Uint8Array, mode: ImageDecodeSelection
       if (architecture === 32 ? operations !== 0 || reserved !== 0
         : architecture === GAMMA ? operations !== 0 || (encoding & 0xfe) !== 0 || reserved !== 0 : true)
         failed('DecodeImage')
-      if (architecture !== GAMMA) throw new EriUnsupportedError('truecolor arithmetic entropy')
       if (depth !== 24 && depth !== 32 && !(type === GRAY && depth === 8))
         throw new EriUnsupportedError('truecolor source depth ' + depth)
-      const image = yield* decodeEriGammaTruecolor(bits, {
+      const image = yield* decodeEriPredictiveTruecolor(bits, {
         width, height, channels, degree: blockingDegree, enhanced: enhanced !== 0, continuous: (encoding & 1) !== 0,
-      })
+      }, architecture === 32 ? encoding : undefined)
       return yield* publishTruecolor(image, width, height, signedHeight, mode === 'grayscale',
         (type & WITH_ALPHA) !== 0, progress)
     }
@@ -284,10 +284,9 @@ export function* decodeSelectedEri(bytes: Uint8Array, mode: ImageDecodeSelection
   }
   if (outputDepth !== 8) failed('DecodeImage')
   if (bits.take(24) !== 0) failed('DecodeImage')
-  if (architecture !== GAMMA && architecture !== HUFFMAN)
-    throw new EriUnsupportedError('entropy architecture 0x' + architecture.toString(16))
   if (depth !== 8 || (type & WITH_ALPHA)) throw new EriUnsupportedError('only 8-bit sources without alpha are supported')
-  const plane = architecture === HUFFMAN ? yield* decodeEriHuffmanIndices(bits, width, height) : yield* indices(bits, width, height),
+  const plane = architecture === HUFFMAN ? yield* decodeEriHuffmanIndices(bits, width, height)
+    : architecture === 32 ? yield* decodeEriArithmeticIndices(bits, width, height) : yield* indices(bits, width, height),
     data = new Uint8Array(width * height * 4),
     gray = mode === 'grayscale', key = paletteKey === undefined || paletteKey === -1 ? -1 : paletteKey & 255
   // Missing palette memory in the original is uninitialized; the Web's owned

@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 122 批在 Windows 手工 ERI 对照组加入算术编码的独立输入，以及单独启动原版 SDK 的 MIDI 打开文件对照。该组的产物 `original-eri-reference` 保存 ERI 的逐像素差异、MIDI 的原始脚本观察和各自的 TAP 报告。上一批 46 个 ERI 对照均匹配，应用构建失败后跳过的 KAG 和浏览器作业仍待运行。[122 验收记录](decisions/122-eri-arithmetic-and-midi.md)
+
 推送分支、创建/更新 PR 或手动运行 **Tests** 工作流都会启动验证。工作流定义见 [test.yml](../.github/workflows/test.yml)。
 
 2026-10-05 起，完整 Tests 在成功 build 后同时调用 [KAG 兼容工作流](../.github/workflows/compatibility.yml)，直接复用当前 run 的 `test-build`。All tests 要求原 KAG、帮助菜单和旧 ABI 离线升级矩阵成功；手动兼容入口仍可指定 `build-run` 并检查来源一致。此接线为本批候选，尚待首次 Actions 执行。工作流复用方式依据 [GitHub 官方文档](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)。

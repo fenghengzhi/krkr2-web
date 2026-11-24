@@ -8,6 +8,7 @@ import {
 } from '../helpers/eri-fixtures.ts'
 import { eriTruecolorCases, eriTruecolorFiles, eriTrueGray, eriTrueRgb, eriTrueRgba } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanCases, eriHuffmanFiles, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
+import { eriArithmeticCases, eriArithmeticFiles } from '../helpers/eri-arithmetic-fixtures.ts'
 import { encoderPixels, encoderRecipes, indexedEncoderRecipe, prepareEncodedImages } from './eri-encoder.ts'
 import { noColorKey } from '../../src/engine/graphics/loading.ts'
 import type { Resource } from '../../src/engine/ports/storage.ts'
@@ -39,7 +40,7 @@ const corpus = process.env.KRKR_ERI_CORPUS ?? 'authored'
 assert(corpus === 'authored' || corpus === 'encoder')
 const cases: Case[] = corpus === 'encoder' ? encoderRecipes.map((recipe) => ({
   id: recipe.id, source: recipe.id + '.eri', width: recipe.width, height: recipe.height, expected: [...encoderPixels(recipe)],
-})) : [...cases119, ...[...eriTruecolorCases, ...eriHuffmanCases, ...eriHuffmanPaletteCases].map(({ name, width, height, rgba }) => ({
+})) : [...cases119, ...[...eriTruecolorCases, ...eriHuffmanCases, ...eriHuffmanPaletteCases, ...eriArithmeticCases].map(({ name, width, height, rgba }) => ({
   id: name.slice(0, -4), source: name, width, height, expected: rgba,
 })), {
   id: 'tc-mask', source: 'tc-rgb-v1-table.eri', mask: 'tc-rgba-v1-independent.eri', width: 3, height: 3,
@@ -54,6 +55,14 @@ const cases: Case[] = corpus === 'encoder' ? encoderRecipes.map((recipe) => ({
   id: 'hp-key', source: 'hp-indexed-negative.eri', width: 3, height: 2, index: 1, expected: eriKey1,
 }, {
   id: 'hp-mask', source: 'rgb-negative.eri', mask: 'hp-indexed-positive.eri', width: 3, height: 2,
+  expected: eriMaskedRgba(reversed(eriPaletteGray, 3)),
+}, {
+  id: 'ar-rgb-mask', source: 'ar-rgb8-table.eri', mask: 'ar-rgba8-table.eri', width: 3, height: 3,
+  expected: eriTrueRgb.map((value, i) => i % 4 === 3 ? eriTrueGray[i >> 2]! : value),
+}, {
+  id: 'ar-index-key', source: 'ar-palette8-frame2.eri', width: 3, height: 2, index: 1, expected: eriKey1,
+}, {
+  id: 'ar-index-mask', source: 'rgb-negative.eri', mask: 'ar-palette8-positive.eri', width: 3, height: 2,
   expected: eriMaskedRgba(reversed(eriPaletteGray, 3)),
 }]
 const provinceError = 'currently Kirikiri does not support loading palettized ERI image.'
@@ -71,7 +80,7 @@ if (corpus === 'encoder') {
 async function prepare() {
   mkdirSync(game, { recursive: true })
   const files = corpus === 'encoder' ? await prepareEncodedImages(output)
-    : { ...eriContractFiles(), ...eriTruecolorFiles(), ...eriHuffmanFiles() }
+    : { ...eriContractFiles(), ...eriTruecolorFiles(), ...eriHuffmanFiles(), ...eriArithmeticFiles() }
   const inputs: { name: string; bytes: number; sha256: string }[] = []
   function copy(from: string, name: string) {
     const bytes = files[from]

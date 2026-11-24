@@ -1,4 +1,6 @@
 import { emptyLoops, type MidiAsset } from '../../engine/ports/audio.ts'
+import { TjsError } from '../../engine/system/tjs-error.ts'
+import { TvpError } from '../../engine/system/tvp-error.ts'
 interface Timed {
   tick: number
   order: number
@@ -27,16 +29,20 @@ export function decodeMidi(input: Uint8Array): MidiAsset {
     if (!found) throw new Error('RMID has no MIDI data')
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  if (bytes.length < 14 || ascii(bytes, 0, 4) !== 'MThd')
-    throw new Error('Invalid Standard MIDI File header')
+  // Native MIDISoundBuffer.Open tests the four-byte ID before reading the
+  // remaining ten header bytes. ReadBuffer and format errors have different
+  // script-assignable holders.
+  if (bytes.length < 4) throw new TjsError('TJSReadError', 'Truncated MIDI header')
+  if (ascii(bytes, 0, 4) !== 'MThd')
+    throw new TvpError('TVPInvalidSMF', ['MThd not found'], 'Invalid Standard MIDI File header')
+  if (bytes.length < 14) throw new TjsError('TJSReadError', 'Truncated MIDI header')
   const header = view.getUint32(4),
     format = view.getUint16(8),
     tracks = view.getUint16(10),
     division = view.getUint16(12)
+  if (format > 1) throw new TvpError('TVPInvalidSMF', ['Format must be 0 or 1'], 'Unsupported MIDI format')
   if (
     header < 6 ||
-    header + 8 > bytes.length ||
-    format > 1 ||
     !tracks ||
     tracks > 256 ||
     (format === 0 && tracks !== 1) ||
@@ -48,11 +54,12 @@ export function decodeMidi(input: Uint8Array): MidiAsset {
     order = 0,
     endTick = 0
   for (let track = 0; track < tracks; track++) {
-    if (position + 8 > bytes.length || ascii(bytes, position, 4) !== 'MTrk')
-      throw new Error('MIDI track chunk is missing')
+    if (position + 8 > bytes.length) throw new TjsError('TJSReadError', 'Truncated MIDI track header')
+    if (ascii(bytes, position, 4) !== 'MTrk')
+      throw new TvpError('TVPInvalidSMF', ['MTrk not found'], 'MIDI track chunk is missing')
     const end = position + 8 + view.getUint32(position + 4)
     position += 8
-    if (end > bytes.length) throw new Error('Truncated MIDI track')
+    if (end > bytes.length) throw new TjsError('TJSReadError', 'Truncated MIDI track')
     const byte = () => {
       if (position >= end) throw new Error('Truncated MIDI event')
       return bytes[position++]!
@@ -79,7 +86,6 @@ export function decodeMidi(input: Uint8Array): MidiAsset {
         status = running
       }
       if (status < 0xf0) {
-        running = status
         const size = (status & 0xf0) === 0xc0 || (status & 0xf0) === 0xd0 ? 1 : 2,
           data = Array.from({ length: size }, byte)
         if (data.some((value) => value > 127)) throw new Error('MIDI channel data has a status bit')
@@ -89,10 +95,11 @@ export function decodeMidi(input: Uint8Array): MidiAsset {
           length = variable()
         if (position + length > end) throw new Error('Truncated MIDI meta event')
         if (type === 0x51) {
-          if (length !== 3) throw new Error('Invalid MIDI tempo')
-          const tempo = bytes[position]! * 65536 + bytes[position + 1]! * 256 + bytes[position + 2]!
-          if (!tempo) throw new Error('MIDI tempo cannot be zero')
-          events.push({ tick, order: order++, status, data: [], tempo })
+          // KRKR2 folds the complete meta payload into an unsigned DWORD and
+          // SetTempo maps zero back to the default half-second quarter note.
+          let tempo = 0
+          for (let i = Math.max(0, length - 4); i < length; i++) tempo = tempo * 256 + bytes[position + i]!
+          events.push({ tick, order: order++, status, data: [], tempo: tempo || 500000 })
         } else if (type === 0x2f) {
           if (length) throw new Error('Invalid MIDI end-of-track')
           ended = true
@@ -108,8 +115,13 @@ export function decodeMidi(input: Uint8Array): MidiAsset {
           data: Array.from(bytes.subarray(position, position + length)),
         })
         position += length
-        running = 0
-      } else throw new Error(`Unsupported MIDI system event: ${status}`)
+      } else {
+        // Native ProcessEvent consumes the system-common operands even when
+        // the synthesizer has no audible response to that short message.
+        const length = status === 0xf2 ? 2 : status === 0xf1 || status === 0xf3 ? 1 : 0
+        events.push({ tick, order: order++, status, data: Array.from({ length }, byte) })
+      }
+      running = status
       if (events.length > 250000) throw new Error('MIDI event budget exceeded')
     }
     endTick = Math.max(endTick, tick)

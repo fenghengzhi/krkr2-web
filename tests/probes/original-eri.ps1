@@ -1,10 +1,12 @@
+param([ValidateSet('eri', 'midi')][string]$Project = 'eri')
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
-  throw 'The original ERI reference requires a GitHub-hosted Windows runner.'
+  throw 'The original SDK reference requires a GitHub-hosted Windows runner.'
 }
 $output = Join-Path $env:GITHUB_WORKSPACE 'out/verification/native-eri'
+if ($Project -eq 'midi') { $output = Join-Path $output 'midi' }
 $game = Join-Path $output 'game'
-if (!(Test-Path (Join-Path $game 'startup.tjs'))) { throw 'Missing prepared ERI reference project.' }
+if (!(Test-Path (Join-Path $game 'startup.tjs'))) { throw "Missing prepared $Project reference project." }
 $work = Join-Path $env:RUNNER_TEMP ('krkr2-eri-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $work | Out-Null
 $pin = Get-Content tests/fixtures/native-reference/sdk.json -Raw | ConvertFrom-Json
@@ -12,8 +14,18 @@ $state = [ordered]@{ state = 'not-run'; commit = $env:GITHUB_SHA; attempt = $env
   run = $env:GITHUB_RUN_ID; image = $env:ImageVersion; timedOut = $false; exitCode = $null; error = $null }
 $process = $null
 try {
-  $archive = Join-Path $work 'sdk.zip'
-  Invoke-WebRequest -Uri $pin.url -OutFile $archive
+  # Both owned projects in this job use the same immutable SDK. Revalidate
+  # cached bytes on every invocation; never reuse a partial network write.
+  $archive = Join-Path $env:RUNNER_TEMP ('krkr2-sdk-' + $pin.archiveSha256 + '.zip')
+  $state.archiveReused = Test-Path $archive
+  if (!$state.archiveReused) {
+    $download = Join-Path $work 'sdk-download.zip'
+    Invoke-WebRequest -Uri $pin.url -OutFile $download
+    if ((Get-Item $download).Length -ne $pin.archiveBytes -or (Get-FileHash $download).Hash.ToLowerInvariant() -cne $pin.archiveSha256) {
+      throw 'Original SDK archive does not match its recorded size and SHA-256.'
+    }
+    Move-Item -LiteralPath $download -Destination $archive
+  }
   if ((Get-Item $archive).Length -ne $pin.archiveBytes -or (Get-FileHash $archive).Hash.ToLowerInvariant() -cne $pin.archiveSha256) {
     throw 'Original SDK archive does not match its recorded size and SHA-256.'
   }
@@ -35,11 +47,11 @@ try {
   $null = $process.Handle
   if (!$process.WaitForExit(30000)) {
     $state.timedOut = $true
-    throw 'Original process timed out before completing the ERI controls.'
+    throw "Original process timed out before completing the $Project controls."
   }
   $state.exitCode = $process.ExitCode
   if ($process.ExitCode -ne 0 -or !(Test-Path (Join-Path $game 'native-events.txt'))) {
-    throw 'Original process did not exit cleanly with ERI observations.'
+    throw "Original process did not exit cleanly with $Project observations."
   }
   $state.state = 'observed'
 } catch {
