@@ -131,17 +131,9 @@ test('ERI distinguishes explicit frame precondition rejection from unimplemented
     assert.throws(() => finish(decodeSelectedEri(input, 'normal', observed.progress)), native('ERIDecoder::DecodeImage failed.'))
     assert.deepEqual(observed.sizes, [[3, 2]]); assert.deepEqual(observed.rows, [])
   }
-  // Remaining unsupported entropy families. Actual RL-Gamma frame1/frame4
-  // inputs now have independent positive/negative vectors in eri-truecolor.
-  const truecolor = (frameVersion: number, version: number, architecture: number) => {
-    const input = bytes.slice()
-    field(input, info, version); field(input, info + 8, architecture)
-    field(input, info + 12, 1); field(input, info + 24, 24); field(input, info + 52, 2)
-    input.set([frameVersion, 0, 0, frameVersion === 8 ? 8 : 0], frame)
-    return input
-  }
-  for (const input of [field(bytes.slice(), info + 8, 32), field(bytes.slice(), info + 8, 0xfffffffc),
-    truecolor(8, 0x20200, 0xfffffffc)]) {
+  // Arithmetic remains an explicit gap. Actual Gamma and Huffman payloads
+  // now have independent positive/negative vectors in their own suites.
+  for (const input of [field(bytes.slice(), info + 8, 32)]) {
     const observed = observe()
     assert.throws(() => finish(decodeSelectedEri(input, 'normal', observed.progress)), EriUnsupportedError)
     assert.deepEqual(observed.sizes, [[3, 2]]); assert.deepEqual(observed.rows, [])

@@ -115,6 +115,12 @@ jobs:
                 throw "The exact synchronous SC_MOVE+2 call is not fully recorded: $($case.id)"
               }
               if ($case.leftButton) {
+                $neutralRequests = @($events | Where-Object {
+                  $_.phase -ceq 'controlled-mouse-request' -and ($_.details.flags -band 0x2000) -ne 0
+                })
+                if ($neutralRequests.Count -ne 1 -or ($neutralRequests[0].details.flags -band 6) -ne 0) {
+                  throw "Missing single uncoalesced neutral positioning request: $($case.id)"
+                }
                 if ($case.inputPrepared -ne $true -or $case.neutralPointerObserved -ne $true -or
                     $case.controlledLeftObserved -ne $true -or $case.leftDownInjections -ne 1) {
                   throw "Held-button preconditions were not observed exactly once: $($case.id)"

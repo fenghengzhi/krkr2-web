@@ -173,11 +173,10 @@ bool deliveredAtTarget(const State& s, HWND hwnd, LPARAM lp, std::string* detail
     }
     return ready;
 }
-bool observeInputDecision(State& s, HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
+bool observeInputDecision(State& s, HWND hwnd, UINT message, WPARAM wp, LPARAM lp, LPARAM tag) {
     // Journal exactly the values used for this decision, rather than making
     // a second set of reads that might describe a different foreground state.
     const bool prepared = s.prepared.load(), neutralObserved = s.neutralObserved.load();
-    const LPARAM tag = GetMessageExtraInfo();
     const bool tagMatches = tag == static_cast<LPARAM>(ControlledInputTag);
     std::string deliveryDetails, targetDetails;
     const bool delivered = deliveredAtTarget(s, hwnd, lp, &deliveryDetails),
@@ -218,22 +217,26 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     case WM_SYSCOMMAND: state->record("WM_SYSCOMMAND", hwnd, message, wp, lp); break;
     case WM_ACTIVATEAPP: case WM_ACTIVATE: case WM_SETFOCUS: case WM_KILLFOCUS:
         state->record("activation-or-focus", hwnd, message, wp, lp); break;
-    case WM_MOUSEMOVE:
+    case WM_MOUSEMOVE: {
+        const LPARAM tag = GetMessageExtraInfo();
         state->record("WM_MOUSEMOVE", hwnd, message, wp, lp);
-        if (observeInputDecision(*state, hwnd, message, wp, lp)) {
+        if (observeInputDecision(*state, hwnd, message, wp, lp, tag)) {
             state->neutralObserved = true;
             state->record("owned-neutral-pointer-observed", hwnd, message, wp, lp);
             SetEvent(state->neutralSeen.value);
         }
         break;
-    case WM_LBUTTONDOWN:
+    }
+    case WM_LBUTTONDOWN: {
+        const LPARAM tag = GetMessageExtraInfo();
         state->record("WM_LBUTTONDOWN", hwnd, message, wp, lp);
-        if (observeInputDecision(*state, hwnd, message, wp, lp)) {
+        if (observeInputDecision(*state, hwnd, message, wp, lp, tag)) {
             state->controlledDownObserved = true;
             state->record("owned-controlled-left-observed", hwnd, message, wp, lp);
             SetEvent(state->buttonSeen.value);
         }
         break;
+    }
     case WM_LBUTTONUP: case WM_KEYDOWN: case WM_KEYUP: case WM_CANCELMODE:
         state->record("input-or-cancel", hwnd, message, wp, lp); break;
     case PrepareInput: {
@@ -337,16 +340,16 @@ bool inject(State& s, INPUT* values, UINT count, const char* phase) {
     if (sent != count) s.error("SendInput did not insert the complete controlled stimulus");
     return sent == count;
 }
-bool mouse(State& s, POINT point, DWORD button, const char* phase) {
+bool mouse(State& s, POINT point, DWORD flags, const char* phase) {
     const LONG left = GetSystemMetrics(SM_XVIRTUALSCREEN), top = GetSystemMetrics(SM_YVIRTUALSCREEN),
         width = GetSystemMetrics(SM_CXVIRTUALSCREEN), height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
     if (width <= 1 || height <= 1) { s.error("Invalid virtual desktop dimensions"); return false; }
     INPUT input{}; input.type = INPUT_MOUSE;
     input.mi.dx = static_cast<LONG>((static_cast<long long>(point.x - left) * 65535) / (width - 1));
     input.mi.dy = static_cast<LONG>((static_cast<long long>(point.y - top) * 65535) / (height - 1));
-    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | button;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | flags;
     input.mi.dwExtraInfo = ControlledInputTag;
-    if (button & MOUSEEVENTF_LEFTDOWN) {
+    if (flags & MOUSEEVENTF_LEFTDOWN) {
         if (++s.leftDownInjections != 1) { s.error("Repeated controlled left down is forbidden"); return false; }
     }
     s.record("controlled-mouse-request", nullptr, 0, 0, 0,
@@ -395,7 +398,9 @@ std::string observe(const Scenario& scenario, const fs::path& output) {
             if (!PostMessageW(hwnd, PrepareInput, 0, 0)) s.error("Could not schedule owned input preparation");
             else if (!wait(s.inputPrepared.value, 1000)) s.error("Owned input preparation deadline exceeded");
             if (!s.failed) {
-                const bool moved = mouse(s, start, 0, "controlled-neutral-pointer");
+                // This exact packet is the held-button prerequisite. Keep it
+                // distinct from pointer updates caused by SetFocus/SetCapture.
+                const bool moved = mouse(s, start, MOUSEEVENTF_MOVE_NOCOALESCE, "controlled-neutral-pointer");
                 if (moved && !wait(s.neutralSeen.value, 1000)) s.error("Owned child did not observe the tagged neutral pointer before deadline");
             }
             if (!s.failed && !controlledTargetReady(s)) s.error("Owned input target changed before controlled left down");

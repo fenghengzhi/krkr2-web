@@ -4,10 +4,12 @@ import type { LayerTree } from '../../src/engine/scene/layers.ts'
 import { headless } from '../helpers/headless.ts'
 import { eriTruecolorFiles, eriTruecolorSource, eriTruecolorCases, eriTrueRgb,
   eriTrueGray, eriTruecolorError } from '../helpers/eri-truecolor-fixtures.ts'
+import { eriHuffmanFiles, eriHuffmanCases, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
+import { eriKey1 } from '../helpers/eri-fixtures.ts'
 
 async function using(binary: boolean, run: (f: Awaited<ReturnType<typeof headless>>, reads: Map<string, number>,
   frames: { id: number; data: number[] }[][]) => Promise<void>) {
-  const files: Record<string, string | Uint8Array> = { ...eriTruecolorFiles(), 'truecolor.tjs': eriTruecolorSource,
+  const files: Record<string, string | Uint8Array> = { ...eriTruecolorFiles(), ...eriHuffmanFiles(), 'truecolor.tjs': eriTruecolorSource,
     'startup.tjs': binary ? 'Scripts.compileStorage("truecolor.tjs","savedata/truecolor.cjs",false,true,false);Scripts.execStorage("savedata/truecolor.cjs");'
       : 'Scripts.execStorage("truecolor.tjs");' }, reads = new Map<string, number>(),
     frames: { id: number; data: number[] }[][] = [], failures: unknown[] = [],
@@ -38,6 +40,28 @@ async function using(binary: boolean, run: (f: Awaited<ReturnType<typeof headles
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
+  test(`${mode}: Huffman ERI reaches Layer pixels, invalidates on clear and recovers from a failed companion mask`, { timeout: 60000 }, async () => {
+    await using(binary, async ({ session }, reads) => {
+      for (const item of [...eriHuffmanCases, ...eriHuffmanPaletteCases]) {
+        assert.equal(await session.evaluate(`tcLoad(tcImage,"${item.name}",clNone)`), 'ok')
+        assert.equal(await session.evaluate('tcPixels(tcImage)'), item.rgba.join(','), item.name)
+      }
+      assert.equal(await session.evaluate('tcLoad(tcImage,"hp-indexed-negative.eri",clPalIdx+1)'), 'ok')
+      assert.equal(await session.evaluate('tcPixels(tcImage)'), eriKey1.join(','))
+      const mask = eriTrueRgb.map((v, i) => i % 4 === 3 ? eriTrueGray[i >> 2]! : v)
+      assert.equal(await session.evaluate('tcLoad(tcCopy,"hc-mask.eri",clNone)'), 'ok')
+      await session.evaluate('(System.clearGraphicCache(),0)')
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        assert.equal(await session.evaluate('tcLoad(tcImage,"hc-mask-bad.eri",clNone)'), `eri-true:<${eriTruecolorError}>`)
+        assert.equal(await session.evaluate('tcPixels(tcImage)'), eriTrueRgb.join(','))
+        assert.equal(await session.evaluate('tcPixels(tcCopy)'), mask.join(','))
+        assert.equal(reads.get('hc-mask-bad_m.eri'), attempt)
+      }
+      assert.equal(await session.evaluate('tcLoad(tcImage,"hc-mask.eri",clNone)'), 'ok')
+      assert.equal(await session.evaluate('tcPixels(tcImage)'), mask.join(','))
+      assert.equal(reads.get('hc-mask_m.eri'), 2)
+    })
+  })
   test(`${mode}: real ERI truecolor frames decode both directions and remain independent in processed cache destinations`, { timeout: 60000 }, async () => {
     await using(binary, async ({ session }, reads, frames) => {
       const id = Number(await session.evaluate('tcImage.__id'))

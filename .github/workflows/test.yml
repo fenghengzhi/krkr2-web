@@ -223,7 +223,18 @@ jobs:
           name: jpeg-fixtures
           path: out/verification/jpeg-fixtures/
       - name: Check types and production release
+        id: release
         run: npm run build 2>&1 | tee out/ci/build.log
+      - name: Collect diagnostics for all TypeScript projects after a release failure
+        if: ${{ failure() && steps.release.outcome == 'failure' }}
+        run: |
+          failed=0
+          for project in tsconfig.json tsconfig.worker.json tsconfig.engine.json tsconfig.tools.json; do
+            if ! ./node_modules/.bin/tsc -p "$project" 2>&1 | tee "out/ci/types-$project.log"; then
+              failed=1
+            fi
+          done
+          exit "$failed"
       - name: Build offline update fixtures
         run: node scripts/build-pwa-fixtures.mjs 2>&1 | tee out/ci/pwa-build.log
       - name: Generate shared project-owned video track fixtures
@@ -925,6 +936,12 @@ jobs:
       - name: Compare every native observation with the selected Web image loader
         if: ${{ !cancelled() && steps.prepare_eri.outcome == 'success' }}
         run: node --import tsx tests/probes/eri-sdk.ts compare
+      - name: Run the portable ERI contracts against the same checkout
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.prepare_eri.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-reporter=tap tests/conformance/eri-native.test.ts tests/conformance/eri-truecolor.test.ts tests/conformance/eri-huffman.test.ts |
+            Tee-Object -FilePath out/verification/native-eri/conformance.tap
+          exit $LASTEXITCODE
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:

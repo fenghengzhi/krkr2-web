@@ -102,6 +102,8 @@ gh workflow run test.yml --ref BRANCH -f runtime-only=true
 
 Windows ERI 对照分两组。手工输入的结果存入 `original-eri-reference`。原作者工具 ericvt 压缩的 BMP、生成的 ERI、原生观察及 Web 像素存入 `original-eri-encoder-reference`。两组都要求每个像素吻合，并独立保留失败时已取得的证据。[真彩色 ERI 验收](decisions/120-eri-truecolor.md)
 
+第 121 批起，手工输入作业同时保存 ERI 合同的 `conformance.tap`，作者工具组包含默认 Huffman 输出和树重建用图。常规浏览器套件还会在托管 runner 上读取固定的 `kag3_intro.xp3`，从原包启动并完成介绍路线、书签恢复及退出。[Huffman 和发行样例验收](decisions/121-eri-huffman-and-kag-intro.md)
+
 | 作业                       | 范围                                                                 |
 | -------------------------- | -------------------------------------------------------------------- |
 | Node                       | `tests/conformance`、`tests/integration`，含真实 WASM                |

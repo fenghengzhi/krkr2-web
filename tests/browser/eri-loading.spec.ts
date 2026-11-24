@@ -9,6 +9,7 @@ import {
 import {
   eriTruecolorCases, eriTruecolorError, eriTruecolorFiles, eriTruecolorSource, eriTrueGray, eriTrueRgb, eriTrueRgba,
 } from '../helpers/eri-truecolor-fixtures.ts'
+import { eriHuffmanCases, eriHuffmanFiles, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
 
 async function frame(canvas: Locator) {
   return canvas.evaluate((element) => {
@@ -96,11 +97,15 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     if (failures.length) throw new AggregateError(failures, 'ERI browser consumer or cleanup failed', { cause: failures[0] })
   })
 
-for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
-  test(`${backend}/${binary ? 'bytecode' : 'source'}: truecolor ERI in visible Layers and companion masks`, async ({ page }, info) => {
+const colorSuites = [
+  { title: 'truecolor ERI', prefix: 'tc', cases: eriTruecolorCases, files: eriTruecolorFiles, alpha: 'tc-rgba-v1-independent.eri' },
+  { title: 'Huffman ERI', prefix: 'hc', cases: eriHuffmanCases, files: eriHuffmanFiles, alpha: 'hc-rgba-inline.eri' },
+]
+for (const suite of colorSuites) for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
+  test(`${backend}/${binary ? 'bytecode' : 'source'}: ${suite.title} in visible Layers and companion masks`, async ({ page }, info) => {
     test.setTimeout(120000)
     const game = await launchWindowAttention(page, backend, binary, eriTruecolorSource,
-      Object.entries(eriTruecolorFiles()).map(([name, bytes]) => ({ name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) })))
+      Object.entries(suite.files()).map(([name, bytes]) => ({ name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) })))
     const canvas = game.surface('ERI truecolor').locator('canvas[data-window-id]')
     const failures: unknown[] = [], observed: string[] = []
     const display = async (name: string, key: string, rgba: readonly number[]) => {
@@ -111,21 +116,31 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       observed.push(name + ' ' + key)
     }
     try {
-      for (const item of eriTruecolorCases.filter((item) => item.width === 3 && item.height === 3))
+      for (const item of suite.cases.filter((item) => item.width === 3 && item.height === 3))
         await display(item.name, 'clNone', item.rgba)
-      await display('tc-rgba-v1-independent.eri', '0x0a141e', eriTrueRgba.map((v, i) => i % 4 === 3 ? (i === 3 ? 0 : 255) : v))
+      await display(suite.alpha, '0x0a141e', eriTrueRgba.map((v, i) => i % 4 === 3 ? (i === 3 ? 0 : 255) : v))
       const mask = eriTrueRgb.map((v, i) => i % 4 === 3 ? eriTrueGray[i >> 2]! : v)
-      await display('tc-mask.eri', 'clNone', mask)
-      await evaluate(page, 'tcLoad(tcCopy,"tc-mask.eri",clNone)', 'ok')
+      const name = suite.prefix + '-mask'
+      await display(name + '.eri', 'clNone', mask)
+      await evaluate(page, `tcLoad(tcCopy,"${name}.eri",clNone)`, 'ok')
       await evaluate(page, '(System.clearGraphicCache(),0)', '0')
-      await evaluate(page, 'tcLoad(tcImage,"tc-mask-bad.eri",clNone)', `eri-true:<${eriTruecolorError}>`)
+      await evaluate(page, `tcLoad(tcImage,"${name}-bad.eri",clNone)`, `eri-true:<${eriTruecolorError}>`)
       await evaluate(page, 'tcPixels(tcImage)', eriTrueRgb.join(','))
       await evaluate(page, 'tcPixels(tcCopy)', mask.join(','))
-      await display('tc-mask.eri', 'clNone', mask)
+      await display(name + '.eri', 'clNone', mask)
+      if (suite.prefix === 'hc') {
+        for (const item of eriHuffmanPaletteCases) {
+          await evaluate(page, `tcLoad(tcImage,"${item.name}",clNone)`, 'ok')
+          await evaluate(page, 'tcPixels(tcImage)', item.rgba.join(','))
+          observed.push(item.name)
+        }
+        await evaluate(page, 'tcLoad(tcImage,"hp-indexed-negative.eri",clPalIdx+1)', 'ok')
+        await evaluate(page, 'tcPixels(tcImage)', eriKey1.join(','))
+      }
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
     try {
-      await info.attach('eri-truecolor', { contentType: 'application/json', body: JSON.stringify({ backend, binary, observed }) })
+      await info.attach('eri-truecolor', { contentType: 'application/json', body: JSON.stringify({ backend, binary, codec: suite.title, observed }) })
     } catch (error) { failures.push(error) }
     try {
       await game.stop()

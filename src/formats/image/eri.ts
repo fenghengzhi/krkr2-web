@@ -1,8 +1,9 @@
 import type { DecodedImage } from '../../engine/ports/graphics.ts'
 import { ImageDecodeError, type ImageDecodeProgress, type ImageDecodeSelection } from './selection.ts'
-import { decodeEriGammaTruecolor } from './eri-truecolor.ts'
+import { decodeEriGammaTruecolor, decodeEriHuffmanTruecolor } from './eri-truecolor.ts'
+import { decodeEriHuffmanIndices } from './eri-huffman.ts'
 
-/* ERI lossless RL-MTF-G palette and RL-Gamma truecolor decoder.
+/* ERI lossless RL-MTF-G palette and Gamma/Huffman truecolor decoder.
  * Written for this engine from the ERINA-Library 1.0A format/algorithm source,
  * Copyright (C) 2000-2002 Leshade Entis, Entis-soft. The original SDK is not
  * bundled here. Source, license and the older fixed KRKR headers are recorded
@@ -272,15 +273,22 @@ export function* decodeSelectedEri(bytes: Uint8Array, mode: ImageDecodeSelection
       if (channels < 3 || enhanced !== 2 || architecture !== HUFFMAN || !restorable) failed('DecodeImage')
       const operations = bits.take(8), encoding = bits.take(8), bitCount = bits.take(8)
       if (operations !== 0 || (encoding & 0xfe) !== 0 || bitCount !== 8) failed('DecodeImage')
-      throw new EriUnsupportedError('ImageFrm version ' + frameVersion)
+      if (depth !== 24 && depth !== 32) throw new EriUnsupportedError('truecolor source depth ' + depth)
+      const image = yield* decodeEriHuffmanTruecolor(bits, {
+        width, height, channels, degree: blockingDegree, continuous: (encoding & 1) !== 0,
+      })
+      return yield* publishTruecolor(image, width, height, signedHeight, mode === 'grayscale',
+        (type & WITH_ALPHA) !== 0, progress)
     }
     failed('DecodeImage')
   }
   if (outputDepth !== 8) failed('DecodeImage')
   if (bits.take(24) !== 0) failed('DecodeImage')
-  if (architecture !== GAMMA) throw new EriUnsupportedError('entropy architecture 0x' + architecture.toString(16))
+  if (architecture !== GAMMA && architecture !== HUFFMAN)
+    throw new EriUnsupportedError('entropy architecture 0x' + architecture.toString(16))
   if (depth !== 8 || (type & WITH_ALPHA)) throw new EriUnsupportedError('only 8-bit sources without alpha are supported')
-  const plane = yield* indices(bits, width, height), data = new Uint8Array(width * height * 4),
+  const plane = architecture === HUFFMAN ? yield* decodeEriHuffmanIndices(bits, width, height) : yield* indices(bits, width, height),
+    data = new Uint8Array(width * height * 4),
     gray = mode === 'grayscale', key = paletteKey === undefined || paletteKey === -1 ? -1 : paletteKey & 255
   // Missing palette memory in the original is uninitialized; the Web's owned
   // zero palette is an explicit safe boundary. A present short Palette record

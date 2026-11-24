@@ -546,7 +546,7 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
   return {
     compressed,
     expandedLength,
-    decode: (expanded) => {
+    decode: (expanded: Uint8Array) => {
       if (expanded.length !== expandedLength) throw new Error('PNG expanded size mismatch')
       return (function* (): Generator<void, DecodedImage> {
         const image = yield* pixels(h, expanded, palette, transparent, metadata, mode, progress, undefined, undefined, paletteKey)

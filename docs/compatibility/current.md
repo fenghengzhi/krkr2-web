@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 121 批接入无损 Huffman ERI 的真彩色帧 8 和索引帧 2。Windows 原版对照和浏览器验收覆盖这两种编码，并新增使用发行样例原包的 KAG 路线。120 的 27 个 SDK 场景全部匹配，涵盖调色板、灰度、真彩色、透明度和省份图拒绝。整套应用因 PNG 参数类型错误跳过下游验证，这处错误的修复随本批验证。[121 实现与证据](../decisions/121-eri-huffman-and-kag-intro.md)
+
 120 实现提交为 `a1967b78e9280c7a9591d1ca1f15c61e1c552a73`，全套验证首次登记为排队中。[Actions 45475659242](https://github.com/fenghengzhi/krkr2-web/actions/runs/45475659242)
 
 第 120 批已为播放器增加无损 Run-length Gamma ERI 帧 1／4 的 RGB 和 RGBA 加载。按原版规则还原透明像素、伴随遮罩及图像方向，新增 Windows SDK、浏览器和 KAG 验收，结果待回收。算术、Huffman 及有损 ERI 仍待实现。上一批的 8 位 ERI、PNG 和 JPEG 独立对照作业已报告成功，整套应用在取回时仍未给出结果。[120 实现与验证范围](../decisions/120-eri-truecolor.md)

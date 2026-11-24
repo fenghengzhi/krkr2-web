@@ -9,33 +9,67 @@ const encoder = {
   bytes: 176128, sha256: 'a24baae35e560e0cb781130a2e8c8ebf77dbaa5e4d98b067e078b17c838882ec',
 }
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
-export const encoderRecipes = [
+interface Recipe {
+  id: string; width: number; height: number; degree: number; speed: number; independent: boolean
+  huffman?: 'default' | 'enhanced'; rebuildPattern?: boolean; indexed?: boolean
+}
+export const indexedEncoderRecipe: Recipe = { id: 'encoder-huffman-indexed', width: 27, height: 12, degree: 0,
+  speed: 1, independent: false, huffman: 'default', indexed: true }
+export const encoderRecipes: Recipe[] = [
   { id: 'encoder-standard', width: 13, height: 11, degree: 3, speed: 0, independent: false },
   { id: 'encoder-independent', width: 19, height: 17, degree: 3, speed: 2, independent: true },
   { id: 'encoder-degree4', width: 21, height: 9, degree: 4, speed: 3, independent: false },
+  { id: 'encoder-huffman-default', width: 13, height: 11, degree: 4, speed: 1, independent: false, huffman: 'default' },
+  { id: 'encoder-huffman-table', width: 29, height: 17, degree: 3, speed: 0, independent: false, huffman: 'enhanced' },
+  { id: 'encoder-huffman-inline', width: 19, height: 17, degree: 3, speed: 2, independent: true, huffman: 'enhanced' },
+  { id: 'encoder-huffman-rebuild', width: 96, height: 96, degree: 3, speed: 3, independent: false,
+    huffman: 'enhanced', rebuildPattern: true },
+  indexedEncoderRecipe,
 ]
-type Recipe = typeof encoderRecipes[number]
+
+function paletteIndex(x: number, y: number, width: number) {
+  if (x < 5 || x >= width - 4) return y % 3 === 0 ? 173 : 23
+  return (x * 11 + y * 41) & 255
+}
+const paletteColor = (index: number) => [index, (index * 37 + 5) & 255, (255 - index) & 255, 255]
 
 // Author the top-down image before choosing a file representation. Every pixel
 // can be compared after encoding by ericvt and loading by two different engines.
-export function encoderPixels({ width, height }: Recipe) {
+export function encoderPixels({ width, height, rebuildPattern, indexed }: Recipe) {
   const rgba = new Uint8Array(width * height * 4)
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    rgba.set([(x * 17 + y * 13 + 7) & 255, (x * 3 + y * 29 + 40) & 255,
-      ((x ^ y) * 19 + 23) & 255, 255], (y * width + x) * 4)
+    const at = (y * width + x) * 4
+    if (indexed) {
+      rgba.set(paletteColor(paletteIndex(x, y, width)), at)
+    } else if (rebuildPattern && y < 88) {
+      // -p3 emits horizontal and vertical differences without a color or order
+      // transform. Each of these 88 rows contains 96 differences per channel,
+      // mainly +1 with +2/+3/+4 interspersed. Context 1 exceeds weight 0x4000.
+      const ramp = x + 1 + Math.floor((x + 1) / 8) + 2 * Math.floor((x + 1) / 11)
+      const sample = (ramp * (y + 1)) & 255
+      rgba.set([sample, sample, sample, 255], at)
+    } else {
+      rgba.set([(x * 17 + y * 13 + 7) & 255, (x * 3 + y * 29 + 40) & 255,
+        ((x ^ y) * 19 + 23) & 255, 255], at)
+    }
   }
   return rgba
 }
 
-function bitmap({ width, height }: Recipe, rgba: Uint8Array) {
-  const stride = (width * 3 + 3) & ~3
-  const bmp = Buffer.alloc(54 + stride * height)
-  bmp.write('BM'); bmp.writeUInt32LE(bmp.length, 2); bmp.writeUInt32LE(54, 10)
+function bitmap({ width, height, indexed }: Recipe, rgba: Uint8Array) {
+  const components = indexed ? 1 : 3, stride = (width * components + 3) & ~3, pixels = 54 + (indexed ? 1024 : 0)
+  const bmp = Buffer.alloc(pixels + stride * height)
+  bmp.write('BM'); bmp.writeUInt32LE(bmp.length, 2); bmp.writeUInt32LE(pixels, 10)
   bmp.writeUInt32LE(40, 14); bmp.writeInt32LE(width, 18); bmp.writeInt32LE(height, 22)
-  bmp.writeUInt16LE(1, 26); bmp.writeUInt16LE(24, 28); bmp.writeUInt32LE(stride * height, 34)
+  bmp.writeUInt16LE(1, 26); bmp.writeUInt16LE(components * 8, 28); bmp.writeUInt32LE(stride * height, 34)
+  if (indexed) for (let i = 0; i < 256; i++) {
+    const [r, g, b] = paletteColor(i)
+    bmp.set([b!, g!, r!, 0], 54 + i * 4)
+  }
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const src = (y * width + x) * 4, dest = 54 + (height - y - 1) * stride + x * 3
-    bmp[dest] = rgba[src + 2]!; bmp[dest + 1] = rgba[src + 1]!; bmp[dest + 2] = rgba[src]!
+    const src = (y * width + x) * 4, dest = pixels + (height - y - 1) * stride + x * components
+    if (indexed) bmp[dest] = paletteIndex(x, y, width)
+    else { bmp[dest] = rgba[src + 2]!; bmp[dest + 1] = rgba[src + 1]!; bmp[dest + 2] = rgba[src]! }
   }
   return bmp
 }
@@ -59,9 +93,11 @@ function checkOutput(bytes: Buffer, recipe: Recipe) {
   const stream = member('Stream  ', header.next, bytes.length), frame = member('ImageFrm', stream.data, stream.next)
   assert(info.next - info.data >= 68 && frame.next - frame.data > 4)
   const fields = [0, 4, 8, 12, 16, 20, 24, 52].map((offset) => bytes.readUInt32LE(info.data + offset))
-  assert.deepEqual(fields, [0x20100, 0x03020000, 0xffffffff, 1, recipe.width, -recipe.height >>> 0, 24, recipe.degree])
+  assert.deepEqual(fields, [recipe.huffman ? 0x20200 : 0x20100, 0x03020000,
+    recipe.huffman ? 0xfffffffc : 0xffffffff, recipe.indexed ? 0x01000001 : 1,
+    recipe.width, -recipe.height >>> 0, recipe.indexed ? 8 : 24, recipe.degree])
   const frameHeader = [...bytes.subarray(frame.data, frame.data + 4)]
-  assert.deepEqual(frameHeader, [1, 0, recipe.independent ? 0 : 1, 0])
+  assert.deepEqual(frameHeader, recipe.indexed ? [2, 0, 0, 0] : [recipe.huffman ? 8 : 1, 0, recipe.independent ? 0 : 1, recipe.huffman ? 8 : 0])
   return { imageInfo: fields, frameHeader }
 }
 
@@ -83,8 +119,9 @@ export async function prepareEncodedImages(output: string): Promise<Record<strin
       const dir = resolve(artifacts, recipe.id), rgba = encoderPixels(recipe), bmp = bitmap(recipe, rgba)
       mkdirSync(dir)
       writeFileSync(resolve(dir, 'input.bmp'), bmp)
-      const args = ['-s', '-b' + recipe.degree, '-p' + recipe.speed,
-        ...(recipe.independent ? ['-i'] : []), 'input.bmp', 'output.eri']
+      const options = recipe.huffman === 'default' ? ['-e'] : [recipe.huffman ? '-x' : '-s',
+        '-b' + recipe.degree, '-p' + recipe.speed, ...(recipe.independent ? ['-i'] : [])]
+      const args = [...options, 'input.bmp', 'output.eri']
       const run = spawnSync(exe, args, { cwd: dir, timeout: 15000, maxBuffer: 1024 * 1024, windowsHide: true })
       writeFileSync(resolve(dir, 'stdout.log'), run.stdout ?? '')
       writeFileSync(resolve(dir, 'stderr.log'), run.stderr ?? '')
