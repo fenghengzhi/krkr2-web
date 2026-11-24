@@ -23,3 +23,5 @@ Wave、MIDI 和 CDDA 的 `open` 先检查参数并转换文件名，然后才执
 127 的主构建成功。冻结时 53 项作业中 42 项成功、4 项失败、7 项仍在运行。Node 已登记 3,971 项，其中 3,957 项通过、10 项失败、4 项未报告。已取回的 634 项浏览器结果中有 623 项符合预期、10 项意外失败、1 项跳过。独立的原版书签对照 86/86 匹配，三个兼容性作业各通过 32/32，JPEG 对照通过 43/43。透明转场原版仍只有一项直接拷贝匹配，64 个逐帧像素观察均未报告。[127 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45508747480)
 
 128 冻结时处于等待状态，尚无作业或产物。129 共回收两批当时已列出的 50 份原 ZIP，并逐一核对大小与 SHA-256，合计 534,042,601 字节。完整归档清单位于 `out/verification/github-actions/129-archive-summary.json`。Firefox 介绍游戏的实际菜单、影片切轨和 128 新加入的有损 ERI 等待后续托管结果。[128 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45511886991)
+
+129 的实现提交为 `5e198a223fcd209ed33bba611dca6e064597c300`，全套工作流首次登记为 `pending`。下一批取回已发布的 127–129 报告。[129 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45514385708)
