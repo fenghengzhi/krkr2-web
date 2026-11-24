@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 125 批新增 8 个常规 Node 测试和每个浏览器 4 个音频测试。Windows 原版的 KAG 共享控制增加到 35 组，SLI 和 WAVE 打开文件对照合计 12 组。暂停影片切换的既有验收同时保留 CPU、默认画布和实际视口的结果。[125 验收记录](decisions/125-kag-expressions-wave-and-video.md)
+
 第 124 批新增 17 个 Node 测试和每个浏览器 4 个测试，覆盖 CUE 选轨、循环、关闭与图像资源查找。Windows 作业另保存原版介绍程序的首次菜单或自动分页观察，浏览器继续验收其两条交互路线。影片切轨失败时，测试另存暂存解码器与各参考视频的逐通道差异，以区分画面解码和提交时机。[124 验收记录](decisions/124-kag-layout-storage-and-cdda.md)
 
 第 123 批在 Windows 的 `original-eri-reference` 产物中另保存 `kag` 和 `sli` 两个原版 SDK 项目的输入、原始观察与比较结果。KAG 有 30 个场景，SLI 有 8 个打开文件和读取标签的场景。Linux 的 `kag-bookmarks` 作业读取同一提交的构建和原书签，在 Session 和 Chromium 核对读档后返回原来的剧情。结果集中在 `original-kag-bookmark-comparison` 产物。[123 验收记录](decisions/123-kag-bookmarks-and-game-audio.md)

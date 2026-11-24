@@ -27,10 +27,10 @@ interface State {
 for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: original Introduction package completes its first route with bookmark and refresh restoration`, async ({ page }, info) => {
     test.setTimeout(180000)
-    const errors: string[] = [], failures: unknown[] = [], steps: string[] = [], observations: unknown[] = [], inputs: unknown[] = []
-    let evaluation = 0, loaded = false, exited = false, previousState = '', waitObservations = 0
+    const errors: string[] = [], failures: unknown[] = [], steps: string[] = [], observations: unknown[] = [], inputs: unknown[] = [], consoleReads: unknown[] = []
+    let evaluation = 0, loaded = false, exited = false, previousState = '', waitObservations = 0, startupRead = true
     const evidence: Record<string, unknown> = {
-      source, backend, browser: info.project.name, steps, observations, inputs, pageErrors: errors,
+      source, backend, browser: info.project.name, steps, observations, inputs, consoleReads, pageErrors: errors,
       scope: 'Runs the pinned Introduction to Kirikiri and KAG distribution sample through its original menu, page waits, bookmark methods and Exit link. Imports one unchanged XP3 and executes its original source scripts with the selected WASM backend.',
       importedFiles: ['kag3_intro.xp3'], originalScenarioUnmodified: true,
       layoutFields: kagIntroLayoutFields,
@@ -40,12 +40,22 @@ for (const backend of ['asyncify', 'jspi'])
     await observeStartup(page)
     const canvas = page.locator('#stage canvas[data-window-id]')
     const read = async (expression: string): Promise<string> => {
-      const prefix = `intro-read-${++evaluation}:`
-      await page.locator('#expression').fill(`${JSON.stringify(prefix)}+string(${expression})`)
-      await page.locator('#evaluate').click()
-      const output = page.locator('#logs p span').filter({ hasText: new RegExp('^' + prefix) }).last()
-      await expect(output).toBeVisible({ timeout: 5000 })
-      return ((await output.textContent()) ?? '').slice(prefix.length)
+      const prefix = `intro-read-${++evaluation}:`, first = startupRead, began = Date.now(),
+        observation = { prefix, phase: first ? 'startup' : 'gameplay', budgetMs: first ? 30000 : 5000, elapsedMs: 0, complete: false }
+      startupRead = false
+      if (consoleReads.length < 256) consoleReads.push(observation)
+      try {
+        await page.locator('#expression').fill(`${JSON.stringify(prefix)}+string(${expression})`)
+        await page.locator('#evaluate').click()
+        const output = page.locator('#logs p span').filter({ hasText: new RegExp('^' + prefix) }).last()
+        // The first read can queue behind the original startup's background
+        // decode. It uses the existing startup budget; every subsequent read
+        // retains the 5-second transaction bound, with no retry or new click.
+        await expect(output).toBeVisible({ timeout: observation.budgetMs })
+        const value = ((await output.textContent()) ?? '').slice(prefix.length)
+        observation.complete = true
+        return value
+      } finally { observation.elapsedMs = Date.now() - began }
     }
     const state = async (): Promise<State | undefined> => {
       const value = await read(stateExpression)
@@ -102,6 +112,7 @@ for (const backend of ['asyncify', 'jspi'])
       if (await fullscreen.isVisible()) await fullscreen.click()
       await expect(page.locator('#stage')).not.toHaveClass(/window-fullscreen/)
       await expect(canvas).toHaveCount(1)
+      startupRead = true
     }
     const advance = async (before: State, label: string, kind: 'line' | 'page' | 'choice') => {
       await canvas.scrollIntoViewIfNeeded()

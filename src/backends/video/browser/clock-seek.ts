@@ -57,11 +57,13 @@ export function waitForClockPresentation(
     cancelTimeout = deadline(() => done(new Error('Video frame seek presentation timed out')))
     try {
       current()
-      // seek() synchronously starts the currentTime assignment before its
-      // first await. Register after that assignment, before browser tasks run.
+      // Arm before assigning currentTime. The media/compositor thread can
+      // publish a paused seek's sole frame during that assignment; rVFC is a
+      // next-frame notification and does not replay a submission missed before
+      // registration. Timestamp/counter checks above still reject old frames.
+      request()
       const pending = seek()
       void pending.then(() => { sought = true; complete() }, done)
-      request()
     } catch (error) { done(error) }
   })
 }

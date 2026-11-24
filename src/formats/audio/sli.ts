@@ -1,3 +1,4 @@
+import { decodeUtf8 } from '../text/utf8.ts'
 import type { LoopInfo, LoopLink } from '../../engine/ports/audio.ts'
 import { emptyLoops } from '../../engine/ports/audio.ts'
 
@@ -10,7 +11,7 @@ const conditions: readonly LoopLink['condition'][] = ['no', 'eq', 'ne', 'gt', 'g
 const space = (value: string | undefined) => value !== undefined && /^[\t\n\v\f\r ]$/.test(value)
 const numericSpace = (value: string | undefined) => value !== undefined && value.charCodeAt(0) > 0 && value.charCodeAt(0) <= 32
 const syntax = (message: string): never => { throw new SliSyntaxError(message) }
-const textLimit = (length: number) => {
+export const checkSliSize = (length: number) => {
   if (length > 16 * 1024 * 1024) throw new Error('SLI text exceeds the 16 MiB Web budget')
 }
 /** GetInt/GetInt64 accept a decimal prefix, no leading plus, and return zero
@@ -33,7 +34,7 @@ function integer(value: string, name: string, small = false): number {
   return number === 0 ? 0 : number
 }
 function parse(text: string, label: (value: string) => string): LoopInfo {
-  textLimit(text.length)
+  checkSliSize(text.length)
   const nul = text.indexOf('\0')
   if (nul >= 0) text = text.slice(0, nul)
   const result = emptyLoops()
@@ -137,17 +138,15 @@ export function parseSli(text: string): LoopInfo { return parse(text, (value) =>
 /** WaveImpl reads raw bytes, not a TJS text stream. Only Name is UTF-8
  * converted by GetString; arbitrary comment bytes do not trigger decoding. */
 export function parseSliBytes(bytes: Uint8Array): LoopInfo {
-  textLimit(bytes.length)
+  checkSliSize(bytes.length)
   let text = ''
   for (let at = 0; at < bytes.length; at += 8192) text += String.fromCharCode(...bytes.subarray(at, at + 8192))
-  const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
   return parse(text, (value) => {
-    const bytes = Uint8Array.from(value, (character) => character.charCodeAt(0))
-    try { return utf8.decode(bytes) }
-    catch (error) {
-      if (error instanceof TypeError) return syntax('Invalid UTF-8 SLI label')
-      throw error
-    }
+    const label = Uint8Array.from(value, (character) => character.charCodeAt(0)),
+      decoded = decodeUtf8(label, () => new SliSyntaxError('Invalid UTF-8 SLI label'))
+    let step = decoded.next()
+    while (!step.done) step = decoded.next()
+    return step.value
   })
 }
 /** ++/-- may parse an operand but always change by one. Invalid expressions

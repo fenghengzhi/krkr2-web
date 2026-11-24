@@ -80,7 +80,7 @@ test('native SLI labels execute once with original increment/operand grammar in 
   mixer.command({ op: 'load', id: 1, asset, settings: defaultSoundSettings() })
   mixer.command({ op: 'flag', id: 1, index: 1, value: 1 }); mixer.command({ op: 'play', id: 1 })
   const left = new Float32Array(1000), right = new Float32Array(1000), events = mixer.render(left, right)
-  assert.deepEqual(events.filter((event) => event.type === 'label').map((event) => event.label), sliNativeLabels)
+  assert.deepEqual(events.flatMap((event) => event.type === 'label' ? [event.label] : []), sliNativeLabels)
   assert.deepEqual(mixer.snapshot(1).flags.slice(0, 5), sliNativeFlags)
   assert.deepEqual([...left], [...Array(800).fill(0.25), ...Array(200).fill(0)])
   assert.equal(mixer.snapshot(1).status, 'stop')
@@ -111,6 +111,11 @@ test('raw SLI bytes decode only label UTF-8 and keep syntax failures separate fr
     ...utf8.encode('#2.00\n#'), 0xff, ...utf8.encode("\nLabel {Name='日本語';}"),
   ])
   assert.deepEqual(parseSliBytes(bytes).labels, [{ position: 0, name: '日本語' }])
+  assert.deepEqual(parseSliBytes(utf8.encode("#2.00\nLabel {Name='\uFEFF🎵';}")).labels,
+    [{ position: 0, name: '\uFEFF🎵' }])
+  const prefix = utf8.encode("#2.00\nLabel {Name='"), suffix = utf8.encode("';}")
+  for (const invalid of [[0xc0, 0x80], [0xed, 0xa0, 0x80], [0xf4, 0x90, 0x80, 0x80], [0xe3, 0x81]])
+    assert.throws(() => parseSliBytes(Uint8Array.from([...prefix, ...invalid, ...suffix])), SliSyntaxError)
   assert.throws(() => parseSliBytes(Uint8Array.of(0xff, 0xfe, 35, 0, 50, 0)), SliSyntaxError)
   for (const text of ['#2.00\nLink {CondVar=16;}', '#2.00\nLink {From=9007199254740992;}',
     '#2.00\nLink {RefValue=2147483648;}', '#2.00\nLabel {Position=-1;}'])

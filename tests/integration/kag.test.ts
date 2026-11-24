@@ -4,6 +4,7 @@ import { headless } from '../helpers/headless.ts'
 
 const setup = String.raw`
 var callbacks=[];
+var localValue=42;
 class Probe extends KAGParser {
   var localValue=42;
   function Probe() { super.KAGParser(); debugLevel=tkdlNone; }
@@ -126,14 +127,15 @@ test('KAG label aliases, disabled control processing and callback veto are obser
   }
 })
 
-test('KAG conditions, cond, emb and inline TJS execute in the subclass context', async () => {
+test('KAG expressions use global values while inline-script callbacks retain their explicit context', async () => {
   const source =
-    '[if exp="false"][if exp="missingFunction()"]X[endif][elsif exp="localValue==42"]Y[else]N[endif][ignore exp="true"]N[endignore][emit cond="false"][emb exp="\'[x]\'"]\\\n@iscript\nlocalValue+=1;\n@endscript\n[emb exp="localValue"]\\\n'
+    '[if exp="false"][if exp="missingFunction()"]X[endif][elsif exp="localValue==42"]Y[else]N[endif][ignore exp="true"]N[endignore][emit cond="false"][emb exp="\'[x]\'"]\\\n@iscript\nlocalValue+=1;global.localValue+=2;\n@endscript\n[emb exp="localValue"]\\\n'
   const { session } = await headless({ 'startup.tjs': setup, 'main.ks': source })
   try {
     await session.start()
-    assert.equal(await session.evaluate('drain()'), 'Y[x]43')
+    assert.equal(await session.evaluate('drain()'), 'Y[x]44')
     assert.equal(await session.evaluate('parser.localValue'), '43')
+    assert.equal(await session.evaluate('global.localValue'), '44')
   } finally {
     await session.stop()
   }

@@ -1,3 +1,4 @@
+import { readWaveFormat, waveInfo, copyWaveSamples, type WaveFormat } from './wav-format.ts'
 import type { PcmAsset } from '../../engine/ports/audio.ts'
 import { emptyLoops } from '../../engine/ports/audio.ts'
 const MAX_PCM_BYTES = 128 * 1024 * 1024
@@ -10,11 +11,7 @@ export function decodeWav(bytes: Uint8Array): PcmAsset | undefined {
   if (bytes.length < 12 || text(0, 4) !== 'RIFF' || text(8, 4) !== 'WAVE') return
   const end = view.getUint32(4, true) + 8
   if (end > bytes.length) throw new Error('Truncated WAVE file')
-  let format = 0,
-    channels = 0,
-    sampleRate = 0,
-    bits = 0,
-    align = 0,
+  let format: WaveFormat | undefined,
     data: Uint8Array | undefined
   const loops = emptyLoops()
   for (let at = 12; at + 8 <= end;) {
@@ -24,17 +21,7 @@ export function decodeWav(bytes: Uint8Array): PcmAsset | undefined {
       limit = start + length
     if (limit > end) throw new Error(`Truncated WAVE ${tag} chunk`)
     if (tag === 'fmt ') {
-      if (length < 16) throw new Error('WAVE format chunk is too short')
-      format = view.getUint16(start, true)
-      channels = view.getUint16(start + 2, true)
-      sampleRate = view.getUint32(start + 4, true)
-      align = view.getUint16(start + 12, true)
-      bits = view.getUint16(start + 14, true)
-      if (format === 0xfffe) {
-        if (length < 40 || view.getUint16(start + 16, true) < 22)
-          throw new Error('Malformed extensible WAVE')
-        format = view.getUint16(start + 24, true)
-      }
+      format = readWaveFormat(bytes.subarray(start, limit))
     } else if (tag === 'data') data = bytes.subarray(start, limit)
     else if (tag === 'smpl' && length >= 36) {
       const count = view.getUint32(start + 28, true)
@@ -56,39 +43,11 @@ export function decodeWav(bytes: Uint8Array): PcmAsset | undefined {
     }
     at = limit + (length & 1)
   }
-  if (format !== 1 && format !== 3) return // Browser decoder may handle compressed WAVE.
-  if (
-    !data ||
-    channels < 1 ||
-    channels > 8 ||
-    sampleRate < 1000 ||
-    sampleRate > 384000 ||
-    ![8, 16, 24, 32, 64].includes(bits) ||
-    (format === 3 && bits !== 32 && bits !== 64)
-  )
-    throw new Error('Unsupported WAVE PCM format')
-  if (align !== (channels * bits) / 8 || data.length % align)
-    throw new Error('Invalid WAVE block alignment')
-  const frames = data.length / align
-  if (frames * channels * 4 > MAX_PCM_BYTES) throw new Error('Decoded audio exceeds 128 MiB budget')
-  const samples = Array.from({ length: channels }, () => new Float32Array(frames)),
-    pcm = new DataView(data.buffer, data.byteOffset, data.byteLength)
-  for (let frame = 0; frame < frames; frame++)
-    for (let channel = 0; channel < channels; channel++) {
-      const at = frame * align + (channel * bits) / 8
-      let value: number
-      if (format === 3) value = bits === 32 ? pcm.getFloat32(at, true) : pcm.getFloat64(at, true)
-      else if (bits === 8) value = (pcm.getUint8(at) - 128) / 128
-      else if (bits === 16) value = pcm.getInt16(at, true) / 32768
-      else if (bits === 24)
-        value =
-          (((pcm.getUint8(at) | (pcm.getUint8(at + 1) << 8) | (pcm.getUint8(at + 2) << 16)) << 8) >>
-            8) /
-          8388608
-      else if (bits === 32) value = pcm.getInt32(at, true) / 2147483648
-      else throw new Error('Unsupported integer WAVE bit depth')
-      if (!Number.isFinite(value)) throw new Error('WAVE contains a non-finite sample')
-      samples[channel]![frame] = value
-    }
-  return { kind: 'pcm', sampleRate, sampleCount: frames, channels, bits, data: samples, loops }
+  if (!format) return // The host may support another encoding.
+  if (!data) throw new Error('Unsupported WAVE PCM format')
+  const info = waveInfo(format, data.length)
+  if (info.sampleCount * info.channels * 4 > MAX_PCM_BYTES) throw new Error('Decoded audio exceeds 128 MiB budget')
+  const samples = Array.from({ length: info.channels }, () => new Float32Array(info.sampleCount))
+  copyWaveSamples(format, data, samples, 0)
+  return { kind: 'pcm', ...info, data: samples, loops }
 }

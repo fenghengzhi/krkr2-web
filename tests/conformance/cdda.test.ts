@@ -1,5 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { decodePlainText } from '../../src/backends/files/blob-source.ts'
+import { readText, writeText } from '../../src/backends/files/text-codecs.ts'
 import { parseCue, cueTrackParts } from '../../src/formats/audio/cue.ts'
 import { openCddaPcmSource } from '../../src/formats/audio/cdda-source.ts'
 import { openPortablePcmSource } from '../../src/backends/audio/pcm-source.ts'
@@ -21,7 +23,20 @@ function raw(sectors: number, little = true): Uint8Array {
   return bytes
 }
 const source = (bytes: Uint8Array): ByteSource => ({ size: bytes.length, async read(offset, length) { return bytes.slice(offset, offset + length) } })
-const sheet = (text: string) => parseCue(encode(text))
+const sheet = parseCue
+
+test('plain CUE metadata preserves UTF-16 BOM and Shift-JIS paths without interpreting TJS stream modes', async () => {
+  const before = 'FILE "', after = '.wav" WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00', text = before + '日' + after
+  const le = Buffer.from('\uFEFF' + text, 'utf16le'), be = Buffer.from(le).swap16()
+  for (const bytes of [encode(text), le, be, Uint8Array.from([...encode(before), 0x93, 0xfa, ...encode(after)])]) {
+    const parsed = parseCue(await readText(bytes, '', undefined, 'plain'))
+    assert.equal(parsed.files[0]!.name, '日.wav')
+  }
+  const tjs = await writeText(text, 'c1')
+  assert.equal(await readText(tjs), text)
+  await assert.rejects(async () => parseCue(await readText(tjs, '', undefined, 'plain')))
+  await assert.rejects(readText(Uint8Array.of(0xff, 0xfe, 0x01), '', undefined, 'plain'))
+})
 
 test('CUE preserves original track numbers and file-relative INDEX 01 boundaries in CD frames', () => {
   const value = sheet('REM ignored text\nfile "disc image.bin" BINARY\nTRACK 01 MODE1/2352\nINDEX 01 00:00:00\n' +
@@ -50,7 +65,7 @@ test('CUE rejects invalid coordinates and explicitly separates unsupported physi
     assert.throws(() => sheet(text), /Invalid CUE/)
   assert.throws(() => cueTrackParts(sheet('FILE a BINARY\nTRACK 01 MODE1/2048\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 01 00:01:00'), 2), /non-2352/)
   assert.throws(() => cueTrackParts(sheet('FILE a WAVE\nTRACK 01 AUDIO\nFLAGS PRE\nINDEX 01 00:00:00'), 1), /pre-emphasis/)
-  assert.throws(() => parseCue(new Uint8Array(1024 * 1024 + 1)), /budget/)
+  assert.throws(() => parseCue('x'.repeat(1024 * 1024 + 1)), /budget/)
 })
 
 test('raw little/big-endian CD sectors decode exact stereo samples and expose only selected frames', async () => {
@@ -143,7 +158,7 @@ function resolver(files: Record<string, Uint8Array>, cues: string[], discs?: Par
   } satisfies Resource]))
   return new CddaDiscs({ currentDirectory: '', exists: async (name) => resources.has(name),
     exact: async (name) => resources.get(name), cues: async () => cues,
-    read: (resource) => resource.read(), checkpoint: async () => {} }, discs)
+    read: (resource) => resource.read(), decodeText: decodePlainText, checkpoint: async () => {} }, discs)
 }
 test('virtual CDDA preserves direct files, binds explicit drives and resolves CUE-relative archive paths', async () => {
   const cue = encode('FILE "../audio/raw.bin" BINARY\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 01 00:00:01'),

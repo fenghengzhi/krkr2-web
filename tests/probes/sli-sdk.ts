@@ -3,14 +3,17 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { sliInvalidNames, sliNativeFiles, sliNativeSource } from '../helpers/sli-native-fixtures.ts'
+import { wavePrecisionFiles } from '../helpers/extensible-wave.ts'
 
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted'); assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/sli'), game = resolve(output, 'game')
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|800',
   ...Object.fromEntries(sliInvalidNames.map((name) => [name, 'sli:<' + name + '.sli>'])),
-  changed: 'changed:<bad-smooth.wav.sli>', reopen: 'open' }
-const files = sliNativeFiles()
+  changed: 'changed:<bad-smooth.wav.sli>', reopen: 'open',
+  '12-in-16.wav': 'open|48000', '20-in-24.wav': 'open|48000', '24-in-32.wav': 'open|48000',
+  'foreign-guid.wav': 'wave:<foreign-guid.wav>' }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -27,6 +30,9 @@ if (process.argv[2] === 'prepare') {
     ...sliInvalidNames.map((name) => `record("${name}|"+sliTryOpen("${name}"));`),
     'System.assignMessage("TVPInvalidLoopInformation","changed:<%1>");',
     'record("changed|"+sliTryOpen("bad-smooth.wav"));record("reopen|"+sliTryOpen("native.wav"));',
+    'System.assignMessage("TVPUnknownWaveFormat","wave:<%1>");var opened;',
+    ...Object.keys(precision).map((name) =>
+      `opened=sliTryOpen("${name}");record("${name}|"+opened+(opened=="open"?"|"+sliSound.frequency:""));`),
     'record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)

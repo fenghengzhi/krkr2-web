@@ -19,6 +19,7 @@ export interface CddaStorage {
   exact(logical: string): Promise<Resource | undefined>
   cues(): Promise<string[]>
   read(resource: Resource): Promise<Uint8Array>
+  decodeText(bytes: Uint8Array): string | Promise<string>
   checkpoint(): Promise<void>
   currentDirectory: string
 }
@@ -54,7 +55,7 @@ export class CddaDiscs {
     const bytes = await this.storage.read(resource)
     await this.storage.checkpoint()
     if (bytes.length !== resource.size) throw new Error('Truncated CUE metadata')
-    const sheet = parseCue(bytes), parts = cueTrackParts(sheet, parsed), selected: SelectedPart[] = [],
+    const sheet = parseCue(await this.storage.decodeText(bytes)), parts = cueTrackParts(sheet, parsed), selected: SelectedPart[] = [],
       directory = resource.name.slice(0, Math.max(resource.name.lastIndexOf('/'), resource.name.lastIndexOf('>')) + 1),
       files = new Map<number, Resource>()
     if (parts) for (const part of parts) {

@@ -29,15 +29,8 @@ function tokens(line: string): string[] {
   }
   return result
 }
-export function parseCue(bytes: Uint8Array): CueSheet {
-  if (bytes.length > cueLimits.bytes) throw new Error('CUE metadata exceeds the 1 MiB budget')
-  let text: string
-  if (bytes[0] === 255 && bytes[1] === 254) text = new TextDecoder('utf-16le', { fatal: true }).decode(bytes)
-  else if (bytes[0] === 254 && bytes[1] === 255) text = new TextDecoder('utf-16be', { fatal: true }).decode(bytes)
-  else {
-    try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes) }
-    catch { text = new TextDecoder('shift_jis', { fatal: true }).decode(bytes) }
-  }
+export function parseCue(text: string): CueSheet {
+  if (text.length > cueLimits.bytes) throw new Error('CUE metadata exceeds the 1 MiB budget')
   if (text.includes('\0')) return invalid('embedded NUL')
   const lines = text.split(/\r\n?|\n/), files: CueFile[] = [], tracks: CueTrack[] = []
   if (lines.length > cueLimits.lines) throw new Error('CUE line budget exceeded')

@@ -12,7 +12,9 @@ interface Readback {
 interface HandoffProbe {
   capture(video: HTMLVideoElement, canvas: HTMLCanvasElement): {
     media: { position: number; paused: boolean; seeking: boolean; width: number; height: number; pixels: number[] }
-    reads: { defaultRepeated: number[]; defaultRedrawn: number[]; cpu: number[]; cpuRepeated: number[]; cpuRedrawn: number[] }
+    reads: { default: number[]; defaultRepeated: number[]; defaultRedrawn: number[];
+      cpu: number[]; cpuRepeated: number[]; cpuRedrawn: number[];
+      differences: { defaultVsCpu: number[]; defaultRepeated: number[]; defaultRedrawn: number[] } }
     paint: { width: number; height: number; pixels: number[] }
     production: Readback | undefined
     dropped: number
@@ -78,11 +80,18 @@ export async function installHandoffReadbacks(page: Page): Promise<void> {
             output = new OffscreenCanvas(canvas.width, canvas.height),
             paint = output.getContext('2d', { willReadFrequently: true })!
           paint.drawImage(canvas, 0, 0)
+          const difference = (before: number[], after: number[]) => after.map((value, at) => value - before[at]!)
           return {
             media: { position: video.currentTime, paused: video.paused, seeking: video.seeking,
-              width, height, pixels: normal.pixels },
-            reads: { defaultRepeated: normal.repeated, defaultRedrawn: normal.redrawn,
-              cpu: cpu.pixels, cpuRepeated: cpu.repeated, cpuRedrawn: cpu.redrawn },
+              // Match the actual layer decoder's CPU readback semantics. The
+              // independent default GPU route remains completely recorded:
+              // archived WebKit rereads changed even without a track switch.
+              width, height, pixels: cpu.pixels },
+            reads: { default: normal.pixels, defaultRepeated: normal.repeated, defaultRedrawn: normal.redrawn,
+              cpu: cpu.pixels, cpuRepeated: cpu.repeated, cpuRedrawn: cpu.redrawn,
+              differences: { defaultVsCpu: difference(cpu.pixels, normal.pixels),
+                defaultRepeated: difference(normal.pixels, normal.repeated),
+                defaultRedrawn: difference(normal.pixels, normal.redrawn) } },
             paint: { width: canvas.width, height: canvas.height,
               pixels: [...paint.getImageData(0, 0, canvas.width, canvas.height).data] },
             production, dropped,

@@ -13,7 +13,7 @@ export interface Resource {
   readonly aliasOf?: string
   /** False hides this container's bare member aliases. True also admits a
    * byte-only container without a standard suffix when looking for optional
-   * image companions. Explicit container addresses remain available. */
+   * image companions and audio loop information. Explicit container addresses remain available. */
   readonly archiveAliases?: boolean
   /** Successfully indexed container; present even when the archive is empty. */
   readonly archiveKind?: 'xp3' | 'zip'

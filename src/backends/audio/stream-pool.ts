@@ -185,12 +185,15 @@ export class PcmStreamPool {
         const info = decoder.info
         if (!Number.isInteger(info.sampleRate) || info.sampleRate < 1000 || info.sampleRate > 384000 ||
             !Number.isSafeInteger(info.sampleCount) || info.sampleCount < 1 ||
+            (info.reportedSampleCount !== undefined && (!Number.isSafeInteger(info.reportedSampleCount) ||
+              info.reportedSampleCount < info.sampleCount)) ||
             !Number.isInteger(info.channels) || info.channels < 1 || info.channels > 8 ||
             !Number.isInteger(info.bits) || info.bits < 1 || info.bits > 64)
           throw new Error('Invalid streaming PCM metadata')
         const loops = command.loops.links.length || command.loops.labels.length ? command.loops : info.loops
         record.asset = { kind: 'stream', streamId: record.streamId, sampleRate: info.sampleRate,
           sampleCount: info.sampleCount, channels: info.channels, bits: info.bits,
+          ...(info.reportedSampleCount === undefined ? {} : { reportedSampleCount: info.reportedSampleCount }),
           loops: { links: loops.links.map((link) => ({ ...link })), labels: loops.labels.map((label) => ({ ...label })) },
           initial: [] }
       })

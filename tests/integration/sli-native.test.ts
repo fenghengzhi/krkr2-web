@@ -58,8 +58,9 @@ for (const binary of [false, true]) {
       assert.equal(await session.evaluate('sliFlagText()'), sliNativeFlags.join(','))
       assert(logs.includes('sli-finished:' + sliNativeFlags.join(',')))
       assert.deepEqual(pcm, [...Array(800).fill(0.25), ...Array(200).fill(0)])
-      await session.evaluate('(sliSound.unload(),0)')
-      assert.equal(await session.evaluate('sliSound.status'), 'unload')
+      await session.evaluate('(invalidate sliSound,0)')
+      await session.idle()
+      assert.equal(audio.mixer.inspectStreams().voices, 0)
     })
   })
 }

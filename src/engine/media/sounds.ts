@@ -21,7 +21,8 @@ import {
   type ScriptValue,
 } from '../script/runtime.ts'
 import { PhaseVocoderService, type PhaseVocoderConnection } from './phase-vocoder-service.ts'
-import { parseSliBytes, SliSyntaxError } from '../../formats/audio/sli.ts'
+import { parseSliBytes, SliSyntaxError, checkSliSize } from '../../formats/audio/sli.ts'
+import { WaveFormatError } from '../../formats/audio/wav-format.ts'
 import type { Resource } from '../ports/storage.ts'
 import { AudioResourceSources, type AudioSourceLease } from '../storage/audio-sources.ts'
 import type { EventClock } from '../scheduler/events.ts'
@@ -60,7 +61,7 @@ export class SoundService {
     private readonly objects: ScriptRuntime,
     private readonly backend: AudioBackend | undefined,
     private readonly read: (name: string) => Promise<Uint8Array>,
-    private readonly exists: (name: string) => boolean | Promise<boolean>,
+    private readonly findSidecar: (name: string) => Promise<Resource | undefined>,
     private readonly dispatch: (
       callback: ScriptObject,
       member: string,
@@ -429,6 +430,7 @@ export class SoundService {
         frequency: 0,
         sampleRate: 0,
         sampleCount: 0,
+        reportedSampleCount: undefined,
         channels: 0,
         bits: 0,
         fading: false,
@@ -464,8 +466,11 @@ export class SoundService {
       try {
         const sli = name + '.sli'
         loops = emptyLoops()
-        if (!selected && await this.exists(sli)) {
-          const bytes = await this.read(sli)
+        const sidecar = selected ? undefined : await this.findSidecar(sli)
+        if (sidecar) {
+          checkSliSize(sidecar.size)
+          const bytes = await sidecar.read()
+          if (bytes.length !== sidecar.size) throw new Error('Truncated SLI storage')
           try { loops = parseSliBytes(bytes) }
           catch (error) {
             if (error instanceof SliSyntaxError)
@@ -526,6 +531,8 @@ export class SoundService {
           sound.resourceRequested = false
           sound.ready = false
         }
+        if (sound.kind === 'wave' && error instanceof WaveFormatError)
+          throw new TvpError('TVPUnknownWaveFormat', [name], error.message, { cause: error })
         throw error
       }
       sound.ready = true
@@ -580,7 +587,7 @@ export class SoundService {
       else if (property === 'samplePosition') value = BigInt(state.position)
       else if (property === 'totalTime')
         value = BigInt(
-          state.sampleRate ? Math.floor((state.sampleCount * 1000) / state.sampleRate) : 0,
+          state.sampleRate ? Math.floor(((state.reportedSampleCount ?? state.sampleCount) * 1000) / state.sampleRate) : 0,
         )
       else if (property === 'status') value = state.status
       else if (

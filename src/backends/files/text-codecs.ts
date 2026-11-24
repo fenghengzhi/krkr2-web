@@ -4,7 +4,7 @@ import {
   modeOffset,
   type TextCodecs,
 } from '../../formats/text/stream.ts'
-import { inflate } from './blob-source.ts'
+import { decodePlainText, inflate } from './blob-source.ts'
 import { CompressionError } from '../../formats/binary/compression-error.ts'
 import { BinaryWriter } from '../../formats/binary/writer.ts'
 const codecs: TextCodecs = {
@@ -40,8 +40,8 @@ const codecs: TextCodecs = {
     }
   },
 }
-export const readText = (bytes: Uint8Array, mode = '', encoding?: string) =>
-  decodeTextStream(bytes, codecs, mode, encoding)
+export const readText = async (bytes: Uint8Array, mode = '', encoding?: string, format: 'tjs' | 'plain' = 'tjs') =>
+  format === 'plain' ? decodePlainText(bytes) : decodeTextStream(bytes, codecs, mode, encoding)
 export const writeText = (text: string, mode = '') => encodeTextStream(text, codecs, mode)
 export async function readScript(
   bytes: Uint8Array,

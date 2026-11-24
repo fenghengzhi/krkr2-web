@@ -1,9 +1,12 @@
+import { kagEvaluationFiles, kagEvaluationExpected, kagEvaluationSource } from './kag-evaluation.ts'
+
 /** Shared TJS controls for the 2.32r2 SDK and the Web runtime. The SDK
  * produces its own macro bookmark from a real call into another storage. */
 export const kagFiles = {
   'entry.ks': '*start\n[macro name=scene][call storage=chapter.ks target=*chapter][endmacro]\\\n[scene actor=Alice][finished]\\\n',
   'chapter.ks': '*chapter\n[observe actor=%actor]\\\n[return]\\\n',
   'empty.ks': '',
+  ...kagEvaluationFiles,
 }
 
 export const kagExpected: Readonly<Record<string, string>> = {
@@ -20,6 +23,7 @@ export const kagExpected: Readonly<Record<string, string>> = {
   'stray-endmacro': 'bad-tag', 'empty-if': 'bad-tag', 'macro-underflow': 'bad-tag',
   'bad-lexer': 'bad-tag', 'return-underflow': 'no-call', 'erase-unknown': 'no-macro:<missing>',
   'bad-save-depth': 'bad-save', 'assign-object': 'bad-parser', 'changed-holder': 'changed:<*absent>:<chapter.ks>',
+  ...kagEvaluationExpected,
 }
 
 export const kagControlSource = String.raw`
@@ -28,7 +32,7 @@ class RefParser extends KAGParser {
   var body, watch=false, loadedArgs="", veto=false, callAt="";
   function RefParser(){super.KAGParser();debugLevel=tkdlNone;}
   function onScenarioLoad(n){
-    if(watch && mp!==null) loadedArgs=callStackDepth+"|"+mp.actor+"|"+mp.extra;
+    if(watch && macroParams!==null) loadedArgs=callStackDepth+"|"+macroParams.actor+"|"+macroParams.extra;
     return body;
   }
   function onCall(t){if(veto){callAt=curLine+"|"+curPos;return false;}return true;}
@@ -50,15 +54,16 @@ function kagFirst(p,n){p.loadScenario(n);return string(p.getNextTag().text);}
 function kagSavePoint(){
   var p=new RefParser();p.loadScenario("entry.ks");
   if(p.getNextTag().actor!="Alice" || p.callStackDepth!=1)throw new Exception("missing original macro call");
-  p.mp.extra="live";
+  p.macroParams.extra="live";
   return p.store();
 }
 function kagResumePoint(d){
   var q=new RefParser();q.watch=true;q.restore(d);
-  var restored=q.getNextTag().actor+"|"+q.callStackDepth+"|"+q.mp.actor+"|"+q.mp.extra+"|"+q.loadedArgs;
-  return restored+"|"+q.getNextTag().tagname+"|"+q.callStackDepth+"|"+int(q.mp===null);
+  var restored=q.getNextTag().actor+"|"+q.callStackDepth+"|"+q.macroParams.actor+"|"+q.macroParams.extra+"|"+q.loadedArgs;
+  return restored+"|"+q.getNextTag().tagname+"|"+q.callStackDepth+"|"+int(q.macroParams===null);
 }
 function kagObserve(id){
+  if(id.indexOf("expression-")==0){try{return kagEvaluateObserve(id);}catch(e){return e.message;}}
   kagHolders();
   var p=new RefParser(),q=new RefParser(),r=new RefParser(),n="case-live.ks",result="",d;
   p.clear();
@@ -102,7 +107,7 @@ function kagObserve(id){
         d=kagSavePoint();d.callStack[0].orgLineStr="changed calling line";kagResumePoint(d);break;
       case "forward-current":
         p.body="[macro name=m][mark][emit old=before *][endmacro][m actor=Alice]";p.loadScenario(n);
-        p.getNextTag();p.mp.extra="new";var t=p.getNextTag();return t.actor+"|"+t.extra+"|"+int(t.old===void);
+        p.getNextTag();p.macroParams.extra="new";var t=p.getNextTag();return t.actor+"|"+t.extra+"|"+int(t.old===void);
       case "call-cursor":
         p.body="X[call target=*z]Y";p.veto=true;p.loadScenario(n);p.getNextTag();
         return p.getNextTag().text+"|"+p.callAt;
@@ -130,4 +135,4 @@ function kagObserve(id){
     return "unexpected success";
   }catch(e){return e.message;}
 }
-`
+` + kagEvaluationSource

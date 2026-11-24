@@ -1,3 +1,4 @@
+import { decodeUtf8 } from '../../text/utf8.ts'
 import type { DecodedImage } from '../../../engine/ports/graphics.ts'
 import { BinaryReader } from '../../binary/reader.ts'
 import { readTlg5 } from './tlg5.ts'
@@ -7,43 +8,6 @@ import { ImageReadError } from '../read-error.ts'
 
 function signature(input: BinaryReader): string {
   return String.fromCharCode(...input.slice(11))
-}
-
-/** Strict UTF-8, independent of DOM codecs. Tags count bytes, not code points. */
-function* utf8(bytes: Uint8Array): Generator<void, string> {
-  let value = ''
-  for (let at = 0, work = 0; at < bytes.length;) {
-    const first = bytes[at++]!
-    let point = first,
-      extra = 0,
-      min = 0
-    if (first >= 0xc2 && first <= 0xdf) {
-      extra = 1
-      point &= 31
-      min = 0x80
-    } else if (first >= 0xe0 && first <= 0xef) {
-      extra = 2
-      point &= 15
-      min = 0x800
-    } else if (first >= 0xf0 && first <= 0xf4) {
-      extra = 3
-      point &= 7
-      min = 0x10000
-    } else if (first >= 0x80) throw new Error('Invalid UTF-8 in TLG tags')
-    for (let i = 0; i < extra; i++) {
-      const next = bytes[at++]
-      if (next === undefined || (next & 0xc0) !== 0x80) throw new Error('Invalid UTF-8 in TLG tags')
-      point = point * 64 + (next & 63)
-    }
-    if (point < min || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff))
-      throw new Error('Invalid UTF-8 in TLG tags')
-    value += String.fromCodePoint(point)
-    if (++work >= 4096) {
-      work = 0
-      yield
-    }
-  }
-  return value
 }
 
 function* tagString(input: BinaryReader, nativePart?: 'name' | 'value'): Generator<void, string> {
@@ -59,7 +23,7 @@ function* tagString(input: BinaryReader, nativePart?: 'name' | 'value'): Generat
     if (++digits > 7) throw new Error('Invalid TLG tag byte length')
     length = length * 10 + byte - 48
   }
-  return yield* utf8(input.slice(length))
+  return yield* decodeUtf8(input.slice(length), () => new Error('Invalid UTF-8 in TLG tags'))
 }
 
 function* raw(

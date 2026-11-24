@@ -131,6 +131,7 @@ export class AudioMixer {
       flags: [...voice.flags],
       sampleRate: asset?.sampleRate ?? 0,
       sampleCount: asset?.sampleCount ?? 0,
+      ...(asset?.reportedSampleCount === undefined ? {} : { reportedSampleCount: asset.reportedSampleCount }),
       channels: asset?.channels ?? 0,
       bits: voice.filters?.length ? 32 : (asset?.bits ?? 0),
     }
@@ -257,6 +258,8 @@ export class AudioMixer {
     } else if (command.op === 'load') {
       const { asset, settings } = command
       if (!Number.isSafeInteger(asset.sampleCount) || asset.sampleCount < 1 ||
+          (asset.reportedSampleCount !== undefined && (!Number.isSafeInteger(asset.reportedSampleCount) ||
+            asset.reportedSampleCount < asset.sampleCount)) ||
           !Number.isInteger(asset.sampleRate) || asset.sampleRate < 1000 || asset.sampleRate > 384000 ||
           !Number.isInteger(asset.channels) || asset.channels < 1 || asset.channels > 8)
         throw new Error('Invalid decoded audio')

@@ -113,6 +113,11 @@ export function decodeScript(bytes: Uint8Array): string | Uint8Array {
   if (bytes[0] === 0x54 && bytes[1] === 0x4a && bytes[2] === 0x53 && bytes[3] === 0x32) return bytes
   if (bytes[0] === 0xfe && bytes[1] === 0xfe)
     throw new Error('Encoded TJS text streams are not yet supported')
+  return decodePlainText(bytes)
+}
+
+/** Unencoded imported metadata such as a CUE sheet. No TJS stream markers. */
+export function decodePlainText(bytes: Uint8Array): string {
   if (bytes[0] === 0xff && bytes[1] === 0xfe)
     return new TextDecoder('utf-16le', { fatal: true }).decode(bytes)
   if (bytes[0] === 0xfe && bytes[1] === 0xff)

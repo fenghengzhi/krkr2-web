@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { build } from 'vite'
 import { resolve } from 'node:path'
+import { test as storageTest } from '../helpers/library-browser.ts'
 
 const base = '/drop-capabilities-assets/', bundles = new Map<string, string>()
 let entry = ''
@@ -74,9 +75,13 @@ test('native DataTransfer Files are captured synchronously, survive its clearing
   await info.attach('actual-datatransfer-files', { body: JSON.stringify(result), contentType: 'application/json' })
 })
 
-test('actual OPFS directory handles enumerate nested files and empty directories after event-time handle acquisition', async ({ page }, info) => {
+// Real OPFS handles need the same isolated persistent profile as the library
+// contracts. WebKit's ephemeral context exposes getDirectory but rejects root
+// access before captureDrop or enumeration can run. Other capability contracts
+// keep their default context, including unavailable-capability observations.
+storageTest('actual OPFS directory handles enumerate nested files and empty directories after event-time handle acquisition', async ({ page }, info) => {
   await mount(page)
-  test.skip(!(await page.evaluate(() => typeof navigator.storage?.getDirectory === 'function')), 'OPFS directory handles unavailable')
+  storageTest.skip(!(await page.evaluate(() => typeof navigator.storage?.getDirectory === 'function')), 'OPFS directory handles unavailable')
   const failures: unknown[] = []
   try {
     const result = await page.evaluate(async (entry) => {
@@ -150,7 +155,7 @@ test('actual OPFS directory handles enumerate nested files and empty directories
           })))
         entries.sort((a, b) => a.path.localeCompare(b.path))
         return { calls, roots: tree.roots, name, entries,
-          evidence: 'Native OPFS FileSystemDirectoryHandle/getFile/values; DataTransfer accessor injected. Not external OS dragging.' }
+          evidence: 'Native OPFS FileSystemDirectoryHandle/getFile/values in an isolated persistent profile; DataTransfer accessor injected. Not external OS dragging.' }
       } catch (error) {
         failed = true; primary = error
         record({ phase: 'scenario', state: 'error', at: performance.now(), error: describe(error) })

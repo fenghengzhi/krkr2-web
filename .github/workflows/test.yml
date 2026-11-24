@@ -976,14 +976,14 @@ jobs:
       - name: Preserve and compare native KAG control observations
         if: ${{ !cancelled() && steps.prepare_kag.outcome == 'success' }}
         run: node --import tsx tests/probes/kag-sdk.ts native
-      - name: Prepare WaveSoundBuffer loop information and label controls
+      - name: Prepare WaveSoundBuffer loop, label and WAVE format controls
         if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
         id: prepare_sli
         run: node --import tsx tests/probes/sli-sdk.ts prepare
-      - name: Observe original SDK loop information and label dictionaries
+      - name: Observe original SDK loop information, labels and WAVE opens
         if: ${{ !cancelled() && steps.prepare_sli.outcome == 'success' }}
         run: ./tests/probes/original-eri.ps1 -Project sli
-      - name: Compare the SLI observations
+      - name: Compare the SLI and WAVE format observations
         if: ${{ !cancelled() && steps.prepare_sli.outcome == 'success' }}
         run: node --import tsx tests/probes/sli-sdk.ts compare
       - name: Prepare the original KAG introduction and its layout observer

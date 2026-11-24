@@ -5,6 +5,7 @@ import { evaluate } from '../helpers/browser-expression.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 import { stopGeometryPage } from '../helpers/window-geometry-browser.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia } from '../helpers/video-audio-probe.ts'
+import { installVideoSeekRegistrations, observeVideoSeekRegistrations } from '../helpers/video-seek-registration.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
 for (const container of ['multitrack', 'interleaved']) for (const mode of [1, 2]) {
@@ -13,6 +14,7 @@ for (const container of ['multitrack', 'interleaved']) for (const mode of [1, 2]
     const failures: unknown[] = [], readings: unknown[] = []
     let game: Awaited<ReturnType<typeof launchWindowAttention>> | undefined
     await installVideoAudioProbe(page)
+    await installVideoSeekRegistrations(page)
     await observeVideoFrames(page)
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)), 'JSPI unavailable')
@@ -104,6 +106,15 @@ movie.originalWidth,movie.originalHeight,movie.numberOfVideoStream,movie.layer1=
       await audible()
       await evaluate(page, '(movie.pause(),movie.position=1000,r0.visible=true,r1.visible=false,movie.enabledVideoStream)', '0')
       await capture(0)
+      const registrations = await observeVideoSeekRegistrations(page),
+        stagedSeeks = registrations.events.filter((event) => event.event === 'seek' && event.staged &&
+          event.target! > 0 && Math.abs(event.target! - event.from!) > 1e-8)
+      expect(registrations.dropped).toBe(0)
+      expect(stagedSeeks.length).toBeGreaterThanOrEqual(3)
+      // observeVideoFrames owns one independent callback. The transaction must
+      // already own another before the real native currentTime setter runs;
+      // compositor work is not serialized with subsequent main-thread calls.
+      expect(stagedSeeks.every((event) => event.pending >= 2)).toBe(true)
       await evaluate(page, '(movie.close(),movie.enabledVideoStream+","+movie.numberOfVideoStream)', '-1,0')
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) {
@@ -142,7 +153,8 @@ movie.originalWidth,movie.originalHeight,movie.numberOfVideoStream,movie.layer1=
       } catch (diagnostic) { failures.push(diagnostic) }
     }
     try { await info.attach('video-stream-selection', { contentType: 'application/json', body: JSON.stringify({
-      backend, binary, container, mode, readings, media: await observeVideoMedia(page), logs: await page.locator('#logs').innerText(),
+      backend, binary, container, mode, readings, media: await observeVideoMedia(page),
+      seekRegistrations: await observeVideoSeekRegistrations(page), logs: await page.locator('#logs').innerText(),
     }) }) } catch (error) { failures.push(error) }
     try {
       if (game) await game.stop(); else await stopGeometryPage(page)

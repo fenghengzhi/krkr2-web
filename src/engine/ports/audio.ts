@@ -4,6 +4,8 @@ export type SoundKind = 'wave' | 'midi' | 'cdda'
 export interface AudioInfo {
   sampleRate: number
   sampleCount: number
+  /** When the original WAVE header reports a different duration from its physical PCM. */
+  reportedSampleCount?: number
   channels: number
   bits: number
 }

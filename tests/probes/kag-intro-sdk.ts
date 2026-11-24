@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import { inflateSync } from 'node:zlib'
-import { readXp3 } from '../../src/formats/xp3/archive.ts'
+import { adler32, readXp3 } from '../../src/formats/xp3/archive.ts'
 import { kagIntroSource, kagIntroStateExpression, kagIntroLayoutExpression,
   kagIntroLayoutFields } from '../helpers/kag-intro-observation.ts'
 
@@ -60,44 +60,71 @@ introTimer=new Timer(global,"introObserve");introTimer.interval=100;introTimer.e
 
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
-  const response = await fetch(kagIntroSource.url, { signal: AbortSignal.timeout(30000) })
-  assert(response.ok, 'Original introduction acquisition failed: HTTP ' + response.status)
-  const bytes = Buffer.from(await response.arrayBuffer())
-  assert.equal(bytes.length, kagIntroSource.bytes)
-  assert.equal(sha(bytes), kagIntroSource.sha256)
-  writeFileSync(resolve(output, 'kag3_intro.xp3'), bytes)
-  // This extractor only prepares input bytes; it supplies no font, wait or
-  // rendering oracle. zlib and XP3 checks remain explicit setup failures.
-  const entries = await readXp3({ size: bytes.length, async read(offset, length) {
-    assert(offset >= 0 && length >= 0 && offset + length <= bytes.length)
-    return bytes.subarray(offset, offset + length)
-  } }, async (compressed, expected) => {
-    assert(expected <= 64 * 1024 * 1024)
-    const plain = inflateSync(compressed, { maxOutputLength: expected || 1 })
-    assert.equal(plain.length, expected)
-    return plain
-  }, { verifyAdler32: true })
-  assert(entries.length > 0 && entries.length <= 10000)
-  const seen = new Set<string>(), inputs: Input[] = []
-  let total = 0
-  for (const entry of entries) {
-    const key = entry.name.toLowerCase()
-    assert(!seen.has(key) && ![originalStartup, 'native-events.txt'].includes(key), 'Duplicate or reserved original path')
-    seen.add(key)
-    total += entry.size
-    assert(total <= 64 * 1024 * 1024, 'Original package exceeds input preparation budget')
-    const content = await entry.read(), preparedName = entry.name === 'startup.tjs' ? originalStartup : entry.name
-    assert.equal(content.length, entry.size)
-    const destination = inputPath(preparedName)
-    mkdirSync(dirname(destination), { recursive: true })
-    writeFileSync(destination, content)
-    inputs.push({ name: entry.name, preparedName, bytes: content.length, sha256: sha(content) })
+  const preparation: Record<string, unknown> = { commit: process.env.GITHUB_SHA, phase: 'acquire', complete: false,
+    scope: 'Pinned original archive and per-resource hashes are integrity checks. The XP3 adlr field is recorded as opaque extraction metadata, not assumed to be a content checksum.' }
+  let primary: unknown
+  try {
+    const response = await fetch(kagIntroSource.url, { signal: AbortSignal.timeout(30000) })
+    assert(response.ok, 'Original introduction acquisition failed: HTTP ' + response.status)
+    const bytes = Buffer.from(await response.arrayBuffer())
+    assert.equal(bytes.length, kagIntroSource.bytes)
+    assert.equal(sha(bytes), kagIntroSource.sha256)
+    writeFileSync(resolve(output, 'kag3_intro.xp3'), bytes)
+    preparation.phase = 'archive-index'
+    // This extractor only prepares input bytes; it supplies no font, wait or
+    // rendering oracle. zlib and XP3 checks remain explicit setup failures.
+    const entries = await readXp3({ size: bytes.length, async read(offset, length) {
+      assert(offset >= 0 && length >= 0 && offset + length <= bytes.length)
+      return bytes.subarray(offset, offset + length)
+    } }, async (compressed, expected) => {
+      assert(expected <= 64 * 1024 * 1024)
+      const plain = inflateSync(compressed, { maxOutputLength: expected || 1 })
+      assert.equal(plain.length, expected)
+      return plain
+    })
+    assert(entries.length > 0 && entries.length <= 10000)
+    const seen = new Set<string>(), inputs: Input[] = []
+    let total = 0
+    for (const entry of entries) {
+      preparation.phase = 'resource'; preparation.resource = entry.name
+      preparation.archiveFileHash = entry.xp3.fileHash ?? null
+      const key = entry.name.toLowerCase()
+      assert(!seen.has(key) && ![originalStartup, 'native-events.txt'].includes(key), 'Duplicate or reserved original path')
+      seen.add(key)
+      total += entry.size
+      assert(total <= 64 * 1024 * 1024, 'Original package exceeds input preparation budget')
+      const content = await entry.read(), preparedName = entry.name === 'startup.tjs' ? originalStartup : entry.name
+      assert.equal(content.length, entry.size)
+      const destination = inputPath(preparedName)
+      mkdirSync(dirname(destination), { recursive: true })
+      writeFileSync(destination, content)
+      const input = { name: entry.name, preparedName, bytes: content.length, sha256: sha(content),
+        archiveFileHash: entry.xp3.fileHash ?? null, actualAdler32: adler32(content),
+        pathCodeUnitSum: entry.name.split('').reduce((sum, character) => sum + character.charCodeAt(0), 0) }
+      inputs.push(input)
+      // Persist the first concrete comparison even if a later entry fails.
+      if (inputs.length === 1) preparation.firstResource = input
+    }
+    assert(inputs.some((entry) => entry.name === 'startup.tjs'))
+    assert(inputs.some((entry) => entry.name === 'scenario/first.ks'))
+    preparation.phase = 'launch-observer'
+    writeFileSync(inputPath('startup.tjs'), startup)
+    save('inputs.json', { commit: process.env.GITHUB_SHA, source: kagIntroSource, inputs, observerSha256: sha(startup),
+      scope: 'Every original resource is extracted byte-for-byte. Only the launch startup is an external read-only observer which executes the retained original startup. The original XP3 is also preserved. No game methods, fonts, scenarios or inputs are replaced.' })
+    preparation.complete = true
+    preparation.phase = 'complete'
+  } catch (error) {
+    primary = error
+    preparation.error = error instanceof Error ? { name: error.name, message: error.message, stack: error.stack,
+      cause: error.cause === undefined ? undefined : String(error.cause) } : String(error)
+    throw error
+  } finally {
+    try { save('prepare-status.json', preparation) }
+    catch (error) {
+      if (primary !== undefined) throw new AggregateError([primary, error], 'Introduction preparation and evidence saving failed', { cause: primary })
+      throw error
+    }
   }
-  assert(inputs.some((entry) => entry.name === 'startup.tjs'))
-  assert(inputs.some((entry) => entry.name === 'scenario/first.ks'))
-  writeFileSync(inputPath('startup.tjs'), startup)
-  save('inputs.json', { commit: process.env.GITHUB_SHA, source: kagIntroSource, inputs, observerSha256: sha(startup),
-    scope: 'Every original resource is extracted byte-for-byte. Only the launch startup is an external read-only observer which executes the retained original startup. The original XP3 is also preserved. No game methods, fonts, scenarios or inputs are replaced.' })
 } else if (process.argv[2] === 'native') {
   const manifest = JSON.parse(readFileSync(resolve(output, 'inputs.json'), 'utf8')) as Manifest
   assert.equal(manifest.commit, process.env.GITHUB_SHA)

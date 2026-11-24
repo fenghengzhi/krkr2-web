@@ -272,7 +272,8 @@ export interface SessionDependencies {
     mode?: string,
     encoding?: string,
   ) => string | Uint8Array | Promise<string | Uint8Array>
-  readText: (bytes: Uint8Array, mode?: string, encoding?: string) => Promise<string>
+  /** Plain metadata uses BOM/charset decoding without TJS stream transforms. */
+  readText: (bytes: Uint8Array, mode?: string, encoding?: string, format?: 'tjs' | 'plain') => Promise<string>
   writeText: (text: string, mode?: string) => Promise<Uint8Array>
   saveStore?: SaveStore
   appLocks?: AppLocks
@@ -562,6 +563,7 @@ export class EngineSession {
         this.control.check(); return bytes
       },
       checkpoint: async () => { await this.control.wait(); this.control.check() },
+      decodeText: (bytes) => this.deps.readText(bytes, '', undefined, 'plain'),
       cues: () => this.discoverCddaCues(),
     }, cddaDiscs)
     this.windowGeometry = deps.windowGeometry ?? new HeadlessWindowGeometry()
@@ -824,7 +826,7 @@ export class EngineSession {
         this.runtime,
         this.deps.audio,
         (name) => this.readResource(name),
-        (name) => this.resourceExists(name),
+        (name) => this.findResource(name, true),
         (callback, member, args, valid, source) =>
           this.systemEvents!.post(() => ({ kind: 'invoke', callback, member, args }), {
             valid,
@@ -4139,10 +4141,10 @@ export class EngineSession {
     if (!resource) throw new TvpError(missing, [name], `Resource not found: ${name}`)
     return resource
   }
-  private async findResource(name: string, optionalImage = false): Promise<Resource | undefined> {
+  private async findResource(name: string, optionalCompanion = false): Promise<Resource | undefined> {
     this.materializeLogs()
     return this.storage.lookupAsync(name, (candidate) => this.saves.resource(candidate),
-      this.saves.list().map((file) => this.saves.resource(file.name)!), optionalImage ? 'identified' : 'all')
+      this.saves.list().map((file) => this.saves.resource(file.name)!), optionalCompanion ? 'identified' : 'all')
   }
   private async resourceExists(name: string): Promise<boolean> {
     return !!await this.findResource(name)

@@ -43,7 +43,7 @@ function fixture(aborted = false) {
 
 test('clock frame seek accepts a fresh 0.666667 PTS at the exact 0.5 media clock only after seek completion', async () => {
   const f = fixture()
-  assert.deepEqual(f.order, ['seek', 'request'])
+  assert.deepEqual(f.order, ['request', 'seek'])
   f.fire()
   await Promise.resolve()
   assert.equal(f.outcome, 'pending', 'Presentation alone cannot stand in for seeked')
@@ -66,7 +66,7 @@ test('a pre-seek submission and a replayed compositor counter cannot release the
   f.fire()
   await f.pending
   assert.deepEqual(f.observed, [0.666667])
-  assert.deepEqual(f.order, ['seek', 'request', 'request', 'request'])
+  assert.deepEqual(f.order, ['request', 'seek', 'request', 'request'])
 })
 
 for (const invalid of ['still-seeking', 'not-decoded', 'clock-moved'] as const)
@@ -114,4 +114,33 @@ test('the clock seek deadline rejects absent presentation and cancels its pendin
   assert.deepEqual(f.cancelled, [1])
   assert.equal(f.callbacks.size, 0)
   assert.equal(f.timerCleared, true)
+})
+
+test('a paused seek which submits its only fresh frame during the setter cannot lose its callback registration', async () => {
+  const abort = new AbortController(), callbacks = new Map<number, VideoFrameRequestCallback>(), observed: number[] = []
+  let serial = 0, cleared = false, requestedBeforeSeek = false, sought = false
+  const video = { currentTime: 0, readyState: 4, seeking: false,
+    requestVideoFrameCallback(callback: VideoFrameRequestCallback) { callbacks.set(++serial, callback); return serial },
+    cancelVideoFrameCallback(handle: number) { callbacks.delete(handle) },
+  }
+  const pending = waitForClockPresentation(video as HTMLVideoElement, 1000, 1, abort.signal, () => {}, () => {
+    // Model the compositor thread completing before the JS setter returns.
+    // Missing this one notification cannot be repaired by paused playback.
+    requestedBeforeSeek = callbacks.size === 1
+    video.currentTime = 1
+    for (const [handle, callback] of [...callbacks]) {
+      callbacks.delete(handle)
+      callback(performance.now(), { mediaTime: 1, presentationTime: performance.now(),
+        expectedDisplayTime: performance.now(), presentedFrames: 2, width: 80, height: 60 })
+    }
+    return Promise.resolve().then(() => { sought = true })
+  }, () => () => { cleared = true }, (metadata) => observed.push(metadata.mediaTime))
+  void pending.catch(() => {})
+  try {
+    assert.equal(requestedBeforeSeek, true)
+    assert.deepEqual(observed, [1])
+    assert.equal(sought, false, 'fresh pixels alone still do not complete the seek')
+    await pending
+    assert.equal(sought, true); assert.equal(cleared, true); assert.equal(callbacks.size, 0)
+  } finally { abort.abort(); await pending.catch(() => {}) }
 })

@@ -1,5 +1,6 @@
 // The engine owns parse positions and control flow. TJS owns live dictionaries
-// and runs callbacks/expressions with the actual subclass instance as context.
+// and runs callbacks with the actual subclass instance as context. Native KAG
+// expression entities, conditions and embeddings use the global TJS context.
 export const kagClass = String.raw`
 class KAGParser {
   var __kagId, __kagMacros, __kagParams, __kagParamNames, __kagTag, __kagTagList;
@@ -22,7 +23,7 @@ class KAGParser {
             else if(a[0] != "onScenarioLoad" || typeof result != "String") result = void;
             break;
           case "eval":
-            result = Scripts.eval(a[0], a[2], a[3], this);
+            result = Scripts.eval(a[0], a[2], a[3], global);
             if(a[1]) result = !!result;
             else if(result !== void) result = string(result);
             break;

@@ -6,6 +6,7 @@ import { openPortablePcmSource, pcmSourceLimits, type PcmSource } from '../../sr
 import { decodePortableAudio } from '../../src/backends/audio/decode.ts'
 import type { ByteSource } from '../../src/engine/ports/storage.ts'
 import { wave } from '../helpers/audio.ts'
+import { extensibleWave } from '../helpers/extensible-wave.ts'
 
 const test = (name: string, run: () => Promise<void>) => nodeTest(name, { timeout: 60000 }, run)
 const memory = (bytes: Uint8Array): ByteSource => ({ size: bytes.length,
@@ -93,6 +94,38 @@ for (const bits of [32, 64]) test(`range PCM preserves extensible ${bits}-bit fl
     assert.deepEqual(source.info.loops, { links: [{ from: 3, to: 1, smooth: false,
       condition: 'no', variable: 0, reference: 0, whenLooping: true }], labels: [] })
   } finally { await source.close() }
+})
+
+for (const [storage, bits, reported] of [[16, 12, 6400], [24, 20, 5760], [32, 24, 6400]] as const)
+  test(`extensible ${bits}-in-${storage} streaming and buffered readers agree on precision, advertised time and playable frames`, async () => {
+    const file = extensibleWave(storage, bits, true), source = await opened(file)
+    try {
+      const buffered = await decodePortableAudio(file, 'wave')
+      assert(buffered?.kind === 'pcm')
+      for (const info of [source.info, buffered]) {
+        assert.equal(info.bits, bits)
+        assert.equal(info.reportedSampleCount, reported)
+        assert.equal(info.sampleCount, 4800)
+      }
+      for (const planes of [await source.read(4095, 2), buffered.data.map((plane) => plane.slice(4095, 4097))])
+        assert.deepEqual(planes.map((plane) => [...plane]), [[0.25, 0.25], [-0.5, -0.5]])
+      assert.deepEqual((await source.read(4799, 2)).map((plane) => [...plane]), [[0.25], [-0.5]])
+    } finally { await source.close() }
+  })
+
+test('the whole extensible subtype GUID and valid bit count select PCM', async () => {
+  for (const offset of [46, 52, 59]) {
+    const file = extensibleWave(24, 20)
+    file[offset] ^= 1
+    await assert.rejects(openPortablePcmSource(memory(file)), /subtype GUID/)
+    await assert.rejects(decodePortableAudio(file, 'wave'), /subtype GUID/)
+  }
+  for (const bits of [0, 7, 25]) {
+    const file = extensibleWave(24, 20)
+    view(file).setUint16(38, bits, true)
+    await assert.rejects(openPortablePcmSource(memory(file)), /Unsupported WAVE PCM/)
+    await assert.rejects(decodePortableAudio(file, 'wave'), /Unsupported WAVE PCM/)
+  }
 })
 
 test('a sparse 512 MiB WAVE opens by headers and reads only the requested bounded ranges', async () => {
