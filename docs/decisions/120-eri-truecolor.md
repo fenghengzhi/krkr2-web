@@ -23,3 +23,7 @@ Windows 托管作业分别运行手工构造的输入和原作者工具产生的
 第 118 批已终态失败，12 个作业成功、5 个失败、11 个跳过。最后两项 CUR／ANI 对照成功。第 119 批取回时有 21 个作业成功、1 个失败、3 个运行中。PNG 与 JPEG 的独立构建及差分、原版 8 位 ERI SDK 对照和两个分配器作业报告成功。Windows 2022 的 beginMove 作业失败，公开页面只给出退出码 1。主构建和两个 CUR／ANI 作业仍在运行，Node、浏览器和应用验收尚无本次结果。[118 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45469186113) · [119 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45473097908)
 
 本轮保存了三个运行各自的运行状态、作业和产物清单，以及四份公开作业页面。已列出的 40 份产物尚未取得原 ZIP。第 119 批的一次性历史归档回收仍在下载，取回时尚无归档产物。以上成功数均按作业状态统计。本批实现与新增验收仍待托管结果。[历史归档回收](https://github.com/fenghengzhi/krkr2-web/actions/runs/45473098039)
+
+## 批次交接
+
+19 个文件随实现提交 `a1967b78e9280c7a9591d1ca1f15c61e1c552a73` 推送至 `codex/migrated-window-attention`。首次登记时整套验证已排队。原始 Actions 页面与匹配结果保存在 `out/verification/github-actions/120-initial-a1967b78e9280c7a9591d1ca1f15c61e1c552a73/`。下一批一起取回本次结果和第 119 批尚未完成的应用验证、窗口作业与历史归档。[第 120 批全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45475659242)
