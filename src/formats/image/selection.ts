@@ -21,7 +21,7 @@ export interface ImageDecodeProgress {
  * Short reads, host failures, cancellation and Web budgets are not this type. */
 export class ImageDecodeError extends Error {
   constructor(
-    readonly format: Exclude<ImageDecodeSelection['format'], 'eri'>,
+    readonly format: ImageDecodeSelection['format'],
     readonly reason: string,
   ) {
     super(reason)

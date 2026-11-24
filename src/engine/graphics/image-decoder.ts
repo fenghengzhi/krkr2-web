@@ -8,6 +8,7 @@ import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress }
 import type { ImageInflater } from '../ports/image-inflater.ts'
 import { ImageReadError } from '../../formats/image/read-error.ts'
 import { decodeSelectedJpeg } from '../../formats/image/jpeg.ts'
+import { checkEriSourceSize, decodeSelectedEri } from '../../formats/image/eri.ts'
 import type { ImageJpegDecoder, ImageJpegMode } from '../ports/image-jpeg.ts'
 
 export interface SelectedImageDecoderDependencies {
@@ -33,6 +34,7 @@ function codecError(error: unknown): unknown {
   if (error instanceof ImageDecodeError) {
     const id = {
       bmp: 'TVPImageLoadError', jpeg: 'TVPJPEGLoadError', png: 'TVPPNGLoadError', tlg: 'TVPTLGLoadError',
+      eri: 'TVPERILoadError',
     } as const
     return new TvpError(id[error.format], [error.reason], error.message, { cause: error })
   }
@@ -41,6 +43,21 @@ function codecError(error: unknown): unknown {
 function codec<T>(read: () => T): T {
   try { return read() }
   catch (error) { throw codecError(error) }
+}
+
+/** Both native handlers reject province loading before their first byte read. */
+function requireNonPaletteMode(format: 'eri' | 'jpeg', mode: ImageDecodeSelection['mode']): 'normal' | 'grayscale' {
+  if (mode !== 'palettized') return mode
+  const reason = format === 'eri' ? 'currently Kirikiri does not support loading palettized ERI image.'
+    : 'JPEG does not support palettized image'
+  throw codecError(new ImageDecodeError(format, reason))
+}
+
+/** The stream wrapper knows the declared length before reading the input. */
+export function checkSelectedImageStorage(format: ImageDecodeSelection['format'], mode: ImageDecodeSelection['mode'],
+  size: number): void {
+  if (format === 'eri' || format === 'jpeg') requireNonPaletteMode(format, mode)
+  if (format === 'eri') codec(() => checkEriSourceSize(size))
 }
 function* codecWork<T>(create: () => Generator<void, T>): Generator<void, T> {
   // Only the codec's own reads/validation are translated. The scheduler and
@@ -110,8 +127,10 @@ export async function decodeSelectedImage(
     }
   try {
     switch (selected.format) {
-      case 'eri':
-        throw new TvpError('TVPNotImplemented', [], 'ERI image decoding is not available')
+      case 'eri': {
+        const mode = requireNonPaletteMode('eri', selected.mode)
+        return await dependencies.finish(codecWork(() => decodeSelectedEri(bytes, mode, progress, selected.paletteKey)))
+      }
       case 'bmp': {
         const portable = codec(() => decodeSelectedBmp(bytes, selected.mode, progress))
         if (portable) return portable
@@ -149,11 +168,9 @@ export async function decodeSelectedImage(
       case 'tlg':
         return await dependencies.finish(codecWork(() => decodeSelectedTlg(bytes, selected.mode, progress)))
       case 'jpeg': {
-        if (selected.mode === 'palettized')
-          throw codecError(new ImageDecodeError('jpeg', 'JPEG does not support palettized image'))
+        const mode = requireNonPaletteMode('jpeg', selected.mode)
         if (dependencies.openJpeg) {
-          const mode: ImageJpegMode = selected.mode,
-            decoder = await dependencies.openJpeg(bytes, mode), guarded: ImageJpegDecoder = {
+          const decoder = await dependencies.openJpeg(bytes, mode), guarded: ImageJpegDecoder = {
             step(input, eof) {
               try { return decoder.step(input, eof) }
               catch (error) { throw new DecoderFailure(error) }

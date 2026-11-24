@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 119 批增加 8 位 ERI `ImageFrm` v2 的 RL-MTF-G 解码，覆盖无 alpha 调色板图、灰度图、正负高度及伴随遮罩。真彩色 ERI 和其他压缩架构仍待实现。选定格式的 PNG 加载已按原库区分实际解码用透明数据和成功登记的 tRNS 信息。新实现尚待托管核验。[实现与限制](../decisions/119-eri-png-and-hosted-codecs.md)
+
 第 118 批已提交至 `0ff9f1080ac82bb37258ddb96aa6045b40e284e0`。首次登记时托管运行已开始，尚无结论。下次批量回收结果。[Actions 45469186113](https://github.com/fenghengzhi/krkr2-web/actions/runs/45469186113)
 
 第 118 批将播放器通过 `.jpg`、`.jpeg` 和 `.jif` 加载的游戏图像接到独立 IJG 6b 内核。灰度遮罩请求 JPEG 的亮度输出，损坏文件遵循原数值错误和结束标记恢复规则。当前比较基准是原配置的标量 C 实现，Borland 优化二进制的像素一致性仍待核实。新实现、离线资产和 113 的构建修复均待托管验证。[118 实现与边界](../decisions/118-native-jpeg-and-hosted-build-recovery.md)

@@ -60,7 +60,7 @@ function imageSelectionMessages(){
   System.assignMessage("TVPPNGLoadError","png:%1");
   System.assignMessage("TVPTLGLoadError","tlg:%1");
   System.assignMessage("TVPJPEGLoadError","jpeg:%1");
-  System.assignMessage("TVPNotImplemented","unavailable-handler");
+  System.assignMessage("TVPERILoadError","eri:%1");
   System.assignMessage("TVPCannotLoadRuleGraphic","rule:%1");
   return true;
 }
@@ -109,4 +109,4 @@ function imageSelectionDraw(){
 }
 `
 
-export const imageSelectionErrors = 'unknown:game://./unknown.data|unknown:game://./absent.data|unknown:game://./unknown.gif|suggest:game://./onlybare|open:game://./absent.bmp|unavailable-handler'
+export const imageSelectionErrors = 'unknown:game://./unknown.data|unknown:game://./absent.data|unknown:game://./unknown.gif|suggest:game://./onlybare|open:game://./absent.bmp|eri:ERIFile::Open failed.'

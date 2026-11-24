@@ -1,0 +1,23 @@
+name: Restore a production image kernel
+description: Use this run's exact WASM, module, manifest and licenses
+inputs:
+  kernel:
+    description: Independently built jpeg or zlib kernel
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Require a known image kernel
+      shell: bash
+      env:
+        IMAGE_KERNEL: ${{ inputs.kernel }}
+      run: |
+        case "$IMAGE_KERNEL" in jpeg|zlib) ;; *) exit 1 ;; esac
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: ${{ inputs.kernel }}-kernel
+        path: ${{ runner.temp }}/krkr-image-${{ inputs.kernel }}
+    - shell: bash
+      env:
+        IMAGE_KERNEL: ${{ inputs.kernel }}
+      run: tar -xzf "$RUNNER_TEMP/krkr-image-$IMAGE_KERNEL/$IMAGE_KERNEL-kernel.tar.gz"

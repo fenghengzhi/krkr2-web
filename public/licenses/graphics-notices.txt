@@ -5,6 +5,12 @@ Source file hashes and native scalar fixture provenance: tests/fixtures/blend-re
 TLG encoder fixture provenance and source hashes: tests/fixtures/tlg-reference.json.
 The native reference test adapter is not included in the browser application.
 
+The Web ERI reader implements the ERINA-Library version 1.0A lossless
+RL-MTF-G image format. ERINA-Library by Leshade Entis, Entis-soft.
+Original KRKR2 image loader by W.Dee and contributors.
+License text (transcoded from Shift-JIS to UTF-8): erina-1.0a.txt
+ERINA source reference: https://github.com/uyjulian/erinalib/tree/829244b10337bf70cd91c19174becce4e7dfd690
+
 Copyright (c), W.Dee and contributors All rights reserved.
 Contributors
  Go Watanabe, Kenjo, Kiyobee, Kouhei Yanagita, mey, MIK, Takenori Imoto, yun

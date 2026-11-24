@@ -1,0 +1,39 @@
+name: Recover frozen batch119 Actions evidence
+
+# One request-file push starts this archival job. Ordinary implementation and
+# documentation pushes do not repeat it; no dispatch or reusable entry exists.
+on:
+  push:
+    paths:
+      - .github/evidence-recovery/119-request.json
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: frozen-evidence-recovery-119
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: Recover fixed original ZIPs and failed-job logs
+    if: github.repository == 'fenghengzhi/krkr2-web' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Download only the frozen allowlist without executing its contents
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/recover-actions-evidence.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: recovered-actions-evidence-119-${{ github.run_id }}
+          path: out/verification/evidence-recovery-119/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 90

@@ -46,6 +46,36 @@ function message(id: string, name: string) {
   }
 }
 
+test('ERI and JPEG province rejections resolve the resource but do not read its bytes', async () => {
+  const f = fixture([['mask.eri', 1], ['mask.jpg', 2]])
+  try {
+    await assert.rejects(f.loader.province('mask.eri', 1, 1),
+      message('TVPERILoadError', 'currently Kirikiri does not support loading palettized ERI image.'))
+    await assert.rejects(f.loader.province('mask.jpg', 1, 1),
+      message('TVPJPEGLoadError', 'JPEG does not support palettized image'))
+    await assert.rejects(f.loader.province('missing.eri', 1, 1),
+      message('TVPCannotOpenStorage', 'missing.eri'))
+    assert.deepEqual(f.queries, ['mask.eri', 'mask.jpg', 'missing.eri'])
+    assert.deepEqual(f.reads, [])
+    assert.deepEqual(f.selections, [])
+  } finally { f.loader.dispose() }
+})
+
+test('ERI distinguishes the original stream length limit from the smaller Web budget before a payload read', async () => {
+  const f = fixture([])
+  let reads = 0
+  for (const [name, size] of [['over-web.eri', 64 * 1024 * 1024 + 1], ['over-native.eri', 2 ** 32]] as const)
+    f.resources.set(name, { name, size, async read() { reads++; throw new Error('Unexpected whole-file read') } })
+  try {
+    await assert.rejects(f.loader.load('over-native.eri', noColorKey), message('TVPERILoadError', 'Too large storage'))
+    await assert.rejects(f.loader.province('over-native.eri', 1, 1),
+      message('TVPERILoadError', 'currently Kirikiri does not support loading palettized ERI image.'))
+    await assert.rejects(f.loader.load('over-web.eri', noColorKey), (error: unknown) =>
+      error instanceof Error && !(error instanceof TvpError) && error.message.includes('64 MiB'))
+    assert.equal(reads, 0)
+  } finally { f.loader.dispose() }
+})
+
 test('all ten native suffixes select their own handler with ASCII case folding', async () => {
   const cases = [
     ['.bmp', 'bmp'], ['.dib', 'bmp'], ['.jpeg', 'jpeg'], ['.jpg', 'jpeg'], ['.jif', 'jpeg'],

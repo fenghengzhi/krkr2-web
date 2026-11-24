@@ -65,7 +65,7 @@ bool hasTvpMessage(const tjs_char* id) { return findMessage(id) != nullptr; }
 TJS::ttstr formatTjsMessage(const tjs_char* id) {
     if(!id || TJS::TJS_strcmp(id, u"TJSReadError") != 0)
         TJS::TJS_eTJSError(u"Unknown private TJS message ID");
-    const auto* text = static_cast<const tjs_char*>(TJS::TJSReadError);
+    const auto* text = static_cast<const tjs_char*>(::TJSReadError);
     TemporaryMemory temporary;
     temporary.reserve(TJS::TJS_strlen(text) + 1, sizeof(tjs_char));
     return TJS::ttstr(text);

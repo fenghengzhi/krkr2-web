@@ -29,7 +29,7 @@ for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
   for (const [name, expression, expected] of [
     ['built-in priority and ASCII extension aliases', 'imageSelectionOrder()', '1'],
-    ['normalized unknown/missing names and registered unavailable ERI', 'imageSelectionErrors()', imageSelectionErrors],
+    ['normalized unknown/missing names and selected ERI open error', 'imageSelectionErrors()', imageSelectionErrors],
     ['selected format rejects differently encoded bytes', 'imageSelectionWrongFormat()', '1'],
     ['normal cache cannot bypass province/mask/rule modes', 'imageSelectionModes()', '1'],
     ['companions use the requested stem across AutoPaths', 'imageSelectionCompanions()', '1'],

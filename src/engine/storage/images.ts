@@ -5,6 +5,7 @@ import { ProcessedImageCache, type ProcessedImage, type ProcessedImageObservatio
 import { expandRule, planeImage, tileImage } from './processed-image.ts'
 import { decodedImageBytes } from './image-cache.ts'
 import { TvpError } from '../system/tvp-error.ts'
+import { checkSelectedImageStorage } from '../graphics/image-decoder.ts'
 import type { ImageLoadProgress } from './image-load-progress.ts'
 import {
   applyImageKey,
@@ -203,9 +204,12 @@ export class ImageLoader {
   }
   private async decodeSelected(selected: SelectedImage, mode: ImageDecodeSelection['mode'], progress?: ImageDecodeProgress,
     paletteKey?: number): Promise<DecodedImage> {
-    this.scheduler.check()
-    const bytes = await selected.resource.read()
     let waiting = this.scheduler.wait?.()
+    if (waiting) await waiting
+    this.scheduler.check()
+    checkSelectedImageStorage(selected.format, mode, selected.resource.size)
+    const bytes = await selected.resource.read()
+    waiting = this.scheduler.wait?.()
     if (waiting) await waiting
     this.scheduler.check()
     let sized = false

@@ -130,6 +130,10 @@ console.log(`WASM manifest: ${manifestPath}`)
 // The allocation diagnostics exercise only TJS.
 if (!allocatorDiagnostic) {
   run(process.execPath, ['scripts/build-fonts.mjs'])
-  run(process.execPath, ['scripts/build-image-zlib.mjs'])
-  run(process.execPath, ['scripts/build-image-jpeg.mjs'])
+  if (process.env.KRKR_SEPARATE_PNG_BUILD !== '1')
+    run(process.execPath, ['scripts/build-image-zlib.mjs'])
+  // Full hosted builds restore this run's standalone codec artifact. The
+  // default entry point still builds all required production assets.
+  if (process.env.KRKR_SEPARATE_JPEG_BUILD !== '1')
+    run(process.execPath, ['scripts/build-image-jpeg.mjs'])
 }

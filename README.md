@@ -2,7 +2,7 @@
 
 使用 TypeScript、Web API 与独立 TJS2 WASM 实现的浏览器 KiriKiri2 兼容运行时。
 
-开发候选与已验证版本分开记录：当前分支正在补齐非插件功能，最新候选接通同步窗口更新、视频图层几何及跨窗绑定，并修正播放中 seek 和换轨图像确认。共享 GPU 多窗口和 CSS 光标已有专项通过记录；窗口几何与媒体公开时钟因上一批构建失败仍未执行，类型错误已在本批修正、待重新构建。Actions 仍有失败与未报告项目，历史 Node 堆崩溃仍待定位，尚未完成整体验收。较大批次的执行结果在下一批取回，详见[实现进度](docs/non-plugin-progress.md)。
+目标是让原版 KRKR2 游戏在浏览器里完成启动、游玩、存读档和退出，当前优先实现插件以外的功能。各项改动按较大批次提交到 GitHub-hosted Actions，下一批取回结果。已通过的场景、待验证的实现和仍需处理的失败记录在[实现进度](docs/non-plugin-progress.md)。
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
@@ -83,7 +83,7 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 构建脚本在本机还会尝试探测 `../toolchains/krkr2/` 下的工具链。其他机器应显式配置上述环境变量。TJS2、fmt、Oniguruma 与必要的 Boost 头文件已随项目固定保存；构建不依赖相邻的 kirikiroid2-web 仓库，也不要求安装 vcpkg。
 
-首次构建生成 `.generated/wasm/` 和 `.generated/fonts/` 中的哈希资源与独立 manifest。FreeType 由 Emscripten 的固定端口获取并编译，首次需要网络，许可证随应用发布。日常修改 TypeScript 时无需重新编译 C/C++；修改 TJS 桥或相关第三方源码后执行 `npm run build:wasm`，仅修改字体内核时可执行 `npm run build:fonts`。
+完整构建为 TJS、FreeType、PNG/zlib 和 JPEG 分别生成带哈希的资源和清单，位于 `.generated/wasm/`、`.generated/fonts/`、`.generated/image-zlib/` 和 `.generated/image-jpeg/`。首次构建从固定来源获取依赖，许可证随应用发布。托管工作流让图像差分和播放器使用同一组编译产物。[构建与验证](docs/testing.md)
 
 ```sh
 npm run build:wasm -- asyncify  # 仅构建一种变体

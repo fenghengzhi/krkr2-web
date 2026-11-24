@@ -20,14 +20,16 @@ const pythonRoot = resolve(sdk, 'python'), python = process.env.EMSDK_PYTHON ||
   env = { ...process.env, EMSDK: sdk, ...(python ? { EMSDK_PYTHON: python } : {}) },
   build = resolve(root, 'out/native/image-zlib'), output = resolve(root, '.generated/image-zlib')
 mkdirSync(build, { recursive: true }); mkdirSync(output, { recursive: true })
-const compiled = spawnSync(resolve(emscripten, 'emcc'), [
+const command = [
   'native/image-zlib/kernel.c', '-std=c11', '-O2', '--no-entry', '-sUSE_ZLIB=1',
   '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sEXPORT_NAME=createImageZlib', '-sENVIRONMENT=web,worker,node',
   '-sFILESYSTEM=0', '-sALLOW_MEMORY_GROWTH=1', '-sABORTING_MALLOC=0',
   '-sSTACK_SIZE=65536', '-sINITIAL_MEMORY=2097152', '-sMAXIMUM_MEMORY=67108864',
   "-sINCOMING_MODULE_JS_API=['locateFile','wasmBinary']", "-sEXPORTED_RUNTIME_METHODS=['HEAPU8']",
   '-o', resolve(build, 'image-zlib.mjs'),
-], { cwd: root, env, stdio: 'inherit' })
+]
+writeFileSync(resolve(build, 'compile-command.json'), JSON.stringify({ toolchain, command }, null, 2) + '\n')
+const compiled = spawnSync(resolve(emscripten, 'emcc'), command, { cwd: root, env, stdio: 'inherit' })
 if (compiled.error) throw compiled.error
 if (compiled.status !== 0) throw new Error(`Image zlib build failed (${compiled.status})`)
 const configuration = spawnSync(resolve(emscripten, 'em-config'), ['PORTS'], { cwd: root, env, encoding: 'utf8' })

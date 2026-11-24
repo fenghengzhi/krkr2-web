@@ -1,0 +1,878 @@
+{
+  "schema": 1,
+  "batch": 119,
+  "repository": "fenghengzhi/krkr2-web",
+  "purpose": "Recover only originals missing from the already-frozen batch119 snapshot; no run/job/artifact listing, execution or rerun.",
+  "artifactCount": 75,
+  "jobLogCount": 20,
+  "expectedArtifactBytes": 629040186,
+  "limits": {
+    "perArtifactBytes": 134217728,
+    "perJobLogBytes": 8388608,
+    "totalDownloadedBytes": 939524096,
+    "httpErrorBodyBytes": 65536
+  },
+  "snapshots": [
+    {
+      "runId": 40791060043,
+      "headSha": "2f38ee94b686cbfa487f6137ea44d026af53cd16",
+      "runSnapshotSha256": "4f6cabdb4c54a77a64d7357c096f9ec406a7d3add288f8d6aedf26071a47e7f0",
+      "jobsSnapshotSha256": "2f401159a34ffec951677c235deba50e508e7fb14cf9e63a4d45826963495b71",
+      "artifactsSnapshotSha256": "7687d663e7910aa0d69d537436728e197d5e762940c6f7d3a0f782bcf8afb8dc"
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "runSnapshotSha256": "35c73fe30dc8624a80bec056a2addb730d18a7f97ceee752c7bc6746c7ec3379",
+      "jobsSnapshotSha256": "55427e8289d859f3a10193310c59c81434a25b84d184f1f323dcd899bd3c74c8",
+      "artifactsSnapshotSha256": "e1642855d798854b2b83fe443fd04643c366c484104106ce8e8ae0b328cbbba7"
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "runSnapshotSha256": "cc81c0ea3722cfcd824207239197d4a2349021f1fca9333ffa838d06f3075e14",
+      "jobsSnapshotSha256": "f333894ba2e288d679b793fe5601a1e6eec2df07513c158b6dbc54591b041bc4",
+      "artifactsSnapshotSha256": "23921529346afb0c2d31c7ffddf41d840c367d872b7ec55b2de3c845ad1712f4"
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "runSnapshotSha256": "c4456876f39237683a76d9e82108b7ed5639c0b598dfa4c7a5ca319454ec3104",
+      "jobsSnapshotSha256": "c9c4724149404e4f4073b7fc498df5930e7a4d5f5555433018c098b76f18beac",
+      "artifactsSnapshotSha256": "0c1267bad0169e10b1f0fb5ab97a539b5b947fd8651939f2aa0e4670a4def614"
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "runSnapshotSha256": "ed9f10983d5bca9186b943346b647f9d861dc4bc962c6f3f246ee08f123fabd2",
+      "jobsSnapshotSha256": "0b4b2424487685a66d765adb4e5f54161d70ab83f101b3c93889adcc305936e0",
+      "artifactsSnapshotSha256": "e466cdcd6f30ae36ed40913b92a3b2e4dbd76eb294a3e0c73d449a08c5dbab11"
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "runSnapshotSha256": "8f5c4236c5d610d6a71f4a2778ff17ee1dfdaa19bdc5da8d89d6bd13de7b09bb",
+      "jobsSnapshotSha256": "1e3cc9a7edb993b5a975c2191895c5d8ec3aebfafeb2e1aa51ce4ac7e9eb1232",
+      "artifactsSnapshotSha256": "dd23acc3765d81fbb81fb95e85035ed9755d071b76fc5b17472e079db4b46f44"
+    }
+  ],
+  "artifacts": [
+    {
+      "runId": 40791060043,
+      "headSha": "2f38ee94b686cbfa487f6137ea44d026af53cd16",
+      "id": 12868630320,
+      "name": "native-cursor-windows-2025-1",
+      "bytes": 25645029,
+      "sha256": "40c1fa8160a232761791afd3348ea61325775bd619460a7571cfafda2ee69bbd",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40791060043,
+      "headSha": "2f38ee94b686cbfa487f6137ea44d026af53cd16",
+      "id": 12868186593,
+      "name": "native-cursor-windows-2022-1",
+      "bytes": 25642924,
+      "sha256": "513c2667463365a091944cf17f63cbd69ce4161046ac08d2045078ba2ca99c7f",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40791060043,
+      "headSha": "2f38ee94b686cbfa487f6137ea44d026af53cd16",
+      "id": 12867946700,
+      "name": "object-identity-allocations-jspi",
+      "bytes": 543287,
+      "sha256": "0edaa082d02615d790f49f73327e278e0d3561d3ef9ae01aff552c30fc24f299",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12868731054,
+      "name": "native-cursor-windows-2022-1",
+      "bytes": 25642959,
+      "sha256": "34b517ac475667a8dbe79877d1082471ed9f5a6248c12f10fb74bcd6922d7683",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12868710055,
+      "name": "native-window-geometry-windows-2022-1",
+      "bytes": 535029,
+      "sha256": "2d971100143b83fc2341c662bd05acd6a0b14677c2111aadc9d24a63e73bb3eb",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12868705025,
+      "name": "build-logs",
+      "bytes": 201476,
+      "sha256": "1914e1d3b59d50b9e4f6f83c748dd66e4fac2dbe147a8d4087f7fd8eeb51ace8",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12868655294,
+      "name": "native-window-move-windows-2022-1",
+      "bytes": 392292,
+      "sha256": "a7652251bb6d2cbc473637f146430f0790ef9b135340d9c28c40808b2651d8a2",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12868491451,
+      "name": "native-cursor-windows-2025-1",
+      "bytes": 25645026,
+      "sha256": "93ab9335213a835f6eb4f08b22e3d7206e6d6513d8f4504b65099e721eefb8ee",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12868401295,
+      "name": "native-window-move-windows-2025-1",
+      "bytes": 393217,
+      "sha256": "9d58bcada4f7a99df990f0f5f8c0d9b7a0fb9264b3680a1cb029af0b68203623",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12868386831,
+      "name": "object-identity-allocations-jspi",
+      "bytes": 543284,
+      "sha256": "d7f5ba61a00dee39cc920508072540e41b8a96578325c01aa7664373b9347c31",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12868296583,
+      "name": "object-identity-allocations-asyncify",
+      "bytes": 817932,
+      "sha256": "0bb9b44b06886d337f9fd993f6e7fa9322b52dfd250acddf285252b72cc007c0",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12868197251,
+      "name": "variant-stack-thread-1",
+      "bytes": 144923,
+      "sha256": "61670177fac91761d4910fa6e48873d2886c038719a3f574da0c4a8b2d12ad84",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12867927384,
+      "name": "native-termination-windows-2025-1",
+      "bytes": 28903,
+      "sha256": "229ae7debcd8ab0f2f1df858ca5f87d94348203000284a872d35719122ab93d5",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12867833585,
+      "name": "native-png-reference",
+      "bytes": 474429,
+      "sha256": "72f2f21ad3e7b71eea82cd28db89257862c39004061427e3a7686c147eb2c962",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12867683059,
+      "name": "native-termination-windows-2022-1",
+      "bytes": 28894,
+      "sha256": "87c9ffa7251badde5e9f55850a13acee9d661465d359419498a76f24862ae975",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12867578254,
+      "name": "variant-stack-address-undefined-1",
+      "bytes": 271656,
+      "sha256": "33cd1aa6a390448c849234459675feed732cde5801fc0b777e744a1b1c08f595",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 12867464816,
+      "name": "native-window-geometry-windows-2025-1",
+      "bytes": 535570,
+      "sha256": "8719b866563e0bd3d383d71201fb0afa77fa0ccb285533418b4d37a075f466a4",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12868636715,
+      "name": "native-window-geometry-windows-2025-1",
+      "bytes": 535832,
+      "sha256": "a6eec548c9edbc5cf38be79180e2fda17df15345aeda237eda5e87df1d3e6403",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12868617426,
+      "name": "native-cursor-windows-2022-1",
+      "bytes": 25642935,
+      "sha256": "fbbb63a9bd0ef6408a9ca4fe1fe8d816378bda28a567fe793e84a8edba1a61da",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12868546898,
+      "name": "native-termination-windows-2025-1",
+      "bytes": 28913,
+      "sha256": "5dfd4ca560d26a7c2cc22aea7cdff7552a4a77df676878bfc69c274598c9641e",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12868282275,
+      "name": "native-window-geometry-windows-2022-1",
+      "bytes": 534888,
+      "sha256": "816d2d7a5c7408056d84f59c3c4fe79cf1bc9f0d7ad6a679bfa7e85c8b27e78a",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12868263188,
+      "name": "native-termination-windows-2022-1",
+      "bytes": 28926,
+      "sha256": "ce92b0fd8be323f79e9b92a0c49d72ee44df9945f2008fd1a2e31ecc279cd969",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12868252916,
+      "name": "native-cursor-windows-2025-1",
+      "bytes": 25645005,
+      "sha256": "4b60c483975b6ef9c458ef1bb477036a5c09f61ea9352edbad8121e9317d8edd",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12868118291,
+      "name": "object-identity-allocations-jspi",
+      "bytes": 543288,
+      "sha256": "eecac6ece602e25b5ec33ef95e3e3391b58d8bfa27f8dbf8c79bae98ba126fed",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12868099410,
+      "name": "build-logs",
+      "bytes": 211023,
+      "sha256": "2a34b387826c40d5b1832b82566c022ca5bbdc74fdded6b792a5e47a68d38c4a",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12868088967,
+      "name": "variant-stack-thread-1",
+      "bytes": 144923,
+      "sha256": "a8941b9bf576d6e2648267e46735d5fa285c6661558647f49df2606b1ae06f13",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12867999290,
+      "name": "native-window-move-windows-2022-1",
+      "bytes": 392091,
+      "sha256": "a94203ae5f332b93ed6eedad2a7d5ffab7f8d43223b415f23cfaeaf3cd40164a",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12867609273,
+      "name": "native-window-move-windows-2025-1",
+      "bytes": 392628,
+      "sha256": "b72facb2b212024c77872270e7385bbed1739fe72c0367acf8e5f6095784472b",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12867484701,
+      "name": "object-identity-allocations-asyncify",
+      "bytes": 817940,
+      "sha256": "d2eb22430cd499f40fb87161c8d03e896260cfad39e955176be4b419f2f39f4e",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12867459480,
+      "name": "variant-stack-address-undefined-1",
+      "bytes": 271656,
+      "sha256": "f6bef8b50e21d1f3686e12180f61f712b7ea17ffd9da9cd285d61d315b3b70f0",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 12867429585,
+      "name": "native-png-reference",
+      "bytes": 2722317,
+      "sha256": "9b6bc7aa644d9945a2bb1859b07adcd53003e8079b6d8af76a31acd146b450e2",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12869375474,
+      "name": "native-cursor-windows-2022-1",
+      "bytes": 25642922,
+      "sha256": "74e909f2b64a97d2026195594201bc44e67939783bf6398ddeb1dc48ca16390e",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12869115151,
+      "name": "native-termination-windows-2025-1",
+      "bytes": 28892,
+      "sha256": "03071f8f6f80cd536f0a5f516c94e263cf745ebf25a49adfe04349e4e88852b9",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12868836558,
+      "name": "build-logs",
+      "bytes": 206064,
+      "sha256": "f5fe2f12bc21d197ee131819275f0a2d1a9d457132755357a0756712f0c5e361",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12868816490,
+      "name": "native-termination-windows-2022-1",
+      "bytes": 28906,
+      "sha256": "ec04b3885fe6e7418e46a8e2a1ef7ca5bf29c8cc70707de9ec3e2af153f5ae29",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12868776739,
+      "name": "native-window-geometry-windows-2025-1",
+      "bytes": 535515,
+      "sha256": "8830295b5ae4597a638c5787209820e3ba943819ed6be7fbbd0b56bf5f8c8ff6",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12868742131,
+      "name": "native-window-geometry-windows-2022-1",
+      "bytes": 534941,
+      "sha256": "69723dc9e853ce2edaeddb4a7e1a94770b83cc10d56e07e5b85d23eac4e450ff",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12868737145,
+      "name": "object-identity-allocations-jspi",
+      "bytes": 4163,
+      "sha256": "d6e197fa3c950ba7ede0ab675e419b9f1388e63b7544b773a8740e21ff12b303",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12868637599,
+      "name": "native-window-move-windows-2025-1",
+      "bytes": 391921,
+      "sha256": "aa8c7b7aa9debaa39e79c1251a9ac4551c356c65ee878a31181f9643612f1a84",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12868577193,
+      "name": "object-identity-allocations-asyncify",
+      "bytes": 4183,
+      "sha256": "a0c231ed4f51b56d071c8058e07fe86dd486433333adb4e9d0ce7fe4f87680e2",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12868293937,
+      "name": "variant-stack-thread-1",
+      "bytes": 144923,
+      "sha256": "3c83f899a2f59ddfad8b1cd1f566ede77d2fa2b7de7aa97282b8b8250cea726b",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12868213812,
+      "name": "native-cursor-windows-2025-1",
+      "bytes": 25645008,
+      "sha256": "b1727b695985a15a377bd8e60d357006edd624dfd9f20105ac2015722a00fc36",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12867784507,
+      "name": "variant-stack-address-undefined-1",
+      "bytes": 271656,
+      "sha256": "cdb4f16fe5f9d1fa030c93f751a49fbed1406661e4b7525a2dc59a8ec6170416",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12867739533,
+      "name": "native-window-move-windows-2022-1",
+      "bytes": 392053,
+      "sha256": "b53b9d07a6ddb3d2cef839683df91e6937a5862f74dee9cee5df0c54364227ff",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 12867669786,
+      "name": "native-png-reference",
+      "bytes": 2722317,
+      "sha256": "dbbb5e5816414902e0ed9ee5866c0e2b8784293063ac713b016badd0939bf79a",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12869255925,
+      "name": "native-window-move-windows-2025-1",
+      "bytes": 392520,
+      "sha256": "2978d6981104af02fc75b6e65cfbcbdc441a23929631c854c45cf3ee749363c5",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12869196444,
+      "name": "object-identity-allocations-asyncify",
+      "bytes": 4184,
+      "sha256": "7378941ff442c249726282ae377fa384883b8dd21b83d809e23dc51a7b9fa629",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12869191125,
+      "name": "native-window-geometry-windows-2022-1",
+      "bytes": 534586,
+      "sha256": "beaae9b9009850591d2849bcc81f7513eb97fafed54560bbe85e409709a6d500",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12869056654,
+      "name": "activity-wrapper-runtime-default",
+      "bytes": 86205068,
+      "sha256": "0eec51491574607fb639d58fe46bc499ac2c5f7242593f2ac35bc9d01d4de944",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12869046626,
+      "name": "native-window-move-windows-2022-1",
+      "bytes": 391429,
+      "sha256": "e911bb00e4fd27b2ba15797ada876c99bf3fd5eb9129eb5dc47caf1156191417",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12869041581,
+      "name": "native-window-geometry-windows-2025-1",
+      "bytes": 536134,
+      "sha256": "c46f0e6e315ef26de8ca0a1487b423f57fcf416160fada3f050e986d52c97d44",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12869007687,
+      "name": "native-cursor-windows-2022-1",
+      "bytes": 25642952,
+      "sha256": "7be231a95a7d80a1dcbb2883bba2f7602fab3ce26cf5f9127a754dea3b3ac338",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12868991995,
+      "name": "build-logs",
+      "bytes": 206062,
+      "sha256": "750a372bde3ba672c11b3a1e8a5fb38b50eb4e8d776cdea54d27d02dec90fa41",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12868892355,
+      "name": "native-png-reference",
+      "bytes": 2945990,
+      "sha256": "4b02faedeb5b30fe0cc09b6137083737acf6e59639e668e0b020c21fe665635f",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12868733159,
+      "name": "native-termination-windows-2025-1",
+      "bytes": 28896,
+      "sha256": "9fc6eba80983ad2e4dd30203fc7ba47b0571e9dbaf1c6eb6f33f7b66f36ea475",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12868722327,
+      "name": "variant-stack-address-undefined-1",
+      "bytes": 271656,
+      "sha256": "00d1aa3b0926ed88cfbc6fc43709bc1d2329cfd88abb42e1a6d37ace72710979",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12868569901,
+      "name": "native-cursor-windows-2025-1",
+      "bytes": 25645027,
+      "sha256": "e38192144573d981110575604f927427b01c245a6d132024a53813e7d5acae0d",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12868513878,
+      "name": "variant-stack-thread-1",
+      "bytes": 144923,
+      "sha256": "581b8bc838a730768a25f21a45b7d2c582a0acb8352e165ea74a8e49b62cb690",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12868423468,
+      "name": "object-identity-allocations-jspi",
+      "bytes": 4167,
+      "sha256": "5aab12995830e13cdbceb51c05dbe0093075da460c9b41a774c620a402abcfb8",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12868408545,
+      "name": "activity-wrapper-runtime-no-wasm-code-gc",
+      "bytes": 86205110,
+      "sha256": "20ad3109d7a553924aec0ae6fce57197055a4d065b8159908a873d1c49e1ee09",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 12868353572,
+      "name": "native-termination-windows-2022-1",
+      "bytes": 28913,
+      "sha256": "c6294d595c1eb2d2cae5c044c028a2268ae3181d2414db5ed2c48289d1ffcf5f",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14957775501,
+      "name": "object-identity-allocations-asyncify",
+      "bytes": 4178,
+      "sha256": "b7bd127d091f76d9c281ba2561aa802b764c2a21bd0ebf1c5f7d8b4df7d87c40",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14957715321,
+      "name": "variant-stack-thread-1",
+      "bytes": 144920,
+      "sha256": "abfcd7431d55b0e5460dc65436963a4c886c0b8c5e5935e5b9d00c6078962164",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14957450526,
+      "name": "native-window-move-windows-2025-1",
+      "bytes": 392641,
+      "sha256": "8d4f7598a3024cec92722769c74447a83405e2e324fc5acf519f252f0f6c28a7",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14957181063,
+      "name": "native-png-reference",
+      "bytes": 2945990,
+      "sha256": "53e2d8e27024f67ed4cbc4773c4398836340c13f322181f9521ac7bc434ba493",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14957165631,
+      "name": "native-window-geometry-windows-2022-1",
+      "bytes": 534961,
+      "sha256": "b1668c37ae953cf53e8d56a1c4b49154d794845ce20901c5e00a7bbf5856af1f",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14957126234,
+      "name": "activity-wrapper-runtime-no-wasm-code-gc",
+      "bytes": 86204921,
+      "sha256": "a46df19fdfd5c0bd8442a3b66a119b2ff2676fe7dc633b3dc1bd8606e85b4de9",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14956985757,
+      "name": "native-window-move-windows-2022-1",
+      "bytes": 392056,
+      "sha256": "ab3c4781d3f1e4effd5df488eca157295bea62029ded52e39f193c23ead6eada",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14956506089,
+      "name": "build-logs",
+      "bytes": 206063,
+      "sha256": "9c6c8fba89efcf3cc674f024974364d72de3e2f8621f6ebc9569ece74acd8f82",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14956350969,
+      "name": "native-termination-windows-2022-1",
+      "bytes": 28917,
+      "sha256": "f38243a12ada0936eb67e6a875eacabe72b67d497140fa0f572f8a4a899e4988",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14956266029,
+      "name": "native-termination-windows-2025-1",
+      "bytes": 28905,
+      "sha256": "2f858ab9b85f89bea44b064835951f8d206caf64f9dc794df0d742da3fadb8fb",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14955942513,
+      "name": "native-window-geometry-windows-2025-1",
+      "bytes": 535829,
+      "sha256": "277f0875f272b09f619fbd623fc30321cc8dfb8953c4cccea6d6ce2e56686bff",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14955942421,
+      "name": "variant-stack-address-undefined-1",
+      "bytes": 271656,
+      "sha256": "7e79c8fd67dd562a935ca0dec4f403e16deeb4fd03d10fc9b7c7c8ca455ba7d1",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14955594105,
+      "name": "activity-wrapper-runtime-default",
+      "bytes": 86204709,
+      "sha256": "0d6a5274108882dcd7c15da0e964deb5a6aa103d1b22f8e1e77e1e7fdfb46cef",
+      "snapshotExpired": false
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 14955454712,
+      "name": "object-identity-allocations-jspi",
+      "bytes": 4164,
+      "sha256": "5b26dd5f3ce3c3e9d7937aa0a74b03317f91b3465c20300f385b218ad991c399",
+      "snapshotExpired": false
+    }
+  ],
+  "jobLogs": [
+    {
+      "runId": 40791060043,
+      "headSha": "2f38ee94b686cbfa487f6137ea44d026af53cd16",
+      "id": 123224468495,
+      "name": "All tests",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 123224494181,
+      "name": "WASM, types and production build",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40794100263,
+      "headSha": "cfd4ed7cc893aba8d17932d6bc84f8c85ddef96f",
+      "id": 123226696569,
+      "name": "All tests",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 123226731228,
+      "name": "WASM, types and production build",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40798634885,
+      "headSha": "5784993da5a6e5d48fc0e7cd92ad133ddab57930",
+      "id": 123228262292,
+      "name": "All tests",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 123228293766,
+      "name": "WASM, types and production build",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 123228293810,
+      "name": "Native object identity allocation failures / Object identity allocator / jspi",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 123228293850,
+      "name": "Native object identity allocation failures / Object identity allocator / asyncify",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 123228294244,
+      "name": "Native Window beginMove reference / beginMove / windows-2025",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40801785412,
+      "headSha": "2f22e878502353c9c8e93e72e78c34c7d306ae1e",
+      "id": 123230319694,
+      "name": "All tests",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 123230351472,
+      "name": "WASM, types and production build",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 123230351600,
+      "name": "Native object identity allocation failures / Object identity allocator / jspi",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 123230351666,
+      "name": "Native object identity allocation failures / Object identity allocator / asyncify",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 123230351704,
+      "name": "Native Window beginMove reference / beginMove / windows-2025",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 123230352159,
+      "name": "Native Window beginMove reference / beginMove / windows-2022",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 40805119639,
+      "headSha": "32a1945fc88b0acccf3aab90ab7f1d7e9548d0fd",
+      "id": 123232453310,
+      "name": "All tests",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 138712162326,
+      "name": "WASM, types and production build",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 138712162498,
+      "name": "Native Window beginMove reference / beginMove / windows-2022",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 138712162600,
+      "name": "Native object identity allocation failures / Object identity allocator / jspi",
+      "snapshotConclusion": "failure"
+    },
+    {
+      "runId": 45469186113,
+      "headSha": "0ff9f1080ac82bb37258ddb96aa6045b40e284e0",
+      "id": 138712163213,
+      "name": "Native object identity allocation failures / Object identity allocator / asyncify",
+      "snapshotConclusion": "failure"
+    }
+  ]
+}

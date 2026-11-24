@@ -98,7 +98,7 @@ gh workflow run test.yml --ref BRANCH -f runtime-only=true
 
 构建作业固定 Node.js 24.19.0 和 Emscripten 6.0.9，使用锁文件安装依赖，编译 Asyncify、JSPI、FreeType 和独立的 PNG/zlib、JPEG 内核，执行类型检查、生产构建和离线发布文件校验，再生成两个 PWA 更新样本。原生源码、第三方源码、构建脚本与工具链版本匹配时复用云端内核缓存。应用和 PWA 样本每次重新构建。缓存 key 和命中情况写入构建信息。
 
-第 118 批起，构建作业另用固定源码的 32 位 C 编码器生成 `jpeg-fixtures`。编码输入、出处和命令日志单独归档，应用测试从本次 `test-build` 取得同一组字节。原 JPEG 加载器的 C 参考观察保存在 `native-jpeg-reference`，实际 WASM 与该参考的逐项比较保存在 `jpeg-comparison`。两项作业都属于全套通过条件。[JPEG 验收范围](decisions/118-native-jpeg-and-hosted-build-recovery.md)
+独立作业从固定源码生成 `jpeg-fixtures`、`jpeg-kernel` 和 `zlib-kernel`。主构建将同一份内核、许可和测试输入纳入发布及 `test-build`。PNG、JPEG 差分可以在主 TJS 构建失败时给出自己的结果。JPEG 的 C 观察及比较分别保存在 `native-jpeg-reference` 和 `jpeg-comparison`，PNG 的流式、调色板及低位灰度结果分别归档。另有 Windows 作业以原版 2.32r2 SDK 比较 ERI 像素。上述作业均列入全套门禁。[JPEG 验收](decisions/118-native-jpeg-and-hosted-build-recovery.md) · [ERI 和 PNG 验收](decisions/119-eri-png-and-hosted-codecs.md)
 
 | 作业                       | 范围                                                                 |
 | -------------------------- | -------------------------------------------------------------------- |

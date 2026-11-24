@@ -33,8 +33,123 @@ env:
   CI: 'true'
 
 jobs:
+  png-kernel:
+    name: Production PNG inflater WebAssembly kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: |
+          mkdir -p out/ci
+          cp native/image-zlib/source.json out/ci/image-zlib-source.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        id: node
+        with:
+          node-version: '24.19.0'
+      - uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984
+        id: emsdk
+        with:
+          version: '6.0.9'
+      - name: Prepare the exact zlib port source
+        id: source
+        run: python3 scripts/prepare-emscripten-ports.py --evidence out/ci/png-ports.json zlib 2>&1 | tee out/ci/png-ports.log
+      - name: Build the PNG assets shared by the application and differential tests
+        id: kernel
+        run: |
+          node scripts/build-image-zlib.mjs 2>&1 | tee out/ci/image-zlib.log
+          tar -czf "$RUNNER_TEMP/zlib-kernel.tar.gz" .generated/image-zlib public/licenses/image-zlib
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zlib-kernel
+          path: ${{ runner.temp }}/zlib-kernel.tar.gz
+          if-no-files-found: error
+          retention-days: 90
+      - name: Preserve source and toolchain step outcomes
+        if: always()
+        env:
+          NODE_OUTCOME: ${{ steps.node.outcome }}
+          EMSDK_OUTCOME: ${{ steps.emsdk.outcome }}
+          SOURCE_OUTCOME: ${{ steps.source.outcome }}
+          KERNEL_OUTCOME: ${{ steps.kernel.outcome }}
+        run: |
+          mkdir -p out/ci
+          python3 - <<'PY'
+          import json, os, pathlib
+          fields = ['GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'NODE_OUTCOME', 'EMSDK_OUTCOME', 'SOURCE_OUTCOME', 'KERNEL_OUTCOME']
+          pathlib.Path('out/ci/png-kernel-status.json').write_text(json.dumps({key: os.environ.get(key) for key in fields}, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: png-kernel-build-logs
+          path: |
+            out/ci/
+            out/native/image-zlib/compile-command.json
+          if-no-files-found: error
+          retention-days: 90
+
+  jpeg-fixtures:
+    name: Independent IJG fixture inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Generate fixed-source inputs and record compiler output
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python3 scripts/run-native-jpeg-reference.py --fixtures-only --output out/verification/jpeg-fixtures
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: jpeg-fixtures
+          path: out/verification/jpeg-fixtures/
+          if-no-files-found: error
+          retention-days: 90
+
+  jpeg-kernel:
+    name: Production IJG WebAssembly kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.19.0'
+      - uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984
+        with:
+          version: '6.0.9'
+      - name: Build the JPEG assets shared by the application and differential tests
+        run: |
+          mkdir -p out/ci
+          node scripts/build-image-jpeg.mjs 2>&1 | tee out/ci/image-jpeg.log
+          tar -czf "$RUNNER_TEMP/jpeg-kernel.tar.gz" .generated/image-jpeg public/licenses/image-jpeg
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: jpeg-kernel
+          path: ${{ runner.temp }}/jpeg-kernel.tar.gz
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: jpeg-kernel-build-logs
+          path: |
+            out/ci/image-jpeg.log
+            out/native/image-jpeg/compile-command.json
+          retention-days: 90
+
   build:
     name: WASM, types and production build
+    # Still compile the main VM when an independent image build fails.
+    if: ${{ !cancelled() }}
+    needs: [jpeg-fixtures, jpeg-kernel, png-kernel]
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -59,11 +174,10 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            .generated
+            .generated/wasm
+            .generated/fonts
             public/licenses/freetype
-            public/licenses/image-zlib
-            public/licenses/image-jpeg
-          key: kernels-v1-${{ runner.os }}-${{ runner.arch }}-emsdk-6.0.9-${{ hashFiles('native/**', 'third_party/**', 'scripts/build-wasm.mjs', 'scripts/build-fonts.mjs', 'scripts/build-image-zlib.mjs', 'scripts/build-image-jpeg.mjs', 'scripts/generate-tvp-messages.py') }}
+          key: kernels-v1-${{ runner.os }}-${{ runner.arch }}-emsdk-6.0.9-${{ hashFiles('native/**', 'third_party/**', 'scripts/build-wasm.mjs', 'scripts/build-fonts.mjs', 'scripts/build-image-zlib.mjs', 'scripts/build-image-jpeg.mjs', 'scripts/prepare-emscripten-ports.py', 'scripts/generate-tvp-messages.py') }}
       - name: Install native build tools
         if: steps.kernels.outputs.cache-hit != 'true'
         run: |
@@ -80,69 +194,34 @@ jobs:
           out/ci/string-append-native 2>&1 | tee out/ci/string-append-native.log
       - name: Build Asyncify, JSPI, font and image kernels
         if: steps.kernels.outputs.cache-hit != 'true'
+        env:
+          KRKR_SEPARATE_JPEG_BUILD: '1'
+          KRKR_SEPARATE_PNG_BUILD: '1'
         run: |
           mkdir -p out/ci
-          # GitHub archive redirects intermittently return 504. Fetch from its
-          # codeload endpoint and require the exact Emscripten port hashes.
-          python3 - <<'PY' 2>&1 | tee out/ci/font-ports.log
-          import ast, hashlib, json, os, pathlib, shutil, subprocess, tempfile, urllib.request
-          emscripten = pathlib.Path(os.environ['EMSDK']) / 'upstream/emscripten'
-          ports = pathlib.Path(subprocess.check_output([str(emscripten / 'em-config'), 'PORTS'], text=True).strip())
-          ports.mkdir(parents=True, exist_ok=True)
-          evidence = []
-          for name, repo, extension in [('zlib', 'madler/zlib', 'tar.gz'), ('freetype', 'freetype/freetype', 'zip')]:
-              source = (emscripten / 'tools/ports' / (name + '.py')).read_text()
-              values = {}
-              for item in ast.parse(source).body:
-                  if isinstance(item, ast.Assign) and len(item.targets) == 1 and isinstance(item.targets[0], ast.Name):
-                      key = item.targets[0].id
-                      if key in ('VERSION', 'TAG', 'HASH'):
-                          values[key] = ast.literal_eval(item.value)
-              tag = 'v' + values['VERSION'] if name == 'zlib' else values['TAG']
-              original = f'https://github.com/{repo}/archive/refs/tags/{tag}.tar.gz' if name == 'zlib' else f'https://github.com/{repo}/archive/{tag}.zip'
-              url = f'https://codeload.github.com/{repo}/{extension}/refs/tags/{tag}'
-              with urllib.request.urlopen(url, timeout=90) as response:
-                  data = response.read()
-              actual = hashlib.sha512(data).hexdigest()
-              if actual != values['HASH']:
-                  raise RuntimeError(f'{name} archive differs from pinned Emscripten SHA-512: {actual}')
-              with tempfile.TemporaryDirectory(dir=ports) as temporary:
-                  archive = pathlib.Path(temporary) / ('source.' + extension)
-                  archive.write_bytes(data)
-                  unpacked = pathlib.Path(temporary) / 'unpacked'
-                  shutil.unpack_archive(archive, unpacked)
-                  (unpacked / '.emscripten_url').write_text(original + '\n')
-                  destination = ports / name
-                  if destination.exists():
-                      shutil.rmtree(destination)
-                  os.replace(unpacked, destination)
-              evidence.append({'name': name, 'tag': tag, 'url': url, 'bytes': len(data), 'sha512': actual})
-              print(f'Prepared {name} {tag}: {actual}', flush=True)
-          pathlib.Path('out/ci/font-ports.json').write_text(json.dumps(evidence, indent=2) + '\n')
-          PY
+          # The font port still needs its own zlib; its source preparation is
+          # shared with the independent PNG build, not its compiled kernel.
+          python3 scripts/prepare-emscripten-ports.py --evidence out/ci/font-ports.json zlib freetype 2>&1 | tee out/ci/font-ports.log
           npm run build:wasm 2>&1 | tee out/ci/wasm.log
       - name: Cache compiled kernels
         if: steps.kernels.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            .generated
+            .generated/wasm
+            .generated/fonts
             public/licenses/freetype
-            public/licenses/image-zlib
-            public/licenses/image-jpeg
           key: ${{ steps.kernels.outputs.cache-primary-key }}
-      - name: Generate independent fixed-source JPEG fixture inputs
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib
-          python3 scripts/run-native-jpeg-reference.py --fixtures-only --output out/verification/jpeg-fixtures 2>&1 | tee out/ci/jpeg-fixtures.log
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
+      - uses: ./.github/actions/restore-image-kernel
+        with:
+          kernel: zlib
+      - uses: ./.github/actions/restore-image-kernel
+        with:
+          kernel: jpeg
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: jpeg-fixtures
           path: out/verification/jpeg-fixtures/
-          if-no-files-found: error
-          retention-days: 90
       - name: Check types and production release
         run: npm run build 2>&1 | tee out/ci/build.log
       - name: Build offline update fixtures
@@ -613,7 +692,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-reference, png-stream-comparison, png-palette-comparison, jpeg-reference, jpeg-comparison]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, eri-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -704,10 +783,36 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  png-lowbit:
+    name: Independent selected PNG low-bit and transparency contracts
+    if: ${{ !inputs.runtime-only }}
+    needs: png-kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        with:
+          image-kernel: zlib
+      - name: Run all eight definitions with this run's production inflater
+        run: |
+          mkdir -p out/verification/png-lowbit
+          cp .generated/image-zlib/manifest.json out/verification/png-lowbit/kernel-manifest.json
+          node --import tsx --test --test-reporter=tap tests/conformance/png-lowbit.test.ts 2>&1 | tee out/verification/png-lowbit/node.tap
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: png-lowbit-results
+          path: out/verification/png-lowbit/
+          if-no-files-found: error
+          retention-days: 90
+
   png-stream-comparison:
     name: PNG pull decoder and native write phases
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, png-reference]
+    needs: [png-kernel, png-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -715,6 +820,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/prepare-tests
+        with:
+          image-kernel: zlib
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: native-png-reference
@@ -732,7 +839,7 @@ jobs:
   png-palette-comparison:
     name: PNG palette transforms and native row layout
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, png-reference]
+    needs: [png-kernel, png-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -740,6 +847,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/prepare-tests
+        with:
+          image-kernel: zlib
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: native-png-reference
@@ -757,7 +866,7 @@ jobs:
   jpeg-reference:
     name: Fixed IJG 6b original JPEG handler reference
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
-    needs: build
+    needs: jpeg-fixtures
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -781,10 +890,41 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  eri-reference:
+    name: Original 2.32r2 SDK ERI pixels and palette selection
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - name: Prepare the owned image fixtures and record input hashes
+        run: node --import tsx tests/probes/eri-sdk.ts prepare
+      - name: Observe the original SDK with the fixed ERI project
+        run: ./tests/probes/original-eri.ps1
+      - name: Compare every native observation with the selected Web image loader
+        run: node --import tsx tests/probes/eri-sdk.ts compare
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-eri-reference
+          path: out/verification/native-eri/
+          if-no-files-found: error
+          retention-days: 90
+
   jpeg-comparison:
     name: JPEG native pixels, read phases and completed row groups
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, jpeg-reference]
+    needs: [jpeg-kernel, jpeg-reference]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -792,6 +932,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/prepare-tests
+        with:
+          image-kernel: jpeg
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: native-jpeg-reference

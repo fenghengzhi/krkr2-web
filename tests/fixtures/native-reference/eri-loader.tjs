@@ -1,0 +1,26 @@
+var events=[];
+function record(text){events.add(text);events.save("native-events.txt");}
+record("start");
+System.exceptionHandler=function(error){record("fatal|"+error.message);System.exit();return true;};
+System.exitOnWindowClose=false;
+System.exitOnNoWindowStartup=false;
+System.assignMessage("TVPERILoadError","eri:%1");
+var referenceWindow=new Window(), target=new Layer(referenceWindow,null);
+target.type=ltAlpha;
+function observe(id,key,province){
+  try {
+    if(province) target.loadProvinceImage(id+".eri");
+    else target.loadImages(id+".eri",key);
+    if(target.imageWidth!=3 || target.imageHeight!=2) throw new Exception("unexpected dimensions");
+    var pixels=[];
+    for(var y=0;y<2;y++) for(var x=0;x<3;x++){
+      var c=target.getMainPixel(x,y);
+      pixels.add((c>>16)&255);pixels.add((c>>8)&255);pixels.add(c&255);
+      pixels.add(target.getMaskPixel(x,y));
+    }
+    record("case|"+id+"|ok|3|2|"+pixels.join(","));
+  } catch(error) {record("case|"+id+"|error|"+error.message);}
+}
+/* CASES */
+record("done");
+System.exit();

@@ -109,16 +109,12 @@ test('selected normal TLG5/6 retain the original native-encoder full pixel corpu
   }
 })
 
-test('wrong bytes remain in the chosen handler and ERI is registered but unavailable', async () => {
+test('wrong bytes remain in the chosen handler and invalid ERI fails when its container opens', async () => {
   await assert.rejects(decode(imageFixture('main.png'), 'bmp'), native('TVPImageLoadError', 'This is not a Windows BMP file or an OS/2 BMP file.'))
   await assert.rejects(decode(bmp(), 'png'), native('TVPPNGLoadError', 'Not a PNG file'))
   await assert.rejects(decode(imageFixture('main.png'), 'tlg'), native('TVPTLGLoadError', 'Invalid TLG header or unsupported TLG version.'))
   await assert.rejects(decode(imageFixture('main.png'), 'jpeg'), untyped)
-  await assert.rejects(decode(imageFixture('main.png'), 'eri'), (error: unknown) => {
-    assert.ok(error instanceof TvpError)
-    assert.deepEqual(error.tvpMessage, { id: 'TVPNotImplemented', args: [] })
-    return true
-  })
+  await assert.rejects(decode(imageFixture('main.png'), 'eri'), native('TVPERILoadError', 'ERIFile::Open failed.'))
 })
 
 test('BMP known header/compression/mode reasons preserve preflight order and do not use another decoder', async () => {

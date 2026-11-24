@@ -280,6 +280,9 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
     header: Header | undefined,
     palette: Uint8Array | undefined,
     transparent: Uint8Array | undefined,
+    // libpng stores decoder transparency before checking tRNS CRC. Only a
+    // valid CRC sets info_ptr->valid, which controls duplicate rejection.
+    transparencyValid = false,
     total = 0,
     dataStart = 0,
     dataStop = 0,
@@ -324,6 +327,8 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
       } else if (!header && ['tRNS', 'oFFs', 'pHYs'].includes(type)) {
         throw new ImageDecodeError('png', `Missing IHDR before ${type === 'pHYs' ? 'pHYS' : type}`)
       }
+      if (type === 'tRNS' && header?.type === 3 && !dataStarted && !transparencyValid && !palette && length > 256)
+        throw new Error('PNG transparency before palette exceeds 256-entry Web budget')
     } else if (bytes.length - at < 12) throw new Error('Truncated PNG chunk')
     if (progress && !dataStarted && header && bytes.length - at >= 8 &&
         String.fromCharCode(...bytes.subarray(at + 4, at + 8)) === 'IDAT' &&
@@ -343,7 +348,7 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
       const otherKnown = ['gAMA', 'cHRM', 'sBIT', 'sRGB', 'bKGD', 'hIST', 'iCCP', 'sPLT',
         'tIME', 'sCAL', 'pCAL', 'tEXt', 'zTXt', 'iTXt'].includes(type),
         paletteTriples = type === 'PLTE' && !dataStarted && header?.type === 3 && length % 3 === 0,
-        transparencySkip = type === 'tRNS' && (dataStarted || !!transparent ||
+        transparencySkip = type === 'tRNS' && (dataStarted || transparencyValid ||
           (header?.type === 3 ? !length || (!!palette && length > palette.length / 3)
             : header?.type === 0 ? length !== 2 : header?.type === 2 ? length !== 6 : true)),
         skipped = type === 'IDAT' || type === 'IEND' || transparencySkip ||
@@ -366,7 +371,8 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
     } else if (length > bytes.length - at - 12) throw new Error('Truncated PNG chunk data')
     const chunk = bytes.subarray(start + 4, end)
     afterData = dataStarted && type !== 'IDAT'
-    const nativePosition = mode !== undefined &&
+    const nativeTransparency = mode !== undefined && type === 'tRNS',
+      nativePosition = mode !== undefined &&
       (type === 'oFFs' || type === 'pHYs' || type.toLowerCase() === 'vpag'),
       ancillaryPosition = nativePosition && !!(bytes[start]! & 32),
       validCrc = (yield* crc32(bytes.subarray(start, end))) === view.getUint32(end)
@@ -374,12 +380,12 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
     // fails before its CRC is consumed; ancillary variants are ignored.
     if (nativePosition && type.toLowerCase() === 'vpag' && length < 9 && !ancillaryPosition)
       throw new ImageDecodeError('png', `${type}: unknown critical chunk`)
-    if (!validCrc && !ancillaryPosition && !(streaming && (bytes[start]! & 32))) {
+    if (!validCrc && !ancillaryPosition && !nativeTransparency && !(streaming && (bytes[start]! & 32))) {
       if (streaming) throw new ImageDecodeError('png', `${type}: CRC error`)
       throw new Error('PNG chunk CRC mismatch')
     }
     at = end + 4
-    if (streaming && !validCrc && (bytes[start]! & 32) && type.toLowerCase() !== 'vpag') {
+    if (streaming && !validCrc && (bytes[start]! & 32) && type.toLowerCase() !== 'vpag' && !nativeTransparency) {
       yield
       continue
     }
@@ -425,6 +431,24 @@ function* parse(bytes: Uint8Array, mode?: ImageDecodeSelection['mode'], progress
       palette = chunk
     } else if (type === 'tRNS') {
       const color = header!.type
+      if (mode !== undefined) {
+        // png_handle_tRNS warns and consumes these chunks without changing
+        // either state. A failed earlier CRC left the info-valid slot free.
+        if (dataStarted) dataEnded = true
+        if (dataStarted || transparencyValid ||
+            (color === 3 ? !length || (!!palette && length > palette.length / 3)
+              : color === 0 ? length !== 2 : color === 2 ? length !== 6 : true)) {
+          yield
+          continue
+        }
+        // Missing PLTE is only a warning in the fixed reader. The bounded
+        // decoder data can precede its palette; pixel indices are checked
+        // against the actual palette when rows are decoded.
+        transparent = chunk
+        transparencyValid = validCrc
+        yield
+        continue
+      }
       if (
         transparent ||
         dataStarted ||
