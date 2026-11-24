@@ -23,3 +23,7 @@
 121 的 Windows 原版 ERI 手工场景 36/36、作者工具场景 10/10 逐像素匹配，独立 ERI 合约 23/23 通过。JPEG 对照为 43/43，PNG 流式与调色板两组各 30/30，低位深 PNG 合约 8/8。窗口移动参考在两种 Windows runner 各观察到完整的 7/7 场景。旧提交 111 的两组专项各完成 240/240，均无新 core，历史 SIGTRAP 和 SIGABRT 的根因仍未定位。[121 原始运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45478711947)
 
 本轮核对两个历史运行列出的全部 56 份 ZIP，总计 467,289,885 字节，其中 32 份为新取回。归档时核对了 GitHub 记录的 SHA-256 和长度，保留了两次按名称下载返回的 404，以及通过固定产物 ID 取得的原 ZIP。本地归档摘要在 `out/verification/github-actions/122-archive-summary.md`。新提交的结果由下一批取回。
+
+## 批次交接
+
+提交 `03ebffb4dde2acc451a1ac5c1d76cced5ffe01ba` 已推送。本批新增 15 个常规 Node 测试定义，以及每个浏览器 4 个算术 ERI 定义。原有音频浏览器用例也加载带分段重置和零节拍事件的 MIDI 文件。全套运行首次登记为 `in_progress`。登记页及提交匹配记录保存在 `out/verification/github-actions/122-initial-03ebffb4dde2acc451a1ac5c1d76cced5ffe01ba/`。下批优先取回发布构建、原版 KAG 游戏路线、ERI 像素和 MIDI 消息对照结果。[第 122 批全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45482636479)

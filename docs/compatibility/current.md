@@ -1,6 +1,6 @@
 # 当前实现范围
 
-第 122 批的播放器接入无损算术 ERI，支持帧 1、4 的真彩色和帧 2 的 8 位灰度／索引图。MIDI 增加打开文件时的原版错误消息、零速度值的默认节拍和分段音源重置。当前原版逐像素证据来自 121 的 46 个 ERI 场景。122 的新增行为和游戏路线待托管结果。[兼容范围与验收](../decisions/122-eri-arithmetic-and-midi.md)
+第 122 批的播放器接入无损算术 ERI，支持帧 1、4 的真彩色和帧 2 的 8 位灰度／索引图。MIDI 增加打开文件时的原版错误消息、零值节拍的恢复和分段音源重置。当前原版逐像素证据来自 121 的 46 个 ERI 场景。122 的完整实现提交为 `03ebffb4dde2acc451a1ac5c1d76cced5ffe01ba`，首次登记为运行中。[兼容范围与验收](../decisions/122-eri-arithmetic-and-midi.md) · [122 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45482636479)
 
 第 121 批完整提交为 `894f62165b9cc848b30aba1453be4c754329fe56`，全套验证首次登记为排队中。[Actions 45478711947](https://github.com/fenghengzhi/krkr2-web/actions/runs/45478711947)
 
