@@ -1,0 +1,531 @@
+{
+  "schema": 1,
+  "library": "ijg-libjpeg",
+  "version": "6b",
+  "jpegAbi": 62,
+  "toolchain": "6.0.9",
+  "archive": {
+    "url": "https://www.ijg.org/files/jpegsrc.v6b.tar.gz",
+    "bytes": 613261,
+    "sha256": "75c3ec241e9996504fe02a9ed4d12f16b74ade713972f3db9e65ce95cd27e35d"
+  },
+  "originalHeaders": [
+    {
+      "file": "jconfig.h",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/environ/win32/bcb2007/include/libjpeg2/jconfig.h",
+      "bytes": 1333,
+      "sha256": "1d0894775067d15163181f26d3039e24b34501ca7e5380dd2ddb8526dd05b250"
+    },
+    {
+      "file": "jmorecfg.h",
+      "url": "https://raw.githubusercontent.com/krkrz/krkr2/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/environ/win32/bcb2007/include/libjpeg2/jmorecfg.h",
+      "bytes": 12637,
+      "sha256": "fb3c11f0cbd0eb70b75a5067e9d8a23ad5bcf5ebf7f4f82e7de65d601170e1b7"
+    }
+  ],
+  "files": [
+    {
+      "file": "README",
+      "bytes": 19945,
+      "sha256": "4cf9c190f184019b61c36bcc49d4a24ffeb2a838c6f1690d6c4db14cfb2d0478"
+    },
+    {
+      "file": "install.doc",
+      "bytes": 51928,
+      "sha256": "101cf3d98ab4a4bc5602d9ccd0c9ce0a8f789f0e411e1d64fa3920a0666810cb"
+    },
+    {
+      "file": "usage.doc",
+      "bytes": 27171,
+      "sha256": "2f64e407a1403c3212a9e4c2bbd36935bb6086d345e78dd9ba1d3f6b675ec7b3"
+    },
+    {
+      "file": "wizard.doc",
+      "bytes": 9759,
+      "sha256": "a8d435226add320a7217e457e87bf44c0760687481fcfa9803b3b46c9da78f0d"
+    },
+    {
+      "file": "example.c",
+      "bytes": 17091,
+      "sha256": "6cf46f1ab60fadfcb13284ab0ec5f1cb89fa50182842588f36d8f72c87965ea7"
+    },
+    {
+      "file": "libjpeg.doc",
+      "bytes": 159338,
+      "sha256": "d281517671fb9669154a1fdd7f5c6d578944f7218ee4a27b23dda79902517ae4"
+    },
+    {
+      "file": "structure.doc",
+      "bytes": 51896,
+      "sha256": "01be133939dbc4f2d7dd22d459139fb2e9bc37219351c3042285f58a1e510567"
+    },
+    {
+      "file": "coderules.doc",
+      "bytes": 5364,
+      "sha256": "bd6f1d32e1a758afeaa54036d2b6371636addbd678d31651c82477da0c3b3f3b"
+    },
+    {
+      "file": "filelist.doc",
+      "bytes": 8368,
+      "sha256": "cbacd794bb2a2339c242e94eed31d80a451a21266fed6440c8fb64df95e7fe21"
+    },
+    {
+      "file": "configure",
+      "bytes": 60309,
+      "sha256": "391a79fa559ea020c0450cf377abd1f58fef32b8183476176d2893dfa229254e"
+    },
+    {
+      "file": "makefile.cfg",
+      "bytes": 15750,
+      "sha256": "1246784acae91c661f2facc1a54cff16c0f154f39cf91ec3a0c1f0cf15544f1c"
+    },
+    {
+      "file": "jcapimin.c",
+      "bytes": 9121,
+      "sha256": "5d7e394ac763f51bb13d6f049c65888d3b106bf54c01253807647745acdf6eac"
+    },
+    {
+      "file": "jcapistd.c",
+      "bytes": 5881,
+      "sha256": "371517d8285ca47d286be53a6c1bf8f1a0372e12e6e7f7c84b324d7f441b6581"
+    },
+    {
+      "file": "jccoefct.c",
+      "bytes": 16400,
+      "sha256": "3ae6713a9b2a3fe717703dcdcb37f5dfdf123c19736207b71c132c4e1caa7099"
+    },
+    {
+      "file": "jccolor.c",
+      "bytes": 14848,
+      "sha256": "2c2b7417c2da845e5dcd959b4fb6264b8848c0de689d95dcc2a5b407ecaba5b5"
+    },
+    {
+      "file": "jcdctmgr.c",
+      "bytes": 12469,
+      "sha256": "58adbdb02c125057964569e56fad59df8dc7d61e751a476006c34e24c030d1dd"
+    },
+    {
+      "file": "jchuff.c",
+      "bytes": 28222,
+      "sha256": "1255c27a8fae13ad2b53d5fa17697b3b7cdb4983f6bdbf96876326189d2efba0"
+    },
+    {
+      "file": "jcinit.c",
+      "bytes": 2349,
+      "sha256": "31aa9f72d8e6250790328512ae9c646b3c2b32887f79fa3df01af7d5345e061c"
+    },
+    {
+      "file": "jcmainct.c",
+      "bytes": 9168,
+      "sha256": "a51f469b02429189ad0c5a52fb2d789d7025c1802b87168a9fe9180fc135c07e"
+    },
+    {
+      "file": "jcmarker.c",
+      "bytes": 17245,
+      "sha256": "c4eadb83aeaa63df9a17364fbddb1df1b96fb1281f2d395dff6ec8371373cfcc"
+    },
+    {
+      "file": "jcmaster.c",
+      "bytes": 19889,
+      "sha256": "44a467046fc8eee886359e1c738fb8289a5bb3533b06de62d332d5b409ddfb2b"
+    },
+    {
+      "file": "jcomapi.c",
+      "bytes": 3110,
+      "sha256": "d8a79c2a19310e0bc918324d7174a1e1bc1b9e316f63fd90449abf46c041711d"
+    },
+    {
+      "file": "jcparam.c",
+      "bytes": 21275,
+      "sha256": "c24c98d067ba1424a578e91a0ab584533983eafbcc399d681895974225478629"
+    },
+    {
+      "file": "jcphuff.c",
+      "bytes": 25115,
+      "sha256": "7a428d6d13f786ba53d200ba96ab1fa3ff9f7dad61737ad96f3ce199b748c367"
+    },
+    {
+      "file": "jcprepct.c",
+      "bytes": 12073,
+      "sha256": "4713a51fd7ecb9cc7c7162b30bc26243342361a4e083f43f2afbd10e977a92fc"
+    },
+    {
+      "file": "jcsample.c",
+      "bytes": 18859,
+      "sha256": "8e0b73f54bafcd87f7117795de04987eb1a5a3ac74fb8d256833ceb59f8b31d4"
+    },
+    {
+      "file": "jctrans.c",
+      "bytes": 13977,
+      "sha256": "d548e4aea1e85dfd37ac1bf359df768480c82927a52ecd2356ef1ca0987f51a9"
+    },
+    {
+      "file": "jdapimin.c",
+      "bytes": 12637,
+      "sha256": "4f6e8865e4ef356b90131327f6fa847fb12e8ef03e823bde946d3e2f9d9356c3"
+    },
+    {
+      "file": "jdapistd.c",
+      "bytes": 9348,
+      "sha256": "1b062e70e891819f4603f83baf49462ea737255a0c39df3ef941ef543f94fbab"
+    },
+    {
+      "file": "jdatadst.c",
+      "bytes": 5119,
+      "sha256": "733388bac2d58328f8918d23ddfc9f1fc3d60b8a97ad90eb057920005c23cfc7"
+    },
+    {
+      "file": "jdatasrc.c",
+      "bytes": 7604,
+      "sha256": "4de71c25304b1c3a2f19f62ba176122db78c4ac7147c2fc3fdf92532dce8f80d"
+    },
+    {
+      "file": "jdcoefct.c",
+      "bytes": 25155,
+      "sha256": "d84af1a89ea5f91d68607d5620a492f986b7515c141bc3666c5a70dc44df57db"
+    },
+    {
+      "file": "jdcolor.c",
+      "bytes": 12962,
+      "sha256": "de64bfa0416fa45c8a55cec82c7da468b329c3c3fc9cc55eb5f56509a80332cf"
+    },
+    {
+      "file": "jddctmgr.c",
+      "bytes": 8293,
+      "sha256": "f50d9b1414b44782d4ef46761a53f930b06764468b4cbbf0bf0761ac0751defd"
+    },
+    {
+      "file": "jdhuff.c",
+      "bytes": 20866,
+      "sha256": "980d1bdeb8bc631a3528560a4f01bfae28efd8f3ecce4a76d32c97a71e6d1f52"
+    },
+    {
+      "file": "jdinput.c",
+      "bytes": 13500,
+      "sha256": "f1f6b042aa907fe622aa7c94b21d71e61f7f306e10988148c42cc7d50f667e76"
+    },
+    {
+      "file": "jdmainct.c",
+      "bytes": 20366,
+      "sha256": "f9a8331d0a58f6ae74bbfc27e9640d66afb067793586358e0bb47bdb7cb754df"
+    },
+    {
+      "file": "jdmarker.c",
+      "bytes": 41118,
+      "sha256": "1200c42679f318768025f8e45457d02c5ce5dfecbd72b37dc0bd1da9adb4dba0"
+    },
+    {
+      "file": "jdmaster.c",
+      "bytes": 19710,
+      "sha256": "c9f18a007511047a50db0b14c54e4d88c279571ec36824b70c3c20232ef7a8fe"
+    },
+    {
+      "file": "jdmerge.c",
+      "bytes": 13916,
+      "sha256": "a47ca108ebf955104abbe3f9a64383532be2c70c6f956b5844b412f151f50453"
+    },
+    {
+      "file": "jdphuff.c",
+      "bytes": 20559,
+      "sha256": "75db83bd4bf1f3f6f6fe7b1d2e195efcf5e3ab65597089807aaeeffbdb013627"
+    },
+    {
+      "file": "jdpostct.c",
+      "bytes": 9723,
+      "sha256": "f873dd3a08eedee9a32c1e343cfbdc3380d2e245e1eab2c416d4e1a62cc9586e"
+    },
+    {
+      "file": "jdsample.c",
+      "bytes": 16381,
+      "sha256": "acca64d28c61b87e77993dd0bd51d089ecd68f8989f93e7d17156314ca58670d"
+    },
+    {
+      "file": "jdtrans.c",
+      "bytes": 5090,
+      "sha256": "c97867f861168d81844a9c9fd8c0b643ce835534a605a93aaab758ec36c56d8a"
+    },
+    {
+      "file": "jerror.c",
+      "bytes": 7801,
+      "sha256": "f215cc7948e628f4b3bf1f153ce1f460a65b0c4f9b5d4967e9cdc7ad95a3e265"
+    },
+    {
+      "file": "jfdctflt.c",
+      "bytes": 5486,
+      "sha256": "07c7ec15785f5709515424da1b45deacfa822197b761e319f45fbaa45e17caf9"
+    },
+    {
+      "file": "jfdctfst.c",
+      "bytes": 7578,
+      "sha256": "1c28ec690d4a69bdc285eac01bef668e31866ad0018fe9b4f68bcdce8a9ec044"
+    },
+    {
+      "file": "jfdctint.c",
+      "bytes": 11066,
+      "sha256": "807dd95d59692db94d2fa23557d8a16e2a20cb4d851ba5a82f26fa1a674b52c8"
+    },
+    {
+      "file": "jidctflt.c",
+      "bytes": 8451,
+      "sha256": "0988f6ba29f57b691dabdd3f0541839fb651dc74abd36c395130b12a30937155"
+    },
+    {
+      "file": "jidctfst.c",
+      "bytes": 13170,
+      "sha256": "c864b3dcfe494f9c8bda25a6fa5fc0a330e636b32eb4bcb6febe8cb01ed1d433"
+    },
+    {
+      "file": "jidctint.c",
+      "bytes": 14815,
+      "sha256": "3b7123ba9a66c10eb1f96d7432637b051278f3538d1b06884f9d21a39fd78f9a"
+    },
+    {
+      "file": "jidctred.c",
+      "bytes": 13528,
+      "sha256": "df25adc646b0fdd69aed54361928aeb36972a8293c917f8ec1b0d62e8f764252"
+    },
+    {
+      "file": "jquant1.c",
+      "bytes": 31294,
+      "sha256": "556df5715cf5d915e5190066ff4e542a9911b651e45b34d322a6f6c2b0098fbc"
+    },
+    {
+      "file": "jquant2.c",
+      "bytes": 48429,
+      "sha256": "9b6844e18480d7003618e8f473a0900743d15fc8516aee7229a77adce470eb0b"
+    },
+    {
+      "file": "jutils.c",
+      "bytes": 5240,
+      "sha256": "2cab735c6ea1bca55f4c94a72c73035a0a161378403a6bd849b350df71db92d6"
+    },
+    {
+      "file": "jmemmgr.c",
+      "bytes": 40988,
+      "sha256": "2b57e48bb6dd369c2d46e5827cd1e2553d50e02b062d94c2c17725ca26b642e3"
+    },
+    {
+      "file": "jmemansi.c",
+      "bytes": 4610,
+      "sha256": "fbcb3e54fa6e4b014321f29bf671ccae87072d5bb5ae8e5d31ab9f85e2383c4e"
+    },
+    {
+      "file": "jmemname.c",
+      "bytes": 8314,
+      "sha256": "c6318c7b484c26354ac3e6164c15403b6445d5eb0d81699b7e5c4106bf4e3e9e"
+    },
+    {
+      "file": "jmemnobs.c",
+      "bytes": 2772,
+      "sha256": "0605c64556d298071473fc245fa9d83cf10b60022d5c5d2821a846b94aa1a9fb"
+    },
+    {
+      "file": "jmemdos.c",
+      "bytes": 18977,
+      "sha256": "d98757c16fb714ebd61c0e5b0dbff9733294975dd61967e4f62b4bacdce1a1fb"
+    },
+    {
+      "file": "jmemmac.c",
+      "bytes": 9507,
+      "sha256": "0fcbd4378662b3eeb9952fa7c498ed087dd5a058daa8921f5abe1390676f4241"
+    },
+    {
+      "file": "cjpeg.c",
+      "bytes": 19852,
+      "sha256": "87657ebceb24e5cb694f8c5c55fc2ecf38e9e2628e1185d5f149dda474b4446c"
+    },
+    {
+      "file": "djpeg.c",
+      "bytes": 19339,
+      "sha256": "d462a6c7bb75357c183f0317f9dceb8fb543c73eb3358f692471df3038af59f4"
+    },
+    {
+      "file": "jpegtran.c",
+      "bytes": 16227,
+      "sha256": "a442485777182ae80b745bdb19bf9e45bece7143d9e7828ec97c06ba81e57f21"
+    },
+    {
+      "file": "rdjpgcom.c",
+      "bytes": 13879,
+      "sha256": "ba367aabfdea730030f8e397f6e883da331c6ac50e4e611f0f9291e5ad86f2f6"
+    },
+    {
+      "file": "wrjpgcom.c",
+      "bytes": 16563,
+      "sha256": "95f78068a270902b8cf7f48215fca8255f67a39f10c75fc9b1289fcc64cc8c0d"
+    },
+    {
+      "file": "cdjpeg.c",
+      "bytes": 4682,
+      "sha256": "7e9f5afdd367683ddac9ddc47f06d321b926df1b211d6dd71cd7e8e5241b257a"
+    },
+    {
+      "file": "rdcolmap.c",
+      "bytes": 6849,
+      "sha256": "85e72e62132c92e6e5c72277e4c05bee9a08d2128bc2855f2d3a49c3001de1a0"
+    },
+    {
+      "file": "rdswitch.c",
+      "bytes": 9675,
+      "sha256": "e20d1272e6146d89cd30e89646d1a8c2f08dfacb3a1705661b9896b99bca3e4f"
+    },
+    {
+      "file": "transupp.c",
+      "bytes": 32630,
+      "sha256": "0a3c3b0ca389beaaee00bcbc97e5377c13ca755d47de550a4b7db6910c98eea6"
+    },
+    {
+      "file": "rdppm.c",
+      "bytes": 14024,
+      "sha256": "4c800ecf405e821f7d350eb6fe9ea1a336940a615c1b45d15017100bdf11e7d6"
+    },
+    {
+      "file": "wrppm.c",
+      "bytes": 8331,
+      "sha256": "5ddd59bbd783775bd3e153e5013e26cb784ee2232b725b12d00acf08af272ea0"
+    },
+    {
+      "file": "rdgif.c",
+      "bytes": 1272,
+      "sha256": "f632af674bc404242816be0f945203fdc87a04266ae7e8a21e870c4333e2197a"
+    },
+    {
+      "file": "wrgif.c",
+      "bytes": 12888,
+      "sha256": "7fa7715f8b62a248e8641d34c948d0e2088ca2cd0f927d9c619df90cadda484d"
+    },
+    {
+      "file": "rdtarga.c",
+      "bytes": 14967,
+      "sha256": "6cc6528ca9cff3dfe6b1a3897d09a9f9f86733dd3b7c65810e0d4966b5ad3e14"
+    },
+    {
+      "file": "wrtarga.c",
+      "bytes": 7524,
+      "sha256": "8988e10a7d5f2dc7770f70e883a149cdac551111de16724b248b2be22d45045d"
+    },
+    {
+      "file": "rdbmp.c",
+      "bytes": 13792,
+      "sha256": "a059c7271be741d6a494d1196bfe78584524b9f56267ca238e24ba040a3886b7"
+    },
+    {
+      "file": "wrbmp.c",
+      "bytes": 13913,
+      "sha256": "ee77a227a0d1ce3d856b5da651308f7c438b3c803ab7f89dca8fb61df420e5f1"
+    },
+    {
+      "file": "rdrle.c",
+      "bytes": 11673,
+      "sha256": "b6393aa4bc0eee2c52a31c67882ac1042db28616b81050ee762991e28560b3d4"
+    },
+    {
+      "file": "wrrle.c",
+      "bytes": 9242,
+      "sha256": "c8847511c86d816a7728f019c0a4da2e62d84acec1fe2fbb467dfe4f22249220"
+    },
+    {
+      "file": "jchuff.h",
+      "bytes": 1575,
+      "sha256": "0aa206ea4abf0e68df14745c114fbe1db7705ce5c881b0964babf5acfbc38764"
+    },
+    {
+      "file": "jdhuff.h",
+      "bytes": 8138,
+      "sha256": "9474219e38bd98af7fd427e25462857854f3391fe4eaf329a0d0cb5e438e56f3"
+    },
+    {
+      "file": "jdct.h",
+      "bytes": 7041,
+      "sha256": "4cde9d7c12ffc920e1dd525c6b7f41f88a3ea573af8c66a4b6d0d6ed3d7fd770"
+    },
+    {
+      "file": "jerror.h",
+      "bytes": 13936,
+      "sha256": "324f058e0dc17408ea83a8d47d0a7a1f6ba7553d653f709a9be275971f539fec"
+    },
+    {
+      "file": "jinclude.h",
+      "bytes": 3250,
+      "sha256": "a6433e5ea0030f4bffd41bcc2f064008afd79de4270cf28494bd43d2fbc5da06"
+    },
+    {
+      "file": "jmemsys.h",
+      "bytes": 8230,
+      "sha256": "dbe87b534bc93f9ea54492589e69307b492aff8a377fa3c9c8b54a54de488397"
+    },
+    {
+      "file": "jmorecfg.h",
+      "bytes": 12458,
+      "sha256": "262138c3433e81e84e9f6811b38b5dc63e6f161e9b952afb0ff61b4a39b697a9"
+    },
+    {
+      "file": "jpegint.h",
+      "bytes": 15712,
+      "sha256": "f2fbbf47da9fe7cc9e4813235d71e1252ec4662e3ecb8823bd4d499492125153"
+    },
+    {
+      "file": "jpeglib.h",
+      "bytes": 46205,
+      "sha256": "b34b3d9897820302cc23ba60217157f75e03db8c537a7d4703ff0bc8c9fc048b"
+    },
+    {
+      "file": "jversion.h",
+      "bytes": 360,
+      "sha256": "7a8c12a9d52f62342b46b64a8d91d148ae7b0398e9663ad03da3e0b882cd2f14"
+    },
+    {
+      "file": "cdjpeg.h",
+      "bytes": 6123,
+      "sha256": "51414d6b716c3fd47a77b4988988b2755dd3e32aea4ec7860b62b03dafd19c8a"
+    },
+    {
+      "file": "cderror.h",
+      "bytes": 5249,
+      "sha256": "fff8952ba362b0decf1994221dcdce56380540cbc68817fd5cf3e1bfa52c6a7e"
+    },
+    {
+      "file": "transupp.h",
+      "bytes": 5761,
+      "sha256": "ce899a5d2a45663d7f98b2d7cf89db21a7e1aa85bb83106a287fba120c5cdd45"
+    },
+    {
+      "file": "jconfig.doc",
+      "bytes": 5372,
+      "sha256": "d4ca4825b8362c64b56f9c09af87078daa668470e2ac3c32df6c0ce01a91882d"
+    },
+    {
+      "file": "ckconfig.c",
+      "bytes": 12166,
+      "sha256": "db5e167c0c22b2dd01be7593a6d4933a1bc3e80f9e59bcace41975859aef9041"
+    },
+    {
+      "file": "ansi2knr.c",
+      "bytes": 22315,
+      "sha256": "cec2a7df258a10884a9a3e6190ad9394058b05d14686d852f942ed36f88219c4"
+    }
+  ],
+  "decoderSources": [
+    "jcomapi.c",
+    "jdapimin.c",
+    "jdapistd.c",
+    "jdcoefct.c",
+    "jdcolor.c",
+    "jddctmgr.c",
+    "jdhuff.c",
+    "jdinput.c",
+    "jdmainct.c",
+    "jdmarker.c",
+    "jdmaster.c",
+    "jdmerge.c",
+    "jdphuff.c",
+    "jdpostct.c",
+    "jdsample.c",
+    "jerror.c",
+    "jidctflt.c",
+    "jidctfst.c",
+    "jutils.c",
+    "jmemmgr.c"
+  ],
+  "scope": "Official IJG6b scalar decoder with fixed KRKR2 libjpeg2 headers; not Borland optimized library binary identity."
+}

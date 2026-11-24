@@ -100,7 +100,15 @@ export class ProcessedImageProgress implements ImageLoadProgress {
     if (!current || image.width !== current.width || image.height !== current.height || image.data !== current.data ||
         !(current.data.buffer instanceof ArrayBuffer) || current.data.byteOffset !== 0 ||
         current.data.byteLength !== current.data.buffer.byteLength) return undefined
-    const data = structuredClone(current.data, { transfer: [current.data.buffer] })
+    // The engine is checked with ES2022 only, without DOM/Worker ambient
+    // declarations. Ask for this single host capability without importing
+    // those platforms' globals or replacing a move with an extra bitmap copy.
+    const clone: unknown = Reflect.get(globalThis, 'structuredClone'), bytes = current.data.byteLength
+    if (typeof clone !== 'function') throw new Error('Image buffer transfer is unavailable')
+    const data: unknown = Reflect.apply(clone, globalThis, [current.data, { transfer: [current.data.buffer] }])
+    if (!(data instanceof Uint8Array) || data.byteLength !== bytes || data.byteOffset !== 0 ||
+        !(data.buffer instanceof ArrayBuffer) || data.buffer.byteLength !== bytes || current.data.byteLength !== 0)
+      throw new Error('Image buffer transfer did not preserve exclusive ownership')
     this.current = { width: current.width, height: current.height, data }
     this.closed = true
     this.readers.clear()

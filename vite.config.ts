@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import { offlineShell } from './scripts/build/offline-shell.ts'
 import { fontAssets } from './scripts/build/font-assets.ts'
 import { imageZlibAssets } from './scripts/build/image-zlib-assets.ts'
+import { imageJpegAssets } from './scripts/build/image-jpeg-assets.ts'
 import { workerEntryIsolation } from './scripts/build/worker-chunks.ts'
 
 const root = dirname(fileURLToPath(import.meta.url))
@@ -79,7 +80,7 @@ function wasmAssets(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [workerRpc({ pool: 1 }), wasmAssets(), fontAssets(root), imageZlibAssets(root), offlineShell()],
+  plugins: [workerRpc({ pool: 1 }), wasmAssets(), fontAssets(root), imageZlibAssets(root), imageJpegAssets(root), offlineShell()],
   build: { target: 'es2022' },
   worker: {
     format: 'es',

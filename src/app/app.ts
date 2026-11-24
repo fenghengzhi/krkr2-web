@@ -355,6 +355,9 @@ export function mountApp(root: HTMLDivElement): void {
       launchWindows = windows
       const pads = createGamePads(el('stage'))
       launchPads = pads
+      // The URL accepts the original option's three public values. Unknown
+      // text selects normal; absence preserves an absent System argument.
+      const requestedJpeg = new URLSearchParams(location.search).get('jpegdec')
       const instance: ReturnType<typeof createPlayer> = createPlayer(
         canvas,
         (event) => {
@@ -426,6 +429,8 @@ export function mountApp(root: HTMLDivElement): void {
         {
           windows,
           pads,
+          jpegPrecision: requestedJpeg === null ? undefined
+            : requestedJpeg === 'low' || requestedJpeg === 'high' ? requestedJpeg : 'normal',
           desktopElement: el('stage'),
           async onStopRequested() {
             if (current !== generation || player !== instance) return

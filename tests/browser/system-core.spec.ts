@@ -353,7 +353,7 @@ test.describe('public createPlayer System dataPath embedding', () => {
   const base = '/system-core-embedding-assets/',
     bundles = new Map<string, { body: Buffer; contentType: string }>(),
     hashes: { file: string; sha256: string }[] = []
-  let entry: string, wasmManifestHash: string, fontManifestHash: string, imageZlibManifestHash: string
+  let entry: string, wasmManifestHash: string, fontManifestHash: string, imageZlibManifestHash: string, imageJpegManifestHash: string
 
   test.beforeAll(async () => {
     wasmManifestHash = createHash('sha256')
@@ -364,6 +364,9 @@ test.describe('public createPlayer System dataPath embedding', () => {
       .digest('hex')
     imageZlibManifestHash = createHash('sha256')
       .update(await readFile(resolve('.generated/image-zlib/manifest.json')))
+      .digest('hex')
+    imageJpegManifestHash = createHash('sha256')
+      .update(await readFile(resolve('.generated/image-jpeg/manifest.json')))
       .digest('hex')
     const id = 'virtual:system-core-embedding',
       resolvedId = '\0system-core-embedding',
@@ -399,6 +402,9 @@ test.describe('public createPlayer System dataPath embedding', () => {
           ),
           __KRKR_IMAGE_ZLIB_MANIFEST_FILE__: JSON.stringify(
             `image-zlib/manifest-${imageZlibManifestHash.slice(0, 16)}.json`,
+          ),
+          __KRKR_IMAGE_JPEG_MANIFEST_FILE__: JSON.stringify(
+            `image-jpeg/manifest-${imageJpegManifestHash.slice(0, 16)}.json`,
           ),
         },
         worker: { format: 'es' },

@@ -6,6 +6,45 @@ import { test, expect } from '../helpers/library-browser.ts'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { projectRootFiles } from '../helpers/project-root-fixtures.ts'
 import { readScreenshotPng } from '../helpers/screenshot-png.ts'
+import { attachStartup, observeStartup } from '../helpers/startup-observation.ts'
+
+interface DirectoryInputObservation {
+  events: { type: string; at: number; count: number; paths: string[]; mode: string;
+    selectedIndex: number; executableDirectory: string; root: string }[]
+  dropped: number
+}
+declare global { interface Window { projectDirectoryInput: DirectoryInputObservation } }
+
+async function selectDirectory(page: Page, info: TestInfo, directory: string, mode: 'auto' | 'root', phase: string) {
+  const failures: unknown[] = []
+  let timer: ReturnType<typeof setTimeout> | undefined
+  await expect(page.locator('#project-mode')).toHaveValue(mode)
+  try {
+    // WebKit's directory operation waits for a native input event. Bound this
+    // step so an unfinished upload is reported before whole-test teardown can
+    // produce a misleading empty-value assertion against a closed page.
+    await page.locator('#folder').setInputFiles(directory, { timeout: 15000 })
+    await expect(page.locator('#project-mode')).toHaveValue(mode)
+  } catch (error) { failures.push(error) }
+  try {
+    await info.attach('directory-input-' + phase, { contentType: 'application/json',
+      body: JSON.stringify(await Promise.race([page.evaluate(() => ({
+        observation: window.projectDirectoryInput,
+        mode: document.querySelector<HTMLSelectElement>('#project-mode')?.value,
+        selectedIndex: document.querySelector<HTMLSelectElement>('#project-mode')?.selectedIndex,
+        executableDirectory: document.querySelector<HTMLInputElement>('#project-exe-directory')?.value,
+        root: document.querySelector<HTMLInputElement>('#project-root')?.value,
+        currentFileCount: document.querySelector<HTMLInputElement>('#folder')?.files?.length,
+      })), new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Directory input evidence read timed out')), 3000)
+      })]), null, 2) })
+  } catch (error) { failures.push(error) }
+  finally { clearTimeout(timer) }
+  try { await attachStartup(page, info, 'directory-' + phase, []) }
+  catch (error) { failures.push(error) }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length) throw new AggregateError(failures, 'Directory selection or evidence failed', { cause: failures[0] })
+}
 
 type Name = 'A' | 'B'
 const expected = {
@@ -73,6 +112,22 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     test.setTimeout(180000)
     const failures: unknown[] = [], pageErrors: string[] = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
+    await observeStartup(page)
+    await page.addInitScript(() => {
+      const observation: DirectoryInputObservation = { events: [], dropped: 0 }
+      window.projectDirectoryInput = observation
+      for (const type of ['input', 'change']) document.addEventListener(type, (event) => {
+        const input = event.target
+        if (!(input instanceof HTMLInputElement) || input.id !== 'folder') return
+        if (observation.events.length >= 32) { observation.dropped++; return }
+        const mode = document.querySelector<HTMLSelectElement>('#project-mode')!
+        observation.events.push({ type, at: performance.now(), count: input.files?.length ?? 0,
+          paths: [...(input.files ?? [])].slice(0, 64).map((file) => file.webkitRelativePath),
+          mode: mode.value, selectedIndex: mode.selectedIndex,
+          executableDirectory: document.querySelector<HTMLInputElement>('#project-exe-directory')!.value,
+          root: document.querySelector<HTMLInputElement>('#project-root')!.value })
+      }, true)
+    })
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)), 'JSPI unavailable')
     const fixture = await projectRootFiles(binary),
@@ -88,8 +143,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await info.attach('project-root-fixture', { body: JSON.stringify(fixture.provenance), contentType: 'application/json' })
       await page.locator('#project-mode').selectOption('auto')
       await page.locator('#project-exe-directory').fill('games/A/')
-      await page.locator('#folder').setInputFiles(directory)
-      await expect(page.locator('#project-mode')).toHaveValue('auto')
+      await selectDirectory(page, info, directory, 'auto', 'A-auto')
       await ready(page, 'A', 'none')
       await evaluate(page, 'Storages.isExistentStorage(System.exePath+"data.xp3")', '1')
       await evaluate(page, '(function(){try{return Scripts.evalStorage(System.exePath+"data.xp3>startup.tjs");}catch(error){return error.message;}})()',
@@ -112,8 +166,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await page.locator('#project-mode').selectOption('root')
       await page.locator('#project-exe-directory').fill('games/B/')
       await page.locator('#project-root').fill('games/B/data.xp3>')
-      await page.locator('#folder').setInputFiles(directory)
-      await expect(page.locator('#project-mode')).toHaveValue('root')
+      await selectDirectory(page, info, directory, 'root', 'B-root')
       await ready(page, 'B', 'none')
       await pixels(page, info, 'B', 'explicit-archive')
       await expect(page.locator('#save-library')).toBeEnabled()

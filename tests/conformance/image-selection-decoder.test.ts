@@ -245,7 +245,7 @@ test('TLG selected structural reasons retain native field order and literal quir
     native('TVPTLGLoadError', `Malformed TLG SDS tag structure, ${reason}`))
 })
 
-test('JPEG selected mode snapshots survive await; gray is explicit Web RGB approximation and host errors remain original', async () => {
+test('custom embedding JPEG fallback snapshots selection across await and retains its explicit RGB-gray approximation and host errors', async () => {
   await assert.rejects(decode(new Uint8Array(), 'jpeg', 'palettized'), native('TVPJPEGLoadError', 'JPEG does not support palettized image'))
   const selection: { format: ImageDecodeSelection['format']; mode: ImageDecodeSelection['mode'] } = { format: 'jpeg', mode: 'grayscale' },
     bytes = Uint8Array.of(255, 216, 255, 217)

@@ -120,6 +120,20 @@ export async function verifyOfflineBuild(directory, base = '/') {
   }
   for (const name of ['LICENSE.txt', 'CREDITS.txt'])
     assert(listed.includes('licenses/image-zlib/' + name))
+  const imageJpegBytes = await read('image-jpeg/manifest.json'),
+    imageJpegPath = `image-jpeg/manifest-${hash(imageJpegBytes).slice(0, 16)}.json`,
+    imageJpeg = JSON.parse(imageJpegBytes)
+  assert.deepEqual(await read(imageJpegPath), imageJpegBytes)
+  assert.equal(imageJpeg.abi, 1)
+  assert.equal(imageJpeg.library, 'ijg-libjpeg')
+  assert.equal(imageJpeg.version, '6b')
+  for (const asset of Object.values(imageJpeg.assets)) {
+    const bytes = await read(`image-jpeg/${asset.file}`)
+    assert.equal(bytes.length, asset.bytes)
+    assert.equal(hash(bytes), asset.sha256)
+  }
+  for (const name of ['LICENSE.txt', 'CREDITS.txt'])
+    assert(listed.includes('licenses/image-jpeg/' + name))
   assert(listed.some((path) => /session\.worker.*\.js$/.test(path)))
   assert(listed.some((path) => /library\.worker.*\.js$/.test(path)))
   assert(listed.some((path) => /mixer\.worklet.*\.js$/.test(path)))
@@ -132,6 +146,7 @@ export async function verifyOfflineBuild(directory, base = '/') {
     wasmManifest: wasmPath,
     fontManifest: fontPath,
     imageZlibManifest: imageZlibPath,
+    imageJpegManifest: imageJpegPath,
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)

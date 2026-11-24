@@ -12,6 +12,7 @@ import { inflateImage, deflateImage } from '../../src/backends/files/blob-source
 import { archiveReader } from '../../src/backends/files/archive-reader.ts'
 import type { ModuleFactory, WasmManifest } from '../../src/backends/script/tjs-wasm/module.ts'
 import { createHeadlessImageInflaterProvider } from './image-zlib.ts'
+import { createHeadlessImageJpegProvider } from './image-jpeg.ts'
 
 const directory = resolve('.generated/wasm')
 const manifest: WasmManifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8'))
@@ -34,6 +35,7 @@ export async function headless(
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
     inflateImage,
     imageInflater: createHeadlessImageInflaterProvider(() => session.control),
+    imageJpeg: createHeadlessImageJpegProvider(() => session.control),
     deflateImage,
     createRuntime: createHeadlessRuntime,
     renderer: { present() {}, dispose() {} },

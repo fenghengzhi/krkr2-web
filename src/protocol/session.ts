@@ -12,6 +12,7 @@ import type { WindowMoveMessage } from '../engine/ports/window-move.ts'
 import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
 import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
+import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
 export const PROTOCOL_VERSION = 42
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
@@ -39,6 +40,8 @@ export interface InitializeRequest {
   debugMode?: boolean
   /** Raw relative -datapath configuration, normalized once by the engine. */
   dataPath?: string
+  /** Optional startup-only -jpegdec setting; omitted differs from explicit normal. */
+  jpegPrecision?: ImageJpegPrecision
   /** Immutable page/embedding palette, validated again before Worker resources are created. */
   systemColors?: readonly number[]
   /** Player-local CSS geometry, sampled before its Worker is initialized. */

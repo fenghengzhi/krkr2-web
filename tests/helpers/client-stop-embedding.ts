@@ -19,6 +19,9 @@ export async function buildClientStopEmbedding() {
     imageZlibHash = createHash('sha256')
       .update(await readFile(resolve('.generated/image-zlib/manifest.json')))
       .digest('hex'),
+    imageJpegHash = createHash('sha256')
+      .update(await readFile(resolve('.generated/image-jpeg/manifest.json')))
+      .digest('hex'),
     result = await build({
       configFile: false,
       publicDir: false,
@@ -44,6 +47,7 @@ export async function buildClientStopEmbedding() {
         __KRKR_WASM_MANIFEST_FILE__: JSON.stringify(`wasm/manifest-${wasmHash.slice(0, 16)}.json`),
         __KRKR_FONT_MANIFEST_FILE__: JSON.stringify(`fonts/manifest-${fontHash.slice(0, 16)}.json`),
         __KRKR_IMAGE_ZLIB_MANIFEST_FILE__: JSON.stringify(`image-zlib/manifest-${imageZlibHash.slice(0, 16)}.json`),
+        __KRKR_IMAGE_JPEG_MANIFEST_FILE__: JSON.stringify(`image-jpeg/manifest-${imageJpegHash.slice(0, 16)}.json`),
       },
       worker: { format: 'es' },
       build: {

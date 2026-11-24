@@ -22,23 +22,28 @@ import { PortClipboardBackend } from '../backends/clipboard/port-backend.ts'
 import { PortHelpBackend } from '../backends/help/port-backend.ts'
 import { PortWindowGeometry } from '../backends/window/port-geometry.ts'
 import type { InitializeRequest, SessionEvent } from '../protocol/session.ts'
-import { fontManifestFile, imageZlibManifestFile } from './build-info.ts'
+import { fontManifestFile, imageZlibManifestFile, imageJpegManifestFile } from './build-info.ts'
 import { loadImageZlibKernel } from '../backends/image-zlib/module.ts'
 import { LazyImageInflaterProvider } from '../engine/graphics/image-inflater-provider.ts'
+import { loadImageJpegKernel } from '../backends/image-jpeg/module.ts'
+import { LazyImageJpegProvider } from '../engine/graphics/image-jpeg-provider.ts'
 import { loadFontKernel } from '../backends/text/freetype/module.ts'
 import { copyGameProject, type GameProject } from '../engine/storage/project.ts'
+import { copyJpegPrecision } from './jpeg-precision.ts'
 
 export function createSession(request: InitializeRequest, project?: GameProject): EngineSession {
   // Reject invalid configuration before any port backend or surface owns the
   // transferred channels. Player validates template syntax before preparation;
   // only here is the frozen executable directory available for path bounds.
   const dataPath = request.dataPath
+  const jpegPrecision = copyJpegPrecision(request.jpegPrecision)
   const storageProject = copyGameProject(project)
   normalizeSystemDataPath(dataPath, storageProject?.executableDirectory)
   const systemColors = copySystemColorPalette(request.systemColors)
   const systemDisplay = copySystemDisplayMetrics(request.systemDisplay)
   const arguments_ = new Map<string, string>(request.debugMode ? [['-debug', 'yes']] : [])
   if (dataPath !== undefined) arguments_.set('-datapath', dataPath)
+  if (jpegPrecision !== undefined) arguments_.set('-jpegdec', jpegPrecision)
   let sequence = 0
   const session: EngineSession = new EngineSession({
     archives: archiveReader,
@@ -61,6 +66,8 @@ export function createSession(request: InitializeRequest, project?: GameProject)
     inflateImage,
     imageInflater: new LazyImageInflaterProvider(() => loadImageZlibKernel(
       new URL('../' + imageZlibManifestFile, request.manifestUrl).href, session.control), () => session.control),
+    imageJpeg: new LazyImageJpegProvider(() => loadImageJpegKernel(
+      new URL('../' + imageJpegManifestFile, request.manifestUrl).href, session.control), () => session.control),
     deflateImage,
     now: () => performance.now(),
     schedule: (callback, delay) => {

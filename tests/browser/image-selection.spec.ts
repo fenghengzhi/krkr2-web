@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { imageSelectionFiles, imageSelectionSource, imageSelectionErrors } from '../helpers/image-selection.ts'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { magnifyPixelWindow } from '../helpers/pixel-window.ts'
+import { jpegFixture } from '../helpers/jpeg-contract.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) {
   test(`${backend}/${binary ? 'bytecode' : 'source'}: selected image formats, modes and companion storage reach real pixels`, async ({ page }) => {
@@ -9,22 +10,17 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
     page.on('pageerror', (error) => errors.push(error.message))
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)), 'JSPI unavailable')
-    // The browser encodes and independently decodes this JPEG on the hosted
-    // runner. This reference covers its host codec, not historical libjpeg.
-    const jpeg = await page.evaluate(async () => {
-      const surface = new OffscreenCanvas(3, 2), context = surface.getContext('2d')!
-      context.fillStyle = '#c12712'; context.fillRect(0, 0, 3, 2)
-      const blob = await surface.convertToBlob({ type: 'image/jpeg', quality: 1 }), image = await createImageBitmap(blob)
-      context.drawImage(image, 0, 0); image.close()
-      const rgba = [...context.getImageData(0, 0, 1, 1).data]
-      return { bytes: [...new Uint8Array(await blob.arrayBuffer())], rgb: rgba[0]! * 65536 + rgba[1]! * 256 + rgba[2]! }
-    })
+    // Independent hosted IJG6b encoder: 3x2 direct RGB, quality100, each
+    // component a constant DC plane [32,96,160]. Original null_convert keeps
+    // that order and TVP packs it as BGR, giving literal RGBA [160,96,32,255].
+    // The C reference also requires every physical pixel [32,96,160,255].
+    const jpeg = jpegFixture('constant-rgb')
     const startup = binary
       ? 'Scripts.compileStorage("selection.tjs","savedata/selection.cjs",false,true,false);Scripts.execStorage("savedata/selection.cjs");Debug.message("selection-ready");'
       : 'Scripts.execStorage("selection.tjs");Debug.message("selection-ready");'
     await page.locator('#files').setInputFiles([
       ...Object.entries(imageSelectionFiles()).map(([name, bytes]) => ({ name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) })),
-      ...['jpeg', 'JPG', 'JIF'].map((extension) => ({ name: `photo.${extension}`, mimeType: 'image/jpeg', buffer: Buffer.from(jpeg.bytes) })),
+      ...['jpeg', 'JPG', 'JIF'].map((extension) => ({ name: `photo.${extension}`, mimeType: 'image/jpeg', buffer: jpeg })),
       { name: 'selection.tjs', mimeType: 'text/plain', buffer: Buffer.from(imageSelectionSource) },
       { name: 'startup.tjs', mimeType: 'text/plain', buffer: Buffer.from(startup) },
     ])
@@ -51,8 +47,20 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       image.close(); return result
     }, 'data:image/png;base64,' + screenshot.toString('base64'))
     expect(pixels).toEqual(Array.from({ length: 6 }, () => [18, 52, 86, 255]))
-    for (const extension of ['JPEG', 'jpg', 'jif'])
-      await evaluate(page, `(function(){selectionLayer.loadImages("photo.${extension}");return selectionLayer.imageWidth==3 && selectionLayer.getMainPixel(0,0)==${jpeg.rgb};})()`, '1')
+    for (const extension of ['JPEG', 'jpg', 'jif']) {
+      await evaluate(page, `(function(){selectionLayer.loadImages("photo.${extension}");
+        if(selectionLayer.imageWidth!=3 || selectionLayer.imageHeight!=2)return false;
+        for(var y=0;y<2;y++)for(var x=0;x<3;x++)
+          if(selectionLayer.getMainPixel(x,y)!=0xa06020 || selectionLayer.getMaskPixel(x,y)!=255)return false;
+        return true;})()`, '1')
+      await expect.poll(() => canvas.evaluate((element) => {
+        const source = element as HTMLCanvasElement, target = new OffscreenCanvas(source.width, source.height),
+          context = target.getContext('2d', { willReadFrequently: true })!
+        context.drawImage(source, 0, 0)
+        return { width: source.width, height: source.height,
+          rgba: [...context.getImageData(0, 0, source.width, source.height).data] }
+      })).toEqual({ width: 3, height: 2, rgba: Array.from({ length: 6 }, () => [160, 96, 32, 255]).flat() })
+    }
     await evaluate(page, 'imageFailure("photo.JIF",1)', 'jpeg:JPEG does not support palettized image')
     await page.locator('#stop').click()
     await expect(page.locator('#stop')).toBeDisabled()

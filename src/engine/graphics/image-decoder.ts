@@ -7,22 +7,25 @@ import { decodeSelectedTlg } from '../../formats/image/tlg/index.ts'
 import { ImageDecodeError, type ImageDecodeSelection, type ImageDecodeProgress } from '../../formats/image/selection.ts'
 import type { ImageInflater } from '../ports/image-inflater.ts'
 import { ImageReadError } from '../../formats/image/read-error.ts'
+import { decodeSelectedJpeg } from '../../formats/image/jpeg.ts'
+import type { ImageJpegDecoder, ImageJpegMode } from '../ports/image-jpeg.ts'
 
 export interface SelectedImageDecoderDependencies {
   finish<T>(work: Generator<void, T>): Promise<T>
   inflate(compressed: Uint8Array, length: number): Promise<Uint8Array>
   openInflater?(source: Uint8Array, expandedLength: number): Promise<ImageInflater>
+  openJpeg?(source: Uint8Array, mode: ImageJpegMode): Promise<ImageJpegDecoder>
   host(bytes: Uint8Array, selection: ImageDecodeSelection): Promise<DecodedImage>
 }
 
 class ProgressFailure {
   constructor(readonly cause: unknown) {}
 }
-class InflaterFailure {
+class DecoderFailure {
   constructor(readonly cause: unknown) {}
 }
 function original(error: unknown): unknown {
-  return error instanceof ProgressFailure || error instanceof InflaterFailure ? error.cause : error
+  return error instanceof ProgressFailure || error instanceof DecoderFailure ? error.cause : error
 }
 function codecError(error: unknown): unknown {
   if (error instanceof ImageReadError)
@@ -123,7 +126,7 @@ export async function decodeSelectedImage(
           const guarded: ImageInflater = {
             step(input, output) {
               try { return inflater.step(input, output) }
-              catch (error) { throw new InflaterFailure(error) }
+              catch (error) { throw new DecoderFailure(error) }
             },
             close() { inflater.close() },
           }
@@ -148,8 +151,29 @@ export async function decodeSelectedImage(
       case 'jpeg': {
         if (selected.mode === 'palettized')
           throw codecError(new ImageDecodeError('jpeg', 'JPEG does not support palettized image'))
-        // A host must never accept PNG/GIF/etc. under a chosen JPEG extension.
-        // Exact libjpeg numeric diagnostics remain a separate compatibility gap.
+        if (dependencies.openJpeg) {
+          const mode: ImageJpegMode = selected.mode,
+            decoder = await dependencies.openJpeg(bytes, mode), guarded: ImageJpegDecoder = {
+            step(input, eof) {
+              try { return decoder.step(input, eof) }
+              catch (error) { throw new DecoderFailure(error) }
+            },
+            close() { decoder.close() },
+          }
+          let failed: { error: unknown } | undefined
+          try { return await dependencies.finish(codecWork(() => decodeSelectedJpeg(bytes, mode, guarded, progress))) }
+          catch (error) { failed = { error }; throw error }
+          finally {
+            try { decoder.close() }
+            catch (cleanup) {
+              if (!failed) throw cleanup
+              const primary = original(failed.error)
+              throw new AggregateError([primary, cleanup], 'JPEG decoding and cleanup failed', { cause: primary })
+            }
+          }
+        }
+        // Legacy embeddings can supply only the generic host decoder. Check
+        // the chosen handler's signature before delegating to that decoder.
         if (bytes.length < 3) throw new Error('Truncated JPEG signature')
         if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff)
           throw new Error('Selected JPEG handler received a non-JPEG stream')

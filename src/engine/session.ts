@@ -43,6 +43,7 @@ import {
 import { ImageLoader, ProvinceImageLoadError } from './storage/images.ts'
 import { decodeSelectedImage } from './graphics/image-decoder.ts'
 import type { ImageInflaterProvider } from './ports/image-inflater.ts'
+import type { ImageJpegMode, ImageJpegPrecision, ImageJpegProvider } from './ports/image-jpeg.ts'
 import { CursorStorage } from './storage/cursors.ts'
 import type { CursorAsset } from '../formats/cursor/index.ts'
 import { loadCursorBytes, windowsDesktopCursorProfile } from '../formats/cursor/load.ts'
@@ -258,6 +259,8 @@ export interface SessionDependencies {
   /** Selected PNGs use controlled pull inflation; generic image embeddings may
    * retain the older complete-buffer dependency when this is absent. */
   imageInflater?: ImageInflaterProvider
+  /** Actual App/headless JPEG uses the fixed original-library configuration. */
+  imageJpeg?: ImageJpegProvider
   deflateImage: (bytes: Uint8Array) => Promise<Uint8Array>
   renderer: Renderer
   decodeScript: (
@@ -331,6 +334,18 @@ export class EngineSession {
         } catch (error) {
           try { inflater.close() }
           catch (cleanup) { throw new AggregateError([error, cleanup], 'Image inflater admission and cleanup failed', { cause: error }) }
+          throw error
+        }
+      } } : {}),
+      ...(this.deps.imageJpeg ? { openJpeg: async (source: Uint8Array, mode: ImageJpegMode) => {
+        const decoder = await this.deps.imageJpeg!.open(source, mode, this.jpegPrecision)
+        try {
+          if (this.control.paused) await this.control.wait()
+          this.control.check()
+          return decoder
+        } catch (error) {
+          try { decoder.close() }
+          catch (cleanup) { throw new AggregateError([error, cleanup], 'JPEG decoder admission and cleanup failed', { cause: error }) }
           throw error
         }
       } } : {}),
@@ -429,6 +444,7 @@ export class EngineSession {
   private attemptedFrameVersion = 0
   private eventYieldAt = 0
   private readonly systemArguments: Map<string, string>
+  private readonly jpegPrecision: ImageJpegPrecision
   private events?: ScriptEvents
   private sounds?: SoundService
   private videos?: VideoService
@@ -504,6 +520,8 @@ export class EngineSession {
     // are consulted. A failed constructor has no disposal owner yet.
     this.systemColors = new SystemColors(deps.systemColors)
     this.systemArguments = new Map(deps.arguments)
+    const jpegPrecision = this.systemArguments.get('-jpegdec')
+    this.jpegPrecision = jpegPrecision === 'low' || jpegPrecision === 'high' ? jpegPrecision : 'normal'
     this.systemEnvironment = new SystemEnvironment(
       this.systemArguments,
       deps.fillRandomBytes,
@@ -610,6 +628,7 @@ export class EngineSession {
         () => { this.physicalScreen = undefined; this.hiddenCursorPositions.clear() },
         () => this.images.dispose(),
         () => deps.imageInflater?.dispose(),
+        () => deps.imageJpeg?.dispose(),
         () => this.dropped.dispose(),
         () => this.storage.dispose(),
         () => this.closeCursors(),

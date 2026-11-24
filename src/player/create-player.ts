@@ -30,6 +30,8 @@ import { copySystemColorPalette } from '../engine/graphics/system-colors.ts'
 import { sampleSystemColorPalette } from './system-colors.ts'
 import { BrowserSystemDisplay } from './system-display.ts'
 import { copySystemDisplayMetrics, type SystemDisplayMetrics } from '../engine/system/display.ts'
+import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
+import { copyJpegPrecision } from './jpeg-precision.ts'
 
 /** Player-facing DOM ownership; compatible with the app's GameWindows host. */
 export interface PlayerWindowSurface {
@@ -68,6 +70,9 @@ export interface PlayerOptions {
   onStopRequested?(): Promise<void>
   /** Optional game-relative startup directory; never a host filesystem path. */
   dataPath?: string
+  /** Fixed startup -jpegdec setting. Omission leaves the argument absent and
+   * decodes at normal precision; later System.setArgument does not retune it. */
+  jpegPrecision?: ImageJpegPrecision
   /** 31 RGB values for legacy indices 0..30 (25 must be zero); defaults to page CSS colors. */
   systemColors?: readonly number[]
   /** Fixed, copied virtual display geometry. Defaults to the live player desktop. */
@@ -95,6 +100,7 @@ export function createPlayer(
   options: PlayerOptions,
 ) {
   const dataPath = options.dataPath
+  const jpegPrecision = copyJpegPrecision(options.jpegPrecision)
   // Bounds depend on the selected executable directory, determined during
   // prepare. The Worker completes that check before allocating the Session.
   validateSystemDataPathTemplate(dataPath)
@@ -554,6 +560,7 @@ export function createPlayer(
         helpChannel.port2,
         !!options.windows.beginMove,
         options.windows.measureGeometry ? geometryChannel.port2 : undefined,
+        jpegPrecision,
       )
       await session.mount()
       // Only ordered Session events update the host. A start RPC snapshot can

@@ -62,7 +62,8 @@ jobs:
             .generated
             public/licenses/freetype
             public/licenses/image-zlib
-          key: kernels-v1-${{ runner.os }}-${{ runner.arch }}-emsdk-6.0.9-${{ hashFiles('native/**', 'third_party/**', 'scripts/build-wasm.mjs', 'scripts/build-fonts.mjs', 'scripts/build-image-zlib.mjs', 'scripts/generate-tvp-messages.py') }}
+            public/licenses/image-jpeg
+          key: kernels-v1-${{ runner.os }}-${{ runner.arch }}-emsdk-6.0.9-${{ hashFiles('native/**', 'third_party/**', 'scripts/build-wasm.mjs', 'scripts/build-fonts.mjs', 'scripts/build-image-zlib.mjs', 'scripts/build-image-jpeg.mjs', 'scripts/generate-tvp-messages.py') }}
       - name: Install native build tools
         if: steps.kernels.outputs.cache-hit != 'true'
         run: |
@@ -77,7 +78,7 @@ jobs:
           c++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
             -Ithird_party/tjs2 tests/native/string-append.cpp -o out/ci/string-append-native
           out/ci/string-append-native 2>&1 | tee out/ci/string-append-native.log
-      - name: Build Asyncify, JSPI and font kernels
+      - name: Build Asyncify, JSPI, font and image kernels
         if: steps.kernels.outputs.cache-hit != 'true'
         run: |
           mkdir -p out/ci
@@ -128,7 +129,20 @@ jobs:
             .generated
             public/licenses/freetype
             public/licenses/image-zlib
+            public/licenses/image-jpeg
           key: ${{ steps.kernels.outputs.cache-primary-key }}
+      - name: Generate independent fixed-source JPEG fixture inputs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python3 scripts/run-native-jpeg-reference.py --fixtures-only --output out/verification/jpeg-fixtures 2>&1 | tee out/ci/jpeg-fixtures.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: jpeg-fixtures
+          path: out/verification/jpeg-fixtures/
+          if-no-files-found: error
+          retention-days: 90
       - name: Check types and production release
         run: npm run build 2>&1 | tee out/ci/build.log
       - name: Build offline update fixtures
@@ -160,8 +174,11 @@ jobs:
           JS
           tar -czf "$RUNNER_TEMP/test-build.tar.gz" \
             .generated dist out/ci/build-info.json \
+            public/licenses/image-zlib public/licenses/image-jpeg \
             out/verification/pwa/site-a out/verification/pwa/site-b \
-            out/verification/pwa/fixture-artifacts.json out/verification/video-tracks
+            out/verification/pwa/fixture-artifacts.json out/verification/video-tracks \
+            out/verification/jpeg-fixtures/inputs \
+            out/verification/jpeg-fixtures/case-manifest.json out/verification/jpeg-fixtures/codes.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-build
@@ -596,7 +613,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-reference, png-stream-comparison, png-palette-comparison]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-reference, png-stream-comparison, png-palette-comparison, jpeg-reference, jpeg-comparison]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -734,5 +751,57 @@ jobs:
         with:
           name: png-palette-comparison
           path: out/verification/png-palette-comparison/
+          if-no-files-found: error
+          retention-days: 90
+
+  jpeg-reference:
+    name: Fixed IJG 6b original JPEG handler reference
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: jpeg-fixtures
+          path: out/verification/jpeg-fixtures/
+      - name: Execute the pinned original JPEG call order
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          python3 scripts/run-native-jpeg-reference.py --reference out/verification/jpeg-fixtures --output out/verification/native-jpeg
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: native-jpeg-reference
+          path: out/verification/native-jpeg/
+          if-no-files-found: error
+          retention-days: 90
+
+  jpeg-comparison:
+    name: JPEG native pixels, read phases and completed row groups
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    needs: [build, jpeg-reference]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-jpeg-reference
+          path: out/verification/native-jpeg/
+      - name: Compare every fixed-source JPEG reference
+        run: node --import tsx tests/probes/jpeg-compare.ts out/verification/native-jpeg
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: jpeg-comparison
+          path: out/verification/jpeg-comparison/
           if-no-files-found: error
           retention-days: 90
