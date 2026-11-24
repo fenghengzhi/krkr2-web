@@ -4,8 +4,10 @@ import { browserLaunchOptions } from '../helpers/browser-launch.ts'
 import { createServer } from 'node:http'
 import { readFile, stat, mkdir, writeFile } from 'node:fs/promises'
 import { resolve, basename, extname, sep } from 'node:path'
+import { createHash } from 'node:crypto'
 import { chromium, firefox, webkit, expect } from '@playwright/test'
 import { encodeBmp } from '../../src/formats/image/bmp.ts'
+import { eriTruecolorFiles, eriTrueRgb, eriTrueRgba } from '../helpers/eri-truecolor-fixtures.ts'
 const filename = process.argv[2],
   engine = process.argv[3] ?? 'chromium',
   backend = process.argv[4] ?? 'asyncify',
@@ -25,6 +27,19 @@ if (
 const root = resolve('dist'),
   directory = resolve(process.env.KRKR_KAG_OUTPUT ?? 'out/verification'),
   reportName = `${basename(filename, '.xp3')}-${engine}-${backend}${mode === 'startup' ? '' : '-' + mode}`
+const eriDecoyRgba = Array.from({ length: 9 }, () => [68, 85, 102, 255]).flat()
+const eriFiles: { name: string; mimeType: string; buffer: Buffer }[] = []
+if (saving) {
+  const authored = eriTruecolorFiles()
+  eriFiles.push(
+    { name: 'eri-save-verification.ks', mimeType: 'text/plain', buffer: await readFile('tests/fixtures/kag-eri-save.ks') },
+    { name: 'kag-eri-bookmark.eri', mimeType: 'application/octet-stream', buffer: Buffer.from(authored['tc-rgba-v1-independent.eri']!) },
+    { name: 'kag-eri-changed.eri', mimeType: 'application/octet-stream', buffer: Buffer.from(authored['tc-rgb-v4-table.eri']!) },
+    { name: 'kag-eri-bookmark.bmp', mimeType: 'image/bmp', buffer: Buffer.from(encodeBmp({
+      width: 3, height: 3, data: new Uint8Array(eriDecoyRgba),
+    }, 'bmp24')) },
+  )
+}
 const files =
   mode !== 'startup'
     ? [
@@ -68,6 +83,7 @@ const files =
               },
             ]
           : []),
+        ...eriFiles,
       ]
     : resolve(filename)
 const server = createServer(async (request, response) => {
@@ -120,6 +136,19 @@ let report: Record<string, unknown> = {
   scriptDebug,
 }
 const steps: string[] = []
+const imageBookmark: {
+  verified: boolean; steps: string[]; observations: unknown[]; sourceTagCounts: Record<string, number>
+  originalKagImageTag: boolean; originalBookmarkMethods: boolean; slot: number
+  inputs: { name: string; bytes: number; sha256: string; base64: string }[]; beforeRefreshLogs?: string
+  bookmarkFile?: string; bookmarkPayload?: string
+  bookmarkArtifact?: { path: string; bytes: number; sha256: string; base64: string }
+} = {
+  verified: false, steps: [], observations: [], sourceTagCounts: {},
+  originalKagImageTag: true, originalBookmarkMethods: true, slot: 120,
+  inputs: eriFiles.map(({ name, buffer }) => ({ name, bytes: buffer.length,
+    sha256: createHash('sha256').update(buffer).digest('hex'), base64: buffer.toString('base64') })),
+}
+if (saving) report.imageBookmark = imageBookmark
 let evaluation = 0
 async function prepareConsole(): Promise<void> {
   // Running is announced before the KAG constructor restores saved options.
@@ -150,6 +179,20 @@ async function marker(name: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 100))
   await expect(page.locator('#status')).toHaveText('运行中')
   steps.push(name)
+}
+async function eriPixels(stage: string, storage: string, rgba: readonly number[]): Promise<void> {
+  const observed = await evaluate(`(function(){var l=kag.fore.layers[0],v=[];
+    for(var y=0;y<3;y++)for(var x=0;x<3;x++){
+      var c=l.getMainPixel(x,y);v.add((c>>16)&255);v.add((c>>8)&255);v.add(c&255);v.add(l.getMaskPixel(x,y));
+    }return l.imageWidth+","+l.imageHeight+"|"+v.join(",")+"|"+l.Anim_loadParams.storage;
+  })()`, `3,3|${rgba.join(',')}|${storage}`)
+  imageBookmark.observations.push({ stage, storage, width: 3, height: 3, rgba: [...rgba], observed })
+  imageBookmark.steps.push(stage)
+}
+async function sourceTagCount(stage: string, expected: number): Promise<void> {
+  const marker = page.locator('#logs p span').filter({ hasText: /^eri-save=source-tag$/ })
+  await expect(marker).toHaveCount(expected)
+  imageBookmark.sourceTagCounts[stage] = await marker.count()
 }
 try {
   await page.goto(`http://127.0.0.1:${address.port}/?backend=${backend}`)
@@ -272,6 +315,79 @@ try {
       )
       await evaluate('"reload-value="+f.saved', 'reload-value=7')
       steps.push('reload')
+
+      // Keep the original plain/thumbnail/reload contract above intact. This
+      // additional scenario uses original KAG tags and bookmark methods; the
+      // probe reads its real Layer, never writes decoded pixels or patches KAG.
+      await evaluate(
+        '(function(){kag.conductor.loadScenario("eri-save-verification.ks");kag.conductor.startProcess();return "eri-started";})()',
+        'eri-started',
+      )
+      await expect(page.locator('#logs')).toContainText('eri-save=bmp-control')
+      await eriPixels('explicit-bmp-control', 'kag-eri-bookmark.bmp', eriDecoyRgba)
+      await evaluate(
+        '(function(){kag.conductor.goToLabel("*source");kag.conductor.startProcess();return "eri-source-started";})()',
+        'eri-source-started',
+      )
+      await expect(page.locator('#logs p span').filter({ hasText: /^eri-save=ready:41$/ })).toHaveCount(1)
+      await eriPixels('original-eri-selected', 'kag-eri-bookmark', eriTrueRgba)
+      await sourceTagCount('beforeSave', 1)
+      await evaluate('kag.pcflags.foreCharacterLayers[0].loadParams.storage', 'kag-eri-bookmark')
+      await evaluate(
+        '(function(){kag.saveThumbnail=false;return "eri-bookmark-save="+kag.saveBookMark(120);})()',
+        'eri-bookmark-save=1',
+      )
+      imageBookmark.bookmarkFile = await evaluate('kag.getBookMarkFileNameAtNum(120)', /.+/)
+      imageBookmark.bookmarkPayload = await evaluate(`(function(){
+        var data=Scripts.evalStorage(kag.getBookMarkFileNameAtNum(120)),l=data.core.foreCharacterLayers[0];
+        return l.loadParams.storage+"|"+l.imageWidth+","+l.imageHeight+"|"+data.core.currentLabel+"|"+data.user.eriSaved;
+      })()`, 'kag-eri-bookmark|3,3|*eri_checkpoint|41')
+      const pendingEriDownload = page.waitForEvent('download')
+      await page.locator('#export-saves').click()
+      const eriDownload = await pendingEriDownload,
+        eriBackup = JSON.parse(await readFile((await eriDownload.path())!, 'utf8')) as {
+          files: { path: string; base64: string }[]
+        },
+        bookmarkName = imageBookmark.bookmarkFile.replaceAll('\\', '/').split('/').at(-1)!,
+        savedEntries = eriBackup.files.filter((file) => file.path.replaceAll('\\', '/').split('/').at(-1) === bookmarkName)
+      expect(savedEntries).toHaveLength(1)
+      const saved = savedEntries[0]!, savedBytes = Buffer.from(saved.base64, 'base64')
+      expect(savedBytes.length).toBeGreaterThan(0)
+      imageBookmark.bookmarkArtifact = { path: saved.path, bytes: savedBytes.length,
+        sha256: createHash('sha256').update(savedBytes).digest('hex'), base64: saved.base64 }
+      imageBookmark.steps.push('bookmark-file-saved')
+      await evaluate(
+        '(function(){kag.conductor.goToLabel("*eri_changed");kag.conductor.startProcess();return "eri-change-started";})()',
+        'eri-change-started',
+      )
+      await expect(page.locator('#logs')).toContainText('eri-save=changed:99')
+      await eriPixels('replacement-eri-selected', 'kag-eri-changed.eri', eriTrueRgb)
+      await evaluate('(System.clearGraphicCache(),"eri-cache-cleared")', 'eri-cache-cleared')
+      await evaluate('"eri-bookmark-load="+kag.loadBookMark(120)', 'eri-bookmark-load=1')
+      await evaluate('"eri-value="+f.eriSaved', 'eri-value=41')
+      await expect(page.locator('#logs p span').filter({ hasText: /^eri-save=ready:41$/ })).toHaveCount(2)
+      await eriPixels('bookmark-restored', 'kag-eri-bookmark', eriTrueRgba)
+      await sourceTagCount('afterLoad', 1)
+      imageBookmark.beforeRefreshLogs = await page.locator('#logs').innerText()
+      await page.reload()
+      await page.locator('#files').setInputFiles(files)
+      await expect(page.locator('#status')).toHaveText('运行中', { timeout: 20000 })
+      await prepareConsole()
+      await sourceTagCount('afterRefresh', 0)
+      imageBookmark.steps.push('refresh-before-restore')
+      // Deliberately no loadScenario/goToLabel here. Original bookmark restore
+      // must reconstruct the layer before resuming at the saved label, which is
+      // after the source [image] tag. A replay would emit the absent marker.
+      await evaluate(
+        '(function(){kag.saveThumbnail=false;return "eri-refresh-load="+kag.loadBookMark(120);})()',
+        'eri-refresh-load=1',
+      )
+      await evaluate('"eri-refreshed-value="+f.eriSaved', 'eri-refreshed-value=41')
+      await evaluate('"legacy-value="+f.saved', 'legacy-value=7')
+      await expect(page.locator('#logs p span').filter({ hasText: /^eri-save=ready:41$/ })).toHaveCount(1)
+      await eriPixels('refresh-bookmark-restored', 'kag-eri-bookmark', eriTrueRgba)
+      await sourceTagCount('afterRefreshLoad', 0)
+      imageBookmark.verified = true
     }
     if (transitioning) {
       await evaluate(
@@ -307,6 +423,7 @@ try {
       !(await page.locator('#logs .error').count()) &&
       (!flow || steps.join(',') === 'line,history,page,link,choice') &&
       (!saving || steps.join(',') === 'plain-save,plain-load,thumbnail-8,thumbnail-24,reload') &&
+      (!saving || imageBookmark.verified) &&
       (!transitioning || steps.join(',') === 'crossfade,scroll,universal,done'),
   }
   await mkdir(directory, { recursive: true })

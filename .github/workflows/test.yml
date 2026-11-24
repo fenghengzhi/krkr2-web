@@ -891,10 +891,20 @@ jobs:
           retention-days: 90
 
   eri-reference:
-    name: Original 2.32r2 SDK ERI pixels and palette selection
+    name: Original 2.32r2 SDK ERI pixels (${{ matrix.corpus }})
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     runs-on: windows-2022
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - corpus: authored
+            artifact: original-eri-reference
+          - corpus: encoder
+            artifact: original-eri-encoder-reference
+    env:
+      KRKR_ERI_CORPUS: ${{ matrix.corpus }}
     defaults:
       run:
         shell: pwsh
@@ -908,15 +918,17 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Prepare the owned image fixtures and record input hashes
+        id: prepare_eri
         run: node --import tsx tests/probes/eri-sdk.ts prepare
       - name: Observe the original SDK with the fixed ERI project
         run: ./tests/probes/original-eri.ps1
       - name: Compare every native observation with the selected Web image loader
+        if: ${{ !cancelled() && steps.prepare_eri.outcome == 'success' }}
         run: node --import tsx tests/probes/eri-sdk.ts compare
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: original-eri-reference
+          name: ${{ matrix.artifact }}
           path: out/verification/native-eri/
           if-no-files-found: error
           retention-days: 90

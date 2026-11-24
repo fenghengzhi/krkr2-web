@@ -131,8 +131,8 @@ test('ERI distinguishes explicit frame precondition rejection from unimplemented
     assert.throws(() => finish(decodeSelectedEri(input, 'normal', observed.progress)), native('ERIDecoder::DecodeImage failed.'))
     assert.deepEqual(observed.sizes, [[3, 2]]); assert.deepEqual(observed.rows, [])
   }
-  // Valid precondition combinations of the unsupported truecolor algorithms;
-  // their remaining payload is deliberately not decoded or called a success.
+  // Remaining unsupported entropy families. Actual RL-Gamma frame1/frame4
+  // inputs now have independent positive/negative vectors in eri-truecolor.
   const truecolor = (frameVersion: number, version: number, architecture: number) => {
     const input = bytes.slice()
     field(input, info, version); field(input, info + 8, architecture)
@@ -141,7 +141,7 @@ test('ERI distinguishes explicit frame precondition rejection from unimplemented
     return input
   }
   for (const input of [field(bytes.slice(), info + 8, 32), field(bytes.slice(), info + 8, 0xfffffffc),
-    truecolor(1, 0x20100, 0xffffffff), truecolor(4, 0x20200, 0xffffffff), truecolor(8, 0x20200, 0xfffffffc)]) {
+    truecolor(8, 0x20200, 0xfffffffc)]) {
     const observed = observe()
     assert.throws(() => finish(decodeSelectedEri(input, 'normal', observed.progress)), EriUnsupportedError)
     assert.deepEqual(observed.sizes, [[3, 2]]); assert.deepEqual(observed.rows, [])

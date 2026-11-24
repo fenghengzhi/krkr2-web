@@ -7,18 +7,19 @@ System.exitOnNoWindowStartup=false;
 System.assignMessage("TVPERILoadError","eri:%1");
 var referenceWindow=new Window(), target=new Layer(referenceWindow,null);
 target.type=ltAlpha;
-function observe(id,key,province){
+function observe(id,key,province,width,height){
   try {
     if(province) target.loadProvinceImage(id+".eri");
     else target.loadImages(id+".eri",key);
-    if(target.imageWidth!=3 || target.imageHeight!=2) throw new Exception("unexpected dimensions");
+    if(target.imageWidth!=width || target.imageHeight!=height)
+      throw new Exception("unexpected dimensions "+target.imageWidth+"x"+target.imageHeight);
     var pixels=[];
-    for(var y=0;y<2;y++) for(var x=0;x<3;x++){
+    for(var y=0;y<height;y++) for(var x=0;x<width;x++){
       var c=target.getMainPixel(x,y);
       pixels.add((c>>16)&255);pixels.add((c>>8)&255);pixels.add(c&255);
       pixels.add(target.getMaskPixel(x,y));
     }
-    record("case|"+id+"|ok|3|2|"+pixels.join(","));
+    record("case|"+id+"|ok|"+target.imageWidth+"|"+target.imageHeight+"|"+pixels.join(","));
   } catch(error) {record("case|"+id+"|error|"+error.message);}
 }
 /* CASES */

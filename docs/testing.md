@@ -100,6 +100,8 @@ gh workflow run test.yml --ref BRANCH -f runtime-only=true
 
 独立作业从固定源码生成 `jpeg-fixtures`、`jpeg-kernel` 和 `zlib-kernel`。主构建将同一份内核、许可和测试输入纳入发布及 `test-build`。PNG、JPEG 差分可以在主 TJS 构建失败时给出自己的结果。JPEG 的 C 观察及比较分别保存在 `native-jpeg-reference` 和 `jpeg-comparison`，PNG 的流式、调色板及低位灰度结果分别归档。另有 Windows 作业以原版 2.32r2 SDK 比较 ERI 像素。上述作业均列入全套门禁。[JPEG 验收](decisions/118-native-jpeg-and-hosted-build-recovery.md) · [ERI 和 PNG 验收](decisions/119-eri-png-and-hosted-codecs.md)
 
+Windows ERI 对照分两组。手工输入的结果存入 `original-eri-reference`。原作者工具 ericvt 压缩的 BMP、生成的 ERI、原生观察及 Web 像素存入 `original-eri-encoder-reference`。两组都要求每个像素吻合，并独立保留失败时已取得的证据。[真彩色 ERI 验收](decisions/120-eri-truecolor.md)
+
 | 作业                       | 范围                                                                 |
 | -------------------------- | -------------------------------------------------------------------- |
 | Node                       | `tests/conformance`、`tests/integration`，含真实 WASM                |

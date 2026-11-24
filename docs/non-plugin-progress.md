@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 120 批接入无损真彩色 ERI，让游戏图层能加载 RGB、带透明度的图像及灰度遮罩。验收包含原作者工具压缩的三幅图、Windows 原版 SDK 逐像素对照，以及原版 KAG 模板的图像存读档。119 的独立 PNG、JPEG、8 位 ERI 对照作业已成功。取回时整套应用验收尚无结果，Windows 2022 的窗口移动作业失败。后续仍需处理验证失败、其余 ERI 编码和真实游戏验收。[120 实现与证据](decisions/120-eri-truecolor.md)
+
 119 已推送至 `7670f09f7c637a41cb8a86b21d7ab0cdb4d7ae2a`。同一次初始登记显示全套验证和历史归档回收均已开始，结论待下批取回。[全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45473097908) · [历史归档回收](https://github.com/fenghengzhi/krkr2-web/actions/runs/45473098039)
 
 第 119 批接入 ERI 版本 2 的 8 位无损 RL-MTF-G 索引图与灰度图，并修正 PNG 透明度数据在 CRC 警告后的处理。已加入原版 Windows SDK 的 11 组 ERI 对照。118 的原生编译失败使应用验收与 JPEG 差分跳过，本批修复全局 `TJSReadError` 引用，并将 PNG／JPEG 的独立比较接到各自内核产物。113–117 已终态失败，118 的部分作业在取回时仍在运行。[实现与验证范围](decisions/119-eri-png-and-hosted-codecs.md)

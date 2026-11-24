@@ -1,7 +1,8 @@
 import type { DecodedImage } from '../../engine/ports/graphics.ts'
 import { ImageDecodeError, type ImageDecodeProgress, type ImageDecodeSelection } from './selection.ts'
+import { decodeEriGammaTruecolor } from './eri-truecolor.ts'
 
-/* ERI version-2 8-bit RL-MTF-G decoder.
+/* ERI lossless RL-MTF-G palette and RL-Gamma truecolor decoder.
  * Written for this engine from the ERINA-Library 1.0A format/algorithm source,
  * Copyright (C) 2000-2002 Leshade Entis, Entis-soft. The original SDK is not
  * bundled here. Source, license and the older fixed KRKR headers are recorded
@@ -179,6 +180,45 @@ function* indices(bits: EriBits, width: number, height: number): Generator<void,
   return plane
 }
 
+/** The original copies bottom-up physical rows only after DecodeImage returns.
+ * Reorder the private image in place to avoid retaining a second whole image.
+ * Its alpha conversion is TVPDivTable, not an assumed straight-alpha copy. */
+function* publishTruecolor(data: Uint8Array, width: number, height: number, signedHeight: number,
+  gray: boolean, hasAlpha: boolean, progress?: ImageDecodeProgress): Generator<void, DecodedImage> {
+  const stride = width * 4
+  if (signedHeight > 0) {
+    const temporary = new Uint8Array(stride)
+    for (let y = 0; y < Math.floor(height / 2); y++) {
+      const first = y * stride, last = (height - y - 1) * stride
+      temporary.set(data.subarray(first, first + stride))
+      data.copyWithin(first, last, last + stride)
+      data.set(temporary, last)
+      yield
+    }
+  }
+  for (let y = 0; y < height; y++) {
+    const start = y * stride
+    for (let at = start; at < start + stride; at += 4) {
+      const blue = data[at]!, green = data[at + 1]!, red = data[at + 2]!, alpha = data[at + 3]!
+      if (gray) {
+        // The grayscale branch sees the original physical colors and ignores
+        // alpha. It does not unpremultiply before applying the integer weights.
+        data[at] = data[at + 1] = data[at + 2] = (red * 54 + green * 183 + blue * 19) >>> 8
+        data[at + 3] = 255
+      } else if (hasAlpha) {
+        data[at] = alpha ? Math.min(255, Math.floor(red * 255 / alpha)) : 0
+        data[at + 1] = alpha ? Math.min(255, Math.floor(green * 255 / alpha)) : 0
+        data[at + 2] = alpha ? Math.min(255, Math.floor(blue * 255 / alpha)) : 0
+      } else {
+        data[at] = red; data[at + 2] = blue; data[at + 3] = 255
+      }
+    }
+    progress?.row(y, data.subarray(start, start + stride))
+    yield
+  }
+  return { width, height, data, ...(gray ? { grayscale: true } : {}) }
+}
+
 /** Native selection accepts palettized source data for normal/gray output,
  * but rejects the caller's palettized mode before any source/header read.
  * Size is observable before Initialize/DecodeImage; all decoded source pixels
@@ -219,7 +259,14 @@ export function* decodeSelectedEri(bytes: Uint8Array, mode: ImageDecodeSelection
       if (architecture === 32 ? operations !== 0 || reserved !== 0
         : architecture === GAMMA ? operations !== 0 || (encoding & 0xfe) !== 0 || reserved !== 0 : true)
         failed('DecodeImage')
-      throw new EriUnsupportedError('ImageFrm version ' + frameVersion)
+      if (architecture !== GAMMA) throw new EriUnsupportedError('truecolor arithmetic entropy')
+      if (depth !== 24 && depth !== 32 && !(type === GRAY && depth === 8))
+        throw new EriUnsupportedError('truecolor source depth ' + depth)
+      const image = yield* decodeEriGammaTruecolor(bits, {
+        width, height, channels, degree: blockingDegree, enhanced: enhanced !== 0, continuous: (encoding & 1) !== 0,
+      })
+      return yield* publishTruecolor(image, width, height, signedHeight, mode === 'grayscale',
+        (type & WITH_ALPHA) !== 0, progress)
     }
     if (frameVersion === 8) {
       if (channels < 3 || enhanced !== 2 || architecture !== HUFFMAN || !restorable) failed('DecodeImage')

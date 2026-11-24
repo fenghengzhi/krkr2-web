@@ -202,6 +202,56 @@ for (const { name, keys } of series) {
             save: ['plain-save', 'plain-load', 'thumbnail-8', 'thumbnail-24', 'reload'],
             transition: ['crossfade', 'scroll', 'universal', 'done'],
           }[row.mode])
+          if (row.mode === 'save') {
+            // The original five save stages and the96-case inventory remain.
+            // Additional real ERI image restoration must be present in each of
+            // the existing12 XP3/ZIP × browser/backend save definitions.
+            const image = detail.imageBookmark
+            assert.equal(image.verified, true)
+            assert.equal(image.originalKagImageTag, true)
+            assert.equal(image.originalBookmarkMethods, true)
+            assert.equal(image.slot, 120)
+            assert.deepEqual(image.steps, ['explicit-bmp-control', 'original-eri-selected', 'bookmark-file-saved',
+              'replacement-eri-selected', 'bookmark-restored', 'refresh-before-restore', 'refresh-bookmark-restored'])
+            assert.deepEqual(image.sourceTagCounts, { beforeSave: 1, afterLoad: 1, afterRefresh: 0, afterRefreshLoad: 0 })
+            assert.equal(image.bookmarkPayload, 'kag-eri-bookmark|3,3|*eri_checkpoint|41')
+            assert.equal(typeof image.bookmarkFile, 'string')
+            assert(image.beforeRefreshLogs.includes('eri-save=source-tag'))
+            assert(!detail.logs.includes('eri-save=source-tag'), 'Fresh-session restoration cannot replay the source image tag')
+            assert.deepEqual(image.inputs.map((input) => input.name), [
+              'eri-save-verification.ks', 'kag-eri-bookmark.eri', 'kag-eri-changed.eri', 'kag-eri-bookmark.bmp',
+            ])
+            for (const input of [...image.inputs, image.bookmarkArtifact]) {
+              const bytes = Buffer.from(input.base64, 'base64')
+              assert(bytes.length > 0)
+              assert.equal(bytes.length, input.bytes)
+              assert.equal(hash(bytes), input.sha256)
+            }
+            assert.equal(image.inputs[0].sha256, hash(await readFile('tests/fixtures/kag-eri-save.ks')))
+            assert.equal(image.bookmarkArtifact.path.split(/[\\/]/).at(-1), image.bookmarkFile.split(/[\\/]/).at(-1))
+            const expectedRgba = [
+              10, 20, 30, 255, 63, 31, 15, 128, 239, 159, 79, 64,
+              0, 0, 0, 0, 0, 255, 255, 1, 255, 255, 159, 128,
+              255, 255, 255, 255, 1, 2, 3, 254, 55, 119, 247, 32,
+            ], expectedRgb = [
+              10, 20, 30, 255, 32, 16, 8, 255, 60, 40, 20, 255,
+              9, 8, 7, 255, 0, 1, 2, 255, 200, 130, 80, 255,
+              255, 255, 255, 255, 1, 2, 3, 255, 7, 15, 31, 255,
+            ]
+            const expectedObservations = [
+              ['explicit-bmp-control', 'kag-eri-bookmark.bmp', Array.from({ length: 9 }, () => [68, 85, 102, 255]).flat()],
+              ['original-eri-selected', 'kag-eri-bookmark', expectedRgba],
+              ['replacement-eri-selected', 'kag-eri-changed.eri', expectedRgb],
+              ['bookmark-restored', 'kag-eri-bookmark', expectedRgba],
+              ['refresh-bookmark-restored', 'kag-eri-bookmark', expectedRgba],
+            ]
+            assert.equal(image.observations.length, expectedObservations.length)
+            for (let i = 0; i < expectedObservations.length; i++) {
+              const [stage, storage, rgba] = expectedObservations[i], observation = image.observations[i]
+              assert.deepEqual(observation, { stage, storage, width: 3, height: 3, rgba,
+                observed: `3,3|${rgba.join(',')}|${storage}` })
+            }
+          }
           await nonempty(row.screenshot)
         } else if (name === 'kag-panels' || name === 'kag-diagnostics') {
           assert.deepEqual(row.errors, [])
@@ -248,12 +298,13 @@ const counts = Object.fromEntries(['passed', 'failed', 'unreported'].map((status
 const summary = {
   recordedAt: new Date().toISOString(), githubRun: process.env.GITHUB_RUN_ID,
   githubSha: process.env.GITHUB_SHA, browser, buildInfo, indexSha256,
-  inventory: { perBrowser: 32, matrixBrowsers: browsers, matrixCases: 96, originalHelpCases: 6, originalCursorCases: 6 },
+  inventory: { perBrowser: 32, matrixBrowsers: browsers, matrixCases: 96, originalHelpCases: 6, originalCursorCases: 6,
+    imageBookmarkCases: 12 },
   counts, evidenceErrors, results,
   passing: counts.passed === 32 && evidenceErrors.length === 0,
 }
 await writeFile(resolve(directory, 'current-inventory.json'), JSON.stringify(summary, null, 2) + '\n')
-const markdown = `Compatibility ${browser}: ${counts.passed}/32 passed, ${counts.failed} failed, ${counts.unreported} unreported. Full matrix inventory: 96 cases (including 6 original KAG help and 6 cursor cases).\n`
+const markdown = `Compatibility ${browser}: ${counts.passed}/32 passed, ${counts.failed} failed, ${counts.unreported} unreported. Full matrix inventory: 96 cases (including 6 original KAG help and 6 cursor cases; 12 existing save cases also require ERI image bookmark restoration).\n`
 console.log(markdown.trim())
 if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, markdown)
 if (!summary.passing) process.exitCode = 1
