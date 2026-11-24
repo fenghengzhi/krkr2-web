@@ -1,12 +1,14 @@
 import { Scenario } from './scenario.ts'
-import { lexTag, type LexedTag } from './lexer.ts'
+import { KagTagSyntaxError, lexTag, type LexedTag } from './lexer.ts'
 import { integer, list, record, string, type Data, type RecordData } from './data.ts'
+import { TvpError } from '../system/tvp-error.ts'
 
 export interface Effect {
   kind: string
   args: Data[]
 }
-export type Task = Generator<Effect, Data, Data>
+export type Task<Result = Data> = Generator<Effect, Result, Data | Scenario>
+interface ParsedTag { token: LexedTag; values: RecordData; condition: boolean; kind: string }
 const special = new Set([
   'if',
   'ignore',
@@ -67,14 +69,19 @@ export class KagParser {
   }
 
   private *effect(kind: string, ...args: Data[]): Task {
-    return yield { kind, args }
+    const value = yield { kind, args }
+    if (value instanceof Scenario) throw new Error('Unexpected KAG scenario reply')
+    return value
   }
   private *callback(name: string, ...args: Data[]): Task {
     return yield* this.effect('callback', name, args)
   }
   private *evaluate(expression: Data, boolean = false): Task {
-    if (!string(expression)) throw new Error('KAG expression is empty')
     return yield* this.effect('eval', string(expression), boolean, this.curStorage, this.tagLine)
+  }
+  private *controlExpression(expression: Data, boolean = false): Task {
+    if (!string(expression)) throw new TvpError('TVPKAGSyntaxError')
+    return yield* this.evaluate(expression, boolean)
   }
   private *popTo(depth: number): Task {
     if (depth < 0 || depth > this.macroDepth) throw new Error('KAG macro argument stack underflow')
@@ -95,8 +102,10 @@ export class KagParser {
     if (!this.scenario || this.curStorage !== name || force) {
       this.scenario = undefined
       const provided = yield* this.callback('onScenarioLoad', name)
-      const source = typeof provided === 'string' ? provided : yield* this.effect('read', name)
-      this.scenario = new Scenario(name, string(source))
+      const scenario = typeof provided === 'string' ? new Scenario(name, provided, true)
+        : yield { kind: 'read', args: [name] }
+      if (!(scenario instanceof Scenario)) throw new Error('Missing KAG scenario reply')
+      this.scenario = scenario
       if (this.debugLevel >= 1) yield* this.effect('log', `Scenario loaded : ${name}`)
     }
     this.curLine = this.curPos = 0
@@ -148,7 +157,7 @@ export class KagParser {
   }
   private *popCall(storage: Data, target: Data): Task {
     const frame = this.calls.at(-1)
-    if (!frame) throw new Error('KAG return without matching call')
+    if (!frame) throw new TvpError('TVPKAGCallStackUnderflow')
     this.macroBase = integer(frame.macroArgStackDepth)
     yield* this.popTo(this.macroBase)
     if (string(storage) || string(target)) yield* this.goTo(storage, target)
@@ -161,7 +170,7 @@ export class KagParser {
         (this.curLine < this.scenario!.lines.length &&
           this.scenario!.lines[this.curLine] !== frame.orgLineStr)
       )
-        throw new Error('KAG return position was lost because the scenario changed')
+        throw new TvpError('TVPKAGReturnLostSync')
       this.curPos = integer(frame.pos)
       this.buffer = frame.lineBufferUsing ? string(frame.lineBuffer) : undefined
       this.restoreConditions(frame)
@@ -192,6 +201,7 @@ export class KagParser {
     this.interrupted = false
   }
   *popMacroArgs(): Task {
+    if (this.macroDepth === 0) throw new TvpError('TVPKAGSyntaxError')
     yield* this.popTo(this.macroDepth - 1)
     return
   }
@@ -211,7 +221,7 @@ export class KagParser {
         continue
       }
       if (source.startsWith('*')) {
-        if (this.recording) throw new Error('A label is not allowed inside a KAG macro')
+        if (this.recording) throw new TvpError('TVPLabelOrScriptInMacro')
         this.curLabel = this.scenario.label(this.curLine)
         const separator = source.indexOf('|')
         yield* this.callback(
@@ -223,7 +233,7 @@ export class KagParser {
         continue
       }
       if (/^(?:\[iscript\]\\?|@iscript)$/.test(source)) {
-        if (this.recording) throw new Error('An iscript block is not allowed inside a KAG macro')
+        if (this.recording) throw new TvpError('TVPLabelOrScriptInMacro')
         this.nextLine()
         const start = this.curLine
         let script = ''
@@ -232,11 +242,11 @@ export class KagParser {
           !/^(?:\[endscript\]\\?|@endscript)$/.test(this.curLineStr)
         ) {
           if (++work % 1024 === 0) yield* this.effect('yield')
-          script += this.curLineStr + '\r\n'
+          if (this.excludeLevel === -1) script += this.curLineStr + '\r\n'
           this.nextLine()
         }
         if (this.curLine === this.scenario.lines.length)
-          throw new Error('KAG iscript has no matching endscript')
+          throw new TvpError('TVPKAGInlineScriptNotEnd')
         if (this.excludeLevel === -1)
           yield* this.callback('onScript', script, this.curStorage.replace(/^.*[\\/>]/, ''), start)
         this.nextLine()
@@ -267,21 +277,33 @@ export class KagParser {
     this.buffer = buffer
     this.curPos = start
   }
-  private *attributes(token: LexedTag): Task {
-    const values: RecordData = { tagname: token.name }
-    const names: Data[] = ['tagname']
+  private *readTag(source: string, start: number, lineCommand: boolean): Task<ParsedTag> {
+    const { name, fields } = lexTag(source, start, lineCommand)
+    const kind = this.processSpecialTags && special.has(name) ? name : ''
+    let values: RecordData = Object.assign(Object.create(null), { tagname: name })
+    let names: Data[] = ['tagname']
     let condition = true
-    for (const attribute of token.attributes) {
+    // Native evaluates each attribute before examining the next delimiter.
+    // An expression can observe curPos or take effect before a later error.
+    for (;;) {
+      const next = fields.next()
+      if (next.done) {
+        const token = next.value
+        this.curPos = token.lineCommand ? token.end : token.end - 1
+        values.taglist = names
+        return { token, values, condition, kind }
+      }
+      const attribute = next.value
+      this.curPos = attribute.end
       if (attribute.forward) {
         if (!this.recording) {
           const current = yield* this.effect('params')
           if (current !== null) {
             const params = record(record(current).values)
-            for (const name of list(record(current).names)) {
-              if (name === 'tagname') continue
-              values[string(name)] = params[string(name)]
-              names.push(name)
-            }
+            values = Object.assign(Object.create(null), params, { tagname: name })
+            const ordered = list(record(current).names).map(string).filter((name) => name !== 'tagname' && Object.hasOwn(params, name))
+            const known = new Set(ordered)
+            names = ['tagname', ...ordered, ...Object.keys(params).filter((name) => name !== 'tagname' && !known.has(name))]
           }
         }
         continue
@@ -289,7 +311,7 @@ export class KagParser {
       let value: Data = attribute.value
       if (
         (!this.recording && this.excludeLevel === -1) ||
-        (token.name === 'elsif' && this.processSpecialTags)
+        kind === 'elsif'
       ) {
         if (attribute.entity) value = yield* this.evaluate(value)
         else if (attribute.parameter) {
@@ -309,8 +331,6 @@ export class KagParser {
       values[attribute.name] = value
       names.push(attribute.name)
     }
-    values.taglist = names
-    return { values, condition }
   }
   *getNextTag(): Task {
     // EOF takes precedence over interrupt in the native class.
@@ -352,14 +372,16 @@ export class KagParser {
           return character === '\n' ? tag('r') : tag('ch', { text: character })
         continue
       }
-      const token = lexTag(source, start, lineCommand)
-      const kind = this.processSpecialTags && special.has(token.name) ? token.name : ''
-      const parsed = record(yield* this.attributes(token)),
-        values = record(parsed.values)
-      const condition = !!parsed.condition
+      let parsed: ParsedTag
+      try { parsed = yield* this.readTag(source, start, lineCommand) }
+      catch (error) {
+        if (error instanceof KagTagSyntaxError) this.curPos = error.position
+        throw error
+      }
+      const { token, values, condition, kind } = parsed
       if (condition && this.excludeLevel === -1) {
         if (kind === 'endmacro') {
-          if (!this.recording) throw new Error('KAG endmacro without matching macro')
+          if (!this.recording) throw new TvpError('TVPKAGSyntaxError')
           yield* this.effect('setMacro', this.recording.name, this.recording.source + '[macropop]')
           this.recording = undefined
         }
@@ -374,7 +396,7 @@ export class KagParser {
         this.excludes.push(this.excludeLevel)
         this.executed.push(false)
         if (this.excludeLevel === -1) {
-          let included = !!(yield* this.evaluate(values.exp, true))
+          let included = !!(yield* this.controlExpression(values.exp, true))
           if (kind === 'ignore') included = !included
           this.executed[this.executed.length - 1] = included
           if (!included) this.excludeLevel = this.executed.length
@@ -385,7 +407,7 @@ export class KagParser {
           if (this.executed[depth - 1]) this.excludeLevel = depth
           else if (
             depth === this.excludeLevel &&
-            (kind === 'else' || !!(yield* this.evaluate(values.exp, true)))
+            (kind === 'else' || !!(yield* this.controlExpression(values.exp, true)))
           ) {
             this.executed[depth - 1] = true
             this.excludeLevel = -1
@@ -403,7 +425,7 @@ export class KagParser {
       }
       const macro = !kind ? yield* this.effect('getMacro', token.name) : undefined
       if (kind === 'emb' || macro !== undefined) {
-        let content = macro === undefined ? string(yield* this.evaluate(values.exp)) : string(macro)
+        let content = macro === undefined ? string(yield* this.controlExpression(values.exp)) : string(macro)
         if (
           macro === undefined &&
           (values.escape === undefined || !!(yield* this.effect('boolean', values.escape)))
@@ -434,10 +456,13 @@ export class KagParser {
         }
       } else if (kind === 'macro') {
         const name = string(values.name).toLowerCase()
-        if (!name) throw new Error('KAG macro requires a name')
+        if (!name) throw new TvpError('TVPKAGSyntaxError')
         this.recording = { name, source: '' }
       } else if (kind === 'macropop') yield* this.popMacroArgs()
-      else if (kind === 'erasemacro') yield* this.effect('eraseMacro', string(values.name))
+      else if (kind === 'erasemacro') {
+        const name = string(values.name)
+        if (!(yield* this.effect('eraseMacro', name))) throw new TvpError('TVPUnknownMacroName', [name])
+      }
       this.advance(token)
       if (!kind) return values
     }
@@ -467,10 +492,10 @@ export class KagParser {
   store(macros: Data, params: Data, names: Data): RecordData {
     return {
       macros: record(macros),
-      macroArgs: list(params).map((value, index) => {
-        const param = record(value)
-        return list(list(names)[index]).flatMap((key) => [key, param[string(key)]])
-      }),
+      macroArgs: list(params).map(record),
+      // Native macroArgs are dictionaries. Keep the Web taglist ordering
+      // separately so duplicate attribute positions survive a Web round trip.
+      ...(list(params).length ? { macroArgNames: list(names) } : {}),
       callStack: this.calls.map((frame) => ({ ...frame })),
       storageName: this.curStorage,
       storageShortName: this.curStorage.replace(/^.*[\\/>]/, ''),
@@ -488,21 +513,26 @@ export class KagParser {
     const macros = record(data.macros),
       frames = list(data.callStack).map(record)
     if (frames.length > 4096) throw new Error('Malformed KAG call stack')
-    const params = list(data.macroArgs).map((value) => {
-      const pairs = list(value)
-      if (pairs.length % 2) throw new Error('Malformed KAG macro arguments')
-      const values: RecordData = {},
-        names: Data[] = []
-      for (let i = 0; i < pairs.length; i += 2) {
-        values[string(pairs[i])] = pairs[i + 1]
-        names.push(pairs[i])
+    const nameLists = data.macroArgNames === undefined ? undefined : list(data.macroArgNames)
+    const params = list(data.macroArgs).map((entry, index) => {
+      if (!Array.isArray(entry)) {
+        const values = record(entry), saved = nameLists?.[index]
+        return { values, names: saved === undefined ? Object.keys(values) : list(saved).map(string) }
       }
-      values.taglist = names
-      return values
+      // Earlier Web bookmarks used alternating attribute names and values.
+      if (entry.length % 2) throw new Error('Malformed KAG macro arguments')
+      const values: RecordData = Object.create(null), names: string[] = []
+      for (let i = 0; i < entry.length; i += 2) {
+        const name = string(entry[i])
+        values[name] = entry[i + 1]
+        names.push(name)
+      }
+      return { values, names }
     })
     const depth = integer(data.macroArgStackDepth),
       base = integer(data.macroArgStackBase)
-    if (depth < 0 || depth !== params.length || base < 0 || base > depth || depth > 4096)
+    if (depth !== params.length) throw new TvpError('TVPKAGMalformedSaveData')
+    if (depth < 0 || base < 0 || base > depth || depth > 4096)
       throw new Error('Malformed KAG macro depth')
     // Validate condition data before mutating the running parser.
     const validator = new KagParser()
@@ -522,14 +552,21 @@ export class KagParser {
     }
     yield* this.clearCallStack()
     yield* this.effect('restoreMacros', macros)
+    this.calls = frames.map((frame) => ({ ...frame }))
+    yield* this.effect('restoreParams', params)
+    // Preserve restored arguments during ClearBuffer/LoadScenario. Scripts
+    // can inspect mp and callStackDepth inside onScenarioLoad/Loaded.
+    this.macroBase = this.macroDepth = depth
+    this.curLabel = string(data.curLabel)
     // Native restore resumes from the saved label, not the middle of a text run.
     if (string(data.storageName)) {
       yield* this.loadScenario(string(data.storageName), true)
       yield* this.goToLabel(string(data.curLabel))
-    } else yield* this.clear()
-    this.calls = frames.map((frame) => ({ ...frame }))
-    yield* this.effect('restoreParams', params)
-    this.macroDepth = depth
+    } else {
+      this.scenario = undefined
+      this.buffer = undefined
+      this.curLine = this.curPos = 0
+    }
     this.macroBase = base
     this.restoreConditions(data)
     return
@@ -541,7 +578,6 @@ export class KagParser {
     this.curLabel = other.curLabel
     this.buffer = other.buffer
     this.tagLine = other.tagLine
-    this.interrupted = other.interrupted
     this.recording = other.recording && { ...other.recording }
     this.macroBase = other.macroBase
     this.macroDepth = other.macroDepth
@@ -549,6 +585,5 @@ export class KagParser {
     this.restoreConditions(other.conditions())
     this.debugLevel = other.debugLevel
     this.ignoreCR = other.ignoreCR
-    this.processSpecialTags = other.processSpecialTags
   }
 }

@@ -14,6 +14,13 @@ const output = resolve('out/verification/native-eri/midi'), game = resolve(outpu
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const inputs = cases.map(({ id, bytes, expected }) => ({ id, expected, length: bytes.length, sha256: sha(bytes) }))
 const save = (name: string, value: unknown) => writeFileSync(resolve(output, name), JSON.stringify(value, null, 2) + '\n')
+const rawCalls = [
+  ['missing', 'MIDISoundBuffer.midiOut()', 'count'],
+  ['wrong-type', 'midiMusic.midiOut("not-an-octet")', 'conversion'],
+  ['explicit-void', 'MIDISoundBuffer.midiOut(void)', 'void'],
+  ['empty-instance', 'midiMusic.midiOut(<% %>)', 'void'],
+  ['valid-extra', 'MIDISoundBuffer.midiOut(<% f1 01 f2 01 02 f3 03 f8 %>,123)', 'void'],
+] as const
 
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -24,6 +31,12 @@ if (process.argv[2] === 'prepare') {
     'record("start"); System.exceptionHandler=function(e){record("fatal|"+e.message);System.exit();return true;};',
     midiOpenSource,
     ...cases.map(({ id }) => `record("${id}|"+openMidiFile("${id}.mid"));`),
+    'var rawRows=[];function logRaw(id,fn){var value;try{value=(fn()===void?"void":"returned");}catch(e){value=e.message;}rawRows.add(id+"|"+value);rawRows.save("native-output.txt");}',
+    'System.assignMessage("TJSBadParamCount","count");System.assignMessage("TJSVariantConvertError","conversion");System.assignMessage("TVPMalformedMIDIMessage","malformed");',
+    ...rawCalls.map(([id, call]) => `logRaw("${id}",function(){return ${call};});`),
+    // The original returns before parsing when MIDI_MAPPER cannot be opened.
+    // This bounded truncated F2 distinguishes that path from active output.
+    'logRaw("output-path",function(){return MIDISoundBuffer.midiOut(<% f2 01 %>);});',
     'record("done"); System.exit();',
   ].join('\n')
   const script = Buffer.from('\ufeff' + startup, 'utf16le')
@@ -51,5 +64,15 @@ if (process.argv[2] === 'prepare') {
   const complete = sdk?.state === 'observed' && sdk.exitCode === 0 && lines.length === inputs.length + 2 &&
     lines[0] === 'start' && lines.at(-1) === 'done' && results.every((r) => r.matched)
   save('comparison.json', { commit: process.env.GITHUB_SHA, complete, results, observationSha256: raw.length ? sha(raw) : null })
+  const rawPath = resolve(game, 'native-output.txt'), outputBytes = existsSync(rawPath) ? readFileSync(rawPath) : Buffer.alloc(0)
+  const outputRows = outputBytes.toString(outputBytes[0] === 255 && outputBytes[1] === 254 ? 'utf16le' : 'utf8')
+    .replace(/^\ufeff/, '').trimEnd().split(/\r?\n/)
+  const argumentsMatch = rawCalls.every(([id, , expected], index) => outputRows[index] === id + '|' + expected)
+  const device = outputRows.at(-1) === 'output-path|malformed' ? 'active-output' :
+    outputRows.at(-1) === 'output-path|void' ? 'original-returned-before-parsing' : 'unreported'
+  const rawComplete = sdk?.state === 'observed' && sdk.exitCode === 0 && argumentsMatch &&
+    outputRows.length === rawCalls.length + 1 && device !== 'unreported'
+  save('raw-output.json', { commit: process.env.GITHUB_SHA, complete: rawComplete, outputRows, device, sha256: sha(outputBytes) })
   assert(complete, 'MIDI open observations differ or are incomplete')
+  assert(rawComplete, 'Original MIDI signature or output-path observations differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

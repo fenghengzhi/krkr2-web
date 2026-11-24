@@ -110,7 +110,7 @@ test('MIDI tempo maps merge tracks and running status without changing event ord
 test('SLI conditional links and label expressions are resolved at source sample positions', () => {
   const asset = decodeWav(wave([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]))!
   asset.loops = parseSli(
-    '#2.00\nLink {From=6;To=2;Smooth=False;Condition=eq;RefValue=0;CondVar=0;}\nLabel {Position=3;Name=\":[0]++\";}\nLabel {Position=4;Name=\"mark\";}',
+    "#2.00\nLink {From=6;To=2;Smooth=False;Condition=eq;RefValue=0;CondVar=0;}\nLabel {Position=3;Name=':[0]++';}\nLabel {Position=4;Name='mark';}",
   )
   const mixer = new AudioMixer(1000)
   mixer.command({ op: 'load', id: 1, asset, settings: defaultSoundSettings() })
@@ -156,7 +156,7 @@ test('resampling visits conditional labels and short loops even between output s
   const mixer = new AudioMixer(1000),
     asset = decodeWav(wave([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]))!
   asset.loops = parseSli(
-    '#2.00\nLink {From=4;To=2;Condition=lt;RefValue=3;CondVar=0;}\nLabel {Position=1;Name=\":[0]=0\";}\nLabel {Position=3;Name=\":[0]++\";}',
+    "#2.00\nLink {From=4;To=2;Condition=lt;RefValue=3;CondVar=0;}\nLabel {Position=1;Name=':[0]=0';}\nLabel {Position=3;Name=':[0]++';}",
   )
   mixer.command({ op: 'load', id: 1, asset, settings: defaultSoundSettings() })
   mixer.command({ op: 'set', id: 1, property: 'frequency', value: 10000 })

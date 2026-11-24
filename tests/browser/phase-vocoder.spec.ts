@@ -439,7 +439,7 @@ sound.looping=true;sound.play();Debug.message("phase-native-ready");
         {
           name: 'phase.wav.sli',
           mimeType: 'text/plain',
-          buffer: Buffer.from('#2.00\nLabel {Position=24000;Name="middle";}'),
+          buffer: Buffer.from("#2.00\nLabel {Position=24000;Name='middle';}"),
         },
       ])
       await expect(page.getByText('phase-native-ready', { exact: true })).toBeVisible()

@@ -22,7 +22,7 @@ try{throw new Exception("warm sound lifetime exception");}catch(e){}
 ${definitions}
 `,
       'tone.wav': new Uint8Array([1, 2, 3, 4]),
-      'tone.wav.sli': '#2.00\nLabel {Position=20;Name="cue";}',
+      'tone.wav.sli': "#2.00\nLabel {Position=20;Name='cue';}",
       'hold.tjs': 'hold-sound-lifetime-callback',
     },
     { audio, now: () => clock.now, schedule: clock.schedule, ...overrides },

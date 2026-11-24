@@ -353,6 +353,13 @@ jobs:
             --test-reporter=spec --test-reporter-destination=stdout \
             --test-reporter=tap --test-reporter-destination=out/ci/native-container-factories-jspi.tap \
             tests/conformance/native-container-factories.test.ts 2>&1 | tee out/ci/native-container-factories-jspi.log
+      - name: Check the JSPI MIDI octet capability before VM creation
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        env:
+          KRKR_MIDI_VARIANT: jspi
+        run: |
+          node --experimental-wasm-jspi --import tsx --test --test-name-pattern='native MIDI octet support' \
+            --test-reporter=tap tests/conformance/midi-output.test.ts | tee out/ci/midi-output-jspi.tap
       - name: Record backtraces for any terminated Node process
         if: always()
         run: |
@@ -703,7 +710,7 @@ jobs:
   tests:
     name: All tests
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, eri-reference]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, eri-reference, kag-bookmarks]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -959,11 +966,64 @@ jobs:
             Tee-Object -FilePath out/verification/native-eri/midi/conformance.tap
           if ($comparison -ne 0) { exit $comparison }
           exit $LASTEXITCODE
+      - name: Prepare original KAG scenarios and bookmark controls
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
+        id: prepare_kag
+        run: node --import tsx tests/probes/kag-sdk.ts prepare
+      - name: Read scenarios and save an active macro with the original KAG parser
+        if: ${{ !cancelled() && steps.prepare_kag.outcome == 'success' }}
+        run: ./tests/probes/original-eri.ps1 -Project kag
+      - name: Preserve and compare native KAG control observations
+        if: ${{ !cancelled() && steps.prepare_kag.outcome == 'success' }}
+        run: node --import tsx tests/probes/kag-sdk.ts native
+      - name: Prepare WaveSoundBuffer loop information and label controls
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
+        id: prepare_sli
+        run: node --import tsx tests/probes/sli-sdk.ts prepare
+      - name: Observe original SDK loop information and label dictionaries
+        if: ${{ !cancelled() && steps.prepare_sli.outcome == 'success' }}
+        run: ./tests/probes/original-eri.ps1 -Project sli
+      - name: Compare the SLI observations
+        if: ${{ !cancelled() && steps.prepare_sli.outcome == 'success' }}
+        run: node --import tsx tests/probes/sli-sdk.ts compare
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: ${{ matrix.artifact }}
           path: out/verification/native-eri/
+          if-no-files-found: error
+          retention-days: 90
+
+  kag-bookmarks:
+    name: Load the original SDK macro bookmark in the Web player
+    needs: [build, eri-reference]
+    if: ${{ !cancelled() && !inputs.node-only && !inputs.runtime-only && needs.build.result == 'success' && needs.eri-reference.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: original-eri-reference
+          path: out/verification/native-eri
+      - run: node --import tsx tests/probes/kag-sdk.ts web
+      - name: Restore the SDK bookmark through the Chromium player
+        if: ${{ !cancelled() && hashFiles('out/verification/native-eri/kag/game/native-bookmark.tjs') != '' }}
+        env:
+          KRKR_KAG_SDK_IMPORT: '1'
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test tests/browser/kag-macro-bookmark.spec.ts --project=chromium --output=out/verification/kag-bookmark-browser
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-kag-bookmark-comparison
+          path: |
+            out/verification/native-eri/kag
+            out/verification/kag-bookmark-browser
           if-no-files-found: error
           retention-days: 90
 

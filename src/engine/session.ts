@@ -798,7 +798,6 @@ export class EngineSession {
         this.deps.audio,
         (name) => this.readResource(name),
         (name) => this.resourceExists(name),
-        this.deps.readText,
         (callback, member, args, valid, source) =>
           this.systemEvents!.post(() => ({ kind: 'invoke', callback, member, args }), {
             valid,
@@ -807,6 +806,7 @@ export class EngineSession {
         (error) => {
           if (!this.control.cancelled) this.fail(error)
         },
+        { now: this.deps.now, schedule: this.deps.schedule },
         (source) => this.systemEvents!.cancelSource(source),
         {
           resolve: (name) => this.resolveResource(name),
@@ -4583,6 +4583,7 @@ export class EngineSession {
         if (level >= 10) listeners.push(
           ['Layer composition', () => this.composer.clear()],
           ['Storage auto paths', () => this.storage.invalidateSearch()],
+          ['KAG scenarios', () => this.kag.compact()],
         )
         if (level >= 15) listeners.push(
           ['Processed images', () => this.images.compact()],

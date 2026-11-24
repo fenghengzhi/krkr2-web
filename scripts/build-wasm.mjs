@@ -111,6 +111,7 @@ manifest.capabilities = {
   nativeSystem: 6,
   nativeRandom: 1,
   nativeMessages: 2,
+  nativeMidi: 1,
   nativeStorages: 2,
   nativeTextStreams: 2,
   nativeHelp: 1,

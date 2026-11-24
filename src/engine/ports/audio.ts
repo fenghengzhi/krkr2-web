@@ -57,6 +57,10 @@ export interface MidiEvent {
   status: number
   data: number[]
 }
+/** A complete physical output, already parsed from the public raw octet. */
+export type MidiOutputMessage =
+  | { kind: 'short'; status: number; data: number[] }
+  | { kind: 'long'; data: Uint8Array }
 export interface MidiAsset extends AudioInfo {
   kind: 'midi'
   events: MidiEvent[]
@@ -117,6 +121,7 @@ export type MixerCommand =
   | { op: 'globalVolume'; volume: number }
   | { op: 'waveMuted'; muted: boolean }
   | { op: 'midiOut'; data: Uint8Array }
+  | { op: 'midiMessage'; message: MidiOutputMessage }
   | { op: 'shutdown' }
 export type AudioCommand =
   | MixerCommand

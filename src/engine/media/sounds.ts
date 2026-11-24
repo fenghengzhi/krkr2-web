@@ -9,7 +9,7 @@ import {
   type SoundSnapshot,
   type LoopInfo,
 } from '../ports/audio.ts'
-import { mapTextStreamError } from '../system/text-stream-error.ts'
+import { TvpError } from '../system/tvp-error.ts'
 import {
   isScriptObject,
   scriptList,
@@ -21,9 +21,11 @@ import {
   type ScriptValue,
 } from '../script/runtime.ts'
 import { PhaseVocoderService, type PhaseVocoderConnection } from './phase-vocoder-service.ts'
-import { parseSli } from '../../formats/audio/sli.ts'
+import { parseSliBytes, SliSyntaxError } from '../../formats/audio/sli.ts'
 import type { Resource } from '../ports/storage.ts'
 import { AudioResourceSources, type AudioSourceLease } from '../storage/audio-sources.ts'
+import type { EventClock } from '../scheduler/events.ts'
+import { MidiOutputExecutor } from './midi-output.ts'
 interface Sound {
   id: number
   kind: SoundKind
@@ -38,6 +40,7 @@ interface Sound {
 }
 type Callback = { name: string; args: ScriptValue[] }
 export class SoundService {
+  private readonly midiOutput: MidiOutputExecutor
   private readonly sources?: AudioResourceSources
   private cancelling?: Promise<void>
   private readonly filters: PhaseVocoderService
@@ -54,7 +57,6 @@ export class SoundService {
     private readonly backend: AudioBackend | undefined,
     private readonly read: (name: string) => Promise<Uint8Array>,
     private readonly exists: (name: string) => boolean | Promise<boolean>,
-    private readonly text: (bytes: Uint8Array) => Promise<string>,
     private readonly dispatch: (
       callback: ScriptObject,
       member: string,
@@ -63,12 +65,15 @@ export class SoundService {
       source: object,
     ) => Promise<void>,
     private readonly error: (error: unknown) => void,
+    midiClock: EventClock,
     private readonly cancelQueued: (source: object) => void = () => {},
     private readonly resourceSource?: {
       resolve(name: string): Resource | Promise<Resource>
       checkpoint(): void | Promise<void>
     },
   ) {
+    this.midiOutput = new MidiOutputExecutor(midiClock,
+      (message) => this.command({ op: 'midiMessage', message }))
     if (resourceSource) this.sources = new AudioResourceSources(() => resourceSource.checkpoint())
     this.filters = new PhaseVocoderService(objects, async (id, filters) => {
       const sound = this.get(id)
@@ -277,9 +282,10 @@ export class SoundService {
       }
       if (property === 'midiOut') {
         if (!(args[1] instanceof Uint8Array)) throw new Error('MIDI output requires an octet')
-        await this.command({ op: 'midiOut', data: args[1] })
+        await this.midiOutput.send(args[1])
         return
       }
+      if (property === 'midiOutMethod') return { type: 'native-method', name: 'midiOut' }
       throw new Error('Unsupported sound global property')
     }
     const sound = this.get(number(0))
@@ -413,10 +419,12 @@ export class SoundService {
         loops = emptyLoops()
         if (await this.exists(sli)) {
           const bytes = await this.read(sli)
-          let text: string
-          try { text = await this.text(bytes) }
-          catch (error) { throw mapTextStreamError(error, sli) }
-          loops = parseSli(text)
+          try { loops = parseSliBytes(bytes) }
+          catch (error) {
+            if (error instanceof SliSyntaxError)
+              throw new TvpError('TVPInvalidLoopInformation', [sli], error.message, { cause: error })
+            throw error
+          }
         }
         if (sound.kind === 'wave' && this.backend?.streaming && this.sources && this.resourceSource) {
           sourceLease = await this.sources.open(await this.resourceSource.resolve(name),
@@ -547,6 +555,7 @@ export class SoundService {
   }
   cancel(): Promise<void> {
     if (this.cancelling) return this.cancelling
+    this.midiOutput.cancel()
     this.sources?.dispose()
     // Queue drain waits for TJS host calls. Cancel their source waiters now,
     // before retirement later waits for those same inflight calls to finish.
@@ -561,6 +570,7 @@ export class SoundService {
       return
     }
     this.disposed = true
+    this.midiOutput.cancel()
     this.unsubscribe?.()
     if (this.backend?.cancel) void this.cancel()
     for (const id of [...this.buffers.keys()]) this.retire(id)

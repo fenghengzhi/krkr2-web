@@ -9,7 +9,7 @@ async function setup(source: string) {
   const clock = new AudioClock(),
     audio = new HeadlessAudioBackend({ now: () => clock.now, schedule: clock.schedule })
   const result = await headless(
-    { 'startup.tjs': source, 'tone.wav.sli': '#2.00\nLabel {Position=20;Name="cue";}' },
+    { 'startup.tjs': source, 'tone.wav.sli': "#2.00\nLabel {Position=20;Name='cue';}" },
     { audio, now: () => clock.now, schedule: clock.schedule },
   )
   const wav = wave(Array.from({ length: 100 }, (_, i) => Math.sin(i * 0.2) * 0.5)),

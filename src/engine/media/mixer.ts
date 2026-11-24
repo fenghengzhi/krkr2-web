@@ -13,8 +13,10 @@ import {
   type SoundSettings,
   type SoundSnapshot,
   type PhaseVocoderFilter,
+  type MidiOutputMessage,
 } from '../ports/audio.ts'
 import { MidiSynth } from './midi-synth.ts'
+import { midiOutputSteps } from './midi-output.ts'
 import {
   AudioFilterChain,
   audioFilterChainMemoryBytes,
@@ -24,6 +26,7 @@ import {
 import { FilteredWaveSource, filteredWaveSourceMemoryBytes } from './filtered-wave-source.ts'
 import { phaseVocoderMemoryBytes, validatePhaseVocoderParameters } from './phase-vocoder.ts'
 import { StreamPcm, streamPcmReservation } from './stream-pcm.ts'
+import { applySliExpression } from '../../formats/audio/sli.ts'
 interface Fade {
   target: number
   delta: number
@@ -75,6 +78,9 @@ export class AudioMixer {
   private waveMuted = false
   private pending: AudioEvent[] = []
   private liveMidi = new MidiSynth()
+  private midiDelayUntil: number | undefined
+  private midiPending: { at: number; message: MidiOutputMessage }[] = []
+  private midiPendingIndex = 0
   private time = 0
   frames = 0
   peak = 0
@@ -83,7 +89,7 @@ export class AudioMixer {
   }
   get hasClockWork(): boolean {
     if (this.paused) return false
-    if (this.liveMidi.activeNotes) return true
+    if (this.liveMidi.activeNotes || this.midiPending.length) return true
     for (const voice of this.voices.values())
       if (voice.fade || (voice.asset && voice.status === 'play' && !voice.settings.paused))
         return true
@@ -219,6 +225,9 @@ export class AudioMixer {
     if (command.op === 'shutdown') {
       this.voices.clear()
       this.liveMidi.reset()
+      this.midiPending = []
+      this.midiPendingIndex = 0
+      this.midiDelayUntil = undefined
       this.pending = []
       return { events: [] }
     }
@@ -236,6 +245,10 @@ export class AudioMixer {
     }
     if (command.op === 'midiOut') {
       this.midiOut(command.data)
+      return { events: [] }
+    }
+    if (command.op === 'midiMessage') {
+      this.deliverMidi(command.message)
       return { events: [] }
     }
     const id = command.id
@@ -441,29 +454,7 @@ export class AudioMixer {
     return voice.link
   }
   private expression(voice: Voice, name: string): boolean {
-    const match =
-      /^:\s*\[\s*(\d+)\s*\]\s*(\+\+|--|\+=|-=|=)\s*(?:(-?\d+)|\[\s*(\d+)\s*\])?\s*$/.exec(name)
-    if (!match) return false
-    const index = Number(match[1]),
-      operator = match[2]!,
-      indirect = match[4] === undefined ? undefined : Number(match[4])
-    if (
-      index >= 16 ||
-      (indirect !== undefined && indirect >= 16) ||
-      (!['++', '--'].includes(operator) && match[3] === undefined && indirect === undefined)
-    )
-      return false
-    const previous = voice.flags[index]!,
-      operand = indirect === undefined ? Number(match[3] ?? 1) : voice.flags[indirect]!
-    voice.flags[index] = clamp(
-      operator === '='
-        ? operand
-        : operator === '+=' || operator === '++'
-          ? previous + operand
-          : previous - operand,
-      0,
-      9999,
-    )
+    if (!applySliExpression(voice.flags, name)) return false
     voice.linkDirty = true
     return true
   }
@@ -748,6 +739,11 @@ export class AudioMixer {
       }
     }
     for (let frame = 0; frame < left.length; frame++) {
+      while (this.midiPendingIndex < this.midiPending.length && this.midiPending[this.midiPendingIndex]!.at <= this.time + 1e-10)
+        this.deliverMidi(this.midiPending[this.midiPendingIndex++]!.message)
+      if (this.midiPending.length && this.midiPendingIndex === this.midiPending.length) {
+        this.midiPending = []; this.midiPendingIndex = 0
+      }
       this.liveMidi.render(this.time, dt)
       this.time += dt
       left[frame] = clamp(left[frame]! + this.liveMidi.left, -1, 1)
@@ -758,34 +754,30 @@ export class AudioMixer {
     return this.pending.splice(0)
   }
   private midiOut(bytes: Uint8Array): void {
-    let status = 0
-    for (let at = 0; at < bytes.length;) {
-      const byte = bytes[at]!
-      if (byte >= 0xf8) {
-        at++
-        continue
+    // Direct low-level mixer callers have a synchronous API. Keep their
+    // delays on the sample clock; public TJS uses MidiOutputExecutor and
+    // awaits the host deadline before sending already parsed midiMessage.
+    for (const step of midiOutputSteps(bytes)) {
+      if (step.kind === 'delay') this.midiDelayUntil = Math.max(this.time, this.midiPending.at(-1)?.at ?? this.time) + 0.05
+      else {
+        const at = Math.max(this.time, this.midiDelayUntil ?? this.time,
+          this.midiPending.at(-1)?.at ?? this.time)
+        if (at > this.time) {
+          if (this.midiPending.length >= 65536) throw new Error('MIDI pending message budget exceeded')
+          this.midiPending.push({ at, message: step })
+        } else this.deliverMidi(step)
+        this.midiDelayUntil = undefined
       }
-      if (byte & 128) {
-        status = byte
-        at++
-      } else if (!status) throw new Error('MIDI output has invalid running status')
-      let data: number[]
-      if (status === 0xf0) {
-        const start = at
-        while (at < bytes.length && bytes[at] !== 0xf7) at++
-        if (at === bytes.length) throw new Error('Unterminated MIDI system-exclusive message')
-        data = Array.from(bytes.subarray(start, ++at))
-      } else if (status < 0xf0) {
-        const count = (status & 0xf0) === 0xc0 || (status & 0xf0) === 0xd0 ? 1 : 2
-        data = Array.from(bytes.subarray(at, at + count))
-        if (data.length !== count || data.some((value) => value > 127))
-          throw new Error('Malformed MIDI output')
-        at += count
-      } else throw new Error('Unsupported MIDI system message')
-      this.liveMidi.message({ status, data })
-      for (const voice of this.voices.values()) voice.synth?.message({ status, data })
-      if (status >= 0xf0) status = 0
     }
+  }
+  private deliverMidi(message: MidiOutputMessage): void {
+    const event = message.kind === 'short' ? { status: message.status, data: message.data }
+      : { status: 0xf7, data: Array.from(message.data) }
+    this.liveMidi.message(event)
+    // Raw note-on belongs to the shared output, not one new note per loaded
+    // MIDI file. Global note-off/controllers/resets still affect those voices.
+    if ((event.status & 0xf0) !== 0x90 || (event.data[1] ?? 0) === 0)
+      for (const voice of this.voices.values()) voice.synth?.message(event)
   }
 }
 

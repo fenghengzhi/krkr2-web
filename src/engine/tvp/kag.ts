@@ -30,15 +30,16 @@ class KAGParser {
           case "boolean": result = !!a[0]; break;
           case "setMacro": __kagMacros[a[0]] = a[1]; break;
           case "eraseMacro":
-            if(__kagMacros[a[0]] === void) throw new Exception("Unknown KAG macro: " + a[0]);
-            delete __kagMacros[a[0]]; break;
+            result = delete __kagMacros[a[0]]; break;
           case "params": result = __kagParams.count ? %[values:__kagParams[__kagParams.count-1],names:__kagParamNames[__kagParams.count-1]] : null; break;
           case "pushParams": __kagPushParams(a[0]); break;
           case "popParams": __kagParams.count = a[0]; __kagParamNames.count = a[0]; break;
           case "restoreMacros": (Dictionary.assign incontextof __kagMacros)(a[0]); break;
           case "restoreParams":
             __kagParams.clear(); __kagParamNames.clear();
-            for(var i=0;i<a[0].count;i++) __kagPushParams(a[0][i]);
+            for(var i=0;i<a[0].count;i++) {
+              __kagParams.add(a[0][i].values); __kagParamNames.add(a[0][i].names);
+            }
             break;
           case "yield": break;
           default: throw new Exception("Unknown KAG effect: " + operation.kind);
@@ -74,7 +75,10 @@ class KAGParser {
   function store() { return __host("KAG.store", __kagId, __kagMacros, __kagParams, __kagParamNames); }
   function restore(data) { __kagRun("restore", data); }
   function assign(parser) {
-    if(!(parser instanceof "KAGParser")) throw new Exception("Expected a KAGParser");
+    if(!(parser instanceof "KAGParser")) {
+      if(typeof parser=="Object") __host("KAG.invalidAssign", __kagId);
+      throw new Exception("Expected a KAGParser");
+    }
     __host("KAG.assign", __kagId, parser.__kagId);
     (Dictionary.assign incontextof __kagMacros)(parser.__kagMacros);
     __kagParams.assignStruct(parser.__kagParams);

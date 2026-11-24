@@ -109,6 +109,10 @@ export class TjsWasmRuntime implements ScriptRuntime {
         typeof runtime.module._krkr_format_tvp_message !== 'function' ||
         typeof runtime.module._krkr_format_tjs_message !== 'function')
       throw new Error('TJS WASM is missing native TVP message support')
+    if (typeof runtime.module._krkr_native_midi_version !== 'function' ||
+        runtime.call('krkr_native_midi_version') !== 1 ||
+        typeof runtime.module._krkr_value_set_midi_out_function !== 'function')
+      throw new Error('TJS WASM is missing native MIDI output support')
     runtime.vm = runtime.call('krkr_create', Number(options.debugMode === true))
     if (!runtime.vm) throw new Error('TJS VM initialization failed')
     return runtime
@@ -207,8 +211,9 @@ export class TjsWasmRuntime implements ScriptRuntime {
         this.call('free', bytes)
       }
     } else if (value.type === 'native-method') {
-      if (value.name !== 'getTraceString') throw new Error('Unknown native method')
-      this.call('krkr_value_set_trace_function', pointer)
+      if (value.name === 'getTraceString') this.call('krkr_value_set_trace_function', pointer)
+      else if (value.name === 'midiOut') this.call('krkr_value_set_midi_out_function', this.vm, pointer)
+      else throw new Error('Unknown native method')
     } else if (value.type === 'native-class') {
       if (value.name !== 'Scripts') throw new Error('Unknown native class')
       this.call('krkr_value_set_scripts_class', this.vm, pointer)

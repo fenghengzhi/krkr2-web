@@ -84,7 +84,7 @@ function halt(){sound.stop();return sound.status+"|"+sound.samplePosition;}
           ? 'Scripts.compileStorage("stream-session.tjs","savedata/stream-session.cjs",false,true,false);Scripts.execStorage("savedata/stream-session.cjs");'
           : 'Scripts.execStorage("stream-session.tjs");',
         'stream-session.tjs': script,
-        'long.wav.sli': `#2.00\nLabel {Position=20;Name="early";}\nLabel {Position=${far + 20};Name="late";}\nLabel {Position=${far + 21};Name=":[0]++";}`,
+        'long.wav.sli': `#2.00\nLabel {Position=20;Name='early';}\nLabel {Position=${far + 20};Name='late';}\nLabel {Position=${far + 21};Name=':[0]++';}`,
       }, { audio, now: () => clock.now, schedule: clock.schedule }),
       { session } = harness
     session.mount([wave.resource])

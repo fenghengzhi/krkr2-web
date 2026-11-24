@@ -68,6 +68,8 @@ export interface WasmManifest {
     nativeRandom?: number
     /** Version 2 adds the private literal TJSReadError descriptor to TVP holders. */
     nativeMessages?: number
+    /** Original raw-octet MIDI method argument/conversion policy. */
+    nativeMidi?: number
     nativeStorages?: number
     /** Distinct, suspendable text writer preflight before native allocation. */
     nativeTextStreams?: number

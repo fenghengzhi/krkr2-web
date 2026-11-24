@@ -36,8 +36,8 @@ class WaveSoundBuffer extends __SoundBase {
 __host("PhaseVocoder.bindClass",WaveSoundBuffer);
 class MIDISoundBuffer extends __SoundBase {
   function MIDISoundBuffer(owner){super.__SoundBase("midi",owner);}
-  function midiOut(data){__host("Sound.global","midiOut",data);}
 }
+MIDISoundBuffer.midiOut=__host("Sound.global","midiOutMethod");
 class CDDASoundBuffer extends __SoundBase {
   function CDDASoundBuffer(owner){super.__SoundBase("cdda",owner);}
 }

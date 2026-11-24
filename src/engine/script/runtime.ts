@@ -89,7 +89,7 @@ export interface ScriptClass {
   readonly systemProperties?: readonly { name: string; callback: ScriptObject }[]
 }
 export type ScriptValue =
-  | { readonly type: 'native-method'; readonly name: 'getTraceString' }
+  | { readonly type: 'native-method'; readonly name: 'getTraceString' | 'midiOut' }
   | { readonly type: 'native-class'; readonly name: 'Scripts' }
   | undefined
   | null

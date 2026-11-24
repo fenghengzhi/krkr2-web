@@ -754,6 +754,34 @@ public:
     }
 };
 
+// Fixed MIDIImpl registers this as a normal outer method, without an instance
+// cast. Class and instance calls share the same process-wide raw output API.
+class MidiOutMethod final : public tTJSNativeClassMethod {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    explicit MidiOutMethod(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        if(result) result->Clear();
+        if(count < 1) return TJS_E_BADPARAMCOUNT;
+        krkr::ExecutionFrame delegation(2);
+        auto* octet = args[0]->AsOctetNoAddRef();
+        if(!octet || !octet->GetLength()) return TJS_S_OK;
+        // Keep an owning native copy while the host may suspend; extra
+        // arguments were evaluated by TJS but are neither converted nor sent.
+        tTJSVariant operation(u"midiOut"), data(*args[0]);
+        tTJSVariant* input[] = { &operation, &data };
+        std::unique_ptr<Reply> reply(dispatch_host(vm, u"Sound.global", 12, 2, input));
+        if(!reply) TJS_eTJSError(u"MIDI output host returned no response");
+        resolveReply(vm, *reply, nullptr);
+        return TJS_S_OK;
+    }
+};
+
 // getLocalName differs from the older lexical methods: an unused result skips
 // both conversion and host work, after the native argument-count check.
 class StorageLocalName final : public tTJSNativeClassMethod {
@@ -1726,6 +1754,7 @@ API void krkr_set_console(Vm* vm, int enabled) { vm->engine->SetConsoleOutput(en
 API int krkr_abi_version() { return 5; }
 API int krkr_random_source_version() { return 1; }
 API int krkr_native_messages_version() { return 2; }
+API int krkr_native_midi_version() { return 1; }
 // No VM entry, release drain or CleanupErrors scope: this may be called by a
 // host logger while a script import is suspended, without consuming its errors.
 API Reply* krkr_format_tvp_message(const Reply* request) {
@@ -1818,6 +1847,11 @@ API void krkr_value_set_bytes(tTJSVariant* v, const tjs_uint8* bytes, unsigned l
 API void krkr_value_set_null(tTJSVariant* v) { *v = tTJSVariant(static_cast<iTJSDispatch2*>(nullptr)); }
 API void krkr_value_set_trace_function(tTJSVariant* value) {
     auto method = TJSCreateNativeClassMethod(krkr::getScriptTrace);
+    *value = tTJSVariant(method);
+    method->Release();
+}
+API void krkr_value_set_midi_out_function(Vm* vm, tTJSVariant* value) {
+    auto* method = new MidiOutMethod(vm);
     *value = tTJSVariant(method);
     method->Release();
 }

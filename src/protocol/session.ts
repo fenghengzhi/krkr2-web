@@ -13,7 +13,7 @@ import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
 import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
-export const PROTOCOL_VERSION = 42
+export const PROTOCOL_VERSION = 43
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
   readonly tree: DroppedTree<Blob>

@@ -13,7 +13,7 @@ class StreamSound extends WaveSoundBuffer {
 }
 var sound=new StreamSound();sound.open("long.wav");sound.play();
 Debug.message("stream-ready="+sound.frequency);
-`, `#2.00\nLabel {Position=12000;Name="prefix";}\nLabel {Position=${target + 12000};Name="seek";}`)
+`, `#2.00\nLabel {Position=12000;Name='prefix';}\nLabel {Position=${target + 12000};Name='seek';}`)
     let sent = 0, holdFrom = Infinity, held = 0
     const server = await httpServer({ '/long.xp3': { bytes: Buffer.alloc(0), etag: '"stream-v1"',
       intercept(request, response) {

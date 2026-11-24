@@ -76,7 +76,7 @@ struct State {
     std::atomic<HWND> window{nullptr}, child{nullptr};
     std::atomic<DWORD> threadId{0};
     std::atomic<bool> failed{false}, invoked{false}, inCommand{false}, didReturn{false};
-    std::atomic<bool> prepared{false}, neutralObserved{false}, controlledDownObserved{false};
+    std::atomic<bool> prepared{false}, neutralRequested{false}, neutralObserved{false}, controlledDownObserved{false};
     std::atomic<LONG> inputX{0}, inputY{0};
     std::atomic<unsigned> leftDownInjections{0};
     std::atomic<unsigned> enters{0}, exits{0}, moves{0}, moving{0}, captureChanges{0};
@@ -176,7 +176,8 @@ bool deliveredAtTarget(const State& s, HWND hwnd, LPARAM lp, std::string* detail
 bool observeInputDecision(State& s, HWND hwnd, UINT message, WPARAM wp, LPARAM lp, LPARAM tag) {
     // Journal exactly the values used for this decision, rather than making
     // a second set of reads that might describe a different foreground state.
-    const bool prepared = s.prepared.load(), neutralObserved = s.neutralObserved.load();
+    const bool prepared = s.prepared.load(), neutralRequested = s.neutralRequested.load(),
+        neutralObserved = s.neutralObserved.load(), failed = s.failed.load();
     const bool tagMatches = tag == static_cast<LPARAM>(ControlledInputTag);
     std::string deliveryDetails, targetDetails;
     const bool delivered = deliveredAtTarget(s, hwnd, lp, &deliveryDetails),
@@ -184,13 +185,20 @@ bool observeInputDecision(State& s, HWND hwnd, UINT message, WPARAM wp, LPARAM l
     const SHORT asyncLeft = GetAsyncKeyState(VK_LBUTTON), queuedLeft = GetKeyState(VK_LBUTTON);
     const bool asyncHeld = (asyncLeft & 0x8000) != 0, queuedHeld = (queuedLeft & 0x8000) != 0,
         neutral = message == WM_MOUSEMOVE,
-        eligible = neutral ? prepared && !neutralObserved : neutralObserved,
-        accepted = eligible && tagMatches && delivered && targetReady &&
+        eligible = !failed && (neutral ? prepared && neutralRequested && !neutralObserved : neutralObserved),
+        // The retained Win2022 journal has a real owned-child WM_MOUSEMOVE
+        // at the exact target with neutral buttons, but extraInfo is zero.
+        // This handshake establishes pointer state, not packet identity.
+        // The subsequent real left-down must still carry our SendInput tag.
+        tagRequired = !neutral,
+        accepted = eligible && (!tagRequired || tagMatches) && delivered && targetReady &&
             (neutral ? !messageLeft && !asyncHeld && !queuedHeld : messageLeft && asyncHeld && queuedHeld);
     std::ostringstream out;
-    out << "{\"prepared\":" << boolean(prepared) << ",\"neutralObserved\":" << boolean(neutralObserved)
+    out << "{\"prepared\":" << boolean(prepared) << ",\"neutralRequested\":" << boolean(neutralRequested)
+        << ",\"neutralObserved\":" << boolean(neutralObserved) << ",\"failed\":" << boolean(failed)
         << ",\"eligible\":" << boolean(eligible) << ",\"extraInfo\":" << quote(std::to_string(static_cast<std::uintptr_t>(tag)))
         << ",\"expectedTag\":" << quote(std::to_string(ControlledInputTag)) << ",\"tagMatches\":" << boolean(tagMatches)
+        << ",\"tagRequired\":" << boolean(tagRequired)
         << ",\"delivery\":" << deliveryDetails << ",\"target\":" << targetDetails
         << ",\"messageLeft\":" << boolean(messageLeft) << ",\"asyncLeft\":" << asyncLeft << ",\"queuedLeft\":" << queuedLeft
         << ",\"asyncHeld\":" << boolean(asyncHeld) << ",\"queuedHeld\":" << boolean(queuedHeld)
@@ -391,17 +399,39 @@ std::string observe(const Scenario& scenario, const fs::path& output) {
     HWND hwnd = s.window.load(); POINT start{30, 30};
     if (!s.failed && ClientToScreen(hwnd, &start)) {
         s.inputX = start.x; s.inputY = start.y;
-        const POINT initial{start.x - (scenario.leftButton ? 2 : 0), start.y};
-        const bool positioned = mouse(s, initial, 0, "controlled-initial-neutral-pointer");
+        // Four pixels keep the initial and final +/-1 normalization ranges
+        // disjoint. Both ranges must remain inside this same owned child.
+        const POINT initial{start.x - (scenario.leftButton ? 4 : 0), start.y};
+        if (scenario.leftButton) {
+            RECT bounds{}; POINT initialClient = initial, targetClient = start;
+            const HWND child = s.child.load();
+            const bool converted = ownedWindow(s, child) && GetParent(child) == hwnd &&
+                GetClientRect(child, &bounds) && ScreenToClient(child, &initialClient) && ScreenToClient(child, &targetClient);
+            const auto inside = [&](POINT point) {
+                return point.x - 1 >= bounds.left && point.x + 1 < bounds.right &&
+                    point.y - 1 >= bounds.top && point.y + 1 < bounds.bottom;
+            };
+            const bool separated = std::abs(initialClient.x - targetClient.x) > 2,
+                valid = converted && inside(initialClient) && inside(targetClient) && separated;
+            s.record("neutral-input-positions", child, 0, 0, 0,
+                "{\"initialClient\":[" + std::to_string(initialClient.x) + "," + std::to_string(initialClient.y) +
+                "],\"targetClient\":[" + std::to_string(targetClient.x) + "," + std::to_string(targetClient.y) +
+                "],\"childBounds\":" + rectangle(bounds) + ",\"tolerance\":1,\"converted\":" + boolean(converted) +
+                ",\"disjointToleranceRanges\":" + boolean(separated) + ",\"ready\":" + boolean(valid) + "}");
+            if (!valid) s.error("Neutral pointer positions must be distinct inside the same owned child");
+        }
+        const bool positioned = !s.failed && mouse(s, initial, 0, "controlled-initial-neutral-pointer");
         if (positioned && !cursorReached(initial)) s.error("Controlled initial pointer did not reach its declared screen position");
         if (!s.failed && scenario.leftButton) {
             if (!PostMessageW(hwnd, PrepareInput, 0, 0)) s.error("Could not schedule owned input preparation");
             else if (!wait(s.inputPrepared.value, 1000)) s.error("Owned input preparation deadline exceeded");
             if (!s.failed) {
-                // This exact packet is the held-button prerequisite. Keep it
-                // distinct from pointer updates caused by SetFocus/SetCapture.
+                // Arm once after owner-thread preparation and before the sole
+                // neutral move. The first desktop move remains four pixels away;
+                // its queued message cannot satisfy this exact-target handshake.
+                s.neutralRequested = true;
                 const bool moved = mouse(s, start, MOUSEEVENTF_MOVE_NOCOALESCE, "controlled-neutral-pointer");
-                if (moved && !wait(s.neutralSeen.value, 1000)) s.error("Owned child did not observe the tagged neutral pointer before deadline");
+                if (moved && !wait(s.neutralSeen.value, 1000)) s.error("Owned child did not observe the requested neutral pointer state before deadline");
             }
             if (!s.failed && !controlledTargetReady(s)) s.error("Owned input target changed before controlled left down");
             if (!s.failed) {
@@ -472,7 +502,9 @@ std::string observe(const Scenario& scenario, const fs::path& output) {
       << ",\"returnValue\":" << quote(std::to_string(static_cast<long long>(s.returnValue)))
       << ",\"captureBeforeChild\":" << boolean(s.captureBeforeChild) << ",\"releaseSucceeded\":" << boolean(s.releaseSucceeded)
       << ",\"captureAfterReleaseNull\":" << boolean(s.captureAfterReleaseNull) << ",\"buttonMatches\":" << boolean(buttonMatches)
-      << ",\"inputPrepared\":" << boolean(s.prepared) << ",\"neutralPointerObserved\":" << boolean(s.neutralObserved)
+      << ",\"inputPrepared\":" << boolean(s.prepared) << ",\"neutralInputRequested\":" << boolean(s.neutralRequested)
+      << ",\"neutralPointerObserved\":" << boolean(s.neutralObserved)
+      << ",\"neutralPointerEvidence\":\"owned child delivery within 1px of target and neutral buttons; extraInfo diagnostic only\""
       << ",\"controlledLeftObserved\":" << boolean(s.controlledDownObserved) << ",\"leftDownInjections\":" << s.leftDownInjections
       << ",\"before\":" << rectangle(s.before) << ",\"after\":" << rectangle(s.after)
       << ",\"enters\":" << s.enters << ",\"exits\":" << s.exits << ",\"movingMessages\":" << s.moving

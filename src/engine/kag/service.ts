@@ -1,4 +1,8 @@
 import { KagParser, type Task } from './parser.ts'
+import { Scenario } from './scenario.ts'
+import { TjsError } from '../system/tjs-error.ts'
+import { TvpError } from '../system/tvp-error.ts'
+import { ExecutionCancelled } from '../scheduler/control.ts'
 import { fromScript, integer, record, string, toScript, type Data } from './data.ts'
 import { isScriptObject, type HostContext, type ScriptValue } from '../script/runtime.ts'
 
@@ -7,6 +11,8 @@ export class KagService {
   private nextToken = 1
   private parsers = new Map<number, KagParser>()
   private tasks = new Map<number, { parser: number; task: Task }>()
+  private readonly scenarios = new Map<string, Scenario>()
+  private readonly scenarioReads = new Map<string, Promise<Scenario>>()
   constructor(
     private readonly read: (name: string) => Promise<string>,
     private readonly log: (text: string) => void,
@@ -16,7 +22,33 @@ export class KagService {
     if (!parser) throw new Error('KAGParser has been invalidated')
     return parser
   }
-  private async advance(id: number, token: number, input?: Data): Promise<ScriptValue> {
+  private loadStorage(name: string): Promise<Scenario> {
+    const cached = this.scenarios.get(name)
+    if (cached) {
+      this.scenarios.delete(name)
+      this.scenarios.set(name, cached)
+      return Promise.resolve(cached)
+    }
+    const pending = this.scenarioReads.get(name)
+    if (pending) return pending
+    const reading: Promise<Scenario> = this.read(name).then((source) => {
+      const scenario = new Scenario(name, source)
+      // Clear can run while storage I/O is suspended. An active reader keeps
+      // its scenario, but a retired request cannot repopulate the cache.
+      if (this.scenarioReads.get(name) === reading) {
+        this.scenarios.set(name, scenario)
+        if (this.scenarios.size > 8) this.scenarios.delete(this.scenarios.keys().next().value!)
+      }
+      return scenario
+    }).finally(() => { if (this.scenarioReads.get(name) === reading) this.scenarioReads.delete(name) })
+    this.scenarioReads.set(name, reading)
+    return reading
+  }
+  compact(): void {
+    this.scenarioReads.clear()
+    this.scenarios.clear()
+  }
+  private async advance(id: number, token: number, input?: Data | Scenario): Promise<ScriptValue> {
     const task = this.tasks.get(token)
     if (!task || task.parser !== id) throw new Error('Stale KAG parser continuation')
     try {
@@ -28,7 +60,8 @@ export class KagService {
         }
         const { kind, args } = step.value
         if (kind === 'read') {
-          input = await this.read(string(args[0]))
+          input = await this.loadStorage(string(args[0]))
+          if (this.tasks.get(token) !== task) throw new Error('KAG parser continuation was retired')
           continue
         }
         if (kind === 'log') {
@@ -40,7 +73,9 @@ export class KagService {
       }
     } catch (error) {
       this.tasks.delete(token)
-      const parser = this.parser(id)
+      if (error instanceof TvpError || error instanceof TjsError || error instanceof ExecutionCancelled) throw error
+      const parser = this.parsers.get(id)
+      if (!parser) throw error
       throw new Error(
         `${parser.curStorage || 'KAGParser'}:${parser.curLine + 1}:${parser.curPos + 1}: ${error instanceof Error ? error.message : String(error)}`,
       )
@@ -62,7 +97,11 @@ export class KagService {
     if (operation === 'KAG.destroy') {
       this.parsers.delete(id)
       for (const [token, entry] of this.tasks) if (entry.parser === id) this.tasks.delete(token)
-    } else if (operation === 'KAG.cancel') this.tasks.delete(integer(data(1)))
+    } else if (operation === 'KAG.invalidAssign') throw new TvpError('TVPKAGSpecifyKAGParser')
+    else if (operation === 'KAG.cancel') {
+      const token = integer(data(1))
+      if (this.tasks.get(token)?.parser === id) this.tasks.delete(token)
+    }
     else if (operation === 'KAG.resume') return this.advance(id, integer(data(1)), data(2))
     else if (operation === 'KAG.get') {
       const property = string(data(1))
@@ -108,6 +147,7 @@ export class KagService {
           task = parser.getNextTag()
           break
         case 'clear':
+          this.compact()
           task = parser.clear()
           break
         case 'clearCallStack':
@@ -128,6 +168,7 @@ export class KagService {
     } else throw new Error(`Unknown KAG operation ${operation}`)
   }
   clear(): void {
+    this.compact()
     this.tasks.clear()
     this.parsers.clear()
   }

@@ -7,8 +7,8 @@
 import type { LoopLink, PcmAccess, WaveAsset } from '../ports/audio.ts'
 import type { AudioFilterBudget, FilterPcmSource } from './audio-filter-chain.ts'
 import { WaveSegmentQueue } from './audio-segments.ts'
+import { applySliExpression } from '../../formats/audio/sli.ts'
 
-const clampFlag = (value: number) => Math.max(0, Math.min(9999, value))
 const lowerBound = <T>(items: T[], position: number, key: (item: T) => number): number => {
   let left = 0,
     right = items.length
@@ -88,27 +88,7 @@ export class FilteredWaveSource implements FilterPcmSource {
     return undefined
   }
   private expression(name: string): void {
-    const match =
-      /^:\s*\[\s*(\d+)\s*\]\s*(\+\+|--|\+=|-=|=)\s*(?:(-?\d+)|\[\s*(\d+)\s*\])?\s*$/.exec(name)
-    if (!match) return
-    const index = Number(match[1]),
-      operator = match[2]!,
-      indirect = match[4] === undefined ? undefined : Number(match[4])
-    if (
-      index >= 16 ||
-      (indirect !== undefined && indirect >= 16) ||
-      (!['++', '--'].includes(operator) && match[3] === undefined && indirect === undefined)
-    )
-      return
-    const previous = this.flags[index]!,
-      operand = indirect === undefined ? Number(match[3] ?? 1) : this.flags[indirect]!
-    this.flags[index] = clampFlag(
-      operator === '='
-        ? operand
-        : operator === '+=' || operator === '++'
-          ? previous + operand
-          : previous - operand,
-    )
+    applySliExpression(this.flags, name)
   }
   private sample(channel: number, position: number): number {
     if (position < 0 || position >= this.asset.sampleCount) return 0

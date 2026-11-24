@@ -341,7 +341,7 @@ for (const backend of ['asyncify', 'jspi'] as const) {
               ),
             ),
           },
-          textFile('Audio/tone.wav.sli', '#2.00\nLabel {Position=882;Name="canonical-cue";}'),
+          textFile('Audio/tone.wav.sli', "#2.00\nLabel {Position=882;Name='canonical-cue';}"),
           {
             name: 'Video/colors.mp4',
             mimeType: 'video/mp4',

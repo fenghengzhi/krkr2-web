@@ -1,10 +1,10 @@
-param([ValidateSet('eri', 'midi')][string]$Project = 'eri')
+param([ValidateSet('eri', 'midi', 'kag', 'sli')][string]$Project = 'eri')
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
   throw 'The original SDK reference requires a GitHub-hosted Windows runner.'
 }
 $output = Join-Path $env:GITHUB_WORKSPACE 'out/verification/native-eri'
-if ($Project -eq 'midi') { $output = Join-Path $output 'midi' }
+if ($Project -ne 'eri') { $output = Join-Path $output $Project }
 $game = Join-Path $output 'game'
 if (!(Test-Path (Join-Path $game 'startup.tjs'))) { throw "Missing prepared $Project reference project." }
 $work = Join-Path $env:RUNNER_TEMP ('krkr2-eri-' + [Guid]::NewGuid().ToString('N'))

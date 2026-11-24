@@ -44,7 +44,7 @@ var music=new MIDISoundBuffer(null);music.open("tone.mid");music.looping=true;
       {
         name: 'tone.wav.sli',
         mimeType: 'text/plain',
-        buffer: Buffer.from('#2.00\nLabel {Position=882;Name="cue";}'),
+        buffer: Buffer.from("#2.00\nLabel {Position=882;Name='cue';}"),
       },
       {
         name: 'tone.mid',
@@ -130,7 +130,7 @@ var music=new MIDISoundBuffer(null);music.open("tone.mid");music.looping=true;
             name: `tone.${extension}.sli`,
             mimeType: 'text/plain',
             buffer: Buffer.from(
-              `#2.00\nLabel {Position=4410;Name="${extension}";}\n${extension === 'ogg' ? 'Label {Position=11000;Name="ogg-tail";}' : ''}`,
+              `#2.00\nLabel {Position=4410;Name='${extension}';}\n${extension === 'ogg' ? "Label {Position=11000;Name='ogg-tail';}" : ''}`,
             ),
           },
         ]),

@@ -89,7 +89,7 @@ export async function exerciseSoundLifetime(
         'startup.tjs': '',
         'sound-lifetime.tjs': definitions,
         'tone.wav': new Uint8Array([1, 2, 3, 4]),
-        'tone.wav.sli': '#2.00\nLabel {Position=20;Name="cue";}',
+        'tone.wav.sli': "#2.00\nLabel {Position=20;Name='cue';}",
       }).map(([name, source]) => {
         const bytes = typeof source === 'string' ? new TextEncoder().encode(source) : source
         return { name, size: bytes.length, read: async () => bytes }
