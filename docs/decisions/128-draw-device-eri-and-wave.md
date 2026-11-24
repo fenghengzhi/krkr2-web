@@ -22,4 +22,4 @@
 
 127 取回时有 18 项作业成功、1 项失败、7 项运行中，主构建尚未报告结论。Windows 原版的 KAG 42/42 与已有转场选项 21/21 匹配。介绍样例出现了三个链接，额外字体测量因脚本引用全局 `Font` 失败。SLI／WAVE 的 28 项中有 26 项匹配，两项播放观察因托管 Windows 缺少 DirectSound 设备而失败。透明转场对照有一项直接复制匹配，另外 80 项未报告，其中包括全部 64 个逐帧观察。本批在同一原生场景中保存每一处启动、取样和返回记录，并保留原像素、计时及可见性要求。[127 工作流](https://github.com/fenghengzhi/krkr2-web/actions/runs/45508747480) · [原生转场取样](../../tests/probes/transition-alpha-sdk.ts)
 
-这轮共保存 132 份已发布的原 ZIP，逐份核对运行、提交、字节数与 SHA-256，共 1,855,220,844 字节。历史清单与报告位于本机证据目录 `out/verification/github-actions/128-review-archive-inventory.json` 和 `128-archive-summary.md`。本批结果在下一轮取回。
+这轮共保存 132 份已发布的原 ZIP，逐份核对运行、提交、字节数与 SHA-256，共 1,855,220,844 字节。历史清单与报告位于本机证据目录 `out/verification/github-actions/128-review-archive-inventory.json` 和 `128-archive-summary.md`。128 的实现提交为 `ce29b2d791d98c0e192e62ad56781061c209dc59`。首次登记时，全套工作流为 `pending`。下一批取回结果，并核对这次尚未发布的 127 作业。[128 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45511886991)
