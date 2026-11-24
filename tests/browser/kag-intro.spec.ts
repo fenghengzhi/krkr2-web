@@ -33,7 +33,7 @@ for (const backend of ['asyncify', 'jspi'])
     let fontMetricFailure: unknown
     const evidence: Record<string, unknown> = {
       source, backend, browser: info.project.name, steps, observations, inputs, consoleReads, pageErrors: errors,
-      scope: 'Runs the pinned Introduction to Kirikiri and KAG distribution sample through its original menu, page waits, bookmark methods and Exit link. Imports one unchanged XP3 and executes its original source scripts with the selected WASM backend.',
+      scope: 'Runs the pinned Introduction to Kirikiri and KAG distribution sample through its original route links, page waits, Save/Load menus, slot 0 and Confirm-window Yes buttons, then its Exit link. Imports one unchanged XP3 and executes its original source scripts with the selected WASM backend. Console reads observe game state; they never invoke bookmark save/load methods.',
       importedFiles: ['kag3_intro.xp3'], originalScenarioUnmodified: true,
       layoutFields: kagIntroLayoutFields,
       fontMetricFields: kagIntroFontMetricFields,
@@ -169,6 +169,87 @@ for (const backend of ['asyncify', 'jspi'])
     const basePixels = () => read(`(function(){var l=kag.fore.base,a=[],points=[[0,0],[100,100],[320,240],[639,479]];
       for(var i=0;i<points.count;i++){a.add(l.getMainPixel(points[i][0],points[i][1]));a.add(l.getMaskPixel(points[i][0],points[i][1]));}
       return [l.imageWidth,l.imageHeight,l.Anim_loadParams.storage,a.join(",")].join("|");})()`)
+    const bookmark = async (action: 'Save' | 'Load', stage: string) => {
+      // Read only before the original handler enters showModal. Its local
+      // YesNoDialogWindow has no global handle, and the modal interval below
+      // uses only the presented DOM and real pointer input.
+      const raw = await read(`(function(){var m=kag.${action === 'Save' ? 'storeMenu' : 'restoreMenu'},s=m.children[0];
+        return [kag.__windowId,global.Window.mainWindow.__windowId,kag.zoomNumer,kag.zoomDenom,
+          int(kag.fullScreen),int(kag.freeSaveDataMode),m.children.count,s.bmNum,s.caption,int(s.enabled)].join("|");})()`)
+      const parts = raw.split('|'), ownerId = parts[0]!, numer = Number(parts[2]), denom = Number(parts[3]),
+        record: Record<string, unknown> = { type: 'original-bookmark-menu', stage, action, slot: 0, rawBefore: raw,
+          consoleReadCountBeforeModal: evaluation, menuClicked: false, slotClicked: false, yesClicked: false, modalRetired: false }
+      inputs.push(record)
+      expect(parts).toHaveLength(10)
+      expect(ownerId).toMatch(/^[1-9]\d*$/)
+      expect(parts[1]).toBe(ownerId)
+      expect(Number.isInteger(numer) && numer > 0 && Number.isInteger(denom) && denom > 0).toBe(true)
+      expect(parts[4]).toBe('0') // The route explicitly leaves fullscreen before interacting.
+      expect(parts[5]).toBe('0') // This original package exposes numbered menu slots.
+      expect(Number(parts[6])).toBeGreaterThan(0)
+      expect(parts[7]).toBe('0')
+      expect(parts[9]).toBe('1')
+      await expect(canvas).toHaveAttribute('data-window-id', ownerId)
+      const owner = page.locator(`.game-window[data-window-id="${ownerId}"]`),
+        menu = owner.locator('.game-window-menu details').filter({ has: page.locator('summary', { hasText: new RegExp(`^${action}$`) }) }),
+        summary = menu.locator(':scope > summary'), slots = menu.locator(':scope > .game-menu-group > button'),
+        modal = page.locator('.game-window[data-window-id][aria-label="Confirm"]'), dialogCanvas = modal.locator('canvas[data-window-id]')
+      await expect(menu).toHaveCount(1)
+      await expect(summary).toHaveAttribute('aria-disabled', 'false')
+      await summary.click()
+      record.menuClicked = true
+      await expect(menu).toHaveAttribute('open', '')
+      await expect(slots).toHaveCount(Number(parts[6]))
+      await expect(slots.first().locator('span')).toHaveText(parts[8]!)
+      await expect(slots.first()).toBeEnabled()
+      await slots.first().click()
+      record.slotClicked = true
+      await expect(modal).toHaveCount(1)
+      await expect(modal).toBeVisible()
+      await expect(owner).toHaveAttribute('data-blocked', 'true')
+      await expect(modal).toHaveAttribute('data-blocked', 'false')
+      await expect(modal).toHaveAttribute('data-zoom', `${numer}/${denom}`)
+      record.modalWindowId = await modal.getAttribute('data-window-id')
+      expect(record.modalWindowId).not.toBe(ownerId)
+      await dialogCanvas.scrollIntoViewIfNeeded({ timeout: 5000 })
+      // A new canvas initially has browser-default backing dimensions. Wait
+      // until its real frame matches the measured viewport before deriving the
+      // original Yes button's position; do not click against that placeholder.
+      await expect.poll(() => dialogCanvas.evaluate((element) => {
+        const canvas = element as HTMLCanvasElement, content = canvas.parentElement!
+        return canvas.width > 0 && canvas.height > 0 &&
+          canvas.width === Math.round(Number.parseFloat(content.style.width)) &&
+          canvas.height === Math.round(Number.parseFloat(content.style.height))
+      })).toBe(true)
+      const size = await dialogCanvas.evaluate((element) => {
+        const canvas = element as HTMLCanvasElement
+        return { width: canvas.width, height: canvas.height }
+      }),
+        primaryWidth = Math.round(size.width * denom / numer), primaryHeight = Math.round(size.height * denom / numer),
+        // YesNoDialog.tjs: w=max(200,textWidth+40), h=2*textHeight+60;
+        // Yes is 70x25 at ((w-150)>>1,textHeight+35).
+        logicalPoint = { x: Math.floor((primaryWidth - 150) / 2) + 35, y: (primaryHeight - 60) / 2 + 35 + 12.5 },
+        box = await dialogCanvas.boundingBox()
+      Object.assign(record, { backingSize: size, zoom: [numer, denom], inferredPrimarySize: [primaryWidth, primaryHeight], logicalPoint, box })
+      expect(primaryWidth).toBeGreaterThanOrEqual(200)
+      expect(primaryHeight).toBeGreaterThan(60)
+      expect(box).not.toBeNull()
+      expect(logicalPoint.x).toBeGreaterThan(0); expect(logicalPoint.x).toBeLessThan(primaryWidth)
+      expect(logicalPoint.y).toBeGreaterThan(0); expect(logicalPoint.y).toBeLessThan(primaryHeight)
+      await info.attach(`${stage}-confirm`, { body: await dialogCanvas.screenshot({ timeout: 5000 }), contentType: 'image/png' })
+      const position = { x: logicalPoint.x * numer / denom * box!.width / size.width,
+        y: logicalPoint.y * numer / denom * box!.height / size.height }
+      record.cssPoint = position
+      await dialogCanvas.click({ position })
+      record.yesClicked = true
+      await expect(modal).toHaveCount(0)
+      await expect(owner).toHaveAttribute('data-blocked', 'false')
+      await expect(canvas).toHaveCount(1)
+      await expect(canvas).toHaveAttribute('data-window-id', ownerId)
+      expect(evaluation).toBe(record.consoleReadCountBeforeModal)
+      record.modalRetired = true
+      steps.push(`${stage}-through-original-menu-and-confirm`)
+    }
     const finishPage = async (label: string, lineWaits: number, first: State) => {
       let current = first
       for (let line = 0; line < lineWaits; line++)
@@ -197,7 +278,7 @@ for (const backend of ['asyncify', 'jspi'])
       await capture('route-page-2-bookmark', current)
       const savedPixels = await basePixels()
       expect(savedPixels).toMatch(/^640\|480\|_24_4\|/)
-      expect(await read('kag.saveBookMark(0)')).toBe('1')
+      await bookmark('Save', 'save-slot-0')
       const savedPayload = await read(`(function(){var d=Scripts.evalStorage(kag.getBookMarkFileNameAtNum(0));
         return [d.core.currentLabel,d.core.foreBaseLayer.loadParams.storage,d.user.bg].join("|");})()`)
       expect(savedPayload).toBe('*about_kirikiri2|_24_4|_24_4')
@@ -212,7 +293,7 @@ for (const backend of ['asyncify', 'jspi'])
       current = await finishPage('*about_kirikiri2', 4, current)
       current = await advance(current, '*about_kirikiri3', 'line')
       await capture('route-page-3-before-load', current)
-      expect(await read('kag.loadBookMark(0)')).toBe('1')
+      await bookmark('Load', 'load-slot-0')
       current = await at('*about_kirikiri2', 'line')
       expect(await basePixels()).toBe(savedPixels)
       await capture('original-bookmark-restored', current)
@@ -222,9 +303,9 @@ for (const backend of ['asyncify', 'jspi'])
       const freshMenu = await at('*syokai_start', 'choice')
       expect(freshMenu.links).toBe(3)
       await capture('fresh-session-original-menu', freshMenu)
-      // Only the original bookmark method changes the scenario here. No
-      // loadScenario/goToLabel/tag replacement simulates restored gameplay.
-      expect(await read('kag.loadBookMark(0)')).toBe('1')
+      // The original menu and confirmation handler perform the restore. No
+      // console save/load, loadScenario/goToLabel or replacement tag changes it.
+      await bookmark('Load', 'refresh-load-slot-0')
       current = await at('*about_kirikiri2', 'line')
       expect(await basePixels()).toBe(savedPixels)
       await capture('refresh-bookmark-restored', current)

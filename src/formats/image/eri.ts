@@ -3,8 +3,9 @@ import { ImageDecodeError, type ImageDecodeProgress, type ImageDecodeSelection }
 import { decodeEriPredictiveTruecolor, decodeEriHuffmanTruecolor } from './eri-truecolor.ts'
 import { decodeEriHuffmanIndices } from './eri-huffman.ts'
 import { decodeEriArithmeticIndices } from './eri-arithmetic.ts'
+import { decodeEriDct } from './eri-dct.ts'
 
-/* ERI lossless RL-MTF-G, Gamma, Huffman and arithmetic image decoder.
+/* ERI lossless RL-MTF-G, Gamma, Huffman, arithmetic and lossy DCT decoder.
  * Written for this engine from the ERINA-Library 1.0A format/algorithm source,
  * Copyright (C) 2000-2002 Leshade Entis, Entis-soft. The original SDK is not
  * bundled here. Source, license and the older fixed KRKR headers are recorded
@@ -242,6 +243,14 @@ export function* decodeSelectedEri(bytes: Uint8Array, mode: ImageDecodeSelection
     depth = info.getUint32(24, true), blockingDegree = info.getUint32(52, true), kind = type & TYPE_MASK
   // Only these Initialize branches are established by the ERINA source. Do
   // not classify other potentially valid codecs as native Initialize errors.
+  if (transformation === 1) {
+    if ((architecture !== GAMMA && architecture !== HUFFMAN) || kind !== RGB || depth < 24) failed('Initialize')
+    const alpha = (type & WITH_ALPHA) !== 0
+    const image = yield* decodeEriDct(new EriBits(bytes.subarray(parsed.frame.start, parsed.frame.end)), {
+      width, height, degree: blockingDegree, sampling: info.getUint32(32, true), alpha, huffman: architecture === HUFFMAN,
+    })
+    return yield* publishTruecolor(image, width, height, signedHeight, mode === 'grayscale', alpha, progress)
+  }
   if (transformation === LOSSLESS) {
     if (![GAMMA, HUFFMAN, 32].includes(architecture) || (kind !== RGB && kind !== GRAY) ||
         (version !== 0x00020100 && version !== 0x00020200)) failed('Initialize')

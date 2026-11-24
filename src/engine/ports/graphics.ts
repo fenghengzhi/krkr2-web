@@ -37,6 +37,8 @@ export interface Renderer {
   openWindow?(windowId: number): void
   /** Retires a Window surface and its resources. */
   closeWindow?(windowId: number): void
+  /** Recreate only this Window's output resources, preserving other surfaces. */
+  recreateWindow?(windowId: number): void
   /** Wait only for this Window's surface. Recoverable faults remain retryable. */
   waitWindowReady?(windowId: number): RendererReadiness
   /** The current browser surface identity, absent after retirement. Renderers

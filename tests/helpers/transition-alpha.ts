@@ -79,9 +79,16 @@ alphaRoot.setImageSize(4,2);alphaRoot.setSize(4,2);alphaRoot.fillRect(0,0,4,2,0x
 var alphaFore,alphaBack,alphaSaved,alphaView,alphaGuard;
 var alphaTick=0,alphaTime=0,alphaClockCalls=0,alphaPaintCalls=0,alphaDone=0;
 var alphaLeafClockCalls=0,alphaLeafPaintCalls=0;
+// Optional native-reference journal only. Normal Session/browser consumers
+// leave this void; no frame, option or callback result is replaced.
+var alphaTransitionTrace=void;
+function alphaTransitionMark(phase){
+ if(global.alphaTransitionTrace!==void)global.alphaTransitionTrace(phase);
+}
 var alphaBeforeRGB=[0xf01020,0,0xffffff,0],alphaBeforeA=[0,0,255,255];
 var alphaAfterRGB=[0x08e040,0xffffff,0,0xffffff],alphaAfterA=[0,255,0,255];
 function alphaTransitionRetire(){
+ alphaTransitionMark("retire:before");
  if(global.alphaFore!==void && isvalid global.alphaFore)global.alphaFore.stopTransition();
  if(global.alphaBack!==void && isvalid global.alphaBack)global.alphaBack.stopTransition();
  if(global.alphaFore!==void && isvalid global.alphaFore)invalidate global.alphaFore;
@@ -89,6 +96,7 @@ function alphaTransitionRetire(){
  if(global.alphaSaved!==void && isvalid global.alphaSaved)invalidate global.alphaSaved;
  if(global.alphaView!==void && isvalid global.alphaView)invalidate global.alphaView;
  global.alphaGuard=void;
+ alphaTransitionMark("retire:after");
 }
 function alphaReadPixels(target){
  var bytes=[];
@@ -99,18 +107,23 @@ function alphaReadPixels(target){
  return bytes.join(",");
 }
 function alphaTransitionStart(type,kind,time,vague,guard=true){
+ alphaTransitionMark("start:before-retire");
  alphaTransitionRetire();
+ alphaTransitionMark("start:before-layers");
  global.alphaFore=new Layer(global.alphaWindow,global.alphaRoot);
  global.alphaBack=new Layer(global.alphaWindow,global.alphaRoot);
  global.alphaSaved=new Layer(global.alphaWindow,global.alphaRoot);
+ alphaTransitionMark("start:layers-created");
  global.alphaFore.setImageSize(4,1);global.alphaFore.setSize(4,1);global.alphaFore.type=type;
  global.alphaBack.setImageSize(4,1);global.alphaBack.setSize(4,1);global.alphaBack.type=type;
  global.alphaSaved.setImageSize(4,1);global.alphaSaved.setSize(4,1);global.alphaSaved.visible=false;
+ alphaTransitionMark("start:images-sized");
  for(var x=0;x<4;x++){
   global.alphaFore.setMainPixel(x,0,global.alphaBeforeRGB[x]);global.alphaFore.setMaskPixel(x,0,global.alphaBeforeA[x]);
   global.alphaBack.setMainPixel(x,0,global.alphaAfterRGB[x]);global.alphaBack.setMaskPixel(x,0,global.alphaAfterA[x]);
  }
  global.alphaFore.visible=true;global.alphaBack.visible=false;
+ alphaTransitionMark("start:images-filled");
  if(guard){
   // Fixed Complete(rect) returns MainImage for a childless matching viewport.
   // This ordinary visible child lies wholly outside the4x1 requested region.
@@ -120,17 +133,21 @@ function alphaTransitionStart(type,kind,time,vague,guard=true){
   global.alphaGuard.type=ltAlpha;global.alphaGuard.setPos(4,0);
   global.alphaGuard.fillRect(0,0,1,1,0);global.alphaGuard.visible=true;
  }
+ alphaTransitionMark("start:guard-ready");
  global.alphaView=new Layer(global.alphaWindow,global.alphaRoot);
  global.alphaView.setImageSize(4,2);global.alphaView.setSize(4,2);global.alphaView.type=ltOpaque;
  global.alphaView.fillRect(0,0,4,2,0xff000000);global.alphaView.visible=true;
+ alphaTransitionMark("start:view-ready");
  global.alphaTick=0;global.alphaTime=time;global.alphaClockCalls=0;global.alphaPaintCalls=0;global.alphaDone=0;
  global.alphaFore.onPaint=function(){global.alphaPaintCalls++;};
  global.alphaFore.onTransitionCompleted=function(dest,src){
   if(dest!==global.alphaFore||src!==global.alphaBack)throw new Exception("Wrong alpha transition owners");
   global.alphaDone++;
  };
+ alphaTransitionMark("start:before-transition");
  global.alphaFore.beginTransition(kind,false,global.alphaBack,%[time:time,vague:vague,rule:"alpha-rule.bmp",selfupdate:true,
   callback:function(){global.alphaClockCalls++;return global.alphaTick;}]);
+ alphaTransitionMark("start:after-transition");
  return "started";
 }
 function alphaTransitionLeaf(type){
@@ -165,9 +182,13 @@ function alphaTransitionSample(tick){
   // Completion exchanges the visible owners. Finish through the real Window
   // update, then read the now-visible source's own original image rather than
   // asking the retired destination to represent the final transition frame.
+  alphaTransitionMark("sample:before-window-update");
   global.alphaWindow.update();target=global.alphaBack;
+  alphaTransitionMark("sample:after-window-update");
  }else{
+  alphaTransitionMark("sample:before-piled-copy");
   global.alphaSaved.piledCopy(0,0,global.alphaFore,0,0,4,1);
+  alphaTransitionMark("sample:after-piled-copy");
  }
  var clockChanged=int(global.alphaClockCalls>calls),completed=global.alphaDone;
  var result=alphaReadPixels(target)+"|done:"+completed+"|clock:"+clockChanged+

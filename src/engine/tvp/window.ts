@@ -11,6 +11,8 @@ function __krkrWindowInvalidate(window,id) {
       objects.clear();
     }
     if(window.__windowMenu!==null && window.__windowMenu!==void) invalidate window.__windowMenu;
+    if(typeof window.__windowDrawDevice=="Object" && window.__windowDrawDevice!==null) invalidate window.__windowDrawDevice;
+    window.__windowDrawDevice=void;
   } catch(error) {
     __host("Window.finish",id);
     throw error;
@@ -18,7 +20,7 @@ function __krkrWindowInvalidate(window,id) {
   __host("Window.finish",id);
 }
 class Window {
-  var __windowId, __windowMenu=null, __windowObjects, __windowKeys, __windowClosing=false, __windowCanClose=false, __windowUserClosing=false;
+  var __windowId, __windowMenu=null, __windowObjects, __windowKeys, __windowDrawDevice, __windowClosing=false, __windowCanClose=false, __windowUserClosing=false;
   function Window() {
     if(!__host("Input.padConfigured")) {
       var padMode=__host("System.getArgument","-joypad"),
@@ -29,7 +31,7 @@ class Window {
     }
     __windowObjects=[];__windowKeys=[];
     __windowId=__host("Window.create",this,__krkrWindowInvalidate);
-    __host("Input.synchronize");
+    drawDevice=new global.Window.PassThroughDrawDevice();
   }
   function finalize() {}
   function add(object) {
@@ -49,6 +51,18 @@ class Window {
     return __windowMenu;
   } }
   property primaryLayer { getter() { return __host("Window.primary",__windowId); } }
+  property drawDevice {
+    getter(){return __windowDrawDevice;}
+    setter(value){
+      // Native invalidates the previous device before assigning/extracting
+      // the replacement interface. A bad replacement does not revive it.
+      if(typeof __windowDrawDevice=="Object" && __windowDrawDevice!==null)invalidate __windowDrawDevice;
+      __windowDrawDevice=value;
+      __host("Window.drawDeviceClear",__windowId);
+      if(typeof value=="Object")__host("Window.drawDeviceSet",__windowId,value,int(value.interface));
+      __host("Input.synchronize");
+    }
+  }
   function __windowDispatch(name,args) { return this[name](args*); }
   function showModal() {
     // Keep the attempt alive on the TJS stack. If native release fails before

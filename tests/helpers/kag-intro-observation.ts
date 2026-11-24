@@ -39,13 +39,13 @@ export const kagIntroFontMetricFields = [
   'secondLinkWhole', 'secondLinkCodeUnits', 'exitWhole', 'exitCodeUnits',
 ] as const
 
-/** A separate never-shown child owns this temporary Font. Font(existingLayer)
- * would observe and mutate that existing Layer's native font state instead.
+/** A separate never-shown child owns this temporary Font. Taking the active
+ * Layer's Font would mutate that existing Layer's native font state instead.
  * This runs once, only after preserving the game's unmodified wait/layout. */
 export const kagIntroFontMetricExpression = `(function(){
   var layer=void,font=void,primary=void,cleanup=[],rows=[];
   try{
-    layer=new Layer(kag,kag.current);layer.visible=false;font=new Font(layer);
+    layer=new Layer(kag,kag.current);layer.visible=false;font=layer.font;
     font.face=kag.current.lineLayer.font.face;font.italic=false;font.angle=0;
     var heights=[24,40],samples=["Introduction to Kirikiri and","What is Kirikiri?","What is KAG?","Exit"];
     for(var h=0;h<heights.count;h++)for(var b=0;b<2;b++){
@@ -59,7 +59,6 @@ export const kagIntroFontMetricExpression = `(function(){
       rows.add(row.join(","));
     }
   }catch(e){primary=e;}
-  try{if(font!==void && isvalid font)invalidate font;}catch(e){cleanup.add(e.message);}
   try{if(layer!==void && isvalid layer)invalidate layer;}catch(e){cleanup.add(e.message);}
   if(primary!==void){
     if(cleanup.count)throw new Exception(primary.message+" | Font probe cleanup: "+cleanup.join(" | "));

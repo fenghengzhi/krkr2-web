@@ -6,6 +6,7 @@ import { sliInvalidNames, sliNativeFiles, sliNativeSource } from '../helpers/sli
 import { wavePrecisionFiles } from '../helpers/extensible-wave.ts'
 import { wavePositionExpected, wavePositionFiles, wavePositionSource } from '../helpers/wave-position.ts'
 import { waveFadeExpected, waveFadeDelayedExpected, waveFadeSource } from '../helpers/wave-fade.ts'
+import { waveFrequencyExpected, waveFrequencyFiles, waveFrequencySource } from '../helpers/wave-frequency.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -21,8 +22,8 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   '12-in-16.wav': 'open|48000', '20-in-24.wav': 'open|48000', '24-in-32.wav': 'open|48000',
   'foreign-guid.wav': 'wave:<foreign-guid.wav>', ...wavePositionExpected,
   ...Object.fromEntries(Object.entries(waveFadeExpected).map(([id, value]) => ['fade-' + id, value])),
-  'fade-delayed': waveFadeDelayedExpected }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles() }
+  'fade-delayed': waveFadeDelayedExpected, 'frequency-original': waveFrequencyExpected }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -45,6 +46,8 @@ if (process.argv[2] === 'prepare') {
     'System.assignMessage("TVPUnknownWaveFormat","wave:<%1>");var opened;',
     ...Object.keys(precision).map((name) =>
       `opened=sliTryOpen("${name}");record("${name}|"+opened+(opened=="open"?"|"+sliSound.frequency:""));`),
+    waveFrequencySource,
+    'try{record("frequency-original|"+waveFrequencyObserve());}catch(e){record("frequency-original|unexpected-error:"+e.message);}',
     waveFadeSource,
     ...Object.keys(waveFadeExpected).map((id) =>
       `try{record("fade-${id}|"+waveFadeObserve("${id}"));}catch(e){record("fade-${id}|unexpected-error:"+e.message);}`),

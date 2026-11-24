@@ -9,7 +9,8 @@ import {
 import { eriTruecolorCases, eriTruecolorFiles, eriTrueGray, eriTrueRgb, eriTrueRgba } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanCases, eriHuffmanFiles, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
 import { eriArithmeticCases, eriArithmeticFiles } from '../helpers/eri-arithmetic-fixtures.ts'
-import { encoderPixels, encoderRecipes, indexedEncoderRecipe, prepareEncodedImages } from './eri-encoder.ts'
+import { eriDctCases, eriDctFiles } from '../helpers/eri-dct-fixtures.ts'
+import { dctEncoderRecipes, encoderPixels, encoderRecipes, indexedEncoderRecipe, prepareEncodedImages } from './eri-encoder.ts'
 import { noColorKey } from '../../src/engine/graphics/loading.ts'
 import type { Resource } from '../../src/engine/ports/storage.ts'
 
@@ -20,7 +21,7 @@ const save = (name: string, data: unknown) => writeFileSync(resolve(output, name
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 interface Case {
   id: string; source: string; mask?: string; index?: number; key?: number; province?: boolean
-  width?: number; height?: number; expected?: readonly number[]
+  width?: number; height?: number; expected?: readonly number[]; sdkReference?: boolean
 }
 const reversed = (values: readonly number[], stride: number) => [...values.slice(stride), ...values.slice(0, stride)]
 const cases119: Case[] = [
@@ -37,8 +38,12 @@ const cases119: Case[] = [
   { id: 'province', source: 'rgb-negative.eri', province: true },
 ]
 const corpus = process.env.KRKR_ERI_CORPUS ?? 'authored'
-assert(corpus === 'authored' || corpus === 'encoder')
-const cases: Case[] = corpus === 'encoder' ? encoderRecipes.map((recipe) => ({
+assert(corpus === 'authored' || corpus === 'encoder' || corpus === 'dct')
+const cases: Case[] = corpus === 'dct' ? [
+  ...eriDctCases.filter((item) => !item.inline).map(({ name, width, height, rgba }) =>
+    ({ id: name.slice(0, -4), source: name, width, height, expected: rgba })),
+  ...dctEncoderRecipes.map(({ id, width, height }) => ({ id, source: id + '.eri', width, height, sdkReference: true })),
+] : corpus === 'encoder' ? encoderRecipes.map((recipe) => ({
   id: recipe.id, source: recipe.id + '.eri', width: recipe.width, height: recipe.height, expected: [...encoderPixels(recipe)],
 })) : [...cases119, ...[...eriTruecolorCases, ...eriHuffmanCases, ...eriHuffmanPaletteCases, ...eriArithmeticCases].map(({ name, width, height, rgba }) => ({
   id: name.slice(0, -4), source: name, width, height, expected: rgba,
@@ -66,6 +71,11 @@ const cases: Case[] = corpus === 'encoder' ? encoderRecipes.map((recipe) => ({
   expected: eriMaskedRgba(reversed(eriPaletteGray, 3)),
 }]
 const provinceError = 'currently Kirikiri does not support loading palettized ERI image.'
+if (corpus === 'dct') {
+  const item = eriDctCases.find((entry) => entry.name === 'dct-422-alpha.eri')!
+  cases.push({ id: 'dct-alpha-as-mask', source: item.name, mask: item.name, width: item.width, height: item.height,
+    expected: item.rgba.map((value, at) => at % 4 === 3 ? item.gray[at - 3]! : value) })
+}
 if (corpus === 'encoder') {
   const { id, width, height } = indexedEncoderRecipe, source = id + '.eri'
   const rgba = [...encoderPixels(indexedEncoderRecipe)]
@@ -79,7 +89,8 @@ if (corpus === 'encoder') {
 
 async function prepare() {
   mkdirSync(game, { recursive: true })
-  const files = corpus === 'encoder' ? await prepareEncodedImages(output)
+  const files = corpus === 'dct' ? { ...eriDctFiles(), ...await prepareEncodedImages(output, dctEncoderRecipes) }
+    : corpus === 'encoder' ? await prepareEncodedImages(output, encoderRecipes)
     : { ...eriContractFiles(), ...eriTruecolorFiles(), ...eriHuffmanFiles(), ...eriArithmeticFiles() }
   const inputs: { name: string; bytes: number; sha256: string }[] = []
   function copy(from: string, name: string) {
@@ -153,16 +164,17 @@ async function compare() {
           const fields = found[0]!.split('|')
           assert.equal(fields[2], 'ok', found[0]); assert.equal(fields.length, 6)
           assert.deepEqual(fields.slice(3, 5), [String(width), String(height)])
-          const native = fields[5]!.split(',').map(Number)
+          const native = fields[5]!.split(',').map((channel) => { assert(/^\d+$/.test(channel)); return Number(channel) })
           const actual = (await loader.load(name, item.index === undefined ? item.key ?? noColorKey : 0x03000000 + item.index)).image
           save(item.id + '-web.json', { width: actual.width, height: actual.height, rgba: [...actual.data] })
           assert.deepEqual([actual.width, actual.height], [width, height])
           assert.equal(actual.data.length, width * height * 4)
           assert.equal(native.length, actual.data.length)
-          assert.equal(item.expected?.length, native.length)
+          assert(native.every((channel) => Number.isInteger(channel) && channel >= 0 && channel <= 255))
+          if (!item.sdkReference) assert.equal(item.expected?.length, native.length)
           for (let i = 0; i < native.length; ++i) {
             const label = item.id + ' (' + ((i >> 2) % width) + ',' + Math.floor((i >> 2) / width) + ') ' + 'RGBA'[i % 4]
-            assert.equal(native[i], item.expected![i], 'SDK ' + label)
+            if (!item.sdkReference) assert.equal(native[i], item.expected![i], 'SDK ' + label)
             assert.equal(actual.data[i], native[i], 'Web ' + label)
           }
           rgbaHash = sha(actual.data)

@@ -12,7 +12,9 @@ for (const binary of [false, true]) {
     try {
       await f.execute('makeWindow();')
       assert.equal(f.session.inspectOwnership().windowSources, 1)
-      assert.equal(f.session.inspectOwnership().weakOwners, f.baseline.weakOwners + 1)
+      // The Window and its independently invalidatable default draw device
+      // both have weak native-lifetime observations, without callback roots.
+      assert.equal(f.session.inspectOwnership().weakOwners, f.baseline.weakOwners + 2)
       assert.equal(await f.session.evaluate('win.__windowMenu===null'), '1')
       await f.execute('delete global.win;')
       await f.restored()

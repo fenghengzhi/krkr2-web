@@ -109,6 +109,8 @@ import { MenuService } from './scene/menu-items.ts'
 import { WindowState, type WindowView, type WindowPresentation } from './scene/window.ts'
 import { WindowService, type WindowRecord } from './scene/windows.ts'
 import { windowClass } from './tvp/window.ts'
+import { drawDeviceClass } from './tvp/draw-device.ts'
+import { DrawDevices } from './scene/draw-devices.ts'
 import { layerClass } from './tvp/layer.ts'
 import { fontClass } from './tvp/font.ts'
 import { transitionBridge } from './tvp/transitions.ts'
@@ -403,6 +405,12 @@ export class EngineSession {
   private windowsView = ''
   private transitions?: SceneTransitions
   private readonly composer: SceneComposer
+  private readonly drawDevices = new DrawDevices((windowId, recreate) => {
+    if (!this.registeredWindow(windowId) || this.control.cancelled) return
+    if (recreate) this.deps.renderer.recreateWindow?.(windowId)
+    this.windowPresentedVersions.delete(windowId)
+    this.invalidateWindow(windowId)
+  })
   private preparingFrame = false
   private readonly windowUpdates = new WindowUpdates()
   private paintedLayers = new Set<number>()
@@ -917,7 +925,7 @@ export class EngineSession {
       this.windows = new WindowService(
         this.runtime,
         (window) => {
-          this.inputControllers.create(window.id, () => window.state).keys = new Set(
+          this.inputControllers.create(window.id, () => window.state, () => this.drawDevices.attached(window.id)).keys = new Set(
             this.physicalKeys,
           )
           this.refreshKeyboardRoutes()
@@ -965,6 +973,7 @@ export class EngineSession {
           await this.videos?.flushCloses()
         },
         (window) => {
+          this.drawDevices.closeWindow(window.id)
           this.fileDropSequences.delete(window.id)
           this.windowUpdates.remove(window.id)
           this.geometryRequests.delete(window.id)
@@ -1118,6 +1127,7 @@ export class EngineSession {
       this.discard(await this.runtime.execute(kagClass, 'krkr2-web/kag.tjs'))
       this.discard(await this.runtime.execute(menuClass, 'krkr2-web/menus.tjs'))
       this.discard(await this.runtime.execute(windowClass, 'krkr2-web/window.tjs'))
+      this.discard(await this.runtime.execute(drawDeviceClass, 'krkr2-web/draw-device.tjs'))
       this.discard(await this.runtime.execute(inputBridge, 'krkr2-web/input.tjs'))
       this.discard(await this.runtime.execute(checkpointBridge, 'krkr2-web/checkpoints.tjs'))
       this.discard(await this.runtime.execute(modalBridge, 'krkr2-web/modal.tjs'))
@@ -3567,10 +3577,11 @@ export class EngineSession {
       const viewportWidth = Math.max(1, window.viewportWidth), viewportHeight = Math.max(1, window.viewportHeight),
         primaryId = this.inputControllers.get(target.id)?.root() ?? 0,
         primary = this.layers.has(primaryId) ? this.layers.get(primaryId) : undefined,
-        geometry = drawDeviceGeometry(window, primary?.width ?? 0, primary?.height ?? 0)
+        geometry = drawDeviceGeometry(window, primary?.width ?? 0, primary?.height ?? 0),
+        drawer = primary ? this.drawDevices.prepare(target.id, viewportWidth, viewportHeight, primary.width, primary.height) : 0
       const presented = this.deps.renderer.present(
         window.visible && window.viewportWidth > 0 && window.viewportHeight > 0 &&
-          primary && primary.width > 0 && primary.height > 0
+          drawer && primary && primary.width > 0 && primary.height > 0
           ? this.composer.frame(
               viewportWidth,
               viewportHeight,
@@ -3580,6 +3591,7 @@ export class EngineSession {
               target.id,
               geometry.height / primary.height,
               primaryId,
+              drawer === 1,
             )
           : [],
         viewportWidth,
@@ -4060,6 +4072,7 @@ export class EngineSession {
       await attempt(() => this.layerObjects?.dispose())
       await attempt(() => this.kag.clear())
       await attempt(() => this.windows?.dispose())
+      await attempt(() => this.drawDevices.dispose())
       this.windowPresentedVersions.clear()
       this.virtualCursors.clear()
       this.mouseKeys.clear()
@@ -5018,6 +5031,31 @@ export class EngineSession {
         break
       case 'Events.destroy':
         this.events!.destroy(number(0))
+        break
+      case 'DrawDevice.create': {
+        if (!isScriptObject(args[0])) throw new Error('Expected a draw device object')
+        const runtime = this.runtime!, owner = args[0]
+        value = BigInt(this.drawDevices.create(runtime.objectIdentity(owner), (retire) => {
+          const weak = runtime.observe(owner, retire)
+          return () => runtime.unobserve(weak)
+        }))
+        break
+      }
+      case 'DrawDevice.recreate': this.drawDevices.recreate(number(0)); break
+      case 'DrawDevice.preferred': value = BigInt(this.drawDevices.preferred(number(0))); break
+      case 'DrawDevice.prefer': this.drawDevices.setPreferred(number(0), Number(BigInt.asIntN(32, args[1] as bigint))); break
+      case 'DrawDevice.drawer': value = BigInt(this.drawDevices.drawer(number(0))); break
+      case 'DrawDevice.interface':
+        this.drawDevices.drawer(number(0)) // Validate the live interface before exposing its opaque identity.
+        value = BigInt(number(0)); break
+      case 'Window.drawDeviceClear':
+        this.windows!.get(number(0))
+        this.drawDevices.detach(number(0))
+        break
+      case 'Window.drawDeviceSet':
+        this.windows!.get(number(0))
+        if (!isScriptObject(args[1])) throw new Error('Expected a draw device object')
+        this.drawDevices.attach(number(0), number(2), this.runtime!.objectIdentity(args[1]))
         break
       case 'Window.create': {
         if (!isScriptObject(args[0]) || !isScriptObject(args[1]))

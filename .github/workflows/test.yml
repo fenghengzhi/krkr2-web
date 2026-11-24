@@ -960,6 +960,8 @@ jobs:
             artifact: original-eri-reference
           - corpus: encoder
             artifact: original-eri-encoder-reference
+          - corpus: dct
+            artifact: original-eri-dct-reference
     env:
       KRKR_ERI_CORPUS: ${{ matrix.corpus }}
     defaults:
@@ -986,7 +988,7 @@ jobs:
       - name: Run the portable ERI contracts against the same checkout
         if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.prepare_eri.outcome == 'success' }}
         run: |
-          node --import tsx --test --test-reporter=tap tests/conformance/eri-native.test.ts tests/conformance/eri-truecolor.test.ts tests/conformance/eri-huffman.test.ts tests/conformance/eri-arithmetic.test.ts |
+          node --import tsx --test --test-reporter=tap tests/conformance/eri-native.test.ts tests/conformance/eri-truecolor.test.ts tests/conformance/eri-huffman.test.ts tests/conformance/eri-arithmetic.test.ts tests/conformance/eri-dct.test.ts |
             Tee-Object -FilePath out/verification/native-eri/conformance.tap
           exit $LASTEXITCODE
       - name: Prepare MIDI open controls for the original SDK

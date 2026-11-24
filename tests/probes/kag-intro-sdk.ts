@@ -24,6 +24,29 @@ const inputPath = (name: string) => {
 }
 interface Input { name: string; preparedName: string; bytes: number; sha256: string }
 interface Manifest { commit: string; source: typeof kagIntroSource; inputs: Input[]; observerSha256: string }
+// Use a separate hidden Window after preserving the original game's layout.
+// Record only identity relationships. OS interface pointer values are private.
+const drawDeviceExpected = '1,1,1|0,1,2,3,4|1,1,1|0,1,1|0,1'
+const drawDeviceExpression = `(function(){
+  var control=new Window(),old=control.drawDevice,device=void,rows=[],failure=void;
+  try{
+    device=new Window.PassThroughDrawDevice();
+    rows.add([int(old instanceof "PassThroughDrawDevice"),int(old===control.drawDevice),int(old!==device)].join(","));
+    rows.add([device.dtNone,device.dtDrawDib,device.dtDBGDI,device.dtDBDD,device.dtDBD3D].join(","));
+    device.preferredDrawer=device.dtDrawDib;
+    rows.add([device.preferredDrawer,int(device.interface!=0),int(old.interface!=device.interface)].join(","));
+    control.drawDevice=device;
+    rows.add([int(isvalid old),int(control.drawDevice===device),device.preferredDrawer].join(","));
+    control.drawDevice=void;
+    rows.add([int(isvalid device),int(control.drawDevice===void)].join(","));
+  }catch(error){failure=error;}
+  try{invalidate control;}catch(cleanup){
+    if(failure!==void)throw new Exception(failure.message+" | draw device cleanup: "+cleanup.message);
+    throw cleanup;
+  }
+  if(failure!==void)throw failure;
+  return rows.join("|");
+})()`
 const startup = textBytes(`
 var introRecords=[];
 function introRecord(value){introRecords.add(value);introRecords.save("native-events.txt");}
@@ -46,10 +69,12 @@ function introObserve(){
         if(candidate && state==global.introPrevious){
           global.introRecord("state|"+state);
           global.introRecord("layout|"+${kagIntroLayoutExpression});
-          // Save the original game state first. This separate temporary Font
-          // does not change the active message Font or replay its scenario.
+          // The separate hidden Layer owns the Font used for measurement.
+          // The game's live message layer keeps its settings.
           try{global.introRecord("font-metrics|"+${kagIntroFontMetricExpression});}
           catch(e){global.introRecord("font-metrics-error|"+e.message);}
+          try{global.introRecord("draw-device|"+${drawDeviceExpression});}
+          catch(e){global.introRecord("draw-device-error|"+e.message);}
           global.introRecord("done|"+(fields[1]=="1"?"initial-automatic-page":"initial-three-link-choice"));
           done=true;
         }
@@ -114,7 +139,7 @@ if (process.argv[2] === 'prepare') {
     preparation.phase = 'launch-observer'
     writeFileSync(inputPath('startup.tjs'), startup)
     save('inputs.json', { commit: process.env.GITHUB_SHA, source: kagIntroSource, inputs, observerSha256: sha(startup),
-      scope: 'Every original resource is extracted byte-for-byte. Only the launch startup is an external read-only observer which executes the retained original startup. The original XP3 is also preserved. No game methods, fonts, scenarios or inputs are replaced.' })
+      scope: 'Every original resource is extracted byte-for-byte. The wrapper executes the retained original startup, observes game state, and runs its draw-device controls in a separate Window. The original XP3 is also preserved. No game methods, fonts, scenarios or inputs are replaced.' })
     preparation.complete = true
     preparation.phase = 'complete'
   } catch (error) {
@@ -158,17 +183,20 @@ if (process.argv[2] === 'prepare') {
   const state = states[0], classified = classification === 'initial-three-link-choice'
     ? state?.[1] === '0' && state[6] === '0' && state[7] === '3'
     : classification === 'initial-automatic-page' && state?.[1] === '1' && state[3] === '1' && state[10] !== 'p'
+  const drawDeviceObservation = lines.filter((line) => line.startsWith('draw-device|') || line.startsWith('draw-device-error|'))
+  const drawDeviceMatched = drawDeviceObservation.length === 1 && drawDeviceObservation[0] === 'draw-device|' + drawDeviceExpected
   const observed = processResult.state === 'observed' && processResult.exitCode === 0 && !processResult.timedOut &&
-    processResult.commit === manifest.commit && lines.length === 5 && lines[0] === 'start' &&
+    processResult.commit === manifest.commit && lines.length === 6 && lines[0] === 'start' &&
     states.length === 1 && states[0]!.length === 11 && states[0]![0] === '*syokai_start' &&
     layouts.length === 1 && layouts[0]!.length === kagIntroLayoutFields.length &&
     classified
   save('observation.json', { commit: manifest.commit, observed, classification, state: states[0],
     layout: layouts[0] && Object.fromEntries(kagIntroLayoutFields.map((name, index) => [name, layouts[0]![index]])),
     observationsSha256: sha(bytes), lines, process: processResult,
-    fontMetricsComplete, fontMetricErrors, fontMetricFields: kagIntroFontMetricFields,
+    drawDeviceMatched, drawDeviceObservation, drawDeviceExpected, fontMetricsComplete, fontMetricErrors, fontMetricFields: kagIntroFontMetricFields,
     fontMetrics: fontMetricRows?.map((row) => Object.fromEntries(kagIntroFontMetricFields.map((key, index) => [key, Number(row[index])]))),
-    scope: 'Original SDK initial layout only. Both a three-link menu and an automatic page wait are recorded as observations; neither is a complete native gameplay or Web font-metric equivalence claim. No input was injected.' })
+    scope: 'Original SDK initial layout, Layer font measurements and separate Window draw-device controls. Records a three-link menu or an automatic page wait. No input was injected.' })
   assert(observed, 'Incomplete original Introduction initial-layout observation')
   assert(fontMetricsComplete, 'Incomplete separate original Introduction font measurement')
+  assert(drawDeviceMatched, 'Original Window draw-device observations incomplete or different')
 } else throw new Error('Expected prepare or native')

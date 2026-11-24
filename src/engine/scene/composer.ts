@@ -421,6 +421,7 @@ export class SceneComposer {
     windowId?: number,
     zoomY = zoom,
     primaryId?: number,
+    software = false,
   ): FrameLayer[] {
     const result: FrameLayer[] = []
     const visit = (layer: LayerState, x: number, y: number, clip: Rect) => {
@@ -433,13 +434,13 @@ export class SceneComposer {
         },
         area = intersect(clip, rect)
       if (!area.width || !area.height) return
-      if (binder(layer)) {
+      if (binder(layer) && !software) {
         for (const child of layer.children) visit(this.layers.get(child), rect.x, rect.y, area)
         return
       }
       const transition = this.transition(layer.id),
         group =
-          this.needsRawComposition(layer.id, false) ||
+          software || this.needsRawComposition(layer.id, false) ||
           (transition && (transition.children || transition.kind !== 'scroll')) ||
           (layer.opacity < 255 && layer.children.some((id) => this.layers.get(id).visible))
       if (group) {

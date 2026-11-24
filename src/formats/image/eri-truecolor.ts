@@ -26,10 +26,11 @@ function failed(): never {
 
 /** A run may span calls/blocks. Its zero/nonzero kind flips only when the
  * declared run has been consumed; an independent block resets both fields. */
-class GammaRuns {
+export class GammaRuns {
   private remaining = 0
   private nonzero = false
   constructor(private readonly bits: EriBitSource) {}
+  get pending(): number { return this.remaining }
   initialize(): void {
     const flag = this.bits.next()
     if (flag < 0) failed()

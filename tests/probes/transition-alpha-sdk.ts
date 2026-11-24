@@ -16,16 +16,23 @@ const save = (name: string, data: unknown) => writeFileSync(resolve(output, name
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
   for (const [name, bytes] of Object.entries(files)) writeFileSync(resolve(game, name), bytes)
+  const scene = Buffer.from('\ufeff' + alphaTransitionSource, 'utf16le')
+  writeFileSync(resolve(game, 'alpha-scene.tjs'), scene)
   const startup = Buffer.from('\ufeff' + [
     'System.exitOnNoWindowStartup=false;System.exitOnWindowClose=false;',
     'var nativeAlphaRows=[];function record(s){nativeAlphaRows.add(s);nativeAlphaRows.save("native-events.txt");}',
+    'var nativeAlphaProgress=[],nativeAlphaCase="scene";function progress(s){if(nativeAlphaProgress.count<1024){nativeAlphaProgress.add(s);nativeAlphaProgress.save("native-progress.txt");}}',
     'record("start");System.exceptionHandler=function(e){record("fatal|"+e.message);System.exit();return true;};',
-    alphaTransitionSource,
-    ...alphaTransitionChecks.map(({ id, call }) => `record("${id}|"+${call});`),
-    'record("done");System.exit();',
+    'progress("scene:before");try{Scripts.execStorage("alpha-scene.tjs");}catch(e){progress("scene:error|"+e.message);record("fatal|scene|"+e.message);throw e;}progress("scene:after");',
+    'alphaTransitionTrace=function(phase){progress("phase|"+global.nativeAlphaCase+"|"+phase);};',
+    // Preserve a script exception before the application's startup exception
+    // UI can intercept it. A blocked call retains its last completed phase.
+    'function observeAlpha(id,call){global.nativeAlphaCase=id;progress("before|"+id);var value;try{value=call();}catch(e){progress("error|"+id+"|"+e.message);record("error|"+id+"|"+e.message);throw e;}record(id+"|"+value);progress("after|"+id);}',
+    ...alphaTransitionChecks.map(({ id, call }) => `observeAlpha("${id}",function(){return ${call};});`),
+    'progress("done");record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
-  save('inputs.json', { commit: process.env.GITHUB_SHA, startupSha256: sha(startup),
+  save('inputs.json', { commit: process.env.GITHUB_SHA, startupSha256: sha(startup), sceneSha256: sha(scene),
     helperSha256: sha(readFileSync('tests/helpers/transition-alpha.ts')), checks: alphaTransitionChecks,
     cases: alphaTransitionCases, files: fileManifest,
     scope: 'Live original Layer.piledCopy/getMainPixel/getMaskPixel with independent literal rows; leaf direct-copy negative controls and real completion-clock observations. No product pixel implementation imported.' })
@@ -42,6 +49,7 @@ if (process.argv[2] === 'prepare') {
       JSON.stringify(manifest?.cases) !== JSON.stringify(alphaTransitionCases)) evidenceErrors.push('Literal contract inventory differs')
   if (JSON.stringify(manifest?.files) !== JSON.stringify(fileManifest)) evidenceErrors.push('Input file manifest differs')
   for (const [path, expected] of [[resolve(game, 'startup.tjs'), manifest?.startupSha256],
+    [resolve(game, 'alpha-scene.tjs'), manifest?.sceneSha256],
     [resolve('tests/helpers/transition-alpha.ts'), manifest?.helperSha256]] as const)
     if (!existsSync(path) || sha(readFileSync(path)) !== expected) evidenceErrors.push(`Source hash differs or is missing: ${path}`)
   for (const [name, bytes] of Object.entries(files)) {
@@ -58,13 +66,21 @@ if (process.argv[2] === 'prepare') {
   })
   const sequenceMatches = lines.length === results.length + 2 && lines[0] === 'start' && lines.at(-1) === 'done' &&
     results.every((row, index) => lines[index + 1] === row.id + '|' + row.expected)
+  const progressPath = resolve(game, 'native-progress.txt'), progressRaw = existsSync(progressPath) ? readFileSync(progressPath) : Buffer.alloc(0),
+    progress = progressRaw.toString(progressRaw[0] === 255 && progressRaw[1] === 254 ? 'utf16le' : 'utf8')
+      .replace(/^\ufeff/, '').trimEnd().split(/\r?\n/),
+    boundaries = progress.filter((line) => line.startsWith('before|') || line.startsWith('after|')),
+    expectedBoundaries = alphaTransitionChecks.flatMap(({ id }) => ['before|' + id, 'after|' + id]),
+    progressComplete = progress[0] === 'scene:before' && progress[1] === 'scene:after' && progress.at(-1) === 'done' &&
+      progress.length <= 1024 && JSON.stringify(boundaries) === JSON.stringify(expectedBoundaries) &&
+      !progress.some((line) => line.startsWith('error|') || line.startsWith('scene:error|'))
   const complete = !evidenceErrors.length && sdk?.state === 'observed' && sdk.exitCode === 0 && sdk.timedOut === false &&
-    sequenceMatches && results.every((row) => row.matched)
+    sequenceMatches && progressComplete && results.every((row) => row.matched)
   save('comparison.json', { commit: process.env.GITHUB_SHA, planned: results.length,
     plannedPixelFrames: alphaTransitionCases.reduce((sum, item) => sum + item.frames.length, 0),
     reported: results.filter((row) => row.observed.length > 0).length, complete, sequenceMatches, evidenceErrors,
     sdkState: sdk?.state ?? 'unreported', sdkExitCode: sdk?.exitCode ?? null, sdkTimedOut: sdk?.timedOut ?? null,
-    results, lines, observationSha256: sha(raw),
+    results, lines, observationSha256: sha(raw), progressComplete, progress, progressSha256: sha(progressRaw),
     scope: 'Original live transition snapshot bytes and leaf/cache path observations. Source/bytecode Session and browser rendering are independently required.' })
   assert(complete, 'Original alpha transition pixels or observation boundaries differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

@@ -90,6 +90,7 @@ export class InputController {
     readonly layers: LayerTree,
     private readonly window: () => WindowView,
     private readonly windowId?: () => number,
+    private readonly drawDeviceEnabled: () => boolean = () => true,
   ) {}
   get sourceWindowId(): number {
     return this.windowId?.() ?? 0
@@ -154,6 +155,7 @@ export class InputController {
     return undefined
   }
   root(): number {
+    if (!this.drawDeviceEnabled()) return 0
     let root = 0, firstManager = Infinity
     for (const id of this.layers.ids()) {
       const layer = this.layers.get(id)

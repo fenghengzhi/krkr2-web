@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 128 批增加第 9 版 DCT ERI 的 RGB、透明图像及灰度遮罩，并接入 Wave 的原始采样率恢复和确认窗口的绘图设备。125、126 的原版介绍游戏在 Chromium 与 WebKit 的已测路线符合预期，Firefox 的结果仍有差异。新增行为等待同一提交的托管验证。[128 兼容范围](../decisions/128-draw-device-eri-and-wave.md)
+
 126 已取回原版书签跨引擎读档证据，源码及字节码会话都继续完成了对应剧情。第 127 批修正系统粗体的测量和绘制，为透明、加算透明图层接入原版转场运算。原版介绍游戏的完整菜单、分页与刷新读档仍在验收中。[127 兼容范围](../decisions/127-game-bookmarks-text-and-transitions.md)
 
 第 126 批恢复 KAG 跳转与调用回调后的剧本位置，新增转场选项读取顺序、100 像素滚动边界和 Wave 声音坐标的对照。声音实现覆盖原版默认立体声模式，可选 DirectSound3D 声场仍待实现。本批等待 GitHub 托管结果。[126 兼容范围](../decisions/126-kag-routing-transitions-and-wave.md)

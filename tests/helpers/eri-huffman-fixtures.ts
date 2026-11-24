@@ -2,39 +2,27 @@
 // Source: archived ERINA1.0A common/cmperi.cpp1096–1269 and
 // cpp/cmperib.cpp131–342; adaptive tree common/experi.cpp145–242 and
 // cpp/experib.cpp260–341. No product entropy/reconstruction code is imported.
-import { eriTrueRaw, eriTrueRgb, eriTrueRgba, eriTrueGray } from './eri-truecolor-fixtures.ts'
+import { EriFixtureBits, eriTrueRaw, eriTrueRgb, eriTrueRgba, eriTrueGray } from './eri-truecolor-fixtures.ts'
 import { eriRgbNegative, eriRgbPositive, eriPaletteGray } from './eri-fixtures.ts'
 
 const ROOT = 512, ESCAPE = 0x7fffffff
 interface Node { weight: number; parent: number; child: number | null; symbol?: number }
-class BitWriter {
-  readonly bits: number[] = []
-  put(value: number, count: number) { for (let b = count - 1; b >= 0; b--) this.bits.push((value >>> b) & 1) }
-  gamma(value: number) {
-    if (!Number.isInteger(value) || value < 1) throw new Error('Invalid authored Huffman length')
-    for (const digit of value.toString(2).slice(1)) { this.put(1, 1); this.put(Number(digit), 1) }
-    this.put(0, 1)
-  }
+class BitWriter extends EriFixtureBits {
   unterminatedGamma() {
     const end = (Math.floor(this.bits.length / 32) + 1) * 32
     for (let i = 0; this.bits.length < end; i++) this.put(i % 2 === 0 ? 1 : 0, 1)
-  }
-  bytes() {
-    const out = new Uint8Array(Math.ceil(this.bits.length / 32) * 4)
-    this.bits.forEach((value, at) => { out[at >>> 3]! |= value << (7 - (at & 7)) })
-    return out
   }
 }
 export interface HuffmanAuthoringStats {
   literals: number; hits: number; lengths: number; lengthHits: number; blocks: number
   rebuilds: number; replacements: number
 }
-const statsFor = (blocks: number): HuffmanAuthoringStats =>
+export const statsFor = (blocks: number): HuffmanAuthoringStats =>
   ({ literals: 0, hits: 0, lengths: 0, lengthHits: 0, blocks, rebuilds: 0, replacements: 0 })
 /** Tree mutation follows the independent original encoder's shared routines,
  * including its ordered half-weight rebuild and full length-tree replacement.
  * Expected image values remain authored independently of this writer. */
-class ForwardTree {
+export class ForwardTree {
   readonly nodes: (Node | undefined)[] = []
   readonly lookup = new Map<number, number>()
   private escape: number | undefined
@@ -136,7 +124,7 @@ class ForwardTree {
       this.normalize(at + 2)
     }
   }
-  private path(at: number, writer: BitWriter) {
+  private path(at: number, writer: EriFixtureBits) {
     const bits: number[] = []
     for (let count = 0; at < ROOT; count++) {
       if (count >= 512) throw new Error('Authored Huffman path exceeded bound')
@@ -145,10 +133,10 @@ class ForwardTree {
     }
     for (let i = bits.length - 1; i >= 0; i--) writer.put(bits[i]!, 1)
   }
-  escaped(writer: BitWriter) {
+  escaped(writer: EriFixtureBits) {
     if (this.escape !== undefined) { const at = this.escape; this.path(at, writer); this.increase(at) }
   }
-  write(value: number, writer: BitWriter, length: boolean, stats: HuffmanAuthoringStats) {
+  write(value: number, writer: EriFixtureBits, length: boolean, stats: HuffmanAuthoringStats) {
     let at = this.lookup.get(value & 255)
     if (length && (at === undefined || this.node(at).symbol !== value)) {
       at = undefined

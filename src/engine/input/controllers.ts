@@ -29,13 +29,14 @@ export class InputControllers {
     return registry
   }
 
-  create(id: number, view: WindowView | (() => WindowView)): InputController {
+  create(id: number, view: WindowView | (() => WindowView), drawDeviceEnabled?: () => boolean): InputController {
     if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid input Window identifier')
     if (this.registered.has(id)) throw new Error('Input Window is already registered')
     const controller = new InputController(
       this.layers,
       typeof view === 'function' ? view : () => view,
       () => id,
+      drawDeviceEnabled,
     )
     this.registered.set(id, controller)
     return controller

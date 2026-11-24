@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 128 批增加独立的有损 ERI 原版 Windows 作业，逐像素比较 5 个有独立期望的场景和 3 个作者工具生成的图像。Node 另检验二维余弦基函数、行发布时机和错误，并通过源码与字节码调用游戏图层。浏览器验收实际画布上的颜色和遮罩。原版无损 ERI 两组仍分别出报告。整批增加 15 个 Node 测试、每个浏览器项目 8 个测试，另增强原有介绍游戏的菜单验收。[128 验收记录](decisions/128-draw-device-eri-and-wave.md)
+
 第 127 批新增 11 个常规 Node 测试、每个浏览器项目 9 个测试。原版 Windows 的透明转场像素对照覆盖四种图层类型、64 个过渡帧与直接复制主图的行为。KAG 扩至 42 个场景，SLI／WAVE 扩至 28 个。声音项目还会在 Ubuntu 的独立 32 位 Wine 环境使用 PulseAudio 软件输出运行，以便观察托管 Windows 缺少 DirectSound 设备时未能执行的两个播放场景。两套运行保留各自进程日志和逐项结果。[127 验收记录](decisions/127-game-bookmarks-text-and-transitions.md)
 
 第 126 批的 Windows 原版对照覆盖 41 个 KAG 场景、20 个 SLI／WAVE 场景和 21 个转场选项场景。书签作业保存每个场景的进度，转场作业保存原始 getter 顺序和错误消息。常规队列增加 8 个 Node 测试、每个浏览器项目 12 个测试，包含声音采样和四个方向滚动时的画面比较。[126 验收记录](decisions/126-kag-routing-transitions-and-wave.md)

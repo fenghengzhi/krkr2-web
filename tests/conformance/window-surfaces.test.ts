@@ -105,6 +105,64 @@ class FakeRenderer implements Renderer {
   }
 }
 
+test('draw-device recreation replays only its retained Window frame on the same canvas and epoch', () => {
+  const port = new FakePort(), made: { renderer: FakeRenderer; canvas: OffscreenCanvas; id: number }[] = []
+  const surfaces = new WorkerWindowSurfaces(port.port, 7, { createRenderer(canvas, identity) {
+    const renderer = new FakeRenderer(); made.push({ renderer, canvas, id: identity.windowId }); return renderer
+  } })
+  try {
+    surfaces.openWindow(1); surfaces.openWindow(2)
+    surfaces.recreateWindow(1) // Pending DOM acquisition remains the original request.
+    assert.equal(port.posted.length, 2)
+    port.receive(attach(1)); port.receive(attach(2))
+    const layers: FrameLayer[] = [{ id: 9, x: 0, y: 0, width: 2, height: 1, opacity: 1, revision: 1,
+      pixels: { width: 2, height: 1, data: new Uint8Array([255, 0, 0, 255, 0, 0, 255, 255]) },
+      clip: { x: 0, y: 0, width: 2, height: 1 }, source: { x: 0, y: 0, width: 2, height: 1 }, type: 12 }]
+    surfaces.present(layers, 2, 1, 1); surfaces.present([], 3, 2, 2)
+    const otherFrames = made[1]!.renderer.frames.length
+    surfaces.recreateWindow(1)
+    assert.equal(made.length, 3)
+    assert.equal(made[2]!.canvas, made[0]!.canvas)
+    assert.equal(made[2]!.id, 1)
+    assert.equal(surfaces.windowSurfaceEpoch(1), 1)
+    assert.equal(port.posted.length, 2, 'No DOM transfer or surface epoch replacement')
+    assert.equal(made[0]!.renderer.disposals, 1)
+    assert.equal(made[1]!.renderer.disposals, 0)
+    assert.equal(made[1]!.renderer.frames.length, otherFrames)
+    assert.deepEqual(made[2]!.renderer.frames.at(-1), { layers, width: 2, height: 1, windowId: 1 })
+  } finally { surfaces.dispose() }
+  assert.deepEqual(made.map(({ renderer }) => renderer.disposals), [1, 1, 1])
+})
+
+test('output recreation tolerates synchronous reentry and retirement without a second renderer or late resurrection', () => {
+  const port = new FakePort(), made: FakeRenderer[] = []
+  let retire = false
+  const surfaces = new WorkerWindowSurfaces(port.port, 7, { createRenderer(_canvas, identity) {
+    const renderer = new FakeRenderer(), dispose = renderer.dispose.bind(renderer)
+    renderer.dispose = () => {
+      dispose()
+      surfaces.recreateWindow(identity.windowId)
+      if (retire) surfaces.closeWindow(identity.windowId)
+    }
+    made.push(renderer); return renderer
+  } })
+  try {
+    surfaces.openWindow(1); port.receive(attach(1))
+    surfaces.recreateWindow(1)
+    assert.equal(made.length, 2)
+    assert.equal(made[0]!.disposals, 1)
+    retire = true
+    surfaces.recreateWindow(1)
+    assert.equal(made.length, 2)
+    assert.equal(made[1]!.disposals, 1)
+    assert.equal(surfaces.windowSurfaceEpoch(1), undefined)
+    surfaces.recreateWindow(1)
+    port.receive(attach(1))
+    assert.equal(made.length, 2)
+  } finally { surfaces.dispose() }
+  assert.deepEqual(made.map((renderer) => renderer.disposals), [1, 1])
+})
+
 test('surface host transfers once and ignores old generations, duplicate requests and retired epochs', () => {
   const port = new FakePort(),
     first = canvas(),

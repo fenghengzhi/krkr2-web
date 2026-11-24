@@ -641,8 +641,9 @@ export class SoundService {
         return this.result(undefined, callbacks)
       }
       // WaveImpl takes a tjs_int, after the public setter's TJS integer
-      // conversion. Preserve its low 32 bits before applying the pan clamp.
-      let setting = sound.kind === 'wave' && property === 'pan' && typeof input[1] === 'bigint'
+      // conversion. Preserve its low 32 bits before the pan clamp or frequency
+      // sentinel dispatch (in particular 2^32 becomes original-frequency zero).
+      let setting = sound.kind === 'wave' && (property === 'pan' || property === 'frequency') && typeof input[1] === 'bigint'
         ? Number(BigInt.asIntN(32, input[1])) : numeric(1)
       if (property === 'volume' || property === 'volume2')
         setting = Math.max(0, Math.min(100000, setting))

@@ -8,16 +8,16 @@ const concat = (...parts: Uint8Array[]) => {
   for (const part of parts) { out.set(part, at); at += part.length }
   return out
 }
-function words(...values: number[]) {
+export function eriFixtureWords(...values: number[]) {
   const out = new Uint8Array(values.length * 4), view = new DataView(out.buffer)
   values.forEach((value, i) => view.setUint32(i * 4, value >>> 0, true))
   return out
 }
 function record(name: string, data: Uint8Array) {
   if (name.length !== 8) throw new Error('ERI record name must occupy eight bytes')
-  return concat(new TextEncoder().encode(name), words(data.length, 0), data)
+  return concat(new TextEncoder().encode(name), eriFixtureWords(data.length, 0), data)
 }
-class Bits {
+export class EriFixtureBits {
   readonly bits: number[] = []
   put(value: number, count: number) {
     for (let bit = count - 1; bit >= 0; bit--) this.bits.push((value >>> bit) & 1)
@@ -128,7 +128,7 @@ export function eriTruecolorInput(options: TruecolorInput): Uint8Array {
       planes[target]![i]! -= planes[difference[0]]![i]!
     blocks.push(planes.flatMap((plane) => order.map((i) => ((plane[i]! + 128) & 255) - 128)))
   }
-  const bits = new Bits(), opBits = enhanced ? 6 : 4
+  const bits = new EriFixtureBits(), opBits = enhanced ? 6 : 4
   bits.put(frame, 8); bits.put(0, 8); bits.put(Number(table), 8); bits.put(0, 8)
   if (table && channels >= 3) for (const op of operations) bits.put(op, opBits)
   bits.put(Number(options.badSeparator), 1)
@@ -146,13 +146,17 @@ export function eriTruecolorInput(options: TruecolorInput): Uint8Array {
     }
     bits.runs(blocks[i]!)
   }
+  const info = eriFixtureWords(enhanced ? 0x00020200 : 0x00020100, 0x03020000, 0xffffffff,
+    gray ? 2 : alpha ? 0x04000001 : 1, width, positive ? height : -height, depth, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0)
+  return eriFixtureContainer(info, bits.bytes())
+}
+
+export function eriFixtureContainer(info: Uint8Array, frame: Uint8Array) {
   const header = new Uint8Array(64)
   header.set([69, 110, 116, 105, 115, 26, 0, 0]); new DataView(header.buffer).setUint32(8, 0x03000100, true)
   header.set(new TextEncoder().encode('Entis Rasterized Image'), 16)
-  const info = words(enhanced ? 0x00020200 : 0x00020100, 0x03020000, 0xffffffff,
-    gray ? 2 : alpha ? 0x04000001 : 1, width, positive ? height : -height, depth, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0)
-  return concat(header, record('Header  ', concat(record('FileHdr ', words(0x00020100, 1, 1, 1, 0)), record('ImageInf', info))),
-    record('Stream  ', record('ImageFrm', bits.bytes())))
+  return concat(header, record('Header  ', concat(record('FileHdr ', eriFixtureWords(0x00020100, 1, 1, 1, 0)), record('ImageInf', info))),
+    record('Stream  ', record('ImageFrm', frame)))
 }
 
 export interface EriTruecolorCase {

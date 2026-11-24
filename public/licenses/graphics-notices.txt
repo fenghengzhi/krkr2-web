@@ -6,7 +6,8 @@ TLG encoder fixture provenance and source hashes: tests/fixtures/tlg-reference.j
 The native reference test adapter is not included in the browser application.
 
 The Web ERI reader implements ERINA-Library version 1.0A lossless RL-MTF-G,
-run-length Gamma, adaptive Huffman and adaptive arithmetic image coding.
+run-length Gamma, adaptive Huffman and adaptive arithmetic image coding,
+and version 9 lossy DCT image coding.
 ERINA-Library by Leshade Entis, Entis-soft.
 Original KRKR2 image loader by W.Dee and contributors.
 License text (transcoded from Shift-JIS to UTF-8): erina-1.0a.txt

@@ -176,7 +176,9 @@ export class EriHuffmanData {
     if (!tree) this.trees[context] = tree = new EriHuffmanTree(this.work)
     return tree
   }
-  *read(output: Int32Array): Generator<void> {
+  *read(output: Int32Array, pendingZeros?: number): Generator<void> {
+    // Frame 9 shares the native run-length field with the preceding DC reader.
+    if (pendingZeros !== undefined) this.remaining = pendingZeros
     let at = 0
     while (at < output.length) {
       if (this.remaining) {

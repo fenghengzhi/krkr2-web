@@ -347,7 +347,10 @@ export class AudioMixer {
             this.seek(voice, number)
             voice.epoch = this.nextEpoch++
           } else if (property === 'frequency') {
-            if (number < 100 || number > 384000)
+            // WaveImpl forwards zero as DirectSound's DSBFREQUENCY_ORIGINAL.
+            // Keep that requested value in the public snapshot; only the
+            // render step substitutes this voice's current source rate.
+            if (!(voice.kind === 'wave' && number === 0) && (number < 100 || number > 384000))
               throw new Error('Playback frequency is outside range')
             settings.frequency = number
           }
@@ -682,7 +685,8 @@ export class AudioMixer {
         }
         if (!asset || settings.paused || voice.status !== 'play' || waiting) continue
         try {
-          const step = settings.frequency / this.sampleRate
+          const step = (voice.kind === 'wave' && settings.frequency === 0
+            ? asset.sampleRate : settings.frequency) / this.sampleRate
           chain = voice.filters?.length ? this.filtered(voice, filterBudget) : undefined
           if (chain) {
             if (!chain.canAdvance(step)) { waiting = true; continue }

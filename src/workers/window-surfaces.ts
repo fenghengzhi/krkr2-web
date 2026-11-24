@@ -27,11 +27,13 @@ interface PendingFrame {
 
 class DeferredWindowRenderer implements Renderer {
   private renderer?: Renderer
+  private canvas?: OffscreenCanvas
   private unsubscribe?: () => void
   private frame?: PendingFrame
   private received = false
   private disposed = false
   private flushing = false
+  private rebuilding = false
   private initialPending = true
   private readonly listeners = new Set<(status: RendererStatus) => void>()
   private status: RendererStatus = { state: 'restoring', generation: 0, pending: true }
@@ -70,6 +72,7 @@ class DeferredWindowRenderer implements Renderer {
     }
     let renderer: Renderer | undefined
     try {
+      this.canvas = message.canvas
       renderer = this.create(message.canvas, { ...this.identity })
       if (this.disposed) {
         renderer.dispose()
@@ -201,6 +204,24 @@ class DeferredWindowRenderer implements Renderer {
     }
   }
 
+  recreate(): void {
+    if (this.disposed || this.rebuilding || !this.canvas || !this.renderer) return
+    const canvas = this.canvas
+    this.rebuilding = true
+    try {
+      this.releaseRenderer()
+      if (this.disposed) return
+      // This is an intentional output rebuild on the same owned canvas, not a
+      // context-loss pause or another transferControlToOffscreen operation.
+      this.initialPending = true
+      this.publish({ state: 'restoring', generation: this.backendStatus.generation + 1 })
+      if (this.disposed) return
+      this.received = false
+      this.receive({ type: 'attach', ...this.identity, canvas })
+    } catch (error) { this.fail(error); throw error }
+    finally { this.rebuilding = false }
+  }
+
   subscribe(listener: (status: RendererStatus) => void): () => void {
     if (this.disposed) return () => {}
     this.listeners.add(listener)
@@ -240,6 +261,7 @@ class DeferredWindowRenderer implements Renderer {
     this.disposed = true
     this.retire()
     this.frame = undefined
+    this.canvas = undefined
     this.listeners.clear()
     const errors: unknown[] = []
     try {
@@ -316,6 +338,8 @@ export class WorkerWindowSurfaces implements Renderer {
   closeWindow(windowId: number): void {
     this.renderers.closeWindow(windowId)
   }
+
+  recreateWindow(windowId: number): void { this.windows.get(windowId)?.recreate() }
 
   waitWindowReady(windowId: number): RendererReadiness {
     return this.renderers.waitWindowReady(windowId)

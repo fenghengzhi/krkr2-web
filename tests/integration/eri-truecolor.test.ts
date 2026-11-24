@@ -5,6 +5,7 @@ import { headless } from '../helpers/headless.ts'
 import { eriTruecolorFiles, eriTruecolorSource, eriTruecolorCases, eriTrueRgb,
   eriTrueGray, eriTruecolorError } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanFiles, eriHuffmanCases, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
+import { eriDctCases, eriDctFiles } from '../helpers/eri-dct-fixtures.ts'
 import { eriArithmeticFiles, eriArithmeticCases } from '../helpers/eri-arithmetic-fixtures.ts'
 import { eriKey1 } from '../helpers/eri-fixtures.ts'
 
@@ -41,6 +42,14 @@ async function using(binary: boolean, run: (f: Awaited<ReturnType<typeof headles
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
+  test(`${mode}: DCT ERI loads original-size RGB and alpha into the game Layer`, { timeout: 60000 }, async () => {
+    await using(binary, async ({ session }) => {
+      for (const item of eriDctCases) {
+        assert.equal(await session.evaluate(`tcLoad(tcImage,"${item.name}",clNone)`), 'ok')
+        assert.equal(await session.evaluate('tcPixels(tcImage)'), item.rgba.join(','), item.name)
+      }
+    }, eriDctFiles())
+  })
   test(`${mode}: arithmetic ERI reaches real Layers, keyed cache destinations and companion-mask failure recovery`, { timeout: 60000 }, async () => {
     await using(binary, async ({ session }, reads, frames) => {
       const id = Number(await session.evaluate('tcImage.__id'))

@@ -11,7 +11,7 @@ const encoder = {
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 interface Recipe {
   id: string; width: number; height: number; degree: number; speed: number; independent: boolean
-  huffman?: 'default' | 'enhanced'; rebuildPattern?: boolean; indexed?: boolean
+  huffman?: 'default' | 'enhanced'; rebuildPattern?: boolean; indexed?: boolean; sampling?: '4:4:4' | '4:2:2' | '4:1:1'
 }
 export const indexedEncoderRecipe: Recipe = { id: 'encoder-huffman-indexed', width: 27, height: 12, degree: 0,
   speed: 1, independent: false, huffman: 'default', indexed: true }
@@ -25,6 +25,12 @@ export const encoderRecipes: Recipe[] = [
   { id: 'encoder-huffman-rebuild', width: 96, height: 96, degree: 3, speed: 3, independent: false,
     huffman: 'enhanced', rebuildPattern: true },
   indexedEncoderRecipe,
+]
+
+export const dctEncoderRecipes: Recipe[] = [
+  { id: 'encoder-dct-444', width: 19, height: 18, degree: 3, speed: 1, independent: false, sampling: '4:4:4', huffman: 'enhanced' },
+  { id: 'encoder-dct-422', width: 33, height: 23, degree: 4, speed: 1, independent: false, sampling: '4:2:2' },
+  { id: 'encoder-dct-411', width: 39, height: 35, degree: 5, speed: 1, independent: false, sampling: '4:1:1', huffman: 'enhanced' },
 ]
 
 function paletteIndex(x: number, y: number, width: number) {
@@ -93,15 +99,21 @@ function checkOutput(bytes: Buffer, recipe: Recipe) {
   const stream = member('Stream  ', header.next, bytes.length), frame = member('ImageFrm', stream.data, stream.next)
   assert(info.next - info.data >= 68 && frame.next - frame.data > 4)
   const fields = [0, 4, 8, 12, 16, 20, 24, 52].map((offset) => bytes.readUInt32LE(info.data + offset))
-  assert.deepEqual(fields, [recipe.huffman ? 0x20200 : 0x20100, 0x03020000,
+  assert.deepEqual(fields, [recipe.huffman ? 0x20200 : 0x20100, recipe.sampling ? 1 : 0x03020000,
     recipe.huffman ? 0xfffffffc : 0xffffffff, recipe.indexed ? 0x01000001 : 1,
     recipe.width, -recipe.height >>> 0, recipe.indexed ? 8 : 24, recipe.degree])
   const frameHeader = [...bytes.subarray(frame.data, frame.data + 4)]
+  if (recipe.sampling) {
+    const samplingCode = { '4:4:4': 0x40404, '4:2:2': 0x40202, '4:1:1': 0x40101 }[recipe.sampling]
+    assert.equal(bytes.readUInt32LE(info.data + 32), samplingCode)
+    assert.deepEqual(frameHeader, [9, 0, 1, 8])
+    return { imageInfo: fields, samplingCode, frameHeader }
+  }
   assert.deepEqual(frameHeader, recipe.indexed ? [2, 0, 0, 0] : [recipe.huffman ? 8 : 1, 0, recipe.independent ? 0 : 1, recipe.huffman ? 8 : 0])
   return { imageInfo: fields, frameHeader }
 }
 
-export async function prepareEncodedImages(output: string): Promise<Record<string, Uint8Array>> {
+export async function prepareEncodedImages(output: string, recipes: readonly Recipe[]): Promise<Record<string, Uint8Array>> {
   assert.equal(process.env.GITHUB_ACTIONS, 'true')
   assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
   assert.equal(process.env.RUNNER_OS, 'Windows')
@@ -115,11 +127,18 @@ export async function prepareEncodedImages(output: string): Promise<Record<strin
     assert.equal(binary.length, encoder.bytes); assert.equal(digest(binary), encoder.sha256)
     const exe = resolve(temp, 'ericvt.exe')
     writeFileSync(exe, binary)
-    for (const recipe of encoderRecipes) {
+    for (const recipe of recipes) {
       const dir = resolve(artifacts, recipe.id), rgba = encoderPixels(recipe), bmp = bitmap(recipe, rgba)
       mkdirSync(dir)
       writeFileSync(resolve(dir, 'input.bmp'), bmp)
-      const options = recipe.huffman === 'default' ? ['-e'] : [recipe.huffman ? '-x' : '-s',
+      if (recipe.sampling) {
+        const parameters = ['[parameter]', 'sampling_flag=' + recipe.sampling, 'blocking_degree=' + recipe.degree,
+          'y_dc_scale=1.0', 'c_dc_scale=0.75', 'y_low_scale=0.75', 'c_low_scale=0.5',
+          'y_high_scale=0.5', 'c_high_scale=0.25', ''].join('\r\n')
+        writeFileSync(resolve(dir, 'dct.ini'), parameters, 'ascii')
+      }
+      const options = recipe.sampling ? ['-l=dct.ini', ...(recipe.huffman ? [] : ['-s'])]
+        : recipe.huffman === 'default' ? ['-e'] : [recipe.huffman ? '-x' : '-s',
         '-b' + recipe.degree, '-p' + recipe.speed, ...(recipe.independent ? ['-i'] : [])]
       const args = [...options, 'input.bmp', 'output.eri']
       const run = spawnSync(exe, args, { cwd: dir, timeout: 15000, maxBuffer: 1024 * 1024, windowsHide: true })

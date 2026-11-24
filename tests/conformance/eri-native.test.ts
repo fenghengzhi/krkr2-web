@@ -131,14 +131,12 @@ test('ERI distinguishes explicit frame precondition rejection from unimplemented
     assert.throws(() => finish(decodeSelectedEri(input, 'normal', observed.progress)), native('ERIDecoder::DecodeImage failed.'))
     assert.deepEqual(observed.sizes, [[3, 2]]); assert.deepEqual(observed.rows, [])
   }
-  // Actual Gamma, Huffman and arithmetic payloads have independent suites.
-  // CVTYPE_DCT_ERI=1 remains the source-recognized lossy transformation gap;
-  // changing this header does not claim this lossless payload is valid DCT.
-  for (const input of [field(bytes.slice(), info + 4, 1)]) {
-    const observed = observe()
-    assert.throws(() => finish(decodeSelectedEri(input, 'normal', observed.progress)), EriUnsupportedError)
-    assert.deepEqual(observed.sizes, [[3, 2]]); assert.deepEqual(observed.rows, [])
-  }
+  // A palette header cannot initialize a DCT decoder. An unknown transform
+  // stays distinct from that native error.
+  assert.throws(() => finish(decodeSelectedEri(field(bytes.slice(), info + 4, 1), 'normal')), native('ERIDecoder::Initialize failed.'))
+  const observed = observe()
+  assert.throws(() => finish(decodeSelectedEri(field(bytes.slice(), info + 4, 0xabcdef), 'normal', observed.progress)), EriUnsupportedError)
+  assert.deepEqual(observed.sizes, [[3, 2]]); assert.deepEqual(observed.rows, [])
 })
 
 test('ERI final DWORD zero padding and row-bounded repeat lengths preserve the actual entropy grammar', options, () => {

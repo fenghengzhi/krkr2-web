@@ -10,6 +10,7 @@ import {
   eriTruecolorCases, eriTruecolorError, eriTruecolorFiles, eriTruecolorSource, eriTrueGray, eriTrueRgb, eriTrueRgba,
 } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanCases, eriHuffmanFiles, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
+import { eriDctCases, eriDctFiles } from '../helpers/eri-dct-fixtures.ts'
 import { eriArithmeticCases, eriArithmeticFiles } from '../helpers/eri-arithmetic-fixtures.ts'
 
 async function frame(canvas: Locator) {
@@ -105,7 +106,7 @@ const colorSuites = [
 ]
 // The arithmetic corpus also has 2x2 and 3x2 images. Present the loaded image and
 // its actual mask at their own dimensions, without stretching canvas pixels.
-const arithmeticSource = eriTruecolorSource + String.raw`
+const sizedColorSource = eriTruecolorSource + String.raw`
 function tcShowSizedMask(){
   var image=global.tcImage,mask=global.tcMask,w=image.imageWidth,h=image.imageHeight;
   global.tcWindow.setInnerSize(w,h*2);global.tcRoot.setSize(w,h*2);image.setSize(w,h);
@@ -117,7 +118,7 @@ function tcShowSizedMask(){
 for (const suite of colorSuites) for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: ${suite.title} in visible Layers and companion masks`, async ({ page }, info) => {
     test.setTimeout(120000)
-    const game = await launchWindowAttention(page, backend, binary, suite.prefix === 'ar' ? arithmeticSource : eriTruecolorSource,
+    const game = await launchWindowAttention(page, backend, binary, suite.prefix === 'ar' ? sizedColorSource : eriTruecolorSource,
       Object.entries(suite.files()).map(([name, bytes]) => ({ name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) })))
     const canvas = game.surface('ERI truecolor').locator('canvas[data-window-id]')
     const failures: unknown[] = [], observed: string[] = []
@@ -179,4 +180,19 @@ for (const suite of colorSuites) for (const backend of ['asyncify', 'jspi']) for
     } catch (error) { failures.push(error) }
     if (failures.length === 1) throw failures[0]
     if (failures.length) throw new AggregateError(failures, 'ERI truecolor browser consumer or cleanup failed', { cause: failures[0] })
+  })
+
+for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
+  test(`${backend}/${binary ? 'bytecode' : 'source'}: DCT ERI quadrant colors and alpha reach the game canvas`, async ({ page }) => {
+    test.setTimeout(120000)
+    const game = await launchWindowAttention(page, backend, binary, sizedColorSource,
+      Object.entries(eriDctFiles()).map(([name, bytes]) => ({ name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) })))
+    try {
+      const canvas = game.surface('ERI truecolor').locator('canvas[data-window-id]')
+      for (const item of eriDctCases) {
+        await evaluate(page, `tcLoad(tcImage,"${item.name}",clNone)`, 'ok')
+        await evaluate(page, 'tcShowSizedMask()', '0')
+        await expect.poll(() => frame(canvas)).toEqual(expectedFrame(item.rgba, item.width))
+      }
+    } finally { await game.stop() }
   })
