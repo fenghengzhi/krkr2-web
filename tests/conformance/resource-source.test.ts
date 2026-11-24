@@ -186,7 +186,7 @@ test('raw XP3 ranges cross logical segments without reading gaps or the complete
   assert.equal(resolver.resolve('data.xp3>long.wav').source, resolver.resolve('long.wav').source)
 })
 
-test('compressed XP3 and explicit Adler verification never masquerade as random access', async () => {
+test('a whole-buffer-only XP3 inflater and explicit whole-file Adler verification keep the bounded fallback', async () => {
   for (const [archive, verifyAdler32] of [[largeXp3(true), false], [largeXp3(), true]] as const) {
     const resource = (await readXp3(archive.source, inflate, { verifyAdler32 }))[0]!
     assert.equal(resource.source, undefined)

@@ -18,12 +18,16 @@ export function cssFontFamily(name: string): string {
   return generic.has(plain.toLowerCase()) ? plain.toLowerCase() : JSON.stringify(plain)
 }
 
-/** Keep the actual requested faces first. When the platform lacks MS PMincho,
- * preserve its documented proportional Mincho/serif class instead of forcing
- * sans-serif. This is a fallback category, not Windows glyph/metric emulation.
- * https://learn.microsoft.com/en-us/typography/font-list/ms-pmincho */
+/** Keep every requested face ahead of substitutes. Missing MS PMincho uses a
+ * named proportional serif family before the browser's platform-dependent
+ * generic serif. Liberation Serif is a Times New Roman metric replacement;
+ * neither is a reproduction of MS PMincho's Japanese glyphs or exact metrics.
+ * https://learn.microsoft.com/en-us/typography/font-list/ms-pmincho
+ * https://github.com/liberationfonts/liberation-fonts */
 export function cssFontStack(name: string): string {
   const faces = name.split(','), primary = faces[0]!.trim().replace(/^@/, '').toLowerCase(),
-    fallback = primary === 'ms pmincho' ? 'serif' : 'sans-serif'
+    fallback = primary === 'ms pmincho'
+      ? '"Times New Roman","Liberation Serif","Times",serif'
+      : 'sans-serif'
   return faces.map(cssFontFamily).join(',') + ',' + fallback
 }

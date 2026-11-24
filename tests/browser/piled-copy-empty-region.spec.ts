@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
 
 const scene = String.raw`
@@ -54,13 +54,27 @@ async function launch(page: Page, backend: string, binary: boolean, body: string
   }
 }
 
+async function preserveAndStop(page: Page, info: TestInfo, stop: () => Promise<void>, failures: unknown[]) {
+  // Keep the actual console result even when the strict expected-result
+  // locator fails. Capture it before Stop removes the live game evidence.
+  try {
+    await info.attach('piled-copy-original-observations', { contentType: 'application/json',
+      body: JSON.stringify({ logs: await page.locator('#logs').innerText(),
+        status: await page.locator('#status').textContent(),
+        failures: failures.map((error) => error instanceof Error ? error.message : String(error)) }) })
+  } catch (error) { failures.push(error) }
+  try { await stop() } catch (error) { failures.push(error) }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length) throw new AggregateError(failures, 'PiledCopy pixels or cleanup failed', { cause: failures[0] })
+}
+
 for (const backend of ['asyncify', 'jspi']) {
   for (const binary of [false, true]) {
     const mode = `${backend}/${binary ? 'bytecode' : 'source'}`
 
     test(`${mode}: piledCopy empty target regions leave paint pending and still validate both images`, async ({
       page,
-    }) => {
+    }, info) => {
       const stop = await launch(
         page,
         backend,
@@ -88,6 +102,7 @@ function completePendingPaint(){
 }
 `,
       )
+      const failures: unknown[] = []
       try {
         // These records are captured before the same script returns to its
         // ordinary frame; a later frame is allowed to consume pending onPaint.
@@ -99,9 +114,8 @@ function completePendingPaint(){
         // between console actions. No rearming or counter reset masks a lost
         // or duplicated original request, and exact pixels prove a real copy.
         await evaluate(page, 'completePendingPaint()', '1,0,1193046,71')
-      } finally {
-        await stop()
-      }
+      } catch (error) { failures.push(error) }
+      await preserveAndStop(page, info, stop, failures)
     })
 
     test(`${mode}: piledCopy preserves source mapping and the destination clip captured before onPaint`, async ({
@@ -133,6 +147,7 @@ function reentrantCopy(){
 function showCopied(){target.type=ltOpaque;target.visible=true;return 0;}
 `,
       )
+      const failures: unknown[] = []
       try {
         // Both phases, including onPaint functions, are compiled in bytecode mode.
         await evaluate(page, 'partialCopy()', '1,0,1|131073,102,196609,103|1')
@@ -148,12 +163,11 @@ function showCopied(){target.type=ltOpaque;target.visible=true;return 0;}
           surface.style.imageRendering = 'pixelated'
         })
         await testInfo.attach('piled-copy-captured-clip', {
-          body: await canvas.screenshot(),
+          body: await canvas.screenshot({ timeout: 5000 }),
           contentType: 'image/png',
         })
-      } finally {
-        await stop()
-      }
+      } catch (error) { failures.push(error) }
+      await preserveAndStop(page, testInfo, stop, failures)
     })
   }
 }

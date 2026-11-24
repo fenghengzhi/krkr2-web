@@ -1,4 +1,5 @@
 import { inflate, inflateRaw } from './blob-source.ts'
+import { createXp3SegmentPool } from './xp3-inflater.ts'
 import { findXp3Archive, hasXp3Signature, readXp3 } from '../../formats/xp3/archive.ts'
 import { readZip } from '../../formats/zip/archive.ts'
 import { MAX_RESOURCE_BYTES, type Resource } from '../../engine/ports/storage.ts'
@@ -23,7 +24,7 @@ export async function importSources(
   options: { lazyArchives?: boolean } = {},
 ): Promise<Resource[]> {
   if (files.length > 10000) throw new Error('Import exceeds 10,000 source files')
-  const resources: Resource[] = [],
+  const resources: Resource[] = [], compressedSegments = options.lazyArchives ? undefined : createXp3SegmentPool(),
     utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
   const add = (resource: Resource) => {
     if (resources.length >= 250000) throw new Error('Import exceeds 250,000 mounted resource names')
@@ -66,7 +67,7 @@ export async function importSources(
       : prefix[0] === 0x4d && prefix[1] === 0x5a
         ? (await findXp3Archive(source, { checkpoint }))?.source : undefined,
       entries = xp3
-        ? await readXp3(xp3, inflate, { checkpoint })
+        ? await readXp3(xp3, inflate, { checkpoint, compressedSegments })
         : /\.zip$/i.test(name) || zipMagic
           ? await readZip(source, {
               inflate: (bytes, size) => inflateRaw(bytes, size, checkpoint),

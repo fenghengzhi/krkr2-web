@@ -397,20 +397,12 @@ export class SceneComposer {
       const source = this.copyTree(id).pixels
       return { ...source, data: source.data.slice() }
     }
-    if (this.needsRawComposition(id, true)) {
-      const source = this.blendTree(id).pixels
-      return { ...source, data: source.data.slice() }
-    }
-    const source = this.compose(id).pixels,
-      result = { ...source, data: source.data.slice() }
-    if (this.layers.get(id).type !== 12)
-      for (let at = 0; at < result.data.length; at += 4) {
-        const alpha = result.data[at + 3]!
-        if (alpha)
-          for (let c = 0; c < 3; c++)
-            result.data[at + c] = Math.min(255, Math.round((result.data[at + c]! * 255) / alpha))
-      }
-    return result
+    // Native Complete copies MainImage into its cache, blends children in the
+    // layer's format, and PiledCopy copies those raw channels. Display pixels
+    // are premultiplied: converting through them loses low/zero-alpha RGB even
+    // when a seen child lies outside the copied rectangle and adds no pixels.
+    const source = this.blendTree(id).pixels
+    return { ...source, data: source.data.slice() }
   }
   frame(
     width: number,

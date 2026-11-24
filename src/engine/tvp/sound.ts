@@ -14,7 +14,13 @@ class __SoundBase {
   }
   function finalize(){} // Native owner invalidation retires the resource.
   function __clearSoundLabels(){if(__soundLabels!==void)invalidate __soundLabels;__soundLabels=void;}
-  function open(name){__soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[string(name)],__soundKind=="wave"?global.WaveSoundBuffer.__snapshotPhaseVocoderFilters(__filters):void);}
+  function open(args*){
+    if(args.count<1){__soundRun("prepareOpen",[]);return;}
+    // The native method checks count and converts ttstr before entering Open.
+    // A failed conversion must leave the current decoder, labels and fade live.
+    var storage=string(args[0]);
+    __soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[storage],__soundKind=="wave"?global.WaveSoundBuffer.__snapshotPhaseVocoderFilters(__filters):void);
+  }
   function play(){__soundRun("play",[]);}
   function stop(){__soundRun("stop",[]);}
   function fade(args*){
@@ -55,8 +61,9 @@ class MIDISoundBuffer extends __SoundBase {
 MIDISoundBuffer.midiOut=__host("Sound.global","midiOutMethod");
 class CDDASoundBuffer extends __SoundBase {
   function CDDASoundBuffer(owner){super.__SoundBase("cdda",owner);}
-  function open(name){
-    var storage=string(name),ticket=__soundRun("prepareCdda",[storage]);
+  function open(args*){
+    if(args.count<1){__soundRun("prepareOpen",[]);return;}
+    var storage=string(args[0]),ticket=__soundRun("prepareCdda",[storage]);
     if(ticket===void){super.open(storage);return;}
     if(ticket==-1){__soundRun("unload",[]);__soundRun("invalidCddaDrive",[]);return;}
     __soundRun("stop",[]);__soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unloadCdda",[ticket]);__clearSoundLabels();

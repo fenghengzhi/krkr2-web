@@ -1,7 +1,11 @@
 import { wave } from './audio.ts'
 
 /** The same real TJS controls run in the pinned Windows SDK and the Web VM.
- * These exact floats are authored IEEE-754 values, not product calculations. */
+ * Expected floats below are authored IEEE-754 dyadic fractions, not product
+ * calculations. They equal the former long decimal constants exactly:
+ * 0.1f=13421773/2^27; 0.2f=13421773/2^26; 0.00075f=12884902/2^34;
+ * 0.001f=8589935/2^33; 0.003f=12884902/2^32. This avoids making coordinate
+ * equality also depend on the separate long-decimal TJS parser behavior. */
 export const wavePositionExpected: Readonly<Record<string, string>> = {
   'position-default': '+0.0,+0.0,+0.0,0,unload',
   'position-real': '1,1,1,1,1,1,1',
@@ -39,7 +43,7 @@ function wavePositionCase(id,owned){
       case "position-default":return wavePositionText(w)+","+w.pan+","+w.status;
       case "position-real":
         v=w.setPos("0.1",16777217,-0.2);
-        result=[v===void,w.posX==0.100000001490116119384765625,w.posY==16777216,w.posZ==-0.20000000298023223876953125,w.pan==0].join(",");
+        result=[v===void,w.posX==(13421773.0/134217728.0),w.posY==16777216,w.posZ==(-13421773.0/67108864.0),w.pan==0].join(",");
         w.setPos(1e100,-1e100,0);
         return result+","+int(w.posX>1e100)+","+int(w.posY< -1e100);
       case "position-arguments":
@@ -53,15 +57,15 @@ function wavePositionCase(id,owned){
         w.setPos(void,void,void);return result+"|"+wavePositionText(w);
       case "position-properties":
         w.posX=0.1;w.posY=-0.2;w.posZ=16777217;
-        result=[w.posX==0.100000001490116119384765625,w.posY==-0.20000000298023223876953125,w.posZ==16777216].join(",");
+        result=[w.posX==(13421773.0/134217728.0),w.posY==(-13421773.0/67108864.0),w.posZ==16777216].join(",");
         try{w.posY=%[];}catch(e){result+="|"+e.message;}
-        return result+"|"+[w.posX==0.100000001490116119384765625,w.posY==-0.20000000298023223876953125,w.posZ==16777216].join(",");
+        return result+"|"+[w.posX==(13421773.0/134217728.0),w.posY==(-13421773.0/67108864.0),w.posZ==16777216].join(",");
       case "position-pan-before":
         w.setPos(1,2,3);w.pan=0;result=wavePositionText(w);
-        w.pan=50000;result+="|"+[w.posX==0.000750000006519258022308349609375,w.posY==0.001000000047497451305389404296875,w.posZ==0].join(",");
+        w.pan=50000;result+="|"+[w.posX==(12884902.0/17179869184.0),w.posY==(8589935.0/8589934592.0),w.posZ==0].join(",");
         w.setPos(7,8,9);w.pan=50000;result+="|"+wavePositionText(w);
-        w.pan=-100000;result+="|"+[w.posX==-0.0030000000260770320892333984375,w.posY==0.001000000047497451305389404296875,w.posZ==0].join(",");
-        w.pan=4295017296;return result+"|"+w.pan+"|"+int(w.posX==0.000750000006519258022308349609375);
+        w.pan=-100000;result+="|"+[w.posX==(-12884902.0/4294967296.0),w.posY==(8589935.0/8589934592.0),w.posZ==0].join(",");
+        w.pan=4295017296;return result+"|"+w.pan+"|"+int(w.posX==(12884902.0/17179869184.0));
       case "position-independent":
         v=wavePositionNew(owned);w.setPos(1,2,3);v.setPos(4,5,6);
         result=wavePositionText(w)+"|"+wavePositionText(v)+"|"+w.pan+","+v.pan;
@@ -69,7 +73,7 @@ function wavePositionCase(id,owned){
         w=wavePositionNew(owned);return result+"|"+wavePositionText(w);
       case "position-playback":
         w.setPos(1,2,3);w.open("position.wav");w.pan=50000;
-        result=[w.posX==0.000750000006519258022308349609375,w.posY==0.001000000047497451305389404296875].join(",");
+        result=[w.posX==(12884902.0/17179869184.0),w.posY==(8589935.0/8589934592.0)].join(",");
         w.play();w.setPos(7,8,9);w.pan=-50000;result+="|"+wavePositionText(w);
         w.stop();w.pan=0;result+="|"+wavePositionText(w);
         try{w.open("absent-position.wav");}catch(e){}

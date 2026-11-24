@@ -1,4 +1,6 @@
-import type { ArchiveReader } from '../../engine/ports/storage.ts'
+import { createXp3SegmentPool } from './xp3-inflater.ts'
+import type { Xp3SegmentPool } from '../../formats/xp3/segments.ts'
+import type { ArchiveIndex, ArchiveReader, Resource } from '../../engine/ports/storage.ts'
 import { openResourceSource } from '../../engine/storage/resource-source.ts'
 import { findXp3Archive, hasXp3Signature, readXp3 } from '../../formats/xp3/archive.ts'
 import { readZip } from '../../formats/zip/archive.ts'
@@ -17,20 +19,30 @@ export const archiveReader: ArchiveReader = {
     const { source } = await openResourceSource(resource, { checkpoint })
     return !!await findXp3Archive(source, { checkpoint })
   },
-  async open(resource, checkpoint) {
-    const { source } = await openResourceSource(resource, { checkpoint }),
-      prefix = await source.read(0, Math.min(11, source.size)),
-      zip = prefix[0] === 0x50 && prefix[1] === 0x4b &&
-        ((prefix[2] === 3 && prefix[3] === 4) || (prefix[2] === 5 && prefix[3] === 6))
-    await checkpoint()
-    const xp3 = /\.xp3$/i.test(resource.name) || hasXp3Signature(prefix) ? source
-      : prefix[0] === 0x4d && prefix[1] === 0x5a
-        ? (await findXp3Archive(source, { checkpoint }))?.source : undefined
-    if (xp3) return { kind: 'xp3', entries: await readXp3(xp3, inflate, { checkpoint }) }
-    if (/\.zip$/i.test(resource.name) || zip) return { kind: 'zip', entries: await readZip(source, {
-      inflate: (bytes, size) => inflateRaw(bytes, size, checkpoint), checkpoint,
-      utf8: (bytes) => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes),
-    }) }
-    return undefined
-  },
+  open,
+}
+
+async function open(resource: Resource, checkpoint: () => Promise<void>, pool?: Xp3SegmentPool): Promise<ArchiveIndex | undefined> {
+  const { source } = await openResourceSource(resource, { checkpoint }),
+    prefix = await source.read(0, Math.min(11, source.size)),
+    zip = prefix[0] === 0x50 && prefix[1] === 0x4b &&
+      ((prefix[2] === 3 && prefix[3] === 4) || (prefix[2] === 5 && prefix[3] === 6))
+  await checkpoint()
+  const xp3 = /\.xp3$/i.test(resource.name) || hasXp3Signature(prefix) ? source
+    : prefix[0] === 0x4d && prefix[1] === 0x5a
+      ? (await findXp3Archive(source, { checkpoint }))?.source : undefined
+  if (xp3) return { kind: 'xp3', entries: await readXp3(xp3, inflate, { checkpoint, compressedSegments: pool ?? createXp3SegmentPool() }) }
+  if (/\.zip$/i.test(resource.name) || zip) return { kind: 'zip', entries: await readZip(source, {
+    inflate: (bytes, size) => inflateRaw(bytes, size, checkpoint), checkpoint,
+    utf8: (bytes) => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes),
+  }) }
+  return undefined
+}
+
+/** The playing Session owns a shared cache and bounded forward inflater cursors
+ * across all its archives. Metadata-only callers can use archiveReader. */
+export function createSessionArchiveReader() {
+  const pool = createXp3SegmentPool(true)
+  return { ...archiveReader, open: (resource: Resource, checkpoint: () => Promise<void>) => open(resource, checkpoint, pool),
+    compact() { pool.compact() }, dispose() { pool.dispose() } }
 }

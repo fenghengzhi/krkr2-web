@@ -57,6 +57,24 @@ test('a complete leaf snapshot preserves low-alpha RGB bytes without premultipli
     assert.deepEqual([...composer.snapshot(root).data], [100, 101, 102, 0])
   }
 })
+test('a completed ordinary image preserves raw low and zero alpha colors and returns an independent copy', () => {
+  const layers = new LayerTree(), root = layers.create(0), child = layers.create(root)
+  layers.resize(root, 3, 1); layers.resizeImage(root, 3, 1)
+  layers.set(root, 'type', 2)
+  layers.image(root, { width: 3, height: 1,
+    data: Uint8Array.from([1, 2, 3, 1, 18, 52, 86, 0, 2, 0, 1, 102]) })
+  layers.resize(child, 1, 1); layers.resizeImage(child, 1, 1)
+  layers.position(child, 3, 0); layers.set(child, 'visible', 1)
+  const composer = new SceneComposer(layers), first = composer.snapshot(root)
+  // A seen child forces the native cache-completion branch even outside the
+  // source rectangle. CopySelf/CopyRect still keep each untouched RGBA byte.
+  assert.equal(composer.snapshotNeedsCompletion(root), true)
+  assert.deepEqual([...first.data], [1, 2, 3, 1, 18, 52, 86, 0, 2, 0, 1, 102])
+  first.data.fill(255)
+  assert.deepEqual([...composer.snapshot(root).data], [1, 2, 3, 1, 18, 52, 86, 0, 2, 0, 1, 102])
+  layers.setPixel(root, 1, 0, 0xaabbcc, 'main')
+  assert.deepEqual([...composer.snapshot(root).data], [1, 2, 3, 1, 170, 187, 204, 0, 2, 0, 1, 102])
+})
 test('a snapshot keeps the raw parent plane beside a child fading to another layer', () => {
   const layers = new LayerTree(), root = layers.create(0), parent = layers.create(root),
     front = layers.create(parent), back = layers.create(parent)

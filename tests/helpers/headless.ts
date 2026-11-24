@@ -9,7 +9,7 @@ import {
 import { TjsWasmRuntime } from '../../src/backends/script/tjs-wasm/runtime.ts'
 import { readScript, readText, writeText } from '../../src/backends/files/text-codecs.ts'
 import { inflateImage, deflateImage } from '../../src/backends/files/blob-source.ts'
-import { archiveReader } from '../../src/backends/files/archive-reader.ts'
+import { createSessionArchiveReader } from '../../src/backends/files/archive-reader.ts'
 import type { ModuleFactory, WasmManifest } from '../../src/backends/script/tjs-wasm/module.ts'
 import { createHeadlessImageInflaterProvider } from './image-zlib.ts'
 import { createHeadlessImageJpegProvider } from './image-jpeg.ts'
@@ -30,8 +30,9 @@ export async function headless(
 ) {
   const logs: string[] = []
   const events: EngineEvent[] = []
+  const archives = createSessionArchiveReader()
   const session: EngineSession = new EngineSession({
-    archives: archiveReader,
+    archives,
     yieldToHost: () => new Promise((resolve) => setTimeout(resolve, 0)),
     inflateImage,
     imageInflater: createHeadlessImageInflaterProvider(() => session.control),
@@ -61,6 +62,7 @@ export async function headless(
     },
     ...overrides,
   })
+  session.control.onCancel(() => archives.dispose())
   await session.initialize()
   session.mount(
     Object.entries(files).map(([name, text]) => {

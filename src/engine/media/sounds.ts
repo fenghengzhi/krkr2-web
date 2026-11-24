@@ -405,7 +405,9 @@ export class SoundService {
         })
       }
     }
-    if (method === 'setPos') {
+    if (method === 'prepareOpen') {
+      if (input.length < 1) throw new TjsError('TJSBadParamCount')
+    } else if (method === 'setPos') {
       if (sound.kind !== 'wave') throw new Error('Position requires a WaveSoundBuffer')
       if (input.length < 3) throw new TjsError('TJSBadParamCount')
       const x = coordinate(0), y = coordinate(1), z = coordinate(2)
