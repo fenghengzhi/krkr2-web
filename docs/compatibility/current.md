@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 124 批增加导入 CUE 的 CD 音轨，改善原版介绍样例缺少指定字体时的排版，修复可选图像查找误读其他资源和中断启动后遗留画布。第 122 批已有两款浏览器的 KAG 模板验收通过，本批的介绍样例剧情、音轨播放和图像回归待托管验证。[124 兼容范围](../decisions/124-kag-layout-storage-and-cdda.md)
+
 第 123 批增加原版 `KAGParser` 宏参数字典的书签读写、跨解析器的剧本缓存和原版标签错误消息。游戏音频增加 SLI 条件选择和直接 MIDI 输出的字节与等待规则。托管验收将原 SDK 实际写出的书签交给同批 Web 播放器。实现提交为 `63602e7d7f1444668d528fa48c55a2e680ca3576`，首次登记为等待运行。122 的 ERI 手工及作者工具场景分别 49/49、10/10 匹配，MIDI 文件打开场景 8/8 匹配。[123 兼容范围](../decisions/123-kag-bookmarks-and-game-audio.md) · [123 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45486961680)
 
 第 122 批的播放器接入无损算术 ERI，支持帧 1、4 的真彩色和帧 2 的 8 位灰度／索引图。MIDI 增加打开文件时的原版错误消息、零值节拍的恢复和分段音源重置。当前原版逐像素证据来自 121 的 46 个 ERI 场景。122 的完整实现提交为 `03ebffb4dde2acc451a1ac5c1d76cced5ffe01ba`，首次登记为运行中。[兼容范围与验收](../decisions/122-eri-arithmetic-and-midi.md) · [122 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45482636479)
@@ -352,7 +354,7 @@ TLG 解码通过 310 个独立原生编码器样本的 222,986 个 RGBA 像素�
 
 WAV PCM 与 MIDI 由 TypeScript 解析，Vorbis 在会话 Worker 中使用独立 WASM 解码；其他支持的编码委托浏览器。Vorbis 测试覆盖完整源长度与尾部标签；MP3/Opus 的精确编码延迟、尾部裁剪和全部编码参数尚未差分验证。SLI 条件链接不受 EOF looping 开关限制，flags 为 16 个 0..9999 的值；labels 保持字典身份，并提供 name、samplePosition、position。
 
-独立声音 paused 保持 play 状态与采样位置，fade 沿 60 ms 时钟继续；会话暂停冻结两者。页面静音不改变脚本音量。Wave 全局音量只影响 Wave，焦点模式映射到页面可见性/焦点。当前 MIDI 为基础程序合成音色，并非完整 GM 音库；CDDASoundBuffer 只接受导入的音频资源，不能打开物理 CD 曲目。当前会准备完整 PCM 后播放，混音器保留 PCM 上限 128 MiB，解码有额外瞬时内存；没有流式背压或低内存长音轨路径。平滑循环近似交叉淡化、滤波、多声道细节和隐式回收仍需扩大验证。见 [音频时钟与解码边界](../decisions/004-audio-clock.md)。
+独立声音 paused 保持 play 状态与采样位置，fade 沿 60 ms 时钟继续；会话暂停冻结两者。页面静音不改变脚本音量。Wave 全局音量只影响 Wave，焦点模式映射到页面可见性/焦点。早期音频验收使用基础 MIDI 合成音色，CDDA 通过直接打开导入文件播放，并在播放前准备完整 PCM。第 124 批的 CUE 选轨复用现有流式 PCM 解码与缓存，待托管复验。平滑循环近似交叉淡化、滤波、多声道细节和隐式回收仍需扩大验证。见 [音频时钟与解码边界](../decisions/004-audio-clock.md)。
 
 **视频的已验证边界**
 

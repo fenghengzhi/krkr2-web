@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { readFontMetadata, validFontName } from '../../src/formats/font/metadata.ts'
-import { cssFontFamily } from '../../src/backends/text/browser/families.ts'
+import { cssFontFamily, cssFontStack } from '../../src/backends/text/browser/families.ts'
 import { filterFonts } from '../../src/engine/graphics/font-catalog.ts'
 import type { FontDescriptor } from '../../src/engine/ports/fonts.ts'
 const root = new URL('../fixtures/font-selection/', import.meta.url)
@@ -95,4 +95,9 @@ test('font names preserve Unicode and CSS generics retain their keyword meaning'
   assert.equal(cssFontFamily('serif'), 'serif')
   assert.equal(cssFontFamily('My "Font"'), String.raw`"My \"Font\""`)
   assert.equal(cssFontFamily('@Selection Mono'), '"Selection Mono"')
+  assert.equal(cssFontStack('MS PMincho'), '"MS PMincho",serif')
+  assert.equal(cssFontStack('@ms pmincho'), '"ms pmincho",serif')
+  assert.equal(cssFontStack('MS PMincho,Game Face'), '"MS PMincho","Game Face",serif')
+  assert.equal(cssFontStack('Game Face,MS PMincho'), '"Game Face","MS PMincho",sans-serif')
+  assert.equal(cssFontStack('My "Font"'), String.raw`"My \"Font\"",sans-serif`)
 })

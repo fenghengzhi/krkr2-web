@@ -135,8 +135,14 @@ export class BrowserInputCoordinator {
         // A real OS pointer is global, including when a trap-key Window is
         // not the physical target. Retire its Web cursor immediately instead
         // of waiting for a later keyboard packet or a delayed Worker view.
+        const menuWindow = this.options.popupWindow?.(event.target)
         for (const [id, surface] of this.surfaces) {
-          if (!this.views.get(id)?.useMouseKey || !surface.visible || surface.blocked || this.suspended) continue
+          // A body-mounted popup consumes normal canvas input. Its actual
+          // pointer events must still retire its owner's virtual cursor; the
+          // overlay's mere insertion must not manufacture such an observation.
+          const menuPointer = surface.menuActive && id === menuWindow
+          if ((!this.views.get(id)?.useMouseKey && !menuPointer) ||
+              !surface.visible || surface.blocked || this.suspended) continue
           try { surface.input.mouseKeyObservation(id, this.pagePointer, true, screen) }
           catch (error) { this.error(error) }
           this.mouseKeyObservations.set(id, this.pointerObservation)
@@ -359,6 +365,7 @@ export class BrowserInputCoordinator {
       keyboard: (event) =>
         current() && this.active === surface && (!event || !this.hostKeyEvents.has(event)),
       popupHidePosted: (event) => this.popupHideKeyEvents.has(event),
+      menuCover: (target) => current() && surface.menuActive && this.options.popupWindow?.(target) === windowId,
       mouse: (type, buttons) => {
         if (!current() || (this.mouseOwner && this.mouseOwner !== surface)) return false
         if (type === 'down') this.mouseOwner = surface

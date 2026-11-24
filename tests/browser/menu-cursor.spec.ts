@@ -28,7 +28,7 @@ menuTimer.onTimer=function(){
   if(global.menuMutation==1){global.menuWindow.mouseCursorState=mcsHidden;global.menuRoot.cursor=crIBeam;}
   if(global.menuMutation==2){global.menuWindow.mouseCursorState=mcsVisible;global.menuRoot.cursor="menu.cur";global.menuRoot.setCursorPos(100,80);}
   if(global.menuMutation==3){global.menuWindow.mouseCursorState=mcsHidden;global.menuRoot.cursor="menu.cur";global.menuRoot.setCursorPos(100,80);}
-  Debug.message("menu-force-mutation:"+global.menuMutation+":"+global.menuWindow.mouseCursorState);
+  Debug.message("menu-force-mutation:"+global.menuMutation+":"+global.menuWindow.mouseCursorState+":"+global.menuPopupRound);
 };
 function mutateMenuCursor(mode){global.menuMutation=mode;global.menuTimer.enabled=true;}
 menuWindow.onKeyDown=function(key,shift){
@@ -165,6 +165,11 @@ for (const backend of ['asyncify','jspi']) for (const binary of [false,true]) {
       await evaluate(page, '(menuWindow.fullScreen=true,0)', '0')
       await expect(a).toHaveClass(/game-window-fullscreen/)
       await snapshotMenuCursor(page, 'fullscreen-ready')
+      // Place the real pointer under the forthcoming overlay. Its insertion
+      // must hide presentation without taking over the Timer's virtual cursor.
+      const bounds = await canvas.boundingBox()
+      expect(bounds).not.toBeNull()
+      await page.mouse.move(bounds!.x + bounds!.width * 0.75, bounds!.y + bounds!.height * 0.75)
       await canvas.focus(); await page.keyboard.press('F9')
       await expect(popup).toBeVisible()
       await expect(page.locator('#logs')).toContainText('menu-force-mutation:2:0')
@@ -176,6 +181,25 @@ for (const backend of ['asyncify','jspi']) for (const binary of [false,true]) {
       await snapshotMenuCursor(page, 'second-popup-closed')
       await expect(a.locator('.game-custom-cursor')).toBeVisible()
       await expect(a.locator('.game-custom-cursor')).toHaveClass(/game-virtual-cursor/)
+      await expect(a.locator('.game-custom-cursor')).toHaveAttribute('data-cursor-revision', '2')
+      await expect.poll(() => a.locator('.game-custom-cursor').evaluate((node) =>
+        [...(node as HTMLCanvasElement).getContext('2d')!.getImageData(16, 16, 1, 1).data]))
+        .toEqual([255, 0, 255, 255])
+
+      await canvas.focus(); await page.keyboard.press('F9')
+      await expect(popup).toBeVisible()
+      await expect(page.getByText('menu-force-mutation:2:0:3', { exact: true })).toBeVisible()
+      await page.mouse.move(bounds!.x + bounds!.width * 0.6, bounds!.y + bounds!.height * 0.6)
+      await snapshotMenuCursor(page, 'popup-real-pointer-takeover')
+      await expect(canvas).toHaveCSS('cursor', 'default')
+      await page.keyboard.press('Escape')
+      await expect(page.locator('#logs')).toContainText('menu-force-popup-return:3:0')
+      await expect(a.locator('.game-custom-cursor')).toBeVisible()
+      await expect(a.locator('.game-custom-cursor')).not.toHaveClass(/game-virtual-cursor/)
+      await expect.poll(() => a.locator('.game-custom-cursor').evaluate((node) =>
+        [...(node as HTMLCanvasElement).getContext('2d')!.getImageData(16, 16, 1, 1).data]))
+        .toEqual([255, 0, 255, 255])
+      await snapshotMenuCursor(page, 'popup-real-pointer-restored')
 
       await canvas.focus(); await page.keyboard.press('F9')
       await expect(popup).toBeVisible()

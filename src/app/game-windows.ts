@@ -869,6 +869,9 @@ export function createGameWindows(
       scrollListeners.clear()
       abort.abort()
       for (const surface of windows.values()) remove(surface)
+      // Launch installs this canvas before reading startup.tjs. Stop can
+      // finish while the archive is still opening, before any Window owns it.
+      if (initialCanvas.parentElement === stage) initialCanvas.remove()
       pending.clear()
       epochs.clear()
       synchronize()

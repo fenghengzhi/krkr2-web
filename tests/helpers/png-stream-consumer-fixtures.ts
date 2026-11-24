@@ -59,7 +59,7 @@ var streamRoot=new Layer(streamWindow,null);streamWindow.add(streamRoot);
 streamRoot.type=ltOpaque;streamRoot.setSize(8,6);streamRoot.fillRect(0,0,8,6,0xff000000);streamWindow.setInnerSize(8,6);
 var streamLayer=new Layer(streamWindow,streamRoot);streamLayer.type=ltAlpha;streamLayer.visible=true;
 function resetStream(){
-  global.streamLayer.setImagePos(0,0);global.streamLayer.setSize(3,3);global.streamLayer.setImageSize(4,4);
+  global.streamLayer.setImageSize(4,4);global.streamLayer.setImagePos(0,0);global.streamLayer.setSize(3,3);
   global.streamLayer.setClip(0,0,4,4);
   for(var y=0;y<4;y++)for(var x=0;x<4;x++){
     global.streamLayer.setMainPixel(x,y,0x123456);global.streamLayer.setMaskPixel(x,y,74);global.streamLayer.setProvincePixel(x,y,0);

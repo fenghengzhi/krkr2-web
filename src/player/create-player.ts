@@ -32,6 +32,7 @@ import { BrowserSystemDisplay } from './system-display.ts'
 import { copySystemDisplayMetrics, type SystemDisplayMetrics } from '../engine/system/display.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
 import { copyJpegPrecision } from './jpeg-precision.ts'
+import { copyCddaDiscs, type CddaDisc } from '../engine/ports/cdda.ts'
 
 /** Player-facing DOM ownership; compatible with the app's GameWindows host. */
 export interface PlayerWindowSurface {
@@ -73,6 +74,9 @@ export interface PlayerOptions {
   /** Fixed startup -jpegdec setting. Omission leaves the argument absent and
    * decodes at normal precision; later System.setArgument does not retune it. */
   jpegPrecision?: ImageJpegPrecision
+  /** Virtual CD drives, in default-drive order. Paths address imported game
+   * storage. Omit to discover a single project CUE as drive D:. */
+  cddaDiscs?: readonly CddaDisc[]
   /** 31 RGB values for legacy indices 0..30 (25 must be zero); defaults to page CSS colors. */
   systemColors?: readonly number[]
   /** Fixed, copied virtual display geometry. Defaults to the live player desktop. */
@@ -101,6 +105,7 @@ export function createPlayer(
 ) {
   const dataPath = options.dataPath
   const jpegPrecision = copyJpegPrecision(options.jpegPrecision)
+  const cddaDiscs = copyCddaDiscs(options.cddaDiscs)
   // Bounds depend on the selected executable directory, determined during
   // prepare. The Worker completes that check before allocating the Session.
   validateSystemDataPathTemplate(dataPath)
@@ -561,6 +566,7 @@ export function createPlayer(
         !!options.windows.beginMove,
         options.windows.measureGeometry ? geometryChannel.port2 : undefined,
         jpegPrecision,
+        cddaDiscs,
       )
       await session.mount()
       // Only ordered Session events update the host. A start RPC snapshot can

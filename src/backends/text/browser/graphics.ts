@@ -9,7 +9,7 @@ import { decodeBmp } from '../../../formats/image/bmp.ts'
 import type { ImageDecodeSelection } from '../../../formats/image/selection.ts'
 import type { FontKernel, NativeFileFont } from '../freetype/face.ts'
 import { fontGeometry } from '../../../engine/graphics/font.ts'
-import { cssFontFamily } from './families.ts'
+import { cssFontStack } from './families.ts'
 import { browserVerticalGlyph, isVerticalFace } from '../../../engine/graphics/vertical.ts'
 
 export class BrowserGraphics implements GraphicsDecoder {
@@ -97,8 +97,7 @@ export class BrowserGraphics implements GraphicsDecoder {
     }
   }
   private font(spec: FontSpec): string {
-    const faces = spec.face.replace(/^@/, '').split(',').map(cssFontFamily).join(',')
-    return `${spec.italic ? 'italic ' : ''}${spec.bold ? 'bold ' : ''}${Math.abs(spec.height)}px ${faces},sans-serif`
+    return `${spec.italic ? 'italic ' : ''}${spec.bold ? 'bold ' : ''}${Math.abs(spec.height)}px ${cssFontStack(spec.face)}`
   }
   measure(text: string, font: FontSpec): { width: number; height: number; ascent: number } {
     if (text.length > 8192) throw new Error('Text exceeds measurement budget')

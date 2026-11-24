@@ -17,17 +17,20 @@ export function normalizeStorageName(input: string, directory = false): string {
   return archive + '>' + (directory && !entry ? '' : normalizePath(entry))
 }
 
+type AliasSearch = 'all' | 'identified'
+
 export class StorageResolver {
   private readonly archives: StorageArchives
   private revision = 0
   private disposed = false
-  private autoTable?: { revision: number; entries: Map<string, string> }
+  private readonly autoTables = new Map<AliasSearch, Map<string, string>>()
+  private readonly collectionTables = new Map<AliasSearch, Map<string, string>>()
   constructor(readonly currentDirectory = '', private readonly archiveAliases = true,
     private readonly reader?: ArchiveReader, private readonly checkpoint: () => Promise<void> = async () => {}) {
     this.archives = new StorageArchives(reader, checkpoint, () => ({
       entries: 250000 - this.files.size - this.aliases.size - this.directories.size,
       units: 16 * 1024 * 1024 - [...this.files.keys(), ...this.aliases.keys(), ...this.directories].reduce((sum, name) => sum + name.length, 0),
-    }))
+    }), () => this.invalidateSearch())
   }
   private files = new Map<string, Resource>()
   private folded = new Map<string, Set<string>>()
@@ -143,7 +146,7 @@ export class StorageResolver {
       throw error
     }
   }
-  invalidateSearch(): void { this.revision++; this.autoTable = undefined }
+  invalidateSearch(): void { this.revision++; this.autoTables.clear(); this.collectionTables.clear() }
   /** Reserve against real/alias files, directories, and case-folded spelling;
    * callers include save-overlay names in the same final synchronous check. */
   hasTree(prefix: string, extraPaths: readonly string[] = []): boolean {
@@ -186,46 +189,62 @@ export class StorageResolver {
     if (!index) throw new Error(`Unsupported archive: ${name}`)
     return this.member(index, member)
   }
-  private async aliasesAsync(overlay?: (name: string) => Resource | undefined): Promise<Map<string, Resource>> {
-    const entries = new Map<string, Resource>()
-    for (const [alias, canonical] of this.aliases) {
-      const resource = this.find(canonical)
-      if (resource) entries.set(alias, resource)
-    }
-    if (!this.reader) return entries
-    // This is an explicit Web collection fallback, after normal lookup. It
-    // cannot hide errors from any registered native project AutoPath.
-    let units = 0, visited = 0
-    for (const mounted of this.files.values()) {
-      this.check()
-      if (!(++visited % 256)) await this.checkpoint()
-      if (mounted.name.includes('>') || mounted.archiveAliases === false) continue
-      const raw = overlay?.(mounted.name) ?? mounted
-      const index = await this.archives.open(raw)
-      if (index) for (const [name, resource] of index.entries) {
-        const old = entries.get(name)
-        units += name.length + resource.name.length - (old ? name.length + old.name.length : 0)
-        if (entries.size + (old ? 0 : 1) > 250000 || units > 16 * 1024 * 1024)
-          throw new Error('Archive compatibility aliases exceed metadata budget')
-        entries.set(name, resource)
-      }
-    }
-    this.check()
-    return entries
-  }
-  private tableFind<T>(entries: ReadonlyMap<string, T>, name: string): T | undefined {
-    const exact = entries.get(name)
-    if (exact) return exact
-    const matches = [...entries].filter(([entry]) => entry.toLowerCase() === name.toLowerCase())
-    if (matches.length > 1) throw new Error(`Ambiguous resource name: ${name}`)
-    return matches[0]?.[1]
-  }
-  private async buildAutoTable(overlay?: (name: string) => Resource | undefined,
-    overlayResources: readonly Resource[] = []): Promise<Map<string, string>> {
+  private async aliasesAsync(overlay: ((name: string) => Resource | undefined) | undefined,
+    aliasSearch: AliasSearch): Promise<Map<string, string>> {
     for (;;) {
       this.check()
       const revision = this.revision
-      if (this.autoTable?.revision === revision) return this.autoTable.entries
+      const cached = this.collectionTables.get('all') ?? this.collectionTables.get(aliasSearch)
+      if (cached) return cached
+      const entries = new Map(this.aliases)
+      let units = 0, visited = 0
+      for (const [name, canonical] of entries) units += name.length + canonical.length
+      if (this.reader) for (const mounted of this.files.values()) {
+        this.check()
+        if (!(++visited % 256)) await this.checkpoint()
+        if (mounted.name.includes('>') || mounted.archiveAliases === false) continue
+        const raw = overlay?.(mounted.name) ?? mounted
+        // Imported range sources can identify even a renamed package without
+        // materializing it. An embedding's ordinary read-only image or sound
+        // must not be read in full to look for an unrelated optional asset.
+        if (aliasSearch === 'identified' && !raw.source && !raw.archiveKind && mounted.archiveAliases !== true &&
+            !this.archives.recognized(raw) && !/\.(?:xp3|zip|exe)$/i.test(raw.name)) continue
+        if (raw.source && this.reader.probeArchive && !await this.archives.candidate(raw)) continue
+        const index = await this.archives.open(raw)
+        if (index) for (const [name, resource] of index.entries) {
+          const old = entries.get(name)
+          units += name.length + resource.name.length - (old ? name.length + old.length : 0)
+          if (entries.size + (old ? 0 : 1) > 250000 || units > 16 * 1024 * 1024)
+            throw new Error('Archive compatibility aliases exceed metadata budget')
+          entries.set(name, resource.name)
+        }
+      }
+      if (revision !== this.revision) continue
+      this.check()
+      if (aliasSearch === 'all') this.collectionTables.delete('identified')
+      this.collectionTables.set(aliasSearch, entries)
+      return entries
+    }
+  }
+  private tableFind(entries: ReadonlyMap<string, string>, name: string): string | undefined {
+    const exact = entries.get(name)
+    if (exact !== undefined) return exact
+    const folded = name.toLowerCase()
+    let match: string | undefined
+    for (const [entry, canonical] of entries) {
+      if (entry.toLowerCase() !== folded) continue
+      if (match !== undefined) throw new Error(`Ambiguous resource name: ${name}`)
+      match = canonical
+    }
+    return match
+  }
+  private async buildAutoTable(overlay: ((name: string) => Resource | undefined) | undefined,
+    overlayResources: readonly Resource[], aliasSearch: AliasSearch): Promise<Map<string, string>> {
+    for (;;) {
+      this.check()
+      const revision = this.revision
+      const cached = this.autoTables.get('all') ?? this.autoTables.get(aliasSearch)
+      if (cached) return cached
       const entries = new Map<string, string>(), paths = [...this.autoPaths]
       let units = 0
       const add = (name: string, path: string) => {
@@ -242,18 +261,19 @@ export class StorageResolver {
           if (relative && !relative.includes('/')) add(relative, resource.name)
         }
         if (this.archiveAliases && !path.includes('>'))
-          for (const [name, resource] of await this.aliasesAsync(overlay))
+          for (const [name, canonical] of await this.aliasesAsync(overlay, aliasSearch))
             if (name.startsWith(path) && !name.slice(path.length).includes('/'))
-              if (!this.find(path + name.slice(path.length))) add(name.slice(path.length), resource.name)
+              if (!this.find(path + name.slice(path.length))) add(name.slice(path.length), canonical)
       }
       if (revision !== this.revision) continue
       this.check()
-      this.autoTable = { revision, entries }
+      if (aliasSearch === 'all') this.autoTables.delete('identified')
+      this.autoTables.set(aliasSearch, entries)
       return entries
     }
   }
   async lookupAsync(path: string, overlay?: (name: string) => Resource | undefined,
-    overlayResources: readonly Resource[] = []): Promise<Resource | undefined> {
+    overlayResources: readonly Resource[] = [], aliasSearch: AliasSearch = 'all'): Promise<Resource | undefined> {
     this.check()
     const direct = parseStoragePath(path, this.currentDirectory)
     // File existence/placement cannot open an archive directory. Its trailing
@@ -263,10 +283,13 @@ export class StorageResolver {
     const current = await this.findAsync(direct, overlay)
     this.check()
     if (current) return current
-    const basename = direct.split(/[/>]/).at(-1)!, table = await this.buildAutoTable(overlay, overlayResources),
+    const basename = direct.split(/[/>]/).at(-1)!, table = await this.buildAutoTable(overlay, overlayResources, aliasSearch),
       placed = this.tableFind(table, basename)
     if (placed) return this.findAsync(placed, overlay)
-    if (this.archiveAliases) return this.tableFind(await this.aliasesAsync(overlay), direct)
+    if (this.archiveAliases) {
+      const canonical = this.tableFind(await this.aliasesAsync(overlay, aliasSearch), direct)
+      if (canonical) return this.findAsync(canonical, overlay)
+    }
     return undefined
   }
   async resolveAsync(path: string, overlay?: (name: string) => Resource | undefined): Promise<Resource> {

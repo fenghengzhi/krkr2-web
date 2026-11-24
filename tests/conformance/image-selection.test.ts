@@ -20,7 +20,6 @@ function fixture(entries: readonly (readonly [string, number, string?])[], optio
   decode?: (value: number, selection: ImageDecodeSelection) => Promise<DecodedImage>
   find?: (name: string) => void
   check?: () => void
-  finish?: typeof finish
 } = {}) {
   const queries: string[] = [], reads: string[] = [], events: string[] = [],
     selections: ImageDecodeSelection[] = [], resources = new Map<string, Resource>()
@@ -34,7 +33,7 @@ function fixture(entries: readonly (readonly [string, number, string?])[], optio
       selections.push(selection); events.push('decode:' + bytes[0] + ':' + selection.mode)
       return options.decode ? options.decode(bytes[0]!, selection) : pixels(bytes[0]!)
     },
-    options.finish ?? finish, { now: () => 0, check: options.check ?? (() => {}), yield: async () => {} }, options.normalize,
+    finish, { now: () => 0, check: options.check ?? (() => {}), yield: async () => {} }, options.normalize,
   )
   return { loader, queries, reads, events, selections, resources }
 }
@@ -193,24 +192,18 @@ test('an absent preferred mask suffix falls back through the full registered ord
 })
 
 test('touch discovers province names without reading pixels and still validates the mask before continuing', async () => {
-  let maskFailures = 0
   const f = fixture([['scene.png', 20], ['scene_p.bmp', 3], ['scene_m.png', 128], ['next.png', 9]], {
     decode: async (value) => value === 128 ? { width: 2, height: 1, data: new Uint8Array(8) } : pixels(value),
-    async finish<T>(work: Generator<void, T>): Promise<T> {
-      try { return await finish(work) }
-      catch (error) {
-        if (error instanceof TvpError && error.tvpMessage.id === 'TVPMaskSizeMismatch') maskFailures++
-        throw error
-      }
-    },
   })
   await f.loader.touch(['scene.png', 'next.png'])
-  assert.equal(maskFailures, 1)
+  assert.equal(f.loader.snapshot().imageCacheEntries, 1)
   assert.ok(f.queries.includes('scene_p.bmp'))
   assert.deepEqual(f.reads, ['scene.png', 'scene_m.png', 'next.png'])
   assert.deepEqual(f.selections.map((selection) => selection.mode), ['normal', 'grayscale', 'normal'])
   await assert.rejects(f.loader.load('scene.png', noColorKey), (error: unknown) =>
     error instanceof TvpError && error.tvpMessage.id === 'TVPMaskSizeMismatch')
+  assert.equal((await f.loader.load('next.png', noColorKey)).image.data[0], 9)
+  assert.deepEqual(f.reads, ['scene.png', 'scene_m.png', 'next.png', 'scene.png', 'scene_m.png'])
   assert.equal(f.reads.includes('scene_p.bmp'), false)
 })
 

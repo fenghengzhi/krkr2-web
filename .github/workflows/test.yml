@@ -986,6 +986,16 @@ jobs:
       - name: Compare the SLI observations
         if: ${{ !cancelled() && steps.prepare_sli.outcome == 'success' }}
         run: node --import tsx tests/probes/sli-sdk.ts compare
+      - name: Prepare the original KAG introduction and its layout observer
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
+        id: prepare_kag_intro
+        run: node --import tsx tests/probes/kag-intro-sdk.ts prepare
+      - name: Observe the initial menu with the original Windows engine
+        if: ${{ !cancelled() && steps.prepare_kag_intro.outcome == 'success' }}
+        run: ./tests/probes/original-eri.ps1 -Project kag-intro
+      - name: Preserve the first stable menu or page boundary and layout metrics
+        if: ${{ !cancelled() && steps.prepare_kag_intro.outcome == 'success' }}
+        run: node --import tsx tests/probes/kag-intro-sdk.ts native
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:

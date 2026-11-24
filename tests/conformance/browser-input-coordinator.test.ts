@@ -210,6 +210,7 @@ function fixture(
   gamepad: BrowserGamepadSource | false = false,
   mouseKeyClock?: MouseKeyClock,
   dropFiles?: BrowserInputCoordinatorOptions['dropFiles'],
+  popupWindow?: BrowserInputCoordinatorOptions['popupWindow'],
 ) {
   const env = dom(),
     packets: InputPacket[] = [],
@@ -228,7 +229,7 @@ function fixture(
         pointers.push([x, y, id])
       },
       (error) => errors.push(error),
-      { isTransientFocus: transient, gamepad, mouseKeyClock, dropFiles },
+      { isTransientFocus: transient, gamepad, mouseKeyClock, dropFiles, popupWindow },
     ),
     a = env.canvas(),
     b = env.canvas(),
@@ -368,25 +369,46 @@ test('an in-flight drop RPC receives cancellation when its visible Window become
 })
 
 test('opening a menu hides the virtual cursor without retiring its identity; real input still takes over', { timeout: 30000 }, async () => {
-  const f = fixture(), view = { ...new WindowState().view(), visible: true },
+  const popupTargets = new Map<EventTarget, number>(),
+    f = fixture(undefined, false, undefined, false, undefined, undefined,
+      (target) => target ? popupTargets.get(target) : undefined),
+    overlay = f.canvas(), foreignOverlay = f.canvas(), view = { ...new WindowState().view(), visible: true },
     input = inputView({ cursor: -3, virtualCursor: { x: 40, y: 30, revision: 1, basePhysicalSequence: 0 } }),
     markers = () => f.rootA.children.filter((node) => node.className === 'game-virtual-cursor' && !node.removed)
   try {
+    popupTargets.set(overlay, 101); popupTargets.set(foreignOverlay, 202)
     f.coordinator.setWindow(101, view); f.coordinator.setInput(101, input)
     assert.equal(markers().length, 1)
     f.coordinator.setMenuActive(101, 1, true)
     assert.equal(markers().length, 0); assert.equal(f.a.style.cursor, 'default')
     f.coordinator.setInput(101, inputView({ ...input, cursor: -4 }))
+    f.dispatch(f.a, 'mouseleave', { clientX: 40, clientY: 30, relatedTarget: overlay })
+    await settle()
+    assert.equal(f.pointers.length, 0, 'Popup coverage alone is not a new physical observation')
+    assert(!f.packets.some((packet) => packet.type === 'leave'))
     f.coordinator.setMenuActive(101, 1, false)
     assert.equal(markers().length, 1)
     assert.equal(markers()[0]!.dataset.cursorRevision, '1')
     assert.equal(markers()[0]!.dataset.cursorShape, 'text')
     f.coordinator.setMenuActive(101, 1, true)
-    f.mouse(f.a, 'mousemove', 0, 45)
+    f.mouse(overlay, 'mousemove', 0, 45)
     assert.equal(f.a.style.cursor, 'default')
     f.coordinator.setMenuActive(101, 1, false)
     assert.equal(markers().length, 0)
     assert.equal(f.a.style.cursor, 'text')
+    assert.deepEqual(f.pointers.at(-1), [45, 10, 101])
+    assert(!f.packets.some((packet) => packet.type === 'move'), 'Popup motion updates physical state without a game callback')
+    f.coordinator.setInput(101, inputView({ ...input, virtualCursor: { x: 40, y: 30, revision: 2, basePhysicalSequence: 1 } }))
+    assert.equal(markers().length, 1)
+    f.coordinator.setMenuActive(101, 1, true)
+    f.mouse(f.a, 'mousemove', 0, 50)
+    f.coordinator.setMenuActive(101, 1, false)
+    assert.equal(markers().length, 0, 'Normal canvas movement still takes over')
+    f.coordinator.setInput(101, inputView({ ...input, virtualCursor: { x: 40, y: 30, revision: 3, basePhysicalSequence: 2 } }))
+    f.coordinator.setMenuActive(101, 1, true)
+    f.dispatch(f.a, 'mouseleave', { clientX: 60, clientY: 30, relatedTarget: foreignOverlay })
+    f.coordinator.setMenuActive(101, 1, false)
+    assert.equal(markers().length, 0, 'Another Window popup cannot suppress this Window departure')
     await settle(); assert.deepEqual(f.errors, [])
   } finally { f.close() }
 })

@@ -29,6 +29,7 @@ import { loadImageJpegKernel } from '../backends/image-jpeg/module.ts'
 import { LazyImageJpegProvider } from '../engine/graphics/image-jpeg-provider.ts'
 import { loadFontKernel } from '../backends/text/freetype/module.ts'
 import { copyGameProject, type GameProject } from '../engine/storage/project.ts'
+import { copyCddaDiscs } from '../engine/ports/cdda.ts'
 import { copyJpegPrecision } from './jpeg-precision.ts'
 
 export function createSession(request: InitializeRequest, project?: GameProject): EngineSession {
@@ -37,6 +38,7 @@ export function createSession(request: InitializeRequest, project?: GameProject)
   // only here is the frozen executable directory available for path bounds.
   const dataPath = request.dataPath
   const jpegPrecision = copyJpegPrecision(request.jpegPrecision)
+  const cddaDiscs = copyCddaDiscs(request.cddaDiscs)
   const storageProject = copyGameProject(project)
   normalizeSystemDataPath(dataPath, storageProject?.executableDirectory)
   const systemColors = copySystemColorPalette(request.systemColors)
@@ -48,6 +50,7 @@ export function createSession(request: InitializeRequest, project?: GameProject)
   const session: EngineSession = new EngineSession({
     archives: archiveReader,
     project: storageProject,
+    cddaDiscs,
     systemFonts: request.systemFonts,
     systemColors,
     systemDisplay,

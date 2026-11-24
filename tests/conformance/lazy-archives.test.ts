@@ -151,3 +151,50 @@ test('collection aliases remain an explicit final fallback, never a way to bypas
   await assert.rejects(resolver.lookupAsync('value.tjs'), /Unsupported XP3 index compression: 7/)
   resolver.dispose()
 })
+
+test('optional masks use the collection index without reading unrelated byte-only assets', async () => {
+  let unrelatedReads = 0, probes = 0
+  const resolver = new StorageResolver('', true, { ...archiveReader,
+    async probeArchive(resource, checkpoint) { probes++; return archiveReader.probeArchive!(resource, checkpoint) } }),
+    optional = (name: string) => resolver.lookupAsync(name, undefined, [], 'identified')
+  try {
+    resolver.mount([{
+      name: 'unreadable.bmp', size: 1, async read() { unrelatedReads++; throw new Error('unrelated storage error') },
+    }, archive('renamed.png', { 'img/title_m.bmp': 'mask' }), bytesResource('loose.bin')])
+    resolver.addAutoPath('img/')
+    assert.equal((await optional('title_m.bmp'))?.name, 'renamed.png>img/title_m.bmp')
+    assert.equal(await optional('title_p.bmp'), undefined)
+    resolver.invalidateSearch()
+    assert.equal((await optional('title_m.bmp'))?.name, 'renamed.png>img/title_m.bmp')
+    assert.equal(probes, 2, 'A namespace rebuild can reuse probes of unchanged immutable sources')
+    assert.equal(unrelatedReads, 0)
+    await assert.rejects((await optional('unreadable.bmp'))!.read(), /unrelated storage error/)
+    resolver.mount([bytesResource('bad.xp3', malformedXp3)])
+    resolver.addAutoPath('bad.xp3>')
+    await assert.rejects(optional('title_m.bmp'), /Unsupported XP3 index compression: 7/)
+  } finally { resolver.dispose() }
+})
+
+test('ordinary alias resolution still discovers byte-only renamed packages after optional misses', async () => {
+  let reads = 0
+  const resolver = new StorageResolver('', true, archiveReader),
+    bytes = xp3Fixture({ 'value.tjs': '42', 'image_m.bmp': 'mask' }).bytes,
+    renamed = { name: 'renamed.png', size: bytes.length, async read() { reads++; return bytes } },
+    optional = () => resolver.lookupAsync('image_m.bmp', undefined, [], 'identified')
+  try {
+    resolver.mount([renamed])
+    assert.equal(await optional(), undefined)
+    assert.equal(reads, 0)
+    assert.equal((await resolver.lookupAsync('value.tjs'))?.name, 'renamed.png>value.tjs')
+    assert.equal((await optional())?.name, 'renamed.png>image_m.bmp')
+    assert.equal(reads, 1)
+    resolver.mount([{ ...renamed, name: 'declared.data', archiveAliases: true }])
+    assert.equal((await optional())?.name, 'declared.data>image_m.bmp')
+    assert.equal(reads, 2)
+    resolver.clear()
+    resolver.mount([renamed])
+    assert.equal(await optional(), undefined)
+    await resolver.findAsync('renamed.png>value.tjs')
+    assert.equal((await optional())?.name, 'renamed.png>image_m.bmp', 'An explicit open exposes the newly recognized package')
+  } finally { resolver.dispose() }
+})

@@ -101,11 +101,18 @@ test('dictionary and malformed-header states expose distinct native statuses wit
     assert.equal(needs.outputUsed, 0)
     assert.ok(output.every((byte) => byte === 0xa5))
     stream.close()
-    const malformed = kernel.open(), bad = malformed.step(Uint8Array.of(0, 0), output)
-    assert.equal(bad.status, 'data-error')
-    assert.equal(bad.nativeReason, 'incorrect header check')
-    assert.equal(bad.outputUsed, 0)
-    malformed.close()
+    // 0x0000 is divisible by 31 but has method zero. 0x7800 announces
+    // deflate with an incorrect FCHECK. The two headers fail distinct checks.
+    for (const [cmf, reason] of [[0, 'unknown compression method'], [0x78, 'incorrect header check']] as const) {
+      const malformed = kernel.open()
+      try {
+        const bad = malformed.step(Uint8Array.of(cmf, 0), output)
+        assert.equal(bad.status, 'data-error')
+        assert.equal(bad.nativeReason, reason)
+        assert.equal(bad.outputUsed, 0)
+        assert.ok(output.every((byte) => byte === 0xa5))
+      } finally { malformed.close() }
+    }
   })
 })
 

@@ -31,9 +31,14 @@ export class StorageArchives {
   private disposed = false
   private epoch = 0
   private unrecognized = new WeakSet<object>()
+  private recognizedPackages = new WeakSet<object>()
+  private signatures = new WeakMap<object, boolean>()
   constructor(private readonly reader: ArchiveReader | undefined,
     private readonly checkpoint: () => Promise<void>,
-    private readonly budget: () => { entries: number; units: number }) {}
+    private readonly budget: () => { entries: number; units: number },
+    private readonly discovered?: () => void) {}
+
+  recognized(resource: Resource): boolean { return this.recognizedPackages.has(resource.cacheToken ?? resource) }
 
   private check = async () => {
     if (this.disposed) throw new Error('Archive storage is disposed')
@@ -95,6 +100,7 @@ export class StorageArchives {
         const candidate = await this.reader.probeArchive?.(job.resource, this.check) ?? false
         await this.check()
         if (job.epoch !== this.epoch) throw new Error('Archive request was retired')
+        this.signatures.set(job.resource.cacheToken ?? job.resource, candidate)
         if (this.flights.get(key) === job) this.flights.delete(key)
         job.resolve(candidate)
         return
@@ -127,6 +133,10 @@ export class StorageArchives {
         if (this.flights.get(key) === job) {
           this.cache.set(key, { source: job.resource.cacheToken ?? job.resource, value })
           this.trim()
+          if (!this.recognized(job.resource)) {
+            this.recognizedPackages.add(job.resource.cacheToken ?? job.resource)
+            this.discovered?.()
+          }
         }
       } else {
         this.unrecognized.add(job.resource.cacheToken ?? job.resource)
@@ -162,9 +172,13 @@ export class StorageArchives {
     if (!this.reader?.probeArchive) return false
     const key = 'probe\0' + resource.name, existing = this.flights.get(key),
       token = resource.cacheToken ?? resource
+    const known = this.signatures.get(token)
+    if (known !== undefined) return known
     if (existing && (existing.resource.cacheToken ?? existing.resource) === token)
       return this.wait(existing.promise).then((value) => value === true)
     await this.check()
+    const completed = this.signatures.get(token)
+    if (completed !== undefined) return completed
     const raced = this.flights.get(key)
     if (raced && (raced.resource.cacheToken ?? raced.resource) === token)
       return this.wait(raced.promise).then((value) => value === true)
@@ -185,6 +199,8 @@ export class StorageArchives {
     for (const job of this.queue.splice(0)) job.reject(error)
     this.flights.clear(); this.cache.clear()
     this.unrecognized = new WeakSet()
+    this.recognizedPackages = new WeakSet()
+    this.signatures = new WeakMap()
   }
   dispose(): void {
     if (this.disposed) return
@@ -194,5 +210,7 @@ export class StorageArchives {
     for (const job of this.queue.splice(0)) job.reject(error)
     this.flights.clear(); this.cache.clear()
     this.unrecognized = new WeakSet()
+    this.recognizedPackages = new WeakSet()
+    this.signatures = new WeakMap()
   }
 }

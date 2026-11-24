@@ -8,6 +8,7 @@ import type { SaveFile } from '../engine/ports/saves.ts'
 import type { InputPacket, PhysicalPointerScreen } from '../engine/ports/input.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
+import type { CddaDisc } from '../engine/ports/cdda.ts'
 import type { ProjectSelection } from '../engine/storage/project.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
@@ -77,6 +78,7 @@ export class SessionClient {
     windowMoveSupported = false,
     geometry?: MessagePort,
     jpegPrecision?: ImageJpegPrecision,
+    cddaDiscs?: readonly CddaDisc[],
   ) {
     const request = {
       version: PROTOCOL_VERSION,
@@ -87,6 +89,7 @@ export class SessionClient {
       backend,
       debugMode,
       jpegPrecision,
+      cddaDiscs,
       gameId,
       audio,
       video,

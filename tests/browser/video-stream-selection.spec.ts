@@ -106,7 +106,41 @@ movie.originalWidth,movie.originalHeight,movie.numberOfVideoStream,movie.layer1=
       await capture(0)
       await evaluate(page, '(movie.close(),movie.enabledVideoStream+","+movie.numberOfVideoStream)', '-1,0')
       await expect(page.locator('#logs .error')).toHaveCount(0)
-    } catch (error) { failures.push(error) }
+    } catch (error) {
+      failures.push(error)
+      try {
+        const staged = page.locator('.video-parking video:not([data-video-id])')
+        if (await staged.count()) {
+          const decoded = await staged.first().evaluate((node) => {
+            const candidate = node as HTMLVideoElement
+            const pixels = (video: HTMLVideoElement) => {
+              if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return
+              const ctx = new OffscreenCanvas(video.videoWidth, video.videoHeight).getContext('2d')!
+              ctx.drawImage(video, 0, 0)
+              return ctx.getImageData(0, 0, video.videoWidth, video.videoHeight).data
+            }
+            const image = pixels(candidate)
+            return { clock: candidate.currentTime, submittedTime: candidate.dataset.presentedTime,
+              submittedFrames: candidate.dataset.presentedFrames, visibility: getComputedStyle(candidate).visibility,
+              parkingOpacity: getComputedStyle(candidate.closest('.video-parking')!).opacity,
+              comparisons: [...document.querySelectorAll<HTMLVideoElement>('video[data-video-id]')].map((video) => {
+                const other = pixels(video)
+                let differences: number | null = null
+                if (image && other && video.videoWidth === candidate.videoWidth && video.videoHeight === candidate.videoHeight) {
+                  differences = 0
+                  for (let i = 0; i < image.length; i++) if (image[i] !== other[i]) differences++
+                }
+                return { id: video.dataset.videoId, clock: video.currentTime, width: video.videoWidth,
+                  height: video.videoHeight, differentChannels: differences }
+              }) }
+          })
+          await info.attach('parked-decoder-at-failure', { body: JSON.stringify(decoded), contentType: 'application/json' })
+          // The assertion above keeps its original 12 s limit. Let the active
+          // transaction record its own 15 s timeout/rollback before teardown.
+          await staged.first().waitFor({ state: 'detached', timeout: 17000 })
+        }
+      } catch (diagnostic) { failures.push(diagnostic) }
+    }
     try { await info.attach('video-stream-selection', { contentType: 'application/json', body: JSON.stringify({
       backend, binary, container, mode, readings, media: await observeVideoMedia(page), logs: await page.locator('#logs').innerText(),
     }) }) } catch (error) { failures.push(error) }

@@ -1,4 +1,5 @@
 import type { ByteSource } from './storage.ts'
+import type { CddaPcmTrack } from './cdda.ts'
 export type SoundKind = 'wave' | 'midi' | 'cdda'
 export interface AudioInfo {
   sampleRate: number
@@ -141,6 +142,8 @@ export type AudioCommand =
       id: number
       kind: SoundKind
       source: ByteSource
+      /** Local imported-disc selection; worklets receive only relative PCM. */
+      cdda?: CddaPcmTrack
       bufferedBytes: number
       /** Backend retires the lease after actual decoder/read cleanup. */
       releaseSource?: () => void

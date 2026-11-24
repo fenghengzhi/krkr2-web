@@ -40,5 +40,12 @@ class MIDISoundBuffer extends __SoundBase {
 MIDISoundBuffer.midiOut=__host("Sound.global","midiOutMethod");
 class CDDASoundBuffer extends __SoundBase {
   function CDDASoundBuffer(owner){super.__SoundBase("cdda",owner);}
+  function open(name){
+    var storage=string(name),ticket=__soundRun("prepareCdda",[storage]);
+    if(ticket===void){super.open(storage);return;}
+    if(ticket==-1){__soundRun("unload",[]);__soundRun("invalidCddaDrive",[]);return;}
+    __soundRun("stop",[]);__soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unloadCdda",[ticket]);__clearSoundLabels();
+    __soundRun("openCdda",[ticket]);
+  }
 }
 `

@@ -13,7 +13,8 @@ import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
 import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
-export const PROTOCOL_VERSION = 43
+import type { CddaDisc } from '../engine/ports/cdda.ts'
+export const PROTOCOL_VERSION = 44
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
   readonly tree: DroppedTree<Blob>
@@ -42,6 +43,8 @@ export interface InitializeRequest {
   dataPath?: string
   /** Optional startup-only -jpegdec setting; omitted differs from explicit normal. */
   jpegPrecision?: ImageJpegPrecision
+  /** Explicit imported-disc bindings; omitted discovers one project CUE. */
+  cddaDiscs?: readonly CddaDisc[]
   /** Immutable page/embedding palette, validated again before Worker resources are created. */
   systemColors?: readonly number[]
   /** Player-local CSS geometry, sampled before its Worker is initialized. */

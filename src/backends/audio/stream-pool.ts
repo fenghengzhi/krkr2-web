@@ -1,6 +1,7 @@
 import type { AudioCommand, MixerCommand, PcmReadRequest, StreamingPcmAsset } from '../../engine/ports/audio.ts'
 import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { openPortablePcmSource, type PcmSource } from './pcm-source.ts'
+import { openCddaPcmSource } from '../../formats/audio/cdda-source.ts'
 
 type OpenSource = Extract<AudioCommand, { op: 'openSource' }>
 type StreamData = Extract<MixerCommand, { op: 'streamData' }>
@@ -174,8 +175,9 @@ export class PcmStreamPool {
     this.preparing.set(record.id, record)
     try {
       await this.schedule(record, async () => {
-        const decoder = command.kind === 'midi' ? undefined
-          : await this.openSource(command.source, { checkpoint: () => this.assertCurrent(record), signal: record.abort.signal })
+        const options = { checkpoint: () => this.assertCurrent(record), signal: record.abort.signal },
+          decoder = command.cdda ? await openCddaPcmSource(command.source, command.cdda, options, this.openSource)
+            : command.kind === 'midi' ? undefined : await this.openSource(command.source, options)
         // Register even a late decoder so retirement closes its actual state.
         record.decoder = decoder
         this.assertCurrent(record)

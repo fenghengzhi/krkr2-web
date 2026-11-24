@@ -2,12 +2,9 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 import { observeStartup, attachStartup } from '../helpers/startup-observation.ts'
+import { kagIntroSource as source, kagIntroStateExpression as stateExpression,
+  kagIntroLayoutExpression, kagIntroLayoutFields } from '../helpers/kag-intro-observation.ts'
 
-const source = {
-  url: 'https://raw.githubusercontent.com/fenghengzhi/kirikiroid2-web/8b40dba4a18ec0a4429d6003d77eb8c3d3098821/tests/test_files/xp3/kag3_intro.xp3',
-  bytes: 908364,
-  sha256: 'b2efe3e6d871c8961c1e0e00070fd0e22a18cdb5cdbf8da4a3cb4e03b7abc46a',
-}
 let packageRequest: Promise<Buffer> | undefined
 function originalPackage(): Promise<Buffer> {
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted')
@@ -24,25 +21,20 @@ function originalPackage(): Promise<Buffer> {
 
 interface State {
   label: string; waiting: boolean; line: boolean; page: boolean
-  curLine: number; curPos: number; conductor: number; links: number; background: string; storage: string
+  curLine: number; curPos: number; conductor: number; links: number; background: string; storage: string; lastTag: string
 }
-const stateExpression = `(function(){
-  if(typeof kag=="undefined" || typeof kag.current=="undefined" || typeof kag.mainConductor=="undefined")return "pending";
-  var p=kag.fore.base.Anim_loadParams;
-  return [kag.currentLabel,int(kag.clickWaiting),int(kag.lineBreak.visible),int(kag.pageBreak.visible),
-    kag.conductor.curLine,kag.conductor.curPos,kag.conductor.status,kag.current.numLinks,
-    string(f.bg),p===void?"":p.storage].join("|");
-})()`
 
 for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: original Introduction package completes its first route with bookmark and refresh restoration`, async ({ page }, info) => {
     test.setTimeout(180000)
     const errors: string[] = [], failures: unknown[] = [], steps: string[] = [], observations: unknown[] = [], inputs: unknown[] = []
-    let evaluation = 0, loaded = false, exited = false
+    let evaluation = 0, loaded = false, exited = false, previousState = '', waitObservations = 0
     const evidence: Record<string, unknown> = {
       source, backend, browser: info.project.name, steps, observations, inputs, pageErrors: errors,
       scope: 'Runs the pinned Introduction to Kirikiri and KAG distribution sample through its original menu, page waits, bookmark methods and Exit link. Imports one unchanged XP3 and executes its original source scripts with the selected WASM backend.',
       importedFiles: ['kag3_intro.xp3'], originalScenarioUnmodified: true,
+      layoutFields: kagIntroLayoutFields,
+      waitEvidence: 'lastTagName is the original Conductor field also consulted by MainWindow.showPageBreakAndClear; automatic pagination is recorded but never accepted as an explicit [p] reading checkpoint.',
     }
     page.on('pageerror', (error) => errors.push(error.message))
     await observeStartup(page)
@@ -58,11 +50,28 @@ for (const backend of ['asyncify', 'jspi'])
     const state = async (): Promise<State | undefined> => {
       const value = await read(stateExpression)
       if (value === 'pending') return undefined
-      const [label, waiting, line, pageWait, curLine, curPos, conductor, links, background, storage] = value.split('|')
-      expect(value.split('|')).toHaveLength(10)
-      return { label: label!, waiting: waiting === '1', line: line === '1', page: pageWait === '1',
+      const [label, waiting, line, pageWait, curLine, curPos, conductor, links, background, storage, lastTag] = value.split('|')
+      expect(value.split('|')).toHaveLength(11)
+      const result = { label: label!, waiting: waiting === '1', line: line === '1', page: pageWait === '1',
         curLine: Number(curLine), curPos: Number(curPos), conductor: Number(conductor), links: Number(links),
-        background: background!, storage: storage! }
+        background: background!, storage: storage!, lastTag: lastTag! }
+      // Retain the first blocked wait as well as successful checkpoints. Old
+      // evidence had no observations when the initial menu itself paginated.
+      if (value !== previousState && waitObservations < 96 && (result.waiting || result.conductor === 0)) {
+        previousState = value
+        waitObservations++
+        const observation: Record<string, unknown> = { stage: 'observed-wait', state: result,
+          waitKind: result.page ? result.lastTag === 'p' ? 'explicit-p' : 'automatic-page'
+            : result.line ? result.lastTag === 'l' ? 'explicit-l' : 'other-line' : 'choice' }
+        observations.push(observation)
+        // A diagnostic read must not replace the route's primary assertion.
+        try {
+          const layout = (await read(kagIntroLayoutExpression)).split('|')
+          expect(layout).toHaveLength(kagIntroLayoutFields.length)
+          observation.layout = Object.fromEntries(kagIntroLayoutFields.map((key, index) => [key, layout[index]]))
+        } catch (error) { observation.layoutError = String(error) }
+      }
+      return result
     }
     const at = async (label: string, kind: 'line' | 'page' | 'choice', changedFrom?: State): Promise<State> => {
       let observed: State | undefined
@@ -72,7 +81,7 @@ for (const backend of ['asyncify', 'jspi'])
         if (changedFrom && observed.curLine === changedFrom.curLine && observed.curPos === changedFrom.curPos &&
             observed.label === changedFrom.label) return false
         return kind === 'choice' ? observed.conductor === 0 && observed.links > 0
-          : observed.waiting && observed[kind]
+          : observed.waiting && observed[kind] && observed.lastTag === (kind === 'line' ? 'l' : 'p')
       }, { timeout: 15000 }).toBe(true)
       expect(errors).toEqual([])
       await expect(page.locator('#logs .error')).toHaveCount(0)

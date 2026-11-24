@@ -65,7 +65,7 @@ interface ImageScheduler {
 export class ImageLoader {
   private readonly cache: ProcessedImageCache
   constructor(
-    private readonly find: (name: string) => Resource | undefined | Promise<Resource | undefined>,
+    private readonly find: (name: string, optionalImage?: boolean) => Resource | undefined | Promise<Resource | undefined>,
     private readonly decode: (bytes: Uint8Array, selection: ImageDecodeSelection, progress?: ImageDecodeProgress) => Promise<DecodedImage>,
     private readonly finish: <T>(work: Generator<void, T>) => Promise<T>,
     private readonly scheduler: ImageScheduler,
@@ -140,9 +140,9 @@ export class ImageLoader {
       index = base.lastIndexOf('.')
     return index < 0 ? '' : base.slice(index).replace(/[A-Z]/g, (letter) => letter.toLowerCase())
   }
-  private async lookup(name: string, observations?: ProcessedImageObservations): Promise<Resource | undefined> {
+  private async lookup(name: string, observations?: ProcessedImageObservations, optionalImage = false): Promise<Resource | undefined> {
     this.scheduler.check()
-    const resource = await this.find(name)
+    const resource = await this.find(name, optionalImage)
     this.scheduler.check()
     observations?.observe(name, resource)
     return resource
@@ -179,12 +179,12 @@ export class ImageLoader {
     const ext = this.extension(name),
       stem = ext ? name.slice(0, -ext.length) : name
     if (ext && preferExtension) {
-      const resource = await this.lookup(stem + suffix + ext, observations)
+      const resource = await this.lookup(stem + suffix + ext, observations, true)
       if (resource) return { resource, format: handlers[ext]!, requestedName: stem + suffix + ext }
     }
     // Companions use registered extensions, and can come from later auto paths.
     for (const extension of imageExtensions) {
-      const resource = await this.lookup(stem + suffix + extension, observations)
+      const resource = await this.lookup(stem + suffix + extension, observations, true)
       if (resource) return { resource, format: handlers[extension]!, requestedName: stem + suffix + extension }
     }
     return undefined

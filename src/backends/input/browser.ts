@@ -108,6 +108,8 @@ export interface BrowserInputHooks {
   deactivate(pageBlur: boolean, nextTarget: EventTarget | null): void
   keyboard(event?: KeyboardEvent): boolean
   popupHidePosted?(event: KeyboardEvent): boolean
+  /** A live popup covering this surface is not a physical pointer departure. */
+  menuCover?(target: EventTarget | null): boolean
   mouse(type: 'down' | 'move' | 'up', buttons: number): boolean
 }
 /** Retained by the coordinator across replacement surfaces of one Window. */
@@ -679,6 +681,11 @@ export class BrowserInput {
   }
   private leave(event: MouseEvent): void {
     if (this.suspended || this.disposed || this.hostMoving) return
+    // Inserting this Window's page-owned popup over a stationary pointer emits
+    // mouseleave. Keep the latest script cursor through that presentation-only
+    // change; actual pointer events over the popup are observed separately by
+    // the coordinator, including while the original TJS callback is blocked.
+    if (this.menuActive && this.shared?.menuCover?.(event.relatedTarget)) return
     const point = this.point(event.clientX, event.clientY), screen = this.screenEvent(event)
     this.physicalCursor = undefined
     // Like movement, a real departure is observed before its callback waits on

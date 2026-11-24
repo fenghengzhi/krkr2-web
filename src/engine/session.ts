@@ -31,6 +31,8 @@ import {
 import { StorageResolver } from './storage/resolver.ts'
 import { DropStorage } from './storage/drop.ts'
 import { copyGameProject, type GameProject } from './storage/project.ts'
+import { CddaDiscs } from './storage/cdda.ts'
+import { copyCddaDiscs, type CddaDisc } from './ports/cdda.ts'
 import {
   chopStorageExt,
   extractStorageExt,
@@ -239,6 +241,8 @@ interface WindowMouseKeys {
   move: { x: number; y: number; paintBoxPoint: { x: number; y: number } }
 }
 export interface SessionDependencies {
+  /** Imported virtual CDs. Omission discovers a unique project CUE as D:. */
+  cddaDiscs?: readonly CddaDisc[]
   project?: GameProject
   archives?: ArchiveReader
   /** The page implements the matching request/reply presentation protocol. */
@@ -320,8 +324,9 @@ export class EngineSession {
   private readonly storage: StorageResolver
   private readonly dropped: DropStorage
   private readonly project?: GameProject
+  private readonly cddaDiscs: CddaDiscs
   private readonly images = new ImageLoader(
-    (name) => this.findResource(name),
+    (name, optionalImage) => this.findResource(name, optionalImage),
     (bytes, selection, progress) => decodeSelectedImage(bytes, selection, {
       finish: (work) => this.finishImageGraphics(work),
       inflate: (compressed, length) => this.deps.inflateImage(compressed, length),
@@ -516,6 +521,7 @@ export class EngineSession {
       this.applicationActivation = { ...deps.application }
     }
     this.project = copyGameProject(deps.project)
+    const cddaDiscs = copyCddaDiscs(deps.cddaDiscs)
     // Reject invalid configuration before clocks or subscribed host resources
     // are consulted. A failed constructor has no disposal owner yet.
     this.systemColors = new SystemColors(deps.systemColors)
@@ -537,6 +543,27 @@ export class EngineSession {
           archiveSteps = 0; archiveYieldAt = deps.now() + 8
         }
       })
+    this.cddaDiscs = new CddaDiscs({
+      currentDirectory: this.project?.directory ?? '',
+      exists: async (name) => {
+        const overlay = (candidate: string) => this.saves.resource(candidate)
+        if (this.storage.lookup(name, overlay)) return true
+        // A numeric existing file wins over track syntax. This check searches
+        // its actual current path and explicitly registered AutoPaths only;
+        // it must not probe unrelated loose audio as possible archives.
+        for (const candidate of this.storage.candidates(name))
+          if (await this.storage.findAsync(candidate, overlay)) return true
+        return false
+      },
+      exact: (name) => this.storage.findAsync(name, (candidate) => this.saves.resource(candidate)),
+      read: async (resource) => {
+        await this.control.wait(); this.control.check()
+        const bytes = await resource.read()
+        this.control.check(); return bytes
+      },
+      checkpoint: async () => { await this.control.wait(); this.control.check() },
+      cues: () => this.discoverCddaCues(),
+    }, cddaDiscs)
     this.windowGeometry = deps.windowGeometry ?? new HeadlessWindowGeometry()
     this.detachGeometry = this.windowGeometry.subscribe((observation) => this.observeWindowScroll(observation))
     this.layers = new LayerTree(this.systemColors)
@@ -807,6 +834,7 @@ export class EngineSession {
           if (!this.control.cancelled) this.fail(error)
         },
         { now: this.deps.now, schedule: this.deps.schedule },
+        this.cddaDiscs,
         (source) => this.systemEvents!.cancelSource(source),
         {
           resolve: (name) => this.resolveResource(name),
@@ -4085,15 +4113,36 @@ export class EngineSession {
     try { return parseTextWriterMode(mode) }
     catch (error) { throw mapTextStreamError(error, name) }
   }
+  private async discoverCddaCues(): Promise<string[]> {
+    const roots = [...new Set(this.project ? [this.project.directory, this.project.executableDirectory] : [''])],
+      found = new Set<string>(),
+      overlays = this.saves.list().map((file) => this.saves.resource(file.name)!)
+    // Enter only the selected project's package, if any. Listing a package
+    // does not probe member payloads. Loose resource paths already contain all
+    // their directory metadata, so recursive file/header probing is needless.
+    if (this.project?.directory.includes('>')) {
+      await this.control.wait(); this.control.check()
+      await this.storage.listDirectory(this.project.directory, overlays)
+    }
+    let count = 0
+    for (const resource of [...this.storage.knownResources(), ...overlays]) {
+      const name = resource.name
+      if (!resource.aliasOf && /\.cue$/i.test(name) && !name.startsWith('.krkr-drop-') && roots.some((root) => name.startsWith(root))) found.add(name)
+      if (found.size > 1) return [...found]
+      if (++count % 4096 === 0) { await this.deps.yieldToHost(); this.control.check() }
+    }
+    this.control.check()
+    return [...found]
+  }
   private async resolveResource(name: string, missing: TvpMessageId = 'TVPCannotFindStorage'): Promise<Resource> {
     const resource = await this.findResource(name)
     if (!resource) throw new TvpError(missing, [name], `Resource not found: ${name}`)
     return resource
   }
-  private async findResource(name: string): Promise<Resource | undefined> {
+  private async findResource(name: string, optionalImage = false): Promise<Resource | undefined> {
     this.materializeLogs()
     return this.storage.lookupAsync(name, (candidate) => this.saves.resource(candidate),
-      this.saves.list().map((file) => this.saves.resource(file.name)!))
+      this.saves.list().map((file) => this.saves.resource(file.name)!), optionalImage ? 'identified' : 'all')
   }
   private async resourceExists(name: string): Promise<boolean> {
     return !!await this.findResource(name)

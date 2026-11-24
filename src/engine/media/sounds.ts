@@ -26,6 +26,7 @@ import type { Resource } from '../ports/storage.ts'
 import { AudioResourceSources, type AudioSourceLease } from '../storage/audio-sources.ts'
 import type { EventClock } from '../scheduler/events.ts'
 import { MidiOutputExecutor } from './midi-output.ts'
+import { CddaDiscs, InvalidCddaDrive, openCddaSelection, type CddaSelection } from '../storage/cdda.ts'
 interface Sound {
   id: number
   kind: SoundKind
@@ -37,6 +38,8 @@ interface Sound {
   version: number
   labels: ScriptValue
   filters?: PhaseVocoderConnection
+  cdda?: CddaSelection
+  preparedCdda?: { token: number; selection: CddaSelection }
 }
 type Callback = { name: string; args: ScriptValue[] }
 export class SoundService {
@@ -45,6 +48,7 @@ export class SoundService {
   private cancelling?: Promise<void>
   private readonly filters: PhaseVocoderService
   private nextId = 1
+  private nextCddaToken = 1
   private buffers = new Map<number, Sound>()
   private unsubscribe?: () => void
   private globalVolume = 100000
@@ -66,6 +70,7 @@ export class SoundService {
     ) => Promise<void>,
     private readonly error: (error: unknown) => void,
     midiClock: EventClock,
+    private readonly cddaDiscs: CddaDiscs,
     private readonly cancelQueued: (source: object) => void = () => {},
     private readonly resourceSource?: {
       resolve(name: string): Resource | Promise<Resource>
@@ -379,7 +384,33 @@ export class SoundService {
         })
       }
     }
-    if (method === 'unload') {
+    if (method === 'prepareCdda') {
+      if (sound.kind !== 'cdda') throw new Error('Invalid CDDA owner')
+      sound.preparedCdda = undefined
+      const version = sound.version
+      let selection: CddaSelection | undefined
+      try { selection = await this.cddaDiscs.prepare(text(0)) }
+      catch (error) {
+        if (error instanceof InvalidCddaDrive) return this.result(-1n, [])
+        throw error
+      }
+      if (this.disposed || this.cancelling || this.buffers.get(sound.id) !== sound || sound.version !== version)
+        throw new Error('CDDA preparation lost its sound owner')
+      if (selection) {
+        if (!Number.isSafeInteger(this.nextCddaToken)) throw new Error('CDDA preparation identity exhausted')
+        const token = this.nextCddaToken++
+        sound.preparedCdda = { token, selection }; value = BigInt(token)
+      }
+    } else if (method === 'invalidCddaDrive') {
+      if (sound.kind !== 'cdda') throw new Error('Invalid CDDA owner')
+      throw new TvpError('TVPInvalidCDDADrive')
+    } else if (method === 'unload' || method === 'unloadCdda') {
+      let keepStopped = false
+      if (method === 'unloadCdda') {
+        if (sound.kind !== 'cdda' || !sound.preparedCdda || sound.preparedCdda.token !== numeric(0))
+          throw new Error('CDDA prepared track is stale')
+        keepStopped = sound.cdda?.drive === sound.preparedCdda.selection.drive
+      }
       const previous = sound.snapshot.status
       this.cancelEvents(sound)
       if (sound.resourceRequested) await this.voiceCommand(sound, { op: 'close', id: sound.id })
@@ -387,10 +418,11 @@ export class SoundService {
       sound.filters = undefined
       sound.resourceRequested = false
       sound.ready = false
+      sound.cdda = undefined
       sound.labels = scriptRecord({})
       sound.snapshot = {
         ...sound.snapshot,
-        status: 'unload',
+        status: keepStopped ? 'stop' : 'unload',
         epoch: 0,
         position: 0,
         paused: false,
@@ -402,11 +434,26 @@ export class SoundService {
         fading: false,
         flags: Array(16).fill(0),
       }
-      if (previous !== 'unload') callbacks.push({ name: 'onStatusChanged', args: ['unload'] })
-    } else if (method === 'open') {
+      if (previous !== sound.snapshot.status) callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
+    } else if (method === 'open' || method === 'openCdda') {
+      let selected: CddaSelection | undefined
+      if (method === 'openCdda') {
+        if (sound.kind !== 'cdda' || !sound.preparedCdda || sound.preparedCdda.token !== numeric(0))
+          throw new Error('CDDA prepared track is stale')
+        selected = sound.preparedCdda.selection
+      }
+      sound.preparedCdda = undefined
+      sound.cdda = selected
       this.cancelEvents(sound)
-      const name = text(0),
+      const name = selected?.cue ?? text(0),
         previous = sound.snapshot.status
+      if (selected && !selected.parts) {
+        // Native open records even an absent track; the device rejects play.
+        // Do not invent a platform-specific MCI error string for a Web disc.
+        sound.snapshot.status = 'stop'; sound.ready = false
+        if (previous !== 'stop') callbacks.push({ name: 'onStatusChanged', args: ['stop'] })
+        return this.result(undefined, callbacks)
+      }
       if (sound.filters) throw new Error('Sound must unload before opening a new stream')
       if (sound.kind === 'wave') {
         if (!isScriptObject(args[3])) throw new Error('WaveSoundBuffer filters must be an Array')
@@ -417,7 +464,7 @@ export class SoundService {
       try {
         const sli = name + '.sli'
         loops = emptyLoops()
-        if (await this.exists(sli)) {
+        if (!selected && await this.exists(sli)) {
           const bytes = await this.read(sli)
           try { loops = parseSliBytes(bytes) }
           catch (error) {
@@ -426,7 +473,15 @@ export class SoundService {
             throw error
           }
         }
-        if (sound.kind === 'wave' && this.backend?.streaming && this.sources && this.resourceSource) {
+        if (selected) {
+          if (!this.backend?.streaming || !this.sources) throw new Error('Virtual CDDA requires a streaming audio backend')
+          const track = await openCddaSelection(selected, this.sources,
+              () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound && sound.cdda === selected)
+          sourceLease = track
+          await apply({ op: 'openSource', id: sound.id, kind: sound.kind,
+            source: track.source, cdda: track.cdda, bufferedBytes: track.bufferedBytes,
+            releaseSource: track.release, loops, settings: sound.snapshot })
+        } else if ((sound.kind === 'wave' || sound.kind === 'cdda') && this.backend?.streaming && this.sources && this.resourceSource) {
           sourceLease = await this.sources.open(await this.resourceSource.resolve(name),
             () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound)
           await apply({ op: 'openSource', id: sound.id, kind: sound.kind,
@@ -491,6 +546,8 @@ export class SoundService {
       if (sound.snapshot.status !== previous)
         callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
     } else if (method === 'play' || method === 'stop') {
+      if (method === 'play' && sound.cdda && !sound.cdda.parts)
+        throw new Error(`Imported CDDA track ${sound.cdda.track} is absent or is a data track`)
       const previous = sound.snapshot.status
       if (sound.ready) await apply({ op: method, id: sound.id })
       if (sound.snapshot.status !== previous) {

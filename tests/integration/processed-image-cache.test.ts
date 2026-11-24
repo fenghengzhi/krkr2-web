@@ -4,7 +4,7 @@ import type { SessionDependencies } from '../../src/engine/session.ts'
 import { headless } from '../helpers/headless.ts'
 import { cacheBmp, processedCacheFiles, processedCacheSource } from '../helpers/processed-cache-fixtures.ts'
 import { imageFixture } from '../helpers/image-fixtures.ts'
-import { inflateImage } from '../../src/backends/files/blob-source.ts'
+import { createHeadlessImageInflaterProvider } from '../helpers/image-zlib.ts'
 
 async function using(binary: boolean, run: (f: Awaited<ReturnType<typeof headless>>, reads: Map<string, number>) => Promise<void>,
   overrides: Partial<SessionDependencies> = {}, extra: Record<string, string | Uint8Array> = {}) {
@@ -169,6 +169,7 @@ for (const binary of [false, true]) {
   test(`${mode}: a replaced PNG cannot refill the processed cache after its paused decoder settles`, { timeout: 60000 }, async () => {
     let enter!: () => void, release!: () => void, held = false
     const entered = new Promise<void>((done) => { enter = done }), gate = new Promise<void>((done) => { release = done })
+    const inflater = createHeadlessImageInflaterProvider()
     try {
       await using(binary, async (f) => {
         const pending = f.session.evaluate('cacheColor("pending.png")').then(
@@ -186,9 +187,12 @@ for (const binary of [false, true]) {
           assert.equal(await f.session.evaluate('cacheColor("pending.png")'), '0')
           assert.equal(f.session.snapshot().imageCacheEntries, 1)
         } finally { release() }
-      }, { async inflateImage(bytes, length) {
-        if (!held) { held = true; enter(); await gate }
-        return inflateImage(bytes, length)
+      }, { imageInflater: {
+        async open(bytes, length) {
+          if (!held) { held = true; enter(); await gate }
+          return inflater.open(bytes, length)
+        },
+        dispose() { inflater.dispose() },
       } }, { 'pending.png': imageFixture('main.png') })
     } finally { release() }
   })

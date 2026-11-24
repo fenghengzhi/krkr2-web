@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 124 批新增 17 个 Node 测试和每个浏览器 4 个测试，覆盖 CUE 选轨、循环、关闭与图像资源查找。Windows 作业另保存原版介绍程序的首次菜单或自动分页观察，浏览器继续验收其两条交互路线。影片切轨失败时，测试另存暂存解码器与各参考视频的逐通道差异，以区分画面解码和提交时机。[124 验收记录](decisions/124-kag-layout-storage-and-cdda.md)
+
 第 123 批在 Windows 的 `original-eri-reference` 产物中另保存 `kag` 和 `sli` 两个原版 SDK 项目的输入、原始观察与比较结果。KAG 有 30 个场景，SLI 有 8 个打开文件和读取标签的场景。Linux 的 `kag-bookmarks` 作业读取同一提交的构建和原书签，在 Session 和 Chromium 核对读档后返回原来的剧情。结果集中在 `original-kag-bookmark-comparison` 产物。[123 验收记录](decisions/123-kag-bookmarks-and-game-audio.md)
 
 第 122 批在 Windows 手工 ERI 对照组加入算术编码的独立输入，以及单独启动原版 SDK 的 MIDI 打开文件对照。该组的产物 `original-eri-reference` 保存 ERI 的逐像素差异、MIDI 的原始脚本观察和各自的 TAP 报告。上一批 46 个 ERI 对照均匹配，应用构建失败后跳过的 KAG 和浏览器作业仍待运行。[122 验收记录](decisions/122-eri-arithmetic-and-midi.md)
