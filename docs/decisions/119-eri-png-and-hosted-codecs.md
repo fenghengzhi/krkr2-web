@@ -29,3 +29,7 @@ ERINA-Library 1.0A 作者为 Leshade Entis、Entis-soft。发布文件中附有�
 本批为这 95 份缺件安排同仓一次性归档。托管作业按已冻结的 ID 清单直接读取，校验 ZIP 的大小和 SHA-256，逐个记录日志结果和未取得项。仅修改回收清单的推送触发该流程。归档结果与产品验证分别记录。[回收请求](../../.github/evidence-recovery/119-request.json)
 
 PNG／JPEG 内核、JPEG 输入和各自参考作业均已拆出主 TJS 编译路径。主构建和差分作业下载同一份内核产物。PNG 低位与透明度的 8 个 Node 定义单独执行，在常规 Node 套件中计数一次。本批共新增 24 个常规 Node 定义、每个浏览器 4 个定义及 11 个独立 SDK 对照，全部等待托管结果。[完整工作流](../../.github/workflows/test.yml)
+
+## 批次交接
+
+实现提交 `7670f09f7c637a41cb8a86b21d7ab0cdb4d7ae2a` 的 35 个文件已推送至 `codex/migrated-window-attention`。一次读取 GitHub 公开 Actions 页面，按分支、完整提交和工作流路径识别到产品验证与历史回收，两者均为运行中。原始页面与匹配记录保存在 `out/verification/github-actions/119-initial-7670f09f7c637a41cb8a86b21d7ab0cdb4d7ae2a/`。本机仅检查源码及历史原件，后续批次再取回两个运行的作业、日志和结果。[全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45473097908) · [历史回收](https://github.com/fenghengzhi/krkr2-web/actions/runs/45473098039)

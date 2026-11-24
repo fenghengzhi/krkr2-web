@@ -1,5 +1,7 @@
 # 当前实现范围
 
+119 实现提交为 `7670f09f7c637a41cb8a86b21d7ab0cdb4d7ae2a`。全套验证首次登记为运行中，尚无本批通过结论。[Actions 45473097908](https://github.com/fenghengzhi/krkr2-web/actions/runs/45473097908)
+
 第 119 批增加 8 位 ERI `ImageFrm` v2 的 RL-MTF-G 解码，覆盖无 alpha 调色板图、灰度图、正负高度及伴随遮罩。真彩色 ERI 和其他压缩架构仍待实现。选定格式的 PNG 加载已按原库区分实际解码用透明数据和成功登记的 tRNS 信息。新实现尚待托管核验。[实现与限制](../decisions/119-eri-png-and-hosted-codecs.md)
 
 第 118 批已提交至 `0ff9f1080ac82bb37258ddb96aa6045b40e284e0`。首次登记时托管运行已开始，尚无结论。下次批量回收结果。[Actions 45469186113](https://github.com/fenghengzhi/krkr2-web/actions/runs/45469186113)
