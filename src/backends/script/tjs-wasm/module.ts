@@ -70,6 +70,9 @@ export interface WasmManifest {
     nativeMessages?: number
     /** Original raw-octet MIDI method argument/conversion policy. */
     nativeMidi?: number
+    /** Optional original Window.postInputEvent argument reader; absent kernels
+     * retain their explicitly selected legacy script wrapper. */
+    nativeWindowInput?: number
     nativeStorages?: number
     /** Distinct, suspendable text writer preflight before native allocation. */
     nativeTextStreams?: number

@@ -991,6 +991,26 @@ jobs:
           node --import tsx --test --test-reporter=tap tests/conformance/eri-native.test.ts tests/conformance/eri-truecolor.test.ts tests/conformance/eri-huffman.test.ts tests/conformance/eri-arithmetic.test.ts tests/conformance/eri-dct.test.ts |
             Tee-Object -FilePath out/verification/native-eri/conformance.tap
           exit $LASTEXITCODE
+      - name: Prepare Window posted key and mouse observations
+        id: prepare_window_input
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
+        run: node --import tsx tests/probes/window-post-input-sdk.ts prepare
+      - name: Deliver posted input through the original game window
+        if: ${{ !cancelled() && steps.prepare_window_input.outcome == 'success' }}
+        run: ./tests/probes/original-eri.ps1 -Project window-input
+      - name: Compare posted key and mouse observations
+        if: ${{ !cancelled() && steps.prepare_window_input.outcome == 'success' }}
+        run: node --import tsx tests/probes/window-post-input-sdk.ts compare
+      - name: Prepare original TJS decimal and saved-value controls
+        id: prepare_decimal
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
+        run: node --import tsx tests/probes/decimal-sdk.ts prepare
+      - name: Read game decimal constants on the original Windows engine
+        if: ${{ !cancelled() && steps.prepare_decimal.outcome == 'success' }}
+        run: ./tests/probes/original-eri.ps1 -Project decimal
+      - name: Compare the exact real numbers saved by the original SDK
+        if: ${{ !cancelled() && steps.prepare_decimal.outcome == 'success' }}
+        run: node --import tsx tests/probes/decimal-sdk.ts native
       - name: Prepare MIDI open controls for the original SDK
         id: prepare_midi
         if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
@@ -1066,7 +1086,7 @@ jobs:
           retention-days: 90
 
   kag-bookmarks:
-    name: Load the original SDK macro bookmark in the Web player
+    name: Compare original game bookmarks, decimal saves and DCT pixels in the Web player
     needs: [build, eri-reference]
     if: ${{ !cancelled() && !inputs.node-only && !inputs.runtime-only && needs.build.result == 'success' && needs.eri-reference.result != 'skipped' }}
     runs-on: ubuntu-24.04
@@ -1076,25 +1096,52 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/prepare-tests
+        id: prepare_sdk_consumers
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: original-eri-reference
           path: out/verification/native-eri
       - run: node --import tsx tests/probes/kag-sdk.ts web
+      - name: Read original saved decimal values in source and bytecode Web sessions
+        if: ${{ !cancelled() }}
+        run: node --import tsx tests/probes/decimal-sdk.ts web
+      - name: Install Chromium for the original SDK comparisons
+        id: sdk_chromium
+        if: ${{ !cancelled() && steps.prepare_sdk_consumers.outcome == 'success' }}
+        run: npx playwright install --with-deps chromium
       - name: Restore the SDK bookmark through the Chromium player
-        if: ${{ !cancelled() && hashFiles('out/verification/native-eri/kag/game/native-bookmark.tjs') != '' }}
+        if: ${{ !cancelled() && steps.sdk_chromium.outcome == 'success' && hashFiles('out/verification/native-eri/kag/game/native-bookmark.tjs') != '' }}
         env:
           KRKR_KAG_SDK_IMPORT: '1'
-        run: |
-          npx playwright install --with-deps chromium
-          npx playwright test tests/browser/kag-macro-bookmark.spec.ts --project=chromium --output=out/verification/kag-bookmark-browser
+        run: npx playwright test tests/browser/kag-macro-bookmark.spec.ts --project=chromium --output=out/verification/kag-bookmark-browser
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: original-kag-bookmark-comparison
           path: |
             out/verification/native-eri/kag
+            out/verification/native-eri/decimal
             out/verification/kag-bookmark-browser
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Fetch the same-commit Windows DCT input and original pixel observations
+        id: download_dct
+        if: ${{ !cancelled() }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: original-eri-dct-reference
+          path: out/verification/sdk-dct
+      - name: Display the author-encoded pictures in Chromium and compare original pixels
+        if: ${{ !cancelled() && steps.download_dct.outcome == 'success' && steps.sdk_chromium.outcome == 'success' }}
+        env:
+          KRKR_DCT_SDK_IMPORT: '1'
+        run: npx playwright test tests/browser/eri-sdk-pixels.spec.ts --project=chromium --output=out/verification/dct-browser
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && steps.download_dct.outcome == 'success' }}
+        with:
+          name: original-dct-browser-comparison
+          path: out/verification/dct-browser/
           if-no-files-found: error
           retention-days: 90
 

@@ -152,7 +152,7 @@ window.onKeyDown=function(key,shift){events.add("window:"+key+":"+shift);};
 a.onKeyDown=function(key,shift,process){events.add("layer:"+key+":"+System.getKeyState(key));};
 a.onKeyPress=function(key,process){events.add("text:"+key);};
 window.postInputEvent("onKeyDown",%[key:VK_A]);
-window.postInputEvent("onKeyPress",%[key:"中"]);
+window.postInputEvent("onKeyPress",%[key:0x92]);window.postInputEvent("onKeyPress",%[key:0x86]);
 events.add("returned");
 `,
   })

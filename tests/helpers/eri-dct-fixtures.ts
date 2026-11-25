@@ -13,6 +13,7 @@ const shapes: DctFixture[] = [
   { name: 'dct-444.eri', width: 19, height: 18, degree: 3, sampling: 0x40404 },
   { name: 'dct-422-alpha.eri', width: 18, height: 17, degree: 4, sampling: 0x40202, positive: true, alpha: true },
   { name: 'dct-411-ac.eri', width: 9, height: 5, degree: 5, sampling: 0x40101, ac: true },
+  { name: 'dct-422-gamma-chroma.eri', width: 17, height: 16, degree: 3, sampling: 0x40202, chromaAC: true },
   { name: 'dct-422-chroma.eri', width: 17, height: 16, degree: 3, sampling: 0x40202, chromaAC: true, huffman: true },
   { name: 'dct-inline-gamma.eri', width: 17, height: 9, degree: 3, sampling: 0x40101, ac: true, inline: true },
   { name: 'dct-inline.eri', width: 18, height: 9, degree: 3, sampling: 0x40101, ac: true, inline: true, huffman: true },

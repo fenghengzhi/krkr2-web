@@ -1,4 +1,5 @@
-export const windowClass = String.raw`
+/** Optional native argument policy is fixed by the loaded kernel at bootstrap. */
+export const windowClass = (nativeWindowInput = false): string => String.raw`
 function __krkrWindowInvalidate(window,id) {
   try {
     window.__windowClosing=true;
@@ -152,10 +153,15 @@ class Window {
   }
   function setMaskRegion(threshold=void) { __host("Window.setMaskRegion",__windowId,threshold===void?1:int(threshold)); }
   function removeMaskRegion() { __host("Window.removeMaskRegion",__windowId); }
-  function postInputEvent(name,params=null) {
+  function postInputEvent(args*) {
+    ${nativeWindowInput ? '__host("Window.postInputNative",__windowId,args*);' : String.raw`
+    // Explicit compatibility for an older kernel without the native argument
+    // reader. Bootstrap selects this branch from the actual kernel capability.
+    var name=args[0],params=args.count<2?null:args[1];
     if(name!="onKeyDown" && name!="onKeyUp" && name!="onKeyPress")throw new Exception("Unknown input event: "+name);
     if(params===null || params.key===void)throw new Exception("Input event requires key");
     __host("Window.postInput",__windowId,string(name),name=="onKeyPress"?string(params.key):int(params.key),int(params.shift));
+    `}
   }
   ${[
     ['onResize', ''],

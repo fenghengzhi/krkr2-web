@@ -2,6 +2,7 @@ import { test, expect, observeVideoFrames } from '../helpers/video-presentation-
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { evaluate } from '../helpers/browser-expression.ts'
+import { installVideoSeekRegistrations, observeVideoSeekRegistrations } from '../helpers/video-seek-registration.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
 for (const container of ['numbered-multitrack', 'numbered-fragmented']) {
@@ -10,6 +11,7 @@ for (const container of ['numbered-multitrack', 'numbered-fragmented']) {
     const errors: string[] = [], failures: unknown[] = [], readings: unknown[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     await observeVideoFrames(page)
+    await installVideoSeekRegistrations(page)
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)), 'JSPI unavailable')
     const source = String.raw`
@@ -69,6 +71,7 @@ Debug.message("clock-ready");
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
     try { await info.attach('public-video-clock', { body: JSON.stringify({ backend, binary, container, readings, errors,
+      seekRegistrations: await observeVideoSeekRegistrations(page),
       logs: await page.locator('#logs').innerText() }), contentType: 'application/json' }) }
     catch (error) { failures.push(error) }
     try {
@@ -88,6 +91,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
     const errors: string[] = [], failures: unknown[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     await observeVideoFrames(page)
+    await installVideoSeekRegistrations(page)
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)), 'JSPI unavailable')
     const source = String.raw`
@@ -138,6 +142,10 @@ variableMovie.open("variable.mp4");variableMovie.pause();Debug.message("variable
       }
       await info.attach('vfr-frame-seek', { body: JSON.stringify({ backend, binary, state }), contentType: 'application/json' })
       await expect(page.locator('#logs .error')).toHaveCount(0)
+    } catch (error) { failures.push(error) }
+    try {
+      await info.attach('vfr-seek-registrations', { body: JSON.stringify(await observeVideoSeekRegistrations(page)),
+        contentType: 'application/json' })
     } catch (error) { failures.push(error) }
     try {
       await info.attach('vfr-clock-log', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' })

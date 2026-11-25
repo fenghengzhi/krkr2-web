@@ -163,6 +163,7 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
   upgradeIdentity: HostObjectIdentity['upgradeIdentity']
   /** Version read from the loaded native TJS kernel, not an emulated SDK version. */
   readonly languageVersion?: string
+  readonly nativeWindowInput?: boolean
   /** Attach a native instance without retaining its owner. Its host operation
    * receives [identifier, owner] during native invalidation, before member deletion.
    * Optional private state is strongly owned until successful native invalidation

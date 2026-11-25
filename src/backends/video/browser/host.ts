@@ -19,7 +19,7 @@ import type { WebAudioHost } from '../../audio/web/host.ts'
 import type { CursorRasterLayer, CursorScene } from '../../input/cursor.ts'
 import { selectVideoTimeline } from '../../../formats/video/mp4.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
-import { waitForClockPresentation } from './clock-seek.ts'
+import { VideoSampleHistory, waitForClockPresentation } from './clock-seek.ts'
 import {
   createVideoMixingSurface,
   releaseVideoMixingSurface,
@@ -39,6 +39,8 @@ interface Movie {
   lastSelectedIndex: number
   presentedTime?: number
   presentedFrames?: number
+  /** Complete observed-sample history, owned and retired with this decoder. */
+  seenSamples: VideoSampleHistory
   switching?: VideoStage
   bytes: number
   settings: VideoSettings
@@ -503,14 +505,19 @@ export class WebVideoHost {
       movie.element.cancelVideoFrameCallback(callback)
     }
   }
+  private observePresentation(movie: Movie, metadata: VideoFrameCallbackMetadata): void {
+    movie.presentedTime = metadata.mediaTime * 1000
+    movie.presentedFrames = metadata.presentedFrames
+    if (movie.timeline)
+      movie.seenSamples.record(videoPresentedFrameAt(movie.timeline, movie.presentedTime))
+  }
   private arm(movie: Movie): void {
     if (movie.disposed || movie.switching || this.isPaused || movie.status !== 'play' || movie.callback !== undefined)
       return
     movie.callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
       movie.callback = undefined
       if (movie.disposed || movie.switching || this.isPaused || movie.seeking || movie.status !== 'play') return
-      movie.presentedTime = metadata.mediaTime * 1000
-      movie.presentedFrames = metadata.presentedFrames
+      this.observePresentation(movie, metadata)
       try {
         if (this.advanceClock(movie, false)) return
         const s = movie.settings
@@ -688,10 +695,10 @@ export class WebVideoHost {
     }
     await waitForClockPresentation(movie.element, position, movie.presentedFrames ?? 0,
       movie.abort.signal, current, seek,
-      (expired) => this.timeouts.start(15000, expired), (metadata) => {
-        movie.presentedTime = metadata.mediaTime * 1000
-        movie.presentedFrames = metadata.presentedFrames
-      })
+      (expired) => this.timeouts.start(15000, expired), (metadata) => this.observePresentation(movie, metadata),
+      movie.timeline && movie.presentedTime !== undefined && movie.seenSamples.available
+        ? { timeline: movie.timeline, previousTime: movie.presentedTime, seenSamples: movie.seenSamples }
+        : undefined)
   }
   private async seekPresented(movie: Movie, position: number, frameSeek = false): Promise<void> {
     if (frameSeek) {
@@ -729,9 +736,8 @@ export class WebVideoHost {
           callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
             callback = undefined
             if (settled) return
-            movie.presentedTime = metadata.mediaTime * 1000
-            movie.presentedFrames = metadata.presentedFrames
-            if (matches(movie.presentedTime)) { presented = true; complete() }
+            this.observePresentation(movie, metadata)
+            if (matches(metadata.mediaTime * 1000)) { presented = true; complete() }
             else { try { request() } catch (error) { done(error) } }
           })
         }
@@ -793,8 +799,7 @@ export class WebVideoHost {
           callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
             callback = undefined
             if (settled) return
-            movie.presentedTime = metadata.mediaTime * 1000
-            movie.presentedFrames = metadata.presentedFrames
+            this.observePresentation(movie, metadata)
             observations.push({ phase: 'presented', time: movie.presentedTime,
               position: movie.element.currentTime * 1000, seeking: movie.element.seeking,
               readyState: movie.element.readyState })
@@ -873,8 +878,7 @@ export class WebVideoHost {
       })
       try {
         callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
-          movie.presentedTime = metadata.mediaTime * 1000
-          movie.presentedFrames = metadata.presentedFrames
+          this.observePresentation(movie, metadata)
           presented = true
           complete()
         })
@@ -989,6 +993,7 @@ export class WebVideoHost {
         bytes: stage.source.size, lastSelectedIndex: selected, settings: { ...settings }, status: 'stop',
         timeline, mixerMetadata: stage.previous?.mixerMetadata,
         blocked: false, disposed: false, periodArmed: false, seeking: false,
+        seenSamples: new VideoSampleHistory(timeline?.times.length ?? 0),
         abort: stage.abort, audio }
       stage.movie = movie
       return movie
@@ -1323,6 +1328,7 @@ export class WebVideoHost {
   private disposeMovie(movie: Movie): void {
     if (movie.disposed) return
     movie.disposed = true
+    movie.seenSamples.dispose()
     movie.inFlight = undefined
     let primary: unknown,
       failed = false

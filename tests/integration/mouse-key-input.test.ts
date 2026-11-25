@@ -142,12 +142,13 @@ for (const binary of [false, true]) {
     assert(Object.values(f.session.inspectOwnership()).every((value) => value === 0))
   })
 
-  test(`${mode}: native key trapping selects the conversion Window and script-posted keys bypass mouse emulation`, { timeout: 60000 }, async () => {
+  test(`${mode}: native key trapping selects physical conversion while posted keys use their explicit Window Form`, { timeout: 60000 }, async () => {
     const f = await fixture(binary)
     try {
       await f.session.evaluate('win.postInputEvent("onKeyDown",%[key:VK_RETURN,shift:0])')
       await f.session.idle()
-      assert.equal(await f.session.evaluate('events.join("|")'), 'window:keyDown:13')
+      assert.equal(await f.session.evaluate('events.join("|")'), '',
+        'InternalKeyDown consumes a mouse key even without an in-client pointer')
       await f.session.evaluate('events.clear()')
       f.session.pointerState(20, 10, f.id, 1)
       const remapped = { windowId: f.id, x: -40, y: 15, scaleX: 1, scaleY: 1, pointerSequence: 1 }

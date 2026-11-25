@@ -134,6 +134,7 @@ import { InputControllers } from './input/controllers.ts'
 import { InputService } from './input/service.ts'
 import { ObservedKeyState } from './input/key-state.ts'
 import { MouseKeyState, type MouseKeyAction } from './input/mouse-key.ts'
+import { PostedKeyBytes } from './input/posted-key.ts'
 import { inputBridge } from './tvp/input.ts'
 import type { InputPacket, InputView, VirtualCursor, PhysicalPointerScreen } from './ports/input.ts'
 import { SceneComposer } from './scene/composer.ts'
@@ -492,6 +493,7 @@ export class EngineSession {
   private readonly physicalPointerSequences = new Map<number, number>()
   private readonly virtualCursors = new Map<number, VirtualCursorState>()
   private readonly mouseKeys = new Map<number, WindowMouseKeys>()
+  private readonly postedKeyBytes = new PostedKeyBytes()
   private readonly windowRegions = new WindowRegions()
   private readonly windowRegionRequests = new Map<number, number>()
   private nextWindowRegionRequest = 1
@@ -991,6 +993,7 @@ export class EngineSession {
           this.physicalPointerSequences.delete(window.id)
           this.virtualCursors.delete(window.id)
           this.mouseKeys.delete(window.id)
+          this.postedKeyBytes.retire(window.id)
           this.windowRegionRequests.delete(window.id)
           this.windowRegions.replace(window.id, null)
           this.windowInputViews.delete(window.id)
@@ -1126,7 +1129,7 @@ export class EngineSession {
       this.discard(await this.runtime.execute(eventClasses, 'krkr2-web/events.tjs'))
       this.discard(await this.runtime.execute(kagClass, 'krkr2-web/kag.tjs'))
       this.discard(await this.runtime.execute(menuClass, 'krkr2-web/menus.tjs'))
-      this.discard(await this.runtime.execute(windowClass, 'krkr2-web/window.tjs'))
+      this.discard(await this.runtime.execute(windowClass(this.runtime.nativeWindowInput === true), 'krkr2-web/window.tjs'))
       this.discard(await this.runtime.execute(drawDeviceClass, 'krkr2-web/draw-device.tjs'))
       this.discard(await this.runtime.execute(inputBridge, 'krkr2-web/input.tjs'))
       this.discard(await this.runtime.execute(checkpointBridge, 'krkr2-web/checkpoints.tjs'))
@@ -2901,7 +2904,9 @@ export class EngineSession {
     if (packet.type === 'activate' || packet.type === 'down' || packet.type === 'keyDown')
       this.applicationActive = true
     // WindowForm posts popup input events before mouse down and before system
-    // key trapping/conversion. Script postInputEvent bypasses this Form path.
+    // key trapping/conversion. Script postInputEvent invokes InternalKeyDown
+    // directly: no OS system-key prelude/trap selection, but mouse-key
+    // conversion can itself create a real Form mouse-down prelude.
     if (packet.type === 'down' ||
         (packet.type === 'keyDown' && packet.systemKey && !packet.popupHidePosted))
       preludes.push(this.queuePopupHide(windowId, 1))
@@ -3053,6 +3058,31 @@ export class EngineSession {
         if (!this.control.cancelled) this.fail(error)
       })
       .finally(() => this.postedInputPending--)
+  }
+  private async postWindowInput(window: WindowRecord, name: string, code: number, shift: number): Promise<void> {
+    if (this.registeredWindow(window.id) !== window) return
+    const record = this.windowMouseKeys(window)
+    if (name === 'onKeyPress') {
+      const byte = code & 255
+      if (!byte || record.state.text(String.fromCharCode(byte))) return
+      const bytes = this.postedKeyBytes.push(window.id, byte)
+      if (!bytes) return
+      // CP932 is the Web platform choice, independent of Scripts.textEncoding.
+      // Explicit plain decoding avoids text-stream BOM/cipher interpretation.
+      const text = bytes.length === 1 && bytes[0]! < 128 ? String.fromCharCode(bytes[0]!)
+        : await this.deps.readText(bytes, '', 'shift_jis', 'plain')
+      await this.control.wait(); this.control.check()
+      if (this.registeredWindow(window.id) === window) this.postInput({ type: 'text', text }, window)
+      return
+    }
+    const down = name === 'onKeyDown', key = code & 65535,
+      point = this.currentVirtualCursor(window.id)?.view ?? this.windowPointers.get(window.id),
+      inside = !!point && point.x >= 0 && point.y >= 0 && point.x < window.state.viewportWidth && point.y < window.state.viewportHeight,
+      result = record.state.key(down, key, this.deps.now(), this.physicalKeys, inside)
+    if (result.consumed) this.observeAdmission(this.mouseKeyActions(window, result.actions))
+    else this.postInput({ type: down ? 'keyDown' : 'keyUp', key,
+      // OnKeyUp travels through VCL TShiftState; repeat/extended flags do not.
+      shift: down ? shift | 0 : shift & 127 }, window)
   }
   async exitFullScreen(windowId = this.windowId): Promise<void> {
     if (this.windowModals?.blocked(windowId)) return
@@ -4076,6 +4106,7 @@ export class EngineSession {
       this.windowPresentedVersions.clear()
       this.virtualCursors.clear()
       this.mouseKeys.clear()
+      this.postedKeyBytes.clear()
       this.windowRegions.clear()
       this.windowRegionRequests.clear()
       this.physicalPointerSequences.clear()
@@ -5203,6 +5234,9 @@ export class EngineSession {
         this.publishWindowRegion(window, null)
         break
       }
+      case 'Window.postInputNative':
+        await this.postWindowInput(this.windows!.get(number(0)), text(1), number(2), number(3))
+        break
       case 'Window.postInput': {
         const window = this.windows!.get(number(0)),
           name = text(1)

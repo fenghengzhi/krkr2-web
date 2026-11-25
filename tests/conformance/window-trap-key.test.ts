@@ -264,10 +264,10 @@ for (const binary of [false, true]) {
       `b.trapKey=true;function posted(){
         a.postInputEvent("onKeyDown",%[key:65]);
         a.postInputEvent("onKeyUp",%[key:65]);
-        a.postInputEvent("onKeyPress",%[key:"直"]);
+        a.postInputEvent("onKeyPress",%[key:0x92]);a.postInputEvent("onKeyPress",%[key:0xbc]);
         b.postInputEvent("onKeyDown",%[key:66]);
         b.postInputEvent("onKeyUp",%[key:66]);
-        b.postInputEvent("onKeyPress",%[key:"指"]);
+        b.postInputEvent("onKeyPress",%[key:0x8e]);b.postInputEvent("onKeyPress",%[key:0x77]);
       }`,
     )
     try {

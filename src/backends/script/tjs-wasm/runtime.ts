@@ -127,6 +127,11 @@ export class TjsWasmRuntime implements ScriptRuntime {
     const version = this.call('krkr_tjs_version') >>> 0
     return `${version >>> 24}.${(version >>> 16) & 0xff}.${version & 0xffff}`
   }
+  get nativeWindowInput(): boolean {
+    this.assertAlive()
+    return typeof this.module._krkr_window_input_version === 'function' &&
+      this.call('krkr_window_input_version') === 1
+  }
   private assertAlive(allowDisposing = false): void {
     if (this.disposed || (this.disposing && !allowDisposing))
       throw new Error('TJS runtime is disposed')

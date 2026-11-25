@@ -102,7 +102,7 @@ for (const backend of ['asyncify', 'jspi']) {
 
         await evaluate(
           page,
-          '(function(){a.postInputEvent("onKeyDown",%[key:90,shift:0]);a.postInputEvent("onKeyPress",%[key:"直"]);a.postInputEvent("onKeyUp",%[key:90,shift:0]);return 1;})()',
+          '(function(){a.postInputEvent("onKeyDown",%[key:90,shift:0]);a.postInputEvent("onKeyPress",%[key:0x92]);a.postInputEvent("onKeyPress",%[key:0xbc]);a.postInputEvent("onKeyUp",%[key:90,shift:0]);return 1;})()',
           '1',
         )
         await expect(page.getByText('trap-text:A:直', { exact: true })).toBeVisible()

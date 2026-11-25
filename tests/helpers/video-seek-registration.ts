@@ -3,7 +3,8 @@ import type { Page } from '@playwright/test'
 export interface VideoSeekRegistrations {
   events: { identity: number; event: 'request' | 'cancel' | 'frame' | 'seek'; at: number;
     pending: number; handle?: number; from?: number; target?: number; staged?: boolean;
-    presentationTime?: number; mediaTime?: number; presentedFrames?: number }[]
+    presentationTime?: number; mediaTime?: number; presentedFrames?: number;
+    callbackNow?: number; currentTime?: number; seeking?: boolean; readyState?: number }[]
   dropped: number
 }
 type ObservedWindow = Window & { videoSeekRegistrations(): VideoSeekRegistrations }
@@ -32,7 +33,8 @@ export async function installVideoSeekRegistrations(page: Page): Promise<void> {
       handle = request.call(this, (now, metadata) => {
         value.pending.delete(handle)
         record({ identity: value.identity, event: 'frame', handle, at: performance.now(), pending: value.pending.size,
-          presentationTime: metadata.presentationTime, mediaTime: metadata.mediaTime, presentedFrames: metadata.presentedFrames })
+          presentationTime: metadata.presentationTime, mediaTime: metadata.mediaTime, presentedFrames: metadata.presentedFrames,
+          callbackNow: now, currentTime: clock.get!.call(this) as number, seeking: this.seeking, readyState: this.readyState })
         callback(now, metadata)
       })
       value.pending.add(handle)

@@ -41,7 +41,8 @@ const codecs: TextCodecs = {
   },
 }
 export const readText = async (bytes: Uint8Array, mode = '', encoding?: string, format: 'tjs' | 'plain' = 'tjs') =>
-  format === 'plain' ? decodePlainText(bytes) : decodeTextStream(bytes, codecs, mode, encoding)
+  format === 'plain' ? encoding ? codecs.narrow(bytes, encoding) : decodePlainText(bytes)
+    : decodeTextStream(bytes, codecs, mode, encoding)
 export const writeText = (text: string, mode = '') => encodeTextStream(text, codecs, mode)
 export async function readScript(
   bytes: Uint8Array,

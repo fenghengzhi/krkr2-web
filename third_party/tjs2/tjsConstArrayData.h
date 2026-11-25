@@ -37,7 +37,7 @@ namespace TJS {
         std::map<tjs_int16, int> ShortHash;
         std::map<tjs_int32, int> IntegerHash;
         std::map<tjs_int64, int> LongHash;
-        std::map<double, int> DoubleHash;
+        std::map<tjs_uint64, int> DoubleHash;
         std::map<std::basic_string<tjs_char>, int> StringHash;
         // オクテット型の時はハッシュを使っていない
 

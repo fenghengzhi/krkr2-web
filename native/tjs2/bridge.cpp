@@ -683,6 +683,36 @@ public:
             if(result) *result = number;
             return TJS_S_OK;
         }
+        if(name == u"Window.postInputNative") {
+            // WindowIntf converts the name and optional object before the
+            // Form validates the event and reads its fields. Do this on the
+            // current TJS stack, retaining original dispatch statuses and
+            // exceptions from getters (including suspendable/reentrant ones).
+            if(count < 3) return TJS_E_BADPARAMCOUNT;
+            const ttstr event(*args[2]);
+            iTJSDispatch2* parameters = count >= 4 ? args[3]->AsObjectNoAddRef() : nullptr;
+            if(event != u"onKeyDown" && event != u"onKeyUp" && event != u"onKeyPress")
+                TJS_eTJSError(krkr::formatTvpMessage(u"TVPSpecifiedEventNameIsUnknown", &event, 1));
+            if(!parameters)
+                TJS_eTJSError(krkr::formatTvpMessage(u"TVPSpecifiedEventNeedsParameter", &event, 1));
+            auto field = [&](const tjs_char* key) -> tjs_uint32 {
+                tTJSVariant value;
+                if(TJS_FAILED(parameters->PropGet(0, key, nullptr, &value, parameters))) {
+                    const ttstr parts[] = { event, ttstr(key) };
+                    TJS_eTJSError(krkr::formatTvpMessage(u"TVPSpecifiedEventNeedsParameter2", parts, 2));
+                }
+                return static_cast<tjs_uint32>(static_cast<tjs_int>(value));
+            };
+            const auto key = field(u"key");
+            const auto shift = event == u"onKeyPress" ? 0u : field(u"shift");
+            tTJSVariant values[] = { *args[1], tTJSVariant(event),
+                tTJSVariant(static_cast<tjs_int64>(key)), tTJSVariant(static_cast<tjs_int64>(shift)) };
+            tTJSVariant* parametersOut[] = { &values[0], &values[1], &values[2], &values[3] };
+            std::unique_ptr<Reply> reply(dispatch_host(vm, name.c_str(), name.GetLen(), 4, parametersOut));
+            if(!reply) TJS_eTJSError(u"Host returned no response");
+            resolveReply(vm, *reply, result);
+            return TJS_S_OK;
+        }
         std::unique_ptr<Reply> reply(dispatch_host(vm, name.c_str(), name.GetLen(), count - 1, args + 1));
         if(!reply) TJS_eTJSError(u"Host returned no response");
         resolveReply(vm, *reply, result);
@@ -1811,6 +1841,7 @@ API int krkr_abi_version() { return 5; }
 API int krkr_random_source_version() { return 1; }
 API int krkr_native_messages_version() { return 3; }
 API int krkr_native_midi_version() { return 1; }
+API int krkr_window_input_version() { return 1; }
 // No VM entry, release drain or CleanupErrors scope: this may be called by a
 // host logger while a script import is suspended, without consuming its errors.
 API Reply* krkr_format_tvp_message(const Reply* request) {

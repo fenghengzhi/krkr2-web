@@ -89,9 +89,19 @@ if (corpus === 'encoder') {
 
 async function prepare() {
   mkdirSync(game, { recursive: true })
-  const files = corpus === 'dct' ? { ...eriDctFiles(), ...await prepareEncodedImages(output, dctEncoderRecipes) }
-    : corpus === 'encoder' ? await prepareEncodedImages(output, encoderRecipes)
+  const files: Record<string, Uint8Array> = corpus === 'dct' ? eriDctFiles() : corpus === 'encoder' ? {}
     : { ...eriContractFiles(), ...eriTruecolorFiles(), ...eriHuffmanFiles(), ...eriArithmeticFiles() }
+  const failures: Record<string, string> = {}, unavailable: Record<string, string> = {}
+  if (corpus !== 'authored') {
+    const recipes = corpus === 'dct' ? dctEncoderRecipes : encoderRecipes
+    try {
+      const encoded = await prepareEncodedImages(output, recipes)
+      Object.assign(files, encoded.files)
+      Object.assign(failures, encoded.failures)
+    } catch (error) {
+      for (const recipe of recipes) failures[recipe.id + '.eri'] = String(error)
+    }
+  }
   const inputs: { name: string; bytes: number; sha256: string }[] = []
   function copy(from: string, name: string) {
     const bytes = files[from]
@@ -101,6 +111,11 @@ async function prepare() {
   }
   const calls: string[] = []
   for (const item of cases) {
+    const missing = [item.source, ...(item.mask ? [item.mask] : [])].find((name) => !files[name])
+    if (missing) {
+      unavailable[item.id] = failures[missing] ?? 'Missing prepared ERI input ' + missing
+      continue
+    }
     copy(item.source, item.id + '.eri')
     if (item.mask) copy(item.mask, item.id + '_m.eri')
     const key = item.index === undefined ? String(item.key ?? 'clNone') : 'clPalIdx+' + item.index
@@ -111,7 +126,7 @@ async function prepare() {
   const startup = Buffer.from('\ufeff' + script.replace('/* CASES */', calls.join('\n')), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
   save('inputs.json', { commit: process.env.GITHUB_SHA, corpus, sdk: JSON.parse(readFileSync('tests/fixtures/native-reference/sdk.json', 'utf8')),
-    cases, inputs, startupSha256: sha(startup) })
+    cases, inputs, unavailable, startupSha256: sha(startup) })
 }
 
 async function compare() {
@@ -125,7 +140,7 @@ async function compare() {
     .replace(/^\ufeff/, '').trimEnd().split(/\r?\n/)
   const rows = lines.filter((line) => line.startsWith('case|'))
   const manifest = JSON.parse(readFileSync(resolve(output, 'inputs.json'), 'utf8')) as {
-    commit: string; corpus: string; inputs: { name: string; bytes: number; sha256: string }[] }
+    commit: string; corpus: string; unavailable: Record<string, string>; inputs: { name: string; bytes: number; sha256: string }[] }
   assert.equal(manifest.commit, process.env.GITHUB_SHA)
   assert.equal(manifest.corpus, corpus)
   const resources = new Map<string, Resource>()
@@ -143,10 +158,14 @@ async function compare() {
     (bytes, selection, progress) => decodeSelectedImage(bytes, selection, {
       finish, async inflate() { throw new Error('Unexpected inflate') }, async host() { throw new Error('Unexpected host decoder') },
     }, progress), finish, { now: () => 0, check() {}, async yield() {} })
-  const results: { id: string; status: 'matched' | 'failed' | 'unreported'; error?: string; sha256?: string }[] = []
+  const results: { id: string; status: 'matched' | 'failed' | 'unreported' | 'preparation-failed'; error?: string; sha256?: string }[] = []
   try {
     for (const item of cases) {
       try {
+        if (Object.hasOwn(manifest.unavailable, item.id)) {
+          results.push({ id: item.id, status: 'preparation-failed', error: manifest.unavailable[item.id] })
+          continue
+        }
         const found = rows.filter((line) => line.split('|')[1] === item.id)
         if (!found.length) {
           results.push({ id: item.id, status: 'unreported' })

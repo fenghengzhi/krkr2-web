@@ -6,6 +6,7 @@
         See details of license at "license.txt"
 */
 //---------------------------------------------------------------------------
+#include <cstring>
 #include "tjsCommHead.h"
 #include "WebHost.h"
 #include <memory>
@@ -109,11 +110,16 @@ namespace TJS {
     }
 
     int tjsConstArrayData::PutDouble(double b) {
-        std::map<double, int>::const_iterator index = DoubleHash.find(b);
+        // The compiler compares real constants by their complete IEEE bits.
+        // Keep the same key when writing the bytecode's double pool.
+        tjs_uint64 bits;
+        static_assert(sizeof(bits) == sizeof(b), "TJS bytecode requires binary64");
+        std::memcpy(&bits, &b, sizeof(bits));
+        auto index = DoubleHash.find(bits);
         if(index == DoubleHash.end()) {
             int idx = (int)Double.size();
             Double.push_back(b);
-            DoubleHash.insert(std::pair<double, int>(b, idx));
+            DoubleHash.emplace(bits, idx);
             return idx;
         } else {
             return index->second;
