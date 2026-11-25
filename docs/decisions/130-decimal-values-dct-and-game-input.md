@@ -23,3 +23,5 @@
 ## 已取回的托管结果
 
 127 已终态失败。完整浏览器报告有 3,086 项符合预期、124 项意外失败、2 项跳过。128 冻结时主构建已成功，原版介绍游戏出现三个链接，四组字体观察及窗口绘图设备控制匹配。原版 KAG 42/42、跨引擎书签 86/86、JPEG 43/43 匹配。Wine 的软件声音设备完成了全部 29 项声音对照；托管 Windows 匹配 27 项，另外两项需要播放设备。原版透明转场仍只有一项直接拷贝匹配，全部 64 个像素帧未报告。129 仍在等待，尚无作业结果。这次共归档 93 份原 ZIP，逐份校验大小和摘要，合计 1,150,347,275 字节。[127 工作流](https://github.com/fenghengzhi/krkr2-web/actions/runs/45508747480) · [128 工作流](https://github.com/fenghengzhi/krkr2-web/actions/runs/45511886991) · [129 工作流](https://github.com/fenghengzhi/krkr2-web/actions/runs/45514385708)
+
+第 130 批实现提交 `c986126b2518b4d4c3975721795f4018a7f4df75` 已推送。该次 GitHub-hosted Actions 全套验证首次登记为 `pending`，下一批取回报告。[130 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45518090473)
