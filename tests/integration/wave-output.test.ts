@@ -27,7 +27,7 @@ for (const binary of [false, true])
       try {
         await session.start()
         // MIDI construction must not initialize the unrelated Wave options.
-        await session.evaluate('(outputMidi=new MIDISoundBuffer(),0)')
+        await session.evaluate('(outputMidi=new MIDISoundBuffer(null),0)')
         if (option !== undefined) await session.evaluate(`System.setArgument("-wsforcecnv",${JSON.stringify(option)})`)
         assert.equal(await session.evaluate('outputOpen("output.wav")'), forced ? '0,0' : '16,2')
         await session.evaluate('(outputSound.samplePosition=4088,outputLabels.clear(),0)')

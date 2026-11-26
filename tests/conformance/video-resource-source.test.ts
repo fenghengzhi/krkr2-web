@@ -87,9 +87,16 @@ test('stored ZIP Blob borrowing preserves CRC and a cancelled scan does not pois
   const payload = await prepareVideoBlob(member, controls().control)
   assert.equal(payload.buffered, false)
   assert.deepEqual(new Uint8Array(await payload.blob.arrayBuffer()), await member.read())
-  const corrupted = Buffer.from(bytes), first = centralRecords(corrupted).records[0]!
-  corrupted[first.data] = corrupted[first.data]! ^ 1
-  const [bad] = await readZip(new BlobSource(new Blob([Uint8Array.from(corrupted).buffer])), zipCodecs)
+  // The reference starts with an empty folder/ record. Its data offset is
+  // the next local header, so select the actual returned file by name before
+  // damaging its payload. This remains a CRC failure, not a header failure.
+  const corrupted = Buffer.from(bytes), selected = centralRecords(corrupted).records.find((record) => record.name === member.name)
+  assert(selected); assert(member.size > 0)
+  assert.equal(corrupted.readUInt16LE(selected.local + 8), 0)
+  assert.equal(corrupted.readUInt32LE(selected.local + 18), member.size)
+  corrupted[selected.data] = corrupted[selected.data]! ^ 1
+  const bad = (await readZip(new BlobSource(new Blob([Uint8Array.from(corrupted).buffer])), zipCodecs))
+    .find((resource) => resource.name === member.name)
   assert(bad)
   await assert.rejects(prepareVideoBlob(bad, controls().control), /CRC32 mismatch/)
   const [compressed] = await readXp3(new BlobSource(new Blob([Uint8Array.from(xp3Fixture({ 'movie.mp4': Uint8Array.of(1, 2, 3) }, { compressed: true }).bytes).buffer])), inflate)

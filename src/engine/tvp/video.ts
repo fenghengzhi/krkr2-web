@@ -66,7 +66,9 @@ function __krkrVideoCallbacks(report){
 }
 function __krkrVideoFrame(report){
  var body=function(movie,frame,layer,deferredPeriod){
-  if(frame>=0 && !global.System.eventDisabled){
+  // A renderer may report -1 at clock frame zero. Only void denotes a
+  // picture without a usable timeline. Such pictures still complete prepare.
+  if(frame!==void && !global.System.eventDisabled){
    try{movie.onFrameUpdate(frame);}catch(error){this.report(error);}
   }
   if(!(isvalid movie))return;
@@ -79,7 +81,7 @@ function __krkrVideoFrame(report){
    if(!(isvalid movie))return;
    movie.__videoRun("pause",[]);movie.__videoRun("prepareRewind",[]);
    movie.__videoRun("prepareClear",[]);
-  }else if(deferredPeriod && frame>=0){
+  }else if(deferredPeriod && frame!==void && frame>=0){
    // The original WndProc reads the cue AFTER the callback. Cancellation,
    // rearming, seeking and reopening in onFrameUpdate affect this same check.
    movie.__videoRun("periodTake",[frame]);

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-function pictureTimes(item, metadata, timeline, fps, windowsMedia) {
+function pictureTimes(item, metadata, timeline, fps, requireAllTimestamps) {
   const inferredTimestampIndices = []
   if (item.elementary) {
     // An elementary stream carries picture durations but no container PTS.
@@ -30,7 +30,7 @@ function pictureTimes(item, metadata, timeline, fps, windowsMedia) {
   const rawTimes = timeline.frames.map((frame) => Number(frame.best_effort_timestamp_time ?? frame.pts_time)),
     known = rawTimes.map((time, index) => ({ time, index })).filter(({ time }) => Number.isFinite(time))
   if (!known.length) throw new Error(`No independent legacy frame timestamps: ${item.file}`)
-  if (windowsMedia && known.length !== timeline.frames.length) throw new Error(`Missing Windows Media frame timestamp: ${item.file}`)
+  if (requireAllTimestamps && known.length !== timeline.frames.length) throw new Error(`Missing container frame timestamp: ${item.file}`)
   const first = known[0], last = known.at(-1)
   const times = rawTimes.map((time, index) => {
     if (Number.isFinite(time)) {
@@ -50,11 +50,10 @@ function pictureTimes(item, metadata, timeline, fps, windowsMedia) {
 
 // Called only from the shared GitHub-hosted fixture generation step. Nothing
 // in this file invokes the Web decoder or the candidate WASM transcoder.
-function generateMovieFixtures(directory, windowsMedia) {
+function generateMovieFixtures(directory, prefix) {
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted')
     throw new Error('Legacy movie fixtures require GitHub-hosted Actions')
-  const prefix = windowsMedia ? 'windows-media' : 'legacy',
-    width = 96, height = 64, fps = 25, frames = 100, rate = 48000,
+  const width = 96, height = 64, fps = 25, frames = 100, rate = 48000,
     colors = [[220, 30, 30], [25, 210, 35], [30, 45, 220]],
     rgb = Buffer.alloc(width * height * 3 * frames), pcm = Buffer.alloc(rate * 4 * 2),
     commands = [], fixtures = [], sha = (bytes) => createHash('sha256').update(bytes).digest('hex'),
@@ -91,62 +90,81 @@ function generateMovieFixtures(directory, windowsMedia) {
   }
   const videoInput = ['-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', `${width}x${height}`],
     audioInput = ['-f', 's16le', '-ar', String(rate), '-ac', '1', '-i', path(prefix + '-authored.s16le')],
-    cases = windowsMedia ? [
-      { file: 'legacy-wmv1.wmv', aliases: [], video: 'wmv1', audio: 'wmav1',
-        options: ['-c:v', 'wmv1', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p',
-          '-c:a', 'wmav1', '-b:a', '128k', '-f', 'asf'] },
-      { file: 'legacy-wmv2.wmv', aliases: ['legacy-wmv2.asf', 'legacy-wmv2.wma'], video: 'wmv2', audio: 'wmav2', audioOffset: .3,
-        options: ['-c:v', 'wmv2', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p',
-          '-c:a', 'wmav2', '-b:a', '128k', '-f', 'asf'] },
-    ] : [
-      { file: 'legacy-program.mpg', aliases: ['legacy-program.mpeg'], video: 'mpeg1video', audio: 'mp2', audioOffset: .3,
-        options: ['-c:v', 'mpeg1video', '-q:v', '2', '-g', '12', '-bf', '2', '-pix_fmt', 'yuv420p',
-          '-c:a', 'mp2', '-b:a', '128k', '-muxpreload', '0', '-muxdelay', '0', '-f', 'mpeg'] },
-      { file: 'legacy-mjpeg.avi', aliases: [], video: 'mjpeg', audio: 'pcm_s16le',
-        options: ['-c:v', 'mjpeg', '-q:v', '3', '-pix_fmt', 'yuvj420p', '-c:a', 'pcm_s16le', '-f', 'avi'] },
-      { file: 'legacy-elementary.m1v', aliases: ['legacy-elementary.mpv'], elementary: true, video: 'mpeg1video', audio: null,
-        options: ['-c:v', 'mpeg1video', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p', '-an', '-f', 'mpeg1video'] },
-      { file: 'legacy-ntsc.mpv', aliases: [], elementary: true, fps: [30000, 1001], video: 'mpeg1video', audio: null,
-        options: ['-c:v', 'mpeg1video', '-q:v', '2', '-g', '12', '-bf', '2', '-pix_fmt', 'yuv420p', '-an', '-f', 'mpeg1video'] },
-    ]
+    fixturesByGroup = {
+      'mpeg2-xvid': [
+        { file: 'legacy-mpeg2.mpg', aliases: [], video: 'mpeg2video', audio: 'mp2', container: 'mpeg', audioOffset: .3, bFrames: true,
+          options: ['-c:v', 'mpeg2video', '-q:v', '2', '-g', '12', '-bf', '2', '-pix_fmt', 'yuv420p',
+            '-c:a', 'mp2', '-b:a', '128k', '-muxpreload', '0', '-muxdelay', '0', '-f', 'vob'] },
+        { file: 'legacy-xvid.avi', aliases: [], video: 'mpeg4', videoTag: 'XVID', audio: 'mp3', container: 'avi',
+          options: ['-c:v', 'mpeg4', '-vtag', 'XVID', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p',
+            '-c:a', 'copy', '-f', 'avi'] },
+      ],
+      'windows-media': [
+        { file: 'legacy-wmv1.wmv', aliases: [], video: 'wmv1', audio: 'wmav1',
+          options: ['-c:v', 'wmv1', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p',
+            '-c:a', 'wmav1', '-b:a', '128k', '-f', 'asf'] },
+        { file: 'legacy-wmv2.wmv', aliases: ['legacy-wmv2.asf', 'legacy-wmv2.wma'], video: 'wmv2', audio: 'wmav2', audioOffset: .3,
+          options: ['-c:v', 'wmv2', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p',
+            '-c:a', 'wmav2', '-b:a', '128k', '-f', 'asf'] },
+      ],
+      legacy: [
+        { file: 'legacy-program.mpg', aliases: ['legacy-program.mpeg'], video: 'mpeg1video', audio: 'mp2', audioOffset: .3, bFrames: true,
+          options: ['-c:v', 'mpeg1video', '-q:v', '2', '-g', '12', '-bf', '2', '-pix_fmt', 'yuv420p',
+            '-c:a', 'mp2', '-b:a', '128k', '-muxpreload', '0', '-muxdelay', '0', '-f', 'mpeg'] },
+        { file: 'legacy-mjpeg.avi', aliases: [], video: 'mjpeg', audio: 'pcm_s16le',
+          options: ['-c:v', 'mjpeg', '-q:v', '3', '-pix_fmt', 'yuvj420p', '-c:a', 'pcm_s16le', '-f', 'avi'] },
+        { file: 'legacy-elementary.m1v', aliases: ['legacy-elementary.mpv'], elementary: true, video: 'mpeg1video', audio: null,
+          options: ['-c:v', 'mpeg1video', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p', '-an', '-f', 'mpeg1video'] },
+        { file: 'legacy-ntsc.mpv', aliases: [], elementary: true, fps: [30000, 1001], video: 'mpeg1video', audio: null,
+          options: ['-c:v', 'mpeg1video', '-q:v', '2', '-g', '12', '-bf', '2', '-pix_fmt', 'yuv420p', '-an', '-f', 'mpeg1video'] },
+      ],
+    }
+  const cases = fixturesByGroup[prefix]
   let failure, cinepakAvailable = false
   try {
     const encoders = run('ffmpeg', ['-hide_banner', '-encoders'], prefix + '-encoders')
-    cinepakAvailable = !windowsMedia && /^\s*V\S*\s+cinepak\s/m.test(encoders)
+    cinepakAvailable = prefix === 'legacy' && /^\s*V\S*\s+cinepak\s/m.test(encoders)
     if (cinepakAvailable) cases.push({ file: 'legacy-cinepak.avi', aliases: [], video: 'cinepak', audio: 'pcm_s16le',
       options: ['-c:v', 'cinepak', '-q:v', '3', '-pix_fmt', 'rgb24', '-c:a', 'pcm_s16le', '-f', 'avi'] })
     for (const item of cases) {
+      // Mux a previously encoded CBR MP3 so encoder priming cannot move the
+      // first AVI video timestamp or insert a duplicate placeholder frame.
+      let soundInput = item.audio ? audioInput : []
+      if (item.audio === 'mp3') {
+        const track = path(prefix + '-track.mp3')
+        run('ffmpeg', [...common, ...audioInput, '-map', '0:a:0', '-c:a', 'libmp3lame', '-b:a', '128k',
+          '-write_xing', '0', '-f', 'mp3', track], item.file + '.encode-audio')
+        soundInput = ['-f', 'mp3', '-i', track]
+      }
       const [rateNum, rateDen] = item.fps ?? [fps, 1], itemFps = rateNum / rateDen, inputRate = `${rateNum}/${rateDen}`
       run('ffmpeg', [...common, ...videoInput, '-framerate', inputRate, '-i', path(prefix + '-authored.rgb'), ...(item.audioOffset ? ['-itsoffset', String(item.audioOffset)] : []),
-        ...(item.audio ? audioInput : []), '-map', '0:v:0',
-        ...(item.audio ? ['-map', '1:a:0', '-ar:a', String(rate)] : []), ...item.options,
+        ...soundInput, '-map', '0:v:0',
+        ...(item.audio ? ['-map', '1:a:0'] : []), ...item.options,
         '-r:v', inputRate, '-threads', '1', ...(item.elementary ? ['-frames:v', String(frames)] : ['-t', '4']), path(item.file)], item.file + '.encode')
       const probe = ['-v', 'error', '-analyzeduration', '10000000', '-probesize', '8388608']
       const metadata = JSON.parse(run('ffprobe', [...probe, '-show_streams', '-show_format', '-of', 'json', path(item.file)], item.file + '.probe')),
         videos = metadata.streams.filter((stream) => stream.codec_type === 'video'),
         audios = metadata.streams.filter((stream) => stream.codec_type === 'audio')
       if (videos.length !== 1 || videos[0].codec_name !== item.video || videos[0].width !== width ||
-        videos[0].height !== height ||
+        videos[0].height !== height || (item.container && metadata.format.format_name !== item.container) ||
+        (item.videoTag && videos[0].codec_tag_string !== item.videoTag) ||
         audios.length !== (item.audio ? 1 : 0) || (item.audio && (audios[0].codec_name !== item.audio || Number(audios[0].sample_rate) !== rate)))
         throw new Error(`Unexpected hosted legacy stream inventory: ${item.file} ${JSON.stringify(metadata.streams)}`)
       const timeline = JSON.parse(run('ffprobe', [...probe, '-fflags', '+genpts', '-select_streams', 'v:0', '-show_frames', '-of', 'json', path(item.file)], item.file + '.frames'))
       if (timeline.frames.length !== frames) throw new Error(`Unexpected hosted legacy frame count: ${item.file}`)
-      const { times, inferredTimestampIndices, timeScope } = pictureTimes(item, metadata, timeline, itemFps, windowsMedia),
+      const { times, inferredTimestampIndices, timeScope } = pictureTimes(item, metadata, timeline, itemFps, prefix === 'windows-media' || item.container === 'avi'),
         commonStart = item.elementary ? 0 : Number(metadata.format.start_time ?? videos[0].start_time ?? 0),
         normalizedVideoTimes = times.map((time) => time - commonStart)
       if (!Number.isFinite(commonStart) || normalizedVideoTimes.some((time, index) => !Number.isFinite(time) ||
           (index && time < normalizedVideoTimes[index - 1]))) throw new Error(`Invalid independent legacy timestamps: ${item.file}`)
-      if (item.file === 'legacy-ntsc.mpv' && !timeline.frames.some((frame) => frame.pict_type === 'B'))
-        throw new Error('The fractional-rate elementary stream must retain reordered pictures')
-      if (item.file === 'legacy-program.mpg' && (!timeline.frames.some((frame) => frame.pict_type === 'B') ||
-          !(Number(audios[0].start_time) - Number(videos[0].start_time) > .2)))
-        throw new Error('MPEG-PS must retain B frames and a genuinely later audio stream start')
-      if (windowsMedia && item.audioOffset && !(Number(audios[0].start_time) - Number(videos[0].start_time) > .2))
-        throw new Error('Windows Media must retain its independently delayed audio stream')
+      if ((item.bFrames || item.file === 'legacy-ntsc.mpv') && !timeline.frames.some((frame) => frame.pict_type === 'B'))
+        throw new Error(`Reordered MPEG input must retain B frames: ${item.file}`)
+      if (item.audioOffset && !(Number(audios[0].start_time) - Number(videos[0].start_time) > .2))
+        throw new Error(`Independent input must retain its delayed audio stream: ${item.file}`)
       run('ffmpeg', [...common, '-i', path(item.file), '-map', '0:v:0', '-vsync', '0', '-pix_fmt', 'rgba', '-f', 'rawvideo', path(item.file + '.rgba')], item.file + '.decode')
       const decoded = readFileSync(path(item.file + '.rgba'))
       if (decoded.length !== width * height * 4 * frames) throw new Error(`Incomplete independent legacy decode: ${item.file}`)
-      const checkedFrames = item.elementary ? Array.from({ length: frames }, (_, i) => i) : [0, 25, 50, 80]
+      const checkedFrames = item.elementary || prefix === 'mpeg2-xvid' ? Array.from({ length: frames }, (_, i) => i) : [0, 25, 50, 80]
       const checks = checkedFrames.map((frame) => {
         const phase = frame < 40 ? 0 : frame < 70 ? 1 : 2, at = (frame * width * height + 32 * width + 48) * 4,
           color = [...decoded.subarray(at, at + 4)]
@@ -162,10 +180,32 @@ function generateMovieFixtures(directory, windowsMedia) {
         if (code !== frame) throw new Error(`Independent legacy frame marker changed: ${item.file} ${code}/${frame}`)
         return { frame, color, code, timestamp: timeline.frames[frame] }
       })
+      let decodedAudio
+      if (prefix === 'mpeg2-xvid') {
+        const file = item.file + '.s16le'
+        run('ffmpeg', [...common, '-i', path(item.file), '-map', '0:a:0', '-ac', '1', '-ar', String(rate),
+          '-f', 's16le', path(file)], item.file + '.decode-audio')
+        const samples = readFileSync(path(file)), toneChecks = []
+        for (const [start, frequency] of [[.17, 0], [.9, 440], [2.05, 660], [3.25, 880]]) {
+          let peak = 0, cycles = 0, previous = 0
+          const first = Math.round(start * rate), count = Math.round(.2 * rate)
+          for (let i = first; i < first + count; i++) {
+            const sample = samples.readInt16LE(i * 2) / 32768
+            peak = Math.max(peak, Math.abs(sample))
+            if (sample > 0 && previous <= 0) cycles++
+            previous = sample
+          }
+          const measured = cycles * rate / count
+          if (frequency ? peak < .06 || Math.abs(measured - frequency) > 10 : peak > .005)
+            throw new Error(`Independent audio decode lost the authored tone: ${item.file} at ${start}s`)
+          toneChecks.push({ start, peak, expectedHz: frequency, measuredHz: measured })
+        }
+        decodedAudio = { file, bytes: samples.length, sha256: sha(samples), rate, checks: toneChecks }
+      }
       const bytes = readFileSync(path(item.file))
       for (const alias of item.aliases) writeFileSync(path(alias), bytes)
       fixtures.push({ file: item.file, aliases: item.aliases, bytes: bytes.length, sha256: sha(bytes),
-        videoCodec: item.video, audioCodec: item.audio, audioInputOffset: item.audioOffset ?? 0,
+        videoCodec: item.video, videoTag: videos[0].codec_tag_string, audioCodec: item.audio, decodedAudio, audioInputOffset: item.audioOffset ?? 0,
         fps: itemFps, authoredVideoDuration: frames / itemFps, commonStart, normalizedVideoTimes,
         inferredTimestampIndices, timeScope, metadata, timeline,
         independentRgba: { file: item.file + '.rgba', bytes: decoded.length, sha256: sha(decoded) }, checks })
@@ -175,7 +215,7 @@ function generateMovieFixtures(directory, windowsMedia) {
     generator: 'scripts/generate-legacy-video-fixtures.mjs',
     scope: 'Independent native FFmpeg authors and decodes legacy inputs. No candidate transcode output is used as an expected image.',
     complete: !failure, failure: failure ? String(failure) : undefined, width, height, fps, frames, duration: 4,
-    ...(!windowsMedia && { cinepak: { encoderAvailable: cinepakAvailable, file: cinepakAvailable ? 'legacy-cinepak.avi' : null,
+    ...(prefix === 'legacy' && { cinepak: { encoderAvailable: cinepakAvailable, file: cinepakAvailable ? 'legacy-cinepak.avi' : null,
       scope: cinepakAvailable ? 'Additional native/WASM decode fixture; no extra browser matrix.' : 'Hosted FFmpeg does not expose a Cinepak encoder; not verified.' },
     }),
     authored: { rgb: { file: prefix + '-authored.rgb', bytes: rgb.length, sha256: sha(rgb) },
@@ -185,12 +225,13 @@ function generateMovieFixtures(directory, windowsMedia) {
         { start: 1.6, end: 2.8, frequency: 660 }, { start: 2.8, end: 4, frequency: 880 }],
       marker: { bits: 7, order: 'LSB first', x: 6, y: 44, width: 12, height: 16, dark: 16, light: 235 } },
     fixtures, commands }
-  const manifest = windowsMedia ? 'windows-media-reference.json' : 'legacy-video-reference.json'
+  const manifest = (prefix === 'legacy' ? 'legacy-video' : prefix) + '-reference.json'
   writeFileSync(path(manifest), JSON.stringify(report, null, 2) + '\n')
   if (failure) throw failure
   return { manifest, fixtures: fixtures.length }
 }
 
-export const generateLegacyVideoFixtures = (directory) => generateMovieFixtures(directory, false)
+export const generateLegacyVideoFixtures = (directory) => generateMovieFixtures(directory, 'legacy')
 /** Separate invocation/report: a failed MPEG fixture must not suppress WMV. */
-export const generateWindowsMediaFixtures = (directory) => generateMovieFixtures(directory, true)
+export const generateWindowsMediaFixtures = (directory) => generateMovieFixtures(directory, 'windows-media')
+export const generateMpeg2XvidFixtures = (directory) => generateMovieFixtures(directory, 'mpeg2-xvid')

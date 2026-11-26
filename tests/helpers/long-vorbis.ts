@@ -29,14 +29,15 @@ var longMusic=new LongMusic();
 function longStart(loop=false){longMusic.open(loop?"loop-bgm.ogg":"long-bgm.ogg");longMusic.play();return longMusic.status;}
 function longSeek(frame){longMusic.samplePosition=frame;return longMusic.samplePosition;}
 function longMenu(){
- global.longWindow=new Window();longWindow.caption="Long Ogg music";longWindow.setInnerSize(320,60);
- var root=new Layer(longWindow,null);longWindow.add(root);root.setSize(320,60);root.holdAlpha=false;root.fillRect(0,0,320,60,0xff102030);
- var far=new Layer(longWindow,root),back=new Layer(longWindow,root),loop=new Layer(longWindow,root),pause=new Layer(longWindow,root);
- var buttons=[far,back,loop,pause];for(var i=0;i<4;i++){longWindow.add(buttons[i]);buttons[i].setPos(i*80,0,76,60);buttons[i].holdAlpha=false;buttons[i].fillRect(0,0,76,60,0xff206040+i*0x101010);buttons[i].visible=true;}
+ global.longWindow=new Window();longWindow.caption="Long Ogg music";longWindow.setInnerSize(400,60);
+ var root=new Layer(longWindow,null);longWindow.add(root);root.setSize(400,60);root.holdAlpha=false;root.fillRect(0,0,400,60,0xff102030);
+ var far=new Layer(longWindow,root),back=new Layer(longWindow,root),loop=new Layer(longWindow,root),pause=new Layer(longWindow,root),edge=new Layer(longWindow,root);
+ var buttons=[far,back,loop,pause,edge];for(var i=0;i<5;i++){longWindow.add(buttons[i]);buttons[i].setPos(i*80,0,76,60);buttons[i].holdAlpha=false;buttons[i].fillRect(0,0,76,60,0xff206040+i*0x101010);buttons[i].visible=true;}
  far.onClick=function(){global.longSeek(4080000);global.Debug.message("long-far");};
  back.onClick=function(){global.longSeek(2304000);global.Debug.message("long-back");};
  loop.onClick=function(){global.longStart(true);global.longSeek(4032000);global.Debug.message("long-loop");};
  pause.onClick=function(){global.longMusic.paused=!global.longMusic.paused;global.Debug.message("long-pause:"+global.longMusic.paused);};
+ edge.onClick=function(){global.longSeek(192007);global.Debug.message("long-page-edge");};
  longStart();longWindow.visible=true;Debug.message("long-ready");
 }
 `

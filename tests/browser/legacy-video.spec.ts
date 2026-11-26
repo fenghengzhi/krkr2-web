@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { test, expect, observeVideoFrames } from '../helpers/video-presentation-browser.ts'
 import { installHandoffReadbacks, type ProbeWindow } from '../helpers/video-handoff-capture.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia, type VideoAudioObservation } from '../helpers/video-audio-probe.ts'
-import { legacyFrameCode, legacyVideoCases, windowsMediaCases, legacyVideoColors, legacyVideoGame } from '../helpers/legacy-video-game.ts'
+import { legacyFrameCode, legacyVideoCases, windowsMediaCases, mpeg2XvidCases, legacyVideoColors, legacyVideoGame } from '../helpers/legacy-video-game.ts'
 
 interface ConvertedOpen {
   name: string; bytes: number; mime: string; signature?: string; sha256?: string; error?: string
@@ -17,6 +17,7 @@ type ObservedWindow = Window & {
 
 for (const group of [
   { label: 'legacy MPEG and AVI', cases: legacyVideoCases, reference: 'legacy-video-reference.json' },
+  { label: 'MPEG-2 program streams and Xvid AVI with MP3', cases: mpeg2XvidCases, reference: 'mpeg2-xvid-reference.json' },
   { label: 'Windows Media WMV and ASF', cases: windowsMediaCases, reference: 'windows-media-reference.json' },
 ]) for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: ${group.label} movies play authored pictures and timed sound through ordinary VideoOverlay controls`, async ({ page }, info) => {

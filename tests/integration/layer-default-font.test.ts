@@ -6,6 +6,7 @@ import type { FontFactory, FontManifest } from '../../src/backends/text/freetype
 import type { FrameLayer } from '../../src/engine/ports/graphics.ts'
 import type { InputView } from '../../src/engine/ports/input.ts'
 import { headless } from '../helpers/headless.ts'
+import { selectSoftwareFrame } from '../helpers/software-frame.ts'
 import { layerDefaultFontCases, layerDefaultFontSource, layerDefaultFontFrameMismatch } from '../helpers/layer-default-font.ts'
 
 for (const binary of [false, true])
@@ -38,6 +39,7 @@ for (const binary of [false, true])
       })
       stop = async () => { await session.stop(); assert(Object.values(session.inspectOwnership()).every((count) => count === 0)) }
       await session.start()
+      await selectSoftwareFrame(session, 'defaultFontWindow')
       const id = Number(await session.evaluate('defaultFontWindow.__windowId')),
         view = (): InputView => {
           for (let i = events.length - 1; i >= 0; i--) {

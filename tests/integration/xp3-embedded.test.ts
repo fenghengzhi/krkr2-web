@@ -4,6 +4,7 @@ import { headless } from '../helpers/headless.ts'
 import { embedXp3, xp3Fixture, xp3Signature } from '../helpers/xp3-fixtures.ts'
 import { importResources, importSources } from '../../src/backends/files/import-resources.ts'
 import type { GameFile } from '../../src/protocol/session.ts'
+import { ExecutionCancelled } from '../../src/engine/scheduler/control.ts'
 
 const file = (path: string, bytes: Uint8Array): GameFile => ({ path, blob: new Blob([Uint8Array.from(bytes).buffer]) })
 function deferred() {
@@ -80,13 +81,19 @@ test('Stop while scanning an executable prefix prevents publication and ignores 
         return bytes.subarray(offset, offset + length)
       },
     } }], async () => session.control.check()).then((resources) => session.mount(resources)),
-      rejected = assert.rejects(preparing)
+      rejected = assert.rejects(preparing, ExecutionCancelled)
     await entered.promise
+    // SFX ZIP detection legitimately inspects the tail before the XP3 scan.
+    // Freeze the real read journal at the held scan boundary, so only reads
+    // started after Stop (not earlier high offsets) can violate retirement.
+    const beforeStop = reads.map(([offset, length]) => [offset, length])
+    assert.deepEqual(beforeStop.at(-1), [16, 256 * 1024])
     await session.stop()
+    assert.deepEqual(reads, beforeStop, 'Stop must not start another read while the existing scan is held')
     release.resolve()
     await rejected
     assert.equal(session.snapshot().resources, 0)
     assert.equal(session.snapshot().state, 'stopped')
-    assert(!reads.some(([offset]) => offset > 16), 'No later scan block or archive index may be read after Stop')
+    assert.deepEqual(reads, beforeStop, 'No later scan block or archive index may be read after Stop')
   } finally { release.resolve(); await session.stop() }
 })

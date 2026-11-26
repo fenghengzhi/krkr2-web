@@ -77,6 +77,8 @@ for (const binary of [false, true]) {
       assert.equal(scratch, 1, 'A faulty face listener must not skip the next scratch listener')
       assert(f.events.some((event) => event.type === 'log' && event.level === 'error' && event.text.includes('Compact Event (Font faces)')))
       assert.equal(await f.session.evaluate('root.font.getTextWidth("AA")'), '12')
+      assert.equal(loads, 1, 'Compact keeps the owning bitmap\'s already measured string')
+      assert.equal(await f.session.evaluate('root.font.getTextWidth("AB")'), '12')
       assert.equal(loads, 2)
       await exec('root.font.face="mapped";root.font.faceIsFileName=false;root.font.mapPrerenderedFont("coverage.tft");var mappedWidth=root.font.getTextWidth("AB");System.doCompact();')
       assert.equal(await f.session.evaluate('root.font.getTextWidth("AB")==mappedWidth'), '1')

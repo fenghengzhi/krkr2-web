@@ -26,7 +26,7 @@ for (const binary of [false, true]) test(`${binary ? 'bytecode' : 'source'}: lon
           if (loop && position >= loopEnd) position = loopStart + (position - loopStart) % (loopEnd - loopStart)
           reference.push(0 + expected.data[channel]![position]!)
         }
-        assert.deepEqual(output[channel], reference)
+        assert.deepEqual(output[channel], reference, `PCM channel ${channel}, seek ${at}, block ${block}, loop ${loop}`)
       }
     }
   }

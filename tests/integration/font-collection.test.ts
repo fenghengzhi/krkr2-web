@@ -5,6 +5,7 @@ import { FontKernel, type NativeFileFont } from '../../src/backends/text/freetyp
 import type { FontFactory, FontManifest } from '../../src/backends/text/freetype/module.ts'
 import type { FrameLayer } from '../../src/engine/ports/graphics.ts'
 import { headless } from '../helpers/headless.ts'
+import { selectSoftwareFrame } from '../helpers/software-frame.ts'
 import { fontCollectionCases, fontCollectionFiles, fontCollectionFrameMismatch,
   fontCollectionGameSource, fontCollectionLists } from '../helpers/font-collection-game.ts'
 
@@ -51,6 +52,7 @@ for (const binary of [false, true])
         assert(Object.values(session.inspectOwnership()).every((value) => value === 0))
       }
       await session.start()
+      await selectSoftwareFrame(session, 'collectionWindow')
       assert.equal(await session.evaluate('collectionAll'), fontCollectionLists.all)
       assert.equal(await session.evaluate('collectionHorizontal'), fontCollectionLists.horizontal)
       assert.equal(await session.evaluate('collectionFixed'), fontCollectionLists.fixed)

@@ -56,6 +56,10 @@ function spriteAbiDraw(method,type,provided){
  if(provided)args.add(type);
  draw(args*);return spriteAbiRead();
 }
+function spriteAbiReject(method,type){
+ try{spriteAbiDraw(method,type,true);}catch(error){return error.message;}
+ throw new Exception("Invalid sprite filter was accepted");
+}
 `
 
 // This is a public-script/embedding ABI comparison, not an independent pixel
@@ -106,7 +110,9 @@ for (const binary of [false, true]) test(`${binary ? 'bytecode' : 'source'}: Lay
       assert.equal(await session.evaluate(`spriteAbiDraw(${method},void,true)`), nearest, `${name}: void filter`)
       assert.equal(await session.evaluate(`spriteAbiDraw(${method},stNearest,true)`), nearest, `${name}: named nearest`)
       for (const bad of [-1, 0x20004, 0x40000]) {
-        await assert.rejects(session.evaluate(`spriteAbiDraw(${method},${bad},true)`), /(?:stretch|affine).*filter/i)
+        // The game catches a rejected option before inspecting its bitmap.
+        // Letting it escape evaluate correctly stops the whole Session.
+        assert.match(await session.evaluate(`spriteAbiReject(${method},${bad})`), /(?:stretch|affine).*filter/i)
         assert.equal(await session.evaluate('spriteAbiRead()'), Array(16).fill('1056816/0').join(','), `${name}: rejected ${bad} left pixels intact`)
       }
     }

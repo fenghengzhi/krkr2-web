@@ -10,13 +10,15 @@ import { readVideoTimelineBlob } from '../../src/formats/video/mp4.ts'
 import { legacyVideoFormat } from '../../src/backends/video/legacy/format.ts'
 
 interface InputReference {
-  file: string; bytes: number; sha256: string; audioCodec: string | null; videoCodec: string
+  file: string; bytes: number; sha256: string; audioCodec: string | null; videoCodec: string; videoTag: string
   fps: number; normalizedVideoTimes: number[]
 }
 
 for (const group of [
   { label: 'MPEG and AVI', reference: 'legacy-video-reference.json', output: 'legacy-media',
     required: ['legacy-program.mpg', 'legacy-mjpeg.avi', 'legacy-elementary.m1v', 'legacy-ntsc.mpv'] },
+  { label: 'MPEG-2 program streams and Xvid AVI', reference: 'mpeg2-xvid-reference.json', output: 'mpeg2-xvid',
+    required: ['legacy-mpeg2.mpg', 'legacy-xvid.avi'] },
   { label: 'ASF with WMV1/WMA1 and WMV2/WMA2', reference: 'windows-media-reference.json', output: 'windows-media',
     required: ['legacy-wmv1.wmv', 'legacy-wmv2.wmv'] },
 ]) test(`the actual single-thread legacy WASM decodes authored ${group.label} into complete selectable MP4 timelines`, { timeout: 600000 }, async () => {
@@ -38,6 +40,10 @@ for (const group of [
   for (const name of group.required) assert(reference.fixtures.some((entry) => entry.file === name))
   if (group.output === 'windows-media')
     assert.deepEqual(reference.fixtures.map((entry) => [entry.videoCodec, entry.audioCodec]), [['wmv1', 'wmav1'], ['wmv2', 'wmav2']])
+  if (group.output === 'mpeg2-xvid') {
+    assert.deepEqual(reference.fixtures.map((entry) => [entry.videoCodec, entry.audioCodec]), [['mpeg2video', 'mp2'], ['mpeg4', 'mp3']])
+    assert.equal(reference.fixtures.find((entry) => entry.file === 'legacy-xvid.avi')?.videoTag, 'XVID')
+  }
   for (const entry of reference.fixtures) {
     const log: string[] = [], observation: Record<string, unknown> = { input: entry.file, videoCodec: entry.videoCodec, audioCodec: entry.audioCodec }
     observations.push(observation)

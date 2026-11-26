@@ -358,7 +358,7 @@ export class VideoService {
       await this.dispatch(
         nativeFrame ? this.frameDispatcher! : lease,
         nativeFrame ? undefined : callback?.name,
-        nativeFrame ? [lease, BigInt(event.snapshot.frame < 0 ? -1 : event.callbackFrame ?? event.snapshot.frame),
+        nativeFrame ? [lease, callback?.args[0],
           BigInt(layerFrame), BigInt(event.deferredPeriod === true), BigInt(event.epoch),
           BigInt(event.deliveryToken ?? 0)] : callback?.args ?? [],
         valid,

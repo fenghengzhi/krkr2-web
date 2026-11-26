@@ -5,6 +5,7 @@ import { FontKernel, type NativeFileFont } from '../../src/backends/text/freetyp
 import type { FontFactory, FontManifest } from '../../src/backends/text/freetype/module.ts'
 import type { FrameLayer } from '../../src/engine/ports/graphics.ts'
 import { headless } from '../helpers/headless.ts'
+import { selectSoftwareFrame } from '../helpers/software-frame.ts'
 import { fontCandidateCases, fontCandidateFrameMismatch, fontCandidateGameSource } from '../helpers/font-candidate-game.ts'
 
 for (const binary of [false, true])
@@ -47,6 +48,7 @@ for (const binary of [false, true])
         assert(Object.values(session.inspectOwnership()).every((value) => value === 0))
       }
       await session.start()
+      await selectSoftwareFrame(session, 'candidateWindow')
       const windowId = Number(await session.evaluate('candidateWindow.__windowId'))
       for (const [phase, row] of fontCandidateCases.entries()) {
         if (phase) {

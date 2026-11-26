@@ -91,9 +91,15 @@ test('a missing final stream page cannot publish the endpoint, and short Decode 
     mixer.command({ op: 'set', id: 1, property: 'position', value: 8198 })
     assert.deepEqual(names(render(mixer, 32, 0)), [])
     assert.equal(mixer.snapshot(1).position, 8198)
-    const requests = mixer.takeStreamRequests(); assert.equal(requests.length, 1)
-    const request = requests[0]!; assert.equal(request.position, 8192)
-    mixer.command({ op: 'streamData', request, data: source.data.map((channel) => channel.slice(request.position, request.position + request.frames)) })
+    const requests = mixer.takeStreamRequests()
+    assert.deepEqual(requests.map((request) => request.position), pipeline ? [8192] : [4096, 8192])
+    for (const request of requests) {
+      mixer.command({ op: 'streamData', request, data: source.data.map((channel) => channel.slice(request.position, request.position + request.frames)) })
+      if (request.position !== 8192) {
+        assert.deepEqual(names(render(mixer, 32, 0)), [])
+        assert.equal(mixer.snapshot(1).position, 8198, 'An earlier lookahead reply cannot publish the missing endpoint')
+      }
+    }
     assert.deepEqual(names(render(mixer, 2)), [])
     assert.deepEqual(names(render(mixer, 1, 0)), ['tail', 'ended'])
   }

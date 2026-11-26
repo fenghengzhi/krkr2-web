@@ -26,7 +26,7 @@ import {
 } from './audio-filter-chain.ts'
 import { FilteredWaveSource, filteredWaveSourceMemoryBytes } from './filtered-wave-source.ts'
 import { phaseVocoderMemoryBytes, validatePhaseVocoderParameters } from './phase-vocoder.ts'
-import { StreamPcm, streamPcmReservation } from './stream-pcm.ts'
+import { StreamPcm, streamPageFrames, streamPcmReservation } from './stream-pcm.ts'
 import { applySliExpression } from '../../formats/audio/sli.ts'
 import { waveAudioGains } from './wave-audio.ts'
 import { convertWaveOutput } from './wave-output.ts'
@@ -362,7 +362,7 @@ export class AudioMixer {
       if (command.op === 'play' && voice.asset && voice.status !== 'play') {
         if (voice.ended || settings.position >= voice.asset.sampleCount) this.seek(voice, 0, true)
         else this.resetFilters(voice)
-        voice.stream?.ready(Math.floor(settings.position), 2)
+        this.prefetchStream(voice, true)
         voice.status = 'play'
         voice.epoch = this.nextEpoch++
       } else if (command.op === 'stop') {
@@ -402,7 +402,7 @@ export class AudioMixer {
             // Request a public seek's destination before the next output
             // block, including while paused/stopped. Internal SLI traversal
             // keeps its own atomic range preflight instead of prefetching.
-            voice.stream?.ready(Math.floor(number), 2)
+            this.prefetchStream(voice, true)
             voice.epoch = this.nextEpoch++
           } else if (property === 'frequency') {
             // WaveImpl forwards zero as DirectSound's DSBFREQUENCY_ORIGINAL.
@@ -633,6 +633,35 @@ export class AudioMixer {
     const position = voice.settings.position
     return this.streamRangeReady(voice.stream!, position, position + advance)
   }
+  private prefetchStream(voice: Voice, initial = false): void {
+    const stream = voice.stream
+    if (!stream) return
+    if (voice.sourcePipeline) {
+      // Its filter/source queue already reserves complete Decode units. Keep
+      // that existing initial reservation and its subsequent lookahead.
+      if (initial) stream.ready(Math.floor(voice.settings.position), 2)
+      else stream.prefetch(voice.settings.position)
+      return
+    }
+    const position = Math.floor(voice.settings.position),
+      first = Math.floor(position / streamPageFrames) * streamPageFrames,
+      end = Math.min(stream.asset.sampleCount, first + 3 * streamPageFrames)
+    // A public seek near a page end needs its following PCM before the first
+    // output quantum, not only after that quantum has already starved. Keep
+    // the existing three-page horizon and four outstanding-request limit.
+    // Filtered sources own their decode-ahead/control boundaries separately.
+    const link = this.link(voice),
+      boundary = link?.from ?? stream.asset.sampleCount,
+      target = link?.to ?? (voice.settings.looping ? 0 : undefined)
+    stream.ready(position, Math.max(0, Math.min(end, Math.floor(boundary) + 2) - position))
+    if (target !== undefined && boundary >= position && boundary <= end) {
+      // Only an already selected jump is warmed. No flag expression, label,
+      // audible cursor or event is executed ahead of time. Avoid filling the
+      // abandoned source tail instead of the next phrase at a hard SLI link.
+      const targetPage = Math.floor(target / streamPageFrames) * streamPageFrames
+      stream.ready(targetPage, 2 * streamPageFrames)
+    }
+  }
   private prepareStreamSample(voice: Voice, step: number): boolean | 'waiting' {
     const position = voice.settings.position, link = this.link(voice),
       boundary = Math.min(link?.from ?? voice.asset!.sampleCount,
@@ -762,7 +791,7 @@ export class AudioMixer {
             chain.advance(step, label)
             settings.position = chain.sourcePosition()
           } else this.advance(voice, step)
-          if (voice.stream && frame === left.length - 1) voice.stream.prefetch(settings.position)
+          if (voice.stream && frame === left.length - 1) this.prefetchStream(voice)
         } catch (error) {
           voice.status = 'stop'
           voice.fade = undefined

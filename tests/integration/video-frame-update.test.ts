@@ -7,7 +7,7 @@ for (const binary of [false, true])
   test(`${binary ? 'bytecode' : 'source'}: frame callback arguments remain independent of public clock snapshots`,
     { timeout: 60000 }, async () => {
       const f = await videoFixture(binary, `
-var frameTrace="";
+var frameTrace="",frameLayer=new Layer(win,null);
 function recordFrame(value){global.frameTrace+=value+":"+this.frame+"|";}
 function openFrameMovie(){
   makeMovie();movie.mode=vomLayer;movie.onFrameUpdate=recordFrame incontextof movie;
@@ -25,11 +25,16 @@ function openFrameMovie(){
             ...(callbackFrame === undefined ? {} : { callbackFrame }) }
           await Promise.all([...f.video.listeners].map((listener) => listener(event)))
         }
+        await emit(4, 3)
+        assert.equal(await f.session.evaluate('frameTrace'), '', 'Layer mode requires a bound output layer')
+        await f.execute('movie.layer1=frameLayer;')
         await emit(10, 9)
         await emit(10)
         await emit(0, -1)
         assert.equal(await f.session.evaluate('frameTrace'), '9:10|10:10|-1:0|')
         assert.equal(await f.session.evaluate('movie.frame'), '0')
+        await emit(-1)
+        assert.equal(await f.session.evaluate('frameTrace'), '9:10|10:10|-1:0|', 'An unindexed picture has no callback frame')
       } catch (error) { failures.push(error) }
       try { await f.session.stop(); f.stopped() } catch (error) { failures.push(error) }
       if (failures.length === 1) throw failures[0]

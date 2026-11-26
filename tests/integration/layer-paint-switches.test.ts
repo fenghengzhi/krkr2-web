@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { headless } from '../helpers/headless.ts'
+import { selectSoftwareFrame } from '../helpers/software-frame.ts'
 import type { FrameLayer } from '../../src/engine/ports/graphics.ts'
 import { layerPaintCases, layerPaintFrame, layerPaintPixels, layerPaintSource, layerPaintStates } from '../helpers/layer-paint-switches.ts'
 
@@ -8,9 +9,9 @@ for (const binary of [false, true])
   test(`${binary ? 'bytecode' : 'source'}: native paint booleans preserve cached group pixels and suppress then restore actual callbacks`, { timeout: 60000 }, async () => {
     let frame: FrameLayer[] = []
     const failures: unknown[] = [], { session } = await headless({ 'paint.tjs': layerPaintSource,
-      'startup.tjs': binary
+      'startup.tjs': 'System.exitOnNoWindowStartup=false;System.exitOnWindowClose=false;' + (binary
         ? 'Scripts.compileStorage("paint.tjs","savedata/paint.cjs",false,true,false);Scripts.execStorage("savedata/paint.cjs");'
-        : 'Scripts.execStorage("paint.tjs");' }, {
+        : 'Scripts.execStorage("paint.tjs");') }, {
       renderer: { present(layers, width, height) {
         if (width === 240 && height === 160) frame = layers.map((layer) => ({ ...layer,
           pixels: { ...layer.pixels, data: layer.pixels.data.slice() } }))
@@ -21,6 +22,7 @@ for (const binary of [false, true])
       for (const { id, expected } of layerPaintCases)
         assert.equal(await session.evaluate(`layerPaintObserve(${JSON.stringify(id)})`), expected, id)
       assert.equal(await session.evaluate('paintSwitchMenu()'), layerPaintStates[0] + '|' + layerPaintPixels[0])
+      await selectSoftwareFrame(session, 'paintSwitchWindow')
       const windowId = Number(await session.evaluate('paintSwitchWindow.__windowId'))
       for (let phase = 0; phase < 4; phase++) {
         if (phase) {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { headless } from '../helpers/headless.ts'
+import { selectSoftwareFrame } from '../helpers/software-frame.ts'
 import type { FrameLayer } from '../../src/engine/ports/graphics.ts'
 import { layerInputBooleanCases, layerInputBooleanSource, layerInputFrame, layerInputStates } from '../helpers/layer-input-booleans.ts'
 
@@ -8,9 +9,9 @@ for (const binary of [false, true])
   test(`${binary ? 'bytecode' : 'source'}: native boolean Layer settings preserve selectable, visible and keyboard-reachable choices`, { timeout: 60000 }, async () => {
     let frame: FrameLayer[] = []
     const failures: unknown[] = [], { session } = await headless({ 'booleans.tjs': layerInputBooleanSource,
-      'startup.tjs': binary
+      'startup.tjs': 'System.exitOnNoWindowStartup=false;System.exitOnWindowClose=false;' + (binary
         ? 'Scripts.compileStorage("booleans.tjs","savedata/booleans.cjs",false,true,false);Scripts.execStorage("savedata/booleans.cjs");'
-        : 'Scripts.execStorage("booleans.tjs");' }, {
+        : 'Scripts.execStorage("booleans.tjs");') }, {
       renderer: { present(layers, width, height) {
         if (width === 240 && height === 120) frame = layers.map((layer) => ({ ...layer,
           pixels: { ...layer.pixels, data: layer.pixels.data.slice() } }))
@@ -21,6 +22,7 @@ for (const binary of [false, true])
       for (const { id, expected } of layerInputBooleanCases)
         assert.equal(await session.evaluate(`layerInputBooleanObserve(${JSON.stringify(id)})`), expected, id)
       await session.evaluate('layerInputMenu()')
+      await selectSoftwareFrame(session, 'layerInputWindow')
       const windowId = Number(await session.evaluate('layerInputWindow.__windowId'))
       const check = async (state: string, phase: number) => {
         await session.idle()

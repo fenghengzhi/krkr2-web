@@ -188,8 +188,10 @@ var paintedColor=target.getMainPixel(0,0),paintedAdvanceColor=target.getMainPixe
         assert.equal(await session.evaluate('sameObjects'), '1,1,1')
         assert.equal(await session.evaluate('assignedClip'), '0,0,16,16,1')
         assert.equal(await session.evaluate('assignedCoverage'), targetCoverage)
-        assert.equal(await session.evaluate('paintedColor'), String(0x654321))
-        assert.equal(await session.evaluate('paintedAdvanceColor'), String(0x654321))
+        // Stock full-coverage TFT alpha blends at weight 255/256. Over the
+        // preceding [17,51,85], [101,67,33] becomes [100,66,33].
+        assert.equal(await session.evaluate('paintedColor'), String(0x644221))
+        assert.equal(await session.evaluate('paintedAdvanceColor'), String(0x644221))
       } finally {
         await stop()
       }

@@ -6,6 +6,11 @@ export const legacyVideoCases = [
   { file: 'legacy-elementary.mpv', format: 'mpegvideo', audio: false, audioOffset: 0 },
 ] as const
 
+export const mpeg2XvidCases = [
+  { file: 'legacy-mpeg2.mpg', format: 'mpeg', audio: true, audioOffset: .3 },
+  { file: 'legacy-xvid.avi', format: 'avi', audio: true, audioOffset: 0 },
+] as const
+
 export const windowsMediaCases = [
   { file: 'legacy-wmv1.wmv', format: 'asf', audio: true, audioOffset: 0 },
   { file: 'legacy-wmv2.asf', format: 'asf', audio: true, audioOffset: .3 },

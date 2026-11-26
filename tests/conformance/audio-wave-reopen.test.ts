@@ -65,7 +65,7 @@ test('a stopped public seek requests its real destination without rendering and 
     assert.equal(audio.mixer.snapshot(1).position, 8196)
     assert.equal(audio.inspect().clockTasks, 0); assert.deepEqual(output, [])
     assert(ranges.includes(44 + 8192 * 2))
-    assert.equal(audio.mixer.inspectStreams().pending, 1)
+    assert.equal(audio.mixer.inspectStreams().pending, 2, 'The stopped seek reserves both remaining pages within the same source budget')
     closing = audio.command({ op: 'close', id: 1 })
     await observed(t.signal, closing)
     assert.equal(releases, 1)

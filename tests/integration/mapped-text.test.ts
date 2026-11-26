@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { FrameLayer } from '../../src/engine/ports/graphics.ts'
 import { headless } from '../helpers/headless.ts'
+import { selectSoftwareFrame } from '../helpers/software-frame.ts'
 import { mappedTextCases, mappedTextExpected, mappedTextFiles, mappedTextSource, mappedTextFrameMismatch } from '../helpers/mapped-text.ts'
 
 for (const binary of [false, true])
@@ -27,6 +28,7 @@ for (const binary of [false, true])
         assert.equal(await session.evaluate(`mappedTextObserve(${JSON.stringify(row.id)},${row.face},${row.opacity},${row.hold},${shadow})`), mappedTextExpected(row), row.id)
       }
       await session.evaluate('mappedTextMenu()')
+      await selectSoftwareFrame(session, 'mappedWindow')
       const id = Number(await session.evaluate('mappedWindow.__windowId'))
       for (let phase = 0; phase < 4; phase++) {
         if (phase) {

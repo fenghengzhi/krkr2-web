@@ -63,7 +63,7 @@ test('a starving stream leaves its source position and boundary labels unchanged
   assert.equal(mixer.snapshot(1).status, 'play')
   assert.equal(mixer.snapshot(2).position, 128)
   assert.deepEqual(held.events, [])
-  assert.equal(supply(mixer, source).length, 1)
+  assert.equal(supply(mixer, source).length, 3, 'Play warms its bounded sequential horizon before any sample is audible')
   const resumed = render(mixer)
   assert.equal(resumed.left[0], source.data[0]![0]! + 0.25)
   assert.deepEqual(resumed.events.flatMap((event) => event.type === 'label' ? [event.label] : []), ['first'])
@@ -117,9 +117,9 @@ test('a high-rate far jump waits before mixing or committing source and target l
     assert(held.right.every((value) => value === 0))
     assert.deepEqual(held.events, [], 'Neither current labels nor the far target may commit early')
     assert.deepEqual(stream.snapshot(1), before)
-    assert.equal(stream.inspectStreams().pending, 1)
+    assert.equal(stream.inspectStreams().pending, 2)
   }
-  assert.deepEqual(supply(stream, source).map((request) => request.position), [12288])
+  assert.deepEqual(supply(stream, source).map((request) => request.position), [12288, 16384])
   const resumed = render(stream), expected = render(regular)
   assert.deepEqual(resumed, expected)
   assert.equal(resumed.left[0], source.data[0]![4093])
@@ -261,4 +261,66 @@ test('stream decode failure is reported once rather than looping or declaring na
   assert.deepEqual(failed.events, [{ type: 'error', message: 'range read failed' }])
   assert.equal(mixer.snapshot(1).status, 'stop')
   assert.deepEqual(render(mixer, 128).events, [])
+})
+
+test('public seeks warm the next PCM page before the first output quantum, including paused and stopped voices', () => {
+  const source = pcm(32 * streamPageFrames)
+  for (const paused of [false, true]) {
+    const stream = new AudioMixer(48000), regular = new AudioMixer(48000),
+      position = 4 * streamPageFrames + 3591
+    for (const [mixer, asset] of [[regular, source], [stream, streamed(source)]] as const) {
+      mixer.command({ op: 'load', id: 1, asset, settings: defaultSoundSettings() })
+      mixer.command({ op: 'set', id: 1, property: 'paused', value: paused })
+      mixer.command({ op: 'set', id: 1, property: 'position', value: position })
+    }
+    const before = stream.snapshot(1), requests = supply(stream, source)
+    assert.deepEqual(requests.map((request) => request.position), [4, 5, 6].map((page) => page * streamPageFrames))
+    assert.deepEqual(stream.snapshot(1), before, 'Reading ahead cannot advance a stopped/paused source')
+    for (const mixer of [regular, stream]) mixer.command({ op: 'play', id: 1 })
+    if (paused) {
+      assert.deepEqual(render(stream, 960), render(regular, 960))
+      assert.equal(stream.snapshot(1).position, position)
+      for (const mixer of [regular, stream]) mixer.command({ op: 'set', id: 1, property: 'paused', value: false })
+    }
+    const actual = render(stream, 960), expected = render(regular, 960)
+    assert.deepEqual(actual, expected)
+    assert(actual.left.every((value) => value > 0), 'The 503-sample prefix must not turn into a silent tail at the page edge')
+    assert.equal(stream.snapshot(1).position, position + 960)
+    assert(stream.inspectStreams().bytes <= streamPcmReservation(2))
+    stream.command({ op: 'close', id: 1 }); regular.command({ op: 'close', id: 1 })
+    assert.deepEqual(stream.inspectStreams(), { voices: 0, bytes: 0, pending: 0, reservedBytes: 0 })
+  }
+})
+
+test('hard SLI and whole-track loops warm their actual targets without consuming labels or their abandoned tail', () => {
+  for (const sli of [true, false]) {
+    const source = pcm(48 * streamPageFrames), stream = new AudioMixer(48000), regular = new AudioMixer(48000),
+      boundary = sli ? 40 * streamPageFrames + 64 : source.sampleCount,
+      target = sli ? 9 * streamPageFrames - 101 : 0, position = boundary - 31
+    if (sli) source.loops.links.push({ from: boundary, to: target, smooth: false, condition: 'no', variable: 0, reference: 0 })
+    source.loops.labels.push({ position: target, name: 'target' }, { position: boundary - 10, name: ':[0]++' })
+    for (const [mixer, asset] of [[regular, source], [stream, streamed(source, false)]] as const) {
+      mixer.command({ op: 'load', id: 1, asset, settings: defaultSoundSettings() })
+      mixer.command({ op: 'set', id: 1, property: 'looping', value: !sli })
+      mixer.command({ op: 'set', id: 1, property: 'position', value: position })
+      mixer.command({ op: 'play', id: 1 })
+    }
+    const before = stream.snapshot(1), requests = supply(stream, source)
+    assert.deepEqual(requests.map((request) => request.position),
+      (sli ? [40, 8, 9] : [47, 0, 1]).map((page) => page * streamPageFrames))
+    assert.deepEqual(stream.snapshot(1), before)
+    assert.equal(before.flags[0], 0, 'Warmup does not execute the flag label')
+    const actual = render(stream, 960), expected = render(regular, 960)
+    assert.deepEqual(actual, expected)
+    assert(actual.left.every((value) => value > 0))
+    assert.deepEqual(actual.events.flatMap((event) => event.type === 'label' ? [event.label] : []), [':[0]++', 'target'])
+    assert.equal(stream.snapshot(1).position, target + 929)
+    assert.equal(stream.snapshot(1).flags[0], 1)
+    assert(stream.inspectStreams().pending <= 4)
+    const late = stream.takeStreamRequests()
+    stream.command({ op: 'close', id: 1 })
+    for (const request of late) stream.command({ op: 'streamData', request,
+      data: source.data.map((channel) => channel.slice(request.position, request.position + request.frames)) })
+    assert.deepEqual(stream.inspectStreams(), { voices: 0, bytes: 0, pending: 0, reservedBytes: 0 })
+  }
 })

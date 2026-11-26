@@ -5,6 +5,7 @@ import { FontKernel } from '../../src/backends/text/freetype/face.ts'
 import type { FontFactory, FontManifest } from '../../src/backends/text/freetype/module.ts'
 import type { FrameLayer } from '../../src/engine/ports/graphics.ts'
 import { headless } from '../helpers/headless.ts'
+import { selectSoftwareFrame } from '../helpers/software-frame.ts'
 import { textMetricCases, textMetricFiles, textMetricSource, textMetricFrameMismatch } from '../helpers/text-metric-cache.ts'
 
 for (const binary of [false, true])
@@ -38,6 +39,7 @@ for (const binary of [false, true])
       for (const row of textMetricCases)
         assert.equal(await session.evaluate(`textMetricObserve(${JSON.stringify(row.id)})`), row.expected, row.id)
       await session.evaluate('textMetricMenu()')
+      await selectSoftwareFrame(session, 'textMetricWindow')
       const id = Number(await session.evaluate('textMetricWindow.__windowId'))
       for (const [phase, height] of [0, 24, 24, 0].entries()) {
         if (phase) {

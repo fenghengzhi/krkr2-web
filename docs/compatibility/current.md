@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 163 批接入 MPEG-2/MP2 节目流和 XVID 标记的 MPEG-4 Part 2/MP3 AVI，修订长 Ogg 配乐跳转时的预读与图层影片的帧回调。本批结果待托管验证。[163 实现与托管证据](../decisions/163-movie-playback-music-and-save-verification.md)
+
 第 162 批修正了 KAG 转发属性后的选章顺序，并按裸 MPEG-1 视频的实际帧率生成过场时钟。[162 实现与托管证据](../decisions/162-game-routes-and-movie-timing.md)
 
 第 161 批增加可保存到游戏库的 CD 盘符映射与 AIFF 整数、浮点音轨播放，修订普通 WAVE 音频块选择和 KAG 宏字段的写入行为。新增实现等待托管验证。[161 兼容范围与证据](../decisions/161-disc-music-wave-and-kag-setters.md)

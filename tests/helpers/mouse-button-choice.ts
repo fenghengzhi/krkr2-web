@@ -10,6 +10,7 @@ function buttonRecord(name,x,y,button=void){
   global.buttonTrace.add(name+":"+x+","+y+(button===void?"":":"+button));
 }
 class ButtonWindow extends Window {
+  function ButtonWindow(){super.Window();}
   function onMouseDown(x,y,button,shift){global.buttonTrace.clear();global.buttonRecord("window-down",x,y,button);}
   function onClick(x,y){global.buttonRecord("window-click",x,y);}
   function onDoubleClick(x,y){global.buttonRecord("window-double",x,y);}
