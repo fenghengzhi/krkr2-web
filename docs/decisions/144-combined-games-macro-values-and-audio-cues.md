@@ -23,3 +23,5 @@
 第 134 批的三浏览器原版 KAG 与发布兼容用例合计 96/96 通过，游戏库与 PWA 合计 128/128 通过。Firefox 的两项场景用例通过，包含图层透明度、转场和保存 BMP 遮罩的回读。另有四项缩略图用例通过。[第 134 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45761489263)
 
 本次取得该批九份常规浏览器报告中的三份，共 794 项通过、33 项失败。另五份尚未发布，Firefox 第一分片的归档已登记，但下载未成功。Node 仍为 4,066 项通过、4 项图层断言失败。第 135 至 143 批在本次取回时仍在队列中。
+
+第 144 批实现提交为 `dd91ffaab28dc6dd73262d703edc88b5ceca432d`，GitHub 首次登记为 `pending`，结果留到下一批取回。[第 144 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45779775709)

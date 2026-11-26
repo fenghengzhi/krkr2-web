@@ -2,7 +2,7 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
-第 144 批支持自动找到安装器旁的内嵌 XP3 游戏，保留 KAG 宏参数的实数类型，并补上自然播放到曲尾的声音标签。第 134 批三浏览器兼容用例 96/96 通过，游戏库与 PWA 合计 128/128 通过，常规浏览器仍有失败和未报告项。[144 实现与验证](decisions/144-combined-games-macro-values-and-audio-cues.md)
+第 144 批支持自动找到安装器旁的内嵌 XP3 游戏，保留 KAG 宏参数的实数类型，并补上自然播放到曲尾的声音标签。第 134 批三浏览器兼容用例 96/96 通过，游戏库与 PWA 合计 128/128 通过，常规浏览器仍有失败和未报告项。144 的提交 `dd91ffa` 已登记排队。[144 实现与验证](decisions/144-combined-games-macro-values-and-audio-cues.md) · [第 144 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45779775709)
 
 第 143 批修正了立绘放大和镜像的像素边缘、全角 KAG 指令与参数，以及游戏用小数控制声音暂停和循环的行为。第 134 批从原版分发包启动、存档并由游戏库重开的新增场景 12/12 通过，仍有 4 项 Node 图层断言失败。143 的提交 `50edb25` 已登记排队。[143 实现与验证](decisions/143-game-sprites-script-names-and-sound.md) · [第 143 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45777718215)
 
