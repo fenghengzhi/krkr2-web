@@ -29,3 +29,5 @@
 第 139 批已结束，24 个作业成功、4 个失败、10 个跳过。上次尚未发布的 Wine 声音参考现已取回，41/41 匹配。第 140 批在这次快照中有 23 个作业成功、3 个失败、10 个跳过，Wine 声音参考仍在运行。两批应用构建都在视频命令读取 `frame` 的 TypeScript 检查处失败，Node、常规浏览器和依赖构建的游戏验收没有结果。第 145 批包含相应的类型修改，本次取回时该批仍在排队。[第 139 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45769721383) · [第 140 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45771395938)
 
 第 140 批原版 KAG 对照为 78/78，图形为 62/62。Windows 声音参考为 37/41，另四项报告 DirectSound 不可用。该批的 Windows 配置对照没有取得五个计划场景的进程记录。第 149 批修订了输入 JSON 的读取方式，执行结果仍待取回。本轮新增 25 份原始归档，已核对大小和 SHA-256。第 141 至 149 批在快照中仍在排队。[第 149 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45793541359)
+
+第 150 批实现提交为 `e2b388570a2f07a2409d8093bf3f4de1fe170846`。GitHub 已登记托管运行，登记时状态为 `pending`，结果留到下一批取回。[第 150 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45796411933)
