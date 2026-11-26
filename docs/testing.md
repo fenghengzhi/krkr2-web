@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 165 批用同一张独立制作的剧情 ISO 检查 Windows 原版查盘读脚本、网页原版 KAG 启动章节以及刷新读档。影片验收覆盖分段 MP4 切换音轨。第 160 批新增三份浏览器报告，两个取消作业保留逐项结果及未报告数量。[165 验收与历史结果](decisions/165-disc-files-and-fragmented-movies.md)
+
 第 164 批用独立生成的 ISO 与 Joliet 镜像核对 Windows 原版查盘结果，从混音样本检查换轨后的淡出，并通过两套独立字形及首帧时间晚于零的影片检查实际显示。新增验收等待托管运行。[164 验收与历史结果](decisions/164-disc-volumes-fades-and-game-rendering.md)
 
 第 163 批用独立生成的 MPEG-2 和 Xvid/MP3 影片检验时间轴、图层与声音，并在 Windows 上用同批发布的 Web 引擎写档后交给原版读回。本批结果待托管验证。[163 实现与托管证据](decisions/163-movie-playback-music-and-save-verification.md)

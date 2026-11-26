@@ -156,7 +156,7 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
         backend.append(option)
       }
       backend.value = draft?.backend ?? game.backend
-      const discs = createCddaSettings('库中 CD 音轨映射')
+      const discs = createCddaSettings('库中游戏光盘映射')
       discs.input.value = formatCddaSettings(game.cddaDiscs)
       const savedDiscText = discs.input.value
       if (draft) discs.input.value = draft.discs

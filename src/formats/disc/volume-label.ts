@@ -31,7 +31,7 @@ export function discVolumeTrack(sheet: CueSheet): DiscVolumeTrack | 'audio' | un
     end: next?.file === track.file ? next.indices.get(0) ?? next.indices.get(1) : undefined }
 }
 
-function isDataSector(bytes: Uint8Array, { bytes: stride, payload }: SectorLayout): boolean {
+export function isDataSector(bytes: Uint8Array, { bytes: stride, payload }: SectorLayout): boolean {
   if (stride === 2352) {
     if (bytes[0] !== 0 || bytes[11] !== 0 || bytes[15] !== (payload === 16 ? 1 : 2)) return false
     for (let i = 1; i <= 10; i++) if (bytes[i] !== 255) return false

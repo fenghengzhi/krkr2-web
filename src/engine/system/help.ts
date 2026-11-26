@@ -9,6 +9,7 @@ import { ExecutionControl } from '../scheduler/control.ts'
 import { cancelable } from '../scheduler/cancelable.ts'
 import { TvpError } from './tvp-error.ts'
 import {
+  discAddress,
   extractStorageName,
   parseStoragePath,
   storageFilePath,
@@ -20,7 +21,8 @@ import {
 export function getWebLocalName(input: string, currentDirectory = ''): string {
   const path = parseStoragePath(input, currentDirectory)
   if (path.includes('>')) throw new TvpError('TVPCannotGetLocalName', [input], 'Archive members do not have a local name')
-  const name = toPublicStoragePath(path)
+  const disc = discAddress(path)
+  const name = disc ? disc.drive.toLowerCase() + ':\\' + disc.path.replaceAll('/', '\\') : toPublicStoragePath(path)
   if (name.length > helpPathLimit) throw new Error('Local storage name exceeds 4096 characters')
   return name
 }
@@ -36,6 +38,7 @@ export async function openHelpDocument(
     host: HelpPort
     control: ExecutionControl
     currentDirectory?: string
+    qualifyDrive?(name: string): Promise<string>
   },
 ): Promise<boolean> {
   const { control } = options
@@ -43,8 +46,9 @@ export async function openHelpDocument(
   if (parameters !== '' || target.length > helpPathLimit) return false
   let path: string
   try {
-    path = storageFilePath(target, options.currentDirectory)
+    path = storageFilePath(options.qualifyDrive ? await options.qualifyDrive(target) : target, options.currentDirectory)
   } catch {
+    control.check()
     return false
   }
   if (path.includes('>') || !/\.(txt|md|log)$/i.test(path)) return false

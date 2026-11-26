@@ -2,6 +2,7 @@ import { TvpError } from '../system/tvp-error.ts'
 
 /** Public game storage addresses are names in one session, never network URLs. */
 const publicRoot = 'game://./'
+const fileRoot = 'file://./'
 const scheme = /^[a-z][a-z0-9+.-]*:/i
 
 /** Strict relative input for imports and persistence. Public media are not accepted here. */
@@ -45,9 +46,7 @@ function directoryEnding(path: string): boolean {
  * Directory delimiters survive; archives and members have separate root bounds.
  * Percent escapes, # and ? have no URL semantics. Paths preserve their spelling.
  */
-export function parseStoragePath(input: string, currentDirectory = ''): string {
-  const absolute = /^(?:game:\/\/(?:\.\/|\/)|\/)/i.test(input.replaceAll('\\', '/')),
-    path = (absolute ? '' : currentDirectory) + relativeInput(input)
+function normalizeComponents(path: string): string {
   const delimiter = path.indexOf('>')
   if (delimiter < 0) {
     const normalized = normalizeResourcePath(path, true)
@@ -61,12 +60,37 @@ export function parseStoragePath(input: string, currentDirectory = ''): string {
   return archive + '>' + normalized + (normalized && directoryEnding(member) ? '/' : '')
 }
 
-export function toPublicStoragePath(logical: string): string {
-  return publicRoot + parseStoragePath(logical)
+/** Only an explicitly bound virtual drive can translate an OS-style input.
+ * Canonical file-medium names also serve as logical keys, disjoint from imports. */
+export function discAddress(input: string): { drive: string; path: string } | undefined {
+  const slashes = input.replaceAll('\\', '/')
+  const match = /^file:\/\/\.\/([a-z])\/(.*)$/is.exec(slashes)
+  return match ? { drive: match[1]!.toUpperCase(), path: match[2]! } : undefined
+}
+export function discStoragePath(drive: string, relative: string): string {
+  return fileRoot + drive.toLowerCase() + '/' + normalizeComponents(relative).replace(/[A-Z]/g, (c) => c.toLowerCase())
+}
+export function nativeDiscPath(input: string): string | undefined {
+  const match = /^([a-z]):\/(.*)$/is.exec(input.replaceAll('\\', '/'))
+  return match ? discStoragePath(match[1]!, match[2]!) : undefined
+}
+export function parseStoragePath(input: string, currentDirectory = ''): string {
+  const disc = discAddress(input)
+  if (disc) return discStoragePath(disc.drive, disc.path)
+  const absolute = /^(?:game:\/\/(?:\.\/|\/)|\/)/i.test(input.replaceAll('\\', '/'))
+  const relative = relativeInput(input)
+  const base = !absolute && discAddress(currentDirectory)
+  if (base) return discStoragePath(base.drive, base.path + relative)
+  return normalizeComponents((absolute ? '' : currentDirectory) + relative)
+}
+
+export function toPublicStoragePath(logical: string, currentDirectory = ''): string {
+  const path = parseStoragePath(logical, currentDirectory)
+  return discAddress(path) ? path : publicRoot + path
 }
 
 export function getFullStoragePath(input: string, currentDirectory = ''): string {
-  return input === '' ? '' : publicRoot + parseStoragePath(input, currentDirectory)
+  return input === '' ? '' : toPublicStoragePath(input, currentDirectory)
 }
 
 /** Validate a file operation without accidentally writing a directory or root. */
@@ -87,6 +111,7 @@ export function storageDirectoryPath(input: string, currentDirectory = ''): stri
 export function storageWritePath(input: string, currentDirectory = ''): string {
   const path = storageFilePath(input, currentDirectory)
   if (path.includes('>')) throw new TvpError('TVPCannotWriteToArchive', [], 'Archive storage is read-only')
+  if (discAddress(path)) throw new TvpError('TVPCannotOpenStorage', [input], 'CD storage is read-only')
   return path
 }
 

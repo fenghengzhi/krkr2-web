@@ -391,7 +391,8 @@ jobs:
           isoinfo -i joliet.iso -J -x "${joliet_files[0]}" > joliet-scene.txt
           cmp files/SCENE.TXT plain-scene.txt
           cmp files/SCENE.TXT joliet-scene.txt
-          sha256sum plain.iso joliet.iso > SHA256SUMS
+          python3 "$GITHUB_WORKSPACE/scripts/generate-story-disc.py"
+          sha256sum plain.iso joliet.iso story.iso > SHA256SUMS
       - name: Encode and independently decode AIFF disc tracks
         id: cdda-aiff-fixtures
         continue-on-error: true

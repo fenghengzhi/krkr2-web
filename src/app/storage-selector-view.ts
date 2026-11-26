@@ -4,10 +4,12 @@ import type {
   StorageSelectorPresentation,
 } from '../engine/ports/storage-selector.ts'
 import {
+  discAddress,
   extractStorageExt,
   extractStorageName,
   extractStoragePath,
   getFullStoragePath,
+  nativeDiscPath,
 } from '../engine/storage/public-path.ts'
 
 interface SelectorActions {
@@ -205,11 +207,12 @@ export function createStorageSelectorView(
       pattern = presentation.filters[Number(filter.value) - 1]?.pattern ?? '*'
     for (const name of listing.directories) {
       if (name === current || name === 'game://./') continue
-      const path = name.slice(0, -1)
-      if (extractStoragePath(path) !== current) continue
+      const path = name.slice(0, -1), disc = discAddress(name)
+      const driveRoot = current === 'game://./' && disc?.path === ''
+      if (!driveRoot && extractStoragePath(path) !== current) continue
       const button = element(
         'button',
-        extractStorageName(path) + (name.endsWith('>') ? ' ›（只读）' : '/'),
+        driveRoot ? `${disc!.drive}: 光盘` : extractStorageName(path) + (name.endsWith('>') ? ' ›（只读）' : '/'),
       )
       button.type = 'button'
       button.className = 'storage-selector-directory'
@@ -299,10 +302,12 @@ export function createStorageSelectorView(
         const raw = input.value.replaceAll('\\', '/')
         if (!raw) throw new Error('请输入文件名。')
         if (raw.length > 4096) throw new Error('文件路径不能超过 4096 个字符。')
-        if (/^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^game:\/\/\.\//i.test(raw))
+        const disc = nativeDiscPath(raw) ?? (discAddress(raw) ? raw : undefined)
+        if (disc && presentation.save) throw new Error('光盘为只读，请选择存档目录。')
+        if (!disc && /^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^game:\/\/\.\//i.test(raw))
           throw new Error('请选择当前游戏中的文件。')
         if (raw.startsWith('/')) throw new Error('请选择当前游戏中的文件。')
-        const name = getFullStoragePath(/^game:\/\/\.\//i.test(raw) ? raw : directory.value + raw)
+        const name = getFullStoragePath(disc ?? (/^game:\/\/\.\//i.test(raw) ? raw : directory.value + raw))
         if (name.endsWith('/') || name.endsWith('>')) throw new Error('请选择文件，而不是目录。')
         // Keep the unextended name on the wire. The engine applies the rule
         // exactly once, including a trailing dot that suppresses the default.

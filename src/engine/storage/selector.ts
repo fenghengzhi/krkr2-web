@@ -7,6 +7,8 @@ import type { ScriptValue } from '../script/runtime.ts'
 import { StorageResolver } from './resolver.ts'
 import { SaveOverlay } from './save-overlay.ts'
 import {
+  discAddress,
+  discStoragePath,
   extractStorageExt,
   extractStorageName,
   extractStoragePath,
@@ -101,16 +103,16 @@ export class StorageSelector {
     )
       throw new Error('File selector option exceeds 4096 characters')
     if (/[\\/>\0]/.test(extension)) throw new Error('Invalid file selector default extension')
-    const requestedName = name ? parseStoragePath(name, this.resources.currentDirectory) : '',
+    const requestedName = name ? parseStoragePath(await this.resources.qualifyDrive(name), this.resources.currentDirectory) : '',
       existingName =
         requestedName && !/[/>]$/.test(requestedName) && (!save || !requestedName.includes('>'))
           ? (this.saves.resource(requestedName) ?? await this.resources.findAsync(requestedName))
           : undefined,
       directory = async (value: string): Promise<StorageSelectorDirectory | undefined> => {
         if (!value) return undefined
-        const normalized = normalizeSelectorPath(toPublicStoragePath(parseStoragePath(value, this.resources.currentDirectory)))
+        const normalized = normalizeSelectorPath(toPublicStoragePath(parseStoragePath(await this.resources.qualifyDrive(value), this.resources.currentDirectory)))
         const candidate = /[/>]$/.test(normalized) ? normalized : normalized + '/'
-        if (save && candidate.includes('>')) return undefined
+        if (save && (discAddress(candidate) || candidate.includes('>'))) return undefined
         try { return await this.browse(save, candidate) }
         catch (error) {
           if (error instanceof Error && error.message.startsWith('Storage directory not found:')) return undefined
@@ -152,6 +154,7 @@ export class StorageSelector {
       virtual = this.virtualDirectories()
     if (logical && !/[/>]$/.test(logical)) throw new Error('File selector directory requires a trailing delimiter')
     if (save && logical.includes('>')) throw new Error('Archive directories are read-only')
+    if (save && discAddress(logical)) throw new Error('CD storage is read-only')
     const overlays = this.saves.list().map((file) => this.saves.resource(file.name)!),
       fallback = this.directory(path, virtual)
     let listed: Awaited<ReturnType<StorageResolver['listDirectory']>>
@@ -171,8 +174,9 @@ export class StorageSelector {
     for (const entry of [...listed.directories.map(normalizeSelectorPath), ...virtual])
       if ((!save || !entry.includes('>')) && extractStoragePath(entry.slice(0, -1)) === name) directories.add(entry)
     // Retain navigation to ancestors without enumerating their archives.
-    const current = parseStoragePath(name)
-    for (let i = 0; i < current.length; i++)
+    if (!save && name === 'game://./') for (const root of await this.resources.discRoots()) directories.add(root)
+    const current = parseStoragePath(name), disc = discAddress(current)
+    for (let i = disc ? discStoragePath(disc.drive, '').length - 1 : 0; i < current.length; i++)
       if (current[i] === '/' || current[i] === '>') directories.add(toPublicStoragePath(current.slice(0, i + 1)))
     const units = [...entries.keys(), ...directories].reduce((sum, value) => sum + value.length, 0)
     if (entries.size > maxEntries || directories.size > maxEntries || units > maxNameUnits)
@@ -204,7 +208,8 @@ export class StorageSelector {
     )
       throw new Error('Invalid file selector choice')
     if (name.length > 4096) throw new Error('File selector path exceeds 4096 characters')
-    let path = request.save ? storageWritePath(name) : storageFilePath(name)
+    const requested = await this.resources.qualifyDrive(name)
+    let path = request.save ? storageWritePath(requested) : storageFilePath(requested)
     // Appending follows the filename, never the directory. A final dot opts out.
     path = selectorExtension(path, request.defaultExtension)
     path = request.save ? storageWritePath(path) : storageFilePath(path)

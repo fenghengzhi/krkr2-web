@@ -75,7 +75,7 @@ export function mountApp(root: HTMLDivElement): void {
   }
   const scriptOptions = scriptEncodings.map((name) => `<option value="${name}">${scriptLabels[name]}</option>`).join('')
   projectControls.insertAdjacentHTML('beforeend', `<label for="script-encoding">无 BOM 的脚本与剧情编码</label><select id="script-encoding">${scriptOptions}</select>`)
-  const discSettings = createCddaSettings('CD 音轨映射（可选）', 'cdda-discs')
+  const discSettings = createCddaSettings('游戏光盘映射（可选）', 'cdda-discs')
   projectControls.append(discSettings.element)
   el('native-save-hint').insertAdjacentHTML('afterend', `<div id="native-zip-options" hidden><label for="native-zip-encoding">存档 ZIP 文件名编码</label><select id="native-zip-encoding"><option value="">沿用当前游戏</option>${zipOptions}</select></div>`)
   const projectSelection = (): ProjectSelection => {

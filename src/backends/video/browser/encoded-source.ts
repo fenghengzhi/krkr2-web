@@ -137,7 +137,8 @@ export class VideoEncodedResources {
       selection = { video, ...(timeline.audioStreams ? { audio: index } : {}) }
     let temporary = 0
     const reserveMetadata = (bytes: number) => { this.charge(bytes); temporary += bytes }
-    const options = { checkpoint: valid, yieldControl: () => new Promise<void>((resolve) => setTimeout(resolve, 0)), reserveMetadata }
+    const options = { checkpoint: valid, yieldControl: () => new Promise<void>((resolve) => setTimeout(resolve, 0)), reserveMetadata,
+      completeFragmentDurations: true }
     try {
       const blob = retained.blob
       if (!blob) reserveMetadata(retained.size)

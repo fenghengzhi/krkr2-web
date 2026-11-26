@@ -9,7 +9,11 @@ export interface SelectedMp4Audio {
   videoStreams: number
   selectedTrackId: number
 }
-export interface Mp4AudioSelectionOptions extends Mp4MetadataOptions {}
+export interface Mp4AudioSelectionOptions extends Mp4MetadataOptions {
+  /** Complete finite-file fragment headers which declare duration zero.
+   * Never changes packet timestamps, payloads or an existing nonzero duration. */
+  completeFragmentDurations?: boolean
+}
 export interface Mp4TrackSelection {
   /** Omitted categories remain intact. Indices refer to the original file. */
   audio?: number
@@ -29,7 +33,11 @@ export interface SelectedMp4BlobTracks extends Omit<SelectedMp4Tracks, 'bytes'> 
   patches: Mp4Patch[]
 }
 interface Box { kind: string; start: number; body: number; end: number }
-interface Track { id: number; handler: string; box: Box; header: Box; alternate: number; descriptions: number; samples: number; regularSamples: number }
+interface Track {
+  id: number; handler: string; box: Box; header: Box; alternate: number; descriptions: number; samples: number; regularSamples: number
+  mediaHeader: Box; timescale: number; editDuration?: number; durationComputable: boolean
+  end: number; decodeEnd: number
+}
 interface FragmentTrack { box: Box; id: number; runs: number[]; ordinal: number; firstTime?: number }
 const MAX_BOXES = 100000, MAX_SAMPLES = 1000000, MAX_BYTES = 64 * 1024 * 1024
 const padding = ['free', 'skip', 'wide']
@@ -181,7 +189,8 @@ async function selectTracks(bytes: Mp4Data, selection: Mp4TrackSelection,
   const mvhd = one(movie, 'mvhd')!, mvhdVersion = full(mvhd, [0, 1]).version
   need(mvhd, mvhd.body, mvhdVersion ? 112 : 100)
   exact(mvhd, mvhd.body + (mvhdVersion ? 112 : 100))
-  if (!view.getUint32(mvhd.body + (mvhdVersion ? 20 : 12))) throw new Error('MP4 movie timescale must be positive')
+  const movieTimescale = view.getUint32(mvhd.body + (mvhdVersion ? 20 : 12))
+  if (!movieTimescale) throw new Error('MP4 movie timescale must be positive')
   const tracks: Track[] = [], ids = new Set<number>()
   for (const box of movie.filter((item) => item.kind === 'trak')) {
     await cooperate()
@@ -197,15 +206,32 @@ async function selectTracks(bytes: Mp4Data, selection: Mp4TrackSelection,
     const mdhd = one(mdia, 'mdhd')!, mediaVersion = full(mdhd, [0, 1]).version
     need(mdhd, mdhd.body, mediaVersion ? 36 : 24)
     exact(mdhd, mdhd.body + (mediaVersion ? 36 : 24))
-    if (!view.getUint32(mdhd.body + (mediaVersion ? 20 : 12))) throw new Error('MP4 media timescale must be positive')
+    const timescale = view.getUint32(mdhd.body + (mediaVersion ? 20 : 12))
+    if (!timescale) throw new Error('MP4 media timescale must be positive')
     const hdlr = one(mdia, 'hdlr')!
     full(hdlr); need(hdlr, hdlr.body, 24)
     const handler = tag(bytes, hdlr.body + 8)
     if (handler !== 'soun' && handler !== 'vide') throw new Error(`Unsupported MP4 track handler ${handler}`)
     const edit = one(track, 'edts', false)
+    let editDuration: number | undefined, durationComputable = true
     if (edit) {
       const elst = one(children(edit, ['elst']), 'elst')!, editVersion = full(elst, [0, 1]).version
-      count(elst, elst.body + 4, editVersion ? 20 : 12, 4096)
+      const edits = count(elst, elst.body + 4, editVersion ? 20 : 12, 4096)
+      if (edits) editDuration = 0
+      for (let i = 0; i < edits; i++) {
+        const at = elst.body + 8 + i * (editVersion ? 20 : 12),
+          duration = editVersion ? view.getBigUint64(at) : BigInt(view.getUint32(at)),
+          rawTime = editVersion ? view.getBigUint64(at + 8) : BigInt(view.getInt32(at + 4)),
+          mediaTime = editVersion ? BigInt.asIntN(64, rawTime) : rawTime,
+          rate = view.getUint32(at + (editVersion ? 16 : 8))
+        // Zero/open-ended edits, dwell/rate edits and negative times other
+        // than the standard empty edit have no inferred replacement here.
+        if (duration === 0n || duration > BigInt(Number.MAX_SAFE_INTEGER) ||
+            mediaTime < -1n || mediaTime > BigInt(Number.MAX_SAFE_INTEGER) || rate !== 0x10000)
+          durationComputable = false
+        editDuration = (editDuration ?? 0) + Number(duration)
+        if (!Number.isSafeInteger(editDuration)) durationComputable = false
+      }
     }
     const minf = children(one(mdia, 'minf')!, ['smhd', 'vmhd', 'nmhd', 'dinf', 'stbl'])
     for (const header of minf.filter((item) => ['smhd', 'vmhd', 'nmhd'].includes(item.kind))) {
@@ -301,7 +327,8 @@ async function selectTracks(bytes: Mp4Data, selection: Mp4TrackSelection,
     }
     if (chunkSamples !== sizeSamples) throw new Error('MP4 chunk and size sample counts disagree')
     tracks.push({ id, handler, box, header, alternate: header.body + (version ? 46 : 34), descriptions: entries.length,
-      samples: sizeSamples, regularSamples: sizeSamples })
+      samples: sizeSamples, regularSamples: sizeSamples, mediaHeader: mdhd, timescale, editDuration, durationComputable,
+      end: 0, decodeEnd: 0 })
   }
   if (tableSamples > MAX_SAMPLES * 2) throw new Error('MP4 aggregate sample budget exceeded')
   const audio = tracks.filter((track) => track.handler === 'soun'),
@@ -393,6 +420,10 @@ async function selectTracks(bytes: Mp4Data, selection: Mp4TrackSelection,
           if (flags & 0x400) field += 4
           if (flags & 0x800) { composition = version ? view.getInt32(field) : view.getUint32(field); field += 4 }
           validateSample(position, size, decodeTime, decodeTime + composition, duration)
+          const track = byId.get(id)!
+          track.end = Math.max(track.end, decodeTime + composition + duration)
+          track.decodeEnd = Math.max(track.decodeEnd, decodeTime + duration)
+          if (decodeTime + composition < 0) track.durationComputable = false
           if (i === 0 && sample === 0) firstTime = decodeTime + composition
           position += size
           decodeTime += duration
@@ -495,6 +526,53 @@ async function selectTracks(bytes: Mp4Data, selection: Mp4TrackSelection,
       const sample = samples[i]!
       if (!(inspected++ % 4096)) await cooperate()
       validateSample(sample.offset, sample.size, sample.dts, sample.cts, sample.duration)
+      track.end = Math.max(track.end, sample.cts + sample.duration)
+      track.decodeEnd = Math.max(track.decodeEnd, sample.dts + sample.duration)
+      if (sample.cts < 0) track.durationComputable = false
+    }
+  }
+  if (options.completeFragmentDurations && fragments.size) {
+    // A finite empty-moov file can advertise zero for every duration. Gecko
+    // then estimates duration from decoded packets and limits seekable to that
+    // estimate (Mozilla bug 1365148; MediaDecoder::GetSeekableImpl). Complete
+    // only missing headers using the independently validated full sample table.
+    // Keep all media bytes, edit lists, CTS/DTS and fragment offsets unchanged.
+    const durationWrites: typeof writes = []
+    const field = (box: Box, trackHeader = false) => {
+      const version = bytes.getUint8(box.body), width = version ? 8 : 4,
+        at = box.body + (trackHeader ? (version ? 28 : 20) : (version ? 24 : 16)),
+        value = width === 8 ? view.getBigUint64(at) : BigInt(view.getUint32(at))
+      return { at, width, value }
+    }
+    const fill = (target: ReturnType<typeof field>, value: bigint): boolean => {
+      if (target.value !== 0n) return true
+      if (value <= 0n || value >= (1n << BigInt(target.width * 8)) - 1n || value > BigInt(Number.MAX_SAFE_INTEGER)) return false
+      durationWrites.push({ at: target.at, width: target.width, value: Number(value) })
+      return true
+    }
+    let complete = true, movieEnd = 0n
+    for (const track of tracks) if (!removed.has(track.id)) {
+      if (!track.durationComputable || !track.samples || track.end <= 0 || track.end < track.decodeEnd) { complete = false; break }
+      const mediaEnd = BigInt(track.end), scale = BigInt(track.timescale),
+        // Round upward only in the coarser movie timescale: the final partial
+        // tick still contains media, and must not make its final frame unseekable.
+        presentationEnd = track.editDuration === undefined
+          ? (mediaEnd * BigInt(movieTimescale) + scale - 1n) / scale : BigInt(track.editDuration),
+        header = field(track.header, true)
+      if (!fill(field(track.mediaHeader), mediaEnd) || !fill(header, presentationEnd)) { complete = false; break }
+      const end = header.value || presentationEnd
+      if (end > movieEnd) movieEnd = end
+    }
+    if (complete && fill(field(mvhd), movieEnd)) {
+      // mehd is also in movie timescale, when the original file supplies it.
+      // Its duration field follows the full-box header rather than mvhd layout.
+      const mehd = mvex && one(list(mvex.body, mvex.end), 'mehd', false)
+      if (mehd) {
+        const width = bytes.getUint8(mehd.body) ? 8 : 4, at = mehd.body + 4,
+          value = width === 8 ? view.getBigUint64(at) : BigInt(view.getUint32(at))
+        complete = fill({ at, width, value }, movieEnd)
+      }
+      if (complete) writes.push(...durationWrites)
     }
   }
   await cooperate()

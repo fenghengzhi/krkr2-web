@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import type { ServerResponse } from 'node:http'
 import { expect, type Page, type TestInfo } from '@playwright/test'
 import { httpServer, type HttpFixture } from './http-server.ts'
+import { kagGameControls } from './kag-game-controls.ts'
 import { xp3Fixture } from './xp3-fixtures.ts'
 
 const story = String.raw`[eval exp="f.remoteProgress=0"]
@@ -112,23 +113,9 @@ export async function submitRemoteManifest(page: Page, url: string) {
 
 export function remoteManifestUi(page: Page, info: TestInfo, gameDirectory = '') {
   const observations: unknown[] = [], errors: string[] = []
-  let sequence = 0
   page.on('pageerror', (error) => errors.push(error.message))
   const canvas = page.locator('#stage canvas[data-window-id]')
-  const read = async (expression: string) => {
-    const prefix = `remote-manifest-read-${++sequence}:`
-    await expect(page.locator('#evaluate')).toBeEnabled()
-    await page.evaluate((source) => {
-      const input = document.querySelector<HTMLInputElement>('#expression')!, button = document.querySelector<HTMLButtonElement>('#evaluate')!
-      if (button.disabled) throw new Error('Remote game observer is unavailable')
-      input.focus({ preventScroll: true }); input.value = source; button.click()
-    }, `${JSON.stringify(prefix)}+string(Scripts.eval(${JSON.stringify(expression)}))`)
-    const line = page.locator('#logs p span').filter({ hasText: new RegExp('^' + prefix) }).last()
-    await expect(line).toBeVisible({ timeout: 5000 })
-    const value = ((await line.textContent()) ?? '').slice(prefix.length)
-    if (observations.length < 160) observations.push({ expression, value })
-    return value
-  }
+  const { read, clickLink } = kagGameControls(page, observations)
   const state = async (progress: number, visits: number, choice = false) => {
     await expect.poll(() => read('remoteState()'), { timeout: 15000 }).toBe(choice
       ? `0|REMOTE PATCH 0|${visits}|*choice|2|0`
@@ -143,22 +130,6 @@ export function remoteManifestUi(page: Page, info: TestInfo, gameDirectory = '')
     await expect(canvas).toHaveAttribute('width', '640'); await expect(canvas).toHaveAttribute('height', '480')
     const paths = ['', 'savedata/', 'data.xp3>startup.tjs', 'patch.xp3>first.ks'].map((path) => 'game://./' + gameDirectory + path)
     expect(await read('remotePaths()')).toBe([...paths, 'remote literal'].join('|'))
-  }
-  const clickLink = async (index: number, target: string) => {
-    const fields = (await read(`(function(){var m=kag.current,l=m.links[${index}];
-      var x=l.x[0]+(l.w[0]>>1),y=l.y[0]+(l.h[0]>>1);
-      if(!l.fixed[0]){x+=m.lineLayerOriginX+m.getLineLayerLeftOffset();y+=m.lineLayerOriginY+m.getLineLayerTopOffset();}
-      for(var p=m;p!==null;p=p.parent){x+=p.left;y+=p.top;}
-      return [x,y,l.w[0],l.h[0],l.target,int(m.selProcessLock)].join("|");})()`)).split('|')
-    expect(fields).toHaveLength(6); expect(fields[4]).toBe(target); expect(fields[5]).toBe('0')
-    const [x, y, width, height] = fields.slice(0, 4).map(Number)
-    expect(width).toBeGreaterThan(0); expect(height).toBeGreaterThan(0)
-    expect(x).toBeGreaterThanOrEqual(0); expect(x).toBeLessThan(640)
-    expect(y).toBeGreaterThanOrEqual(0); expect(y).toBeLessThan(480)
-    await canvas.scrollIntoViewIfNeeded({ timeout: 5000 })
-    const box = await canvas.boundingBox(); expect(box).not.toBeNull()
-    observations.push({ click: target, x, y, box })
-    await canvas.click({ position: { x: x! * box!.width / 640, y: y! * box!.height / 480 }, timeout: 5000 })
   }
   const backup = async (name: string, binary: boolean) => {
     await page.locator('#save-format').selectOption('backup')

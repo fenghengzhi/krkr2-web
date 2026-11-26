@@ -60,7 +60,7 @@ export async function installVideoAudioProbe(page: Page): Promise<void> {
     // Passive events distinguish a seek/decode wait from an unrelated Worker
     // RPC failure. Do not intercept currentTime or add presentation callbacks;
     // observeVideoFrames already supplies the independent presented attributes.
-    for (const event of ['loadedmetadata', 'loadeddata', 'seeking', 'seeked', 'pause', 'playing', 'error', 'emptied'])
+    for (const event of ['loadedmetadata', 'loadeddata', 'durationchange', 'seeking', 'seeked', 'pause', 'playing', 'error', 'emptied'])
       document.addEventListener(event, (entry) => {
         if (!(entry.target instanceof HTMLVideoElement)) return
         if (mediaEvents.length >= 512) { droppedMediaEvents++; return }

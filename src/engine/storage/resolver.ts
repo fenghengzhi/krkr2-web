@@ -1,8 +1,10 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
+import type { CddaDiscs } from './cdda.ts'
+import { resourceReadBounds } from './resource-source.ts'
 import { StorageArchives, type OpenArchive } from './archives.ts'
 import { TvpError } from '../system/tvp-error.ts'
 
-import { extractStorageName, normalizeResourcePath, parseStoragePath, storageDirectoryPath } from './public-path.ts'
+import { discAddress, discStoragePath, extractStorageName, nativeDiscPath, normalizeResourcePath, parseStoragePath, storageDirectoryPath } from './public-path.ts'
 
 // Kept as the strict relative import/key boundary for existing callers.
 export const normalizePath = normalizeResourcePath
@@ -100,7 +102,8 @@ export class StorageResolver {
   private readonly autoTables = new Map<AliasSearch, AutoPathTable>()
   private readonly collectionTables = new Map<AliasSearch, Map<string, string>>()
   constructor(readonly currentDirectory = '', private readonly archiveAliases = true,
-    private readonly reader?: ArchiveReader, private readonly checkpoint: () => Promise<void> = async () => {}) {
+    private readonly reader?: ArchiveReader, private readonly checkpoint: () => Promise<void> = async () => {},
+    private readonly discs?: Pick<CddaDiscs, 'drives' | 'filesystem'>) {
     this.archives = new StorageArchives(reader, checkpoint, () => ({
       entries: 250000 - this.files.size - this.aliases.size - this.directories.size,
       units: 16 * 1024 * 1024 - [...this.files.keys(), ...this.aliases.keys(), ...this.directories].reduce((sum, name) => sum + name.length, 0),
@@ -113,6 +116,15 @@ export class StorageResolver {
   private readonly autoPaths = new Map<string, string>()
   private directories = new Set<string>()
   private readonlyRoots = new Set<string>()
+  async qualifyDrive(path: string): Promise<string> {
+    const disc = discAddress(nativeDiscPath(path) ?? path)
+    if (!disc) return path
+    if (!(await this.discs?.drives())?.includes(disc.drive)) throw new TvpError('TVPUnsupportedMediaName', [disc.drive.toLowerCase()], 'CD drive is not bound')
+    return discStoragePath(disc.drive, disc.path)
+  }
+  async discRoots(): Promise<string[]> {
+    return (await this.discs?.drives() ?? []).map((drive) => discStoragePath(drive, ''))
+  }
   mount(resources: Resource[], options: { directories?: readonly string[]; readonlyRoots?: readonly string[] } = {}): void {
     this.check()
     // Validate the entire mount before mutating the active namespace.
@@ -241,7 +253,11 @@ export class StorageResolver {
         throw new Error('Dropped storage is read-only')
     }
   }
-  assertWritable(path: string): void { this.assertOutsideReadonly(parseStoragePath(path)) }
+  assertWritable(path: string): void {
+    const name = parseStoragePath(path)
+    if (discAddress(name)) throw new TvpError('TVPCannotOpenStorage', [name], 'CD storage is read-only')
+    this.assertOutsideReadonly(name)
+  }
   private check(): void { if (this.disposed) throw new Error('Storage resolver is disposed') }
   private member(index: OpenArchive, member: string): Resource | undefined {
     const exact = index.entries.get(member)
@@ -257,9 +273,19 @@ export class StorageResolver {
     const logical = parseStoragePath(path), direct = overlay?.(logical) ?? this.find(logical)
     if (direct) return direct
     const delimiter = logical.indexOf('>')
-    if (delimiter < 0) return undefined
+    if (delimiter < 0) {
+      const disc = discAddress(logical)
+      if (!disc || !disc.path || disc.path.endsWith('/')) return undefined
+      const fs = await this.discs?.filesystem(disc.drive), source = await fs?.file(disc.path)
+      this.check()
+      if (!source) return undefined
+      return { name: logical, size: source.size, cacheToken: source, source, read: () => {
+        resourceReadBounds(source.size, 0, source.size)
+        return source.read(0, source.size)
+      } }
+    }
     const name = logical.slice(0, delimiter), member = logical.slice(delimiter + 1),
-      raw = overlay?.(name) ?? this.find(name)
+      raw = await this.findAsync(name, overlay)
     if (!raw) throw new TvpError('TVPCannotOpenStorage', [name], `Archive resource not found: ${name}`)
     const index = await this.archives.open(raw)
     this.check()
@@ -312,6 +338,16 @@ export class StorageResolver {
       if (cached) return cached
       const entries = new AutoPathTable(), paths = [...this.autoPaths.values()]
       for (const path of paths) {
+        const disc = discAddress(path)
+        if (disc && !path.includes('>')) {
+          const fs = await this.discs?.filesystem(disc.drive)
+          for (const child of await fs?.list(disc.path) ?? []) {
+            if (child.directory) continue
+            const logical = discStoragePath(disc.drive, disc.path + child.name)
+            entries.add(path, extractStorageName(logical), logical)
+          }
+          continue
+        }
         const directory = await this.directoryEntries(path, overlay, overlayResources),
           realNames = this.archiveAliases && !path.includes('>') ? new Set<string>() : undefined
         for (const resource of directory) {
@@ -340,7 +376,7 @@ export class StorageResolver {
   async lookupAsync(path: string, overlay?: (name: string) => Resource | undefined,
     overlayResources: readonly Resource[] = [], aliasSearch: AliasSearch = 'all'): Promise<Resource | undefined> {
     this.check()
-    const direct = parseStoragePath(path, this.currentDirectory)
+    const direct = parseStoragePath(await this.qualifyDrive(path), this.currentDirectory)
     // File existence/placement cannot open an archive directory. Its trailing
     // delimiter already proves it is not a file, including missing or corrupt
     // packages; directory enumeration still validates the actual archive.
@@ -374,7 +410,7 @@ export class StorageResolver {
     }, direct = matches([...new Map([...this.files.values(), ...overlayResources].map((resource) => [resource.name, resource])).values()])
     const delimiter = path.indexOf('>')
     if (delimiter < 0) return direct.filter((resource) => !resource.name.includes('>'))
-    const name = path.slice(0, delimiter), raw = overlay?.(name) ?? this.find(name)
+    const name = path.slice(0, delimiter), raw = await this.findAsync(name, overlay)
     // Explicit pre-mounted member fixtures remain usable without a container.
     if (!raw && direct.length) return direct
     if (!raw) throw new TvpError('TVPCannotOpenStorage', [name], `Archive resource not found: ${name}`)
@@ -388,8 +424,24 @@ export class StorageResolver {
     name: string; entries: { name: string; size: number }[]; directories: string[]
   }> {
     this.check()
-    let name = parseStoragePath(path)
+    let name = parseStoragePath(await this.qualifyDrive(path))
     if (name && !/[/>]$/.test(name)) throw new Error('Expected storage directory')
+    const disc = discAddress(name)
+    if (disc && !name.includes('>')) {
+      const fs = await this.discs?.filesystem(disc.drive), children = await fs?.list(disc.path)
+      if (!children) throw new Error(`Storage directory not found: ${name}`)
+      const entries: { name: string; size: number }[] = [], directories: string[] = []
+      for (const child of children) {
+        const childPath = discStoragePath(disc.drive, disc.path + child.name)
+        if (child.directory) directories.push(childPath + '/')
+        else {
+          entries.push({ name: childPath, size: child.size })
+          if (/\.(?:xp3|zip|exe)$/i.test(child.name)) directories.push(childPath + '>')
+        }
+      }
+      this.check()
+      return { name, entries, directories }
+    }
     if (!this.directories.has(name)) {
       const matching = [...this.directories].filter((entry) => entry.toLowerCase() === name.toLowerCase())
       if (matching.length > 1) throw new Error(`Ambiguous storage directory: ${name}`)

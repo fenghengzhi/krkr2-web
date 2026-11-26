@@ -1,11 +1,12 @@
 import { cueLimits, cueTrackParts, parseCue, type CueSheet } from '../../formats/audio/cue.ts'
 import { copyCddaDiscs, type CddaDisc, type CddaPcmPart, type CddaPcmTrack } from '../ports/cdda.ts'
-import { discVolumeTrack, readDiscVolumeLabel } from '../../formats/disc/volume-label.ts'
+import { discVolumeTrack, readDiscVolumeLabel, type DiscVolumeTrack } from '../../formats/disc/volume-label.ts'
+import { openDiscFilesystem, type DiscFilesystem } from '../../formats/disc/filesystem.ts'
 import { openResourceSource } from './resource-source.ts'
 import { ExecutionCancelled } from '../scheduler/control.ts'
 import type { Resource } from '../ports/storage.ts'
 import { TvpError } from '../system/tvp-error.ts'
-import { storageFilePath, toPublicStoragePath } from './public-path.ts'
+import { discAddress, storageFilePath, toPublicStoragePath } from './public-path.ts'
 import type { AudioResourceSources, AudioSourceLease } from './audio-sources.ts'
 
 type SelectedPart = { kind: 'silence'; frames: number } | {
@@ -31,10 +32,11 @@ export class CddaDiscs {
   constructor(private readonly storage: CddaStorage, discs?: readonly CddaDisc[]) { this.supplied = copyCddaDiscs(discs) }
   private readonly sheets = new WeakMap<object, CueSheet>()
   private readonly labels = new WeakMap<object, { geometry: string; value: string }>()
+  private readonly filesystems = new WeakMap<object, { geometry: string; fs: DiscFilesystem }>()
   private async bindings(requireUnique: boolean): Promise<readonly CddaDisc[]> {
     if (this.supplied !== undefined) return this.supplied
     const cues = [...new Set(await this.storage.cues())]
-    if (cues.length > 1 && requireUnique) throw new Error('Multiple imported CUE sheets require explicit cddaDiscs bindings')
+    if (cues.length > 1 && requireUnique) throw new Error('Multiple imported CUE sheets or ISO images require explicit cddaDiscs bindings')
     return cues.length === 1 ? [{ drive: 'D', cue: toPublicStoragePath(cues[0]!) }] : []
   }
   private async readSheet(resource: Resource): Promise<CueSheet> {
@@ -53,28 +55,58 @@ export class CddaDiscs {
     if (!file) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(logical)])
     return file
   }
-  private async volumeLabel(disc: CddaDisc): Promise<string | undefined> {
-    const cue = await this.storage.exact(storageFilePath(disc.cue, this.storage.currentDirectory))
+  /** A standalone ISO supplies a single cooked data track. A CUE supplies
+   * actual sector geometry and resolves FILE relative to the sheet. */
+  private async mountedVolume(disc: CddaDisc, labelOnly = false): Promise<{ file: Resource; track?: DiscVolumeTrack } | undefined> {
+    const path = storageFilePath(disc.cue, this.storage.currentDirectory)
+    if (discAddress(path)) throw new Error('A drive binding must refer to imported media')
+    const cue = await this.storage.exact(path)
     if (!cue) return
+    if (/\.iso$/i.test(cue.name)) return {
+      file: cue, track: { file: cue.name, first: 0, layout: { bytes: 2048, payload: 0 } },
+    }
     const key = cue.cacheToken ?? cue
     const sheet = this.sheets.get(key) ?? await this.readSheet(cue)
     this.sheets.set(key, sheet)
     const track = discVolumeTrack(sheet)
-    if (disc.volumeLabel !== undefined || track === 'audio') {
-      // A sheet without its media represents an empty drive. For an explicit
-      // label or an audio disc, checking placement needs no payload read.
-      await this.cueFile(cue.name, sheet.files[sheet.tracks[0]!.file]!.name)
-      return disc.volumeLabel ?? 'Audio CD'
-    }
-    if (!track) return
-    const file = await this.cueFile(cue.name, track.file)
+    if (track === 'audio' || (disc.volumeLabel !== undefined && labelOnly))
+      return { file: await this.cueFile(cue.name, sheet.files[sheet.tracks[0]!.file]!.name) }
+    if (track) return { file: await this.cueFile(cue.name, track.file), track }
+  }
+  async drives(): Promise<string[]> {
+    return (await this.bindings(false)).map((disc) => disc.drive)
+  }
+  async filesystem(drive: string): Promise<DiscFilesystem | undefined> {
+    const disc = (await this.bindings(false)).find((disc) => disc.drive === drive)
+    if (!disc) return
+    const mounted = await this.mountedVolume(disc).catch((error: unknown) => {
+      if (error instanceof TvpError && error.tvpMessage.id === 'TVPCannotOpenStorage') return undefined
+      throw error
+    })
+    if (!mounted?.track) return
+    const { file, track } = mounted, image = file.cacheToken ?? file
+    const geometry = [track.first, track.end, track.layout.bytes, track.layout.payload].join('/')
+    const cached = this.filesystems.get(image)
+    if (cached?.geometry === geometry) return cached.fs
+    const { source } = await openResourceSource(file, { checkpoint: () => this.storage.checkpoint() })
+    const fs = await openDiscFilesystem(source, track)
+    if (fs) this.filesystems.set(image, { geometry, fs })
+    return fs
+  }
+  private async volumeLabel(disc: CddaDisc): Promise<string | undefined> {
+    const mounted = await this.mountedVolume(disc, true)
+    if (!mounted) return
+    const { track, file } = mounted
+    if (!track) return disc.volumeLabel ?? 'Audio CD'
     const image = file.cacheToken ?? file, geometry = [track.first, track.end, track.layout.bytes, track.layout.payload].join('/'),
       cached = this.labels.get(image)
-    if (cached?.geometry === geometry) return cached.value
+    if (cached?.geometry === geometry) return disc.volumeLabel ?? cached.value
     const { source } = await openResourceSource(file, { checkpoint: () => this.storage.checkpoint() }),
       value = await readDiscVolumeLabel(source, track)
-    if (value !== undefined) this.labels.set(image, { geometry, value })
-    return value
+    if (value !== undefined) {
+      this.labels.set(image, { geometry, value })
+      return disc.volumeLabel ?? value
+    }
   }
   async searchVolume(label: string): Promise<string> {
     const folded = label.toUpperCase(), discs = [...await this.bindings(false)].sort((a, b) => a.drive.charCodeAt(0) - b.drive.charCodeAt(0))
@@ -111,6 +143,7 @@ export class CddaDiscs {
       throw new Error('CDDA track number exceeds the safe native integer range')
     const path = storageFilePath(disc.cue, this.storage.currentDirectory), resource = await this.storage.exact(path)
     if (!resource) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(path)])
+    if (/\.iso$/i.test(resource.name)) return { drive: disc.drive, cue: resource.name, track: parsed }
     const sheet = await this.readSheet(resource), parts = cueTrackParts(sheet, parsed), selected: SelectedPart[] = [],
       files = new Map<number, Resource>()
     if (parts) for (const part of parts) {

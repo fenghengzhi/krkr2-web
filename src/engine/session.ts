@@ -36,10 +36,12 @@ import { CddaDiscs } from './storage/cdda.ts'
 import { copyCddaDiscs, type CddaDisc } from './ports/cdda.ts'
 import {
   chopStorageExt,
+  discAddress,
   extractStorageExt,
   extractStorageName,
   extractStoragePath,
   getFullStoragePath,
+  nativeDiscPath,
   parseStoragePath,
   storageWritePath,
   toPublicStoragePath,
@@ -382,7 +384,7 @@ export class EngineSession {
       yield: () => this.yieldGraphics(),
       wait: () => this.control.paused ? this.control.wait() : undefined,
     },
-    (name) => getFullStoragePath(name, this.project?.directory),
+    (name) => nativeDiscPath(name) ?? getFullStoragePath(name, this.project?.directory),
   )
   private readonly cursors = new CursorStorage(
     (name) => this.findResource(name),
@@ -569,7 +571,6 @@ export class EngineSession {
         archiveSteps = 0; archiveYieldAt = deps.now() + 8
       }
     }
-    this.storage = new StorageResolver(this.project?.directory ?? '', !this.project, deps.archives, this.storageCheckpoint)
     this.cddaDiscs = new CddaDiscs({
       currentDirectory: this.project?.directory ?? '',
       exists: async (name) => {
@@ -588,10 +589,11 @@ export class EngineSession {
         const bytes = await resource.read()
         this.control.check(); return bytes
       },
-      checkpoint: async () => { await this.control.wait(); this.control.check() },
+      checkpoint: this.storageCheckpoint,
       decodeText: (bytes) => this.deps.readText(bytes, '', undefined, 'plain'),
-      cues: () => this.discoverCddaCues(),
+      cues: () => this.discoverGameDiscs(),
     }, cddaDiscs)
+    this.storage = new StorageResolver(this.project?.directory ?? '', !this.project, deps.archives, this.storageCheckpoint, this.cddaDiscs)
     this.windowGeometry = deps.windowGeometry ?? new HeadlessWindowGeometry()
     this.detachGeometry = this.windowGeometry.subscribe((observation) => this.observeWindowScroll(observation))
     this.layers = new LayerTree(this.systemColors)
@@ -4256,9 +4258,9 @@ export class EngineSession {
     try { return parseTextWriterMode(mode) }
     catch (error) { throw mapTextStreamError(error, name) }
   }
-  private async discoverCddaCues(): Promise<string[]> {
+  private async discoverGameDiscs(): Promise<string[]> {
     const roots = [...new Set(this.project ? [this.project.directory, this.project.executableDirectory] : [''])],
-      found = new Set<string>(),
+      sheets = new Set<string>(), images = new Set<string>(),
       overlays = this.saves.list().map((file) => this.saves.resource(file.name)!)
     // Enter only the selected project's package, if any. Listing a package
     // does not probe member payloads. Loose resource paths already contain all
@@ -4270,12 +4272,17 @@ export class EngineSession {
     let count = 0
     for (const resource of [...this.storage.knownResources(), ...overlays]) {
       const name = resource.name
-      if (!resource.aliasOf && /\.cue$/i.test(name) && !name.startsWith('.krkr-drop-') && roots.some((root) => name.startsWith(root))) found.add(name)
-      if (found.size > 1) return [...found]
+      if (!resource.aliasOf && /\.(?:cue|iso)$/i.test(name) && !discAddress(name) && !name.startsWith('.krkr-drop-') && roots.some((root) => name.startsWith(root))) {
+        if (/\.cue$/i.test(name)) sheets.add(name)
+        else if (images.size < 2) images.add(name)
+      }
+      if (sheets.size > 1) return [...sheets]
       if (++count % 4096 === 0) { await this.deps.yieldToHost(); this.control.check() }
     }
     this.control.check()
-    return [...found]
+    // A sheet and its referenced ISO describe one disc. Bare ISOs are
+    // considered when there is no sheet to describe the imported media.
+    return [...(sheets.size ? sheets : images)]
   }
   private async resolveResource(name: string, missing: TvpMessageId = 'TVPCannotFindStorage'): Promise<Resource> {
     const resource = await this.findResource(name)
@@ -4291,7 +4298,7 @@ export class EngineSession {
     return !!await this.findResource(name)
   }
   private async storageWriteTarget(name: string, mode: StreamMode): Promise<string> {
-    const requested = storageWritePath(name, this.project?.directory)
+    const requested = storageWritePath(await this.storage.qualifyDrive(name), this.project?.directory)
     this.storage.assertWritable(requested)
     this.materializeLogs()
     if (mode.hasOffset || mode.append) {
@@ -4905,7 +4912,7 @@ export class EngineSession {
         value = await this.storageWriteTarget(text(0), this.textWriterMode(text(0), text(1)))
         break
       case 'Storage.validateWrite':
-        storageWritePath(text(0), this.project?.directory)
+        storageWritePath(await this.storage.qualifyDrive(text(0)), this.project?.directory)
         value = await this.storageWriteTarget(text(0), parseStreamMode(text(1)))
         break
       case 'Storage.writeText':
@@ -4950,7 +4957,7 @@ export class EngineSession {
           },
         }
       case 'Storages.selectFilePath':
-        value = normalizeSelectorPath(getFullStoragePath(text(0), this.project?.directory))
+        value = normalizeSelectorPath(getFullStoragePath(await this.storage.qualifyDrive(text(0)), this.project?.directory))
         break
       case 'Storages.selectFile': {
         this.materializeLogs()
@@ -4999,6 +5006,7 @@ export class EngineSession {
       case 'System.shellExecute':
         value = BigInt(await openHelpDocument(text(0), text(1), {
           currentDirectory: this.project?.directory,
+          qualifyDrive: (name) => this.storage.qualifyDrive(name),
           find: (name) => this.findResource(name),
           decode: (bytes) => this.withTextError(text(0), () => this.deps.readText(bytes, '', this.textEncoding.codec)),
           host: this.help,
@@ -5009,10 +5017,10 @@ export class EngineSession {
         value = await this.cddaDiscs.searchVolume(text(0))
         break
       case 'Storages.getLocalName':
-        value = getWebLocalName(text(0), this.project?.directory)
+        value = getWebLocalName(await this.storage.qualifyDrive(text(0)), this.project?.directory)
         break
       case 'Storages.getFullPath':
-        value = getFullStoragePath(text(0), this.project?.directory)
+        value = getFullStoragePath(await this.storage.qualifyDrive(text(0)), this.project?.directory)
         break
       case 'Storages.extractStorageExt':
         value = extractStorageExt(text(0))
@@ -5035,11 +5043,11 @@ export class EngineSession {
         break
       }
       case 'Storages.addAutoPath':
-        this.storage.addAutoPath(text(0))
+        this.storage.addAutoPath(await this.storage.qualifyDrive(text(0)))
         this.images.namespaceChanged()
         break
       case 'Storages.removeAutoPath':
-        this.storage.removeAutoPath(text(0))
+        this.storage.removeAutoPath(await this.storage.qualifyDrive(text(0)))
         this.images.namespaceChanged()
         break
       case 'Events.create': {
@@ -6136,7 +6144,7 @@ export class EngineSession {
           layer = this.layers.get(id),
           pixels = this.layers.bitmap(id).readPixels,
           type = this.imageWriter.validateType(text(2)),
-          path = storageWritePath(text(1), this.project?.directory)
+          path = storageWritePath(await this.storage.qualifyDrive(text(1)), this.project?.directory)
         this.storage.assertWritable(path)
         const metadata = layerImageMetadata(layer.type, layer.imageLeft, layer.imageTop)
         // Native image saving clears the entire graphic cache after opening

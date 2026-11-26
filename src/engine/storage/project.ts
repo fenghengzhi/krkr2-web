@@ -2,7 +2,7 @@ import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { StorageResolver } from './resolver.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../../formats/zip/names.ts'
 import { scriptEncoding, type ScriptEncoding } from '../script/text-encoding.ts'
-import { extractStoragePath, parseStoragePath, storageDirectoryPath, storageFilePath, toPublicStoragePath } from './public-path.ts'
+import { discAddress, extractStoragePath, parseStoragePath, storageDirectoryPath, storageFilePath, toPublicStoragePath } from './public-path.ts'
 
 /** Host startup configuration; these are not TJS Storages properties. */
 export interface GameEncodings {
@@ -23,19 +23,20 @@ export type ProjectSelection = ({ mode: 'collection' } |
 export interface GameProject { directory: string; executableDirectory: string; executable?: string; distribution?: string }
 
 function directory(value: unknown): string {
-  if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid project directory')
+  if (typeof value !== 'string' || value.length > 4096 || discAddress(value)) throw new Error('Invalid project directory')
   return storageDirectoryPath(value === '' ? './' : /[\\/>]$/.test(value) ? value : value + '/')
 }
 function distributionPath(value: unknown): string {
   if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid distribution ZIP path')
   const name = storageFilePath(value)
-  if (name.includes('>')) throw new Error('Expected an imported distribution ZIP')
+  if (name.includes('>') || discAddress(name)) throw new Error('Expected an imported distribution ZIP')
   return name
 }
 function executablePath(value: unknown, base: string): string {
   if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid executable selection')
   const path = storageFilePath(value, base)
   if (path.includes('>')) throw new Error('Executable cannot be an archive member')
+  if (discAddress(path)) throw new Error('Expected an imported executable')
   return toPublicStoragePath(path)
 }
 export function copyGameProject(value?: GameProject): GameProject | undefined {
