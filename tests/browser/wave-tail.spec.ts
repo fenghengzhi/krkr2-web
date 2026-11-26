@@ -86,6 +86,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       }) })
       await expect(page.getByText('wave-tail-next:play', { exact: true })).toHaveCount(1)
       await evaluate(page, 'waveTailState()', 'stop,play|head,tail,stop|1')
+      await evaluate(page, '[tailCurrent.samplePosition,tailCurrent.position,tailStopPositions.join(",")].join("|")', '0|0|0:0')
       await beginPhaseCapture(page, 0.2)
       const steady = await endPhaseCapture(page)
       await attachPhaseCapture(info, 'steady-next-file', steady, { expected: [0.5, 0.125] })
@@ -96,6 +97,37 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect.poll(() => page.locator('#sound-level').evaluate((node) => (node as HTMLMeterElement).value)).toBe(0)
       await silence('manual-stop-of-next-file')
       await expect(page.getByText('wave-tail-next:play', { exact: true })).toHaveCount(1)
+
+      // Replay through a real menu button, this time choosing the successor
+      // from onStatusChanged only after both public cursors have reset to zero.
+      // A tail event alone cannot make this route audible.
+      await beginPhaseCapture(page, 3)
+      await click(30)
+      await expect(page.getByText('wave-stop-route-started', { exact: true })).toHaveCount(1)
+      const completed = await endPhaseCapture(page)
+      await attachPhaseCapture(info, 'zero-cursor-stop-callback-handoff', completed,
+        { first: [.25, -.5], next: [.5, .125], expectedStoppedPosition: 0 })
+      expect(completed.channels).toHaveLength(2)
+      const [first, second] = completed.channels
+      expect(first).toHaveLength(Math.ceil(completed.sampleRate * 3)); expect(second).toHaveLength(first!.length)
+      let completedPhase = 0, completedFirst = 0, completedNext = 0
+      for (let frame = 0; frame < first!.length; frame++) {
+        const l = first![frame]!, r = second![frame]!
+        if (l === .25 && r === -.5 && completedPhase <= 1) { completedPhase = 1; completedFirst++ }
+        else if (l === .5 && r === .125 && completedFirst > 0) { completedPhase = 3; completedNext++ }
+        else if (l === 0 && r === 0 && completedPhase < 3) { if (completedPhase === 1) completedPhase = 2 }
+        else throw new Error(`Stop-callback handoff frame ${frame}: ${l},${r}, phase=${completedPhase}`)
+      }
+      expect(completedFirst).toBeGreaterThan(completed.sampleRate * .75)
+      expect(completedNext).toBeGreaterThan(completed.sampleRate * .25)
+      expect(completedPhase).toBe(3)
+      await expect(page.getByText('wave-stop-next:play', { exact: true })).toHaveCount(1)
+      await evaluate(page, 'waveTailState()+"|"+tailStopPositions.join(",")', 'stop,play|head,tail,stop|1|0:0')
+      await info.attach('wave-stop-menu', { body: await canvas.screenshot(), contentType: 'image/png' })
+      await click(150)
+      await expect(page.getByText('wave-tail-manual:stop,stop,1', { exact: true })).toHaveCount(2)
+      await expect.poll(() => page.locator('#sound-level').evaluate((node) => (node as HTMLMeterElement).value)).toBe(0)
+      await silence('manual-stop-after-completion-route')
       await evaluate(page, 'waveTailClose()', 'closed')
       await expect(page.locator('#logs .error')).toHaveCount(0); expect(errors).toEqual([])
     } catch (error) { failures.push(error) }

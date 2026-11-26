@@ -16,6 +16,7 @@ import { kagConditionFiles, kagConditionExpected, kagConditionSource } from './k
 import { kagParameterFiles, kagParameterExpected, kagParameterSource } from './kag-parameter-properties.ts'
 import { kagSetterFiles, kagSetterExpected, kagSetterSource } from './kag-parameter-setters.ts'
 import { kagControlPropertyFiles, kagControlPropertyExpected, kagControlPropertySource } from './kag-control-properties.ts'
+import { kagMacroDirectoryFiles, kagMacroDirectoryExpected, kagMacroDirectorySource } from './kag-macro-directory.ts'
 
 /** Shared TJS controls for the 2.32r2 SDK and the Web runtime. The SDK
  * produces its own macro bookmark from a real call into another storage. */
@@ -41,6 +42,7 @@ export const kagFiles = {
   ...kagParameterFiles,
   ...kagSetterFiles,
   ...kagControlPropertyFiles,
+  ...kagMacroDirectoryFiles,
 }
 
 export const kagExpected: Readonly<Record<string, string>> = {
@@ -75,6 +77,7 @@ export const kagExpected: Readonly<Record<string, string>> = {
   ...kagParameterExpected,
   ...kagSetterExpected,
   ...kagControlPropertyExpected,
+  ...kagMacroDirectoryExpected,
 }
 
 export const kagControlSource = String.raw`
@@ -114,6 +117,7 @@ function kagResumePoint(d){
   return restored+"|"+q.getNextTag().tagname+"|"+q.callStackDepth+"|"+int(q.macroParams===null);
 }
 function kagObserve(id){
+  if(id.indexOf("macro-directory-")==0){try{return kagMacroDirectoryObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("control-property-")==0){try{return kagControlPropertyObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("setter-")==0){try{return kagSetterObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("parameter-")==0){try{return kagParameterObserve(id);}catch(e){return e.message;}}
@@ -203,4 +207,4 @@ function kagObserve(id){
     return "unexpected success";
   }catch(e){return e.message;}
 }
-` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource + kagRewindSource + kagModeSource + kagNameSource + kagRealSource + kagEofSource + kagPartialSource + kagLiveSource + kagEntitySource + kagConditionSource + kagParameterSource + kagSetterSource + kagControlPropertySource
+` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource + kagRewindSource + kagModeSource + kagNameSource + kagRealSource + kagEofSource + kagPartialSource + kagLiveSource + kagEntitySource + kagConditionSource + kagParameterSource + kagSetterSource + kagControlPropertySource + kagMacroDirectorySource

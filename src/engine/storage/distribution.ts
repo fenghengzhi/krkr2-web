@@ -104,7 +104,10 @@ export function discOnlyInput(names: readonly string[]): boolean {
     names.every((name) => /\.(?:iso|cue|bin|img|wav|mp3|aiff?|txt|md)$/i.test(name))
 }
 export async function prepareProject(resources: Resource[], requested: ProjectSelection, reader: ArchiveReader,
-  checkpoint: () => Promise<void>, entry = 'startup.tjs', discs?: readonly CddaDisc[]): Promise<{ resources: Resource[]; project?: GameProject; configFiles?: Resource[] }> {
+  checkpoint: () => Promise<void>, entry = 'startup.tjs', discs?: readonly CddaDisc[],
+  decodeText: ArchiveReader['decodeText'] = reader.decodeText?.bind(reader)): Promise<{
+    resources: Resource[]; project?: GameProject; configFiles?: Resource[]; discImports?: Resource[]
+  }> {
   const setting = copyProjectSelection(requested)
   const collection = setting.mode === 'collection'
   const onlyDiscs = discOnlyInput(resources.map((file) => file.name))
@@ -151,7 +154,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     choice.executable && (/\.(?:iso|cue)$/i.test(choice.executable) || discAddress(choice.executable)) ||
     discAddress(choice.executableDirectory ?? ''))
   const boot = (sources: Resource[], location: ProjectLocation, distribution?: string, optionalMedia = false) =>
-    selectBootDisc(sources, location, distributionDiscBindings(discs, distribution), reader, checkpoint, async (files, choice) => {
+    selectBootDisc(sources, location, distributionDiscBindings(discs, distribution), reader, checkpoint, decodeText, async (files, choice) => {
       const hint = entryDisc ? entryDisc.path.split('>', 1)[0]!.toLowerCase() : entryName
       const game = await locateGame(files, choice, checkpoint, probe, 'files', hint, relativeEntry || !!entryDisc, false)
       return game && select(files, game)
@@ -218,7 +221,13 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
       if (names.size % 256 === 0) await checkpoint()
     }
     const project = disc?.project ?? await select(members, inner!)
+    // Discs beside the selected release belong to its optical drives. Their
+    // archives and loose files must not become installed scripts or assets.
+    const discImports = resources.filter((file) => file !== archive && !file.aliasOf && !file.name.includes('>'))
+    const hasDiscImports = discImports.length > 0 && (discImports.some((file) => /\.(?:cue|iso|zip)$/i.test(file.name)) ||
+      discs?.some((disc) => disc.cue.includes('>')))
     return { resources: members, project: copyGameProject({ ...project, distribution: archive.name })!,
+      ...(hasDiscImports && { discImports }),
       ...(disc && { configFiles: disc.configFiles }) }
   }
   if (collection) return await boot(resources, selection) ?? { resources }

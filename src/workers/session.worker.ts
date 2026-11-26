@@ -26,6 +26,7 @@ let preparedEncodings: GameEncodings = {}
 sources.signal.addEventListener('abort', () => distributionReader?.dispose(), { once: true })
 let prepared: SourceFile[] | undefined
 let preparedResources: Resource[] | undefined
+let discImports: Resource[] | undefined
 let configFiles: Resource[] | undefined
 let preparedProject: GameProject | undefined
 let gameId: string | undefined
@@ -157,6 +158,7 @@ const api: SessionApi = {
         resources = await importSources(filesReady, checkpoint, { lazyArchives: true })
         const mount = await prepareProject(resources, requested, distributionReader, checkpoint, entry, libraryLease?.record.cddaDiscs ?? discs)
         resources = mount.resources
+        discImports = mount.discImports
         configFiles = mount.configFiles
         project = mount.project
         const actual = await projectIdentity(libraryLease?.record.sourceGameId ?? identity, project)
@@ -196,7 +198,8 @@ const api: SessionApi = {
     // or embedding host. Legacy records still accept the host's existing option.
     const savedDiscs = libraryLease?.record.cddaDiscs
     session = createSession(savedDiscs === undefined ? request : { ...request, cddaDiscs: savedDiscs },
-      preparedProject, preparedProject?.distribution ? distributionReader : undefined, preparedEncodings)
+      preparedProject, preparedProject?.distribution ? distributionReader : undefined, preparedEncodings, discImports)
+    discImports = undefined
     generation = request.generation
     session.control.onCancel(() => sources.close())
     await session.initialize(configFiles ?? preparedResources)
@@ -368,6 +371,7 @@ const api: SessionApi = {
     sources.close()
     prepared = undefined
     preparedResources = undefined
+    discImports = undefined
     preparedProject = undefined
     configFiles = undefined
     if (frameTimer) clearInterval(frameTimer)

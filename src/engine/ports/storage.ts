@@ -46,6 +46,9 @@ export interface ArchiveIndex {
  * a valid archive; undefined means unrecognized format, never corrupt index. */
 export interface ArchiveReader {
   joinVolumes?(files: readonly Resource[], checkpoint: () => Promise<void>): Promise<Resource[]>
+  /** Host text codec for imported metadata (for example CUE sheets), including
+   * UTF-16 BOM and UTF-8/Shift-JIS fallback. The engine has no DOM decoder. */
+  decodeText?(bytes: Uint8Array): string | Promise<string>
   /** Release shared decoded segment caches. Open resource handles stay usable. */
   compact?(): void
   open(resource: Resource, checkpoint: () => Promise<void>): Promise<ArchiveIndex | undefined>

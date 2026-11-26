@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 168 批支持 ZIP 游戏使用另行导入的剧情盘和 CD 配乐，修订 KAG 控制标签及 WAVE 曲尾回调，并修复上一批取证发现的 CUE 解码依赖构建错误。第 167 批的 FFmpeg 声道对照匹配 10/10。[168 实现与托管证据](decisions/168-companion-game-discs-and-story-callbacks.md)
+
 第 167 批接入 ZIP 包装的游戏光盘，修订日文明朝字体选择和多声道 WAVE 播放。上一批的托管工具类型检查通过，本批新增的游戏行为等待托管结果。[167 实现与托管证据](decisions/167-packaged-game-discs-fonts-and-speakers.md)
 
 第 167 批实现提交 `01c253f` 登记时为 `queued`，运行结果在下一批取回。[第 167 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45846712743)

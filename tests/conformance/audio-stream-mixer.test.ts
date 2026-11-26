@@ -146,7 +146,7 @@ test('stream advance preflight keeps genuine EOF and its final boundary events i
   assert.deepEqual(actual, render(regular))
   assert.equal(actual.left[0], source.data[0]![4094])
   assert.deepEqual(actual.events.map((event) => event.type), ['label', 'label', 'ended'])
-  assert.equal(stream.snapshot(1).position, 4096)
+  assert.equal(stream.snapshot(1).position, 0)
   assert.equal(stream.snapshot(1).status, 'stop')
   assert.equal(stream.snapshot(1).flags[0], 1)
   assert.deepEqual(stream.snapshot(1), regular.snapshot(1))

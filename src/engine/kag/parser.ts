@@ -526,6 +526,13 @@ export class KagParser {
           continue
         }
       }
+      // Stock queries the live macro dictionary before handling any control
+      // tag, including if/call. A property can update the current tag or game
+      // state, but its returned body only replaces ordinary tags (and emb).
+      // Excluded/cond=false tags and a macro being recorded never read it.
+      const macro = condition && this.excludeLevel === -1
+        ? yield* this.tagEffect(state, 'getMacro', token.name) : undefined
+      clearPublishedTag ||= state.published
       // Control tags always adjust nesting, including within an excluded branch.
       if (kind === 'if' || kind === 'ignore') {
         this.ifLevel++
@@ -561,9 +568,7 @@ export class KagParser {
         this.advance(token)
         continue
       }
-      const macro = !kind || kind === 'emb' ? yield* this.tagEffect(state, 'getMacro', token.name) : undefined
-      clearPublishedTag ||= state.published
-      if (kind === 'emb' || macro !== undefined) {
+      if (kind === 'emb' || (!kind && macro !== undefined)) {
         // The closing delimiter is consumed before evaluating emb. A
         // callback observing/reentering this parser must see the suffix.
         if (!token.lineCommand) this.curPos++

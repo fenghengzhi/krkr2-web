@@ -1,4 +1,3 @@
-import { decodePlainText } from '../../formats/text/plain.ts'
 import type { ByteSource } from '../../engine/ports/storage.ts'
 import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { BinaryWriter } from '../../formats/binary/writer.ts'
@@ -124,4 +123,14 @@ export function decodeScript(bytes: Uint8Array): string | Uint8Array {
 }
 
 /** Unencoded imported metadata such as a CUE sheet. No TJS stream markers. */
-export { decodePlainText }
+export function decodePlainText(bytes: Uint8Array): string {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe)
+    return new TextDecoder('utf-16le', { fatal: true }).decode(bytes)
+  if (bytes[0] === 0xfe && bytes[1] === 0xff)
+    return new TextDecoder('utf-16be', { fatal: true }).decode(bytes)
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return new TextDecoder('shift_jis', { fatal: true }).decode(bytes)
+  }
+}

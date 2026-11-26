@@ -489,6 +489,14 @@ export class StorageResolver {
   list(): { name: string; size: number }[] {
     return this.knownResources().map(({ name, size }) => ({ name, size }))
   }
+  /** Indexed names only, including nested directories. Iterating these
+   * entries does not open the files inside the archive. */
+  async archiveEntries(file: Resource): Promise<Iterable<Resource>> {
+    this.check()
+    const index = await this.archives.open(file)
+    this.check()
+    return index?.entries.values() ?? []
+  }
   knownResources(): Resource[] {
     const all = new Map(this.files)
     for (const index of this.archives.known()) for (const resource of index.entries.values()) all.set(resource.name, resource)

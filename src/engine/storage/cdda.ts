@@ -8,26 +8,43 @@ import type { Resource } from '../ports/storage.ts'
 import { TvpError } from '../system/tvp-error.ts'
 import { discAddress, storageFilePath, toPublicStoragePath } from './public-path.ts'
 import type { AudioResourceSources, AudioSourceLease } from './audio-sources.ts'
+import type { StorageResolver } from './resolver.ts'
 
 /** A ZIP distribution mounts its members at the import root. A binding may
  * use that root directly or spell out the selected outer ZIP's address. */
 export function distributionDiscBindings(discs: readonly CddaDisc[] | undefined, distribution: string | undefined) {
   const copied = copyCddaDiscs(discs)
   if (!copied || distribution === undefined) return copied
-  const outer = toPublicStoragePath(distribution).toLowerCase()
   return copied.map((disc) => {
-    const split = disc.cue.indexOf('>')
-    if (split < 0) return disc
-    const prefix = disc.cue.slice(0, split)
-    if (!/\.(?:exe|zip)$/i.test(prefix)) return disc
-    // Parent-relative bindings can refer to a different package inside the
-    // installed game's directory. Leave those for its own storage resolver.
-    let name: string
-    try { name = toPublicStoragePath(prefix) } catch { return disc }
-    if (name.toLowerCase() !== outer) return disc
-    const path = storageFilePath(disc.cue)
-    return { ...disc, cue: toPublicStoragePath(path.slice(path.indexOf('>') + 1)) }
+    const member = distributionMember(disc.cue, distribution)
+    return member ? { ...disc, cue: toPublicStoragePath(member) } : disc
   })
+}
+
+function distributionMember(cue: string, distribution?: string): string | undefined {
+  const split = cue.indexOf('>')
+  if (!distribution || split < 0) return
+  let outer: string
+  try { outer = storageFilePath(cue.slice(0, split)) } catch { return }
+  if (outer.toLowerCase() !== storageFilePath(distribution).toLowerCase()) return
+  const path = storageFilePath(cue)
+  return path.slice(path.indexOf('>') + 1)
+}
+
+type BoundDisc = CddaDisc & { imported?: boolean }
+interface DiscFile { name: string; resource?: Resource; exact(name: string): Promise<Resource | undefined> }
+type DiscImports = Pick<StorageResolver, 'find' | 'findAsync' | 'knownResources' | 'archiveEntries'>
+
+async function opticalFiles(files: Iterable<Resource>, checkpoint: () => Promise<void>): Promise<string[]> {
+  const sheets: string[] = [], images: string[] = []
+  let scanned = 0
+  for (const file of files) {
+    if (++scanned % 4096 === 0) await checkpoint()
+    if (/\.cue$/i.test(file.name)) sheets.push(file.name)
+    else if (/\.iso$/i.test(file.name) && images.length < 2) images.push(file.name)
+    if (sheets.length === 2) break
+  }
+  return sheets.length ? sheets : images
 }
 
 type SelectedPart = { kind: 'silence'; frames: number } | {
@@ -50,15 +67,38 @@ export interface CddaStorage {
 }
 export class CddaDiscs {
   private readonly supplied?: readonly CddaDisc[]
-  constructor(private readonly storage: CddaStorage, discs?: readonly CddaDisc[]) { this.supplied = copyCddaDiscs(discs) }
+  constructor(private readonly storage: CddaStorage, discs?: readonly CddaDisc[],
+    private readonly distribution?: string, private readonly imports?: DiscImports) { this.supplied = copyCddaDiscs(discs) }
   private readonly sheets = new WeakMap<object, CueSheet>()
   private readonly labels = new WeakMap<object, { geometry: string; value: string }>()
   private readonly filesystems = new WeakMap<object, { geometry: string; fs: DiscFilesystem }>()
-  private async bindings(requireUnique: boolean): Promise<readonly CddaDisc[]> {
+  private importedCues?: string[]
+  private async discoverImports(imports: DiscImports): Promise<string[]> {
+    if (this.importedCues) return this.importedCues
+    const files = imports.knownResources().filter((file) => !file.aliasOf && !file.name.includes('>'))
+    const check = () => this.storage.checkpoint(), candidates = await opticalFiles(files, check)
+    let failed = false
+    if (!candidates.length) for (const file of files) {
+      if (!/\.zip$/i.test(file.name)) continue
+      try {
+        candidates.push(...await opticalFiles(await imports.archiveEntries(file), check))
+      } catch (error) {
+        if (error instanceof ExecutionCancelled || error instanceof Error && error.name === 'AbortError') throw error
+        await this.storage.checkpoint()
+        failed = true // An unreadable optional ZIP must not hide a usable disc.
+      }
+      if (candidates.length > 1) break
+    }
+    if (!failed || candidates.length) this.importedCues = candidates
+    return candidates
+  }
+  private async bindings(requireUnique: boolean): Promise<readonly BoundDisc[]> {
     if (this.supplied !== undefined) return this.supplied
-    const cues = [...new Set(await this.storage.cues())]
+    let cues = [...new Set(await this.storage.cues())]
+    const imported = !cues.length && !!this.imports
+    if (imported) cues = await this.discoverImports(this.imports!)
     if (cues.length > 1 && requireUnique) throw new Error('Multiple imported CUE sheets or ISO images require explicit cddaDiscs bindings')
-    return cues.length === 1 ? [{ drive: 'D', cue: toPublicStoragePath(cues[0]!) }] : []
+    return cues.length === 1 ? [{ drive: 'D', cue: toPublicStoragePath(cues[0]!), imported }] : []
   }
   private async readSheet(resource: Resource): Promise<CueSheet> {
     if (!Number.isSafeInteger(resource.size) || resource.size < 0 || resource.size > cueLimits.bytes)
@@ -68,20 +108,51 @@ export class CddaDiscs {
     if (bytes.length !== resource.size) throw new Error('Truncated CUE metadata')
     return parseCue(await this.storage.decodeText(bytes))
   }
-  private async cueFile(cue: string, name: string): Promise<Resource> {
+  private async bindingFile(disc: BoundDisc): Promise<DiscFile> {
+    const member = distributionMember(disc.cue, this.distribution)
+    let importedPath: string | undefined
+    if (this.imports && !member) {
+      // A path such as ../Disc.cue can be valid relative to the game only.
+      try { importedPath = storageFilePath(disc.cue) } catch { /* use the project directory below */ }
+    }
+    const imports = this.imports, delimiter = importedPath?.indexOf('>') ?? -1
+    const locate = async (name: string, exact: DiscFile['exact']): Promise<DiscFile> => {
+      const resource = await exact(name)
+      return { name: resource?.name ?? name, resource, exact }
+    }
+    if (imports && importedPath) {
+      if (disc.imported) return locate(importedPath, (file) => imports.findAsync(file))
+      if (delimiter >= 0 && imports.find(importedPath.slice(0, delimiter))) {
+        // Keep a formerly resolvable project archive ahead of a sibling
+        // release of the same name. A relative path from inside an XP3
+        // cannot name a second archive there.
+        let local: string | undefined
+        try { local = storageFilePath(disc.cue, this.storage.currentDirectory) } catch { /* no project address */ }
+        if (local && !discAddress(local) && await this.storage.exact(local.slice(0, local.indexOf('>'))))
+          return locate(local, (file) => this.storage.exact(file))
+        return locate(importedPath, (file) => imports.findAsync(file))
+      }
+    }
+    const path = member ?? storageFilePath(disc.cue, this.storage.currentDirectory)
+    if (discAddress(path)) throw new Error('A drive binding must refer to imported media')
+    const local = await locate(path, (file) => this.storage.exact(file))
+    if (!local.resource && imports && importedPath && delimiter < 0)
+      return locate(importedPath, (file) => imports.findAsync(file))
+    return local
+  }
+  private async cueFile(sheet: DiscFile, name: string): Promise<Resource> {
     if (/^[\\/]|^[a-z][a-z0-9+.-]*:/i.test(name) || name.includes('>'))
       throw new Error('CUE FILE must be relative to its imported sheet directory')
-    const directory = cue.slice(0, Math.max(cue.lastIndexOf('/'), cue.lastIndexOf('>')) + 1)
-    const logical = storageFilePath(name, directory), file = await this.storage.exact(logical)
+    const cue = sheet.name, directory = cue.slice(0, Math.max(cue.lastIndexOf('/'), cue.lastIndexOf('>')) + 1)
+    const logical = storageFilePath(name, directory), file = await sheet.exact(logical)
     if (!file) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(logical)])
     return file
   }
   /** A standalone ISO supplies a single cooked data track. A CUE supplies
    * actual sector geometry and resolves FILE relative to the sheet. */
-  private async mountedVolume(disc: CddaDisc, labelOnly = false): Promise<{ file: Resource; track?: DiscVolumeTrack } | undefined> {
-    const path = storageFilePath(disc.cue, this.storage.currentDirectory)
-    if (discAddress(path)) throw new Error('A drive binding must refer to imported media')
-    const cue = await this.storage.exact(path)
+  private async mountedVolume(disc: BoundDisc, labelOnly = false): Promise<{ file: Resource; track?: DiscVolumeTrack } | undefined> {
+    const binding = await this.bindingFile(disc)
+    const cue = binding.resource
     if (!cue) return
     if (/\.iso$/i.test(cue.name)) return {
       file: cue, track: { file: cue.name, first: 0, layout: { bytes: 2048, payload: 0 } },
@@ -91,8 +162,8 @@ export class CddaDiscs {
     this.sheets.set(key, sheet)
     const track = discVolumeTrack(sheet)
     if (track === 'audio' || (disc.volumeLabel !== undefined && labelOnly))
-      return { file: await this.cueFile(cue.name, sheet.files[sheet.tracks[0]!.file]!.name) }
-    if (track) return { file: await this.cueFile(cue.name, track.file), track }
+      return { file: await this.cueFile(binding, sheet.files[sheet.tracks[0]!.file]!.name) }
+    if (track) return { file: await this.cueFile(binding, track.file), track }
   }
   async drives(): Promise<string[]> {
     return (await this.bindings(false)).map((disc) => disc.drive)
@@ -119,7 +190,7 @@ export class CddaDiscs {
   async filesystem(drive: string): Promise<DiscFilesystem | undefined> {
     return (await this.openDataDisc(drive))?.filesystem
   }
-  private async volumeLabel(disc: CddaDisc): Promise<string | undefined> {
+  private async volumeLabel(disc: BoundDisc): Promise<string | undefined> {
     const mounted = await this.mountedVolume(disc, true)
     if (!mounted) return
     const { track, file } = mounted
@@ -167,8 +238,9 @@ export class CddaDiscs {
     const match = /^\s*([+-]?\d+)/.exec(specified ? name.slice(2) : name), parsed = Number(match?.[1] ?? 0)
     if (!Number.isSafeInteger(parsed) || parsed < -0x80000000 || parsed > 0x7fffffff)
       throw new Error('CDDA track number exceeds the safe native integer range')
-    const path = storageFilePath(disc.cue, this.storage.currentDirectory), resource = await this.storage.exact(path)
-    if (!resource) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(path)])
+    const binding = await this.bindingFile(disc)
+    const resource = binding.resource
+    if (!resource) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(binding.name)])
     if (/\.iso$/i.test(resource.name)) return { drive: disc.drive, cue: resource.name, track: parsed }
     const sheet = await this.readSheet(resource), parts = cueTrackParts(sheet, parsed), selected: SelectedPart[] = [],
       files = new Map<number, Resource>()
@@ -177,7 +249,7 @@ export class CddaDiscs {
       const file = sheet.files[part.file]!
       let audio = files.get(part.file)
       if (!audio) {
-        audio = await this.cueFile(resource.name, file.name)
+        audio = await this.cueFile(binding, file.name)
         files.set(part.file, audio)
       }
       selected.push({ kind: 'file', resource: audio,

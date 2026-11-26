@@ -20,23 +20,33 @@ export const waveTailFiles = () => {
 export const waveTailSdkExpected: Readonly<Record<string, string>> = {
   'wave-tail-normal': 'head,tail,stop|stop,play|1',
   'wave-tail-smooth': 'head,tail,stop|stop,play|1',
+  'wave-stop-normal': 'head,tail,stop|stop,play|1|0:0',
+  'wave-stop-smooth': 'head,tail,stop|stop,play|1|0:0',
 }
 export const waveTailSource = String.raw`
 System.exitOnNoWindowStartup=false;
-var tailCurrent,tailNext,tailJournal=[],tailCount=0,tailWindow,tailHeldPosition;
+var tailCurrent,tailNext,tailJournal=[],tailCount=0,tailWindow,tailHeldPosition,tailFinishAtStop=false,tailStopPositions=[];
 class TailWave extends WaveSoundBuffer {
  var armed=false;
  function TailWave(){super.WaveSoundBuffer(null);}
  function onLabel(name){
   if(!armed)return;
   global.tailJournal.add(name);
-  if(name=="tail"){
+  if(name=="tail" && !global.tailFinishAtStop){
    global.tailCount++;
    global.tailNext.play();
    global.Debug.message("wave-tail-next:"+global.tailNext.status);
   }
  }
- function onStatusChanged(s){if(armed && s=="stop")global.tailJournal.add("stop");}
+ function onStatusChanged(s){
+  if(!armed || s!="stop")return;
+  global.tailJournal.add("stop");global.tailStopPositions.add(samplePosition+":"+position);
+  // Ordinary game logic waits for the transport to return to its start before
+  // entering the next voice cue. Normal and filtered files must agree here.
+  if(global.tailFinishAtStop && samplePosition==0 && position==0){
+   global.tailCount++;global.tailNext.play();global.Debug.message("wave-stop-next:"+global.tailNext.status);
+  }
+ }
 }
 function waveTailClose(){
  var failures=[];
@@ -45,8 +55,8 @@ function waveTailClose(){
  if(failures.count)throw new Exception("Tail sound cleanup: "+failures.join("|"));
  return "closed";
 }
-function waveTailStart(name,paused=false){
- waveTailClose();tailJournal=[];tailCount=0;
+function waveTailStart(name,paused=false,finishAtStop=false){
+ waveTailClose();tailJournal=[];tailCount=0;tailStopPositions=[];tailFinishAtStop=finishAtStop;
  tailNext=new WaveSoundBuffer(null);tailNext.open("tail-next.wav");tailNext.looping=true;
  tailCurrent=new TailWave();tailCurrent.open(name);tailCurrent.paused=paused;tailCurrent.armed=true;tailCurrent.play();
  return [tailCurrent.status,tailNext.status,tailCount].join(",");
@@ -60,31 +70,36 @@ function waveTailMenu(){
  var play=new Layer(tailWindow,root);tailWindow.add(play);play.holdAlpha=false;play.setPos(0,0,60,60);play.fillRect(0,0,60,60,0xff208040);play.visible=true;
  var pause=new Layer(tailWindow,root);tailWindow.add(pause);pause.holdAlpha=false;pause.setPos(60,0,60,60);pause.fillRect(0,0,60,60,0xffb08020);pause.visible=true;
  var stop=new Layer(tailWindow,root);tailWindow.add(stop);stop.holdAlpha=false;stop.setPos(120,0,60,60);stop.fillRect(0,0,60,60,0xff804080);stop.visible=true;
- play.onClick=function(){global.tailCurrent.paused=false;global.Debug.message("wave-tail-play:"+global.tailCurrent.status);};
+ play.onClick=function(){
+  if(global.tailCurrent.status=="stop"){
+   global.waveTailStart("tail-game.wav",false,true);global.Debug.message("wave-stop-route-started");
+  }else{global.tailCurrent.paused=false;global.Debug.message("wave-tail-play:"+global.tailCurrent.status);}
+ };
  pause.onClick=function(){global.tailCurrent.paused=true;global.tailHeldPosition=global.tailCurrent.samplePosition;global.Debug.message("wave-tail-paused");};
  stop.onClick=function(){global.Debug.message("wave-tail-manual:"+global.waveTailManualStop());};
  Debug.message("wave-tail-ready");
 }
 // The existing Windows/Wine runner invokes these bounded, actual-play cases.
 // No duration getter, silent-device inference or substitute MIDI endpoint is
-// used to prove delivery: the original tail label must start the second Wave.
+// used to prove delivery: the tail label or the real stop callback must start
+// the second Wave, according to the independently named control.
 var waveTailAfter,tailSdkTimer,tailSdkIndex=0,tailSdkTicks=0;
 function waveTailSdkFinishCase(result){
- var id=tailSdkIndex==0?"wave-tail-normal":"wave-tail-smooth";
+ var id=["wave-tail-normal","wave-tail-smooth","wave-stop-normal","wave-stop-smooth"][tailSdkIndex];
  try{waveTailClose();}catch(e){result+="|cleanup:"+e.message;}
  waveTailAfter(id,result);
- if(++tailSdkIndex<2){waveTailSdkNext();return;}
+ if(++tailSdkIndex<4){waveTailSdkNext();return;}
  if(tailSdkTimer!==void && isvalid tailSdkTimer){tailSdkTimer.enabled=false;invalidate tailSdkTimer;}tailSdkTimer=void;
  waveTailAfter("done","");
 }
 function waveTailSdkNext(){
  tailSdkTicks=0;
- try{waveTailStart(tailSdkIndex==0?"tail-native.wav":"tail-native-smooth.wav");}
+ try{waveTailStart(tailSdkIndex%2==0?"tail-native.wav":"tail-native-smooth.wav",false,tailSdkIndex>=2);}
  catch(e){waveTailSdkFinishCase("unexpected-error:"+e.message);}
 }
 function waveTailSdkTick(){
  try{
-  if(tailJournal.find("stop")>=0 && tailCount>0){waveTailSdkFinishCase(tailJournal.join(",")+"|"+[tailCurrent.status,tailNext.status].join(",")+"|"+tailCount);return;}
+  if(tailJournal.find("stop")>=0 && tailCount>0){waveTailSdkFinishCase(tailJournal.join(",")+"|"+[tailCurrent.status,tailNext.status].join(",")+"|"+tailCount+(tailSdkIndex>=2?"|"+tailStopPositions.join(","):""));return;}
   if(++tailSdkTicks>200)waveTailSdkFinishCase("unexpected-error:Tail label timed out:"+waveTailState());
  }catch(e){waveTailSdkFinishCase("unexpected-error:"+e.message);}
 }

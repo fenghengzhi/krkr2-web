@@ -34,7 +34,7 @@ env:
 
 jobs:
   tools-types:
-    name: Typecheck tests and build tools
+    name: Typecheck engine, tests and build tools
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -45,15 +45,19 @@ jobs:
         with:
           node-version: '24.19.0'
           cache: npm
-      - run: npm ci
+      - id: install-types
+        run: npm ci
       - run: |
           mkdir -p out/ci
           npm run typecheck:tools 2>&1 | tee out/ci/types-tsconfig.tools.json.log
+      - name: Check the engine without DOM types
+        if: ${{ !cancelled() && steps.install-types.outcome == 'success' }}
+        run: ./node_modules/.bin/tsc -p tsconfig.engine.json 2>&1 | tee out/ci/types-tsconfig.engine.json.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() }}
         with:
           name: tools-typecheck-log
-          path: out/ci/types-tsconfig.tools.json.log
+          path: out/ci/types-tsconfig.*.log
           if-no-files-found: error
           retention-days: 90
 

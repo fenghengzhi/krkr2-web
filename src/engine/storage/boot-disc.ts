@@ -1,4 +1,3 @@
-import { decodePlainText } from '../../formats/text/plain.ts'
 import type { DiscFilesystem } from '../../formats/disc/filesystem.ts'
 import { copyCddaDiscs, type CddaDisc } from '../ports/cdda.ts'
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
@@ -42,7 +41,7 @@ async function projectFiles(fs: DiscFilesystem, directories: string[], recursive
 }
 
 export async function selectBootDisc(resources: Resource[], selection: Location, supplied: readonly CddaDisc[] | undefined,
-  reader: ArchiveReader, checkpoint: () => Promise<void>, select: Select, entryDrive?: string,
+  reader: ArchiveReader, checkpoint: () => Promise<void>, decodeText: ArchiveReader['decodeText'], select: Select, entryDrive?: string,
   distribution?: string, optionalMedia = false) {
   const frozen = selection.mode === 'root' && selection.bootDisc
   const at = discAddress(selection.executableDirectory ?? '') ?? (selection.mode === 'root' ? discAddress(selection.directory) : undefined)
@@ -77,7 +76,10 @@ export async function selectBootDisc(resources: Resource[], selection: Location,
     const open = async ({ file, drive }: typeof choices[number]) => {
       const discs = new CddaDiscs({ currentDirectory: '', exists: async (name) => !!storage.find(name),
         exact: (name) => storage.findAsync(name), cues: async () => [], read: (resource) => resource.read(),
-        decodeText: decodePlainText, checkpoint }, [{ drive, cue: toPublicStoragePath(file.name) }])
+        decodeText: (bytes) => {
+          if (!decodeText) throw new Error('A host text decoder is required to open a CUE sheet')
+          return decodeText(bytes)
+        }, checkpoint }, [{ drive, cue: toPublicStoragePath(file.name) }])
       const mounted = await discs.openDataDisc(drive).catch(async (error: unknown) => {
         if (error instanceof Error && error.name === 'AbortError') throw error
         await checkpoint()

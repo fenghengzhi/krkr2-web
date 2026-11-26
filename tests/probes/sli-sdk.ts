@@ -144,6 +144,9 @@ if (process.argv[2] === 'prepare') {
   const complete = sdk.commit === manifest.commit && sdk.state === 'observed' && sdk.exitCode === 0 &&
     lines.length === results.length + 2 && lines[0] === 'start' && lines.at(-1) === 'done' && results.every((r) => r.matched)
   save('comparison.json', { commit: manifest.commit, complete, observationSha256: digest(raw), results,
+    waveNaturalCompletion: { planned: 2,
+      matched: results.filter((row) => row.id.startsWith('wave-stop-') && row.matched).length,
+      scope: 'Actual normal/Smooth Wave completion: endpoint label precedes stop, both public cursors are zero inside the stop callback, which starts a different file once. Missing sound devices remain failed observations.' },
     waveSpeakerMasks: { planned: waveMaskSdkNames.length,
       matched: results.filter((row) => row.id.startsWith('wave-mask-') && row.matched).length,
       scope: 'Ordinary built-in Wave open/status/input frequency for declared surround/2.1/5.0/7.1-wide PCM without creating a sound device. Output-format properties and physical-device downmix equivalence are not inferred.' },

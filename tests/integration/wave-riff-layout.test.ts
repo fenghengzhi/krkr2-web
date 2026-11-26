@@ -29,7 +29,7 @@ for (const binary of [false, true]) test(`${binary ? 'bytecode' : 'source'}: ori
       await session.evaluate('(riffMusic.samplePosition=20,riffMusic.paused=false,0)'); await take(20, waveRiffPcm.slice(20, 40))
       await session.evaluate('(riffMusic.flags[0]=1,0)')
       await take(40, [...waveRiffPcm.slice(40), ...Array<number>(20).fill(0)])
-      assert.equal(await session.evaluate('riffMusic.status+":"+riffMusic.samplePosition'), 'stop:60')
+      assert.equal(await session.evaluate('riffMusic.status+":"+riffMusic.samplePosition'), 'stop:0')
       await session.evaluate('(riffMusic.play(),0)'); await take(20, waveRiffPcm.slice(0, 20))
     }
     await session.evaluate('invalidate riffMusic')

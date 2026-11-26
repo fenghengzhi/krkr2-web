@@ -32,8 +32,8 @@ import { StorageResolver } from './storage/resolver.ts'
 import { DropStorage } from './storage/drop.ts'
 import { copyGameProject, type GameProject } from './storage/project.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../formats/zip/names.ts'
-import { CddaDiscs, distributionDiscBindings } from './storage/cdda.ts'
-import type { CddaDisc } from './ports/cdda.ts'
+import { CddaDiscs } from './storage/cdda.ts'
+import { copyCddaDiscs, type CddaDisc } from './ports/cdda.ts'
 import {
   chopStorageExt,
   discAddress,
@@ -259,6 +259,7 @@ interface WindowMouseKeys {
 export interface SessionDependencies {
   /** Imported virtual CDs. Omission discovers a unique project CUE as D:. */
   cddaDiscs?: readonly CddaDisc[]
+  discImports?: { resources: Resource[]; archives: ArchiveReader }
   project?: GameProject
   zipEncoding?: ZipNameEncoding
   scriptEncoding?: ScriptEncoding
@@ -553,9 +554,9 @@ export class EngineSession {
     this.zipEncoding = zipNameEncoding(deps.zipEncoding)
     this.textEncoding = new ScriptTextEncoding(deps.scriptEncoding)
     const boot = this.project?.bootDisc
-    const cddaDiscs = distributionDiscBindings(deps.cddaDiscs ?? (boot ? [{
+    const cddaDiscs = copyCddaDiscs(deps.cddaDiscs ?? (boot ? [{
       drive: discAddress(this.project!.executableDirectory)!.drive, cue: toPublicStoragePath(boot),
-    }] : undefined), this.project?.distribution)
+    }] : undefined))
     // Reject invalid configuration before clocks or subscribed host resources
     // are consulted. A failed constructor has no disposal owner yet.
     this.systemColors = new SystemColors(deps.systemColors)
@@ -574,6 +575,8 @@ export class EngineSession {
         archiveSteps = 0; archiveYieldAt = deps.now() + 8
       }
     }
+    const imports = deps.discImports && new StorageResolver('', false, deps.discImports.archives, this.storageCheckpoint)
+    if (imports && deps.discImports) imports.mount(deps.discImports.resources)
     this.cddaDiscs = new CddaDiscs({
       currentDirectory: boot ? '' : this.project?.directory ?? '',
       exists: async (name) => {
@@ -595,7 +598,7 @@ export class EngineSession {
       checkpoint: this.storageCheckpoint,
       decodeText: (bytes) => this.deps.readText(bytes, '', undefined, 'plain'),
       cues: () => this.discoverGameDiscs(),
-    }, cddaDiscs)
+    }, cddaDiscs, this.project?.distribution, imports)
     this.storage = new StorageResolver(this.project?.directory ?? '', !this.project, deps.archives, this.storageCheckpoint, this.cddaDiscs)
     this.windowGeometry = deps.windowGeometry ?? new HeadlessWindowGeometry()
     this.detachGeometry = this.windowGeometry.subscribe((observation) => this.observeWindowScroll(observation))
@@ -693,6 +696,7 @@ export class EngineSession {
         () => deps.imageJpeg?.dispose(),
         () => this.dropped.dispose(),
         () => this.storage.dispose(),
+        () => imports?.dispose(),
         () => this.closeCursors(),
         () => this.closeWindowRegions(),
         () => this.fonts.dispose(),

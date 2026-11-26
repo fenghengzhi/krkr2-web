@@ -64,7 +64,7 @@ test('complete and streamed Wave playback loop the whole song, reach its tail wh
       output.forEach((channel) => { channel.length = 0 })
       await audio.command({ op: 'set', id: 1, property: 'looping', value: false }); clock.advance(60)
       assert.deepEqual(output, samplerSmallChannels.map((channel) => [...channel.slice(20), ...Array<number>(20).fill(0)]))
-      assert.equal(audio.mixer.snapshot(1).status, 'stop'); assert.equal(audio.mixer.snapshot(1).position, 60)
+      assert.equal(audio.mixer.snapshot(1).status, 'stop'); assert.equal(audio.mixer.snapshot(1).position, 0)
       await audio.command({ op: 'close', id: 1 }); output.forEach((channel) => { channel.length = 0 })
       await audio.command(opening(true)); await audio.command({ op: 'play', id: 1 }); clock.advance(100)
       assert.deepEqual(output, samplerSmallChannels.map((channel) => [...channel, ...channel.slice(40), ...channel.slice(40)]))

@@ -568,7 +568,13 @@ export class AudioMixer {
           this.seek(voice, settings.position % asset.sampleCount, true)
           continue
         }
-        settings.position = asset.sampleCount
+        // WaveImpl flushes endpoint labels, then ResetSamplePositions and
+        // LoopManager::SetPosition(0), before its asynchronous stop callback.
+        // Match the filtered path without restarting labels or decoding here.
+        if (voice.kind === 'wave') {
+          settings.position = 0
+          voice.ended = true
+        } else settings.position = asset.sampleCount
         voice.status = 'stop'
         this.event(voice, 'ended')
         return false

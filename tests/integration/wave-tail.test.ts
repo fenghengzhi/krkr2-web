@@ -30,6 +30,7 @@ for (const binary of [false, true]) test(`${binary ? 'bytecode' : 'source'}: a r
       await session.evaluate('(tailCurrent.paused=false,0)')
       await sample([...Array(4).fill(0.25), ...Array(16).fill(0)], [...Array(4).fill(-0.5), ...Array(16).fill(0)])
       assert.equal(await session.evaluate('waveTailState()'), 'stop,play|head,tail,stop|1')
+      assert.equal(await session.evaluate('[tailCurrent.samplePosition,tailCurrent.position,tailStopPositions.join(",")].join("|" )'), '0|0|0:0')
       // The new voice starts from the real TJS onLabel callback after the
       // preceding render block. Its PCM must appear in the next device block.
       await sample(Array(20).fill(0.5), Array(20).fill(0.125))
@@ -49,6 +50,16 @@ for (const binary of [false, true]) test(`${binary ? 'bytecode' : 'source'}: a r
       assert.equal(await session.evaluate('waveTailState()'), 'play,stop|head,head|0')
       await sample([...Array(4).fill(0.25), ...Array(16).fill(0)], [...Array(4).fill(-0.5), ...Array(16).fill(0)])
       assert.equal(await session.evaluate('waveTailState()'), 'stop,play|head,head,tail,stop|1')
+      await session.evaluate('waveTailClose()')
+
+      // A real story callback uses the stopped cursor to choose the next cue.
+      // It must hear the same successor whether or not a Smooth link exists.
+      await session.evaluate(`waveTailStart("${name}",false,true)`)
+      await sample(Array(20).fill(.25), Array(20).fill(-.5))
+      await sample([...Array(4).fill(.25), ...Array(16).fill(0)], [...Array(4).fill(-.5), ...Array(16).fill(0)])
+      assert.equal(await session.evaluate('waveTailState()+"|"+tailStopPositions.join(",")'), 'stop,play|head,tail,stop|1|0:0')
+      await sample(Array(20).fill(.5), Array(20).fill(.125))
+      assert.equal(await session.evaluate('tailCount'), '1')
       await session.evaluate('waveTailClose()')
     }
   } catch (error) { failures.push(error) }

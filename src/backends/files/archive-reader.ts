@@ -5,13 +5,14 @@ import { openResourceSource } from '../../engine/storage/resource-source.ts'
 import { findXp3Archive, hasXp3Signature, readXp3 } from '../../formats/xp3/archive.ts'
 import { readZip } from '../../formats/zip/archive.ts'
 import { locateExecutableZip } from '../../formats/zip/executable.ts'
-import { inflate, inflateRaw } from './blob-source.ts'
+import { decodePlainText, inflate, inflateRaw } from './blob-source.ts'
 import type { ZipNameEncoding } from '../../formats/zip/names.ts'
 import { zipNameCodecs } from './zip-names.ts'
 import { joinArchiveVolumes } from './archive-volumes.ts'
 
 export const archiveReader: ArchiveReader = {
   joinVolumes: joinArchiveVolumes,
+  decodeText: decodePlainText,
   async probeArchive(resource, checkpoint) {
     if (resource.zipDiskOffsets) return true
     const { source } = await openResourceSource(resource, { checkpoint }),

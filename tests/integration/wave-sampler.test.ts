@@ -29,7 +29,7 @@ for (const binary of [false, true])
         assert.equal(await session.evaluate('samplerSound.samplePosition'), '20')
         await session.evaluate('(samplerSound.states.clear(),samplerSound.looping=false,samplerSound.paused=false,0)')
         await take(60, samplerSmallChannels.map((channel) => [...channel.slice(20), ...Array<number>(20).fill(0)]))
-        assert.equal(await session.evaluate('[samplerSound.status,samplerSound.samplePosition,samplerSound.states.join(",")].join("|")'), 'stop|60|stop')
+        assert.equal(await session.evaluate('[samplerSound.status,samplerSound.samplePosition,samplerSound.states.join(",")].join("|")'), 'stop|0|stop')
       }
       assert.equal(await session.evaluate('samplerStart("sampler-sli.wav",false)'), 'play')
       await take(100, samplerSmallChannels.map((channel) => [...channel, ...channel.slice(40), ...channel.slice(40)]))
