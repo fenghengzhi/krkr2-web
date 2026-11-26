@@ -4,6 +4,8 @@
 
 第 159 批补齐 Deflate64 游戏包与存档导入，改进长 Ogg 配乐的跳转和预渲染字幕的混合。第 158 批原版图形对照已取回，113/113 匹配。其主浏览器结果在此次快照中尚未报告。[159 实现与托管证据](decisions/159-deflate64-games-vorbis-seek-and-text.md)
 
+提交 `6eb0f06` 的托管验证登记时为 `queued`。下一批取回运行结果。[第 159 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45824742294)
+
 第 158 批增加自解压 ZIP、Windows Media 过场，并修正字体测量。第 157 批的四项原版字体差异指向丢弃返回值时的行为，本批增加针对性对照。第 155 至 157 批的主浏览器验收均被跳过。[158 实现与托管证据](decisions/158-executable-zip-windows-media-and-font-calls.md)
 
 提交 `355ed18` 的托管验证登记时为 `queued`。结果留到下一批取回。[第 158 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45821629019)

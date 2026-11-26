@@ -25,3 +25,5 @@
 第 157 批现已终结。此前记录的影片测试类型错误导致应用构建失败，Node 和主浏览器验收跳过。该处代码已在第 158 批修订。[第 157 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45818780023)
 
 第 158 批原版图形对照为 **113/113 匹配**，包括此前的四项字体度量差异和新加入的“是否使用返回值”对照。原版 KAG 为 117/119，两项已知的隐式终结时机差异仍有记录。此次快照里还没有第 158 批的应用构建、Node 和主浏览器结果。本批取回并核对了 22 份新的普通归档，共 60,412,236 字节，另复用 25 份既有原件。[第 158 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45821629019)
+
+第 159 批实现提交 `6eb0f065bd569009705f3cb3aa1e07c78d0cb352` 已在 GitHub-hosted Actions 登记，登记时为 `queued`。下一批取回结果。[第 159 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45824742294)
