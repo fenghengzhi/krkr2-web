@@ -4,6 +4,8 @@
 
 第 160 批支持识别和选择带说明文件的 ZIP 游戏，从桌面备份选目录读档，并修正 KAG 宏的动态属性和配乐分支标志重置。第 159 批原版图形对照 124/124 匹配，取回时尚无主浏览器结果。[160 实现与托管证据](decisions/160-save-folders-kag-parameters-and-wave-flags.md)
 
+提交 `58f6469` 的托管验证登记时为 `queued`。下一批取回运行结果。[第 160 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404)
+
 第 159 批补齐 Deflate64 游戏包与存档导入，改进长 Ogg 配乐的跳转和预渲染字幕的混合。第 158 批原版图形对照已取回，113/113 匹配。其主浏览器结果在此次快照中尚未报告。[159 实现与托管证据](decisions/159-deflate64-games-vorbis-seek-and-text.md)
 
 提交 `6eb0f06` 的托管验证登记时为 `queued`。下一批取回运行结果。[第 159 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45824742294)

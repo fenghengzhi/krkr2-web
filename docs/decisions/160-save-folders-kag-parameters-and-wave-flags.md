@@ -31,3 +31,5 @@ KAG 场景可以用 `%caption` 等写法读取宏参数。游戏脚本可以给�
 测试与构建工具的 TypeScript 检查现在作为单独的托管作业运行，保留编译输出，也是整批通过的必要条件。应用本身的三个 TypeScript 项目、生产构建及离线文件校验继续决定能否生成供浏览器运行的播放器。这样能在同一批里同时取得测试代码的诊断和可运行应用的验收结果。[工作流](../../.github/workflows/test.yml) · [构建命令](../../package.json)
 
 第 159 批的原版图形对照已有 **124/124 匹配**，包括新增的 11 个 TFT 字形、阴影及透明度用例。原版 KAG 为 117/119。取回时普通应用仍在构建，Node、主浏览器、Deflate64 和长 Ogg 素材检查均未报告。本次新取 27 份普通归档，共 63,002,036 字节，另复用 20 份已校验原件。[第 159 批托管运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45824742294)
+
+第 160 批实现提交 `58f64696cc96b01ffb2f7933c017cbdb1aa3209e` 已在 GitHub-hosted Actions 登记，登记时为 `queued`。下一批取回结果。[第 160 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404)
