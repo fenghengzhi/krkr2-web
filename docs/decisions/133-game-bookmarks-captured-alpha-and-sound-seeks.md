@@ -27,3 +27,5 @@ Windows 与 Wine 用实际播放时到达的第一个 SLI 标签对照七次定�
 131 的这次快照和 132 的首次回收共列出 41 份产物，按大小与 SHA-256 核对后共 179,542,589 字节，其中 23 份是新取回的。132 当时状态为 `pending`，尚无作业和产物。[132 托管运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45757288264)
 
 第 133 批新增 23 个 Node 用例，每个浏览器项目新增 14 个用例。原版 Windows 图层对照共 56 项，KAG 对照 61 项，声音对照 41 项。新增实现及真实游戏路线等待 GitHub 托管结果。
+
+最终实现提交为 `88601e3d59021edd5eacde72a5698e746aad28f8`，包含缓存子层局部截图的修正。它与本批首个提交 `25cd99d` 各有一次托管运行，登记时均为 `pending`。下一批取回各自提交的结果。[133 最终提交的验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759226490) · [133 首个提交的验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759125623)
