@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 150 批支持在已载入的 KAG 剧情中恢复只指定章节标签的书签，并校正游戏选择项的鼠标点击和 WAVE 的循环范围。这些行为等待托管验证。[150 范围与验收](../decisions/150-kag-bookmarks-mouse-and-wave.md)
+
 第 149 批增加本地与远程发行目录的子目录识别，修正脚本控制的画面重绘和 MIDI 重播时的乐器选择。这些行为等待托管验证。[149 范围与验收](../decisions/149-wrapped-directories-paint-and-midi.md)
 
 第 148 批加入远程多文件游戏目录，支持保存至浏览器游戏库。图层可见性、可点击性和键盘焦点按原版解释脚本值，MIDI 播放加入了模块复位后的等待。新增行为等待托管验证。[148 范围与验收](../decisions/148-remote-games-layer-options-and-midi-reset.md)

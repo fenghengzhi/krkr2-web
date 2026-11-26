@@ -4,9 +4,10 @@ import { audioTag, audioView, OwnedPcmSource, PcmSourceContext, pcmSourceLimits,
 import { readWaveFormat, waveInfo, copyWaveSamples, type WaveFormat } from './wav-format.ts'
 
 /** Range-based counterpart of decodeWav, retaining its existing PCM, float,
- * extensible subtype and smpl-loop interpretation. Unknown chunks/data bodies
+ * extensible subtype and optional smpl-loop interpretation. Unknown chunks/data bodies
  * are skipped while scanning metadata; no full data allocation is performed. */
-export async function openWavePcmSource(context: PcmSourceContext, initial: Uint8Array): Promise<PcmSource | undefined> {
+export async function openWavePcmSource(context: PcmSourceContext, initial: Uint8Array,
+  options: { samplerLoops?: boolean } = {}): Promise<PcmSource | undefined> {
   if (initial.length < 12 || audioTag(initial, 0) !== 'RIFF' || audioTag(initial, 8) !== 'WAVE') return
   const end = audioView(initial).getUint32(4, true) + 8
   if (end < 12 || end > context.source.size) throw new Error('Truncated WAVE file')
@@ -20,7 +21,7 @@ export async function openWavePcmSource(context: PcmSourceContext, initial: Uint
     if (tag === 'fmt ') {
       format = readWaveFormat(await context.read(start, Math.min(length, 40)))
     } else if (tag === 'data') data = { offset: start, length }
-    else if (tag === 'smpl' && length >= 36) {
+    else if (options.samplerLoops !== false && tag === 'smpl' && length >= 36) {
       const header = await context.read(start, 36), count = audioView(header).getUint32(28, true)
       if (count > (length - 36) / 24) throw new Error('Truncated WAVE sample loop')
       if (count > pcmSourceLimits.waveLoops - loopRecords) throw new Error('WAVE loop metadata budget exceeded')

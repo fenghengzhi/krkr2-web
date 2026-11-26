@@ -56,7 +56,12 @@ class Layer {
     return __inputAction("onClick",%[x:x,y:y]);
   }
   function onPaint() { __inputAction("onPaint",%[]); }
-  function onHitTest(x,y,hit){__inputAction("onHitTest",%[x:x,y:y,hit:hit]);__host("Input.hitChoice",__id,int(hit));}
+  // Native onHitTest intentionally does not notify the action owner. An
+  // override can still call this base method to accept/reject the hit.
+  function onHitTest(args*){
+    if(args.count<3)return __host("Input.hitChoice",__id);
+    __host("Input.hitChoice",__id,int(!!args[2]));
+  }
   function focus(direction=true){__host("Input.focus",__id,int(direction));}
   function focusNext(){return __host("Input.moveFocus",1,__id);}
   function focusPrev(){return __host("Input.moveFocus",0,__id);}

@@ -10,7 +10,9 @@ export async function decodePortableAudio(
   kind: SoundKind,
 ): Promise<AudioAsset | undefined> {
   if (kind === 'midi') return decodeMidi(bytes)
-  const wave = decodeWav(bytes)
+  // WaveIntf's RIFF decoder reads fmt/data only. Sampler metadata belongs to
+  // instrument editors, not the game's whole-file/explicit SLI loop policy.
+  const wave = decodeWav(bytes, { samplerLoops: kind !== 'wave' })
   if (wave) return wave
   if (bytes.length < 28 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'OggS') return
   const header = 27 + bytes[26]!

@@ -138,6 +138,51 @@ function dom() {
 
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
 
+test('only the primary mouse button synthesizes VCL Click and DblClick while all buttons retain down/up', async () => {
+  const env = dom(), canvas = env.canvas(), packets: InputPacket[] = [], errors: unknown[] = [],
+    coordinator = new BrowserInputCoordinator(async (packet) => { packets.push(packet) }, async () => {},
+      () => {}, (error) => errors.push(error), { gamepad: false })
+  const mouse = (type: 'mousedown' | 'mouseup', button: number, buttons: number, detail: number) => {
+    const event = new Event(type, { cancelable: true })
+    Object.assign(event, { button, buttons, detail, clientX: 80, clientY: 40,
+      shiftKey: false, ctrlKey: false, altKey: false })
+    Object.defineProperty(event, 'target', { value: canvas })
+    env.page.dispatchEvent(event)
+    canvas.dispatchEvent(event)
+  }
+  try {
+    coordinator.attach(101, 1, canvas as unknown as HTMLCanvasElement)
+    coordinator.setWindow(101, { ...new WindowState().view(), visible: true })
+    coordinator.setInput(101, inputView()); canvas.focus(); await settle()
+    for (const [domButton, mask, tvpButton, shift] of [[0, 1, 0, 8], [1, 4, 2, 32],
+      [2, 2, 1, 16], [3, 8, 3, 256], [4, 16, 4, 512], [5, 32, 0, 0]] as const) {
+      for (const detail of [0, 1, 2]) {
+        packets.length = 0
+        mouse('mousedown', domButton, mask, detail)
+        mouse('mouseup', domButton, 0, detail)
+        await settle()
+        const observed = packets.flatMap((packet) => packet.type === 'down' || packet.type === 'up'
+          ? [[packet.type, packet.button, packet.shift, packet.clicks, packet.clickPaintBoxPoint]] : [])
+        const clicks = domButton === 0 ? detail || 1 : 0
+        assert.deepEqual(observed, [
+          ['down', tvpButton, shift, 0, undefined],
+          ['up', tvpButton, 0, clicks, clicks === 1 ? { x: 80, y: 40 } : undefined],
+        ])
+      }
+    }
+    // An extended DOM button may use the existing numeric fallback, but it
+    // cannot consume a real primary press's pending Click.
+    packets.length = 0
+    mouse('mousedown', 0, 1, 1)
+    mouse('mousedown', 5, 33, 2)
+    mouse('mouseup', 5, 1, 2)
+    mouse('mouseup', 0, 0, 1)
+    await settle()
+    assert.deepEqual(packets.flatMap((packet) => packet.type === 'up' ? [packet.clicks] : []), [0, 1])
+    assert.deepEqual(errors, [])
+  } finally { coordinator.close(); env.restore() }
+})
+
 test('a release carries the original PaintBox click point without a second physical observation', async () => {
   const env = dom(), canvas = env.canvas(), packets: InputPacket[] = [],
     pointers: { x: number; y: number }[] = [], errors: unknown[] = [],

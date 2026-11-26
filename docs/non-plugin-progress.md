@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 150 批让 KAG 从只含标签的书签恢复章节并返回主线，修正右键或中键误选剧情选项，以及 WAVE 采样器标记导致背景音乐跳过尾奏的问题。第 140 批构建仍有此前的视频命令类型错误，应用验收跳过。[150 实现与验证](decisions/150-kag-bookmarks-mouse-and-wave.md)
+
 第 149 批让本地文件夹和远程清单可以定位子目录中的游戏，修正图层重绘和缓存开关，以及 MIDI 循环或重播时的乐器选择。第 138、139 批的应用构建仍因视频命令类型错误失败，Windows 配置对照缺少原版进程记录。149 的提交 `5013c22` 已登记排队。[149 实现与验证](decisions/149-wrapped-directories-paint-and-midi.md) · [第 149 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45793541359)
 
 第 148 批支持从远程目录清单打开含主包、补丁和散装资源的游戏，修正图层按钮的布尔属性与 MIDI 初始化后的首音时刻。第 135 批常规浏览器报告已收齐。136 和 137 的应用构建均在视频命令类型检查处失败。148 的提交 `22b6eaa` 已登记排队。[148 实现与验证](decisions/148-remote-games-layer-options-and-midi-reset.md) · [第 148 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45791223343)

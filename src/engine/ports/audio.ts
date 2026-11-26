@@ -177,6 +177,11 @@ export interface AudioBackend {
   close(): Promise<void>
 }
 export const emptyLoops = (): LoopInfo => ({ links: [], labels: [] })
+/** Stock WaveSoundBuffer reads loops only from its explicit SLI file, including
+ * an empty/missing one. Other media retain their existing decoder fallback. */
+export function selectPlaybackLoops(kind: SoundKind, requested: LoopInfo, decoded: LoopInfo): LoopInfo {
+  return kind === 'wave' || requested.links.length || requested.labels.length ? requested : decoded
+}
 export const defaultSoundSettings = (): SoundSettings => ({
   volume: 100000,
   volume2: 100000,

@@ -32,6 +32,7 @@ const tag = (tagname: string, attributes: RecordData = {}): RecordData => ({
 })
 const hexStack = (values: number[]) =>
   values.map((value) => (value >>> 0).toString(16).padStart(8, '0')).join('')
+const conditionFields = ['ExcludeLevel', 'IfLevel', 'ExcludeLevelStack', 'IfLevelExecutedStack'] as const
 function parseHex(value: Data): number[] {
   const encoded = string(value)
   if (!/^(?:[0-9a-fA-F]{8})*$/.test(encoded)) throw new Error('Malformed KAG condition stack')
@@ -558,10 +559,9 @@ export class KagParser {
     }
   }
   *restore(data: RecordData): Task {
-    // Original KAG's saveMacros=false writes void here. Restore deliberately
-    // leaves the running game's definitions intact when no snapshot exists.
-    const macros = data.macros === undefined ? undefined : record(data.macros),
-      frames = list(data.callStack).map(record)
+    // The TJS binding restores the optional macro dictionary before it reads
+    // the parameter stack, so callbacks can retain their original identity.
+    const frames = data.callStack === undefined ? this.calls : list(data.callStack).map(record)
     if (frames.length > 4096) throw new Error('Malformed KAG call stack')
     const nameLists = data.macroArgNames === undefined ? undefined : list(data.macroArgNames)
     const params = list(data.macroArgs).map((entry, index) => {
@@ -579,14 +579,11 @@ export class KagParser {
       }
       return { values, names }
     })
-    const depth = integer(data.macroArgStackDepth),
-      base = integer(data.macroArgStackBase)
+    const depth = integer(data.macroArgStackDepth)
     if (depth !== params.length) throw new TvpError('TVPKAGMalformedSaveData')
-    if (depth < 0 || base < 0 || base > depth || depth > 4096)
-      throw new Error('Malformed KAG macro depth')
-    // Validate condition data before mutating the running parser.
+    if (depth > 4096) throw new Error('Malformed KAG macro depth')
+    // Validate the callers before replacing any of them.
     const validator = new KagParser()
-    validator.restoreConditions(data)
     for (const frame of frames) {
       validator.restoreConditions(frame)
       const frameDepth = integer(frame.macroArgStackDepth),
@@ -600,25 +597,36 @@ export class KagParser {
       )
         throw new Error('Malformed KAG call frame')
     }
-    yield* this.clearCallStack()
-    if (macros !== undefined) yield* this.effect('restoreMacros', macros)
-    this.calls = frames.map((frame) => ({ ...frame }))
+    // Native only replaces the callers when a callStack was supplied. A
+    // bookmark for the current chapter can deliberately inherit its caller.
+    if (data.callStack !== undefined) this.calls = frames.map((frame) => ({ ...frame }))
     yield* this.effect('restoreParams', params)
     // Preserve restored arguments during ClearBuffer/LoadScenario. Scripts
     // can inspect mp and callStackDepth inside onScenarioLoad/Loaded.
     this.macroBase = this.macroDepth = depth
-    this.curLabel = string(data.curLabel)
+    const location = record(yield* this.effect('restoreLocation'))
+    const storage = location.storageName === undefined ? this.curStorage : string(location.storageName)
+    const label = location.curLabel === undefined ? this.curLabel : string(location.curLabel)
+    this.curLabel = label
     // Native restore resumes from the saved label, not the middle of a text run.
-    if (string(data.storageName)) {
-      yield* this.loadScenario(string(data.storageName), true)
-      yield* this.goToLabel(string(data.curLabel))
+    if (storage) {
+      yield* this.loadScenario(storage, true)
+      yield* this.goToLabel(label)
     } else {
       this.scenario = undefined
       this.buffer = undefined
       this.curLine = this.curPos = 0
+      yield* this.breakCondition()
     }
-    this.macroBase = base
-    this.restoreConditions(data)
+    // The original reads these fields after the chapter callbacks. Those
+    // callbacks can advance the parser or update the bookmark being loaded.
+    const levels = record(yield* this.effect('restoreLevels'))
+    const state = this.conditions()
+    for (const key of conditionFields) if (levels[key] !== undefined) state[key] = levels[key]
+    const restoredBase = integer(levels.macroArgStackBase, this.macroBase)
+    if (restoredBase < 0 || restoredBase > this.macroDepth) throw new Error('Malformed KAG macro depth')
+    this.restoreConditions(state)
+    this.macroBase = restoredBase
     return
   }
   assign(other: KagParser): void {

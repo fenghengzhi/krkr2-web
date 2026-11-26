@@ -7,6 +7,7 @@ import type {
   PcmReadRequest,
   WireAudioCommand,
 } from '../../engine/ports/audio.ts'
+import { selectPlaybackLoops } from '../../engine/ports/audio.ts'
 import type { AudioMessage, AudioRequest } from '../../protocol/audio.ts'
 import { decodePortableAudio } from './decode.ts'
 import { VoiceOperations } from './voice-operations.ts'
@@ -128,7 +129,7 @@ export class PortAudioBackend implements AudioBackend {
         if (this.closed) throw new Error('Audio backend closed during decoding')
         this.operations.assertCurrent(id, ticket)
         if (asset) {
-          if (command.loops.links.length || command.loops.labels.length) asset.loops = command.loops
+          asset.loops = selectPlaybackLoops(command.kind, command.loops, asset.loops)
           command = {
             op: 'load',
             id,
@@ -177,7 +178,7 @@ export class PortAudioBackend implements AudioBackend {
         const bytes = await this.streams.fallbackBytes(candidate), asset = await this.waitDecode(this.decode(bytes, command.kind))
         assertCurrent()
         if (asset) {
-          if (command.loops.links.length || command.loops.labels.length) asset.loops = command.loops
+          asset.loops = selectPlaybackLoops(command.kind, command.loops, asset.loops)
           outgoing = { op: 'load', id: command.id, asset, settings: command.settings,
             kind: command.kind, filters: command.filters }
         } else outgoing = { op: 'open', id: command.id, bytes, kind: command.kind, loops: command.loops,

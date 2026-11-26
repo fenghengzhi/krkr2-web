@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 150 批的 KAG 对照检查只指定章节标签的书签、缺省调用栈、宏参数以及载入回调修改条件分支的顺序。游戏输入和声音另从浏览器玩家操作及实际输出验收。[150 验收与历史结果](decisions/150-kag-bookmarks-mouse-and-wave.md)
+
 第 149 批检查多层发行目录的自动启动和原版书签恢复、游戏脚本触发的画面重绘，以及 MIDI 配乐在循环和停止后重播时所用的乐器。Windows 原版配置夹具可保留仅大小写不同的两个参数名。[149 验收和历史结果](decisions/149-wrapped-directories-paint-and-midi.md)
 
 第 148 批使用真实 HTTP 服务打开远程游戏目录，核对资源版本、游戏身份与存档。托管验收也覆盖原版图层布尔转换、游戏按钮的点击与焦点，以及 MIDI 模块初始化后的实际声音输出。[148 验收与历史结果](decisions/148-remote-games-layer-options-and-midi-reset.md)

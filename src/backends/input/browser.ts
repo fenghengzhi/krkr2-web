@@ -160,7 +160,7 @@ export class BrowserInput {
   private pressed = new Set<number>()
   private touches = new Map<number, { x: number; y: number; startX: number; startY: number }>()
   private mouseTouch: number | undefined
-  private clicks = new Map<number, number>()
+  private primaryClickCount = 0
   private lastMouseDownPoint?: { x: number; y: number }
   private view?: WindowView
   private input?: InputView
@@ -380,7 +380,7 @@ export class BrowserInput {
       this.cancelComposition()
       this.mouseButtons = 0
       this.mouseTouch = undefined
-      this.clicks.clear()
+      this.primaryClickCount = 0
       this.lastMouseDownPoint = undefined
       this.touches.clear()
       this.pressed.clear()
@@ -398,7 +398,7 @@ export class BrowserInput {
       this.mouseButtons = 0
       this.mouseTouch = undefined
       this.touches.clear()
-      this.clicks.clear()
+      this.primaryClickCount = 0
       this.lastMouseDownPoint = undefined
       this.pressed.clear()
       this.cancelComposition()
@@ -665,9 +665,12 @@ export class BrowserInput {
       event.preventDefault()
       this.focus()
       this.mouseButtons = event.buttons || this.mouseButtons | (1 << event.button)
-      this.clicks.set(button, event.detail || 1)
+      // The stock PaintBox's VCL Click/DblClick notifications belong to the
+      // primary (left) button. Other buttons still take the normal capture,
+      // down and up path; they must not also activate a game choice.
+      if (event.button === 0) this.primaryClickCount = event.detail || 1
     }
-    const shift = shiftState(event), clicks = type === 'up' ? (this.clicks.get(button) ?? 0) : 0
+    const shift = shiftState(event), clicks = type === 'up' && event.button === 0 ? this.primaryClickCount : 0
     this.modifiers(shift)
     this.push({
       type,
@@ -680,7 +683,7 @@ export class BrowserInput {
     })
     if (type === 'up') {
       this.mouseButtons = event.buttons
-      this.clicks.delete(button)
+      if (event.button === 0) this.primaryClickCount = 0
     }
   }
   private leave(event: MouseEvent): void {
@@ -858,7 +861,7 @@ export class BrowserInput {
   }
   private clearTransient(): void {
     this.mouseButtons = 0
-    this.clicks.clear()
+    this.primaryClickCount = 0
     this.lastMouseDownPoint = undefined
     this.touches.clear()
     this.releasePointerCaptures()

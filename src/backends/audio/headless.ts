@@ -4,6 +4,7 @@ import type {
   AudioResult,
   AudioEvent,
 } from '../../engine/ports/audio.ts'
+import { selectPlaybackLoops } from '../../engine/ports/audio.ts'
 import type { EventClock } from '../../engine/scheduler/events.ts'
 import { AudioMixer } from '../../engine/media/mixer.ts'
 import { decodePortableAudio } from './decode.ts'
@@ -112,7 +113,7 @@ export class HeadlessAudioBackend implements AudioBackend {
         this.operations.assertCurrent(command.id, ticket)
         if (!asset)
           throw new Error('Headless audio supports PCM WAVE, Vorbis and Standard MIDI Files')
-        if (command.loops.links.length || command.loops.labels.length) asset.loops = command.loops
+        asset.loops = selectPlaybackLoops(command.kind, command.loops, asset.loops)
         this.advance()
         const result = this.mixer.command({
           op: 'load',
@@ -169,7 +170,7 @@ export class HeadlessAudioBackend implements AudioBackend {
       const asset = candidate.asset ?? await this.waitDecode(this.decode(await this.streams.fallbackBytes(candidate), command.kind))
       assertCurrent()
       if (!asset) throw new Error('Headless audio supports PCM WAVE, Vorbis and Standard MIDI Files')
-      if (command.loops.links.length || command.loops.labels.length) asset.loops = command.loops
+      asset.loops = selectPlaybackLoops(command.kind, command.loops, asset.loops)
       this.advance()
       const result = this.mixer.command({ op: 'load', id: command.id, asset,
         settings: command.settings, kind: command.kind, filters: command.filters })

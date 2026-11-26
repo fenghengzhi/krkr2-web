@@ -37,7 +37,7 @@ class KAGParser {
     for(var i=0;i<fields.count;i+=2)result[fields[i]]=void;
     return result;
   }
-  function __kagRun(method, argument=void, restoring=void) {
+  function __kagRun(method, argument=void, restoring=void, savedParams=void) {
     // These are ordinary VM-owned variants scoped to this invocation. Nested
     // parser calls have separate tables; no reference becomes a host handle.
     var references=void;
@@ -74,14 +74,28 @@ class KAGParser {
           case "pushParams": __kagPushParams(__kagResolveTag(a[0].value,references,a[0].references)); break;
           case "popParams": __kagParamDepth = a[0]; break;
           case "clearParams": __kagClearParams(); break;
-          case "restoreMacros": (Dictionary.assign incontextof __kagMacros)(restoring.macros); break;
           case "restoreParams":
             __kagClearParams();
             for(var i=0;i<a[0].count;i++) {
-              var values=%[];(Dictionary.assign incontextof values)(restoring.macroArgs[i]);
-              __kagParams.add(values); __kagParamNames.add(a[0][i].names);
+              __kagParams.add(savedParams[i]); __kagParamNames.add(a[0][i].names);
             }
             __kagParamDepth = __kagParams.count;
+            break;
+          case "restoreLocation":
+            result=%[];
+            result.storageName=restoring.storageName;
+            // LoadScenario recomputes the short name, but its getter still
+            // runs between the storage and label getters in the original.
+            var shortName=restoring.storageShortName;
+            result.curLabel=restoring.curLabel;
+            break;
+          case "restoreLevels":
+            result=%[];
+            result.ExcludeLevel=restoring.ExcludeLevel;
+            result.IfLevel=restoring.IfLevel;
+            result.ExcludeLevelStack=restoring.ExcludeLevelStack;
+            result.IfLevelExecutedStack=restoring.IfLevelExecutedStack;
+            result.macroArgStackBase=restoring.macroArgStackBase;
             break;
           case "yield": break;
           default: throw new Exception("Unknown KAG effect: " + operation.kind);
@@ -134,19 +148,41 @@ class KAGParser {
   function restore(data) {
     // Native applies optional macros before inspecting macroArgs, including
     // when a later malformed-save error is raised. Omitted macros keep them.
-    if(data.macros!==void)(Dictionary.assign incontextof __kagMacros)(data.macros);
+    var macros=data.macros;
+    if(macros!==void)(Dictionary.assign incontextof __kagMacros)(macros);
     __kagParamDepth=0;
-    var shape=%[],params=[];(Dictionary.assign incontextof shape)(data);
-    shape.macros=void;
-    if(data.macroArgs===void){
+    // Only the fields consumed by KAG cross the host boundary. Games can
+    // keep live callbacks and other private data beside their parser state.
+    var shape=%[],params=[],savedParams=[];
+    var args=data.macroArgs;
+    if(args===void){
       if(__kagParams.count)__host("KAG.malformedSave",__kagId);
       shape.macroArgStackDepth=0;
-    }else for(var i=0;i<data.macroArgs.count;i++){
-      var values=%[];(Dictionary.assign incontextof values)(data.macroArgs[i]);
-      params.add(__kagShape(values));
+    }else{
+      var count=args.count;
+      if(count>4096)throw new Exception("Malformed KAG macro depth");
+      shape.macroArgStackDepth=data.macroArgStackDepth;
+      if(data instanceof "Dictionary")shape.macroArgNames=data.macroArgNames;
+      for(var i=0;i<count;i++){
+        var values=%[];(Dictionary.assign incontextof values)(args[i]);
+        savedParams.add(values);params.add(__kagShape(values));
+      }
     }
     shape.macroArgs=params;
-    __kagRun("restore",shape,data);
+    var frames=data.callStack;
+    if(frames!==void){
+      if(!(frames instanceof "Array") || frames.count>4096)throw new Exception("Malformed KAG call stack");
+      shape.callStack=[];
+      for(var j=0;j<frames.count;j++){
+        var f=frames[j];
+        shape.callStack.add(%[storage:f.storage,label:f.label,offset:f.offset,orgLineStr:f.orgLineStr,
+          lineBuffer:f.lineBuffer,pos:f.pos,lineBufferUsing:f.lineBufferUsing,
+          macroArgStackBase:f.macroArgStackBase,macroArgStackDepth:f.macroArgStackDepth,
+          ExcludeLevel:f.ExcludeLevel,IfLevel:f.IfLevel,ExcludeLevelStack:f.ExcludeLevelStack,
+          IfLevelExecutedStack:f.IfLevelExecutedStack]);
+      }
+    }
+    __kagRun("restore",shape,data,savedParams);
   }
   function assign(parser) {
     if(!(parser instanceof "KAGParser")) {

@@ -4,8 +4,9 @@ import { emptyLoops } from '../../engine/ports/audio.ts'
 const MAX_PCM_BYTES = 128 * 1024 * 1024
 
 /** RIFF/WAVE integer/float PCM, including WAVE_FORMAT_EXTENSIBLE containers.
- * Keep original sample rate and frame numbers; Web Audio's decoder resamples. */
-export function decodeWav(bytes: Uint8Array): PcmAsset | undefined {
+ * Keep original sample rate and frame numbers; Web Audio's decoder resamples.
+ * Generic callers keep sampler loops; stock WaveSoundBuffer opts out. */
+export function decodeWav(bytes: Uint8Array, options: { samplerLoops?: boolean } = {}): PcmAsset | undefined {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const text = (at: number, count: number) => String.fromCharCode(...bytes.subarray(at, at + count))
   if (bytes.length < 12 || text(0, 4) !== 'RIFF' || text(8, 4) !== 'WAVE') return
@@ -23,7 +24,7 @@ export function decodeWav(bytes: Uint8Array): PcmAsset | undefined {
     if (tag === 'fmt ') {
       format = readWaveFormat(bytes.subarray(start, limit))
     } else if (tag === 'data') data = bytes.subarray(start, limit)
-    else if (tag === 'smpl' && length >= 36) {
+    else if (options.samplerLoops !== false && tag === 'smpl' && length >= 36) {
       const count = view.getUint32(start + 28, true)
       if (count > (length - 36) / 24) throw new Error('Truncated WAVE sample loop')
       for (let i = 0; i < count; i++) {

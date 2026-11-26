@@ -6,7 +6,7 @@ import type {
   AudioResult,
   MixerCommand,
 } from '../../../engine/ports/audio.ts'
-import { emptyLoops } from '../../../engine/ports/audio.ts'
+import { emptyLoops, selectPlaybackLoops } from '../../../engine/ports/audio.ts'
 import { decodeWav } from '../../../formats/audio/wav.ts'
 import { decodeMidi } from '../../../formats/audio/midi.ts'
 import { encodedSampleRate } from '../../../formats/audio/encoded-rate.ts'
@@ -395,7 +395,7 @@ export class WebAudioHost {
       this.operations.assertCurrent(command.id, ticket)
       if (command.op !== 'open') return await this.send(node, command)
       let asset: AudioAsset | undefined =
-        command.kind === 'midi' ? decodeMidi(command.bytes) : decodeWav(command.bytes)
+        command.kind === 'midi' ? decodeMidi(command.bytes) : decodeWav(command.bytes, { samplerLoops: command.kind !== 'wave' })
       if (!asset) {
         const rate = encodedSampleRate(command.bytes)
         if (rate === undefined && (command.loops.links.length || command.loops.labels.length))
@@ -424,7 +424,7 @@ export class WebAudioHost {
           loops: emptyLoops(),
         }
       }
-      if (command.loops.links.length || command.loops.labels.length) asset.loops = command.loops
+      asset.loops = selectPlaybackLoops(command.kind, command.loops, asset.loops)
       return await this.send(node, {
         op: 'load',
         id: command.id,

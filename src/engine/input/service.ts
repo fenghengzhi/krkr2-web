@@ -271,6 +271,7 @@ export class InputService {
       return reply(undefined)
     }
     if (name === 'Input.hitChoice') {
+      if (args.length < 2) throw new TjsError('TJSBadParamCount')
       controller.chooseHit(id, !!number(1))
       return reply(undefined)
     }

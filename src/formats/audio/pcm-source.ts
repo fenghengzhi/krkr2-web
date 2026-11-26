@@ -19,6 +19,9 @@ export interface PcmSourceOptions {
   signal?: PcmCancellationSignal
   /** Host scheduling capability, injected by the portable backend. */
   yieldControl?(): void | Promise<void>
+  /** Generic RIFF readers retain sampler loops by default. Stock
+   * WaveSoundBuffer uses its own whole-file/SLI loop manager instead. */
+  waveSamplerLoops?: boolean
 }
 export const pcmSourceLimits = Object.freeze({
   readFrames: 65536,
