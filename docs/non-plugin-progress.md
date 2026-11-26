@@ -4,6 +4,8 @@
 
 第 180 批处理大过场、横向滚动误跳对白和长音轨定位。第 171 批所有常规浏览器报告已取回，Firefox 两个后端均通过原版 Introduction 的两条路线，其中一条包含保存与刷新读档。该批整体失败。[180 实现与托管证据](decisions/180-large-cutscenes-and-story-input.md)
 
+第 180 批实现提交 `b102ad6` 登记时为 `pending`，下一批取回结果。[第 180 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45878405974)
+
 第 179 批处理旧过场编码、双击命名书签和 GS 乐谱鼓轨。新取回的第 171 批报告确认，原版 Introduction 第二条路线已在 WebKit 的 Asyncify 后端通过。[179 实现与托管证据](decisions/179-windows-cutscenes-and-named-bookmarks.md)
 
 第 179 批实现提交 `8bcbe5c` 登记时为 `pending`，结果留到下一批取回。[第 179 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45875774925)

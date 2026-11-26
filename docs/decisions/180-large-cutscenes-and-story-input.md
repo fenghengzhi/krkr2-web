@@ -27,3 +27,5 @@
 第 172 批已取得生产构建和独立类型检查的成功结果。三种浏览器的离线用例共 65 项通过，原版 KAG 与运行时兼容用例共 96 项通过。取证时主 Node 和常规浏览器报告尚未发布，已有 3 个作业失败。第 173 至 179 批当时仍在排队。[第 172 批 Actions](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217) · [第 179 批 Actions](https://github.com/fenghengzhi/krkr2-web/actions/runs/45875774925)
 
 第 171 批有七份 WebKit 播放中换轨记录，候选解码器最后一次定位都精确等于原影片冻结时刻。此前验收还把准备首帧时的定位算进了换轨次数。本批保留每次真实定位，单独核对提交前的准备位置、最终恢复时钟、音调和资源释放。另有一个用例在首次打开影片时超时，仍记为独立失败。[换轨验收](../../tests/browser/video-playing-audio-switch.spec.ts)
+
+第 180 批实现提交 `b102ad6` 登记时为 `pending`，下一批取回结果。[第 180 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45878405974)
