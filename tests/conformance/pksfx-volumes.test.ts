@@ -90,7 +90,7 @@ for (const disks of [2, 3] as const) test(`${disks}-disk PKSFX joins EXE first, 
       assert.equal(await session.evaluate('System.exePath+"|"+System.dataPath'), 'game://./Release/|game://./Release/savedata/')
       assert.equal(await session.evaluate('[].load(System.dataPath+"slot.txt")[0]'), 'disk-save:7')
       if (binary) assert.equal(Buffer.from(session.exportSaves().find((file) => file.path.endsWith('/program.cjs'))!.bytes).toString('ascii', 0, 4), 'TJS2')
-      assert.deepEqual(events.filter((event) => event.type === 'error'), [])
+      assert.deepEqual(events.filter((event) => event.type === 'log' && event.level === 'error'), [])
     } finally { await session.stop() }
     const eager = await importSources(files.map((file) => ({ path: file.name, source: file.source! })), step)
     assert(eager.some((entry) => entry.name === 'bundle/game.Zip' && entry.archiveKind === 'zip'))

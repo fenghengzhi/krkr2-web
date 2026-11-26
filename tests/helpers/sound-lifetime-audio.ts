@@ -128,6 +128,7 @@ export class LifetimeAudioBackend implements AudioBackend {
     else if (command.op === 'fade') snapshot.fading = true
     else if (command.op === 'stopFade') snapshot.fading = false
     else if (command.op === 'flag') snapshot.flags[command.index] = command.value
+    else if (command.op === 'resetFlags') snapshot.flags.fill(0)
     else if (command.op === 'set') Object.assign(snapshot, { [command.property]: command.value })
     else if (command.op !== 'inspect')
       throw new Error(`Unexpected lifetime audio command: ${command.op}`)

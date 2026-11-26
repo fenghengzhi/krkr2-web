@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { inflateSync } from 'node:zlib'
 import { expect, test } from '@playwright/test'
+import { distributionZip, member } from '../helpers/deflated-distribution.ts'
 import { nativeSaveGameSource, nativeSaveStory, nativeSaveZipFiles, nativeSdkResult,
   nativeSdkSaveFiles, nativeSdkSaveReference, saveBytesDigest } from '../helpers/native-saves.ts'
 
@@ -193,6 +194,39 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       expect(await read('nativeStoredState()')).toBe('7|*checkpoint')
       expect(await read('[].load(System.dataPath+"notes/player.txt")[0]')).toBe('native-sidecar:7')
       expect(await read('[].load("outside-native.txt")[0]')).toBe('outside-data-directory')
+
+      await clickLink(0, '*save'); await state(99, 7)
+      expect(await read('nativeStoredState()')).toBe('99|*checkpoint')
+      await pause()
+      const wrapped = distributionZip([
+        ...Array.from(entries, ([name, bytes]) => member('旧版/SaveData/' + name, bytes)),
+        member('旧版/SaveData.old/migration0.bmp', 'different slot'),
+        member('旧版/Assets/scene.txt', 'game content'),
+      ])
+      const chooseDirectory = async () => {
+        const choosing = page.waitForEvent('filechooser')
+        await page.getByRole('button', { name: '从 ZIP 中选择存档目录' }).click()
+        await (await choosing).setFiles({ name: '旧版备份.zip', mimeType: 'application/zip', buffer: wrapped })
+        const selector = page.getByLabel('ZIP 内的存档目录', { exact: true })
+        await selector.selectOption('旧版/')
+        await selector.selectOption('旧版/SaveData/')
+        await expect(page.locator('#save-zip-summary')).toContainText(`共 ${entries.size} 个文件`)
+      }
+      await chooseDirectory()
+      await resume()
+      await expect(page.locator('#save-zip-panel')).toBeHidden()
+      expect(await read('nativeStoredState()')).toBe('99|*checkpoint')
+      await pause(); await chooseDirectory()
+      const marker = page.locator('#logs p span').filter({ hasText: /^存档已导入/ }), before = await marker.count()
+      await page.getByRole('button', { name: '导入此目录' }).click()
+      await expect(marker).toHaveCount(before + 1)
+      const selected = nativeSaveZipFiles(await download('native', 'selected-save-directory.zip'))
+      expect(selected.get('migration0.bmp')).toEqual(bookmark)
+      expect(selected.get('notes/player.txt')).toEqual(entries.get('notes/player.txt'))
+      expect([...selected.keys()].some((name) => name.startsWith('旧版/'))).toBe(false)
+      imports.push({ mode: 'selected-desktop-backup-directory', directory: '旧版/SaveData/', sha256: saveBytesDigest(wrapped) })
+      await resume()
+      expect(await read('nativeStoredState()')).toBe('7|*checkpoint')
       await page.reload(); await start(); await state(7, 1)
       await clickLink(1, '*change'); await state(99, 2)
       await clickLink(2, '*load'); await state(7, 3)

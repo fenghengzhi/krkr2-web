@@ -8,6 +8,7 @@ import type { ZipNameEncoding } from '../formats/zip/names.ts'
 
 const maxArchive = 96 * 1024 * 1024
 type Check = () => Promise<void>
+interface SaveEntry { name: string; size: number; read(): Promise<Uint8Array> }
 
 function validateEntries(entries: readonly { name: string; size: number }[]): void {
   if (!entries.length) throw new Error('没有存档文件')
@@ -32,31 +33,8 @@ function checkpoint(active: () => void): Check {
   }
 }
 
-/** Data-directory-relative files, containing their original bytes. */
-export async function readNativeSaves(files: readonly File[], folder: boolean,
-  active: () => void = () => {}, zipEncoding?: ZipNameEncoding): Promise<SaveFile[]> {
-  const check = checkpoint(active)
+async function readEntries(entries: SaveEntry[], check: Check): Promise<SaveFile[]> {
   await check()
-  let entries: Array<{ name: string; size: number; read(): Promise<Uint8Array> }>
-  if (!folder && files.length === 1 && /\.zip$/i.test(files[0]!.name)) {
-    const file = files[0]!
-    if (file.size > maxArchive) throw new Error('存档 ZIP 超过大小限制')
-    entries = await readZip(new BlobSource(file), { ...zipNameCodecs(zipEncoding),
-      inflate: (bytes, size) => inflateRaw(bytes, size, check), checkpoint: check })
-  } else {
-    let root: string | undefined
-    entries = files.map((file) => {
-      let name = file.name
-      if (folder) {
-        const path = file.webkitRelativePath, slash = path.indexOf('/')
-        if (slash <= 0 || (root !== undefined && path.slice(0, slash) !== root))
-          throw new Error('请选择一个完整的存档目录')
-        root = path.slice(0, slash)
-        name = path.slice(slash + 1)
-      }
-      return { name, size: file.size, read: async () => new Uint8Array(await file.arrayBuffer()) }
-    })
-  }
   validateEntries(entries)
   const result: SaveFile[] = []
   for (const entry of entries) {
@@ -65,6 +43,64 @@ export async function readNativeSaves(files: readonly File[], folder: boolean,
   }
   await check()
   return result
+}
+
+/** Index only. A desktop backup can contain a large game alongside its saves.
+ * The save limits and full member CRCs apply to the selected subtree. */
+export async function openNativeSaveZip(file: File, active: () => void, zipEncoding?: ZipNameEncoding) {
+  const check = checkpoint(active)
+  await check()
+  const entries = await readZip(new BlobSource(file), { ...zipNameCodecs(zipEncoding),
+    inflate: (bytes, size) => inflateRaw(bytes, size, check), checkpoint: check })
+  await check()
+  return {
+    name: file.name,
+    directory(prefix: string) {
+      active()
+      const children = new Set<string>()
+      let count = 0, size = 0
+      for (const entry of entries) {
+        if (!entry.name.startsWith(prefix)) continue
+        count++
+        size += entry.size
+        const slash = entry.name.indexOf('/', prefix.length)
+        if (slash !== -1) children.add(entry.name.slice(0, slash + 1))
+      }
+      return { children: [...children].sort(), count, size, fits: count > 0 && count <= MAX_SAVE_FILES && size <= MAX_SAVE_BYTES }
+    },
+    async read(prefix: string) {
+      if (prefix && !prefix.endsWith('/')) throw new Error('请选择 ZIP 中的目录')
+      const selected = entries.filter((entry) => entry.name.startsWith(prefix)).map((entry) => ({
+        name: entry.name.slice(prefix.length), size: entry.size, read: () => entry.read(),
+      }))
+      return readEntries(selected, check)
+    },
+  }
+}
+
+/** Data-directory-relative files, containing their original bytes. */
+export async function readNativeSaves(files: readonly File[], folder: boolean,
+  active: () => void = () => {}, zipEncoding?: ZipNameEncoding): Promise<SaveFile[]> {
+  const check = checkpoint(active)
+  await check()
+  if (!folder && files.length === 1 && /\.zip$/i.test(files[0]!.name)) {
+    const file = files[0]!
+    if (file.size > maxArchive) throw new Error('存档 ZIP 超过大小限制')
+    return (await openNativeSaveZip(file, active, zipEncoding)).read('')
+  }
+  let root: string | undefined
+  const entries = files.map((file) => {
+    let name = file.name
+    if (folder) {
+      const path = file.webkitRelativePath, slash = path.indexOf('/')
+      if (slash <= 0 || (root !== undefined && path.slice(0, slash) !== root))
+        throw new Error('请选择一个完整的存档目录')
+      root = path.slice(0, slash)
+      name = path.slice(slash + 1)
+    }
+    return { name, size: file.size, read: async () => new Uint8Array(await file.arrayBuffer()) }
+  })
+  return readEntries(entries, check)
 }
 
 /** Single-disk UTF-8 stored ZIP. Slot thumbnails and trailing bookmark data

@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 160 批把测试工具类型检查设为独立必过作业。实际 KAG 读档验收从带外层目录和其他游戏素材的 ZIP 选择旧槽位，在刷新重开后恢复进度。[160 验收与取回结果](decisions/160-save-folders-kag-parameters-and-wave-flags.md)
+
 第 159 批由托管 7-Zip 写入和独立解包 ZIP 方法 9 的游戏，浏览器从同一包启动、保存并重开读档。配乐跳转与字幕覆盖度分别通过音频样本和像素对照验收。[159 验收与取回结果](decisions/159-deflate64-games-vorbis-seek-and-text.md)
 
 第 158 批增加自解压 ZIP 的原版 KAG 启动与重开读档验收、Windows Media 独立素材对照，以及原生字体方法丢弃与取用返回值的对照。第 157 批的影片测试类型错误已修正，等待托管构建。[158 验收与取回结果](decisions/158-executable-zip-windows-media-and-font-calls.md)

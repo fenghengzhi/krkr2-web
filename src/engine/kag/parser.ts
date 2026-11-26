@@ -414,11 +414,19 @@ export class KagParser {
       ) {
         if (attribute.entity) value = yield* this.evaluate(value, false, state)
         else if (attribute.parameter) {
-          const current = yield* this.parameters(state)
+          const separator = attribute.value.indexOf('|'),
+            name = separator < 0 ? attribute.value : attribute.value.slice(0, separator),
+            current = yield* this.tagEffect(state, 'param', name)
           if (current !== null) {
-            const params = current.values,
-              separator = attribute.value.indexOf('|')
-            value = params[separator < 0 ? attribute.value : attribute.value.slice(0, separator)]
+            // A native macro parameter is a real Dictionary property read,
+            // not the raw value copied by Dictionary.assign for the * form.
+            // Its getter can change the game, this parser or the live tag.
+            const result = record(current)
+            if (Object.hasOwn(result, 'reference')) {
+              const index = integer(result.reference, -1)
+              if (index < 0 || index >= 100000) throw new Error('Malformed KAG parameter reference')
+              value = new KagReference(index)
+            } else value = result.value
             if (value === undefined && separator >= 0) value = attribute.value.slice(separator + 1)
           }
         }

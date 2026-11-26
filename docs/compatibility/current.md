@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 160 批可从带说明文件的 ZIP 发行包启动，也可将桌面备份 ZIP 中指定目录的内容导入当前游戏的存档位置，并修订 KAG 宏参数与交互配乐的行为。新增行为等待托管验收。[160 兼容范围与证据](../decisions/160-save-folders-kag-parameters-and-wave-flags.md)
+
 第 159 批加入 ZIP 方法 9，支持从此类发行包读取游戏，以及导入用该方法压缩的原版存档。Ogg 配乐可借助页索引跳转，预渲染 TFT 字体采用 65 级覆盖度混合。新增行为等待托管验收。[159 范围与验证](../decisions/159-deflate64-games-vorbis-seek-and-text.md)
 
 第 158 批在自动模式下可从 ZIP 格式的自解压 EXE 读取游戏，并支持含 WMV1／WMV2 视频的 ASF 过场。字体度量按脚本是否取用结果决定是否更新文字尺寸缓存。新增行为等待托管验收。[158 范围与验证](../decisions/158-executable-zip-windows-media-and-font-calls.md)

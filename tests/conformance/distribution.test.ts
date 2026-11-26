@@ -14,6 +14,71 @@ function packed(bytes: Buffer, name = 'release.ZIP'): Resource {
     read: async () => { throw new Error('Unexpected whole ZIP read') } }
 }
 
+test('a normal game ZIP beside documents ignores unreadable and non-game side packages', async (t) => {
+  const reader = createSessionArchiveReader(); t.after(() => reader.dispose())
+  const game = packed(distributionZip([member('Story/data/startup.tjs', '"selected game"'), member('Story/readme.txt', 'game notes')]), 'editions/Story.zip'),
+    note = packed(Buffer.from('choose a game'), 'readme.txt'), bad = packed(Buffer.from('not a ZIP'), 'broken.zip'),
+    documentation = packed(distributionZip([member('manual.txt', 'documentation')]), 'manuals.zip'),
+    tools = packed(distributionZip([member('tools/setup.exe', 'MZ ordinary utility')]), 'tools.zip'),
+    incomplete = packed(distributionZip([member('asset.zip.001', 'a'), member('asset.zip.003', 'c')]), 'partial-assets.zip'),
+    files = [note, tools, incomplete, bad, game, documentation], originalNames = files.map((file) => file.name)
+  const mounted = await prepareProject(files, { mode: 'auto' }, reader, checkpoint)
+  assert.deepEqual(mounted.project, { directory: 'Story/data/', executableDirectory: 'Story/', distribution: 'editions/Story.zip' })
+  assert.equal(Buffer.from(await mounted.resources.find((file) => file.name.endsWith('/startup.tjs'))!.read()).toString(), '"selected game"')
+  assert.deepEqual(files.map((file) => file.name), originalNames)
+  const replay = await prepareProject([...files].reverse(), { mode: 'root', ...mounted.project! }, reader, checkpoint, 'unrelated.tjs')
+  assert.deepEqual(replay.project, mounted.project)
+  const base = 'game-' + 'c'.repeat(64)
+  assert.equal(await projectIdentity(base, replay.project), await projectIdentity(base, mounted.project))
+  const none = [note, tools, documentation, bad]
+  assert.deepEqual((await prepareProject(none, { mode: 'auto' }, reader, checkpoint)).project, { directory: '', executableDirectory: '' })
+  await assert.rejects(prepareProject(files, { mode: 'auto', executable: 'broken.zip' }, reader, checkpoint), /ZIP/)
+})
+
+test('several normal ZIP games require an explicit package and retain confirmed game errors and cancellation', async (t) => {
+  const reader = createSessionArchiveReader(); t.after(() => reader.dispose())
+  const first = packed(distributionZip([member('First/data/boot.tjs', '"first"')]), 'first.zip'),
+    second = packed(distributionZip([member('Second/data/boot.tjs', '"second"')]), 'second.zip'),
+    note = packed(Buffer.from('editions'), 'README.txt'), files = [first, note, second]
+  await assert.rejects(prepareProject(files, { mode: 'auto' }, reader, checkpoint, 'boot.tjs'),
+    (error: unknown) => error instanceof Error && /多个 ZIP 游戏发行包/.test(error.message) && error.message.includes('first.zip') && error.message.includes('second.zip'))
+  const selected = await prepareProject(files, { mode: 'auto', executable: 'SECOND.ZIP' }, reader, checkpoint, 'boot.tjs')
+  assert.deepEqual(selected.project, { directory: 'Second/data/', executableDirectory: 'Second/', distribution: 'second.zip' })
+  const ambiguousInside = packed(distributionZip([member('One/data/boot.tjs', '1'), member('Two/data/boot.tjs', '2')]), 'both.zip')
+  await assert.rejects(prepareProject([note, ambiguousInside, first], { mode: 'auto' }, reader, checkpoint, 'boot.tjs'), /多个游戏/)
+  const brokenGame = packed(distributionZip([member('Game/data/boot.tjs', '0'), member('assets.zip.001', 'a'), member('assets.zip.003', 'c')]), 'broken-game.zip')
+  await assert.rejects(prepareProject([note, brokenGame, first], { mode: 'auto' }, reader, checkpoint, 'boot.tjs'), /缺少分卷 2/)
+  const cancelled = new DOMException('Cancelled optional package read', 'AbortError'), aborting = { ...reader,
+    async open(resource: Resource, check: () => Promise<void>) {
+      if (resource === first) throw cancelled
+      return reader.open(resource, check)
+    } }
+  await assert.rejects(prepareProject([note, first, second], { mode: 'auto' }, aborting, checkpoint, 'boot.tjs'), (error: unknown) => error === cancelled)
+})
+
+test('ordinary ZIP discovery does not displace loose native projects, XP3 inputs or an existing SFX choice', async (t) => {
+  const reader = createSessionArchiveReader(); t.after(() => reader.dispose())
+  const bytes = distributionZip([member('Wrapped/data/startup.tjs', '"zip game"')]), zip = packed(bytes, 'release.zip'),
+    note = packed(Buffer.from('notes'), 'README.txt'), observed: string[] = [], tracked = { ...reader,
+      async open(resource: Resource, check: () => Promise<void>) { observed.push(resource.name); return reader.open(resource, check) } }
+  for (const native of [packed(Buffer.from('"loose"'), 'data/startup.tjs'),
+    packed(xp3Fixture({ 'startup.tjs': '"native"' }).bytes, 'data.xp3'),
+    packed(embedXp3(xp3Fixture({ 'startup.tjs': '"combined"' }).bytes), 'Novel.exe')]) {
+    const baseline = await prepareProject([native, note], { mode: 'auto' }, reader, checkpoint)
+    observed.length = 0
+    const actual = await prepareProject([zip, native, note], { mode: 'auto' }, tracked, checkpoint)
+    assert.deepEqual(actual.project, baseline.project); assert.deepEqual(observed, [])
+    const base = 'game-' + 'e'.repeat(64)
+    assert.equal(await projectIdentity(base, actual.project), await projectIdentity(base, baseline.project))
+  }
+  const unselected = packed(xp3Fixture({ 'startup.tjs': '42' }).bytes, 'patch.xp3')
+  assert.equal((await prepareProject([zip, unselected, note], { mode: 'auto' }, tracked, checkpoint)).project?.distribution, undefined)
+  const sfx = packed(Buffer.concat([Buffer.from('MZ inert prefix'), bytes]), 'Release.exe')
+  observed.length = 0
+  assert.equal((await prepareProject([zip, note, sfx], { mode: 'auto' }, tracked, checkpoint)).project?.distribution, 'Release.exe')
+  assert.deepEqual(observed, [], 'the existing SFX choice is settled before ordinary sibling ZIPs are inspected')
+})
+
 test('distribution discovery preserves native startup priority, independent choices and saved project identity', async () => {
   const reader = createSessionArchiveReader(), opens: string[] = []
   const tracked = { ...reader, async open(resource: Resource, check: () => Promise<void>) {

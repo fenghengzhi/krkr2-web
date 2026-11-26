@@ -129,6 +129,8 @@ export type MixerCommand =
   | { op: 'play' | 'stop' | 'close' | 'inspect'; id: number }
   | { op: 'set'; id: number; property: Exclude<keyof SoundSettings, 'waveConversion'>; value: number | boolean }
   | { op: 'flag'; id: number; index: number; value: number }
+  /** Native WaveFlags.reset clears all flags under one loop-manager lock. */
+  | { op: 'resetFlags'; id: number }
   | { op: 'fade'; id: number; target: number; time: number; delay: number }
   | { op: 'stopFade'; id: number; finish: boolean }
   | { op: 'pauseAll'; paused: boolean }

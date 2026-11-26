@@ -45,7 +45,7 @@ async function gameFolder(entries: readonly Resource[], checkpoint: () => Promis
 type ProjectLocation = Exclude<ProjectSelection, { mode: 'collection' }>
 async function locateGame(entries: readonly Resource[], selection: ProjectLocation,
   checkpoint: () => Promise<void>, probe: (file: Resource) => Promise<boolean>, source: 'zip' | 'files',
-  entryName: string, relativeEntry: boolean): Promise<ProjectLocation | undefined> {
+  entryName: string, relativeEntry: boolean, allowSingleExecutable = true): Promise<ProjectLocation | undefined> {
   if (selection.mode === 'root' || selection.executableDirectory) return selection
   // A relative entry such as scripts/boot.tjs names both the script and its
   // intended working directory. Find that exact suffix in a wrapped release;
@@ -89,7 +89,7 @@ async function locateGame(entries: readonly Resource[], selection: ProjectLocati
     }
   }
   let folder = selectedExe ? extractStoragePath(selectedExe) : await gameFolder(entries, checkpoint, probe, entryName)
-  if (source === 'zip' && folder === undefined && executables.length === 1) folder = extractStoragePath(executables[0]!.name)
+  if (allowSingleExecutable && source === 'zip' && folder === undefined && executables.length === 1) folder = extractStoragePath(executables[0]!.name)
   if (folder === undefined) return
   return { mode: 'auto', executableDirectory: folder, executable: selectedExe && toPublicStoragePath(selectedExe) }
 }
@@ -133,16 +133,51 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     // launcher shares the project. Existing project/save IDs stay stable.
     return copyGameProject({ ...project, executable: chosen ? toPublicStoragePath(chosen) : choice.executable })!
   }
-  const mountDistribution = async (archive: Resource, choice: ProjectLocation, frozen = false) => {
-    const index = /\.exe$/i.test(archive.name) && !frozen
-      ? await reader.openDistribution?.(archive, checkpoint) : await reader.open(archive, checkpoint)
+  const mountDistribution = async (archive: Resource, choice: ProjectLocation,
+    mode: 'selected' | 'frozen' | 'candidate' = 'selected') => {
+    const frozen = mode === 'frozen', optionalZip = mode === 'candidate'
+    let index: Awaited<ReturnType<ArchiveReader['open']>>
+    try {
+      index = /\.exe$/i.test(archive.name) && !frozen
+        ? await reader.openDistribution?.(archive, checkpoint) : await reader.open(archive, checkpoint)
+    } catch (error) {
+      if (!optionalZip || error instanceof Error && error.name === 'AbortError') throw error
+      // Unselected side files may be unreadable or not really ZIPs. Keep
+      // cancellation authoritative, and never soften a selected package.
+      await checkpoint()
+      return
+    }
     await checkpoint()
     if (index?.kind !== 'zip') {
       if (frozen) throw new Error('Saved game distribution is not a ZIP')
       return
     }
-    const members = reader.joinVolumes ? await reader.joinVolumes(index.entries, checkpoint) : [...index.entries]
-    const inner = await locateGame(members, choice, checkpoint, probe, 'zip', entryName, relativeEntry)
+    const candidateProbe = optionalZip ? async (file: Resource) => {
+      try { return await probe(file) }
+      catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') throw error
+        await checkpoint(); return false
+      }
+    } : probe
+    let members: Resource[]
+    try { members = reader.joinVolumes ? await reader.joinVolumes(index.entries, checkpoint) : [...index.entries] }
+    catch (error) {
+      if (!optionalZip || error instanceof Error && error.name === 'AbortError') throw error
+      await checkpoint()
+      // A damaged auxiliary archive is not a game selection. Native data
+      // pieces or a real startup/combined executable still identify a game,
+      // so its original volume error must not turn into silent fallback.
+      if (index.entries.some((file) => /(?:^|\/)data\.(?:xp3|exe)\.\d{3,}$/i.test(file.name))) throw error
+      let game: ProjectLocation | undefined
+      try { game = await locateGame(index.entries, choice, checkpoint, candidateProbe, 'zip', entryName, relativeEntry, false) }
+      catch (discoveryError) {
+        if (discoveryError instanceof Error && discoveryError.name === 'AbortError') throw discoveryError
+        throw error
+      }
+      if (game) throw error
+      return
+    }
+    const inner = await locateGame(members, choice, checkpoint, candidateProbe, 'zip', entryName, relativeEntry, !optionalZip)
     if (!inner) return
     const names = new Set<string>()
     for (const entry of members) {
@@ -157,7 +192,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     if (selection.distribution !== undefined) {
       const archive = resources.find((file) => file.name === selection.distribution)
       if (!archive) throw new Error('Saved game distribution ZIP is missing: ' + selection.distribution)
-      return (await mountDistribution(archive, selection, true))!
+      return (await mountDistribution(archive, selection, 'frozen'))!
     }
     return { resources, project: await select(resources, selection) }
   }
@@ -190,6 +225,21 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
       found = mounted
     }
     if (found) return found
+    // Preserve the preceding native/SFX result and identity. Only a collection
+    // with no loose/native project enters ordinary ZIP discovery. An XP3 input
+    // remains an explicit native resource rather than being silently discarded.
+    if (!originals.some((file) => file.archiveKind === 'xp3' || /\.xp3$/i.test(file.name))) {
+      let ordinary: Awaited<ReturnType<typeof mountDistribution>>
+      for (const file of originals) {
+        if (!/\.zip$/i.test(file.name)) continue
+        const mounted = await mountDistribution(file, selection, 'candidate')
+        if (!mounted) continue
+        if (ordinary) throw new Error('找到多个 ZIP 游戏发行包，请在“游戏程序名或发行包”填写所选发行包的路径，例如“' +
+          ordinary.project.distribution + '”或“' + file.name + '”。')
+        ordinary = mounted
+      }
+      if (ordinary) return ordinary
+    }
   }
   return { resources, project: await select(resources, location ?? selection) }
 }

@@ -418,6 +418,12 @@ export class AudioMixer {
           throw new Error('Invalid wave flag')
         voice.flags[command.index] = clamp(Math.trunc(command.value), 0, 9999)
         voice.linkDirty = true
+      } else if (command.op === 'resetFlags') {
+        // ClearFlags holds FlagsCS once. Do not expose sixteen intermediate
+        // combinations to a playing SLI branch, or replace the array borrowed
+        // by a live filtered source. Already decoded PCM stays queued.
+        voice.flags.fill(0)
+        voice.linkDirty = true
       } else if (command.op === 'fade') {
         if (command.time <= 0 || command.delay < 0)
           throw new Error('Fade requires positive time and non-negative delay')

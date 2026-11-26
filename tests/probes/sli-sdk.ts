@@ -13,6 +13,7 @@ import { waveSeekFiles, waveSeekSource, waveSeekSdkExpected } from '../helpers/w
 import { soundOpenExpected, soundOpenFiles, soundOpenSource } from '../helpers/sound-open.ts'
 import { waveBooleanExpected, waveBooleanSource } from '../helpers/wave-booleans.ts'
 import { waveTailFiles, waveTailSdkExpected, waveTailSource } from '../helpers/wave-tail.ts'
+import { waveResetFiles, waveResetExpected, waveResetSource } from '../helpers/wave-flags-reset.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -34,11 +35,12 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   'wave-seek-labels': waveSeekSdkExpected,
   ...waveBooleanExpected,
   ...waveTailSdkExpected,
+  ...waveResetExpected,
   ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
   'xp3-decoder': [xp3SegmentScript, xp3SegmentText, 'stop', '48000', '0', '12000', '36320736', '1452000'].join('~'),
   'xp3-compressed': [xp3SegmentScript, xp3SegmentText, xp3CompressedAudioHeader, 'closed'].join('~') }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles() }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles(), ...waveResetFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -52,6 +54,9 @@ if (process.argv[2] === 'prepare') {
     sliNativeSource,
     wavePositionSource,
     waveBooleanSource,
+    waveResetSource,
+    ...Object.keys(waveResetExpected).map((name) =>
+      `try{record("${name}|"+resetSdk(${name === 'wave-flags-paused'}));}catch(e){record("${name}|unexpected-error:"+e.message);}`),
     ...Object.keys(waveBooleanExpected).map((name) =>
       `try{record("${name}|"+waveBooleanObserve("${name}"));}catch(e){record("${name}|unexpected-error:"+e.message);}`),
     ...Object.keys(wavePositionExpected).map((name) =>

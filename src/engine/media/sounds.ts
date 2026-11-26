@@ -394,10 +394,11 @@ export class SoundService {
         action = operation.slice('Sound.flags.'.length)
       if (action === 'get' && property === 'count') return 16n
       if (action === 'call' && property === 'reset') {
-        sound.snapshot.flags.fill(0)
-        if (sound.snapshot.status !== 'unload')
-          for (let index = 0; index < 16; index++)
-            await this.voiceCommand(sound, { op: 'flag', id: sound.id, index, value: 0 })
+        if (sound.snapshot.status !== 'unload') {
+          const result = await this.voiceCommand(sound, { op: 'resetFlags', id: sound.id })
+          if (result.snapshot) sound.snapshot = result.snapshot
+          else sound.snapshot.flags.fill(0)
+        } else sound.snapshot.flags.fill(0)
         return
       }
       const index = Number(property)

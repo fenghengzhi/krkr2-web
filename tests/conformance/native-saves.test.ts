@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { execFileSync } from 'node:child_process'
-import { readNativeSaves, writeNativeSaves } from '../../src/player/native-saves.ts'
+import { crc32 } from 'node:zlib'
+import { openNativeSaveZip, readNativeSaves, writeNativeSaves } from '../../src/player/native-saves.ts'
 import { SaveOverlay } from '../../src/engine/storage/save-overlay.ts'
 import { MemorySaveStore, type SaveFile } from '../../src/engine/ports/saves.ts'
 import { member, distributionZip } from '../helpers/deflated-distribution.ts'
+import { centralRecords } from '../helpers/zip-fixtures.ts'
 
 const bytes = (...values: number[]) => Uint8Array.from(values)
 const file = (path: string, ...values: number[]) => ({ path, bytes: bytes(...values) })
@@ -47,6 +49,73 @@ test('portable input accepts folders, loose slots, and raw-deflated desktop ZIPs
   const bad = member('slot2.ksd', bytes(123, 45))
   const damaged = distributionZip([member('slot1.ksd', bytes(1)), { ...bad, crc: (bad.crc ^ 1) >>> 0 }])
   await assert.rejects(readNativeSaves([new File([Uint8Array.from(damaged)], 'saved.zip')], false), /CRC32/)
+})
+
+test('browse a desktop backup and read only the selected save directory relative to its root', async () => {
+  const sibling = member('Game/Savedata.old/page.bmp', bytes(9))
+  const files = [
+    member('Game/Savedata/page.bmp', bytes(66, 77, 0, 255)),
+    member('Game/Savedata/記録/global.ksd', bytes(3)),
+    { ...sibling, crc: (sibling.crc ^ 1) >>> 0 },
+    member('Readme.txt', 'backup'),
+  ]
+  const zip = new File([Uint8Array.from(distributionZip(files))], 'full-backup.zip')
+  let cancelled = false
+  const archive = await openNativeSaveZip(zip, () => { if (cancelled) throw new Error('session ended') })
+  assert.deepEqual(archive.directory('').children, ['Game/'])
+  assert.deepEqual(archive.directory('Game/').children, ['Game/Savedata.old/', 'Game/Savedata/'])
+  assert.deepEqual(archive.directory('Game/Savedata/'),
+    { children: ['Game/Savedata/記録/'], count: 2, size: 5, fits: true })
+  assert.deepEqual(await archive.read('Game/Savedata/'), [file('page.bmp', 66, 77, 0, 255), file('記録/global.ksd', 3)])
+  await assert.rejects(archive.read('Game/Savedata.old/'), /CRC32/)
+  await assert.rejects(archive.read('Game/absent/'), /没有存档文件/)
+  await assert.rejects(archive.read('Game/Savedata'), /目录/)
+  cancelled = true
+  await assert.rejects(archive.read('Game/Savedata/'), /session ended/)
+})
+
+test('a save subtree enforces relative collisions and its own byte budget before reading members', async () => {
+  const large = member('Game/content.xp3', bytes(1))
+  const zip = new File([Uint8Array.from(distributionZip([
+    { ...large, size: 65 * 1024 * 1024 }, member('Game/Profile/slot', bytes(17)),
+    member('Other/Profile/A', bytes(2)), member('Other/Profile/a', bytes(3)),
+  ]))], 'two-editions.zip')
+  const archive = await openNativeSaveZip(zip, () => {})
+  assert.equal(archive.directory('').fits, false)
+  await assert.rejects(archive.read(''), /64 MiB/)
+  assert.deepEqual(await archive.read('Game/Profile/'), [file('slot', 17)])
+  await assert.rejects(archive.read('Other/Profile/'), /重复/)
+})
+
+test('selecting a save folder in a backup larger than 96 MiB never reads the large game file in full', async () => {
+  const template = distributionZip([member('Release/save/slot.ksd', bytes(4, 8)), member('Release/data.xp3', '')])
+  const { central, records, end } = centralRecords(template), game = records[1]!
+  const block = new Uint8Array(1024 * 1024), slab = new Blob([block]), count = 97, size = count * block.length
+  let crc = 0
+  for (let i = 0; i < count; i++) crc = crc32(block, crc)
+  template.writeUInt16LE(0, game.local + 8)
+  template.writeUInt16LE(0, game.at + 10)
+  for (const start of [game.local + 14, game.at + 16]) {
+    template.writeUInt32LE(crc, start)
+    template.writeUInt32LE(size, start + 4)
+    template.writeUInt32LE(size, start + 8)
+  }
+  template.writeUInt32LE(game.data + size, end + 16)
+  const reads: number[] = []
+  class Backup extends File {
+    override slice(start?: number, stop?: number, type?: string): Blob {
+      const result = super.slice(start, stop, type)
+      reads.push(result.size)
+      return result
+    }
+  }
+  const backup = new Backup([Uint8Array.from(template.subarray(0, game.data)),
+    ...Array<Blob>(count).fill(slab), Uint8Array.from(template.subarray(central))], 'release.zip')
+  await assert.rejects(readNativeSaves([backup], false), /ZIP 超过大小限制/)
+  const archive = await openNativeSaveZip(backup, () => {})
+  assert.equal(archive.directory('Release/').fits, false)
+  assert.deepEqual(await archive.read('Release/save/'), [file('slot.ksd', 4, 8)])
+  assert(reads.length > 0 && Math.max(...reads) <= 65557)
 })
 
 test('native import publishes only a committed batch, preserving later writes across an aborted or successful import', async () => {

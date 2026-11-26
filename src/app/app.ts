@@ -19,6 +19,7 @@ import { createGameHelp } from './game-help.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import { createGameLibrary } from './game-library.ts'
 import { createSaveTransfer } from './save-transfer.ts'
+import { createNativeSaveZipPicker } from './native-save-zip.ts'
 import { createOfflinePanel } from './offline.ts'
 import { remoteUrl } from '../backends/files/http-range.ts'
 import { normalizePath } from '../engine/storage/resolver.ts'
@@ -50,7 +51,7 @@ export function mountApp(root: HTMLDivElement): void {
             <button class="file-button secondary" id="load-url" type="submit">载入链接 <span>↗</span></button></form><label for="entry">启动脚本</label><input id="entry" value="startup.tjs" spellcheck="false"><label for="backend">执行后端</label><select id="backend"><option value="auto">自动选择</option><option value="jspi">JSPI</option><option value="asyncify">Asyncify</option></select><label class="background-setting"><input id="script-debug" type="checkbox">脚本调试</label><p class="muted background-note">下次启动时记录调用栈，用于定位脚本错误。</p><label class="background-setting"><input id="pause-background" type="checkbox" checked>切到后台时暂停</label><p class="muted background-note">关闭后可在后台继续运行；浏览器冻结页面时仍会暂停。</p></section>
           <section class="card support"><p class="eyebrow">CURRENT BUILD</p><h2>基础运行时已接通</h2><p>TJS、KAG 解析、菜单、基础图层、计时器与存档文件。</p><p class="muted">完整 KAG 画面与音视频仍在实现中，暂不支持完整商业游戏。</p></section>
           <section class="card"><p class="eyebrow">AUDIO</p><h2>声音</h2><p id="sound-status">载入游戏后开启声音。</p><button class="file-button" id="sound-toggle" disabled>开启声音</button><meter id="sound-level" min="0" max="1" value="0" aria-label="声音电平"></meter></section>
-          <section class="card"><p class="eyebrow">SAVE FILES</p><h2>存档与备份</h2><p id="save-status">游戏存档保存在此浏览器，可导出备份。</p><label for="save-format">存档格式</label><select id="save-format"><option value="backup">浏览器备份（JSON）</option><option value="native">原版游戏存档</option></select><p class="muted" id="native-save-hint" hidden>暂停游戏后可选择文件、存档目录或 ZIP。ZIP 内的文件会放入当前游戏的存档目录，同名文件将被覆盖。导出的 ZIP 包含游戏在此浏览器写入或导入的存档。</p><button class="file-button" id="export-saves" disabled>导出存档 <span>↓</span></button><button class="file-button secondary" id="import-saves" disabled>导入存档 <span>↑</span></button><input id="save-file" type="file" accept="application/json,.json" hidden><input id="native-save-files" type="file" multiple hidden><span id="native-folder-control" hidden><button type="button" class="file-button secondary" id="choose-native-save-folder" disabled>导入存档目录</button></span><input id="native-save-folder" type="file" webkitdirectory multiple hidden><div id="version-save-transfer"></div></section>
+          <section class="card"><p class="eyebrow">SAVE FILES</p><h2>存档与备份</h2><p id="save-status">游戏存档保存在此浏览器，可导出备份。</p><label for="save-format">存档格式</label><select id="save-format"><option value="backup">浏览器备份（JSON）</option><option value="native">原版游戏存档</option></select><p class="muted" id="native-save-hint" hidden>暂停游戏后可选择文件、存档目录或 ZIP。ZIP 内的文件会放入当前游戏的存档目录，同名文件将被覆盖。导出的 ZIP 包含游戏在此浏览器写入或导入的存档。</p><button class="file-button" id="export-saves" disabled>导出存档 <span>↓</span></button><button class="file-button secondary" id="import-saves" disabled>导入存档 <span>↑</span></button><input id="save-file" type="file" accept="application/json,.json" hidden><input id="native-save-files" type="file" multiple hidden><div id="native-folder-control" hidden><button type="button" class="file-button secondary" id="choose-native-save-folder" disabled>导入存档目录</button><div id="native-save-zip-picker"></div></div><input id="native-save-folder" type="file" webkitdirectory multiple hidden><div id="version-save-transfer"></div></section>
         </aside>
       </div>
       <section class="card library-panel" id="library-panel"></section><section class="console-panel" id="debug-console"><div class="console-heading"><h2>运行记录</h2><div><button id="clear-log">清空</button><button id="hide-console" aria-label="隐藏运行记录">隐藏</button></div></div><div class="logs" id="logs" role="log" aria-live="polite"><p class="muted">等待会话启动…</p></div><form id="console"><span>›</span><input id="expression" aria-label="TJS 表达式" placeholder="输入 TJS 表达式，例如 6 * 7" autocomplete="off" spellcheck="false"><button id="evaluate" disabled>执行</button></form></section>
@@ -58,7 +59,7 @@ export function mountApp(root: HTMLDivElement): void {
     </main>`
   const el = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!
   const projectControls = document.createElement('div')
-  projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">自动识别游戏目录、ZIP 或自解压 ZIP</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><label for="project-executable">游戏程序名（可选）</label><input id="project-executable" placeholder="多个游戏程序中选一个，如 Story.exe" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">自动识别支持游戏目录、ZIP 发行包和 ZIP 格式的自解压 EXE。</p>`
+  projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">自动识别游戏目录、ZIP 或自解压 ZIP</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><label for="project-executable">游戏程序名或发行包（可选）</label><input id="project-executable" placeholder="例如 Story.exe 或 Release/Game.zip" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">自动识别支持游戏目录、ZIP 发行包和 ZIP 格式的自解压 EXE。</p>`
   root.querySelector('label[for="entry"]')!.before(projectControls)
   const zipLabels: Record<ZipNameEncoding, string> = {
     cp437: 'ZIP 默认（CP437）', shift_jis: '日文（Shift_JIS）', gbk: '简体中文（GBK）',
@@ -118,6 +119,7 @@ export function mountApp(root: HTMLDivElement): void {
   let stopRequested = false
   let library: ReturnType<typeof createGameLibrary> | undefined
   let versionSaves: ReturnType<typeof createSaveTransfer> | undefined
+  let zipSaves: ReturnType<typeof createNativeSaveZipPicker> | undefined
   let offline: ReturnType<typeof createOfflinePanel> | undefined
   const log = (text: string, error = false) => {
     const line = document.createElement('p')
@@ -254,7 +256,9 @@ export function mountApp(root: HTMLDivElement): void {
       busy || !snapshot || !['ready', 'running'].includes(snapshot.state)
     const nativeSaves = el<HTMLSelectElement>('save-format').value === 'native'
     const savesBusy = !player || busy || saveJob === player
-    versionSaves?.update(player?.session, snapshot?.state === 'paused' && !stopRequested, savesBusy)
+    const savesPaused = snapshot?.state === 'paused' && !stopRequested
+    versionSaves?.update(player?.session, savesPaused, savesBusy)
+    zipSaves?.update(nativeSaves && savesPaused ? player?.session : undefined, savesBusy)
     el('native-folder-control').hidden = !nativeSaves
     el('native-save-hint').hidden = !nativeSaves
     el('native-zip-options').hidden = !nativeSaves
@@ -781,6 +785,14 @@ export function mountApp(root: HTMLDivElement): void {
     titleFor: (id) => library?.titleFor(id),
     run: (action) => saveTransfer((current, check) => action(current.session, check)),
   })
+  const saveZipEncoding = () => zipNameEncoding(el<HTMLSelectElement>('native-zip-encoding').value || snapshot?.zipEncoding)
+  const logImport = () => log('存档已导入，请通过游戏的读档功能恢复进度')
+  zipSaves = createNativeSaveZipPicker(el('native-save-zip-picker'), {
+    encoding: saveZipEncoding,
+    run: (action) => saveTransfer((current, check) => action(current.session, check)),
+    imported: logImport,
+  })
+  el('native-zip-encoding').addEventListener('change', () => zipSaves?.reset())
   el('export-saves').addEventListener('click', () => {
     const native = el<HTMLSelectElement>('save-format').value === 'native'
     saveTransfer(async (current, check) => {
@@ -813,12 +825,11 @@ export function mountApp(root: HTMLDivElement): void {
       if (!files.length || (owner && owner !== player)) return
       saveTransfer(async (current, check) => {
         const native = id !== 'save-file'
-        const encoding = zipNameEncoding(el<HTMLSelectElement>('native-zip-encoding').value || snapshot?.zipEncoding)
-        const entries = native ? await readNativeSaves(files, id === 'native-save-folder', check, encoding) : await decodeBackup(current.gameId, files[0]!)
+        const entries = native ? await readNativeSaves(files, id === 'native-save-folder', check, saveZipEncoding()) : await decodeBackup(current.gameId, files[0]!)
         check()
         await current.session.importSaves(entries, native ? 'data-directory' : 'all')
         check()
-        log('存档已导入，请通过游戏的读档功能恢复进度')
+        logImport()
       })
     })
   }

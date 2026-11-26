@@ -36,6 +36,15 @@ class KAGParser {
     if(!__kagParamDepth)return null;
     return __kagEncodeFields(references,__kagParams[__kagParamDepth-1],__kagParamNames[__kagParamDepth-1]);
   }
+  function __kagReadParam(references,name) {
+    if(!__kagParamDepth)return null;
+    var value=__kagParams[__kagParamDepth-1][name],kind=typeof value;
+    if(kind=="Object" || kind=="Octet" || kind=="Real"){
+      if(references.count>=100000)throw new Exception("KAG parameter reference budget exceeded");
+      var index=references.count;references.add(value);return %[reference:index];
+    }
+    return %[value:value];
+  }
   function __kagShape(values) {
     var result=%[],fields=[];fields.assign(values);
     for(var i=0;i<fields.count;i+=2)result[fields[i]]=void;
@@ -65,6 +74,7 @@ class KAGParser {
               result=Scripts.eval(tagArgs[0],tagArgs[2],tagArgs[3],global);
               if(tagArgs[1])result=!!result;else if(result!==void)result=string(result);
             }else if(tagOperation=="params")result=__kagEncodeParams(references);
+            else if(tagOperation=="param")result=__kagReadParam(references,tagArgs[0]);
             else if(tagOperation=="getMacro"){
               result=__kagMacros[tagArgs[0]];if(result!==void)result=string(result);
             }else throw new Exception("Unknown KAG tag operation");
