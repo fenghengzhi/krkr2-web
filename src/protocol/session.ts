@@ -1,5 +1,5 @@
 import type { EngineEvent, SessionSnapshot } from '../engine/session.ts'
-import type { SaveFile, SaveScope } from '../engine/ports/saves.ts'
+import type { SaveCopyResult, SaveFile, SaveScope, SaveTransferSource } from '../engine/ports/saves.ts'
 import type { InputPacket } from '../engine/ports/input.ts'
 import type { ActivityState } from '../engine/ports/activity.ts'
 import type { ApplicationActivation } from '../engine/ports/application.ts'
@@ -14,7 +14,7 @@ import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
 import type { CddaDisc } from '../engine/ports/cdda.ts'
-export const PROTOCOL_VERSION = 57
+export const PROTOCOL_VERSION = 58
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
   readonly tree: DroppedTree<Blob>
@@ -115,4 +115,7 @@ export interface SessionApi {
   stop(): Promise<void>
   exportSaves(scope?: SaveScope): Promise<SaveFile[]>
   importSaves(files: SaveFile[], scope?: SaveScope): Promise<void>
+  listSaveVersions(): Promise<SaveTransferSource[]>
+  saveVersionPaths(id: string): Promise<{ paths: string[]; destination: string }>
+  copyVersionSaves(id: string, directory: string, replace: boolean): Promise<SaveCopyResult>
 }

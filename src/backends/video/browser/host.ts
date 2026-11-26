@@ -54,6 +54,8 @@ interface Movie {
   mixerMetadata?: { width: number; height: number; timeline?: VideoTimeline }
   callback?: number
   inFlight?: number
+  frameCallbackDone?: boolean
+  endedPending?: boolean
   blocked: boolean
   disposed: boolean
   period: VideoPeriod
@@ -139,7 +141,15 @@ export class WebVideoHost {
       if ('type' in message) {
         if (message.type === 'ack')
           for (const movie of this.movies.values())
-            if (movie.inFlight === message.serial) movie.inFlight = undefined
+            if (movie.inFlight === message.serial) {
+              movie.inFlight = undefined
+              if (movie.endedPending) {
+                movie.endedPending = false
+                // Its last frame/cue may have paused, sought or replaced the
+                // graph. Only an unchanged, still-ended graph can now stop.
+                if (movie.element.ended) this.finishPlayback(movie)
+              }
+            }
         return
       }
       void this.command(message.command)
@@ -461,7 +471,11 @@ export class WebVideoHost {
   private emit(event: VideoEvent, frame = false, movie?: Movie): void {
     if (this.closed) return
     const serial = this.nextEvent++
-    if (frame && movie) movie.inFlight = serial
+    if (frame && movie) {
+      movie.inFlight = serial
+      movie.frameCallbackDone = false
+      if (event.type === 'frame' && event.deferredPeriod) event.deliveryToken = serial
+    }
     const message: VideoMessage = { type: 'event', event, serial }
     this.port.postMessage(
       message,
@@ -534,17 +548,14 @@ export class WebVideoHost {
       try {
         if (this.advanceClock(movie, false)) return
         const s = movie.settings
-        let periodFrame = videoClockFrameUpdate(s.mode, this.snapshot(movie).frame,
-          videoClockFrameAt(movie.timeline, metadata.mediaTime * 1000))
         if (movie.inFlight === undefined && (s.mode === 1 || s.mode === 2)) {
           const event = this.frame(movie, metadata.mediaTime * 1000)
           event.prepareToken = prepareToken
+          event.deferredPeriod = true
           this.emit(event, true, movie)
-          periodFrame = event.callbackFrame ?? event.snapshot.frame
         }
-        // Native EC_UPDATE publishes the layer frame before testing its period
-        // threshold. Mixer uses GetFrame; layer uses its corrected renderer value.
-        this.period(movie, periodFrame)
+        // EC_UPDATE tests its cue after the immediate game frame callback.
+        // The Worker will send periodTake after that callback's mutations.
       } catch (error) {
         this.fail(error)
       }
@@ -596,9 +607,12 @@ export class WebVideoHost {
         return true
       }
     }
-    // Browser timeupdate remains a clock-based supplement when rVFC is delayed
-    // or withheld. It is not evidence of a particular decoded/rendered frame.
-    if (fallbackPeriod) this.period(movie, videoClockFrameAt(clockTimeline, time))
+    // Keep the established clock fallback (including overlays, absent Layers
+    // and a browser withholding rVFC). Once a real frame HAS been delivered,
+    // its immediate game callback must complete before this fallback can race
+    // its cancellation/rearming. The rVFC path never consumes before dispatch.
+    if (fallbackPeriod && (movie.inFlight === undefined || movie.frameCallbackDone))
+      this.period(movie, videoClockFrameAt(clockTimeline, time))
     return false
   }
   private fail(error: unknown): void {
@@ -1048,6 +1062,9 @@ export class WebVideoHost {
   }
   private finishPlayback(movie: Movie): void {
     if (movie.disposed || movie.seeking || movie.status !== 'play') return
+    // Wait for the game callback/cue, not its separate screen receipt: disabled
+    // user events still finish this internal continuation and allow natural EOF.
+    if (movie.inFlight !== undefined && !movie.frameCallbackDone) { movie.endedPending = true; return }
     if (movie.settings.loop) {
       const epoch = movie.epoch,
         active = () => !movie.disposed && this.movies.get(movie.id) === movie &&
@@ -1276,6 +1293,19 @@ export class WebVideoHost {
       this.remove(command.id)
       return { events: [] }
     }
+    if (command.op === 'frameDone') {
+      const movie = this.movies.get(command.id)
+      // A seek/pause may change epoch on this same decoder. The unique frame
+      // token still owns its callback; a replaced decoder cannot match it.
+      if (movie && movie.inFlight === command.token) {
+        movie.frameCallbackDone = true
+        if (movie.endedPending) {
+          movie.endedPending = false
+          if (movie.element.ended) this.finishPlayback(movie)
+        }
+      }
+      return { events: [] }
+    }
     let movie = this.get(command.id)
     const events: VideoEvent[] = []
     if (command.epoch < movie.epoch) throw new Error('Video operation was superseded')
@@ -1292,6 +1322,14 @@ export class WebVideoHost {
       const previous = movie
       movie = await this.settings(movie, command.settings)
       if (movie !== previous && (movie.settings.mode === 1 || movie.settings.mode === 2)) events.push(this.frame(movie))
+    }
+    else if (command.op === 'periodTake') {
+      if (!Number.isInteger(command.frame) || command.frame < 0 || command.frame > 0x7fffffff)
+        throw new Error('Invalid presented video period frame')
+      if (movie.period.take(command.frame)) {
+        movie.settings.periodEventFrame = movie.period.frame
+        events.push({ type: 'period', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie), reason: 1 })
+      }
     }
     else if (command.op === 'period') {
       if (!Number.isInteger(command.frame) || command.frame < -0x80000000 || command.frame > 0x7fffffff)

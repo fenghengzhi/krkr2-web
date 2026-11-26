@@ -2,7 +2,6 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { generateLegacyVideoFixtures } from './generate-legacy-video-fixtures.mjs'
 
 // This is executable verification setup, and must never run on a developer's
 // computer or a self-hosted runner. All tests receive these exact shared files.
@@ -265,7 +264,6 @@ writeFileSync(resolve(directory, 'video-selection-reference.json'), JSON.stringi
   patterns: videoPatterns, files: videoSelectionFiles, frames: videoSelectionFrames,
   referenceBindings, codecTiming,
 }, null, 2) + '\n')
-const legacyVideo = generateLegacyVideoFixtures(directory)
 const provenance = {
   commit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,
   runner: process.env.RUNNER_ENVIRONMENT,
@@ -278,7 +276,7 @@ const provenance = {
     frames: presentation.reduce((sum, fixture) => sum + fixture.frames.length, 0) },
   videoSelection: { manifest: 'video-selection-reference.json', fixtures: videoSelectionFiles.length,
     references: videoSelectionFrames.length },
-  legacyVideo,
+  legacyVideo: { manifest: 'legacy-video-reference.json' },
 }
 writeFileSync(resolve(directory, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n')
 console.log(JSON.stringify(files.map(({ file, bytes, sha256 }) => ({ file, bytes, sha256 })), null, 2))

@@ -272,6 +272,11 @@ export class SessionClient {
   importSaves(files: SaveFile[], scope: SaveScope = 'all') {
     return this.call('importSaves', files, scope)
   }
+  listSaveVersions() { return this.call('listSaveVersions') }
+  saveVersionPaths(id: string) { return this.call('saveVersionPaths', id) }
+  copyVersionSaves(id: string, directory: string, replace: boolean) {
+    return this.call('copyVersionSaves', id, directory, replace)
+  }
   get isDisposed(): boolean {
     return this.disposed
   }

@@ -291,6 +291,7 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
   if (updates) updates.onmessage = onFocus
   void refresh().catch(options.report)
   return {
+    titleFor(gameId: string) { return state?.games.find((game) => game.gameId === gameId)?.title },
     get busy() {
       return !!operation || changing
     },

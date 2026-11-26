@@ -13,14 +13,15 @@ import { layerInputBooleanCases, layerInputBooleanSource } from '../helpers/laye
 import { layerPaintCases, layerPaintSource } from '../helpers/layer-paint-switches.ts'
 import { closedVideoColorCases, closedVideoColorSource } from '../helpers/video-colors.ts'
 import { layerDefaultFontCases, layerDefaultFontSource } from '../helpers/layer-default-font.ts'
+import { textMetricCases, textMetricFiles, textMetricSource } from '../helpers/text-metric-cache.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
 assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/transition'), game = resolve(output, 'game')
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
-const files = transitionOptionFiles()
-const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases, ...spriteSamplingCases, ...layerInputBooleanCases, ...layerPaintCases, ...closedVideoColorCases, ...layerDefaultFontCases]
+const files = { ...transitionOptionFiles(), ...textMetricFiles() }
+const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases, ...spriteSamplingCases, ...layerInputBooleanCases, ...layerPaintCases, ...closedVideoColorCases, ...layerDefaultFontCases, ...textMetricCases]
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 
 if (process.argv[2] === 'prepare') {
@@ -63,6 +64,8 @@ if (process.argv[2] === 'prepare') {
     'Scripts.execStorage("default-font-platform.tjs");',
     ...layerDefaultFontCases.map(({ id }) => `try{record("${id}|"+layerDefaultFontObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
     '[defaultFontObservedCodes].save("default-font-observed.txt");',
+    textMetricSource,
+    ...textMetricCases.map(({ id }) => `try{record("${id}|"+textMetricObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
     'record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
@@ -79,9 +82,10 @@ if (process.argv[2] === 'prepare') {
     layerPaintHelperSha256: sha(readFileSync('tests/helpers/layer-paint-switches.ts')),
     videoColorHelperSha256: sha(readFileSync('tests/helpers/video-colors.ts')),
     defaultFontHelperSha256: sha(readFileSync('tests/helpers/layer-default-font.ts')),
+    textMetricHelperSha256: sha(readFileSync('tests/helpers/text-metric-cache.ts')),
     cases,
     files: Object.entries(files).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) })),
-    scope: 'Original transitions, gamma, layer order, hit targets, thumbnail resampling, alpha rows, shared images, transformed sprites, Layer booleans, closed video color controls and default Layer font.',
+    scope: 'Original transitions, gamma, layer order, hit targets, thumbnail resampling, alpha rows, shared images, transformed sprites, Layer booleans, closed video color controls, default Layer font and bitmap-owned text metric state.',
   })
 } else if (process.argv[2] === 'compare') {
   mkdirSync(output, { recursive: true })
@@ -110,6 +114,7 @@ if (process.argv[2] === 'prepare') {
     [resolve('tests/helpers/layer-paint-switches.ts'), manifest?.layerPaintHelperSha256],
     [resolve('tests/helpers/video-colors.ts'), manifest?.videoColorHelperSha256],
     [resolve('tests/helpers/layer-default-font.ts'), manifest?.defaultFontHelperSha256],
+    [resolve('tests/helpers/text-metric-cache.ts'), manifest?.textMetricHelperSha256],
   ] as const) {
     if (!existsSync(name) || sha(readFileSync(name)) !== expected) evidenceErrors.push(`${name}: source hash differs or is missing`)
   }
@@ -166,10 +171,12 @@ if (process.argv[2] === 'prepare') {
     defaultFont: { planned: layerDefaultFontCases.length,
       matched: results.filter((row) => row.id.startsWith('default-font-') && row.matched).length,
       platform: fontPlatform, observedFaceCodes: observedFontCodes },
+    textMetrics: { planned: textMetricCases.length,
+      matched: results.filter((row) => row.id.startsWith('text-metric-') && row.matched).length },
     complete, sequenceMatches, evidenceErrors, sdkState: sdk?.state ?? 'unreported',
     sdkExitCode: sdk?.exitCode ?? null, sdkTimedOut: sdk?.timedOut ?? null, results, lines,
     observationSha256: sha(raw),
-    scope: 'Stock SDK option reads, gamma, hit targets, resampling, alpha rows, shared images, transformed sprite pixels, Layer booleans, unopened VideoOverlay color controls and default font properties/metrics. Default face is checked against the actual Windows ACP. Web rendering and input hints are recorded separately.',
+    scope: 'Stock SDK option reads, gamma, hit targets, resampling, alpha rows, shared images, transformed sprite pixels, Layer booleans, unopened VideoOverlay color controls, default font properties and bitmap-owned text metrics. Default face is checked against the actual Windows ACP. Web rendering and input hints are recorded separately.',
   })
   assert(complete, 'Original transition option observations differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

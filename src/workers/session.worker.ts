@@ -1,6 +1,7 @@
 import { exposeRpc } from 'vite-plugin-worker-rpc/runtime'
 import { createSession } from '../player/create-session.ts'
 import { importSources } from '../backends/files/import-resources.ts'
+import { IndexedDbSaveStore } from '../backends/files/indexeddb-saves.ts'
 import { resolveFiles, type SourceFile } from '../backends/files/source-files.ts'
 import { readRemoteManifest } from '../backends/files/remote-manifest.ts'
 import { HttpRangePool } from '../backends/files/http-range.ts'
@@ -58,6 +59,10 @@ let pendingClicks = 0
 function active(): EngineSession {
   if (!session) throw new Error('Session has not been initialized')
   return session
+}
+function openSaveStore(): IndexedDbSaveStore {
+  if (!session || !gameId) throw new Error('Session has not been initialized')
+  return new IndexedDbSaveStore(gameId)
 }
 function reserveInput(): void {
   if (pendingClicks >= 64) throw new Error('Input queue is full; wait for the current script')
@@ -362,6 +367,21 @@ const api: SessionApi = {
   },
   async importSaves(files, scope) {
     await active().importSaves(files, scope)
+  },
+  async listSaveVersions() {
+    const store = openSaveStore()
+    try { return await store.sources() } finally { store.close() }
+  },
+  async saveVersionPaths(id) {
+    const target = active(), store = openSaveStore()
+    try { return { paths: await store.sourcePaths(id), destination: target.saveProfile().directory } }
+    finally { store.close() }
+  },
+  async copyVersionSaves(id, directory, replace) {
+    if (typeof replace !== 'boolean') throw new Error('无效的存档复制选项')
+    const target = active(), store = openSaveStore()
+    try { return await target.copyVersionSaves(await store.readDirectory(id, directory), replace) }
+    finally { store.close() }
   },
 }
 exposeRpc(api, self)

@@ -64,15 +64,17 @@ export function generateLegacyVideoFixtures(directory) {
     for (const item of cases) {
       run('ffmpeg', [...common, ...videoInput, ...(item.audioOffset ? ['-itsoffset', String(item.audioOffset)] : []),
         ...(item.audio ? audioInput : []), '-map', '0:v:0',
-        ...(item.audio ? ['-map', '1:a:0'] : []), ...item.options, '-threads', '1', '-t', '4', path(item.file)], item.file + '.encode')
-      const metadata = JSON.parse(run('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path(item.file)], item.file + '.probe')),
+        ...(item.audio ? ['-map', '1:a:0', '-ar:a', String(rate)] : []), ...item.options,
+        '-r:v', String(fps), '-threads', '1', '-t', '4', path(item.file)], item.file + '.encode')
+      const probe = ['-v', 'error', '-analyzeduration', '10000000', '-probesize', '8388608']
+      const metadata = JSON.parse(run('ffprobe', [...probe, '-show_streams', '-show_format', '-of', 'json', path(item.file)], item.file + '.probe')),
         videos = metadata.streams.filter((stream) => stream.codec_type === 'video'),
         audios = metadata.streams.filter((stream) => stream.codec_type === 'audio')
       if (videos.length !== 1 || videos[0].codec_name !== item.video || videos[0].width !== width ||
-        videos[0].height !== height || videos[0].r_frame_rate !== fps + '/1' ||
-        audios.length !== (item.audio ? 1 : 0) || (item.audio && (audios[0].codec_name !== item.audio || audios[0].sample_rate !== String(rate))))
-        throw new Error(`Unexpected hosted legacy stream inventory: ${item.file}`)
-      const timeline = JSON.parse(run('ffprobe', ['-v', 'error', '-fflags', '+genpts', '-select_streams', 'v:0', '-show_frames', '-of', 'json', path(item.file)], item.file + '.frames'))
+        videos[0].height !== height ||
+        audios.length !== (item.audio ? 1 : 0) || (item.audio && (audios[0].codec_name !== item.audio || Number(audios[0].sample_rate) !== rate)))
+        throw new Error(`Unexpected hosted legacy stream inventory: ${item.file} ${JSON.stringify(metadata.streams)}`)
+      const timeline = JSON.parse(run('ffprobe', [...probe, '-fflags', '+genpts', '-select_streams', 'v:0', '-show_frames', '-of', 'json', path(item.file)], item.file + '.frames'))
       if (timeline.frames.length !== frames) throw new Error(`Unexpected hosted legacy frame count: ${item.file}`)
       const rawTimes = timeline.frames.map((frame) => Number(frame.best_effort_timestamp_time ?? frame.pts_time)),
         known = rawTimes.map((time, index) => ({ time, index })).filter(({ time }) => Number.isFinite(time)),
@@ -91,6 +93,11 @@ export function generateLegacyVideoFixtures(directory) {
         normalizedVideoTimes = times.map((time) => time - commonStart)
       if (!Number.isFinite(commonStart) || normalizedVideoTimes.some((time, index) => !Number.isFinite(time) ||
           (index && time < normalizedVideoTimes[index - 1]))) throw new Error(`Invalid independent legacy timestamps: ${item.file}`)
+      // r_frame_rate is a demuxer estimate. Test the actual presentation
+      // cadence using the decoded frames, with one MPEG clock tick of slack.
+      for (const { time, index } of known)
+        if (Math.abs((time - first.time) - (index - first.index) / fps) > 1 / 90000 + 0.000002)
+          throw new Error(`Unexpected decoded frame cadence: ${item.file} frame ${index}, PTS ${time}, first ${first.time}`)
       if (item.file === 'legacy-program.mpg' && (!timeline.frames.some((frame) => frame.pict_type === 'B') ||
           !(Number(audios[0].start_time) - Number(videos[0].start_time) > .2)))
         throw new Error('MPEG-PS must retain B frames and a genuinely later audio stream start')
@@ -117,7 +124,7 @@ export function generateLegacyVideoFixtures(directory) {
       fixtures.push({ file: item.file, aliases: item.aliases, bytes: bytes.length, sha256: sha(bytes),
         videoCodec: item.video, audioCodec: item.audio, audioInputOffset: item.audioOffset ?? 0,
         commonStart, normalizedVideoTimes, inferredTimestampIndices,
-        inferredTimestampRule: 'At most two missing boundary PTS are derived from the nearest known PTS and ffprobe 25fps; interior gaps fail.',
+        inferredTimestampRule: 'At most two missing boundary PTS are derived from the nearest known PTS and authored 25 fps; all observed PTS must follow this cadence and interior gaps fail.',
         timeScope: item.audio ? 'Original container frame PTS minus common format start; audio is not independently normalized.'
           : 'Elementary MPEG has no container origin; independently observed first-frame PTS is translated to zero.', metadata, timeline,
         independentRgba: { file: item.file + '.rgba', bytes: decoded.length, sha256: sha(decoded) }, checks })

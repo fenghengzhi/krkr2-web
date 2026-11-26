@@ -114,6 +114,10 @@ export type VideoCommand =
   | { op: 'set'; id: number; epoch: number; settings: VideoSettings }
   /** An explicit setter matters even when the numeric cue is unchanged. */
   | { op: 'period'; id: number; epoch: number; frame: number }
+  /** Consume an ordinary cue only after the game's real frame callback. */
+  | { op: 'periodTake'; id: number; epoch: number; frame: number }
+  /** Callback completion is separate from the frame's presentation receipt. */
+  | { op: 'frameDone'; id: number; epoch: number; token: number }
   | { op: 'mixing'; id: number; epoch: number; bitmap: VideoMixingBitmap | null }
   | { op: 'seek'; id: number; epoch: number; position?: number; frame?: number }
   | { op: 'pauseAll'; paused: boolean }
@@ -130,6 +134,11 @@ export type VideoEvent =
       callbackFrame?: number
       /** Captured at rVFC registration, never inferred from readyState/clock. */
       prepareToken?: number
+      /** Modern producers defer ordinary cues until onFrameUpdate returns.
+       * Omitted by legacy embedding producers that send their own periods. */
+      deferredPeriod?: boolean
+      /** Unique producer delivery identity, unaffected by a callback's seek. */
+      deliveryToken?: number
       reason?: number
       pixels?: Pixels
     }

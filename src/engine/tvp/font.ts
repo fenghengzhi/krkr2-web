@@ -4,8 +4,8 @@ class Font {
   function Font(layer) { __host("Font.bind",this,layer); }
   function finalize() {}
   property __data { getter(){return __host("Font.state",this).fontData;} }
-  function mapPrerenderedFont(args*) { if(args.count<1)throw new global.Exception("Missing storage for mapPrerenderedFont");__host("Font.map",__data,string(args[0])); }
-  function unmapPrerenderedFont() { __host("Font.unmap",__data); }
+  function mapPrerenderedFont(args*) { if(args.count<1)throw new global.Exception("Missing storage for mapPrerenderedFont");__host("Font.map",__data,string(args[0]),this); }
+  function unmapPrerenderedFont() { __host("Font.unmap",__data,void,this); }
   function getTextWidth(args*) { if(args.count<1)throw new global.Exception("Missing text for getTextWidth");return __host("Font.measure",string(args[0]),__data,this).width; }
   function getTextHeight(args*) { if(args.count<1)throw new global.Exception("Missing text for getTextHeight");return __host("Font.measure",string(args[0]),__data,this).height; }
   function getGlyphDrawRect(args*) { if(args.count<1)throw new Exception("Missing text for getGlyphDrawRect");var r=__host("Font.bounds",string(args[0]),__data);return new Rect(r.left,r.top,r.right,r.bottom); }
@@ -19,7 +19,7 @@ class Font {
     var selected=__host("Font.select",int(args[0])&0xffffffff,string(args[1]),string(args[2]),string(args[3]),__data);
     if(selected===null)return false;
     __data.face=selected;__data.faceIsFileName=false;
-    __host("Font.attention",this,__data);return true;
+    __host("Font.attention",this,__data,true);return true;
   }
   ${['height', 'face', 'bold', 'italic', 'underline', 'strikeout', 'angle', 'faceIsFileName']
     .map(

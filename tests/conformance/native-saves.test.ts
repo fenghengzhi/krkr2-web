@@ -98,3 +98,32 @@ test('replacing a large original slot and adding its successor uses the final ba
   assert.equal(overlay.size('savedata/new'), old.length); assert.deepEqual(overlay.get('savedata/old'), bytes(7))
   assert.equal(overlay.pending, 0)
 })
+
+test('copying between editions keeps the latest target slot from another session and preserves nested names', async () => {
+  const disk = new MemorySaveStore()
+  const destination = 'New/Profile/'
+  await disk.commit([file(destination + 'Slot.DAT', 1)])
+  const first = new SaveOverlay(disk), second = new SaveOverlay(disk)
+  await first.initialize(); await second.initialize()
+  second.write(destination + 'Slot.DAT', bytes(99))
+  await second.flush()
+  const incoming = [file('slot.dat', 7), file('章/notes.txt', 3)]
+  assert.deepEqual(await first.copy(incoming, destination, false, () => {}), { copied: 1, kept: 1 })
+  assert.deepEqual(first.export(destination), [file('Slot.DAT', 99), file('章/notes.txt', 3)])
+  assert.deepEqual(await first.copy(incoming, destination, false, () => {}), { copied: 0, kept: 2 })
+  assert.deepEqual(await first.copy(incoming, destination, true, () => {}), { copied: 2, kept: 0 })
+  assert.deepEqual(await disk.load(), [file(destination + 'Slot.DAT', 7), file(destination + '章/notes.txt', 3)])
+})
+
+test('a failed version copy leaves player writes pending and preserves disk and memory', async () => {
+  const disk = new MemorySaveStore()
+  await disk.commit([file('saves/chapters/slot', 2)])
+  const overlay = new SaveOverlay(disk)
+  await overlay.initialize()
+  overlay.write('settings', bytes(17))
+  await assert.rejects(overlay.copy([file('new-slot', 1), file('chapters', 7)], 'saves/', true, () => {}), /同名/)
+  await assert.rejects(overlay.copy([file('new-slot', 1)], 'saves/', false, () => { throw new Error('resumed') }), /resumed/)
+  assert.deepEqual(await disk.load(), [file('saves/chapters/slot', 2)])
+  assert.deepEqual(overlay.export('saves/'), [file('chapters/slot', 2)])
+  assert.equal(overlay.pending, 1)
+})

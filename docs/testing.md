@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 157 批新增两类验收用例。一类从两个游戏发行版本的读档菜单核对进度，另一类用图层画面和回调记录检查过场影片。旧影片参考素材生成有独立的必过检查，失败时保留逐条 ffmpeg 和 ffprobe 记录，其他应用验收仍可运行。[157 验收与取回结果](decisions/157-game-version-saves-and-playback.md)
+
 第 156 批加入 Info-ZIP 实际分卷、双 XP3 包、远程分卷游戏断网重开读档、原版默认字体和 MIDI 单音声道的验收。Node 作业使用托管 Ubuntu 上的 `zip -s` 生成独立输入。Windows 字体对照记录进程使用的代码页，浏览器另外测量实际字宽、画面和输入提示。[156 验收与取回结果](decisions/156-split-game-archives-default-font-and-midi.md)
 
 第 155 批用独立字体的字宽和像素验证合集各成员，用原版生成的条件书签验证剧情路线，并从真实双声道输出检查 MIDI 控制器复位。新增验收等待 GitHub-hosted Actions。最近取回的第 149、150 批没有运行依赖应用构建的网页验收。[155 验收与取回结果](decisions/155-font-collections-conditional-saves-and-midi.md)

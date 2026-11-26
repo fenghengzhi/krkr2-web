@@ -1,4 +1,4 @@
-import { MAX_SAVE_BYTES, MAX_SAVE_FILES, type SaveFile, type SaveStore } from '../ports/saves.ts'
+import { MAX_SAVE_BYTES, MAX_SAVE_FILES, type SaveCopyResult, type SaveFile, type SaveStore } from '../ports/saves.ts'
 import { validateNativeSavePaths } from './native-save-paths.ts'
 import { normalizePath } from './resolver.ts'
 import { parseStoragePath, storageWritePath } from './public-path.ts'
@@ -139,6 +139,12 @@ export class SaveOverlay {
     return [...this.files].map(([name, bytes]) => ({ name, size: bytes.length }))
   }
   async import(files: SaveFile[], directory?: string): Promise<void> {
+    await this.merge(files, directory)
+  }
+  copy(files: SaveFile[], directory: string, replace: boolean, check: () => void): Promise<SaveCopyResult> {
+    return this.merge(files, directory, replace, check)
+  }
+  private async merge(files: SaveFile[], directory?: string, replace?: boolean, check?: () => void): Promise<SaveCopyResult> {
     if (!Array.isArray(files) || files.length > MAX_SAVE_FILES) throw new Error('Save import exceeds file count limit')
     const entries: SaveFile[] = [], seen = new Set<string>()
     let total = 0
@@ -152,32 +158,65 @@ export class SaveOverlay {
       seen.add(key)
       entries.push({ path: (directory ?? '') + name, bytes: Uint8Array.from(bytes) })
     }
-    const submitted = this.revision
+    const submitted = this.revision, result = { copied: 0, kept: 0 }
     this.flushing = undefined // A subsequent flush must wait for this import as well.
     await this.persist(async () => {
-      const staged = new Map<string, Uint8Array>(), folded = new Map<string, string | null>()
-      if (directory !== undefined) for (const path of this.files.keys()) {
-        const key = path.toLowerCase()
-        folded.set(key, folded.has(key) ? null : path)
+      const staged = new Map<string, Uint8Array>(), versions = new Map<string, number>()
+      const plan = (stored?: SaveFile[]): SaveFile[] => {
+        check?.()
+        const current = replace === undefined ? this.files : new Map(this.files)
+        // Another tab may have saved since this game started. A still-dirty
+        // local write takes precedence over that persisted snapshot.
+        if (stored) for (const file of stored) {
+          if (!this.dirty.has(file.path)) current.set(file.path, file.bytes)
+        }
+        const folded = new Map<string, string | null>(), batch = new Map<string, Uint8Array>()
+        for (const [path, revision] of this.dirty) {
+          versions.set(path, revision)
+          batch.set(path, this.files.get(path)!)
+        }
+        if (directory !== undefined) for (const path of current.keys()) {
+          const key = path.toLowerCase()
+          folded.set(key, folded.has(key) ? null : path)
+        }
+        for (const entry of entries) {
+          const existing = folded.get(entry.path.toLowerCase())
+          if (existing === null && !current.has(entry.path)) throw new Error('Ambiguous save path: ' + entry.path)
+          const path = current.has(entry.path) ? entry.path : existing ?? entry.path
+          this.assertWritable?.(path)
+          if ((this.lastWrite.get(path) ?? 0) > submitted) {
+            result.kept++
+            continue
+          }
+          if (replace === false && current.has(path)) {
+            staged.set(path, current.get(path)!)
+            result.kept++
+          } else {
+            staged.set(path, entry.bytes)
+            batch.set(path, entry.bytes)
+            result.copied++
+          }
+        }
+        if (directory !== undefined) validateNativeSavePaths(staged.keys(), current.keys())
+        if (replace !== undefined) {
+          for (const [path, bytes] of staged) current.set(path, bytes)
+          if (current.size > MAX_SAVE_FILES) throw new Error('复制后存档超过文件数量限制')
+          let bytes = 0
+          for (const file of current.values()) bytes += file.byteLength
+          if (bytes > MAX_SAVE_BYTES) throw new Error('复制后存档超过大小限制')
+        } else this.checkBudget(staged)
+        this.staged = staged
+        if (directory !== undefined) this.nativeTargets = new Map([...staged.keys()].map((path) => [path.toLowerCase(), path]))
+        return [...batch].map(([path, bytes]) => ({ path, bytes: bytes.slice() }))
       }
-      for (const entry of entries) {
-        const existing = folded.get(entry.path.toLowerCase())
-        if (existing === null && !this.files.has(entry.path)) throw new Error('Ambiguous save path: ' + entry.path)
-        const path = this.files.has(entry.path) ? entry.path : existing ?? entry.path
-        this.assertWritable?.(path)
-        if ((this.lastWrite.get(path) ?? 0) <= submitted) staged.set(path, entry.bytes)
-      }
-      if (directory !== undefined) validateNativeSavePaths(staged.keys(), this.files.keys())
-      this.checkBudget(staged)
-      const versions = new Map(this.dirty), batch = new Map<string, Uint8Array>()
-      for (const path of versions.keys()) batch.set(path, this.files.get(path)!)
-      for (const [path, bytes] of staged) batch.set(path, bytes)
-      this.staged = staged
-      if (directory !== undefined) this.nativeTargets = new Map([...staged.keys()].map((path) => [path.toLowerCase(), path]))
       try {
         // IndexedDB commits all slots in one transaction. Only publish to the
         // running game after success; keep later ordinary writes dirty.
-        if (batch.size) await this.store.commit([...batch].map(([path, bytes]) => ({ path, bytes: bytes.slice() })))
+        if (replace !== undefined && this.store.update) await this.store.update(plan)
+        else {
+          const batch = plan()
+          if (batch.length) await this.store.commit(batch)
+        }
         for (const [path, bytes] of staged) this.publish(path, bytes)
         this.committed(versions)
         for (const path of staged.keys()) this.changed?.(path)
@@ -186,6 +225,7 @@ export class SaveOverlay {
         this.nativeTargets = undefined
       }
     })
+    return result
   }
   get pending(): number {
     return this.dirty.size

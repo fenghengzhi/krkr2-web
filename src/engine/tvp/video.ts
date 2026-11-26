@@ -65,22 +65,35 @@ function __krkrVideoCallbacks(report){
  } incontextof %[report:report];
 }
 function __krkrVideoFrame(report){
- return function(movie,frame){
+ var body=function(movie,frame,layer,deferredPeriod){
   if(frame>=0 && !global.System.eventDisabled){
    try{movie.onFrameUpdate(frame);}catch(error){this.report(error);}
   }
   if(!(isvalid movie))return;
   // The native WndProc rechecks the object latch AFTER onFrameUpdate. Its
   // callbacks can reopen, close or prepare the same object recursively.
-  if(global.__host("Video.preparePending",movie.__videoId)){
+  if(layer && global.__host("Video.preparePending",movie.__videoId)){
    if(!global.System.eventDisabled){
     try{movie.onPeriod(2);}catch(error){this.report(error);}
    }
    if(!(isvalid movie))return;
    movie.__videoRun("pause",[]);movie.__videoRun("prepareRewind",[]);
    movie.__videoRun("prepareClear",[]);
+  }else if(deferredPeriod && frame>=0){
+   // The original WndProc reads the cue AFTER the callback. Cancellation,
+   // rearming, seeking and reopening in onFrameUpdate affect this same check.
+   movie.__videoRun("periodTake",[frame]);
   }
  } incontextof %[report:report];
+ return function(movie,frame,layer=true,deferredPeriod=false,epoch=0,token=0){
+  var id=movie.__videoId;
+  try{this.body(movie,frame,layer,deferredPeriod);}
+  catch(error){
+   if(deferredPeriod){try{global.__host("Video.frameDone",id,epoch,token);}catch(cleanup){global.Debug.message("Video callback cleanup: "+cleanup.message);}}
+   throw error;
+  }
+  if(deferredPeriod)global.__host("Video.frameDone",id,epoch,token);
+ } incontextof %[body:body];
 }
 global.__host("Video.bindCallbacks",__krkrVideoCallbacks(global.__krkrImmediateError),__krkrVideoFrame(global.__krkrImmediateError));
 delete global.__krkrVideoCallbacks;delete global.__krkrVideoFrame;delete global.__krkrImmediateError;

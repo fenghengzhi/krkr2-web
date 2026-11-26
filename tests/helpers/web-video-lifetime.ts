@@ -4,8 +4,10 @@ import {
   defaultVideoSettings,
   type VideoCommand,
   type VideoResult,
+  type VideoEvent,
 } from '../../src/engine/ports/video.ts'
 import type { VideoMessage, VideoRequest } from '../../src/protocol/video.ts'
+import { readVideoTimeline } from '../../src/formats/video/mp4.ts'
 
 export type WebVideoLifetimeCase =
   | 'creation-after-audio'
@@ -15,6 +17,7 @@ export type WebVideoLifetimeCase =
   | 'shutdown-failure'
   | 'cancel-failure'
   | 'hidden-first-frames'
+  | 'cue-callback-barrier'
 const check = (value: unknown, message: string) => {
   if (!value) throw new Error(message)
 }
@@ -56,7 +59,10 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
     >(),
     messages: string[] = [],
     firstFrames: Array<{ id: string | undefined; paused: boolean; clock: number;
-      visibility: string; opacity: string; width: number; height: number }> = []
+      visibility: string; opacity: string; width: number; height: number }> = [],
+    cueEvidence: unknown[] = [], cueEvents: VideoEvent[] = [],
+    heldReceipts: Array<{ serial: number; event: VideoEvent & { type: 'frame' } }> = []
+  let holdReceipt = false
   const originalCreate = document.createElement,
     originalUrl = URL.createObjectURL,
     originalRevoke = URL.revokeObjectURL,
@@ -139,6 +145,11 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
       data.error ? job.reject(new Error(data.error)) : job.resolve(data.result ?? { events: [] })
     } else if (data.type === 'event') {
       if (data.event.type === 'error') messages.push(data.event.message)
+      if (name === 'cue-callback-barrier') cueEvents.push(data.event)
+      if (holdReceipt && data.event.type === 'frame') {
+        heldReceipts.push({ serial: data.serial, event: { ...data.event, type: 'frame' } })
+        return
+      }
       channel.port2.postMessage({ type: 'ack', serial: data.serial } satisfies VideoMessage)
     }
   }
@@ -184,6 +195,54 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
         (await rejected(open())).includes('video-insert-primary'),
         'Cleanup replaced insertion error',
       )
+    } else if (name === 'cue-callback-barrier') {
+      const timeline = await readVideoTimeline(bytes)
+      check(timeline?.times.length === 18, 'Cue probe requires the actual 18-frame MP4 timeline')
+      const openCue = (epoch: number, mode: 0 | 1 | 2) => send({ op: 'open', id: 7, epoch,
+        name: 'colors.mp4', bytes, timeline,
+        settings: { ...defaultVideoSettings(), mode, visible: true } })
+      await openCue(1, 2)
+      await send({ op: 'period', id: 7, epoch: 1, frame: 2 })
+      holdReceipt = true
+      await send({ op: 'play', id: 7, epoch: 1 })
+      await until(() => heldReceipts.length === 1)
+      const heldFrame = heldReceipts[0]!
+      check(heldFrame.event.deferredPeriod && heldFrame.event.deliveryToken === heldFrame.serial,
+        'Real frame did not carry its callback completion token')
+      const element = node.querySelector('video')!
+      await until(() => element.ended)
+      check(!cueEvents.some((event) => event.type === 'period' || event.type === 'ended'),
+        'Clock fallback or EOF bypassed an unfinished real frame callback')
+      check((await send({ op: 'inspect', id: 7, epoch: 1 })).snapshot?.status === 'play', 'EOF did not wait for the callback')
+      await send({ op: 'period', id: 7, epoch: 1, frame: -1 })
+      await send({ op: 'frameDone', id: 7, epoch: 1, token: heldFrame.serial })
+      await until(() => cueEvents.some((event) => event.type === 'ended'))
+      check((await send({ op: 'inspect', id: 7, epoch: 1 })).snapshot?.status === 'stop',
+        'EOF incorrectly waited for the distinct presentation receipt')
+      check(!cueEvents.some((event) => event.type === 'period'), 'Cancelled cue fired after the frame callback')
+      cueEvidence.push({ phase: 'callback-before-EOF', token: heldFrame.serial, actualEnded: element.ended,
+        events: cueEvents.map((event) => event.type), screenReceiptHeld: true })
+      holdReceipt = false
+      channel.port2.postMessage({ type: 'ack', serial: heldFrame.serial } satisfies VideoMessage)
+      for (const mode of [0, 1] as const) {
+        const epoch = mode + 2
+        holdFrames = false
+        await openCue(epoch, mode)
+        cueEvents.length = 0
+        await send({ op: 'period', id: 7, epoch, frame: 6 })
+        holdFrames = true // Actual first frame is loaded; withhold only playback callbacks.
+        await send({ op: 'play', id: 7, epoch })
+        await send({ op: 'frameDone', id: 7, epoch: 1, token: heldFrame.serial })
+        check((await send({ op: 'inspect', id: 7, epoch })).snapshot?.status === 'play',
+          'A retired graph callback completed the replacement decoder')
+        await until(() => cueEvents.some((event) => event.type === 'period' && event.reason === 1))
+        const event = cueEvents.find((event) => event.type === 'period')!
+        check(event.type === 'period' && event.snapshot.frame >= 6, 'Clock fallback fired before its actual frame time')
+        check(!cueEvents.some((event) => event.type === 'frame'), 'Playback rVFC was not actually withheld')
+        cueEvidence.push({ phase: mode === 0 ? 'default-overlay-clock' : 'unbound-layer-clock', event })
+        await send({ op: 'stop', id: 7, epoch })
+        holdFrames = false
+      }
     } else if (name === 'hidden-first-frames') {
       const results = [await open(7), await open(8, 1, { ...defaultVideoSettings(), mode: 1 })]
       check(results.every((result) => result.snapshot?.status === 'stop' && result.snapshot.position === 0),
@@ -296,6 +355,7 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
       messages,
       cancelledResources,
       firstFrames,
+      cueEvidence,
     }
   } finally {
     failContainer = false

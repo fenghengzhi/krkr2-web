@@ -119,7 +119,8 @@ import { layerClass } from './tvp/layer.ts'
 import { fontClass } from './tvp/font.ts'
 import { transitionBridge } from './tvp/transitions.ts'
 import { rectClass } from './tvp/rect.ts'
-import { fontSpec, DEFAULT_LAYER_FONT_FACE } from './graphics/font.ts'
+import { fontSpec, fontSignature, DEFAULT_LAYER_FONT_FACE } from './graphics/font.ts'
+import { BitmapFontMetrics } from './graphics/font-metrics.ts'
 import { standaloneFontBytes } from '../formats/font/collection.ts'
 import { FontService, type NamedFontFace } from './graphics/fonts.ts'
 import { FontCatalog } from './graphics/font-catalog.ts'
@@ -516,6 +517,7 @@ export class EngineSession {
   private readonly keyStates = new ObservedKeyState()
   private get physicalKeys(): ReadonlySet<number> { return this.keyStates.current }
   private readonly fonts: FontService
+  private readonly fontMetrics = new BitmapFontMetrics()
   private sceneDirty = true
   private get dirty(): boolean {
     return this.sceneDirty
@@ -689,6 +691,7 @@ export class EngineSession {
         () => this.closeCursors(),
         () => this.closeWindowRegions(),
         () => this.fonts.dispose(),
+        () => this.fontMetrics.clear(),
         () => deps.graphics.dispose?.(),
       ]) {
         try {
@@ -4202,6 +4205,20 @@ export class EngineSession {
     if (scope !== 'data-directory') throw new Error('Unknown save scope')
     return parseStoragePath(this.systemEnvironment.dataPath)
   }
+  saveProfile() {
+    return { title: this.title.slice(0, 200), directory: parseStoragePath(this.systemEnvironment.dataPath) }
+  }
+  async copyVersionSaves(files: SaveFile[], replace: boolean) {
+    const check = () => {
+      this.control.check()
+      if (this.state !== 'paused') throw new Error('请先暂停当前游戏，再复制存档')
+    }
+    check()
+    this.materializeLogs()
+    const result = await this.saves.copy(files, this.saveProfile().directory, replace, check)
+    this.notify()
+    return result
+  }
   exportSaves(scope: SaveScope = 'all'): SaveFile[] {
     this.materializeLogs()
     return this.saves.export(this.saveDirectory(scope))
@@ -5698,8 +5715,9 @@ export class EngineSession {
         if (!isScriptObject(args[5])) throw new Error('Expected font data')
         const data = context.snapshot(args[5])
         if (data.type !== 'dictionary') throw new Error('Expected font dictionary')
-        const font = fontSpec(data),
-          draws = await this.fonts.draw(
+        const font = fontSpec(data)
+        this.fontMetrics.apply(this.layers.bitmap(id), fontSignature(data), this.fonts.metricsRevision)
+        const draws = await this.fonts.draw(
             text(3),
             font,
             this.systemColors.toActualColor(clipInteger(4)),
@@ -5755,6 +5773,7 @@ export class EngineSession {
         if (data.type !== 'dictionary') throw new Error('Expected font dictionary')
         const entry = data.entries,
           height = Number(entry.height)
+        this.fontMetrics.changed(this.layers.get(layer.id).bitmap, args[2] ? undefined : fontSignature(data))
         this.layers.get(layer.id).attentionFont = {
           face: typeof entry.face === 'string' ? entry.face : DEFAULT_LAYER_FONT_FACE,
           height: Number.isFinite(height) ? height : 0,
@@ -5766,11 +5785,12 @@ export class EngineSession {
         break
       }
       case 'Font.measure': {
-        this.layerObjects!.fontState(args[2], true)
+        const layer = this.layerObjects!.fontLayer(args[2]), bitmap = this.layers.bitmap(layer.id)
         if (!isScriptObject(args[1])) throw new Error('Expected font data')
         const data = context.snapshot(args[1])
         if (data.type !== 'dictionary') throw new Error('Expected font dictionary')
-        const metrics = await this.fonts.measure(text(0), fontSpec(data))
+        const spec = fontSpec(data), metrics = await this.fontMetrics.measure(bitmap, fontSignature(data),
+          () => this.fonts.metricsRevision, text(0), () => this.fonts.measure(text(0), spec))
         value = scriptRecord({
           width: BigInt(Math.round(metrics.width)),
           height: BigInt(Math.round(metrics.height)),
@@ -5793,8 +5813,13 @@ export class EngineSession {
         const data = context.snapshot(args[0])
         if (data.type !== 'dictionary') throw new Error('Expected font dictionary')
         const spec = fontSpec(data)
+        const bitmap = args[2] === undefined ? undefined : this.layers.get(this.layerObjects!.fontLayer(args[2]).id).bitmap
+        if (bitmap) this.fontMetrics.apply(bitmap, fontSignature(data), this.fonts.metricsRevision)
         if (operation === 'Font.map') await this.fonts.map(spec, text(1))
         else this.fonts.unmap(spec)
+        // Unmapping a missing entry still marks this native bitmap's font
+        // changed. Other bitmaps only reset if the shared map really changed.
+        this.fontMetrics.changed(bitmap)
         break
       }
       case 'Font.list': {

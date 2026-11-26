@@ -330,6 +330,8 @@ export class VideoService {
       if (!video || video.detached || video.snapshot.epoch !== event.epoch) return
       const layerFrame = event.type === 'frame' && event.snapshot.mode === 1 &&
         event.snapshot.status === 'play' && !!this.frameDispatcher
+      const nativeFrame = layerFrame || (event.type === 'frame' && event.snapshot.mode === 2 &&
+        event.snapshot.status === 'play' && event.deferredPeriod === true && !!this.frameDispatcher)
       if ((layerFrame && !video.layers.some(Boolean)) ||
           ((layerFrame || event.prepareToken !== undefined) && (event.prepareToken ?? 0) !== video.prepareToken)) return
       // Native asynchronous status changes revoke earlier undelivered video
@@ -354,9 +356,11 @@ export class VideoService {
       }
       const callback = callbacks[0]
       await this.dispatch(
-        layerFrame ? this.frameDispatcher! : lease,
-        layerFrame ? undefined : callback?.name,
-        layerFrame ? [lease, BigInt(event.snapshot.frame < 0 ? -1 : event.callbackFrame ?? event.snapshot.frame)] : callback?.args ?? [],
+        nativeFrame ? this.frameDispatcher! : lease,
+        nativeFrame ? undefined : callback?.name,
+        nativeFrame ? [lease, BigInt(event.snapshot.frame < 0 ? -1 : event.callbackFrame ?? event.snapshot.frame),
+          BigInt(layerFrame), BigInt(event.deferredPeriod === true), BigInt(event.epoch),
+          BigInt(event.deliveryToken ?? 0)] : callback?.args ?? [],
         valid,
         () => this.pixels(video, event),
         event.type !== 'ended',
@@ -365,7 +369,7 @@ export class VideoService {
           receiptReleased = true
           release()
         },
-        layerFrame && prepareToken !== 0,
+        nativeFrame && (prepareToken !== 0 || event.deferredPeriod === true),
       )
     } catch (error) {
       this.error(error)
@@ -383,6 +387,14 @@ export class VideoService {
     }
   }
   async host(operation: string, args: ScriptValue[], context: HostContext): Promise<ScriptValue> {
+    if (operation === 'Video.frameDone') {
+      // The callback may have invalidated or reopened its own object. This
+      // completion only releases the original producer token, never its new
+      // graph, and never bypasses the receipt for actual Layer presentation.
+      if (!this.disposed && !this.cancelled && this.videos.has(Number(args[0])))
+        await this.command({ op: 'frameDone', id: Number(args[0]), epoch: Number(args[1]), token: Number(args[2]) })
+      return
+    }
     if (operation === 'Video.create') {
       if (this.disposed) throw new Error('Video service is disposed')
       if (!isScriptObject(args[0]) || !isScriptObject(args[1]))
@@ -506,6 +518,20 @@ export class VideoService {
       video.prepareToken = method === 'prepareArm' ? this.nextPrepare++ : 0
       if (!Number.isSafeInteger(this.nextPrepare)) throw new Error('Video prepare identity budget exceeded')
       if (video.ready) await apply({ op: 'prepare', ...identity(), token: video.prepareToken })
+    } else if (method === 'periodTake') {
+      const frame = int32(0)
+      // Most game frames have no pending cue. Callback commands update this
+      // snapshot before returning, so only a due cue needs a host roundtrip.
+      if (video.snapshot.periodEventFrame < 0 || video.snapshot.periodEventPast || frame < video.snapshot.periodEventFrame)
+        return scriptRecord({ value, callbacks: scriptList([]) })
+      if (video.ready) await apply({ op: 'periodTake', ...identity(), frame })
+      else {
+        // Close in onFrameUpdate retains the object's cue, just as the stock
+        // WndProc continues its immediate check after the graph is released.
+        const period = new VideoPeriod(video.snapshot.periodEventFrame, video.snapshot.periodEventPast)
+        if (period.take(frame)) callbacks.push({ name: 'onPeriod', args: [1n] })
+        video.snapshot = { ...video.snapshot, periodEventFrame: period.frame, periodEventPast: period.past }
+      }
     } else if (method === 'prepareOpen') {
       if (input.length < 1) throw new TjsError('TJSBadParamCount')
     } else if (method === 'close') {

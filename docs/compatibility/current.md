@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 157 批支持暂停后从此浏览器内另一版本的存档目录复制文件，默认保留当前版本的同名文件。图层影片按每帧回调执行后的标记触发时间点，图层空文本高度跟随位图最近一次度量。新增行为等待托管验收。[157 范围与验证](../decisions/157-game-version-saves-and-playback.md)
+
 第 156 批支持按字节分卷的 XP3／ZIP 和 PKZIP 编号磁盘，库中保留原分卷。相对入口可以指向发行目录内的子目录。新图层使用日文原版默认字体及字号，MIDI 旋律声道可以切换单音与复音。新增行为等待托管验证。[156 兼容范围与证据](../decisions/156-split-game-archives-default-font-and-midi.md)
 
 第 155 批接入游戏 TTC／OTC 合集中的字体家族、字重和纵排成员，修正 KAG 嵌套条件书签读回后的路线，并按旧 Windows GS 行为处理 MIDI 复位与重播时的左右声像。新增实现等待托管验证。[兼容范围与历史结果](../decisions/155-font-collections-conditional-saves-and-midi.md)

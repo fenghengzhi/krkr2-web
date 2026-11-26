@@ -205,6 +205,8 @@ jobs:
     needs: [jpeg-fixtures, jpeg-kernel, png-kernel, legacy-media-kernel]
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    outputs:
+      legacy-fixtures: ${{ steps.legacy-fixtures.outcome }}
     steps:
       - name: Reject conflicting diagnostic selections
         if: ${{ inputs.node-only && inputs.runtime-only }}
@@ -302,6 +304,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           node scripts/generate-video-track-fixtures.mjs 2>&1 | tee out/ci/video-track-fixtures.log
+      - name: Generate and independently decode legacy movie fixtures
+        id: legacy-fixtures
+        continue-on-error: true
+        run: |
+          node --input-type=module <<'JS' 2>&1 | tee out/ci/legacy-video-fixtures.log
+          import { readFileSync, writeFileSync } from 'node:fs'
+          import { generateLegacyVideoFixtures } from './scripts/generate-legacy-video-fixtures.mjs'
+          const directory = 'out/verification/video-tracks'
+          const path = directory + '/provenance.json'
+          const provenance = JSON.parse(readFileSync(path, 'utf8'))
+          provenance.legacyVideo = generateLegacyVideoFixtures(directory)
+          writeFileSync(path, JSON.stringify(provenance, null, 2) + '\n')
+          JS
       - name: Package the exact build for all test jobs
         env:
           KERNEL_CACHE_KEY: ${{ steps.kernels.outputs.cache-primary-key }}
@@ -341,6 +356,29 @@ jobs:
           name: build-logs
           path: out/ci/
           retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && steps.legacy-fixtures.outcome == 'failure' }}
+        with:
+          name: legacy-fixture-evidence
+          path: |
+            out/verification/video-tracks/legacy*.log
+            out/verification/video-tracks/legacy-video-reference.json
+            out/verification/video-tracks/legacy*.mpg
+            out/verification/video-tracks/legacy*.avi
+            out/verification/video-tracks/legacy*.m1v
+            out/verification/video-tracks/legacy-authored.*
+          if-no-files-found: error
+          retention-days: 90
+
+  legacy-fixture-result:
+    name: Independent legacy movie fixture verification
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require complete legacy movie references
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.legacy-fixtures }}
+        run: test "$FIXTURE_OUTCOME" = success
 
   node:
     name: Node conformance and integration
@@ -778,7 +816,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
+    needs: [build, legacy-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

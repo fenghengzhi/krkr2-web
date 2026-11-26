@@ -35,6 +35,7 @@ for (const name of [
   'shutdown-failure',
   'cancel-failure',
   'hidden-first-frames',
+  'cue-callback-barrier',
 ] as const satisfies readonly WebVideoLifetimeCase[])
   test(`browser video resources: ${name}`, async ({ page }) => {
     const errors: string[] = []
@@ -72,7 +73,8 @@ for (const name of [
     expect(result.audioCloses).toBe(result.connected)
     expect(result.revokedUrls).toBe(result.createdUrls)
     expect(result.connected).toBe(
-      ['shutdown-failure', 'supersede-first-frame', 'cancel-failure', 'hidden-first-frames'].includes(name) ? 2 : 1,
+      name === 'cue-callback-barrier' ? 3 :
+        ['shutdown-failure', 'supersede-first-frame', 'cancel-failure', 'hidden-first-frames'].includes(name) ? 2 : 1,
     )
     expect(result.observerCloses).toBe(1)
     expect([
@@ -83,6 +85,7 @@ for (const name of [
       result.videos,
     ]).toEqual([0, 0, 0, 0, 0])
     expect(result.messages).toEqual([])
+    if (name === 'cue-callback-barrier') expect(result.cueEvidence).toHaveLength(3)
     if (name === 'cancel-failure') {
       expect(result.cancelledResources).toMatchObject({ audio: 0, urls: 0, frames: 0, videos: 0 })
       expect(result.cancelledResources?.error).toContain('video-audio-close')

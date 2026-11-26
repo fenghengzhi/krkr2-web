@@ -58,6 +58,7 @@ export class FontService {
   private readonly retiredFiles = new Set<FileFont>()
   private readonly compactRetiredFiles = new Set<FileFont>()
   private cacheEpoch = 0
+  private measureRevision = 0
   private namedFiles = new Map<string, NamedFontFace[]>()
   private systemNames = new Set<string>()
   // A dialog preview may still be finishing when its suspended script resumes.
@@ -77,6 +78,12 @@ export class FontService {
   }
   registerNamed(fonts: Map<string, NamedFontFace[]>): void {
     this.check()
+    if (fonts.size !== this.namedFiles.size || [...fonts].some(([name, faces]) => {
+      const previous = this.namedFiles.get(name)
+      return !previous || faces.length !== previous.length || faces.some((face, i) =>
+        (face.resource.cacheToken ?? face.resource) !== (previous[i]!.resource.cacheToken ?? previous[i]!.resource) ||
+        face.faceIndex !== previous[i]!.faceIndex || face.bold !== previous[i]!.bold || face.italic !== previous[i]!.italic)
+    })) this.measureRevision++
     this.namedFiles = new Map(
       [...fonts]
         .filter(([, faces]) => faces.length)
@@ -85,8 +92,11 @@ export class FontService {
   }
   registerSystem(names: readonly string[]): void {
     this.check()
-    this.systemNames = new Set(names.map((name) => name.toLowerCase()))
+    const current = new Set(names.map((name) => name.toLowerCase()))
+    if (current.size !== this.systemNames.size || [...current].some((name) => !this.systemNames.has(name))) this.measureRevision++
+    this.systemNames = current
   }
+  get metricsRevision(): number { return this.measureRevision }
   private wait<T>(value: Promise<T>): Promise<T> {
     // A shared never-settling cancellation Promise would retain settled race
     // results, including evicted font faces, until the entire session stops.
@@ -161,7 +171,7 @@ export class FontService {
       token = resource.cacheToken ?? resource,
       old = this.mappings.get(key)
     let source = this.sources.get(token)
-    if (source === old && source) return
+    if (source === old && source) { this.measureRevision++; return }
     if (!source) {
       if (resource.size > 32 * 1024 * 1024) throw new Error('Pre-rendered font exceeds 32 MiB')
       const font = await this.finish(readPrerenderedFont(await this.wait(resource.read())))
@@ -178,6 +188,7 @@ export class FontService {
     source.refs++
     this.sources.set(token, source)
     this.mappings.set(key, source)
+    this.measureRevision++
   }
   unmap(spec: FontSpec): void {
     this.check()
@@ -185,6 +196,7 @@ export class FontService {
       entry = this.mappings.get(key)
     if (!entry) return
     this.mappings.delete(key)
+    this.measureRevision++
     if (--entry.refs === 0) this.sources.delete(entry.token)
   }
   private async prepare(spec: FontSpec): Promise<FontSpec> {

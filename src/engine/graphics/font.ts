@@ -4,6 +4,12 @@ import type { ScriptRecord } from '../script/runtime.ts'
  * The initial negative height is public; later Font.height writes use abs. */
 export const DEFAULT_LAYER_FONT_FACE = 'ＭＳ Ｐゴシック'
 export const DEFAULT_LAYER_FONT_HEIGHT = -12
+/** Include the public signed height; a real setter can normalize -12 to 12. */
+export function fontSignature(data: ScriptRecord): string {
+  const value = data.entries
+  return JSON.stringify([typeof value.face === 'string' ? value.face : DEFAULT_LAYER_FONT_FACE, Number(value.height), Number(value.angle), !!value.bold,
+    !!value.italic, !!value.underline, !!value.strikeout, !!value.faceIsFileName])
+}
 /** Preserve the reference's operation order before converting to pixel integers. */
 export function fontGeometry(angle: number, ascent: number) {
   const radians = angle * (Math.PI / 1800),
