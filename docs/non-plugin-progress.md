@@ -4,6 +4,8 @@
 
 第 154 批让中断的远程游戏入库下载可以在刷新后继续，校验已存块并重取损坏的内容。剧情表达式重入同一个 KAG 解析器后继续使用当前行，WAVE 声音在窗口失焦时采用发行包指定的音量。第 147、148 批的原版 KAG 对照均为 89/92 匹配，三项 EOF 差异和跳过的 Web 验收已保留。[154 实现、范围与托管证据](decisions/154-remote-downloads-script-cursor-and-background-audio.md)
 
+实现提交 `8b28dac` 已进入 GitHub-hosted Actions 队列，登记时为 `pending`。下批取回结果。[第 154 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45811619796)
+
 第 153 批修复剧情标签求值时读取旧属性、菜单图片因布尔转换丢失，以及上轮报告中的视频测试类型错误。另为混合模式过场提供亮度、对比度、色相和饱和度控制，并接入游戏的 16 位及单声道 WAVE 输出设置。第 145、146 批均因类型检查失败跳过浏览器验收。第 147 至 152 批在本次快照中仍排队。[153 实现与验收](decisions/153-live-tag-attributes-and-media-controls.md)
 
 实现提交 `0545785` 登记时为 `pending`，结果留到下一次运行时取回。[第 153 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45808179488)
