@@ -41,6 +41,26 @@ try {
     throw 'Original SDK executable does not match its recorded size and SHA-256.'
   }
   $state.fileVersion = (Get-Item $engine).VersionInfo.FileVersion
+  if ($Project -eq 'transition') {
+    # The original default face is a narrow CP932 source literal converted
+    # through TJS_mbstowcs(CP_ACP). Preserve this runner's real Windows ACP;
+    # do not assume that every SDK host returns the Japanese spelling.
+    Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class KrkrDefaultFontPlatform {
+  [DllImport("kernel32.dll")] public static extern uint GetACP();
+}
+'@
+    $codePage = [int][KrkrDefaultFontPlatform]::GetACP()
+    [Text.Encoding]::RegisterProvider([Text.CodePagesEncodingProvider]::Instance)
+    [byte[]]$fontSourceBytes = @(130,108,130,114,32,130,111,131,83,131,86,131,98,131,78)
+    $fontFace = [Text.Encoding]::GetEncoding($codePage).GetString($fontSourceBytes)
+    $faceCodes = (($fontFace.ToCharArray() | ForEach-Object { [int]$_ }) -join ',')
+    $fontScript = Join-Path $game 'default-font-platform.tjs'
+    [IO.File]::WriteAllText($fontScript, ('global.defaultFontExpectedCodes="' + $faceCodes + '";'), [Text.Encoding]::Unicode)
+    $state.defaultFontPlatform = [ordered]@{ codePage = $codePage; faceCodes = $faceCodes; sourceBytes = $fontSourceBytes
+      scriptSha256 = (Get-FileHash $fontScript).Hash.ToLowerInvariant() }
+  }
   $process = Start-Process -FilePath $engine -WorkingDirectory $game -ArgumentList ('"' + $game + '" -forcelog=yes') -PassThru `
     -RedirectStandardOutput (Join-Path $output 'stdout.log') -RedirectStandardError (Join-Path $output 'stderr.log')
   $state.pid = $process.Id

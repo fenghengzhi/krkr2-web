@@ -10,6 +10,7 @@ import type { HttpRangePool } from './http-range.ts'
 import { borrowResourceBlob } from '../../engine/storage/resource-source.ts'
 import type { ZipNameEncoding } from '../../formats/zip/names.ts'
 import { zipNameCodecs } from './zip-names.ts'
+import { joinArchiveVolumes } from './archive-volumes.ts'
 
 /** Prepare a complete mount before publishing any of its paths to the running session. */
 export async function importResources(
@@ -27,17 +28,13 @@ export async function importSources(
   options: { lazyArchives?: boolean; zipEncoding?: ZipNameEncoding } = {},
 ): Promise<Resource[]> {
   if (files.length > 10000) throw new Error('Import exceeds 10,000 source files')
-  const resources: Resource[] = [], compressedSegments = options.lazyArchives ? undefined : createArchiveInflatePool()
-  const add = (resource: Resource) => {
-    if (resources.length >= 250000) throw new Error('Import exceeds 250,000 mounted resource names')
-    resources.push(resource)
-  }
+  const physical: Resource[] = []
   for (const file of files) {
     await checkpoint()
     const name = normalizePath(file.path),
-      source = file.source, containerIndex = resources.length
+      source = file.source
     if (name.includes('>')) throw new Error('Input filename contains an archive address delimiter')
-    add({
+    physical.push({
       name,
       size: source.size,
       source: {
@@ -61,7 +58,19 @@ export async function importSources(
         return bytes
       },
     })
-    if (options.lazyArchives) continue
+  }
+  const mounted = await joinArchiveVolumes(physical, checkpoint)
+  await checkpoint()
+  if (options.lazyArchives) return mounted
+  const resources: Resource[] = [], compressedSegments = createArchiveInflatePool()
+  const add = (resource: Resource) => {
+    if (resources.length >= 250000) throw new Error('Import exceeds 250,000 mounted resource names')
+    resources.push(resource)
+  }
+  for (const resource of mounted) {
+    const { name, source } = resource, containerIndex = resources.length
+    if (!source) throw new Error('Imported file has no byte source: ' + name)
+    add(resource)
     const prefix = await source.read(0, Math.min(source.size, 11)),
       zipMagic =
         prefix &&
@@ -79,7 +88,7 @@ export async function importSources(
               ...zipNameCodecs(options.zipEncoding),
               compressedRanges: compressedSegments,
               checkpoint,
-            })
+            }, resource.zipDiskOffsets)
           : []
     if (xp3 || /\.zip$/i.test(name) || zipMagic)
       resources[containerIndex] = { ...resources[containerIndex]!, archiveKind: xp3 ? 'xp3' : 'zip' }

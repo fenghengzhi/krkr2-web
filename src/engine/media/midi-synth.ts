@@ -10,6 +10,7 @@ interface Channel {
   bend: number
   pitch: MidiPitch
   sustain: boolean
+  mono: boolean
   modulation: number
 }
 interface Note {
@@ -33,6 +34,7 @@ const channel = (bufferVolume = 127, previous?: Channel): Channel => ({
   bend: 0,
   pitch: new MidiPitch(previous?.pitch),
   sustain: false,
+  mono: previous?.mono ?? false,
   modulation: 0,
 })
 const tau = 2 * Math.PI
@@ -88,7 +90,7 @@ export class MidiSynth {
   /** MIDIImpl StopPlay/StartPlay rewinds tracks, silences notes and resets
    * controllers, but sends no ProgramChange. An instrument selected later in
    * the same song therefore remains selected on its next loop or replay;
-   * the old GS device also retains pan and its registered tuning parameters. */
+   * the old GS device also retains pan, mono mode and registered tuning. */
   rewind(time: number): void {
     this.position(time, true)
   }
@@ -171,6 +173,17 @@ export class MidiSynth {
       c.used = true
     }
     if (kind === 0x90 && b) {
+      // Older Windows GS melodic behavior; KRKR2 forwards these channel
+      // messages through MIDI_MAPPER. Mono note-on releases still-held
+      // voices even with damper on, without restarting existing release tails.
+      // Microsoft MIDI SynthEngine.cpp (4db4520bd0e95ed224bb4458ad810091df783aac),
+      // NoteOn / ControllerMonoMode; this does not emulate the GS sound bank.
+      if (c.mono)
+        for (const note of this.notes)
+          if (note.channel === id && note.released === undefined) {
+            note.held = false
+            note.released = this.time
+          }
       if (this.notes.length >= 128) this.notes.shift()
       const tuning = c.pitch.tuning()
       this.notes.push({
@@ -206,7 +219,12 @@ export class MidiSynth {
               note.released = this.time
       } else if (a === 6 || a === 38 || (a >= 98 && a <= 101)) c.pitch.control(a, b)
       else if (a === 120) this.notes = this.notes.filter((note) => note.channel !== id)
-      else if (a === 123) {
+      else if (a === 126 || a === 127) {
+        c.mono = a === 126
+        // Both mode messages perform All Sound Off on this channel. CC121
+        // leaves this selection alone; a module reset restores poly mode.
+        this.notes = this.notes.filter((note) => note.channel !== id)
+      } else if (a === 123) {
         for (const note of this.notes)
           if (note.channel === id) {
             note.held = false

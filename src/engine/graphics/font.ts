@@ -1,5 +1,9 @@
 import type { FontSpec } from '../ports/graphics.ts'
 import type { ScriptRecord } from '../script/runtime.ts'
+/** Japanese Windows default from 2.32stable TVPConstructDefaultFont.
+ * The initial negative height is public; later Font.height writes use abs. */
+export const DEFAULT_LAYER_FONT_FACE = 'ＭＳ Ｐゴシック'
+export const DEFAULT_LAYER_FONT_HEIGHT = -12
 /** Preserve the reference's operation order before converting to pixel integers. */
 export function fontGeometry(angle: number, ascent: number) {
   const radians = angle * (Math.PI / 1800),

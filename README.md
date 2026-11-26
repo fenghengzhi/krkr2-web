@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 156 批支持导入分卷 ZIP 和 XP3，修正游戏未指定字体时的对白字号，并支持 MIDI 配乐切换单音与复音。新增行为等待托管验证。[156 实现与验证](docs/decisions/156-split-game-archives-default-font-and-midi.md)
+
 第 155 批让游戏能选用字体合集中的不同家族和字重，并修复嵌套剧情读档和 MIDI 配乐复位后的声像。新增行为等待托管验证。[155 实现与验证](docs/decisions/155-font-collections-conditional-saves-and-midi.md)
 
 第 154 批补上远程游戏保存到库时的断点续传，并修复动态剧情选项、后台音乐音量与原版的差异。新增功能等待 GitHub-hosted 验证。[154 实现与验证](docs/decisions/154-remote-downloads-script-cursor-and-background-audio.md)
@@ -84,6 +86,8 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 将远程游戏保存到游戏库时，如果中途断线，可重新打开页面并点游戏库里的“继续下载”。服务器需支持 Range 和强 ETag。播放器会确认文件版本，校验磁盘上已保存的块，再下载剩余部分。含本地文件的游戏需重新选择同组文件后再保存。[下载恢复与版本校验](docs/decisions/154-remote-downloads-script-cursor-and-background-audio.md)
 
 打开含 XP3、补丁和散装资源的 ZIP 发行包时，先在“游戏位置”选择“自动识别游戏目录或 ZIP 发行包”，再选择单个 ZIP 或填写远程链接。游戏库会记住包内的游戏目录。[ZIP 发行包的使用范围与验收](docs/decisions/134-zip-distributions-midi-and-game-playback.md)
+
+如果发行包分成 `release.zip.001`、`release.zip.002` 等文件，选中全部编号卷即可。如果文件名是 `release.z01`、`release.z02` 等，还要一起选择最后的 `release.zip`。远程来源可在同一份游戏清单中列出各卷。游戏目录内的 `data.xp3.001` 等编号主包或补丁也按同样方式读取。[分卷游戏与存档](docs/decisions/156-split-game-archives-default-font-and-midi.md)
 
 游戏使用 `boot.tjs` 等自定义入口时，在导入前填写“入口脚本”。ZIP 自动识别会使用该入口定位游戏，避免选中发行包附带工具的 `startup.tjs`。也可以显式填写 `release.zip>目录/boot.tjs`，继续按原归档地址读取。已经存入游戏库的目录和入口优先于下次导入时的界面设置。[自定义 ZIP 入口](docs/decisions/152-legacy-movies-and-zip-entry.md)
 

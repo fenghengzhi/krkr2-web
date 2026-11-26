@@ -83,10 +83,22 @@ async function filename(
 }
 
 /** Index central records without decompressing entries. Member payloads are read and checked on demand. */
-export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<ZipResource[]> {
+export async function readZip(source: ByteSource, codecs: ZipCodecs,
+  diskStarts: readonly number[] = [0]): Promise<ZipResource[]> {
   const check = () => codecs.checkpoint()
   if (!Number.isSafeInteger(source.size) || source.size < 22)
     throw new Error('Truncated ZIP archive')
+  if (diskStarts[0] !== 0 || diskStarts.some((at, i) =>
+    !Number.isSafeInteger(at) || at >= source.size || (i > 0 && at <= diskStarts[i - 1]!)))
+    throw new Error('Invalid ZIP volume boundaries')
+  const lastDisk = diskStarts.length - 1
+  const address = (disk: number, relative: number) => {
+    const start = diskStarts[disk], end = diskStarts[disk + 1] ?? source.size
+    if (start === undefined) throw new Error('Split ZIP requires all numbered volumes')
+    if (!Number.isSafeInteger(relative) || relative < 0 || relative >= end - start)
+      throw new Error('ZIP offset outside declared disk')
+    return start + relative
+  }
   const read = async (offset: number, length: number) => {
     bounds(offset, length, source.size)
     if (length > MAX_RESOURCE_BYTES) throw new Error('ZIP read exceeds 64 MiB budget')
@@ -99,21 +111,29 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
   const tailOffset = Math.max(0, source.size - 65557),
     tail = await read(tailOffset, source.size - tailOffset),
     view = new DataView(tail.buffer, tail.byteOffset, tail.byteLength)
-  let end = -1
+  let end = -1, missingDisk = false
   for (let at = tail.length - 22; at >= 0; at--) {
     if (
       view.getUint32(at, true) === 0x06054b50 &&
       at + 22 + view.getUint16(at + 20, true) === tail.length
     ) {
-      const count = view.getUint16(at + 10, true),
+      const thisDisk = view.getUint16(at + 4, true),
+        firstDirectoryDisk = view.getUint16(at + 6, true),
+        count = view.getUint16(at + 10, true),
         size = view.getUint32(at + 12, true),
-        offset = view.getUint32(at + 16, true)
+        offset = view.getUint32(at + 16, true),
+        directoryBase = diskStarts[firstDirectoryDisk]
+      if (thisDisk !== 0xffff && thisDisk !== lastDisk ||
+        firstDirectoryDisk !== 0xffff && directoryBase === undefined || tailOffset + at < diskStarts[lastDisk]!) {
+        missingDisk = true
+        continue
+      }
       // An EOCD-looking byte sequence inside a comment is not enough to locate an archive.
       if (
         count !== 0xffff &&
         size !== 0xffffffff &&
         offset !== 0xffffffff &&
-        offset + size !== tailOffset + at
+        directoryBase !== undefined && directoryBase + offset + size !== tailOffset + at
       ) {
         const locatorAt = tailOffset + at - 20
         if (locatorAt < 0 || new BinaryReader(await read(locatorAt, 20)).u32() !== 0x07064b50)
@@ -123,7 +143,10 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
       break
     }
   }
-  if (end < 0) throw new Error('ZIP end of central directory not found')
+  if (end < 0) {
+    if (missingDisk) throw new Error('Split ZIP 缺少分卷或卷号不匹配，请同时选择 .z01 起的全部分卷及最后的 .zip。')
+    throw new Error('ZIP end of central directory not found')
+  }
   const eocd = tailOffset + end,
     input = new BinaryReader(tail.subarray(end))
   input.u32()
@@ -133,22 +156,24 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
     count32 = input.u16(),
     size32 = input.u32(),
     offset32 = input.u32()
-  if (disk !== 0 || centralDisk !== 0 || diskCount !== count32)
-    throw new Error('Split ZIP archives are not supported')
   let count = count32,
     centralSize = size32,
-    centralOffset = offset32,
-    centralEnd = eocd
-  const required = count32 === 0xffff || size32 === 0xffffffff || offset32 === 0xffffffff
+    directoryDisk = centralDisk,
+    relativeOffset = offset32,
+    centralEnd = eocd,
+    zip64Disk: number | undefined, zip64DiskCount: number | undefined
+  const required = count32 === 0xffff || size32 === 0xffffffff || offset32 === 0xffffffff ||
+    disk === 0xffff || centralDisk === 0xffff
   const locator = eocd >= 20 ? new BinaryReader(await read(eocd - 20, 20)) : undefined
   const classicEndsHere =
-    size32 !== 0xffffffff && offset32 !== 0xffffffff && centralOffset + centralSize === eocd
+    size32 !== 0xffffffff && offset32 !== 0xffffffff && diskStarts[centralDisk] !== undefined &&
+    diskStarts[centralDisk]! + offset32 + centralSize === eocd
   // A real locator is outside the central directory. Its signature may also
   // occur in an ordinary member comment at the end of a classic directory.
   if (!classicEndsHere && locator?.u32() === 0x07064b50) {
-    if (locator.u32() !== 0) throw new Error('Split ZIP64 archive is not supported')
-    const offset = locator.u64()
-    if (locator.u32() !== 1) throw new Error('Split ZIP64 archive is not supported')
+    zip64Disk = locator.u32()
+    const offset = address(zip64Disk, locator.u64())
+    if (locator.u32() !== diskStarts.length) throw new Error('Split ZIP64 disk count mismatch')
     bounds(offset, 56, eocd - 20)
     const record = new BinaryReader(await read(offset, 56))
     if (record.u32() !== 0x06064b50) throw new Error('Invalid ZIP64 end signature')
@@ -156,31 +181,37 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
     if (length < 44 || offset + 12 + length !== eocd - 20) throw new Error('Invalid ZIP64 end size')
     record.u16()
     record.u16()
-    if (record.u32() !== 0 || record.u32() !== 0)
-      throw new Error('Split ZIP64 archive is not supported')
-    const onDisk = record.u64()
+    if (record.u32() !== zip64Disk) throw new Error('ZIP64 end record on wrong disk')
+    directoryDisk = record.u32()
+    zip64DiskCount = record.u64()
     count = record.u64()
     centralSize = record.u64()
-    centralOffset = record.u64()
+    relativeOffset = record.u64()
     centralEnd = offset
     if (
-      onDisk !== count ||
+      (centralDisk !== 0xffff && centralDisk !== directoryDisk) ||
       (count32 !== 0xffff && count32 !== count) ||
       (size32 !== 0xffffffff && size32 !== centralSize) ||
-      (offset32 !== 0xffffffff && offset32 !== centralOffset)
+      (offset32 !== 0xffffffff && offset32 !== relativeOffset)
     )
       throw new Error('ZIP64 end metadata mismatch')
-  } else if (required && !(count32 === 0xffff && size32 !== 0xffffffff && offset32 !== 0xffffffff))
+  } else if (required && !(count32 === 0xffff && size32 !== 0xffffffff && offset32 !== 0xffffffff &&
+    disk === lastDisk && centralDisk !== 0xffff))
     throw new Error('ZIP64 locator is missing')
   if (count > MAX_ZIP_ENTRIES || centralSize > MAX_RESOURCE_BYTES)
     throw new Error('ZIP index exceeds entry or 64 MiB budget')
+  const centralOffset = address(directoryDisk, relativeOffset)
   bounds(centralOffset, centralSize, centralEnd)
   if (centralOffset + centralSize !== centralEnd)
     throw new Error('ZIP central directory offset or size mismatch')
   const central = new BinaryReader(await read(centralOffset, centralSize)),
     entries: Entry[] = []
+  const counts = new Array<number>(diskStarts.length).fill(0)
+  let recordDisk = directoryDisk
   for (let index = 0; index < count; index++) {
     await codecs.checkpoint()
+    while (recordDisk < lastDisk && centralOffset + central.position >= diskStarts[recordDisk + 1]!) recordDisk++
+    counts[recordDisk] = counts[recordDisk]! + 1
     if (central.u32() !== 0x02014b50) throw new Error('Invalid ZIP central header')
     const madeBy = central.u16()
     central.u16()
@@ -209,7 +240,7 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
       if (offset === 0xffffffff) offset = large.u64()
       if (startDisk === 0xffff) startDisk = large.u32()
     }
-    if (startDisk !== 0) throw new Error('Split ZIP member is not supported')
+    offset = address(startDisk, offset)
     bounds(offset, 30, centralOffset)
     const decoded = await filename(rawName, flags, extra, codecs),
       name = normalizePath(decoded),
@@ -230,6 +261,9 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
       symlink: unix === 0xa000,
     })
   }
+  if (((diskCount !== 0xffff || zip64Disk === undefined) && diskCount !== counts[lastDisk]) ||
+    (zip64Disk !== undefined && zip64DiskCount !== counts[zip64Disk]))
+    throw new Error('ZIP central entry count on disk does not match directory')
   if (central.remaining) {
     if (central.u32() !== 0x05054b50) throw new Error('Extra ZIP central directory data')
     central.slice(central.u16()) // Framing only; no signature authenticity claim.

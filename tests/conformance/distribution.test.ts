@@ -97,6 +97,28 @@ test('a ZIP honors the same custom startup hint as its loose tree without select
   } finally { reader.dispose() }
 })
 
+test('a multi-component relative startup address identifies the working directory of a wrapped release', async () => {
+  const inputs = [member('Bundle/Story/DATA/Scripts/Boot.tjs', 'boot'), member('Extras/Tools/startup.tjs', 'sample')]
+  const reader = createSessionArchiveReader()
+  try {
+    for (const [entry, directory, executableDirectory] of [
+      ['scripts/boot.tjs', 'Bundle/Story/DATA/', 'Bundle/Story/'],
+      ['data/scripts/boot.tjs', 'Bundle/Story/', 'Bundle/Story/'],
+      ['Bundle/Story/DATA/Scripts/Boot.tjs', '', ''],
+    ] as const) {
+      const loose = inputs.map((input) => ({ name: input.name, size: input.size, read: async () => input.packed }))
+      const tree = await prepareProject(loose, { mode: 'auto' }, reader, checkpoint, entry)
+      const wrapped = await prepareProject([packed(distributionZip(inputs))], { mode: 'auto' }, reader, checkpoint, entry)
+      assert.deepEqual(tree.project, { directory, executableDirectory })
+      assert.deepEqual(wrapped.project, { directory, executableDirectory, distribution: 'release.ZIP' })
+    }
+    const two = packed(distributionZip([...inputs, member('Other/Scripts/boot.tjs', 'second')]))
+    await assert.rejects(prepareProject([two], { mode: 'auto' }, reader, checkpoint, 'scripts/boot.tjs'), /多个匹配的入口脚本/)
+    assert.equal((await prepareProject([two], { mode: 'auto', executableDirectory: 'Bundle/Story/' }, reader, checkpoint, 'scripts/boot.tjs')).project?.directory,
+      'Bundle/Story/DATA/')
+  } finally { reader.dispose() }
+})
+
 test('ZIP method 8 checks every byte before exposing a requested prefix and supports independent caller ranges', async () => {
   const reader = createSessionArchiveReader()
   try {

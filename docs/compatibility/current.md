@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 156 批支持按字节分卷的 XP3／ZIP 和 PKZIP 编号磁盘，库中保留原分卷。相对入口可以指向发行目录内的子目录。新图层使用日文原版默认字体及字号，MIDI 旋律声道可以切换单音与复音。新增行为等待托管验证。[156 兼容范围与证据](../decisions/156-split-game-archives-default-font-and-midi.md)
+
 第 155 批接入游戏 TTC／OTC 合集中的字体家族、字重和纵排成员，修正 KAG 嵌套条件书签读回后的路线，并按旧 Windows GS 行为处理 MIDI 复位与重播时的左右声像。新增实现等待托管验证。[兼容范围与历史结果](../decisions/155-font-collections-conditional-saves-and-midi.md)
 
 第 154 批为远程游戏入库提供经过校验的分块续传，支持刷新或换标签页继续。KAG 属性表达式可以在读取当前标签时读取下一条记录。后台 WAVE 播放支持发行配置中的失焦条件及音量百分比。以上新增行为仍待托管验收。[实现与限制](../decisions/154-remote-downloads-script-cursor-and-background-audio.md)

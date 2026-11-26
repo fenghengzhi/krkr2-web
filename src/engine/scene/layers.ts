@@ -6,6 +6,7 @@ import { ProvincePlane } from '../graphics/province.ts'
 import { imageTypes, autoFace, neutralColor } from '../graphics/blend.ts'
 import { SystemColors } from '../graphics/system-colors.ts'
 import { TvpError } from '../system/tvp-error.ts'
+import { DEFAULT_LAYER_FONT_FACE, DEFAULT_LAYER_FONT_HEIGHT } from '../graphics/font.ts'
 
 export interface LayerState {
   windowId: number
@@ -224,8 +225,8 @@ export class LayerTree {
         attentionTop: 0,
         useAttention: false,
         attentionFont: {
-          face: 'sans-serif',
-          height: 18,
+          face: DEFAULT_LAYER_FONT_FACE,
+          height: DEFAULT_LAYER_FONT_HEIGHT,
           bold: false,
           italic: false,
           underline: false,

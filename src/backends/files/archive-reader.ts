@@ -7,8 +7,10 @@ import { readZip } from '../../formats/zip/archive.ts'
 import { inflate, inflateRaw } from './blob-source.ts'
 import type { ZipNameEncoding } from '../../formats/zip/names.ts'
 import { zipNameCodecs } from './zip-names.ts'
+import { joinArchiveVolumes } from './archive-volumes.ts'
 
 export const archiveReader: ArchiveReader = {
+  joinVolumes: joinArchiveVolumes,
   async probeArchive(resource, checkpoint) {
     const { source } = await openResourceSource(resource, { checkpoint }),
       bytes = await source.read(0, Math.min(source.size, 11))
@@ -37,7 +39,7 @@ async function open(resource: Resource, checkpoint: () => Promise<void>, pool?: 
   if (/\.zip$/i.test(resource.name) || zip) return { kind: 'zip', entries: await readZip(source, {
     inflate: (bytes, size) => inflateRaw(bytes, size, checkpoint), checkpoint, compressedRanges: pool ?? createArchiveInflatePool(),
     ...zipNameCodecs(zipEncoding),
-  }) }
+  }, resource.zipDiskOffsets) }
   return undefined
 }
 

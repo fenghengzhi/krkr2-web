@@ -44,8 +44,33 @@ async function gameFolder(entries: readonly Resource[], checkpoint: () => Promis
 
 type ProjectLocation = Exclude<ProjectSelection, { mode: 'collection' }>
 async function locateGame(entries: readonly Resource[], selection: ProjectLocation,
-  checkpoint: () => Promise<void>, probe: (file: Resource) => Promise<boolean>, source: 'zip' | 'files', entryName = ''): Promise<ProjectLocation | undefined> {
+  checkpoint: () => Promise<void>, probe: (file: Resource) => Promise<boolean>, source: 'zip' | 'files',
+  entryName: string, relativeEntry: boolean): Promise<ProjectLocation | undefined> {
   if (selection.mode === 'root' || selection.executableDirectory) return selection
+  // A relative entry such as scripts/boot.tjs names both the script and its
+  // intended working directory. Find that exact suffix in a wrapped release;
+  // a bundled sample's startup.tjs must not take precedence over it.
+  if (!selection.executable && relativeEntry && entryName.includes('/')) {
+    const roots = new Set<string>(), componentsToRemove = entryName.split('/').length
+    for (const [i, file] of entries.entries()) {
+      if (i % 256 === 0) await checkpoint()
+      const path = file.name.toLowerCase()
+      if (path === entryName) { roots.clear(); roots.add(''); break }
+      if (path.endsWith('/' + entryName)) {
+        // Remove whole components from the original spelling. Unicode
+        // lowercase mappings can change UTF-16 length.
+        const components = file.name.split('/')
+        roots.add(components.slice(0, -componentsToRemove).join('/') + '/')
+      }
+    }
+    if (roots.size > 1) throw new Error('导入的文件中有多个匹配的入口脚本，请指定游戏目录。')
+    const directory = roots.values().next().value
+    if (directory !== undefined) {
+      const executableDirectory = /(?:^|\/)(?:content-data|data)\/$/i.test(directory)
+        ? extractStoragePath(directory.slice(0, -1)) : directory
+      return { mode: 'root', directory, executableDirectory }
+    }
+  }
   // An entry addressed from the import root has the same meaning in a ZIP.
   // Loose imports also keep their established data/content-data roots even
   // if a sample is bundled alongside them.
@@ -76,6 +101,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
   // Use the same optional entry hint for ZIP members and loose imports. The
   // original address is still resolved from the selected project by start().
   let entryName = '', entryInArchive = false
+  const relativeEntry = !/^(?:game:|[\\/])/i.test(entry)
   try {
     const path = parseStoragePath(entry)
     entryName = path.split('>', 1)[0]!.toLowerCase()
@@ -119,9 +145,10 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     await checkpoint()
     if (savedZip !== undefined && index?.kind !== 'zip') throw new Error('Saved game distribution is not a ZIP')
     if (index?.kind === 'zip') {
-      const inner = await locateGame(index.entries, selection, checkpoint, probe, 'zip', entryName)
+      const members = reader.joinVolumes ? await reader.joinVolumes(index.entries, checkpoint) : [...index.entries]
+      const inner = await locateGame(members, selection, checkpoint, probe, 'zip', entryName, relativeEntry)
       if (inner) {
-        const members = [...index.entries], names = new Set<string>()
+        const names = new Set<string>()
         for (const entry of members) {
           if (names.has(entry.name)) throw new Error('Duplicate ZIP distribution member: ' + entry.name)
           names.add(entry.name)
@@ -136,6 +163,6 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
   const originals = resources.filter((file) => !file.aliasOf && !file.name.includes('>'))
   // The player's explicit entry can be a loose script or an archive address.
   // Its physical file at the import root must take precedence over bundled demos.
-  const location = await locateGame(originals, selection, checkpoint, probe, 'files', entryName)
+  const location = await locateGame(originals, selection, checkpoint, probe, 'files', entryName, relativeEntry)
   return { resources, project: await select(resources, location ?? selection) }
 }

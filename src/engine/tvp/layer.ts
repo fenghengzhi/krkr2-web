@@ -1,3 +1,5 @@
+import { DEFAULT_LAYER_FONT_FACE, DEFAULT_LAYER_FONT_HEIGHT } from '../graphics/font.ts'
+
 export const layerClass = String.raw`
 function __krkrLayerInvalidate(owner,id,state) {
   try {
@@ -20,7 +22,7 @@ class Layer {
   var __id;
   function Layer(window,parent) {
     var state=%[actionOwner:window,font:null,cache:null,clear:null,cacheRevision:-1,
-      fontData:%[height:18,face:"sans-serif",bold:false,italic:false,underline:false,strikeout:false,angle:0,faceIsFileName:false]];
+      fontData:%[height:${DEFAULT_LAYER_FONT_HEIGHT},face:${JSON.stringify(DEFAULT_LAYER_FONT_FACE)},bold:false,italic:false,underline:false,strikeout:false,angle:0,faceIsFileName:false]];
     __id=__host("Layer.create",this,window,parent,state);
   }
   function finalize() {}

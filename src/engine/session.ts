@@ -119,7 +119,7 @@ import { layerClass } from './tvp/layer.ts'
 import { fontClass } from './tvp/font.ts'
 import { transitionBridge } from './tvp/transitions.ts'
 import { rectClass } from './tvp/rect.ts'
-import { fontSpec } from './graphics/font.ts'
+import { fontSpec, DEFAULT_LAYER_FONT_FACE } from './graphics/font.ts'
 import { standaloneFontBytes } from '../formats/font/collection.ts'
 import { FontService, type NamedFontFace } from './graphics/fonts.ts'
 import { FontCatalog } from './graphics/font-catalog.ts'
@@ -5756,7 +5756,7 @@ export class EngineSession {
         const entry = data.entries,
           height = Number(entry.height)
         this.layers.get(layer.id).attentionFont = {
-          face: typeof entry.face === 'string' ? entry.face : 'sans-serif',
+          face: typeof entry.face === 'string' ? entry.face : DEFAULT_LAYER_FONT_FACE,
           height: Number.isFinite(height) ? height : 0,
           bold: !!entry.bold,
           italic: !!entry.italic,

@@ -12,6 +12,7 @@ import { spriteSamplingCases, spriteSamplingSource } from '../helpers/sprite-sam
 import { layerInputBooleanCases, layerInputBooleanSource } from '../helpers/layer-input-booleans.ts'
 import { layerPaintCases, layerPaintSource } from '../helpers/layer-paint-switches.ts'
 import { closedVideoColorCases, closedVideoColorSource } from '../helpers/video-colors.ts'
+import { layerDefaultFontCases, layerDefaultFontSource } from '../helpers/layer-default-font.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -19,7 +20,7 @@ assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/transition'), game = resolve(output, 'game')
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const files = transitionOptionFiles()
-const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases, ...spriteSamplingCases, ...layerInputBooleanCases, ...layerPaintCases, ...closedVideoColorCases]
+const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases, ...spriteSamplingCases, ...layerInputBooleanCases, ...layerPaintCases, ...closedVideoColorCases, ...layerDefaultFontCases]
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 
 if (process.argv[2] === 'prepare') {
@@ -58,6 +59,10 @@ if (process.argv[2] === 'prepare') {
     'var colorProbeWindow=new Window(),colorProbeMovie=new VideoOverlay(colorProbeWindow);',
     ...closedVideoColorCases.map(({ id, name }) => `try{record("${id}|"+observeClosedVideoControl(colorProbeMovie,"${name}"));}catch(e){record("${id}|error:"+e.message);}`),
     'invalidate colorProbeMovie;invalidate colorProbeWindow;',
+    layerDefaultFontSource,
+    'Scripts.execStorage("default-font-platform.tjs");',
+    ...layerDefaultFontCases.map(({ id }) => `try{record("${id}|"+layerDefaultFontObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
+    '[defaultFontObservedCodes].save("default-font-observed.txt");',
     'record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
@@ -73,9 +78,10 @@ if (process.argv[2] === 'prepare') {
     layerInputBooleanHelperSha256: sha(readFileSync('tests/helpers/layer-input-booleans.ts')),
     layerPaintHelperSha256: sha(readFileSync('tests/helpers/layer-paint-switches.ts')),
     videoColorHelperSha256: sha(readFileSync('tests/helpers/video-colors.ts')),
+    defaultFontHelperSha256: sha(readFileSync('tests/helpers/layer-default-font.ts')),
     cases,
     files: Object.entries(files).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) })),
-    scope: 'Original transitions, gamma, layer order, hit targets, thumbnail resampling, alpha rows, shared images, transformed sprites, Layer booleans and closed video color controls.',
+    scope: 'Original transitions, gamma, layer order, hit targets, thumbnail resampling, alpha rows, shared images, transformed sprites, Layer booleans, closed video color controls and default Layer font.',
   })
 } else if (process.argv[2] === 'compare') {
   mkdirSync(output, { recursive: true })
@@ -103,6 +109,7 @@ if (process.argv[2] === 'prepare') {
     [resolve('tests/helpers/layer-input-booleans.ts'), manifest?.layerInputBooleanHelperSha256],
     [resolve('tests/helpers/layer-paint-switches.ts'), manifest?.layerPaintHelperSha256],
     [resolve('tests/helpers/video-colors.ts'), manifest?.videoColorHelperSha256],
+    [resolve('tests/helpers/layer-default-font.ts'), manifest?.defaultFontHelperSha256],
   ] as const) {
     if (!existsSync(name) || sha(readFileSync(name)) !== expected) evidenceErrors.push(`${name}: source hash differs or is missing`)
   }
@@ -110,6 +117,20 @@ if (process.argv[2] === 'prepare') {
     const path = resolve(game, name)
     if (!existsSync(path) || !readFileSync(path).equals(Buffer.from(bytes))) evidenceErrors.push(`${name}: fixture bytes differ or are missing`)
   }
+  const fontPlatform = sdk?.defaultFontPlatform as { codePage?: number; faceCodes?: string; sourceBytes?: number[]; scriptSha256?: string } | undefined,
+    fontScript = resolve(game, 'default-font-platform.tjs'), fontObservation = resolve(game, 'default-font-observed.txt')
+  let observedFontCodes: string | undefined
+  if (!fontPlatform || !Number.isInteger(fontPlatform.codePage) || !fontPlatform.faceCodes || !/^\d+(?:,\d+)*$/.test(fontPlatform.faceCodes) ||
+      JSON.stringify(fontPlatform.sourceBytes) !== '[130,108,130,114,32,130,111,131,83,131,86,131,98,131,78]')
+    evidenceErrors.push('Missing actual Windows ACP/default-font source bytes')
+  if (!existsSync(fontScript) || sha(readFileSync(fontScript)) !== fontPlatform?.scriptSha256)
+    evidenceErrors.push('Default-font platform input hash differs or is missing')
+  else if (!readFileSync(fontScript).equals(Buffer.from('\ufeffglobal.defaultFontExpectedCodes="' + fontPlatform?.faceCodes + '";', 'utf16le')))
+    evidenceErrors.push('Default-font platform script differs from its ACP code-unit expectation')
+  if (existsSync(fontObservation)) {
+    observedFontCodes = readFileSync(fontObservation).toString('utf16le').replace(/^\ufeff/, '').trim()
+    if (observedFontCodes !== fontPlatform?.faceCodes) evidenceErrors.push('Default-font face differs from the original narrow literal decoded by actual ACP')
+  } else evidenceErrors.push('Missing default-font face observation')
   const path = resolve(game, 'native-events.txt'), raw = existsSync(path) ? readFileSync(path) : Buffer.alloc(0)
   const lines = raw.toString(raw[0] === 255 && raw[1] === 254 ? 'utf16le' : 'utf8')
     .replace(/^\ufeff/, '').trimEnd().split(/\r?\n/)
@@ -142,10 +163,13 @@ if (process.argv[2] === 'prepare') {
       matched: results.filter((row) => row.id.startsWith('paint-bool-') && row.matched).length },
     closedVideoColors: { planned: closedVideoColorCases.length,
       matched: results.filter((row) => row.id.startsWith('closed-video-') && row.matched).length },
+    defaultFont: { planned: layerDefaultFontCases.length,
+      matched: results.filter((row) => row.id.startsWith('default-font-') && row.matched).length,
+      platform: fontPlatform, observedFaceCodes: observedFontCodes },
     complete, sequenceMatches, evidenceErrors, sdkState: sdk?.state ?? 'unreported',
     sdkExitCode: sdk?.exitCode ?? null, sdkTimedOut: sdk?.timedOut ?? null, results, lines,
     observationSha256: sha(raw),
-    scope: 'Stock SDK option reads, gamma, hit targets, resampling, alpha rows, shared images, transformed sprite pixels, Layer boolean conversion and unopened VideoOverlay color controls. Web playback and on-screen results are recorded by their respective jobs.',
+    scope: 'Stock SDK option reads, gamma, hit targets, resampling, alpha rows, shared images, transformed sprite pixels, Layer booleans, unopened VideoOverlay color controls and default font properties/metrics. Default face is checked against the actual Windows ACP. Web rendering and input hints are recorded separately.',
   })
   assert(complete, 'Original transition option observations differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

@@ -28,6 +28,8 @@ export interface Resource {
   readonly archiveAliases?: boolean
   /** Successfully indexed container; present even when the archive is empty. */
   readonly archiveKind?: 'xp3' | 'zip'
+  /** Logical start of each physical PKZIP disk, in disk-number order. */
+  readonly zipDiskOffsets?: readonly number[]
   /** Identity of these immutable bytes, without retaining the resource's input buffer. */
   readonly cacheToken?: object
   /** Optional immutable byte source. Opening this capability does not imply
@@ -43,6 +45,7 @@ export interface ArchiveIndex {
 /** Opening is explicit and asynchronous. A raw file can exist without being
  * a valid archive; undefined means unrecognized format, never corrupt index. */
 export interface ArchiveReader {
+  joinVolumes?(files: readonly Resource[], checkpoint: () => Promise<void>): Promise<Resource[]>
   /** Release shared decoded segment caches. Open resource handles stay usable. */
   compact?(): void
   open(resource: Resource, checkpoint: () => Promise<void>): Promise<ArchiveIndex | undefined>

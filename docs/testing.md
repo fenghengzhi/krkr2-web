@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 156 批加入 Info-ZIP 实际分卷、双 XP3 包、远程分卷游戏断网重开读档、原版默认字体和 MIDI 单音声道的验收。Node 作业使用托管 Ubuntu 上的 `zip -s` 生成独立输入。Windows 字体对照记录进程使用的代码页，浏览器另外测量实际字宽、画面和输入提示。[156 验收与取回结果](decisions/156-split-game-archives-default-font-and-midi.md)
+
 第 155 批用独立字体的字宽和像素验证合集各成员，用原版生成的条件书签验证剧情路线，并从真实双声道输出检查 MIDI 控制器复位。新增验收等待 GitHub-hosted Actions。最近取回的第 149、150 批没有运行依赖应用构建的网页验收。[155 验收与取回结果](decisions/155-font-collections-conditional-saves-and-midi.md)
 
 第 154 批增加真实下载中断、刷新续传、跨标签页修复损坏块和存读档验收。KAG 在同一解析器中嵌套取标签，后台声音用真实浏览器焦点事件和 AudioWorklet 录音检查。上批的构建修复在本次快照中仍排队。[154 验收与历史结果](decisions/154-remote-downloads-script-cursor-and-background-audio.md)
