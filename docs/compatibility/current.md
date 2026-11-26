@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 181 批支持 Windows-949 和 Windows-1251 游戏文本及 ZIP 文件名，CUE 编码可单独保存。图层焦点返回值和普通流式 Wave 起播也已修订，等待托管验收。[181 实现与托管证据](../decisions/181-localized-discs-focus-and-wave-startup.md)
+
 第 180 批接入大于 128 MiB、只能分段读取的影片，修订原版 KAG 的滚轮输入和流式音频定位。影片需要浏览器提供足够的临时存储空间。新增行为等待托管验收。[180 实现与托管证据](../decisions/180-large-cutscenes-and-story-input.md)
 
 第 179 批为 Windows Media 9、VC-1 和 WMA Professional 增加解码，并根据 MOV、MP4 的音视频样本描述选择播放路径。命名书签双击和 GS 打击乐声部也已接入，等待托管验收。[179 实现与托管证据](../decisions/179-windows-cutscenes-and-named-bookmarks.md)

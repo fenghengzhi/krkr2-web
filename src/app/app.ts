@@ -4,7 +4,7 @@ import { createPlayer } from '../player/create-player.ts'
 import { demoFiles } from './demo.ts'
 import { readNativeSaves, writeNativeSaves } from '../player/native-saves.ts'
 import { zipNameEncoding, zipNameEncodings, type ZipNameEncoding } from '../formats/zip/names.ts'
-import { scriptEncoding, scriptEncodings, type ScriptEncoding } from '../engine/script/text-encoding.ts'
+import { scriptEncoding, scriptEncodings } from '../engine/script/text-encoding.ts'
 import { encodeBackup, decodeBackup } from '../player/save-backup.ts'
 import type { BackendPreference, GameInput, LocalGameFile } from '../protocol/session.ts'
 import type { SessionSnapshot } from '../engine/session.ts'
@@ -19,7 +19,7 @@ import { createGameClipboard } from './game-clipboard.ts'
 import { createGameHelp } from './game-help.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import { createGameLibrary } from './game-library.ts'
-import { createCddaSettings, parseCddaSettings } from './cdda-settings.ts'
+import { createCddaSettings, parseCddaSettings, textEncodingLabels } from './cdda-settings.ts'
 import { createLiveDiscControls } from './live-disc.ts'
 import type { CddaDisc } from '../engine/ports/cdda.ts'
 import { createSaveTransfer } from './save-transfer.ts'
@@ -75,16 +75,11 @@ export function mountApp(root: HTMLDivElement): void {
   projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">自动识别游戏目录、ZIP 或光盘</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><label for="project-executable">游戏程序名或发行包（可选）</label><input id="project-executable" placeholder="例如 Story.exe 或 Release.zip&gt;Media/Disc1.cue" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">可从游戏目录、ZIP、自解压 ZIP 或光盘镜像启动。支持 ISO 9660、Joliet 和 UDF 游戏光盘。ZIP 内含光盘时请选择自动识别。CUE 需要配套的数据轨文件。</p>`
   root.querySelector('label[for="entry"]')!.before(projectControls)
   const zipLabels: Record<ZipNameEncoding, string> = {
-    cp437: 'ZIP 默认（CP437）', shift_jis: '日文（Shift_JIS）', gbk: '简体中文（GBK）',
-    big5: '繁体中文（Big5）', 'utf-8': 'UTF-8',
+    ...textEncodingLabels, cp437: 'ZIP 默认（CP437）',
   }
   const zipOptions = zipNameEncodings.map((name) => `<option value="${name}">${zipLabels[name]}</option>`).join('')
   projectControls.insertAdjacentHTML('beforeend', `<label for="zip-encoding">未标记的 ZIP 文件名编码</label><select id="zip-encoding">${zipOptions}</select>`)
-  const scriptLabels: Record<ScriptEncoding, string> = {
-    auto: '自动（先 UTF-8，再尝试日文）', shift_jis: zipLabels.shift_jis, gbk: zipLabels.gbk,
-    big5: zipLabels.big5, 'windows-1252': '西欧（Windows-1252）', 'utf-8': 'UTF-8',
-  }
-  const scriptOptions = scriptEncodings.map((name) => `<option value="${name}">${scriptLabels[name]}</option>`).join('')
+  const scriptOptions = scriptEncodings.map((name) => `<option value="${name}">${textEncodingLabels[name]}</option>`).join('')
   projectControls.insertAdjacentHTML('beforeend', `<label for="script-encoding">无 BOM 的脚本与剧情编码</label><select id="script-encoding">${scriptOptions}</select>`)
   projectControls.insertAdjacentHTML('beforeend', `<label for="registry-file">游戏注册表文件（可选）</label><input id="registry-file" placeholder="例如 Game/settings.reg 或 data.xp3&gt;settings.reg" spellcheck="false"><p class="muted">填写已导入游戏中的文件路径。留空不读取注册表文件。</p>`)
   const discSettings = createCddaSettings('游戏光盘映射（可选）', 'cdda-discs')
@@ -96,6 +91,7 @@ export function mountApp(root: HTMLDivElement): void {
       encodings = {
         zipEncoding: zipNameEncoding(el<HTMLSelectElement>('zip-encoding').value),
         scriptEncoding: scriptEncoding(el<HTMLSelectElement>('script-encoding').value),
+        cueEncoding: scriptEncoding(discSettings.encoding.value, ' CUE '),
         registryFile: el<HTMLInputElement>('registry-file').value.trim() || undefined,
       },
       executableDirectory = el<HTMLInputElement>('project-exe-directory').value.trim(),
@@ -638,7 +634,8 @@ export function mountApp(root: HTMLDivElement): void {
           (loaded.project?.bootDisc ? ' · 启动光盘：' +
             (loaded.project.distribution ? loaded.project.distribution + '>' : '') + loaded.project.bootDisc : '') +
           (loaded.zipEncoding ? ' · ZIP 文件名：' + zipLabels[loaded.zipEncoding] : '') +
-          (loaded.scriptEncoding ? ' · 脚本与剧情：' + scriptLabels[loaded.scriptEncoding] : '') +
+          (loaded.scriptEncoding ? ' · 脚本与剧情：' + textEncodingLabels[loaded.scriptEncoding] : '') +
+          (loaded.cueEncoding ? ' · CUE：' + textEncodingLabels[loaded.cueEncoding] : '') +
           (loaded.registryFile ? ' · 游戏注册表：' + loaded.registryFile : '')
         log('会话就绪。点击画面继续。')
       }
@@ -707,6 +704,7 @@ export function mountApp(root: HTMLDivElement): void {
             ...(snapshot?.project ? { project: snapshot.project } : {}),
             ...(snapshot?.zipEncoding ? { zipEncoding: snapshot.zipEncoding } : {}),
             ...(snapshot?.scriptEncoding ? { scriptEncoding: snapshot.scriptEncoding } : {}),
+            ...(snapshot?.cueEncoding ? { cueEncoding: snapshot.cueEncoding } : {}),
             ...(snapshot?.registryFile ? { registryFile: snapshot.registryFile } : {}),
             ...(currentCddaDiscs === undefined ? {} : { cddaDiscs: currentCddaDiscs }),
           }

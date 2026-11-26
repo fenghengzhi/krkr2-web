@@ -1,4 +1,11 @@
 import { copyCddaDiscs, type CddaDisc } from '../engine/ports/cdda.ts'
+import { scriptEncodings, type ScriptEncoding } from '../engine/script/text-encoding.ts'
+
+export const textEncodingLabels: Record<ScriptEncoding, string> = {
+  auto: '自动（先 UTF-8，再尝试日文）', shift_jis: '日文（Shift_JIS）', gbk: '简体中文（GBK）',
+  big5: '繁体中文（Big5）', 'euc-kr': '韩文（Windows-949）', 'windows-1251': '西里尔字母（Windows-1251）',
+  'windows-1252': '西欧（Windows-1252）', 'utf-8': 'UTF-8',
+}
 
 /** Human-editable drive bindings; preserve order because an unqualified track uses the first disc. */
 export function parseCddaSettings(text: string): readonly CddaDisc[] | undefined {
@@ -49,5 +56,11 @@ export function createCddaSettings(labelText: string, id?: string) {
   element.append(label)
   if (id) element.append(input)
   element.append(hint)
-  return { element, input }
+  const encodingLabel = document.createElement('label'), encoding = document.createElement('select')
+  encodingLabel.textContent = '无 BOM 的 CUE 文件编码'
+  for (const name of scriptEncodings) encoding.add(new Option(textEncodingLabels[name], name))
+  if (id) encoding.id = 'cue-encoding'
+  encodingLabel.append(encoding)
+  element.append(encodingLabel)
+  return { element, input, encoding }
 }

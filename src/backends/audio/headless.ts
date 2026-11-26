@@ -103,11 +103,12 @@ export class HeadlessAudioBackend implements AudioBackend {
     }
     if (command.op === 'openSource') return this.openSource(command)
     this.advance()
-    if (command.op === 'set' && command.property === 'position') {
+    if (command.op === 'play' || (command.op === 'set' && command.property === 'position')) {
       const stream = this.streams.current(command.id)
       if (stream?.asset)
-        return this.seeks.run({ op: 'seekSource', id: command.id, streamId: stream.streamId,
-          position: Number(command.value) }, async (attempt) => {
+        return this.seeks.run(command.op === 'play'
+          ? { op: 'playSource', id: command.id, streamId: stream.streamId }
+          : { op: 'seekSource', id: command.id, streamId: stream.streamId, position: Number(command.value) }, async (attempt) => {
           this.advance()
           try { return this.mixer.command(attempt) }
           finally { this.fillStreams(); this.arm() }

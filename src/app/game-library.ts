@@ -1,5 +1,6 @@
 import { LibraryClient } from '../player/library-client.ts'
 import { createCddaSettings, formatCddaSettings, parseCddaSettings } from './cdda-settings.ts'
+import { scriptEncoding } from '../engine/script/text-encoding.ts'
 import type {
   LibraryGame,
   LibraryImport,
@@ -77,15 +78,17 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
       return
     }
     shownGames = signature
-    const drafts = new Map<string, { title: string; entry: string; backend: string; discs: string }>()
+    const drafts = new Map<string, { title: string; entry: string; backend: string; discs: string; cueEncoding?: string }>()
     for (const row of games.querySelectorAll<HTMLElement>('[data-library-id]')) {
       if (!row.querySelector('details')?.open) continue
       const inputs = row.querySelectorAll('input')
+      const cue = row.querySelector<HTMLSelectElement>('.cdda-settings select')!
       drafts.set(row.dataset.libraryId!, {
         title: inputs[0]!.value,
         entry: inputs[1]!.value,
         backend: row.querySelector('select')!.value,
         discs: row.querySelector('textarea')!.value,
+        cueEncoding: cue.value === cue.dataset.savedEncoding ? undefined : cue.value,
       })
     }
     games.replaceChildren()
@@ -159,6 +162,8 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
       const discs = createCddaSettings('库中游戏光盘映射')
       discs.input.value = formatCddaSettings(game.cddaDiscs)
       const savedDiscText = discs.input.value
+      discs.encoding.dataset.savedEncoding = game.cueEncoding ?? 'auto'
+      discs.encoding.value = draft?.cueEncoding ?? game.cueEncoding ?? 'auto'
       if (draft) discs.input.value = draft.discs
       const submit = document.createElement('button')
       submit.textContent = '保存设置'
@@ -167,9 +172,11 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
       details.append(form)
       form.addEventListener('submit', (event) => {
         event.preventDefault()
-        let discChanges: Pick<LibraryGame, 'cddaDiscs'> = {}
+        const discChanges: Pick<LibraryGame, 'cddaDiscs' | 'cueEncoding'> = {}
         try {
-          if (discs.input.value !== savedDiscText) discChanges = { cddaDiscs: parseCddaSettings(discs.input.value) }
+          if (discs.input.value !== savedDiscText) discChanges.cddaDiscs = parseCddaSettings(discs.input.value)
+          if (discs.encoding.value !== (game.cueEncoding ?? 'auto'))
+            discChanges.cueEncoding = scriptEncoding(discs.encoding.value, ' CUE ')
         }
         catch (error) { options.report(error); return }
         changing = true

@@ -1,4 +1,4 @@
-export const zipNameEncodings = ['cp437', 'shift_jis', 'gbk', 'big5', 'utf-8'] as const
+export const zipNameEncodings = ['cp437', 'shift_jis', 'gbk', 'big5', 'euc-kr', 'windows-1251', 'utf-8'] as const
 export type ZipNameEncoding = typeof zipNameEncodings[number]
 
 /** ZIP's UTF-8 flag and valid Unicode Path extra take precedence over this

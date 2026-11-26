@@ -64,7 +64,7 @@ class Layer {
     if(args.count<3)return __host("Input.hitChoice",__id);
     __host("Input.hitChoice",__id,int(!!args[2]));
   }
-  function focus(direction=true){__host("Input.focus",__id,int(direction));}
+  function focus(args*){return __host("Input.focus",__id,args.count?int(!!args[0]):1);}
   function focusNext(){return __host("Input.moveFocus",1,__id);}
   function focusPrev(){return __host("Input.moveFocus",0,__id);}
   function setAttentionPos(args*) {

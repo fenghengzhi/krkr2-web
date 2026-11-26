@@ -11,6 +11,7 @@ import type {
   LibraryGame,
   LibraryImportRequest,
   LibraryProgress,
+  LibrarySettings,
   LibraryStatus,
 } from '../../protocol/library.ts'
 import {
@@ -301,7 +302,7 @@ export class LibraryService {
   }
   async update(
     id: string,
-    settings: Pick<LibraryGame, 'title' | 'entry' | 'backend' | 'cddaDiscs'>,
+    settings: LibrarySettings,
   ): Promise<void> {
     libraryId(id)
     await this.locks.request(LIBRARY_WRITE_LOCK, async () => {

@@ -988,6 +988,39 @@ jobs:
           path: out/ci/
           retention-days: 90
 
+  game-loading-and-playback:
+    name: Game disc loading, focus and Wave playback
+    if: ${{ !inputs.runtime-only }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-tests
+        id: prepare
+      - name: Check localized game inputs, focus results and streamed sound
+        run: |
+          node --import tsx --test --test-concurrency=2 --test-reporter=tap \
+            tests/conformance/windows-korean-text.test.ts tests/conformance/legacy-zip-names.test.ts \
+            tests/conformance/audio-source-play.test.ts tests/conformance/audio-source-seek.test.ts \
+            tests/conformance/audio-wave-reopen.test.ts \
+            tests/integration/boot-disc-range.test.ts tests/integration/layer-focus-result.test.ts \
+            tests/integration/wave-source-seek.test.ts tests/integration/wave-source-play.test.ts | tee out/ci/game-loading-and-playback.tap
+      - name: Check game scripts against their selected Windows code pages
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-reporter=tap --test-name-pattern='startup, chapter and compiled scripts before a game sets its decoder' \
+            tests/integration/scripts.test.ts | tee out/ci/game-script-encoding.tap
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: game-loading-and-playback
+          path: out/ci/game-*.tap
+          if-no-files-found: warn
+          retention-days: 90
+
   node:
     name: Node conformance and integration
     if: ${{ !inputs.runtime-only }}
@@ -1359,7 +1392,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, tools-types, udf-metadata-disc, windows-media9-originals, cutscene-conversion, wave-speaker-reference, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config, original-disc-search]
+    needs: [build, tools-types, udf-metadata-disc, windows-media9-originals, cutscene-conversion, wave-speaker-reference, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, game-loading-and-playback, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config, original-disc-search]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

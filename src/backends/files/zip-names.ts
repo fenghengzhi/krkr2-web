@@ -1,9 +1,10 @@
 import { cp437, zipNameEncoding, type ZipNameEncoding } from '../../formats/zip/names.ts'
+import { strictTextDecoder } from './text-decoder.ts'
 
 export function zipNameCodecs(encoding?: ZipNameEncoding) {
   const name = zipNameEncoding(encoding)
   const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
-  const decoder = name === 'cp437' ? undefined : name === 'utf-8' ? utf8 : new TextDecoder(name, { fatal: true, ignoreBOM: true })
+  const decoder = name === 'cp437' ? undefined : name === 'utf-8' ? utf8 : strictTextDecoder(name, true)
   return {
     utf8: (bytes: Uint8Array) => utf8.decode(bytes),
     legacyName: (bytes: Uint8Array) => {

@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 181 批增加韩文编码的独立对照、混合编码光盘的原版 KAG 读档、姓名框焦点和普通配乐预读验收。部分 Node 回归在同一批托管运行中单独保存 TAP。[181 实现与托管证据](decisions/181-localized-discs-focus-and-wave-startup.md)
+
 第 180 批用同一段双画面、双音轨影片检查压缩 ZIP 与原始 CUE/BIN 的播放、换轨和释放。原版 KAG 通过实际的横向与纵向滚轮输入验证对白推进。长音轨定位继续核对实际 PCM。[180 实现与托管证据](decisions/180-large-cutscenes-and-story-input.md)
 
 第 179 批由 Windows Media Foundation 编制原片，Linux FFmpeg 独立核对，再用当批转换器和浏览器检查过场。原版 KAG 命名书签与 MIDI 鼓轨各有游戏内验收。[179 实现与托管证据](decisions/179-windows-cutscenes-and-named-bookmarks.md)

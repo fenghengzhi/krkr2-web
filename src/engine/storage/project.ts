@@ -8,6 +8,8 @@ import { discAddress, extractStoragePath, nativeDiscPath, parseStoragePath, stor
 export interface GameEncodings {
   zipEncoding?: ZipNameEncoding
   scriptEncoding?: ScriptEncoding
+  /** CUE filenames follow the disc author's code page independently of game scripts. */
+  cueEncoding?: ScriptEncoding
   /** Explicit imported .reg resource; omitted never reads a registry file. */
   registryFile?: string
 }
@@ -21,10 +23,11 @@ export function registryResourceFile(value: unknown): string | undefined {
 }
 export function copyGameEncodings(value: GameEncodings): GameEncodings {
   const zip = zipNameEncoding(value.zipEncoding), script = scriptEncoding(value.scriptEncoding),
-    registryFile = registryResourceFile(value.registryFile)
+    cue = scriptEncoding(value.cueEncoding, ' CUE '), registryFile = registryResourceFile(value.registryFile)
   return {
     ...(zip === 'cp437' ? {} : { zipEncoding: zip }),
     ...(script === 'auto' ? {} : { scriptEncoding: script }),
+    ...(cue === 'auto' ? {} : { cueEncoding: cue }),
     ...(registryFile === undefined ? {} : { registryFile }),
   }
 }

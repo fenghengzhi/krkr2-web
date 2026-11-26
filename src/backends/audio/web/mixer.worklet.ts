@@ -19,7 +19,7 @@ class KrkrMixerProcessor extends AudioWorkletProcessor {
         const result = this.mixer.command(command)
         // Source-seek callers must own the real pending target request before
         // observing a not-ready reply. Other commands keep their ACK order.
-        if (command.op === 'seekSource' && result.sourceReady === false) this.readStreams()
+        if ((command.op === 'seekSource' || command.op === 'playSource') && result.sourceReady === false) this.readStreams()
         this.send({ type: 'reply', serial, result })
         this.readStreams()
       } catch (error) {

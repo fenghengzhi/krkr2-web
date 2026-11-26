@@ -1,4 +1,4 @@
-import type { LibraryDownload, LibraryGame } from '../../protocol/library.ts'
+import type { LibraryDownload, LibraryGame, LibrarySettings } from '../../protocol/library.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import { copyGameEncodings, copyGameProject, type GameProject } from '../../engine/storage/project.ts'
 import { nativeDiscPath, storageFilePath, toPublicStoragePath } from '../../engine/storage/public-path.ts'
@@ -43,9 +43,9 @@ export function libraryReadLock(id: string): string {
   return 'krkr2-library:v1:' + libraryId(id)
 }
 export function gameSettings(
-  value: Pick<LibraryGame, 'title' | 'entry' | 'backend' | 'cddaDiscs'>,
+  value: LibrarySettings,
   project?: GameProject,
-): Pick<LibraryGame, 'title' | 'entry' | 'backend' | 'cddaDiscs'> {
+): LibrarySettings {
   if (typeof value.title !== 'string' || !value.title.trim() || value.title.length > 200)
     throw new Error('Game name must contain 1–200 characters')
   if (typeof value.entry !== 'string' || value.entry.length > 1024)
@@ -61,9 +61,10 @@ export function gameSettings(
   if (!['auto', 'asyncify', 'jspi'].includes(value.backend))
     throw new Error('Invalid game startup settings')
   const cddaDiscs = copyCddaDiscs(value.cddaDiscs)
-  // An older settings client omits this field. Preserve an existing binding;
-  // an explicit undefined from the editor restores automatic discovery.
+  // Older settings clients omit the disc fields. Only override a stored
+  // binding or code page when the editor actually submits that setting.
   return { title: value.title.trim(), entry, backend: value.backend,
+    ...(Object.hasOwn(value, 'cueEncoding') ? { cueEncoding: copyGameEncodings({ cueEncoding: value.cueEncoding }).cueEncoding } : {}),
     ...(Object.hasOwn(value, 'cddaDiscs') ? { cddaDiscs } : {}) }
 }
 export function validateRecord(value: unknown): LibraryRecord {
@@ -149,11 +150,12 @@ export function summary({
   sourceGameId,
   zipEncoding,
   scriptEncoding,
+  cueEncoding,
   registryFile,
   cddaDiscs,
 }: LibraryGame): LibraryGame {
   return { id, gameId, title, entry, backend, createdAt, size, fileCount,
-    ...copyGameEncodings({ zipEncoding, scriptEncoding, registryFile }),
+    ...copyGameEncodings({ zipEncoding, scriptEncoding, cueEncoding, registryFile }),
     ...(cddaDiscs === undefined ? {} : { cddaDiscs: copyCddaDiscs(cddaDiscs) }),
     ...(project === undefined ? {} : { project: copyGameProject(project), sourceGameId }) }
 }

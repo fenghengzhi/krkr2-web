@@ -14,6 +14,12 @@ const MAX_TEXT_BYTES = 64 * 1024 * 1024
 export function modeOffset(mode: string): number {
   return parseStreamMode(mode).offset
 }
+/** Byte order marks used by plain Windows metadata such as CUE and REG files. */
+export function plainTextBom(bytes: Uint8Array): string | undefined {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return 'utf-16le'
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return 'utf-16be'
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return 'utf-8'
+}
 export function decodeUtf16(bytes: Uint8Array, littleEndian = true): string {
   if (bytes.length % 2) throw new Error('Truncated UTF-16 text stream')
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)

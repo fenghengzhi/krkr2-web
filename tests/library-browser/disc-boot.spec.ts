@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { test, expect } from '../helpers/library-browser.ts'
-import { discBootInput, discReleaseInput } from '../helpers/disc-boot.ts'
+import { discBootInput, discReleaseInput, localizedDiscRelease } from '../helpers/disc-boot.ts'
 import { udfGameDisc, udfMetadataGameDisc, udfSparableGameDisc } from '../helpers/udf-game-discs.ts'
 import { kagGameControls } from '../helpers/kag-game-controls.ts'
 
@@ -12,6 +12,8 @@ const editions = [
     { kind: 'zip', binary, label: 'ZIP release ' + (binary ? 'CUE+ISO bytecode' : 'ISO-only source'), suffix: ' ZIP',
       names: binary ? ['StoryBytecode.zip.003', 'StoryBytecode.zip.002', 'StoryBytecode.zip.001'] : ['StorySource.zip'],
       open: () => discReleaseInput(binary) },
+    { kind: 'localized-zip', binary, label: binary ? 'Windows-949 CUE' : 'Windows-1251 CUE', suffix: ' localized ZIP',
+      names: ['Release.zip'], open: () => localizedDiscRelease(binary) },
     { kind: 'udf', binary, label: binary ? 'UDF 2.01 bytecode' : 'UDF 1.02 source', suffix: ' UDF',
       names: [binary ? 'boot-udf201-bytecode.iso' : 'boot-udf102-source.iso'], open: () => udfGameDisc(binary) },
   ]),
@@ -24,13 +26,14 @@ const editions = [
 ]
 
 for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
-  const { binary, kind } = edition, packaged = kind === 'zip', udf = kind.startsWith('udf')
+  const { binary, kind } = edition, localized = kind === 'localized-zip', packaged = kind === 'zip' || localized, udf = kind.startsWith('udf')
   test(`${backend}/${edition.label}: importing the complete disc boots original KAG and restores its chapter after library refresh`, async ({ page }, info) => {
     test.setTimeout(180000)
     const input = edition.open(),
       drive = packaged ? 'G' : 'D', medium = `file://./${drive.toLowerCase()}/`,
-      mapping = packaged ? (binary ? 'G=Media/boot.cue' : 'G=StorySource.zip>Media/boot-source.iso') : '',
-      launcher = packaged && binary ? 'StoryBytecode.zip>Media/boot.cue' : '',
+      localizedCue = 'Release.zip>Media/' + (binary ? 'Диск.cue' : '한글.cue'),
+      mapping = localized ? 'G=' + localizedCue : packaged ? (binary ? 'G=Media/boot.cue' : 'G=StorySource.zip>Media/boot-source.iso') : '',
+      launcher = localized ? localizedCue : packaged && binary ? 'StoryBytecode.zip>Media/boot.cue' : '',
       errors: string[] = [], observations: unknown[] = [], failures: unknown[] = [],
       title = `Boot disc ${backend} ${binary}${edition.suffix}`, canvas = page.locator('#stage canvas[data-window-id]'),
       item = page.locator('.library-game').filter({ has: page.getByRole('heading', { name: title, exact: true }) }),
@@ -84,6 +87,11 @@ for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
       if (binary || packaged || udf) await page.locator('#project-mode').selectOption('auto')
       await expect(page.locator('#project-mode')).toHaveValue(binary || packaged || udf ? 'auto' : 'collection')
       await page.locator('#cdda-discs').fill(mapping)
+      if (localized) {
+        await page.locator('#zip-encoding').selectOption(binary ? 'windows-1251' : 'euc-kr')
+        await page.locator('#cue-encoding').selectOption(binary ? 'euc-kr' : 'windows-1251')
+        await expect(page.locator('#script-encoding')).toHaveValue('auto')
+      }
       if (packaged) {
         await page.locator('#project-exe-directory').fill('')
         await page.locator('#project-executable').fill(launcher)
@@ -121,6 +129,21 @@ for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
       await page.locator('#library-title').fill(title); await page.locator('#save-library').click()
       await expect(item).toBeVisible(); await expect(page.locator('#cancel-library')).toBeHidden()
       await stop(); await page.reload()
+      if (localized) {
+        const preferred = binary ? 'euc-kr' : 'windows-1251'
+        const editor = item.getByLabel('无 BOM 的 CUE 文件编码'), save = item.getByRole('button', { name: '保存设置', exact: true })
+        await item.locator('summary').click()
+        await expect(editor).toHaveValue(preferred)
+        for (const setting of ['auto', preferred]) {
+          await editor.selectOption(setting)
+          await save.click(); await expect(save).toBeEnabled()
+          await page.reload(); await item.locator('summary').click()
+          await expect(editor).toHaveValue(setting)
+        }
+        await item.locator('summary').click()
+        await page.locator('#cue-encoding').selectOption('utf-8')
+        await page.locator('#zip-encoding').selectOption('big5')
+      }
       if (packaged) {
         // Reopening the saved game must use its recorded disc binding, rather
         // than the unrelated next-import settings left in the page form.

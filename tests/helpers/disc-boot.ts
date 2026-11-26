@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { discStoryProject } from './disc-story.ts'
+import { legacyZip } from './legacy-zip-names.ts'
 
 export const discBootDirectory = 'DiscGame'
 export const discBootVolume = 'KRKR_STORY'
@@ -46,6 +47,21 @@ export function discBootInput(binary: boolean) {
   if (binary) files.unshift({ name: 'boot.cue', mimeType: 'application/octet-stream',
     buffer: Buffer.from(`FILE "${name}" BINARY\n TRACK 01 MODE1/2048\n INDEX 01 00:00:00\n`) })
   return { files, manifest, image: row }
+}
+
+export function localizedDiscRelease(binary: boolean) {
+  const { files, manifest } = discBootInput(binary), iso = files.find((file) => file.name.endsWith('.iso'))!
+  // Literal unflagged Windows ZIP names; no standalone ISO fallback. The
+  // mounted CUE must find the .bin before the original KAG game can start.
+  const stem = Buffer.from(binary ? 'c4e8f1ea' : 'c7d1b1db', 'hex') // Диск or 한글
+  const cueName = Buffer.concat([Buffer.from('Media/'), stem, Buffer.from('.cue')])
+  // The CUE itself uses a different Windows code page than the archive.
+  // Its image has a Unicode ZIP name, independent of both legacy settings.
+  const image = binary ? '한글.bin' : 'Диск.bin'
+  const imageBytes = Buffer.from(binary ? 'c7d1b1db' : 'c4e8f1ea', 'hex')
+  const cue = Buffer.concat([Buffer.from('FILE "'), imageBytes, Buffer.from('.bin" BINARY\r\n TRACK 01 MODE1/2048\r\n INDEX 01 00:00:00\r\n')])
+  const buffer = legacyZip([{ name: cueName, bytes: cue }, { name: 'Media/' + image, utf8: true, bytes: iso.buffer }])
+  return { files: [{ name: 'Release.zip', mimeType: 'application/zip', buffer }], manifest }
 }
 
 interface DiscRelease {

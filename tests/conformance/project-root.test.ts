@@ -107,15 +107,20 @@ test('library manifests preserve frozen project identity and accept unchanged le
   assert.equal(Object.hasOwn(summary(old), 'project'), false)
   assert.equal(Object.hasOwn(summary(old), 'scriptEncoding'), false)
   assert.deepEqual(copyProjectSelection({ mode: 'collection', scriptEncoding: 'auto' }), { mode: 'collection' })
-  for (const setting of ['big5', 'windows-1252'] as const) {
-    const configured = { ...next, zipEncoding: 'shift_jis' as const, scriptEncoding: setting }
+  for (const setting of ['big5', 'windows-1252', 'euc-kr', 'windows-1251'] as const) {
+    const configured = { ...next, zipEncoding: 'shift_jis' as const, scriptEncoding: setting, cueEncoding: 'gbk' as const }
     const catalog = validateSummary(summary(validateRecord(configured)))
     assert.equal(catalog.scriptEncoding, setting)
     assert.equal(catalog.zipEncoding, 'shift_jis')
+    assert.equal(catalog.cueEncoding, 'gbk')
     assert.equal(catalog.gameId, next.gameId)
     assert.equal(copyProjectSelection({ mode: 'auto', scriptEncoding: setting }).scriptEncoding, setting)
   }
   assert.throws(() => validateRecord({ ...old, scriptEncoding: 'unknown' }), /脚本与剧情编码/)
+  assert.throws(() => validateRecord({ ...old, cueEncoding: 'unknown' }), /CUE/)
+  assert.equal(Object.hasOwn(summary(old), 'cueEncoding'), false)
+  assert.equal(Object.hasOwn(gameSettings(old), 'cueEncoding'), false)
+  assert.equal(gameSettings({ ...old, cueEncoding: 'auto' }).cueEncoding, undefined)
   assert.throws(() => validateSummary({ ...old, scriptEncoding: null }), /脚本与剧情编码/)
   assert.deepEqual(validateSummary(summary(validateRecord(next))).project, selected)
   assert.throws(() => validateRecord({ ...next, sourceGameId: undefined }), /project metadata/)

@@ -5,11 +5,12 @@ import {
   type TextCodecs,
 } from '../../formats/text/stream.ts'
 import { decodePlainText, inflate } from './blob-source.ts'
+import { strictTextDecoder } from './text-decoder.ts'
 import { CompressionError } from '../../formats/binary/compression-error.ts'
 import { BinaryWriter } from '../../formats/binary/writer.ts'
 const codecs: TextCodecs = {
   narrow(bytes, encoding) {
-    if (encoding) return new TextDecoder(encoding, { fatal: true }).decode(bytes)
+    if (encoding) return strictTextDecoder(encoding).decode(bytes)
     try {
       return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
     } catch {

@@ -1,9 +1,9 @@
 import type { AudioCommand, AudioResult, MixerCommand, PcmReadRequest } from '../../engine/ports/audio.ts'
 import { streamPageFrames } from '../../engine/media/stream-pcm.ts'
 
-type Seek = Extract<MixerCommand, { op: 'seekSource' }>
-/** A source seek waits for its actual target-page delivery, not a device tick
- * or all background reads. The decoder's existing permits remain its own. */
+type Seek = Extract<MixerCommand, { op: 'seekSource' | 'playSource' }>
+/** Source seek/play waits for actual required-page delivery, not a device
+ * tick or all background reads. Decoder permits remain with their owner. */
 export class SourceSeeks {
   private readonly active = new Map<number, (error: Error) => void>()
   private readonly reads = new Set<{ request: PcmReadRequest; done: Promise<unknown> }>()
@@ -17,11 +17,11 @@ export class SourceSeeks {
   }
   cancel(command?: AudioCommand): void {
     if (!command || command.op === 'shutdown') {
-      for (const reject of this.active.values()) reject(new Error('Audio seek was closed or cancelled'))
+      for (const reject of this.active.values()) reject(new Error('Audio source operation was closed or cancelled'))
       this.active.clear()
     } else if ('id' in command && (['open', 'openSource', 'load', 'create', 'close', 'unload', 'play', 'stop', 'releaseWaveBuffer'].includes(command.op) ||
         (command.op === 'set' && command.property === 'position'))) {
-      this.active.get(command.id)?.(new Error('Audio seek was superseded'))
+      this.active.get(command.id)?.(new Error('Audio source operation was superseded'))
       this.active.delete(command.id)
     }
   }
@@ -30,10 +30,10 @@ export class SourceSeeks {
     const cancelled = new Promise<never>((_resolve, fail) => { reject = fail }),
       cancel = (error: Error) => { failure ??= error; reject(failure) },
       check = () => { if (failure) throw failure },
-      target = Math.floor(command.position / streamPageFrames) * streamPageFrames
+      operation = command.op === 'playSource' ? 'play startup' : 'seek target'
     void cancelled.catch(() => {})
     this.active.set(command.id, cancel)
-    const clearTimeout = this.timeout(() => cancel(new Error('Audio seek target page timed out')))
+    const clearTimeout = this.timeout(() => cancel(new Error(`Audio ${operation} page timed out`)))
     let empty = 0
     const events: AudioResult['events'] = []
     try {
@@ -43,14 +43,15 @@ export class SourceSeeks {
         check()
         events.push(...result.events)
         if (result.sourceReady === true) return { ...result, events }
-        if (result.sourceReady !== false) throw new Error('Audio source seek reply omitted readiness')
-        const all = [...this.reads].filter(({ request }) => request.id === command.id && request.streamId === command.streamId),
+        if (result.sourceReady !== false) throw new Error(`Audio ${operation} reply omitted readiness`)
+        const target = Math.floor((command.op === 'seekSource' ? command.position : result.snapshot?.position ?? 0) / streamPageFrames) * streamPageFrames,
+          all = [...this.reads].filter(({ request }) => request.id === command.id && request.streamId === command.streamId),
           targetReads = all.filter(({ request }) => request.position === target),
           waiting = targetReads.length ? targetReads : all
         if (!waiting.length) {
           // A target reply can settle between the command reply and this
           // continuation. Retry once to observe that already delivered page.
-          if (++empty > 1) throw new Error('Audio source seek has no target-page request')
+          if (++empty > 1) throw new Error(`Audio ${operation} has no pending page request`)
           continue
         }
         empty = 0

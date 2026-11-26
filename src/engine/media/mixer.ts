@@ -26,7 +26,7 @@ import {
 } from './audio-filter-chain.ts'
 import { FilteredWaveSource, filteredWaveSourceMemoryBytes } from './filtered-wave-source.ts'
 import { phaseVocoderMemoryBytes, validatePhaseVocoderParameters } from './phase-vocoder.ts'
-import { StreamPcm, streamPageFrames, streamPcmReservation } from './stream-pcm.ts'
+import { StreamPcm, streamPageFrames, streamPagesPerVoice, streamPcmReservation } from './stream-pcm.ts'
 import { applySliExpression, sliExpressionTarget } from '../../formats/audio/sli.ts'
 import { waveAudioGains } from './wave-audio.ts'
 import { convertWaveOutput } from './wave-output.ts'
@@ -396,7 +396,21 @@ export class AudioMixer {
     } else {
       const voice = this.get(id),
         settings = voice.settings
-      if (command.op === 'play' && voice.asset && (voice.status !== 'play' || voice.bufferReleased)) {
+      if (command.op === 'playSource' && (!voice.stream || voice.stream.asset.streamId !== command.streamId))
+        throw new Error('Audio source play belongs to a retired stream')
+      if ((command.op === 'play' || command.op === 'playSource') && voice.asset && (voice.status !== 'play' || voice.bufferReleased)) {
+        if (command.op === 'playSource' && voice.kind === 'wave' && !voice.sourcePipeline && !voice.asset.loops.links.length) {
+          // Fixed WaveImpl::StartPlay fills four 1/8-second device units
+          // before starting playback. Prime ordinary physical PCM without
+          // moving the audible cursor or publishing labels. Linked/filtered
+          // queues retain their own control/decode-ahead contract.
+          const position = voice.ended || settings.position >= voice.asset.sampleCount ? 0 : settings.position,
+            frames = Math.min(4 * Math.floor(voice.asset.sampleRate / 8), streamPageFrames * (streamPagesPerVoice - 1))
+          // The existing 16-page reservation remains a hard Web bound at high
+          // rates. Short files stop at actual EOF; no following chunk is read.
+          if (!voice.stream!.ready(Math.floor(position), frames))
+            return { snapshot: this.snapshot(id), events: this.pending.splice(start), sourceReady: false }
+        }
         voice.bufferReleased = false
         if (voice.ended || settings.position >= voice.asset.sampleCount) this.seek(voice, 0, true)
         else this.resetFilters(voice)
@@ -501,7 +515,8 @@ export class AudioMixer {
         if (command.time < 60 && command.delay === 0) this.finishFade(voice, true)
       } else if (command.op === 'stopFade') this.finishFade(voice, command.finish)
     }
-    return { snapshot: this.snapshot(id), events: this.pending.splice(start) }
+    return { snapshot: this.snapshot(id), events: this.pending.splice(start),
+      ...(command.op === 'playSource' ? { sourceReady: true } : {}) }
   }
   private finishFade(voice: Voice, finish: boolean): void {
     if (!voice.fade) return
@@ -763,10 +778,16 @@ export class AudioMixer {
     }
     const position = Math.floor(voice.settings.position),
       first = Math.floor(position / streamPageFrames) * streamPageFrames,
-      end = Math.min(stream.asset.sampleCount, first + 3 * streamPageFrames)
+      // Default WaveImpl L2 duration is 1000 ms. Ordinary sequential Wave
+      // playback can fill that physical window ahead of time without running
+      // SLI decisions or filters. Keep the old minimum and existing bounded
+      // cache/4-request admission; do not issue a whole-file decode job.
+      pages = voice.kind === 'wave' && !voice.asset!.loops.links.length
+        ? Math.min(streamPagesPerVoice - 1, Math.max(3, Math.ceil(8 * Math.floor(stream.asset.sampleRate / 8) / streamPageFrames))) : 3,
+      end = Math.min(stream.asset.sampleCount, first + pages * streamPageFrames)
     // A public seek near a page end needs its following PCM before the first
     // output quantum, not only after that quantum has already starved. Keep
-    // the existing three-page horizon and four outstanding-request limit.
+    // the selected horizon and four outstanding-request limit.
     // Filtered sources own their decode-ahead/control boundaries separately.
     const link = this.link(voice),
       boundary = link?.from ?? stream.asset.sampleCount,

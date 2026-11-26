@@ -26,6 +26,7 @@ export interface LibraryStatus {
   quota?: number
   persisted: boolean
 }
+export type LibrarySettings = Pick<LibraryGame, 'title' | 'entry' | 'backend' | 'cddaDiscs' | 'cueEncoding'>
 export interface LibraryDownload {
   id: string
   gameId: string
@@ -58,5 +59,5 @@ export interface LibraryApi {
   importGame(request: LibraryImportRequest): Promise<LibraryGame>
   cancel(operation: string): Promise<void>
   remove(id: string, unfinishedOnly?: boolean): Promise<void>
-  update(id: string, settings: Pick<LibraryGame, 'title' | 'entry' | 'backend' | 'cddaDiscs'>): Promise<void>
+  update(id: string, settings: LibrarySettings): Promise<void>
 }

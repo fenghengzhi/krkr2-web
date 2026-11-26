@@ -275,6 +275,7 @@ test('textEncoding controls script, native text, KAG and compile reads while BOM
 for (const [scriptEncoding, hex, title] of [
   ['big5', 'a4a4a4e5', '中文'], ['gbk', 'd6d0cec4', '中文'],
   ['windows-1252', 'c3a9', 'Ã©'], ['shift_jis', '93fa967b', '日本'],
+  ['euc-kr', 'b0a18141', '가갂'], ['windows-1251', 'c4e8f1ea', 'Диск'],
   ['utf-8', 'e99baa', '雪'],
 ] as const) {
   test(`load ${scriptEncoding} startup, chapter and compiled scripts before a game sets its decoder`, async () => {

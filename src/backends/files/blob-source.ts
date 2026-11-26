@@ -3,6 +3,8 @@ import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { BinaryWriter } from '../../formats/binary/writer.ts'
 import { CompressionError } from '../../formats/binary/compression-error.ts'
 import { resourceViewBounds } from '../../engine/storage/resource-source.ts'
+import { plainTextBom } from '../../formats/text/stream.ts'
+import { strictTextDecoder } from './text-decoder.ts'
 
 export class BlobSource implements ByteSource {
   readonly size: number
@@ -123,11 +125,9 @@ export function decodeScript(bytes: Uint8Array): string | Uint8Array {
 }
 
 /** Unencoded imported metadata such as a CUE sheet. No TJS stream markers. */
-export function decodePlainText(bytes: Uint8Array): string {
-  if (bytes[0] === 0xff && bytes[1] === 0xfe)
-    return new TextDecoder('utf-16le', { fatal: true }).decode(bytes)
-  if (bytes[0] === 0xfe && bytes[1] === 0xff)
-    return new TextDecoder('utf-16be', { fatal: true }).decode(bytes)
+export function decodePlainText(bytes: Uint8Array, fallbackEncoding?: string): string {
+  const encoding = plainTextBom(bytes) ?? fallbackEncoding
+  if (encoding) return strictTextDecoder(encoding).decode(bytes)
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch {

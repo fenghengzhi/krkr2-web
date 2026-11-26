@@ -69,3 +69,28 @@ test('the VM opens a mixed-mode pressing at its data-track INDEX and writes prog
     assert(session.exportSaves().some((file) => file.path === 'savedata/disc-slot.txt'))
   } finally { await session.stop() }
 })
+
+test('CUE track names use the selected disc encoding during boot and inside a game that changes its script decoder', async (t) => {
+  const iso = discBootInput(false).files[0]!.buffer
+  const reader = createSessionArchiveReader(); t.after(() => reader.dispose())
+  const name = 'Диск.bin', prefix = 'FILE "', suffix = '" BINARY\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 02 MODE1/2352\nINDEX 01 00:02:00\n'
+  const text = prefix + name + suffix
+  const legacy = Buffer.concat([Buffer.from(prefix), Buffer.from('c4e8f1ea', 'hex'), Buffer.from('.bin' + suffix)])
+  for (const [cue, cueEncoding] of [[legacy, 'windows-1251'],
+    [Buffer.from('\ufeff' + text), 'euc-kr'], [Buffer.from('\ufeff' + text, 'utf16le'), 'gbk'],
+    [Buffer.from('\ufeff' + text, 'utf16le').swap16(), 'shift_jis']] as const) {
+    const files = pressing(iso, [], { cue, name })
+    const mount = await prepareProject(files, { mode: 'collection', cueEncoding, scriptEncoding: 'windows-1252' }, reader, async () => {})
+    assert.equal(mount.project?.bootDisc, 'media/CD.cue')
+    const { session } = await headless({}, { project: mount.project, cueEncoding, scriptEncoding: 'windows-1252' })
+    session.mount(mount.resources)
+    try {
+      assert.equal(await session.evaluate('(Scripts.textEncoding="SJIS",Storages.searchCD("KRKR_STORY"))'), 'D')
+      assert.equal(await session.evaluate('Scripts.evalStorage("D:/Routes/開幕.tjs")'), '42')
+      assert.equal(session.snapshot().cueEncoding, cueEncoding)
+    } finally { await session.stop() }
+  }
+  const wrong = pressing(iso, [], { cue: legacy, name })
+  await assert.rejects(prepareProject(wrong, { mode: 'auto', executable: 'media/CD.cue', cueEncoding: 'utf-8' },
+    reader, async () => {}), TypeError)
+})

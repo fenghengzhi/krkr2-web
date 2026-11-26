@@ -157,11 +157,13 @@ export class PortAudioBackend implements AudioBackend {
         finishPublication?.()
       }
     }
-    if (command.op === 'set' && command.property === 'position') {
+    if (command.op === 'play' || (command.op === 'set' && command.property === 'position')) {
       const stream = this.streams.current(command.id)
       if (stream?.asset)
-        return this.seeks.run({ op: 'seekSource', id: command.id, streamId: stream.streamId,
-          position: Number(command.value) }, (attempt) => this.send(attempt))
+        return this.seeks.run(command.op === 'play'
+          ? { op: 'playSource', id: command.id, streamId: stream.streamId }
+          : { op: 'seekSource', id: command.id, streamId: stream.streamId, position: Number(command.value) },
+        (attempt) => this.send(attempt))
     }
     return this.send(command)
   }

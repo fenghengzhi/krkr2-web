@@ -109,6 +109,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     resources: Resource[]; project?: GameProject; configFiles?: Resource[]; discImports?: Resource[]
   }> {
   const setting = copyProjectSelection(requested)
+  const readCue = decodeText && ((bytes: Uint8Array) => decodeText(bytes, setting.cueEncoding))
   const collection = setting.mode === 'collection'
   const onlyDiscs = discOnlyInput(resources.map((file) => file.name))
   if (collection && !onlyDiscs) return { resources }
@@ -154,7 +155,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     choice.executable && (/\.(?:iso|cue)$/i.test(choice.executable) || discAddress(choice.executable)) ||
     discAddress(choice.executableDirectory ?? ''))
   const boot = (sources: Resource[], location: ProjectLocation, distribution?: string, optionalMedia = false) =>
-    selectBootDisc(sources, location, distributionDiscBindings(discs, distribution), reader, checkpoint, decodeText, async (files, choice) => {
+    selectBootDisc(sources, location, distributionDiscBindings(discs, distribution), reader, checkpoint, readCue, async (files, choice) => {
       const hint = entryDisc ? entryDisc.path.split('>', 1)[0]!.toLowerCase() : entryName
       const game = await locateGame(files, choice, checkpoint, probe, 'files', hint, relativeEntry || !!entryDisc, false)
       return game && select(files, game)

@@ -13,7 +13,7 @@ import { TvpError } from './system/tvp-error.ts'
 import { TjsError } from './system/tjs-error.ts'
 import { mapTextStreamError } from './system/text-stream-error.ts'
 import type { TvpMessageId } from './system/tvp-message-ids.ts'
-import { ScriptTextEncoding, type ScriptEncoding } from './script/text-encoding.ts'
+import { scriptEncoding, ScriptTextEncoding, type ScriptEncoding } from './script/text-encoding.ts'
 import { debugBridge } from './tvp/debug.ts'
 import { DebugLog } from './diagnostics/log.ts'
 import { DebugPanels, type DebugPanel, type DebugVisibility } from './diagnostics/panels.ts'
@@ -69,7 +69,7 @@ import { SaveOverlay } from './storage/save-overlay.ts'
 import { StorageSelector, normalizeSelectorPath } from './storage/selector.ts'
 import type { DropResourceTree } from './ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from './ports/window-file-drop.ts'
-import { modeOffset } from '../formats/text/stream.ts'
+import { modeOffset, plainTextBom } from '../formats/text/stream.ts'
 import { parseStreamMode, parseTextWriterMode, type StreamMode } from '../formats/text/mode.ts'
 import { ScriptEvents } from './scheduler/events.ts'
 import { SystemEvents, type EventOptions, type EventOutcome } from './scheduler/system-events.ts'
@@ -183,6 +183,7 @@ export interface SessionSnapshot {
   project?: GameProject
   zipEncoding?: ZipNameEncoding
   scriptEncoding?: ScriptEncoding
+  cueEncoding?: ScriptEncoding
   registryFile?: string
   windows?: WindowPresentation[]
   activeWindow?: number
@@ -266,6 +267,7 @@ export interface SessionDependencies {
   project?: GameProject
   zipEncoding?: ZipNameEncoding
   scriptEncoding?: ScriptEncoding
+  cueEncoding?: ScriptEncoding
   registryFile?: string
   archives?: ArchiveReader
   /** The page implements the matching request/reply presentation protocol. */
@@ -351,6 +353,7 @@ export class EngineSession {
   private readonly dropped: DropStorage
   private readonly project?: GameProject
   private readonly zipEncoding: ZipNameEncoding
+  private readonly cueEncoding: ScriptEncoding
   private readonly registryFile?: string
   private registry?: Promise<GameRegistry>
   private readonly registryImports?: StorageResolver
@@ -560,6 +563,7 @@ export class EngineSession {
     }
     this.project = copyGameProject(deps.project)
     this.zipEncoding = zipNameEncoding(deps.zipEncoding)
+    this.cueEncoding = scriptEncoding(deps.cueEncoding, ' CUE ')
     this.registryFile = registryResourceFile(deps.registryFile)
     this.textEncoding = new ScriptTextEncoding(deps.scriptEncoding)
     const boot = this.project?.bootDisc
@@ -607,7 +611,8 @@ export class EngineSession {
         this.control.check(); return bytes
       },
       checkpoint: this.storageCheckpoint,
-      decodeText: (bytes) => this.deps.readText(bytes, '', undefined, 'plain'),
+      decodeText: (bytes) => this.deps.readText(bytes, '',
+        this.cueEncoding === 'auto' || plainTextBom(bytes) ? undefined : this.cueEncoding, 'plain'),
       cues: () => this.discoverGameDiscs(),
     }, cddaDiscs, this.project?.distribution, imports)
     this.storage = new StorageResolver(this.project?.directory ?? '', !this.project, deps.archives, this.storageCheckpoint, this.cddaDiscs)
@@ -4082,6 +4087,7 @@ export class EngineSession {
       ...(this.project ? { project: { ...this.project } } : {}),
       ...(this.zipEncoding === 'cp437' ? {} : { zipEncoding: this.zipEncoding }),
       ...(this.textEncoding.initial === 'auto' ? {} : { scriptEncoding: this.textEncoding.initial }),
+      ...(this.cueEncoding === 'auto' ? {} : { cueEncoding: this.cueEncoding }),
       ...(this.registryFile ? { registryFile: this.registryFile } : {}),
       ...this.layers.inspect(),
       handles: runtime?.handles ?? 0,
@@ -4301,10 +4307,8 @@ export class EngineSession {
         : await this.registryImports?.findAsync(path)
     if (!file) throw new TvpError('TVPCannotOpenStorage', [name], 'Registry export not found: ' + name)
     return readRegistryExport(file, (bytes) => {
-      const hasBom = bytes[0] === 0xff && bytes[1] === 0xfe || bytes[0] === 0xfe && bytes[1] === 0xff ||
-        bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
       const initial = this.textEncoding.initial
-      return this.deps.readText(bytes, '', hasBom || initial === 'auto' ? undefined : initial, 'plain')
+      return this.deps.readText(bytes, '', initial === 'auto' || plainTextBom(bytes) ? undefined : initial, 'plain')
     }, this.storageCheckpoint)
   }
   private async readRegValue(path: string): Promise<string | bigint | undefined> {

@@ -1,10 +1,10 @@
-export const scriptEncodings = ['auto', 'shift_jis', 'gbk', 'big5', 'windows-1252', 'utf-8'] as const
+export const scriptEncodings = ['auto', 'shift_jis', 'gbk', 'big5', 'euc-kr', 'windows-1251', 'windows-1252', 'utf-8'] as const
 export type ScriptEncoding = typeof scriptEncodings[number]
 
-export function scriptEncoding(value: unknown): ScriptEncoding {
+export function scriptEncoding(value: unknown, field = '脚本与剧情'): ScriptEncoding {
   if (value === undefined) return 'auto'
   for (const name of scriptEncodings) if (value === name) return name
-  throw new Error('未知的脚本与剧情编码')
+  throw new Error('未知的' + field + '编码')
 }
 
 /** Scripts.textEncoding selects the decoder for subsequent BOM-less reads. */
