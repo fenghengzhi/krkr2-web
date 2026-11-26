@@ -30,4 +30,4 @@ ZIP 的 deflate 成员可按范围读取，超过 64 MiB 的音乐无需分配�
 
 132 的 `653ca3b`、133 首版 `25cd99d` 和最终版 `88601e3` 在这次查询时均为 `pending`，没有作业或产物。[132](https://github.com/fenghengzhi/krkr2-web/actions/runs/45757288264) · [133 首版](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759125623) · [133 最终版](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759226490)
 
-134 新增 **11 个 Node 用例、每个浏览器项目 8 个常规用例和 4 个游戏库用例**。图层共享观察由 11 项增加到 12 项，原有测试定义保留。会话协议为 47。**134 尚无托管结果**，全部验证只在 GitHub-hosted Actions 执行，下一批再取回，不实时监控。整体非插件兼容目标仍未完成。
+134 新增 **11 个 Node 用例、每个浏览器项目 8 个常规用例和 4 个游戏库用例**。图层共享观察由 11 项增加到 12 项，原有测试定义保留。会话协议为 47。实现提交 `82a8aa0917bfce6bfab39818a3ca592b5f032b82` 的 GitHub 托管运行首次登记为 `pending`，尚无执行结论。下一批再取回结果。[第 134 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45761489263) 整体非插件兼容目标仍未完成。

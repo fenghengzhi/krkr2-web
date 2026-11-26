@@ -2,7 +2,7 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
-第 134 批接入 ZIP 发行包自动识别、压缩大音乐的范围读取和游戏库恢复，校准 MIDI 音量与淡出，并修订游戏路线的只读观察、KAG 图层保存调用和截图像素验收。新增 11 个 Node 用例、每浏览器 8 个常规用例及 4 个游戏库用例，尚无本批托管结果。[134 实现与验收](decisions/134-zip-distributions-midi-and-game-playback.md)
+第 134 批接入 ZIP 发行包自动识别、压缩大音乐的范围读取和游戏库恢复，校准 MIDI 音量与淡出，并修订游戏路线的只读观察、KAG 图层保存调用和截图像素验收。新增 11 个 Node 用例、每浏览器 8 个常规用例及 4 个游戏库用例，实现提交 `82a8aa0` 的托管验证首次登记为 `pending`。[134 实现与验收](decisions/134-zip-distributions-midi-and-game-playback.md) · [第 134 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45761489263)
 
 本次取回的 131 主构建成功，Node 为 4,014 通过、11 失败、2 超时取消。原始介绍游戏六个浏览器与后端组合中五个通过。Firefox Asyncify 在完成菜单存读档和刷新恢复后，第四页返回菜单超时。132、133 首版和最终版在同次固定查询时均仍 `pending`。后续继续取回缺失结果并修复实际游戏失败，不能把修订候选或未启动作业计为通过。[131 运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45755797755)
 
