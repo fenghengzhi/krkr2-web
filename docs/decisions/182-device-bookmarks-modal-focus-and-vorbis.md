@@ -23,3 +23,5 @@
 第 172 批 Firefox 游戏库 **109/110 通过**。第 171 批在这个套件出现的 36 个失败用例此次均已通过，其中包括从光盘启动、换盘、恢复下载和存档迁移。剩余一项在大型影片换轨后等待游戏回报新轨道时超时。第 172 批 Chromium 游戏库的完整结果为 **110/110 通过**。[第 172 批 GitHub Actions](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217)
 
 本次新取回九份第 172 批浏览器产物，合计 2,988 项通过、356 项失败、2 项跳过，另有 613 项未报告。部分作业已取消。已取回的失败还涉及 WebKit 加载滚动场景时的启动状态和影片音画时钟。取回时第 173 至 181 批仍在队列中。以上计数仅属于已标明的提交和套件。[第 172 批 GitHub Actions](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217) · [第 181 批 GitHub Actions](https://github.com/fenghengzhi/krkr2-web/actions/runs/45880484737)
+
+第 182 批实现提交 `76a8f35` 登记时为 `pending`，结果留到下一批取回。[第 182 批 GitHub Actions](https://github.com/fenghengzhi/krkr2-web/actions/runs/45883191112)
