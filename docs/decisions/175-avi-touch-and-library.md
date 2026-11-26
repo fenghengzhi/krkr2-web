@@ -32,3 +32,5 @@ Firefox 另有八个字体候选及字体合集用例的画布顶部处在小数
 | [Chromium 浏览器，已取消](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668/job/140032169086) | 578 | 82 | 0 | 721 |
 
 取回时第 170 批还有一个作业在运行，第 171 至 174 批仍在排队。[第 170 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668) · [第 174 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45863379478)
+
+第 175 批实现提交 `aed119f` 登记时为 `pending`，下一批取回结果。[第 175 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45865578673)

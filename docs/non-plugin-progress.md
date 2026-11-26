@@ -4,6 +4,8 @@
 
 第 175 批接入 Microsoft Video 1 和 DivX 3 过场与相应 ADPCM 声音，修订触屏选择和游戏库重试。此次取回的第 170 批六份报告中，1580 项通过、295 项失败、1 项跳过，三个取消作业另有 1002 项未报告。[175 实现与托管证据](decisions/175-avi-touch-and-library.md)
 
+第 175 批实现提交 `aed119f` 登记时为 `pending`，下一批取回结果。[第 175 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45865578673)
+
 第 174 批处理 CUE 预加重音轨和旧过场的声音延迟。第 170 批 Firefox 第 2 分片有 311 项通过、60 项失败，本批按原版行为修订了章节历史、画布像素和鼠标按钮用例。[174 实现与托管证据](decisions/174-story-history-and-disc-audio.md)
 
 第 174 批实现提交 `972205a` 登记时为 `pending`，下一批取回运行结果。[第 174 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45863379478)
