@@ -276,7 +276,9 @@ export class KagParser {
     const buffer =
       old.slice(0, start) +
       source +
-      old.slice(token.end) +
+      // Expression evaluation can consume text or load another scenario.
+      // Native inserts before the suffix at its live post-evaluation cursor.
+      old.slice(this.curPos) +
       (token.lineCommand && !this.ignoreCR ? '\\' : '')
     if (buffer.length > 8 * 1024 * 1024) throw new Error('KAG macro expansion exceeds text budget')
     this.buffer = buffer
@@ -428,14 +430,15 @@ export class KagParser {
         this.advance(token)
         continue
       }
-      const macro = !kind ? yield* this.effect('getMacro', token.name) : undefined
+      const macro = !kind || kind === 'emb' ? yield* this.effect('getMacro', token.name) : undefined
       if (kind === 'emb' || macro !== undefined) {
+        // The closing delimiter is consumed before evaluating emb. A
+        // callback observing/reentering this parser must see the suffix.
+        if (!token.lineCommand) this.curPos++
         let content = macro === undefined ? string(yield* this.controlExpression(values.exp)) : string(macro)
-        if (
-          macro === undefined &&
-          (values.escape === undefined || !!(yield* this.effect('boolean', values.escape)))
-        )
-          content = content.replace(/\[/g, '[[')
+        // Original emb always produces text, regardless of an escape field.
+        // A real macro (including a macro named emb) still inserts tag source.
+        if (macro === undefined) content = content.replace(/\[/g, '[[')
         this.insert(token, content, start)
         if (macro !== undefined) {
           if (this.macroDepth >= 4096) throw new Error('KAG macro argument stack budget exceeded')

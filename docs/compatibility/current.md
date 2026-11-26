@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 132 批按原版滤镜生成 KAG 存档缩略图，修正 `[emb]` 显示方括号和表达式切换剧情后的续读位置。Wave 音量与左右声像接入原版的分贝换算。两种已测头版本的有损 ERI 现在均按原版拒绝 Gamma 编码。缩略图 BMP、实际剧情点击和浏览器混音输出等待同一提交的托管验收。[132 兼容范围](../decisions/132-game-thumbnails-embedded-text-and-wave-volume.md)
+
 第 131 批修正重叠菜单的显示与输入次序、KAG 在同一宏调用深度复用参数字典、Wave 换轨时继续执行淡变，以及多级基类名的字节码导出。130 的原版 ERI 差分已取得三种作者工具有损图片的像素，另有五个输入在原版初始化阶段被拒绝。[131 兼容范围](../decisions/131-layer-order-macro-arguments-and-wave-reopen.md)
 
 第 130 批调整 TJS 长小数和实数常量的字节码读写、投递到窗口的键盘事件、带有符号黑白点的图层调色，以及暂停影片定位时的画面确认。新增原版保存数值与有损 ERI 画布对照，结果等待托管运行。[130 兼容范围](../decisions/130-decimal-values-dct-and-game-input.md)

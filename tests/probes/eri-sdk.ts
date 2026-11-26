@@ -9,7 +9,7 @@ import {
 import { eriTruecolorCases, eriTruecolorFiles, eriTrueGray, eriTrueRgb, eriTrueRgba } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanCases, eriHuffmanFiles, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
 import { eriArithmeticCases, eriArithmeticFiles } from '../helpers/eri-arithmetic-fixtures.ts'
-import { eriDctCases, eriDctFiles, eriDctRejectedCases, eriDctBoundaryCases,
+import { eriDctCases, eriDctFiles, eriDctRejectedCases,
   eriDctInitializationError } from '../helpers/eri-dct-fixtures.ts'
 import { dctEncoderRecipes, encoderPixels, encoderRecipes, indexedEncoderRecipe, prepareEncodedImages } from './eri-encoder.ts'
 import { noColorKey } from '../../src/engine/graphics/loading.ts'
@@ -23,7 +23,7 @@ const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('he
 interface Case {
   id: string; source: string; mask?: string; index?: number; key?: number; province?: boolean
   width?: number; height?: number; expected?: readonly number[]; sdkReference?: boolean
-  initializationError?: boolean; boundaryObservation?: boolean; originalSha256?: string
+  initializationError?: boolean; originalSha256?: string
 }
 const reversed = (values: readonly number[], stride: number) => [...values.slice(stride), ...values.slice(0, stride)]
 const cases119: Case[] = [
@@ -42,12 +42,10 @@ const cases119: Case[] = [
 const corpus = process.env.KRKR_ERI_CORPUS ?? 'authored'
 assert(corpus === 'authored' || corpus === 'encoder' || corpus === 'dct')
 const cases: Case[] = corpus === 'dct' ? [
-  ...eriDctCases.filter((item) => !item.inline).map(({ name, width, height, rgba }) =>
-    ({ id: name.slice(0, -4), source: name, width, height, expected: rgba })),
+  ...eriDctCases.filter((item) => !item.inline).map(({ name, width, height, rgba, originalSha256 }) =>
+    ({ id: name.slice(0, -4), source: name, width, height, expected: rgba, originalSha256 })),
   ...eriDctRejectedCases.filter((item) => !item.inline).map(({ name, width, height, originalSha256 }) =>
     ({ id: name.slice(0, -4), source: name, width, height, initializationError: true, originalSha256 })),
-  ...eriDctBoundaryCases.map(({ name, width, height, rgba }) =>
-    ({ id: name.slice(0, -4), source: name, width, height, expected: rgba, boundaryObservation: true })),
   ...dctEncoderRecipes.map(({ id, width, height }) => ({ id, source: id + '.eri', width, height, sdkReference: true })),
 ] : corpus === 'encoder' ? encoderRecipes.map((recipe) => ({
   id: recipe.id, source: recipe.id + '.eri', width: recipe.width, height: recipe.height, expected: [...encoderPixels(recipe)],
@@ -168,7 +166,7 @@ async function compare() {
       finish, async inflate() { throw new Error('Unexpected inflate') }, async host() { throw new Error('Unexpected host decoder') },
     }, progress), finish, { now: () => 0, check() {}, async yield() {} })
   const results: { id: string; status: 'matched' | 'failed' | 'unreported' | 'preparation-failed'; error?: string; sha256?: string;
-    boundaryObservation?: boolean; nativeOutcome?: string }[] = []
+    nativeOutcome?: string }[] = []
   try {
     for (const item of cases) {
       let nativeOutcome: string | undefined
@@ -192,7 +190,7 @@ async function compare() {
           await assert.rejects(loader.province(name, width, height), (err: unknown) =>
             err instanceof TvpError && err.tvpMessage.id === 'TVPERILoadError' &&
             err.tvpMessage.args.length === 1 && err.tvpMessage.args[0] === provinceError)
-        } else if (item.initializationError || (item.boundaryObservation && nativeOutcome === 'error')) {
+        } else if (item.initializationError) {
           assert.equal(found[0], 'case|' + item.id + '|error|eri:' + eriDctInitializationError)
           await assert.rejects(async () => {
             const actual = (await loader.load(name, noColorKey)).image
@@ -222,10 +220,8 @@ async function compare() {
           }
           rgbaHash = sha(actual.data)
         }
-        results.push({ id: item.id, status: 'matched', sha256: rgbaHash,
-          boundaryObservation: item.boundaryObservation, nativeOutcome })
-      } catch (err) { results.push({ id: item.id, status: 'failed', error: String(err),
-        boundaryObservation: item.boundaryObservation, nativeOutcome }) }
+        results.push({ id: item.id, status: 'matched', sha256: rgbaHash, nativeOutcome })
+      } catch (err) { results.push({ id: item.id, status: 'failed', error: String(err), nativeOutcome }) }
     }
   } finally { loader.dispose() }
   const complete = sdk?.state === 'observed' && sdk.exitCode === 0 &&

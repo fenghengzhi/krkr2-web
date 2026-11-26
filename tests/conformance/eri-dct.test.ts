@@ -28,6 +28,8 @@ test('ERI inverse transform follows the two-dimensional cosine basis at all supp
 
 test('ERI frame 9 cropped blocks, prediction, chroma, alpha and grays reach the original row interface', () => {
   for (const item of eriDctCases) for (const mode of ['normal', 'grayscale'] as const) {
+    if (item.originalSha256)
+      assert.equal(createHash('sha256').update(item.bytes).digest('hex'), item.originalSha256, item.name)
     const rows: number[] = [], sizes: number[][] = []
     const image = finish(decodeSelectedEri(item.bytes, mode, { size(w, h) { sizes.push([w, h]) },
       write() { assert.fail('DCT publishes completed rows') }, row(y, rgba) { assert.equal(y, rows.length / (item.width * 4)); rows.push(...rgba) } }))
@@ -52,7 +54,7 @@ test('ERI DCT reports image size and withholds scanlines on invalid frame contro
   }
 })
 
-test('ERI DCT preserves the original 20100 Gamma rejection before publishing any row', () => {
+test('ERI DCT preserves Gamma initialization rejection at both supported versions before publishing any row', () => {
   for (const item of eriDctRejectedCases) {
     if (item.originalSha256)
       assert.equal(createHash('sha256').update(item.bytes).digest('hex'), item.originalSha256, item.name)

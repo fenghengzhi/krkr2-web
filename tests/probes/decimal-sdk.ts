@@ -25,6 +25,11 @@ try{
 System.exit();
 `)
 const baseline = decimalCases.map((item) => 'stockBits' in item ? item.stockBits : doubleBits(item.value))
+// The 2.32r2 process wrote these same values for literals, converted strings
+// and reloaded saves in run 45755797755 (decimal/native.json).
+const boundaryBits = ['7feffffffffffffb', '7feffffffffffffd', '7feffffffffffffd',
+  '7feffffffffffffe', '7feffffffffffffe', '7fefffffffffffff', '7fefffffffffffff',
+  'ffeffffffffffffe', '7feffffffffffffe', '7feffffffffffffe', '7fb9999999999999', '3ffcc359e067a348']
 const savedPaths = [...decimalPaths, ...decimalPaths.map((name) => 'boundary-' + name)]
 
 if (process.argv[2] === 'prepare') {
@@ -47,9 +52,8 @@ if (process.argv[2] === 'prepare') {
     const results = savedPaths.map((name) => {
       try {
         const bytes = read(name + '.tjs'), bits = savedRealBits(decode(bytes))
-        const expected = name.startsWith('boundary-') ? savedRealBits(decode(read('boundary-literal.tjs'))) : baseline
-        const length = name.startsWith('boundary-') ? decimalBoundaryTokens.length : baseline.length
-        return { name, sha256: hash(bytes), bits, matched: bits.length === length && bits.every((v, i) => v === expected[i]) }
+        const expected = name.startsWith('boundary-') ? boundaryBits : baseline
+        return { name, sha256: hash(bytes), bits, matched: bits.length === expected.length && bits.every((v, i) => v === expected[i]) }
       } catch (error) { return { name, matched: false, error: String(error) } }
     })
     const complete = processState.state === 'observed' && processState.commit === manifest.commit && processState.exitCode === 0 &&

@@ -46,8 +46,10 @@ function layerOrderRun(id){
    orderHistory.getLayerAt(-1,-1).name,orderPortrait.getLayerAt(0x4000000000000002,2,true).name].join(",");
  }
  if(id=="order-nested-hit"){
-  var caller=new Layer(orderWindow,orderHistory);orderWindow.add(caller);caller.setPos(3,2);
-  var nested=caller.getLayerAt(8,3).name;caller.parent=null;
+  var holder=new Layer(orderWindow,orderHistory),caller=new Layer(orderWindow,holder);
+  orderWindow.add(caller);caller.setPos(3,2);
+  var nested=caller.getLayerAt(8,3).name;invalidate holder;
+  if(caller.parent!==null)throw new Exception("Retired parent still attached");
   var detached=caller.getLayerAt(8,3,true).name;
   orderPortrait.enabled=false;
   return [nested,detached,int(orderHistory.getLayerAt(10,6)===null),orderHistory.getLayerAt(10,6,false,true).name].join(",");

@@ -144,6 +144,7 @@ import { decodePng } from '../formats/image/png.ts'
 import { decodeGif } from '../formats/image/gif.ts'
 import { decodeTlg } from '../formats/image/tlg/index.ts'
 import { stretchPixels } from './graphics/resample.ts'
+import { filteredCopy } from './graphics/copy-resampler.ts'
 import { validateBlend } from './graphics/blend.ts'
 import { affinePixels } from './graphics/affine.ts'
 import { boxBlur } from './graphics/processing.ts'
@@ -5902,24 +5903,37 @@ export class EngineSession {
       case 'Layer.stretchOperate': {
         const id = number(0),
           face = this.layers.face(id),
-          bitmap = this.layers.bitmap(id),
+          layer = this.layers.get(id),
+          sourceLayer = this.layers.get(number(5)),
           operate = operation === 'Layer.stretchOperate',
-          mode = operate ? (number(12) === 128 ? this.layers.get(number(5)).type : number(12)) : 1
+          legacy = operate && !!number(14),
+          mode = operate ? (number(12) === 128 ? sourceLayer.type : number(12)) : 1,
+          opacity = operate ? clipInteger(13) : 255,
+          destination = { x: clipInteger(1), y: clipInteger(2), width: clipInteger(3), height: clipInteger(4) },
+          sourceRect = { x: clipInteger(6), y: clipInteger(7), width: clipInteger(8), height: clipInteger(9) },
+          clip = layer.bitmap?.clip ?? layer.clipBeforeRelease
+        if (legacy && face !== 0 && face !== 1)
+          throw new TvpError('TVPNotDrawableFaceType', [mode === 2 ? 'stretchPile' : 'stretchBlend'])
+        const covered = intersect(clip, {
+          x: Math.min(destination.x, destination.x + destination.width),
+          y: Math.min(destination.y, destination.y + destination.height),
+          width: Math.abs(destination.width), height: Math.abs(destination.height),
+        })
+        if (!covered.width || !covered.height) break
         if (!operate && ![0, 1, 4].includes(face))
-          throw new Error('Stretch copy requires dfAlpha, dfOpaque or dfAddAlpha')
+          throw new TvpError('TVPNotDrawableFaceType', ['stretchCopy'])
         if (operate) {
-          validateBlend(mode, face)
-          if (number(14) && face !== 0 && face !== 1)
-            throw new Error('stretchPile and stretchBlend require dfAlpha or dfOpaque')
+          try { validateBlend(mode, face) }
+          catch { throw new TvpError('TVPNotDrawableFaceType', ['operateStretch']) }
         }
-        const output = stretchPixels(
-          this.layers.sourceBitmap(number(5)).pixels,
-          { x: number(1), y: number(2), width: number(3), height: number(4) },
-          { x: number(6), y: number(7), width: number(8), height: number(9) },
-          bitmap.clip,
-          number(10),
-          number(11),
-        )
+        const bitmap = this.layers.bitmap(id), source = this.layers.sourceBitmap(sourceLayer.id).pixels,
+          bitmapClip = intersect(clip, { x: 0, y: 0, width: bitmap.width, height: bitmap.height }),
+          fullCopy = operate ? mode === 1 && face === 1 && !layer.holdAlpha && opacity === 255
+            : face !== 1 || !layer.holdAlpha,
+          work = fullCopy && filteredCopy(source, sourceRect, destination, bitmapClip, number(10), number(11), id === sourceLayer.id)
+        const output = work
+          ? { pixels: await this.finishGraphics(work), left: destination.x, top: destination.y }
+          : stretchPixels(source, destination, sourceRect, bitmapClip, number(10), number(11))
         if (!output.pixels.width || !output.pixels.height) break
         if (operate) {
           if (
@@ -5930,8 +5944,8 @@ export class EngineSession {
               { x: 0, y: 0, width: output.pixels.width, height: output.pixels.height },
               mode,
               face,
-              number(13),
-              this.layers.get(id).holdAlpha,
+              opacity,
+              layer.holdAlpha,
             )
           )
             break

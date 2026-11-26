@@ -62,8 +62,8 @@ export interface Xp3FixtureSegment { offset: number; originalSize: number; archi
 export interface Xp3FixtureEntry { name: string; size: number; sha256: string; adler32: number; segments: Xp3FixtureSegment[] }
 
 export const xp3CompressedAudioHeader = `48000|16|1|786432|0|12000|${xp3FarSample + 12000}|${xp3BackSample + 12000}`
-/** Original public Wave/TextStream calls. No production archive or audio
- * implementation is imported by this fixture. The SDK observer never plays. */
+/** Public game storage and Wave calls. The SDK records decoder fields before
+ * play and DirectSound format fields after creating the playback buffer. */
 export const xp3CompressedAudioSource = String.raw`
 System.exitOnNoWindowStartup=false;
 var xp3SegmentScript="${xp3SegmentScript}";
@@ -75,11 +75,16 @@ class Xp3CompressedSound extends WaveSoundBuffer {
 function xp3CompressedText(prefix=""){
  var lines=[];lines.load(prefix+"segment-text.txt");return lines.join("\n");
 }
-function xp3CompressedOpen(prefix=""){
+function xp3OpenDecoder(prefix=""){
  global.xp3Audio=new Xp3CompressedSound();
  xp3Audio.open(prefix+"${xp3CompressedWaveName}");
+}
+function xp3CompressedHeader(){
  return [xp3Audio.frequency,xp3Audio.bits,xp3Audio.channels,xp3Audio.totalTime,xp3Audio.samplePosition,
    xp3Audio.labels["prefix"].samplePosition,xp3Audio.labels["far"].samplePosition,xp3Audio.labels["back"].samplePosition].join("|");
+}
+function xp3CompressedOpen(prefix=""){
+ xp3OpenDecoder(prefix);return xp3CompressedHeader();
 }
 function xp3CompressedSeek(sample,phase){
  xp3Audio.paused=true;xp3Audio.samplePosition=sample;global.xp3AudioPhase=phase;

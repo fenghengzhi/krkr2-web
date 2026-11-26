@@ -49,7 +49,8 @@ for (const binary of [false, true]) {
       assert.equal(await session.evaluate('rw.labels["new"].samplePosition'), '10')
       await session.evaluate('(rw.play(),0)'); await settleAudioPages(audio)
       clock.advance(100); await session.idle()
-      assert.deepEqual(left, [...Array(20).fill(0.5), ...Array(39).fill(0.25), ...Array(60).fill(0.125), 0])
+      assert.deepEqual(left, [...Array(20).fill(0.5), ...Array(39).fill(0.25),
+        ...Array(60).fill(Math.fround(0.25 * 10 ** (-1505 / 2000))), 0])
       assert.deepEqual(right, left)
       assert.equal(await session.evaluate('[rw.samplePosition,rw.volume,rw.completed.join(","),rw.labelsSeen.join(",")].join("|")'),
         '100|0|0|old,new')

@@ -29,7 +29,7 @@ for (const binary of [false, true]) test(`${binary ? 'bytecode' : 'source'}: inv
     await session.evaluate('(System.assignMessage("TJSBadParamCount","new-open-count"),System.assignMessage("TJSVariantConvertError","new-open-string"),0)')
     assert.equal(await session.evaluate('soundOpenErrors(openSound)'), 'new-open-count|new-open-string')
     clock.advance(100); await session.idle()
-    assert.deepEqual(left, [...Array(59).fill(0.25), ...Array(60).fill(0.125), 0])
+    assert.deepEqual(left, [...Array(59).fill(0.25), ...Array(60).fill(Math.fround(0.25 * 10 ** (-1505 / 2000))), 0])
     assert.deepEqual(right, left)
     assert.equal(await session.evaluate('[openSound.samplePosition,openSound.completed,openSound.volume,openSound.seen.join(",")].join("|")'), '120|1|0|kept')
     // A successfully converted but missing storage still reaches the existing

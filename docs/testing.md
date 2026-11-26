@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 132 批新增 9 个 Node 用例，每个浏览器项目新增 12 个用例。三条浏览器路线分别核对 KAG 存档缩略图的每个像素及刷新读档、实际点击推进带方括号的剧情、AudioWorklet 左右声道的采样。原版 SDK 共用 11 个新增图层缩放场景及 8 个新增 KAG 场景。声音对照现有 40 个场景，分别记录脚本和解码器观察及需要音频设备的结果。[132 验收记录](decisions/132-game-thumbnails-embedded-text-and-wave-volume.md)
+
 第 131 批新增 12 个常规 Node 定义及每个浏览器项目 8 个定义。十个图层排序与命中场景共用同一套原版 SDK 和 Web 脚本。另有七个宏字典和五个换轨淡变场景，以及 12 种接近双精度上限的十进制写法。浏览器在原 KAG 模板中读回已保存的层顺序，并采样 AudioWorklet 输出的左右声道。[131 验收记录](decisions/131-layer-order-macro-arguments-and-wave-reopen.md)
 
 本次推送选择 `[application tests]`。GitHub 将运行显示为 **Application and compatibility tests**，要求构建、Node、浏览器、直接运行时、发行兼容及原版对照等本批作业成功。三组专门重复历史宿主运行时问题的诊断在汇总中显示为 `skipped`。它们的既有报告按原提交保留。

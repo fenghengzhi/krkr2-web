@@ -27,8 +27,11 @@ System.exceptionHandler=function(e){global.record("fatal|"+e.message);global.Sys
 Scripts.execStorage("posted-input.tjs");postedHolders();
 ${Object.keys(postedInputErrors).map((id) => `record("error-${id}|"+postedInvalid(${id}));`).join('\n')}
 record("ordinary-sync|"+postedOrdinary());
-var postedPhase=0,postedTimer=new Timer(global,"postedObserve");
+var postedPhase=0,postedTicks=[],postedTimer=new Timer(global,"postedObserve");
 function postedObserve(){
+ // The native Timer can drain several expired callbacks in one dispatch.
+ // Disable it to clear that backlog, then arm a fresh interval after posting.
+ postedTimer.enabled=false;postedTicks.add(System.getTickCount());postedTicks.save("native-timer.txt");
  if(postedPhase==0){
   record("ordinary|"+postedTrace.join("|"));
   postedB.visible=false;postedA.bringToFront();recordPointer("before-set");postedRoot.setCursorPos(20,10);
@@ -48,10 +51,11 @@ function postedObserve(){
   postedA.postInputEvent("onKeyPress",%[key:0x82]);postedA.postInputEvent("onKeyPress",%[key:0xa0]);postedPhase=3;
  }else{
   record("native-acp|"+postedTrace.join("|"));postedTimer.enabled=false;
-  invalidate postedB;invalidate postedA;record("done");System.exit();
+  invalidate postedB;invalidate postedA;record("done");System.exit();return;
  }
+ postedTimer.enabled=true;
 }
-postedTimer.interval=100;postedTimer.enabled=true;
+postedTimer.enabled=false;postedTimer.interval=100;postedTimer.capacity=1;postedTimer.enabled=true;
 `), expected = {
     ...Object.fromEntries(Object.entries(postedInputErrors).map(([id, value]) => ['error-' + id, value])),
     'ordinary-sync': 'key,shift,key,shift',
@@ -80,6 +84,10 @@ if (process.argv[2] === 'prepare') {
     pointerLines = decode(pointerRaw).replace(/^\ufeff/, '').trimEnd().split(/\r?\n/).filter(Boolean),
     pointerComplete = pointerLines.length === 4 && ['before-set', 'after-set', 'after-post', 'observe-mouse']
       .every((stage, i) => pointerLines[i]!.startsWith(stage + '|'))
+  const timerRaw = existsSync(resolve(game, 'native-timer.txt')) ? readFileSync(resolve(game, 'native-timer.txt')) : Buffer.alloc(0)
+  const timerTicks = decode(timerRaw).trim().split(/\r?\n/).map(Number)
+  const freshTimers = timerTicks.length === 4 && timerTicks.every((tick, i) =>
+    Number.isSafeInteger(tick) && (i === 0 || tick > timerTicks[i - 1]!))
   const raw = existsSync(resolve(game, 'native-events.txt')) ? readFileSync(resolve(game, 'native-events.txt')) : Buffer.alloc(0),
     lines = decode(raw).replace(/^\ufeff/, '').trimEnd().split(/\r?\n/),
     results = Object.entries(expected).map(([id, expected]) => {
@@ -88,10 +96,11 @@ if (process.argv[2] === 'prepare') {
         : observed.length === 1 && observed[0] === expected ? 'matched' : 'mismatched' }
     }), acp = lines.filter((line) => line.startsWith('native-acp|')),
     complete = processResult.state === 'observed' && processResult.commit === inputs.commit && processResult.exitCode === 0 &&
-      lines.filter((line) => line === 'done').length === 1 && acp.length === 1 && pointerComplete && results.every((row) => row.state === 'matched')
+      lines.filter((line) => line === 'done').length === 1 && acp.length === 1 && pointerComplete && freshTimers && results.every((row) => row.state === 'matched')
   save('comparison.json', { commit: inputs.commit, complete, process: processResult, processError, results,
     nativeAcpObservation: acp, nativeAcpComparedToWeb: false, lines, rawSha256: hash(raw),
     pointerObservations: pointerLines, pointerComplete, pointerSha256: hash(pointerRaw),
+    timerTicks, freshTimers, timerSha256: hash(timerRaw),
     mouseScope: 'Final mouse event coordinates/order remain strict. Cursor getter observations do not prove Win32 HWND hit testing or successful SetCursorPos; they localize a missing delivery without accepting it.' })
   assert(complete, 'Original posted-input comparison incomplete or different; raw observations retained')
 }

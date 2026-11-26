@@ -288,7 +288,8 @@ export class SoundService {
       const property = args[0]
       if (property === 'volume') {
         if (args[1] !== undefined) {
-          this.globalVolume = Math.max(0, Math.min(100000, number(1)))
+          const volume = typeof args[1] === 'bigint' ? Number(BigInt.asIntN(32, args[1])) : number(1) | 0
+          this.globalVolume = Math.max(0, Math.min(100000, volume))
           if (this.backend) await this.command({ op: 'globalVolume', volume: this.globalVolume })
         }
         return BigInt(this.globalVolume)
@@ -658,9 +659,9 @@ export class SoundService {
         return this.result(undefined, callbacks)
       }
       // WaveImpl takes a tjs_int, after the public setter's TJS integer
-      // conversion. Preserve its low 32 bits before the pan clamp or frequency
+      // conversion. Preserve its low 32 bits before the gain/pan clamp or frequency
       // sentinel dispatch (in particular 2^32 becomes original-frequency zero).
-      let setting = sound.kind === 'wave' && (property === 'pan' || property === 'frequency') && typeof input[1] === 'bigint'
+      let setting = sound.kind === 'wave' && ['pan', 'frequency', 'volume', 'volume2'].includes(property) && typeof input[1] === 'bigint'
         ? Number(BigInt.asIntN(32, input[1])) : numeric(1)
       if (property === 'volume' || property === 'volume2')
         setting = Math.max(0, Math.min(100000, setting))

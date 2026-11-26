@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { encodeBmp, decodeBmp } from '../../src/formats/image/bmp.ts'
 import { stretchPixels } from '../../src/engine/graphics/resample.ts'
+import { filteredCopy } from '../../src/engine/graphics/copy-resampler.ts'
 const rect = (width: number, height = 1) => ({ x: 0, y: 0, width, height })
 test('BMP writers use padded bottom-up rows, preserve masks and encode the fixed palette', () => {
   const source = {
@@ -27,6 +28,17 @@ test('BMP writers use padded bottom-up rows, preserve masks and encode the fixed
   assert.equal(decodeBmp(indexed)!.data[0], 255)
   assert.throws(() => decodeBmp(rgba.subarray(0, 60)), /Truncated/)
 })
+test('interrupting a filtered self-copy after a work checkpoint preserves the input pixels', () => {
+  const image = { width: 128, height: 128, data: new Uint8Array(128 * 128 * 4) }
+  for (let i = 0; i < image.data.length; i++) image.data[i] = (i * 17 + (i >>> 8)) & 255
+  const before = image.data.slice(), bounds = { x: 0, y: 0, width: 128, height: 128 }
+  const work = filteredCopy(image, bounds, { x: 1, y: 2, width: 125, height: 119 }, bounds, 3, -1, true)!
+  assert.equal(work.next().done, false)
+  assert.equal(work.next().done, false)
+  work.return(image)
+  assert.deepEqual(image.data, before)
+})
+
 test('stretch filters preserve mapping under clipping, reversal and reference-edge control', () => {
   const source = { width: 2, height: 1, data: new Uint8Array([255, 0, 0, 64, 0, 0, 255, 192]) }
   assert.deepEqual(

@@ -23,7 +23,7 @@ for (const binary of [false, true]) test(`${binary ? 'bytecode' : 'source'}: nat
     clock.advance(120); await session.idle()
     // The un-clamped target makes the first 60ms update overshoot to 100000.
     // Clamping the target first would wrongly produce a 62500 intermediate.
-    assert.deepEqual(left, [...Array(59).fill(0.125), ...Array(61).fill(0.5)])
+    assert.deepEqual(left, [...Array(59).fill(Math.fround(0.5 * 10 ** (-3010 / 2000))), ...Array(61).fill(0.5)])
     assert.deepEqual(right, left)
     assert.equal(await session.evaluate('faded.observations.join(",")'), '100000')
     assert.equal(await session.evaluate('faded.samplePosition'), '120')

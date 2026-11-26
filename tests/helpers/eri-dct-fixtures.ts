@@ -7,6 +7,7 @@ import { ForwardTree, statsFor } from './eri-huffman-fixtures.ts'
 interface DctFixture {
   name: string; width: number; height: number; degree: number; sampling: number
   alpha?: boolean; positive?: boolean; inline?: boolean; ac?: boolean; chromaAC?: boolean; huffman?: boolean; version?: number
+  originalSha256?: string
 }
 
 const shapes: DctFixture[] = [
@@ -15,11 +16,14 @@ const shapes: DctFixture[] = [
   { name: 'dct-411-ac.eri', width: 9, height: 5, degree: 5, sampling: 0x40101, ac: true, huffman: true },
   { name: 'dct-422-chroma.eri', width: 17, height: 16, degree: 3, sampling: 0x40202, chromaAC: true, huffman: true },
   { name: 'dct-inline.eri', width: 18, height: 9, degree: 3, sampling: 0x40101, ac: true, inline: true, huffman: true },
+  { name: 'dct-422-huffman-v20100.eri', width: 17, height: 16, degree: 3, sampling: 0x40202,
+    chromaAC: true, huffman: true, version: 0x20100,
+    originalSha256: '7756686d8f2253e97ed098e49d198e95941abb5892858bb8a2bf98dd85166b9e' },
 ]
-// Preserve the original 20100/Gamma inputs as initialization-error controls.
+// Preserve the original 20100/20200 Gamma inputs as initialization-error controls.
 // Their coefficients are unchanged; no failed native pixels become a success
 // oracle. The original ZIP hashes below are checked only on hosted runners.
-const gammaShapes: (DctFixture & { originalSha256?: string })[] = [
+const gammaShapes: DctFixture[] = [
   { ...shapes[0]!, name: 'dct-444-gamma.eri', huffman: false,
     originalSha256: '6037ff72d7e10442f6df90acc647d76afeee1c47c04a2d24e8a96d096b27cb3b' },
   { ...shapes[1]!, name: 'dct-422-alpha-gamma.eri', huffman: false,
@@ -29,6 +33,8 @@ const gammaShapes: (DctFixture & { originalSha256?: string })[] = [
   { ...shapes[3]!, name: 'dct-422-gamma-chroma.eri', huffman: false,
     originalSha256: '21e733d229a8e925288c15f418bb2c821e61e9d2cb3d9e609132f7caf4e14797' },
   { name: 'dct-inline-gamma.eri', width: 17, height: 9, degree: 3, sampling: 0x40101, ac: true, inline: true },
+  { ...shapes[3]!, name: 'dct-422-gamma-v20200.eri', version: 0x20200, huffman: false,
+    originalSha256: '4b90caf0d931c08eda5dce3e9b4786620a75ed906da6cdb88bfa4d925f4c1933' },
 ]
 
 function build(shape: DctFixture) {
@@ -115,17 +121,12 @@ export const eriDctRejectedCases = gammaShapes.map((shape) => {
   const { name, width, height, bytes, inline } = build(shape)
   return { name, width, height, bytes, inline, reason: eriDctInitializationError, originalSha256: shape.originalSha256 }
 })
-// These cross the two header fields independently. No prior SDK result exists:
-// the hosted comparison records its actual success or exact initialization
-// error, then requires the selected Web loader to agree.
-export const eriDctBoundaryCases = [
-  build({ ...shapes[3]!, name: 'dct-422-gamma-v20200.eri', version: 0x20200, huffman: false }),
-  build({ ...shapes[3]!, name: 'dct-422-huffman-v20100.eri', version: 0x20100 }),
-]
+// Batch131's original SDK resolved both crossed controls: 20100/Huffman
+// succeeds, 20200/Gamma fails Initialize. They now have strict contracts above.
 export const eriDctAlpha = eriDctCases.find((item) => item.alpha)!
 export const eriDctMaskedRgba = eriDctAlpha.rgba.map((value, at) => at % 4 === 3 ? eriDctAlpha.gray[at - 3]! : value)
 export function eriDctFiles(): Record<string, Uint8Array> {
-  const files = Object.fromEntries([...eriDctCases, ...eriDctRejectedCases, ...eriDctBoundaryCases]
+  const files = Object.fromEntries([...eriDctCases, ...eriDctRejectedCases]
     .map(({ name, bytes }) => [name, bytes]))
   return { ...files, 'dct-mask.eri': eriDctAlpha.bytes, 'dct-mask_m.eri': eriDctAlpha.bytes,
     'dct-mask-bad.eri': eriDctAlpha.bytes, 'dct-mask-bad_m.eri': files['dct-422-alpha-gamma.eri']! }

@@ -147,7 +147,9 @@ for (const mode of ['headless', 'port'] as const)
       assert.equal(mixer.snapshot(1).volume, 50000)
       assert.equal(mixer.snapshot(1).fading, true)
       await audio.command({ op: 'play', id: 1 }); await advance(50)
-      assert.deepEqual(left, [...Array(20).fill(0.5), ...Array(50).fill(0), ...Array(49).fill(0.125), 0])
+      // Native 50% volume selects -1505 hundredths dB, not half amplitude.
+      assert.deepEqual(left, [...Array(20).fill(0.5), ...Array(50).fill(0),
+        ...Array(49).fill(Math.fround(0.25 * 10 ** (-1505 / 2000))), 0])
       assert.deepEqual(right, left)
       assert.equal(events.filter((event) => event.type === 'fade').length, 1)
       assert.equal(mixer.snapshot(1).position, 50)

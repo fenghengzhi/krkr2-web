@@ -245,10 +245,10 @@ export function* decodeSelectedEri(bytes: Uint8Array, mode: ImageDecodeSelection
   // below; other potentially valid codecs must not acquire invented errors.
   if (transformation === 1) {
     if ((architecture !== GAMMA && architecture !== HUFFMAN) || kind !== RGB || depth < 24) failed('Initialize')
-    // The pinned 2.32r2 SDK rejects this header combination before decoding.
-    // The newer ERINA mirror accepts it; do not infer that its acceptance
-    // describes the bundled library, or extend this result to other versions.
-    if (version === 0x00020100 && architecture === GAMMA) failed('Initialize')
+    // The pinned 2.32r2 SDK rejects DCT Gamma at both supported ImageInf
+    // versions; its crossed Huffman controls succeed. The newer ERINA mirror
+    // accepts Gamma, but does not identify the bundled library's behavior.
+    if ((version === 0x00020100 || version === 0x00020200) && architecture === GAMMA) failed('Initialize')
     const alpha = (type & WITH_ALPHA) !== 0
     const image = yield* decodeEriDct(new EriBits(bytes.subarray(parsed.frame.start, parsed.frame.end)), {
       width, height, degree: blockingDegree, sampling: info.getUint32(32, true), alpha, huffman: architecture === HUFFMAN,

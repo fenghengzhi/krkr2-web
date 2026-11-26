@@ -8,6 +8,7 @@ import { wavePositionExpected, wavePositionFiles, wavePositionSource } from '../
 import { waveFadeExpected, waveFadeDelayedExpected, waveFadeSource } from '../helpers/wave-fade.ts'
 import { waveFrequencyExpected, waveFrequencyFiles, waveFrequencySource } from '../helpers/wave-frequency.ts'
 import { waveReopenExpected, waveReopenFiles, waveReopenSource } from '../helpers/wave-reopen.ts'
+import { waveGainSource, waveGainPublicExpected } from '../helpers/wave-gain.ts'
 import { soundOpenExpected, soundOpenFiles, soundOpenSource } from '../helpers/sound-open.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
@@ -26,8 +27,10 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   'foreign-guid.wav': 'wave:<foreign-guid.wav>', ...wavePositionExpected,
   ...Object.fromEntries(Object.entries(waveFadeExpected).map(([id, value]) => ['fade-' + id, value])),
   'fade-delayed': waveFadeDelayedExpected, 'frequency-original': waveFrequencyExpected,
+  'wave-gain-controls': waveGainPublicExpected,
   ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
+  'xp3-decoder': [xp3SegmentScript, xp3SegmentText, 'stop', '48000', '0', '12000', '36320736', '1452000'].join('~'),
   'xp3-compressed': [xp3SegmentScript, xp3SegmentText, xp3CompressedAudioHeader, 'closed'].join('~') }
 const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
@@ -62,9 +65,20 @@ if (process.argv[2] === 'prepare') {
     waveReopenSource,
     ...Object.keys(waveReopenExpected).map((kind) =>
       `try{record("wave-reopen-${kind}|"+waveReopenObserve("${kind}"));}catch(e){record("wave-reopen-${kind}|unexpected-error:"+e.message);}`),
-    // Normal public archive/TextStream/Wave open calls only. Do not play or
-    // construct a device buffer: Windows audio availability is not this gate.
-    'try{Scripts.execStorage("compressed-audio.xp3>compressed-audio.tjs");var xp3Proof=[xp3SegmentScript,xp3CompressedText("compressed-audio.xp3>"),xp3CompressedOpen("compressed-audio.xp3>"),xp3CompressedClose()];record("xp3-compressed|"+xp3Proof.join("~"));}catch(e){record("xp3-compressed|unexpected-error:"+e.message);}',
+    waveGainSource,
+    'try{record("wave-gain-controls|"+waveGainPublicControls());}catch(e){record("wave-gain-controls|unexpected-error:"+e.message);}',
+    // The 2.32r2 bits/channels/totalTime getters use the DirectSound output
+    // format. Wave.open has populated the decoder but has not created it yet.
+    `var xp3Prefix="compressed-audio.xp3>",xp3Text,xp3Opened=false;
+     try{Scripts.execStorage(xp3Prefix+"compressed-audio.tjs");xp3Text=xp3CompressedText(xp3Prefix);
+       xp3OpenDecoder(xp3Prefix);xp3Opened=true;record("xp3-decoder|"+[xp3SegmentScript,xp3Text,xp3Audio.status,xp3Audio.frequency,xp3Audio.samplePosition,
+         xp3Audio.labels["prefix"].samplePosition,xp3Audio.labels["far"].samplePosition,xp3Audio.labels["back"].samplePosition].join("~"));
+     }catch(e){record("xp3-decoder|unexpected-error:"+e.message);}
+     try{if(!xp3Opened)throw new Exception("XP3 decoder did not open");xp3Audio.paused=true;xp3Audio.play();xp3Audio.stop();
+       var xp3Proof=[xp3SegmentScript,xp3Text,xp3CompressedHeader(),xp3CompressedClose()];record("xp3-compressed|"+xp3Proof.join("~"));
+     }catch(e){record("xp3-compressed|unexpected-error:"+e.message);
+       try{if(typeof global.xp3CompressedClose!="undefined")xp3CompressedClose();}catch(cleanup){record("xp3-cleanup|"+cleanup.message);}
+     }`,
     waveFadeSource,
     ...Object.keys(waveFadeExpected).map((id) =>
       `try{record("fade-${id}|"+waveFadeObserve("${id}"));}catch(e){record("fade-${id}|unexpected-error:"+e.message);}`),
@@ -75,7 +89,7 @@ if (process.argv[2] === 'prepare') {
     files: Object.entries(files).map(([name, bytes]) => ({ name, sha256: digest(bytes) })),
     xp3Archive: { name: archiveName, bytes: archive.bytes.length, sha256: archive.sha256,
       waveBytes: archive.wave.size, waveSha256: archive.waveSha256, entries: archive.entries,
-      scope: '72-MiB WAVE in one real zlib segment, streamed writer; mixed compressed/raw multi-segment script and text. Original SDK checks open/header/labels/text without playback.' } })
+      scope: '72-MiB WAVE in one zlib segment with mixed-segment script and text. SDK checks decoder/labels at open, then creates a paused playback buffer for output format and duration.' } })
 } else if (process.argv[2] === 'compare') {
   const manifest = JSON.parse(readFileSync(resolve(output, 'inputs.json'), 'utf8'))
   assert.equal(manifest.commit, process.env.GITHUB_SHA)

@@ -27,6 +27,7 @@ import { FilteredWaveSource, filteredWaveSourceMemoryBytes } from './filtered-wa
 import { phaseVocoderMemoryBytes, validatePhaseVocoderParameters } from './phase-vocoder.ts'
 import { StreamPcm, streamPcmReservation } from './stream-pcm.ts'
 import { applySliExpression } from '../../formats/audio/sli.ts'
+import { waveAudioGains } from './wave-audio.ts'
 interface Fade {
   target: number
   delta: number
@@ -57,6 +58,7 @@ interface Voice {
   filterBudget?: AudioFilterBudget
   ended?: boolean
   stream?: StreamPcm
+  gains?: { volume: number; volume2: number; globalVolume: number; pan: number; muted: boolean; left: number; right: number }
 }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 const lowerBound = <T>(items: T[], position: number, key: (item: T) => number): number => {
@@ -119,6 +121,15 @@ export class AudioMixer {
     const voice = this.voices.get(id)
     if (!voice) throw new Error('Audio voice is closed')
     return voice
+  }
+  private waveGains(voice: Voice) {
+    const { volume, volume2, pan } = voice.settings, cached = voice.gains
+    if (cached && cached.volume === volume && cached.volume2 === volume2 && cached.pan === pan &&
+        cached.globalVolume === this.globalVolume && cached.muted === this.waveMuted) return cached
+    // Reuse across realtime blocks. Table/pow work is done at module startup;
+    // unchanged controls allocate nothing, including silent/unloaded fades.
+    return voice.gains = { volume, volume2, pan, globalVolume: this.globalVolume, muted: this.waveMuted,
+      ...waveAudioGains(volume, volume2, this.globalVolume, pan, this.waveMuted) }
   }
   snapshot(id: number): SoundSnapshot {
     const voice = this.get(id),
@@ -691,7 +702,7 @@ export class AudioMixer {
     for (const voice of this.voices.values()) {
       const settings = voice.settings,
         asset = voice.asset
-      const master = voice.kind === 'wave' ? (this.waveMuted ? 0 : this.globalVolume / 100000) : 1
+      let gains = voice.kind === 'wave' ? this.waveGains(voice) : undefined
       let chain: AudioFilterChain | undefined, waiting = false
       const label = (name: string, position: number) => {
         settings.position = position
@@ -702,6 +713,7 @@ export class AudioMixer {
       for (let frame = 0; frame < left.length; frame++) {
         voice.clock += dt
         if (voice.fade && voice.clock + 1e-10 >= voice.fade.next) {
+          const previousVolume = settings.volume
           voice.fade.next += 0.06
           if (voice.fade.delay > 0) voice.fade.delay = Math.max(0, voice.fade.delay - 60)
           else if (voice.fade.count === 1) this.finishFade(voice, true)
@@ -709,6 +721,7 @@ export class AudioMixer {
             voice.fade.count--
             settings.volume = clamp(settings.volume + voice.fade.delta, 0, 100000)
           }
+          if (gains && settings.volume !== previousVolume) gains = this.waveGains(voice)
         }
         if (!asset || settings.paused || voice.status !== 'play' || waiting) continue
         try {
@@ -754,10 +767,10 @@ export class AudioMixer {
               if (asset.channels >= 8) r += sample(7) * 0.5
             }
           }
-          const gain = (((settings.volume / 100000) * settings.volume2) / 100000) * master,
+          const gain = ((settings.volume / 100000) * settings.volume2) / 100000,
             pan = settings.pan / 100000
-          left[frame] += l * gain * (pan > 0 ? 1 - pan : 1)
-          right[frame] += r * gain * (pan < 0 ? 1 + pan : 1)
+          left[frame] += l * (gains?.left ?? gain * (pan > 0 ? 1 - pan : 1))
+          right[frame] += r * (gains?.right ?? gain * (pan < 0 ? 1 + pan : 1))
           if (chain) {
             chain.advance(step, label)
             settings.position = chain.sourcePosition()
