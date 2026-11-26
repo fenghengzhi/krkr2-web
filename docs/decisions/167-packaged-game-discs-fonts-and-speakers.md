@@ -23,3 +23,5 @@
 第 160 批两项 WebKit 目录选择验收在 Playwright 等待文件选择器完成时超时，已有浏览器事件却记录了本次选择的全部 41 个文件及正确的目录，应用也已启动所选游戏。本批保留原超时，只在路径与大小、可信输入事件、表单状态及运行中的游戏会话全部吻合时继续检查原有游戏画面和存档。[目录选择验收](../../tests/helpers/game-directory-input.ts)
 
 第 163、164、165 批最终均失败，旧 WAVE 类型错误和影片转换器补丁失败阻断了普通验证。第 166 批的测试与构建工具类型检查已通过。取证时其影片转换器仍在运行，应用构建和依赖它的浏览器结果尚未公布。第 167 批新增的行为等待后续批次取回各作业结果。[第 163 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45834683767) · [第 164 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45837990362) · [第 165 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45840946389) · [第 166 批工具类型检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/45843758935/job/139991941664)
+
+第 167 批实现提交 `01c253f` 登记时为 `queued`，运行结果在下一批取回。[第 167 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45846712743)
