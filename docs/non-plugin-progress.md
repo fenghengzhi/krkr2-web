@@ -4,6 +4,8 @@
 
 第 164 批让游戏按卷标选择导入的光盘，处理换轨淡出、预渲染字幕字体和 WebKit 过场起始帧。此次取回的第 160 批六份浏览器报告共有 1,234 项通过、272 项失败、1 项跳过。第 161 至 163 批在取回时仍排队。[164 实现与托管证据](decisions/164-disc-volumes-fades-and-game-rendering.md)
 
+第 164 批实现提交 `86c415d` 登记时为 `pending`。结果留到下一批取回。[第 164 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45837990362)
+
 第 163 批补齐两种旧过场的播放路径，修正配乐跨页跳转和影片帧回调。第 160 批 Node 作业取消前，逐项记录已有 4,368 项通过与 37 项失败。本批结果待托管验证。[163 实现与托管证据](decisions/163-movie-playback-music-and-save-verification.md)
 
 第 163 批实现提交 `7f7ab58` 已登记为 `pending`。下一批取回运行结果。[第 163 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45834683767)

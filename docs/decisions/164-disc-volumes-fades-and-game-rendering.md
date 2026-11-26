@@ -37,3 +37,5 @@
 | 合计 | **1,234** | **272** | **1** |
 
 六份 ZIP 共 753,317,204 字节，另复用 44 份历史普通原件；全部与冻结目录中的大小、SHA-256 核对。第 160 批当时仍在运行，Node 和 WebKit 第 4 分片已取消，未完成范围不计通过。第 161、162、163 批在该快照均为 `pending`、没有作业或产物；本批修订也没有托管结果。原报告、失败附件及历史判断完整保留，后续候选不改写旧结果。本地归档位于 `out/verification/github-actions/164-archive-summary.md`。[WebKit 第 2 分片](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404/job/139938356329) · [第 160 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404)
+
+第 164 批实现提交 `86c415d53f0fd1f69d4190205f4ed2f2819c2520` 登记时为 `pending`。下一批取回可用结果。[第 164 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45837990362)
