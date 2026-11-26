@@ -1,4 +1,4 @@
-/** Fixed KAGParser.cpp 2488/2510 use variant bool, while debugLevel (2529)
+/** Fixed KAGParser.cpp 2490/2510 use variant bool, while debugLevel (2530)
  * uses an integer. tjsVariant.h 895–905 distinguishes real/object/octet. */
 export const kagModeFiles = {
   'mode-route.ks': '[if exp=true]YES[else]NO[endif][jump target=*end]BAD\n*end\nEND[done]\n',
