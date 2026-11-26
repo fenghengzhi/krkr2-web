@@ -294,9 +294,9 @@ export class Bitmap extends ImagePlane {
           else if (stockCopyBlend) {
             const inside = x - left >= stockCopyBlend.interior[row * 2]! &&
               x - left < stockCopyBlend.interior[row * 2 + 1]!,
-              // These are deliberately different stock scalar expressions:
-              // horizontal opa += opa > 7; arbitrary-angle opa += opa >> 7.
-              weight = amount + (inside ? stockCopyBlend.horizontal ? Number(amount > 7) : amount >> 7 : 0)
+              // Both stock Win32 MMX interiors use opa += opa >> 7.
+              // The C++ border keeps the original opacity.
+              weight = amount + (inside ? amount >> 7 : 0)
             for (let c = 0; c < 4; c++) {
               const dest = this.storage.data[at + c]!
               this.storage.data[at + c] = dest + (((pixels.data[from + c]! - dest) * weight) >> 8)

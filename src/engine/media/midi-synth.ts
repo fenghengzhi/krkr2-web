@@ -1,4 +1,5 @@
 import type { MidiAsset, MidiEvent } from '../ports/audio.ts'
+import { MidiPitch } from './midi-pitch.ts'
 interface Channel {
   volume: number
   level: number
@@ -7,9 +8,8 @@ interface Channel {
   pan: number
   program: number
   bend: number
-  bendRange: number
+  pitch: MidiPitch
   sustain: boolean
-  rpn: number
   modulation: number
 }
 interface Note {
@@ -21,18 +21,18 @@ interface Note {
   held: boolean
   phase: number
   family: number
+  tuning: number
 }
-const channel = (bufferVolume = 127): Channel => ({
+const channel = (bufferVolume = 127, previous?: Channel): Channel => ({
   volume: 100,
   level: Math.trunc(100 * bufferVolume / 127) / 127,
   used: false,
   expression: 1,
   pan: 0,
-  program: 0,
+  program: previous?.program ?? 0,
   bend: 0,
-  bendRange: 2,
+  pitch: new MidiPitch(previous?.pitch),
   sustain: false,
-  rpn: 16383,
   modulation: 0,
 })
 const tau = 2 * Math.PI
@@ -75,12 +75,8 @@ export class MidiSynth {
   reset(): void {
     this.resetSequence(false)
   }
-  private resetSequence(keepPrograms: boolean): void {
-    this.channels = this.channels.map((previous) => {
-      const next = channel(this.bufferVolume)
-      if (keepPrograms) next.program = previous.program
-      return next
-    })
+  private resetSequence(keepParameters: boolean): void {
+    this.channels = this.channels.map((previous) => channel(this.bufferVolume, keepParameters ? previous : undefined))
     this.notes = []
     this.exclusive = undefined
     this.cursor = 0
@@ -91,12 +87,24 @@ export class MidiSynth {
   }
   /** MIDIImpl StopPlay/StartPlay rewinds tracks, silences notes and resets
    * controllers, but sends no ProgramChange. An instrument selected later in
-   * the same song therefore remains selected on its next loop or replay. */
+   * the same song therefore remains selected on its next loop or replay;
+   * the old GS device also retains its registered tuning parameters. */
   rewind(time: number): void {
     this.position(time, true)
   }
-  private position(time: number, keepPrograms: boolean): void {
-    this.resetSequence(keepPrograms)
+  private position(time: number, keepParameters: boolean): void {
+    this.resetSequence(keepParameters)
+    if (time === 0) return
+    // Integrate each channel's bend intervals; fine/coarse tuning belongs to
+    // each note's note-on snapshot. Work is linear in score events
+    // plus 16 channels and the bounded live-note set, not all past notes.
+    // As before, historical modulation-wheel vibrato is not reconstructed.
+    const phases = new Float64Array(16), times = new Float64Array(16),
+      settle = (id: number, at: number) => {
+        const state = this.channels[id]!
+        phases[id] = phases[id]! + (at - times[id]!) * 440 * 2 ** (state.pitch.bendOffset(state.bend) / 12)
+        times[id] = at
+      }
     if (this.asset)
       while (
         this.cursor < this.asset.events.length &&
@@ -104,11 +112,17 @@ export class MidiSynth {
       ) {
         const event = this.asset.events[this.cursor++]!
         this.time = event.outputTime ?? event.time
-        this.message(event)
+        if (event.status === 0xf0 || event.status === 0xf7)
+          for (let id = 0; id < 16; id++) settle(id, this.time)
+        else if (event.status < 0xf0) settle(event.status & 15, this.time)
+        this.applyMessage(event, true, phases)
       }
     this.time = time
-    for (const note of this.notes)
-      note.phase = ((time - note.born) * 440 * 2 ** ((note.key - 69) / 12)) % 1
+    for (let id = 0; id < 16; id++) settle(id, time)
+    for (const note of this.notes) {
+      const phase = note.phase + phases[note.channel]! * 2 ** ((note.key - 69 + note.tuning) / 12)
+      note.phase = ((phase % 1) + 1) % 1
+    }
   }
   message(event: Pick<MidiEvent, 'status' | 'data'>): void {
     this.applyMessage(event, true)
@@ -118,7 +132,7 @@ export class MidiSynth {
   rawMessage(event: Pick<MidiEvent, 'status' | 'data'>): void {
     this.applyMessage(event, false)
   }
-  private applyMessage(event: Pick<MidiEvent, 'status' | 'data'>, fromFile: boolean): void {
+  private applyMessage(event: Pick<MidiEvent, 'status' | 'data'>, fromFile: boolean, phaseOrigins?: Float64Array): void {
     const { status, data } = event,
       id = status & 15,
       kind = status & 0xf0,
@@ -158,14 +172,16 @@ export class MidiSynth {
     }
     if (kind === 0x90 && b) {
       if (this.notes.length >= 128) this.notes.shift()
+      const tuning = c.pitch.tuning()
       this.notes.push({
         channel: id,
         key: a,
         velocity: b / 127,
         born: this.time,
         held: true,
-        phase: 0,
+        phase: phaseOrigins ? -phaseOrigins[id]! * 2 ** ((a - 69 + tuning) / 12) : 0,
         family: c.program >> 3,
+        tuning,
       })
     } else if (kind === 0x80 || kind === 0x90) {
       const note = this.notes.find((note) => note.channel === id && note.key === a && note.held)
@@ -188,9 +204,7 @@ export class MidiSynth {
           for (const note of this.notes)
             if (note.channel === id && !note.held && note.released === undefined)
               note.released = this.time
-      } else if (a === 100) c.rpn = (c.rpn & 0x3f80) | b
-      else if (a === 101) c.rpn = (c.rpn & 127) | (b << 7)
-      else if (a === 6 && c.rpn === 0) c.bendRange = b
+      } else if (a === 6 || a === 38 || (a >= 98 && a <= 101)) c.pitch.control(a, b)
       else if (a === 120) this.notes = this.notes.filter((note) => note.channel !== id)
       else if (a === 123) {
         for (const note of this.notes)
@@ -199,11 +213,9 @@ export class MidiSynth {
             if (!c.sustain) note.released = this.time
           }
       } else if (a === 121) {
-        const program = c.program
-        this.channels[id] = channel(fromFile ? this.bufferVolume : 127)
+        this.channels[id] = channel(fromFile ? this.bufferVolume : 127, c)
         if (!fromFile) this.channels[id]!.volume = c.volume
         this.channels[id]!.used = fromFile || c.used
-        this.channels[id]!.program = program
         for (const note of this.notes)
           if (note.channel === id && !note.held) note.released = this.time
       }
@@ -262,7 +274,7 @@ export class MidiSynth {
           2 **
             ((note.key -
               69 +
-              c.bend * c.bendRange +
+              note.tuning + c.pitch.bendOffset(c.bend) +
               Math.sin(time * tau * 5) * c.modulation * 0.3) /
               12)
         note.phase = (note.phase + frequency * step) % 1

@@ -6,16 +6,17 @@ import { spriteOpacityPreviews, spriteSamplingCases, spriteSamplingSource } from
 const pages = [
   ['sprite-third-stretch', 3, 0], ['sprite-third-reversed', 3, 0],
   ['sprite-hold-affine', 8, 0], ['sprite-cubic-clipped', 8, 0],
-  ...spriteOpacityPreviews.filter(({ id }) => id === 'sprite-opacity-stretch' || id === 'sprite-opacity-rotated128')
-    .map(({ id, cells, row }) => [id, cells, row] as const),
+  ['sprite-ref-neighbor', 4, 0], ['sprite-ref-native-linear', 4, 0], ['sprite-ref-native-name', 4, 0],
+  ['sprite-rotated', 1, 2, 2],
+  ...spriteOpacityPreviews.map(({ id, cells, row }) => [id, cells, row] as const),
 ] as const
 const gallery = spriteSamplingSource + `
 var galleryIndex=0,galleryPages=${JSON.stringify(pages)};
 function galleryShow(){
- var preview=galleryPages[galleryIndex],id=preview[0],cells=preview[1],row=preview[2],cell=96/cells;
+ var preview=galleryPages[galleryIndex],id=preview[0],cells=preview[1],row=preview[2],cell=96/cells,left=preview.count>3?preview[3]:0;
  spriteSamplingRun(id);
  for(var x=0;x<cells;x++){
-  var color=spriteOut.getMainPixel(x,row),mask=spriteOut.getMaskPixel(x,row);
+  var color=spriteOut.getMainPixel(x+left,row),mask=spriteOut.getMaskPixel(x+left,row);
   spriteRoot.fillRect(x*cell,2,cell,16,0xff000000|color);
   spriteRoot.fillRect(x*cell,20,cell,16,0xff000000|(mask*0x010101));
  }

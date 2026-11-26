@@ -72,6 +72,7 @@ interface CatalogDependencies {
   files(): Resource[] | Promise<Resource[]>
   resolve(name: string): Resource | Promise<Resource>
   bind(fonts: Map<string, NamedFontFace[]>): void
+  bindSystem?(names: string[]): void
   check(): void
   yield(): Promise<void>
   warn(message: string): void
@@ -83,18 +84,49 @@ export class FontCatalog {
   private metadata = new WeakMap<object, FontDescriptor[]>()
   private styles = new WeakMap<object, { bold: boolean; italic: boolean }>()
   private loading?: Promise<void>
+  private loadingFile?: string
+  private initialized = false
   private readonly fileFaces = new Map<string, object>()
   constructor(private readonly deps: CatalogDependencies) {}
   setSystem(entries: FontDescriptor[]) {
     this.system = validateSystemFonts(entries)
+    this.deps.bindSystem?.(this.system.map((entry) => entry.name))
+  }
+  /** First ordinary family use shares discovery with getList/select. Later
+   * explicit prepare calls still refresh added or replaced game resources. */
+  async ensure(): Promise<void> {
+    if (this.initialized) return
+    try { await this.prepare() }
+    catch (error) {
+      this.deps.check() // Cancellation never becomes a successful fallback.
+      if (this.initialized) return
+      // Optional auto-discovery must not break an otherwise usable system
+      // font. Do not replace any catalog published by an explicit refresh.
+      this.initialized = true
+      this.deps.warn(`Optional game font discovery failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
   async prepare(font?: FontSpec): Promise<void> {
-    if (this.loading) return this.loading
-    this.loading = this.discover(font)
-    try {
+    this.deps.check()
+    if (this.loading) {
+      const covered = !font?.faceIsFileName || this.loadingFile === font.face
       await this.loading
+      if (covered) return
+      // A normal scan need not include an explicitly requested path (e.g. an
+      // unopened archive member). Join it first, then coalesce the file scan
+      // with any same-path waiter that already resumed.
+      return this.prepare(font)
+    }
+    const pending = this.discover(font)
+    this.loading = pending
+    this.loadingFile = font?.faceIsFileName ? font.face : undefined
+    try {
+      await pending
     } finally {
-      this.loading = undefined
+      if (this.loading === pending) {
+        this.loading = undefined
+        this.loadingFile = undefined
+      }
     }
   }
   private async discover(font?: FontSpec) {
@@ -126,13 +158,22 @@ export class FontCatalog {
       if (!entries) {
         try {
           if (resource.size > 16 * 1024 * 1024) throw new Error('Font file exceeds 16 MiB')
-          const bytes = await this.deps.wait(resource.read())
+          const source = resource.source
+          if (source && source.size !== resource.size) throw new Error('Font resource length changed')
+          const bytes = source ? undefined : await this.deps.wait(resource.read())
           this.deps.check()
-          if (bytes.length !== resource.size) throw new Error('Font resource length changed')
+          if (bytes && bytes.length !== resource.size) throw new Error('Font resource length changed')
           const m = await readFontMetadata(
             {
-              size: bytes.length,
-              read: async (offset, length) => bytes.subarray(offset, offset + length),
+              size: resource.size,
+              read: async (offset, length) => {
+                this.deps.check()
+                if (source && source.size !== resource.size) throw new Error('Font resource length changed')
+                const part = source ? await this.deps.wait(source.read(offset, length)) : bytes!.subarray(offset, offset + length)
+                this.deps.check()
+                if (source && source.size !== resource.size) throw new Error('Font resource length changed')
+                return part
+              },
             },
             () => this.deps.check(),
           )
@@ -173,6 +214,7 @@ export class FontCatalog {
     this.deps.check()
     this.game = game
     this.deps.bind(bindings)
+    this.initialized = true
   }
   entries() {
     return [...this.game, ...this.system, ...genericFonts]
@@ -192,6 +234,8 @@ export class FontCatalog {
   clear() {
     this.game = []
     this.system = []
+    this.initialized = false
+    this.deps.bindSystem?.([])
     this.metadata = new WeakMap()
     this.styles = new WeakMap()
     this.fileFaces.clear()

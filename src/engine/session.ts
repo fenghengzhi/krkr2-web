@@ -153,6 +153,7 @@ import { validateBlend } from './graphics/blend.ts'
 import { affinePixels } from './graphics/affine.ts'
 import { boxBlur } from './graphics/processing.ts'
 import { stockAffinePixels, stockSampling } from './graphics/stock-affine.ts'
+import { scriptStretchMode } from './graphics/script-stretch-mode.ts'
 import type { InputOperation } from './input/controller.ts'
 import {
   activityPaused,
@@ -600,6 +601,7 @@ export class EngineSession {
       deps.graphics,
       (work) => this.finishGraphics(work),
       (error) => deps.event({ type: 'log', level: 'error', text: `Compact Event (Font faces): ${String(error)}` }),
+      () => this.fontCatalog.ensure(),
     )
     this.fontCatalog = new FontCatalog({
       // Never enumerate unopened packages just to discover optional fonts.
@@ -609,6 +611,7 @@ export class EngineSession {
         this.fonts.registerNamed(fonts)
         this.padFonts = fonts
       },
+      bindSystem: (names) => this.fonts.registerSystem(names),
       check: () => this.control.check(),
       // Catalog discovery is pure host work shared with Pad. A paused VM must
       // not prevent an auxiliary editor from obtaining its font bytes.
@@ -6004,7 +6007,7 @@ export class EngineSession {
           simpleBlt = destination.width > 0 && destination.height > 0 &&
             destination.width === sourceRect.width && destination.height === sourceRect.height &&
             covered.width === destination.width && covered.height === destination.height,
-          filter = number(10), coefficient = number(11),
+          filter = scriptStretchMode(number(10)), coefficient = number(11),
           work = fullCopy && filteredCopy(source, sourceRect, destination, bitmapClip, filter, coefficient, id === sourceLayer.id),
           blend = operate ? mode : 'copy',
           sampling = stockSampling(filter, blend, face, layer.holdAlpha)
@@ -6049,7 +6052,8 @@ export class EngineSession {
           layer = this.layers.get(id),
           bitmap = this.layers.bitmap(id),
           face = this.layers.face(id),
-          mode = copy ? 'copy' : number(14) === 128 ? this.layers.get(source).type : number(14)
+          mode = copy ? 'copy' : number(14) === 128 ? this.layers.get(source).type : number(14),
+          filter = scriptStretchMode(number(13))
         validateBlend(mode === 'copy' ? 1 : mode, face)
         if (number(17) && face !== 0 && face !== 1)
           throw new Error('affinePile and affineBlend require dfAlpha or dfOpaque')
@@ -6060,8 +6064,8 @@ export class EngineSession {
             !!number(6),
             [number(7), number(8), number(9), number(10), number(11), number(12)],
             bitmap.clip,
-            number(13),
-            stockSampling(number(13), mode, face, layer.holdAlpha),
+            filter,
+            stockSampling(filter, mode, face, layer.holdAlpha),
           ),
         )
         this.control.check()

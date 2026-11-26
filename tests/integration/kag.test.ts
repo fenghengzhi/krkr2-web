@@ -100,6 +100,7 @@ test('KAG saved call frames restore across storages and reject malformed conditi
       ),
       /Malformed KAG condition nesting/,
     )
+    assert.equal(await session.evaluate('(function(){var s=parser.store();return [s.IfLevel,s.ExcludeLevelStack,s.IfLevelExecutedStack,parser.getNextTag().text].join("|");})()'), '0|||S')
   } finally {
     await session.stop()
   }

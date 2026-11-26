@@ -11,6 +11,7 @@ import { readPrerenderedFont, type PrerenderedFont } from '../../formats/font/pr
 import { colorGlyph, shadowGlyph, type GlyphMask } from './glyph.ts'
 import { fontGeometry } from './font.ts'
 import { isVerticalFace } from './vertical.ts'
+import { fontCandidates } from './font-candidates.ts'
 
 type Finish = <T>(work: Generator<void, T>) => Promise<T>
 interface MappedFont {
@@ -54,6 +55,7 @@ export class FontService {
   private readonly compactRetiredFiles = new Set<FileFont>()
   private cacheEpoch = 0
   private namedFiles = new Map<string, NamedFontFace[]>()
+  private systemNames = new Set<string>()
   // A dialog preview may still be finishing when its suspended script resumes.
   // Keep raster operations together so another operation cannot evict its face.
   private readonly raster = new SerialQueue()
@@ -64,6 +66,7 @@ export class FontService {
     private readonly graphics: GraphicsDecoder,
     private readonly finish: Finish,
     private readonly onCompactError?: (error: unknown) => void,
+    private readonly prepareCatalog?: () => Promise<void>,
   ) {}
   private check(): void {
     if (this.disposed) throw new ExecutionCancelled()
@@ -75,6 +78,10 @@ export class FontService {
         .filter(([, faces]) => faces.length)
         .map(([name, faces]) => [name, faces.map((face) => ({ ...face }))]),
     )
+  }
+  registerSystem(names: readonly string[]): void {
+    this.check()
+    this.systemNames = new Set(names.map((name) => name.toLowerCase()))
   }
   private wait<T>(value: Promise<T>): Promise<T> {
     // A shared never-settling cancellation Promise would retain settled race
@@ -178,11 +185,36 @@ export class FontService {
   }
   private async prepare(spec: FontSpec): Promise<FontSpec> {
     this.check()
-    const epoch = this.cacheEpoch, family = spec.face.toLowerCase(),
-      variants =
-        this.namedFiles.get(family) ??
-        (family.startsWith('@') ? this.namedFiles.get(family.slice(1)) : undefined),
-      cost = (face: NamedFontFace) =>
+    const epoch = this.cacheEpoch
+    // Direct file and mapped PRF paths keep their existing preparation. The
+    // unqualified CSS generics need no game-family discovery. A real family
+    // list can discover packaged faces without a script-side getList call.
+    if (this.prepareCatalog && !spec.faceIsFileName && !this.mappings.has(fontKey(spec)) &&
+      !/^(?:sans-serif|serif|monospace)$/i.test(spec.face)) {
+      await this.wait(this.prepareCatalog())
+      this.check()
+    }
+    let variants: NamedFontFace[] | undefined
+    if (!spec.faceIsFileName) for (const candidate of fontCandidates(spec.face)) {
+      const family = candidate.name.toLowerCase()
+      variants = this.namedFiles.get(family) ??
+        (family.startsWith('@') ? this.namedFiles.get(family.slice(1)) : undefined)
+      if (!variants && !candidate.forced && !this.systemNames.has(family)) {
+        // An older embedding cannot distinguish a missing system name from
+        // an available one. Preserve its original list instead of silently
+        // promoting a later game font over a real system face.
+        if (!this.graphics.hasFont) break
+        const present = await this.wait(Promise.resolve(this.graphics.hasFont(candidate.name)))
+        this.check()
+        if (!present) continue
+      }
+      spec = { ...spec,
+        face: candidate.vertical && !candidate.name.startsWith('@') ? '@' + candidate.name : candidate.name,
+        verticalFace: spec.verticalFace ?? (candidate.vertical || candidate.name.startsWith('@')),
+      }
+      break
+    }
+    const cost = (face: NamedFontFace) =>
         Number(face.italic !== spec.italic) * 2 + Number(face.bold !== spec.bold),
       named = !spec.faceIsFileName
         ? variants?.reduce((best, face) => (cost(face) < cost(best) ? face : best))
@@ -481,6 +513,7 @@ export class FontService {
     this.mappings.clear()
     this.sources.clear()
     this.namedFiles.clear()
+    this.systemNames.clear()
     this.compact()
   }
 }

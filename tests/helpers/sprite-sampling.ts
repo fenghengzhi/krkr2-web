@@ -11,17 +11,23 @@ export const spriteSamplingCases = [
   { id: 'sprite-hold-affine', expected: row([0,0,64,64,192,192,240,240], Array(8).fill(73)) },
   { id: 'sprite-cubic-clipped', expected: row([17,16,48,96,160,204,228,17], [73,16,48,96,160,204,228,73]) },
   { id: 'sprite-ref-clip', expected: row([64,96,160,192]) },
-  { id: 'sprite-ref-neighbor', expected: row([48,96,160,204]) },
+  // Keep the original batch143 input: 0x10000 is not the stock flag.
+  { id: 'sprite-ref-neighbor', expected: row([64,96,160,192]) },
+  { id: 'sprite-ref-native-nearest', expected: row([64,64,192,192]) },
+  { id: 'sprite-ref-native-fastlinear', expected: row([48,96,160,204]) },
+  { id: 'sprite-ref-native-linear', expected: row([48,96,160,204]) },
+  { id: 'sprite-ref-native-cubic', expected: row([48,96,160,204]) },
+  { id: 'sprite-ref-native-name', expected: row([48,96,160,204]) },
   { id: 'sprite-alpha-magnify', expected: '1,1,1,1' },
   { id: 'sprite-alpha-affine', expected: '1,1,1,1' },
   { id: 'sprite-two-pass', expected: row([15,143]) },
-  { id: 'sprite-rotated', expected: row([192]) },
+  { id: 'sprite-rotated', expected: row([191]) },
   // Complete RGB integers and alpha, independently reduced from constant
-  // RGBA [255,128,64,255] over [0,0,0,0]. Borders use raw opacity; horizontal
-  // interiors add (opacity > 7), arbitrary-angle interiors add (opacity >> 7).
-  { id: 'sprite-opacity-stretch', expected: row([0x3f2010,0x402010,0x402010,0x402010,0x402010,0x402010,0x402010,0x3f2010], [63,64,64,64,64,64,64,63]) },
-  { id: 'sprite-opacity-affine', expected: row([0x3f2010,0x402010,0x402010,0x402010,0x402010,0x402010,0x402010,0x3f2010], [63,64,64,64,64,64,64,63]) },
-  { id: 'sprite-opacity-eight', expected: row([0x070402,0x080402,0x080402,0x080402,0x080402,0x080402,0x080402,0x070402], [7,8,8,8,8,8,8,7]) },
+  // RGBA [255,128,64,255] over [0,0,0,0]. The batch143 stock SDK confirms
+  // MMX interiors add (opacity >> 7), while borders use raw opacity.
+  { id: 'sprite-opacity-stretch', expected: row([0x3f2010,0x3f2010,0x3f2010,0x3f2010,0x3f2010,0x3f2010,0x3f2010,0x3f2010], [63,63,63,63,63,63,63,63]) },
+  { id: 'sprite-opacity-affine', expected: row([0x3f2010,0x3f2010,0x3f2010,0x3f2010,0x3f2010,0x3f2010,0x3f2010,0x3f2010], [63,63,63,63,63,63,63,63]) },
+  { id: 'sprite-opacity-eight', expected: row([0x070402,0x070402,0x070402,0x070402,0x070402,0x070402,0x070402,0x070402], [7,7,7,7,7,7,7,7]) },
   { id: 'sprite-opacity-rotated64', expected: row([0x3f2010,0x3f2010,0x3f2010,0x3f2010], [63,63,63,63]) },
   { id: 'sprite-opacity-rotated128', expected: row([0x7f4020,0x804020,0x804020,0x7f4020], [127,128,128,127]) },
 ] as const
@@ -91,8 +97,15 @@ function spriteSamplingRun(id){
   return spriteLine(8);
  }else if(id=="sprite-cubic-clipped"){
   spriteOut.setClip(1,0,6,1);spriteOut.stretchCopy(0,0,8,1,spriteIn,0,0,4,1,stCubic);return spriteLine(8);
- }else if(id=="sprite-ref-clip" || id=="sprite-ref-neighbor"){
-  spriteOut.affineCopy(spriteIn,1,0,2,1,true,2,0,0,1,.5,0,stLinear|(id=="sprite-ref-neighbor"?0x10000:0));
+ }else if(id.indexOf("sprite-ref-")==0){
+  var sampling=stLinear;
+  if(id=="sprite-ref-neighbor")sampling|=0x10000;
+  else if(id=="sprite-ref-native-nearest")sampling=0x10;
+  else if(id=="sprite-ref-native-fastlinear")sampling=0x11;
+  else if(id=="sprite-ref-native-linear")sampling=0x12;
+  else if(id=="sprite-ref-native-cubic")sampling=0x13;
+  else if(id=="sprite-ref-native-name")sampling|=stRefNoClip;
+  spriteOut.affineCopy(spriteIn,1,0,2,1,true,2,0,0,1,.5,0,sampling);
   return spriteLine(4);
  }else if(id=="sprite-alpha-magnify" || id=="sprite-alpha-affine"){
   for(var x=0;x<4;x++)spriteIn.setMaskPixel(x,0,255);

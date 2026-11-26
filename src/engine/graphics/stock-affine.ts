@@ -35,10 +35,10 @@ function scanline(vertices: Vertex[], y: number) {
 }
 const mix = (a: number, b: number, weight: number) => a + (((b - a) * weight) >> 8)
 
-/** Sample all four channels with the two successive byte blends from TVP's
- * scalar inner loops. The clipped border and arbitrary-angle loop adjust both
- * weights. The horizontal interior loop adjusts only its vertical weight. */
-function bilinear(source: Pixels, sx: number, sy: number, bounds: Rect, horizontal: boolean, dest: Uint8Array, at: number) {
+/** The stock Win32 MMX stretch and affine interiors both adjust only the Y
+ * weight. Their C++ clipped-border path adjusts both weights. The scalar C
+ * affine fallback differs from the MMX implementation used by the SDK. */
+function bilinear(source: Pixels, sx: number, sy: number, bounds: Rect, dest: Uint8Array, at: number) {
   const x = Math.floor(sx / unit), y = Math.floor(sy / unit),
     right = bounds.x + bounds.width - 1, bottom = bounds.y + bounds.height - 1,
     x0 = Math.max(bounds.x, Math.min(right, x)), x1 = Math.max(bounds.x, Math.min(right, x + 1)),
@@ -47,7 +47,7 @@ function bilinear(source: Pixels, sx: number, sy: number, bounds: Rect, horizont
     p10 = (y1 * source.width + x0) * 4, p11 = (y1 * source.width + x1) * 4
   const interior = x >= bounds.x && x + 1 <= right && y >= bounds.y && y + 1 <= bottom
   let wx = (sx & 65535) >>> 8, wy = (sy & 65535) >>> 8
-  if (!horizontal || !interior) wx += wx >>> 7
+  if (!interior) wx += wx >>> 7
   wy += wy >>> 7
   for (let c = 0; c < 4; c++) {
     const top = mix(source.data[p00 + c]!, source.data[p01 + c]!, wx),
@@ -108,7 +108,7 @@ export function* stockAffinePixels(source: Pixels, rect: Rect, corners: readonly
       if (sampling === 'point') {
         const from = (iy * source.width + ix) * 4
         for (let c = 0; c < 4; c++) pixels.data[at + c] = source.data[from + c]!
-      } else if (bilinear(source, sx, sy, bounds, dy === 0, pixels.data, at)) {
+      } else if (bilinear(source, sx, sy, bounds, pixels.data, at)) {
         if (firstInterior < 0) firstInterior = x - left
         lastInterior = x - left + 1
       }

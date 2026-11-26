@@ -159,7 +159,7 @@ export class KagService {
           task = parser.popMacroArgs()
           break
         case 'restore':
-          task = parser.restore(record(data(2)))
+          task = parser.restore()
           break
         default:
           throw new Error(`Unknown KAG method ${method}`)

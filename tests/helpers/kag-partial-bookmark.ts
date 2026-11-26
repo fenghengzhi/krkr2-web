@@ -16,6 +16,11 @@ export const partialBookmarkFiles = {
 *returned|Returned to caller
 [cm][nowait]RETURN [emb exp=f.partialResult][endnowait]
 [partialmark phase=returned]
+[if exp="global.partialOrigin=='file'"][r][link target=*live]Open saved branch[endlink][endif]
+[s]
+*live
+[call storage=chapter.ks target=*branch]
+[jump target=*returned]
 [s]
 `,
   'chapter.ks': String.raw`*entry|Entered chapter
@@ -39,6 +44,22 @@ export const partialBookmarkFiles = {
 [s]
 *return
 [return]
+*branch
+[partialbranch]
+[partialbad]
+[s]
+`,
+  'live.ks': String.raw`*wrong
+[partialbad]
+[s]
+*destination
+[partialbad][else][eval exp="f.partialResult=91"][endif]
+[cm][nowait]BRANCH [emb exp=f.partialResult][endnowait]
+[partialmark phase=branch]
+[r][link target=*return]Return to caller[endlink]
+[s]
+*return
+[return]
 `,
 }
 
@@ -48,6 +69,17 @@ export const partialBookmarkFiles = {
 export const partialBookmarkSource = String.raw`
 var partialOwner=kag.conductor,partialPhase="",partialText="",partialEntered=0,partialRestores=0;
 var partialFallthrough=0,partialOrigin="none",partialEvents=[];
+class PartialBranchSlot {
+ var parser,slot,macros=void,macroArgs=void,callStack=void,macroArgStackBase=void;
+ function PartialBranchSlot(p,d){parser=p;slot=d;}
+ property storageName {getter(){return "live.ks";}}
+ property storageShortName {getter(){return parser.curStorage=="live.ks"?"reading-branch":"wrong";}}
+ property curLabel {getter(){return parser.store().storageShortName=="reading-branch"?slot.curLabel:"*wrong";}}
+ property ExcludeLevel {getter(){return 1;}}
+ property IfLevel {getter(){return parser.store().ExcludeLevel;}}
+ property ExcludeLevelStack {getter(){return parser.store().IfLevel==1?"ffffffff":"";}}
+ property IfLevelExecutedStack {getter(){return parser.store().ExcludeLevelStack=="ffffffff"?"0":"1";}}
+}
 function partialApply(origin){
  var p=global.kag.conductor,d;
  if(p!==global.partialOwner || p.callStackDepth!=1 || p.curStorage!="chapter.ks")
@@ -66,6 +98,12 @@ function partialApply(origin){
 }
 kag.tagHandlers.partialwrite=function(elm){return global.partialApply("memory");};
 kag.tagHandlers.partialread=function(elm){return global.partialApply("file");};
+kag.tagHandlers.partialbranch=function(elm){
+ var p=global.kag.conductor,d=Scripts.evalStorage(System.dataPath+"partial-bookmark.tjs");
+ if(p.curStorage!="chapter.ks" || p.callStackDepth!=1)throw new Exception("Missing caller for the saved branch");
+ global.partialOrigin="live";
+ p.restore(new PartialBranchSlot(p,d));global.partialRestores++;return 0;
+};
 kag.tagHandlers.partialbad=function(elm){global.partialFallthrough++;throw new Exception("Restore fell through instead of selecting its label");};
 kag.tagHandlers.partialmark=function(elm){
  global.partialPhase=elm.phase;global.partialText=global.kag.historyLayer.currentLine;

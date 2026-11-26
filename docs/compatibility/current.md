@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 151 批调整 KAG 书签属性的读取与应用顺序、Windows 立绘的变换采样、对白字体的候选顺序和 MIDI 配乐的通道音高。TJS 脚本现在按原版数值 `0x10` 解释 `stRefNoClip`。曾写死 Web 扩展滤镜数值的脚本可以改用具名常量。本批行为等待托管验证。[151 范围与数字兼容说明](../decisions/151-bookmark-restore-and-game-rendering.md)
+
 第 150 批支持在已载入的 KAG 剧情中恢复只指定章节标签的书签，并校正游戏选择项的鼠标点击和 WAVE 的循环范围。这些行为等待托管验证。[150 范围与验收](../decisions/150-kag-bookmarks-mouse-and-wave.md)
 
 第 149 批增加本地与远程发行目录的子目录识别，修正脚本控制的画面重绘和 MIDI 重播时的乐器选择。这些行为等待托管验证。[149 范围与验收](../decisions/149-wrapped-directories-paint-and-midi.md)

@@ -115,13 +115,18 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       expect(await read('partialEvents.join(";")')).toBe('file|chapter.ks|1|chapter.ks|*destination|1|1')
       await info.attach('partial-file-destination', { body: await canvas.screenshot({ timeout: 5000 }), contentType: 'image/png' })
       await click(0, '*return')
-      await state('returned|RETURN 77|first.ks|*returned|0|77|0|1|0|file|1|0|0')
+      await state('returned|RETURN 77|first.ks|*returned|0|77|0|1|0|file|1|1|0')
+      await click(0, '*live')
+      await state('branch|BRANCH 91|live.ks|*destination|1|91|0|2|0|live|1|1|0')
+      await info.attach('partial-live-branch', { body: await canvas.screenshot({ timeout: 5000 }), contentType: 'image/png' })
+      await click(0, '*return')
+      await state('returned|RETURN 91|first.ks|*returned|0|91|0|2|0|live|1|0|0')
       expect(errors).toEqual([])
     } catch (error) { failures.push(error) }
     for (const report of [
       () => info.attach('partial-bookmark-inputs', { body: JSON.stringify({ files: partialBookmarkFiles, source: partialBookmarkSource }, null, 2), contentType: 'application/json' }),
       () => info.attach('partial-bookmark-observations', { body: JSON.stringify({ backend, binary, observations, errors,
-        scope: 'Original KAG Conductor and public call/return/tag dispatch. A game-owned tag restores only curLabel (omitted or void caller/storage fields) on that same parser. The very next parsed destination must draw the chapter; no repair jump is used. The serialized lightweight dictionary persists through a full page refresh, independently of a complete KAG bookmark.' }, null, 2), contentType: 'application/json' }),
+        scope: 'The original KAG Conductor reads a label-only bookmark from memory and disk, then returns to its caller. After refresh, a separate branch uses that saved label and reads the active parser inside bookmark getters. The resulting chapter must display BRANCH 91 and return to the original caller.' }, null, 2), contentType: 'application/json' }),
       async () => info.attach('partial-bookmark-logs', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }),
     ]) try { await report() } catch (error) { failures.push(error) }
     try { await stop() } catch (error) { failures.push(error) }

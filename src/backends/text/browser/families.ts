@@ -14,8 +14,12 @@ const generic = new Set([
   'fangsong',
 ])
 export function cssFontFamily(name: string): string {
-  const plain = name.trim().replace(/^@/, '')
+  const plain = trimFamily(name).replace(/^@/, '')
   return generic.has(plain.toLowerCase()) ? plain.toLowerCase() : JSON.stringify(plain)
+}
+const trimFamily = (name: string): string => name.replace(/^[\x00-\x20]+|[\x00-\x20]+$/g, '')
+export function isGenericFontFamily(name: string): boolean {
+  return generic.has(name.toLowerCase())
 }
 
 /** Keep every requested face ahead of substitutes. Missing MS PMincho uses a
@@ -25,7 +29,7 @@ export function cssFontFamily(name: string): string {
  * https://learn.microsoft.com/en-us/typography/font-list/ms-pmincho
  * https://github.com/liberationfonts/liberation-fonts */
 export function cssFontStack(name: string): string {
-  const faces = name.split(','), primary = faces[0]!.trim().replace(/^@/, '').toLowerCase(),
+  const faces = name.split(','), primary = trimFamily(faces[0]!).replace(/^@/, '').toLowerCase(),
     fallback = primary === 'ms pmincho'
       ? '"Times New Roman","Liberation Serif","Times",serif'
       : 'sans-serif'

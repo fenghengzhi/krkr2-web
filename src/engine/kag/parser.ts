@@ -32,7 +32,6 @@ const tag = (tagname: string, attributes: RecordData = {}): RecordData => ({
 })
 const hexStack = (values: number[]) =>
   values.map((value) => (value >>> 0).toString(16).padStart(8, '0')).join('')
-const conditionFields = ['ExcludeLevel', 'IfLevel', 'ExcludeLevelStack', 'IfLevelExecutedStack'] as const
 function parseHex(value: Data): number[] {
   const encoded = string(value)
   if (!/^(?:[0-9a-fA-F]{8})*$/.test(encoded)) throw new Error('Malformed KAG condition stack')
@@ -43,6 +42,8 @@ function parseHex(value: Data): number[] {
  * TJS trampoline: expression evaluation never re-enters a suspended JS frame. */
 export class KagParser {
   private scenario?: Scenario
+  private storageName = ''
+  private storageShortName = ''
   curLine = 0
   curPos = 0
   curLabel = ''
@@ -51,6 +52,7 @@ export class KagParser {
   private interrupted = false
   private recording?: { name: string; source: string }
   private excludeLevel = -1
+  private ifLevel = 0
   private excludes: number[] = []
   private executed: boolean[] = []
   private macroBase = 0
@@ -60,7 +62,7 @@ export class KagParser {
   ignoreCR = false
   debugLevel = 1
   get curStorage(): string {
-    return this.scenario?.name ?? ''
+    return this.storageName
   }
   get curLineStr(): string {
     return this.buffer ?? this.scenario?.lines[this.curLine] ?? ''
@@ -110,6 +112,7 @@ export class KagParser {
   private *breakCondition(): Task {
     this.recording = undefined
     this.excludeLevel = -1
+    this.ifLevel = 0
     this.excludes = []
     this.executed = []
     yield* this.popTo(this.macroBase)
@@ -120,6 +123,7 @@ export class KagParser {
     const loaded = !this.scenario || this.curStorage !== name || force
     if (loaded) {
       this.scenario = undefined
+      this.storageName = this.storageShortName = ''
       const provided = yield* this.callback('onScenarioLoad', name)
       const scenario = typeof provided === 'string' ? new Scenario(name, provided, true)
         : yield { kind: 'read', args: [name] }
@@ -132,6 +136,10 @@ export class KagParser {
     // That callback may reenter this parser while preparing a virtual story;
     // its temporary conditions/macros must not become the new story's state.
     yield* this.breakCondition()
+    if (loaded) {
+      this.storageName = name
+      this.storageShortName = name.replace(/^.*[\\/>]/, '')
+    }
     if (loaded && this.debugLevel >= 1) yield* this.effect('log', `Scenario loaded : ${name}`)
     yield* this.callback('onScenarioLoaded', name)
     return
@@ -211,6 +219,7 @@ export class KagParser {
   }
   *clear(): Task {
     this.scenario = undefined
+    this.storageName = this.storageShortName = ''
     this.curLine = this.curPos = 0
     this.buffer = undefined
     yield* this.clearCallStack()
@@ -280,7 +289,7 @@ export class KagParser {
         if (this.curLine === this.scenario.lines.length)
           throw new TvpError('TVPKAGInlineScriptNotEnd')
         if (this.excludeLevel === -1)
-          yield* this.callback('onScript', script, this.curStorage.replace(/^.*[\\/>]/, ''), start)
+          yield* this.callback('onScript', script, this.storageShortName, start)
         this.nextLine()
         continue
       }
@@ -433,29 +442,30 @@ export class KagParser {
       }
       // Control tags always adjust nesting, including within an excluded branch.
       if (kind === 'if' || kind === 'ignore') {
+        this.ifLevel++
         this.excludes.push(this.excludeLevel)
         this.executed.push(false)
         if (this.excludeLevel === -1) {
           let included = !!(yield* this.controlExpression(values.exp, true))
           if (kind === 'ignore') included = !included
           this.executed[this.executed.length - 1] = included
-          if (!included) this.excludeLevel = this.executed.length
+          if (!included) this.excludeLevel = this.ifLevel
         }
       } else if (kind === 'elsif' || kind === 'else') {
-        const depth = this.executed.length
-        if (depth) {
-          if (this.executed[depth - 1]) this.excludeLevel = depth
+        if (this.executed.length) {
+          if (this.executed.at(-1)) this.excludeLevel = this.ifLevel
           else if (
-            depth === this.excludeLevel &&
+            this.ifLevel === this.excludeLevel &&
             (kind === 'else' || !!(yield* this.controlExpression(values.exp, true)))
           ) {
-            this.executed[depth - 1] = true
+            this.executed[this.executed.length - 1] = true
             this.excludeLevel = -1
           }
         }
       } else if (kind === 'endif' || kind === 'endignore') {
         this.excludeLevel = this.excludes.pop() ?? this.excludeLevel
         this.executed.pop()
+        this.ifLevel = Math.max(0, this.ifLevel - 1)
         this.advance(token)
         continue
       }
@@ -520,23 +530,26 @@ export class KagParser {
   private conditions(): RecordData {
     return {
       ExcludeLevel: this.excludeLevel,
-      IfLevel: this.executed.length,
+      IfLevel: this.ifLevel,
       ExcludeLevelStack: hexStack(this.excludes),
       IfLevelExecutedStack: this.executed.map((value) => (value ? '1' : '0')).join(''),
     }
   }
-  private restoreConditions(data: RecordData): void {
-    const excludes = parseHex(data.ExcludeLevelStack),
-      executed = string(data.IfLevelExecutedStack)
-    if (
-      !/^[01]*$/.test(executed) ||
-      excludes.length !== executed.length ||
-      integer(data.IfLevel) !== executed.length
-    )
+  private checkConditionNesting(): void {
+    if (this.excludes.length !== this.executed.length || this.ifLevel !== this.executed.length)
       throw new Error('Malformed KAG condition nesting')
-    this.excludes = excludes
-    this.executed = [...executed].map((value) => value === '1')
+  }
+  private setExecutedStack(value: Data): void {
+    const bits = string(value)
+    if (!/^[01]*$/.test(bits)) throw new Error('Malformed KAG condition nesting')
+    this.executed = [...bits].map((bit) => bit === '1')
+  }
+  private restoreConditions(data: RecordData): void {
+    this.excludes = parseHex(data.ExcludeLevelStack)
+    this.setExecutedStack(data.IfLevelExecutedStack)
     this.excludeLevel = integer(data.ExcludeLevel, -1)
+    this.ifLevel = integer(data.IfLevel)
+    this.checkConditionNesting()
   }
   store(macros: Data, params: Data, names: Data): RecordData {
     return {
@@ -547,7 +560,7 @@ export class KagParser {
       ...(list(params).length ? { macroArgNames: list(names) } : {}),
       callStack: this.calls.map((frame) => ({ ...frame })),
       storageName: this.curStorage,
-      storageShortName: this.curStorage.replace(/^.*[\\/>]/, ''),
+      storageShortName: this.storageShortName,
       curLine: this.curLine,
       curPos: this.curPos,
       curLabel: this.curLabel,
@@ -558,11 +571,11 @@ export class KagParser {
       ...this.conditions(),
     }
   }
-  *restore(data: RecordData): Task {
+  *restore(): Task {
     // The TJS binding restores the optional macro dictionary before it reads
     // the parameter stack, so callbacks can retain their original identity.
-    const frames = data.callStack === undefined ? this.calls : list(data.callStack).map(record)
-    if (frames.length > 4096) throw new Error('Malformed KAG call stack')
+    this.macroDepth = 0
+    const data = record(yield* this.effect('readRestoreParams'))
     const nameLists = data.macroArgNames === undefined ? undefined : list(data.macroArgNames)
     const params = list(data.macroArgs).map((entry, index) => {
       if (!Array.isArray(entry)) {
@@ -582,55 +595,76 @@ export class KagParser {
     const depth = integer(data.macroArgStackDepth)
     if (depth !== params.length) throw new TvpError('TVPKAGMalformedSaveData')
     if (depth > 4096) throw new Error('Malformed KAG macro depth')
-    // Validate the callers before replacing any of them.
-    const validator = new KagParser()
-    for (const frame of frames) {
-      validator.restoreConditions(frame)
-      const frameDepth = integer(frame.macroArgStackDepth),
-        frameBase = integer(frame.macroArgStackBase)
-      if (
-        integer(frame.offset) < 0 ||
-        integer(frame.pos) < 0 ||
-        frameBase < 0 ||
-        frameDepth < frameBase ||
-        frameDepth > depth
-      )
-        throw new Error('Malformed KAG call frame')
+    this.macroDepth = depth
+    const installedCount = yield* this.effect('restoreParams', params)
+    if (integer(installedCount) !== this.macroDepth) throw new TvpError('TVPKAGMalformedSaveData')
+    this.macroBase = this.macroDepth
+    const suppliedCount = yield* this.effect('restoreCallCount')
+    if (suppliedCount !== undefined) {
+      const count = integer(suppliedCount)
+      if (count < 0 || count > 4096) throw new Error('Malformed KAG call stack')
+      this.calls = []
+      const validator = new KagParser()
+      for (let index = 0; index < count; index++) {
+        const frame = record(yield* this.effect('restoreCallFrame', index))
+        validator.restoreConditions(frame)
+        const frameDepth = integer(frame.macroArgStackDepth), frameBase = integer(frame.macroArgStackBase)
+        if (integer(frame.offset) < 0 || integer(frame.pos) < 0 || frameBase < 0 ||
+          frameDepth < frameBase || frameDepth > this.macroDepth || this.calls.length >= 4096)
+          throw new Error('Malformed KAG call frame')
+        this.calls.push(frame)
+      }
     }
-    // Native only replaces the callers when a callStack was supplied. A
-    // bookmark for the current chapter can deliberately inherit its caller.
-    if (data.callStack !== undefined) this.calls = frames.map((frame) => ({ ...frame }))
-    yield* this.effect('restoreParams', params)
-    // Preserve restored arguments during ClearBuffer/LoadScenario. Scripts
-    // can inspect mp and callStackDepth inside onScenarioLoad/Loaded.
-    this.macroBase = this.macroDepth = depth
-    const location = record(yield* this.effect('restoreLocation'))
-    const storage = location.storageName === undefined ? this.curStorage : string(location.storageName)
-    const label = location.curLabel === undefined ? this.curLabel : string(location.curLabel)
-    this.curLabel = label
+    // A bookmark can implement each field as a getter on the running game.
+    // Install each result before invoking the getter for the following field.
+    let value = yield* this.effect('restoreField', 'storageName')
+    if (value !== undefined) this.storageName = string(value)
+    value = yield* this.effect('restoreField', 'storageShortName')
+    if (value !== undefined) this.storageShortName = string(value)
+    value = yield* this.effect('restoreField', 'curLabel')
+    if (value !== undefined) this.curLabel = string(value)
+    const storage = this.curStorage, label = this.curLabel
     // Native restore resumes from the saved label, not the middle of a text run.
     if (storage) {
       yield* this.loadScenario(storage, true)
       yield* this.goToLabel(label)
     } else {
       this.scenario = undefined
+      this.storageShortName = ''
       this.buffer = undefined
       this.curLine = this.curPos = 0
       yield* this.breakCondition()
     }
     // The original reads these fields after the chapter callbacks. Those
     // callbacks can advance the parser or update the bookmark being loaded.
-    const levels = record(yield* this.effect('restoreLevels'))
-    const state = this.conditions()
-    for (const key of conditionFields) if (levels[key] !== undefined) state[key] = levels[key]
-    const restoredBase = integer(levels.macroArgStackBase, this.macroBase)
+    const priorConditions = this.conditions()
+    value = yield* this.effect('restoreField', 'ExcludeLevel')
+    if (value !== undefined) this.excludeLevel = integer(value)
+    value = yield* this.effect('restoreField', 'IfLevel')
+    if (value !== undefined) this.ifLevel = integer(value)
+    value = yield* this.effect('restoreField', 'ExcludeLevelStack')
+    if (value !== undefined) this.excludes = parseHex(value)
+    value = yield* this.effect('restoreField', 'IfLevelExecutedStack')
+    if (value !== undefined) this.setExecutedStack(value)
+    value = yield* this.effect('restoreField', 'macroArgStackBase')
+    const restoredBase = integer(value, this.macroBase)
     if (restoredBase < 0 || restoredBase > this.macroDepth) throw new Error('Malformed KAG macro depth')
-    this.restoreConditions(state)
+    try {
+      this.checkConditionNesting()
+    } catch (error) {
+      // A finished, structurally invalid bookmark is rejected. Restore the
+      // coherent branch that was active after loading the chapter. A script
+      // getter that throws earlier retains the fields already applied.
+      this.restoreConditions(priorConditions)
+      throw error
+    }
     this.macroBase = restoredBase
     return
   }
   assign(other: KagParser): void {
     this.scenario = other.scenario
+    this.storageName = other.storageName
+    this.storageShortName = other.storageShortName
     this.curLine = other.curLine
     this.curPos = other.curPos
     this.curLabel = other.curLabel
@@ -642,7 +676,10 @@ export class KagParser {
     // source depth; self-assignment therefore has no active macro arguments.
     this.macroDepth = other === this ? 0 : other.macroDepth
     this.calls = other.calls.map((frame) => ({ ...frame }))
-    this.restoreConditions(other.conditions())
+    this.excludeLevel = other.excludeLevel
+    this.ifLevel = other.ifLevel
+    this.excludes = [...other.excludes]
+    this.executed = [...other.executed]
     this.debugLevel = other.debugLevel
     this.ignoreCR = other.ignoreCR
   }

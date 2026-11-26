@@ -9,7 +9,7 @@ import { decodeBmp } from '../../../formats/image/bmp.ts'
 import type { ImageDecodeSelection } from '../../../formats/image/selection.ts'
 import type { FontKernel, NativeFileFont } from '../freetype/face.ts'
 import { fontGeometry } from '../../../engine/graphics/font.ts'
-import { cssFontStack } from './families.ts'
+import { cssFontStack, isGenericFontFamily } from './families.ts'
 import { browserVerticalGlyph, isVerticalFace } from '../../../engine/graphics/vertical.ts'
 
 export class BrowserGraphics implements GraphicsDecoder {
@@ -18,9 +18,35 @@ export class BrowserGraphics implements GraphicsDecoder {
   private readonly raster = new OffscreenCanvas(1, 1)
   private readonly nativeFaces = new Map<string, NativeFileFont>()
   private readonly browserFaces = new Set<() => void>()
+  private readonly systemFaces = new Map<string, Promise<boolean>>()
   private nativePromise?: Promise<FontKernel>
   private disposed = false
   constructor(private readonly nativeLoader?: () => Promise<FontKernel>) {}
+  hasFont(name: string): Promise<boolean> {
+    if (this.disposed) return Promise.reject(new Error('Font backend is disposed'))
+    const plain = name.replace(/^@/, '')
+    if (isGenericFontFamily(plain) || this.nativeFaces.has(name)) return Promise.resolve(true)
+    let pending = this.systemFaces.get(plain)
+    if (!pending) {
+      pending = (async () => {
+        if (typeof FontFace === 'undefined') return false
+        try {
+          // FontFaceSet.check can succeed via a fallback. local() must resolve
+          // this particular family. The probe is never installed in fonts and
+          // cannot replace a game's face or alter Canvas font selection.
+          await new FontFace('krkr-system-presence', `local(${JSON.stringify(plain)})`).load()
+        } catch { return false }
+        if (this.disposed) throw new Error('Font backend is disposed')
+        return true
+      })()
+      this.systemFaces.set(plain, pending)
+      if (this.systemFaces.size > 128) this.systemFaces.delete(this.systemFaces.keys().next().value!)
+    } else {
+      this.systemFaces.delete(plain)
+      this.systemFaces.set(plain, pending)
+    }
+    return pending
+  }
   compact(): void {
     if (this.disposed) return
     // Glyph results own their bytes. The reusable canvas can shrink while an
@@ -29,6 +55,7 @@ export class BrowserGraphics implements GraphicsDecoder {
   }
   async loadFont(bytes: Uint8Array) {
     if (this.disposed) throw new Error('Font backend is disposed')
+    this.systemFaces.clear()
     if (this.nativeLoader) {
       const pending = (this.nativePromise ??= this.nativeLoader())
       let kernel: FontKernel
@@ -249,6 +276,7 @@ export class BrowserGraphics implements GraphicsDecoder {
   dispose() {
     if (this.disposed) return
     this.disposed = true
+    this.systemFaces.clear()
     for (const face of this.nativeFaces.values()) face.dispose()
     this.nativeFaces.clear()
     for (const dispose of this.browserFaces) dispose()
