@@ -75,6 +75,7 @@ for (const binary of [false, true]) {
   test(`${mode}: a real held Wave resource cannot freeze fade time, resurrect old volume or outlive Stop`, { timeout: 60000 }, async (t) => {
     const clock = new AudioClock(), output: number[] = [], failures: unknown[] = [],
       gates = [deferred(), deferred()], entered = [deferred(), deferred()],
+      reads: { at: number; length: number }[][] = [[], []],
       audio = new HeadlessAudioBackend({ now: () => clock.now, schedule: clock.schedule }, (left) => output.push(...left), 1000),
       { session } = await headless(files(binary), { audio, now: () => clock.now, schedule: clock.schedule }),
       bytes = waveReopenFiles()['reopen-b.wav'], pending: Promise<unknown>[] = []
@@ -82,7 +83,13 @@ for (const binary of [false, true]) {
       let first = true
       return { name, size: bytes.length, read: async () => { throw new Error('A range source must not be fully read') },
         source: { size: bytes.length, async read(at: number, length: number) {
-          if (first) { first = false; entered[index]!.resolve(); await gates[index]!.promise }
+          reads[index]!.push({ at, length })
+          // Missing optional .sli lookup may first inspect an unrelated range
+          // resource's 11-byte archive signature. Hold the real portable PCM
+          // decoder's RIFF probe, not storage discovery of another sound.
+          if (first && at === 0 && length === 12) {
+            first = false; entered[index]!.resolve(); await gates[index]!.promise
+          }
           return bytes.slice(at, at + length)
         } } }
     }))
@@ -93,6 +100,8 @@ for (const binary of [false, true]) {
       const opening = session.evaluate('rw.open("held-reopen.wav")')
       pending.push(opening); void opening.catch(() => {})
       await observed(t.signal, entered[0]!.promise, opening)
+      assert.deepEqual(reads[0]!.at(-1), { at: 0, length: 12 })
+      assert.equal(audio.inspect().pendingCreates, 1, 'The gate owns actual audio decoder preparation')
       assert.equal(audio.mixer.inspectStreams().voices, 0)
       assert.equal(audio.inspect().fadingVoices, 1)
       clock.advance(120)
@@ -108,6 +117,8 @@ for (const binary of [false, true]) {
       const cancelled = session.evaluate('rw.open("cancel-reopen.wav")')
       pending.push(cancelled); void cancelled.catch(() => {})
       await observed(t.signal, entered[1]!.promise, cancelled)
+      assert.deepEqual(reads[1]!.at(-1), { at: 0, length: 12 })
+      assert.equal(audio.inspect().pendingCreates, 1)
       const rejected = assert.rejects(cancelled, /cancel|closed|expired/i)
       await observed(t.signal, session.stop()); await rejected
       assert.equal(audio.inspect().voices, 0); assert.equal(audio.inspect().pendingCreates, 0)

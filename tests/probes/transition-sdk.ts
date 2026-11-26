@@ -6,6 +6,7 @@ import { transitionOptionCases, transitionOptionFiles, transitionOptionsSource }
 import { layerGammaCases, layerGammaExpected, layerGammaSource } from '../helpers/layer-gamma.ts'
 import { layerOrderCases, layerOrderSource } from '../helpers/layer-order.ts'
 import { thumbnailStretchCases, thumbnailStretchSource } from '../helpers/thumbnail-stretch.ts'
+import { layerAlphaRows, layerAlphaSource } from '../helpers/layer-alpha-rows.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -13,7 +14,7 @@ assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/transition'), game = resolve(output, 'game')
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const files = transitionOptionFiles()
-const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases]
+const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows]
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 
 if (process.argv[2] === 'prepare') {
@@ -34,7 +35,10 @@ if (process.argv[2] === 'prepare') {
     'layerOrderClose();',
     thumbnailStretchSource,
     ...thumbnailStretchCases.map(({ id }) => `try{record("${id}|"+thumbnailStretchRun("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
-    'thumbnailStretchClose();record("done");System.exit();',
+    'thumbnailStretchClose();',
+    layerAlphaSource,
+    ...layerAlphaRows.map(({ id }) => `try{record("${id}|"+layerAlphaRun("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
+    'layerAlphaClose();record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
   save('inputs.json', {
@@ -43,9 +47,10 @@ if (process.argv[2] === 'prepare') {
     gammaHelperSha256: sha(readFileSync('tests/helpers/layer-gamma.ts')),
     orderHelperSha256: sha(readFileSync('tests/helpers/layer-order.ts')),
     thumbnailHelperSha256: sha(readFileSync('tests/helpers/thumbnail-stretch.ts')),
+    alphaRowHelperSha256: sha(readFileSync('tests/helpers/layer-alpha-rows.ts')),
     cases,
     files: Object.entries(files).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) })),
-    scope: 'Original transition options, gamma contrast, overlapping layer order and hit targets, and thumbnail resampling.',
+    scope: 'Original transition options, gamma contrast, layer order, hit targets, thumbnail resampling, and alpha rows in snapshots and rectangles.',
   })
 } else if (process.argv[2] === 'compare') {
   mkdirSync(output, { recursive: true })
@@ -67,6 +72,7 @@ if (process.argv[2] === 'prepare') {
     [resolve('tests/helpers/layer-gamma.ts'), manifest?.gammaHelperSha256],
     [resolve('tests/helpers/layer-order.ts'), manifest?.orderHelperSha256],
     [resolve('tests/helpers/thumbnail-stretch.ts'), manifest?.thumbnailHelperSha256],
+    [resolve('tests/helpers/layer-alpha-rows.ts'), manifest?.alphaRowHelperSha256],
   ] as const) {
     if (!existsSync(name) || sha(readFileSync(name)) !== expected) evidenceErrors.push(`${name}: source hash differs or is missing`)
   }
@@ -94,11 +100,13 @@ if (process.argv[2] === 'prepare') {
     layerOrder: { planned: layerOrderCases.length,
       matched: results.filter((row) => row.id.startsWith('order-') && row.matched).length },
     thumbnail: { planned: thumbnailStretchCases.length,
-      matched: results.slice(-thumbnailStretchCases.length).filter((row) => row.matched).length },
+      matched: results.filter((row) => thumbnailStretchCases.some(({ id }) => id === row.id) && row.matched).length },
+    alphaRows: { planned: layerAlphaRows.length,
+      matched: results.filter((row) => row.id.startsWith('alpha-row-') && row.matched).length },
     complete, sequenceMatches, evidenceErrors, sdkState: sdk?.state ?? 'unreported',
     sdkExitCode: sdk?.exitCode ?? null, sdkTimedOut: sdk?.timedOut ?? null, results, lines,
     observationSha256: sha(raw),
-    scope: 'Stock SDK option-read/error, gamma, layer order and hit targets, and full-copy resampling. Web and on-screen results are recorded by their respective jobs.',
+    scope: 'Stock SDK option reads, gamma, hit targets, resampling and alpha rows. Web and on-screen results are recorded by their respective jobs.',
   })
   assert(complete, 'Original transition option observations differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

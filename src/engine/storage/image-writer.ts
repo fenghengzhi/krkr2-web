@@ -1,5 +1,5 @@
 import type { Pixels } from '../ports/graphics.ts'
-import { encodeBmp } from '../../formats/image/bmp.ts'
+import { encodeBmpRows } from '../../formats/image/bmp.ts'
 import { encodePng } from '../../formats/image/png-encoder.ts'
 import { encodeTlg } from '../../formats/image/tlg/encoder.ts'
 
@@ -60,7 +60,7 @@ export class ImageWriter {
     metadata: ReadonlyMap<string, string>,
   ): Promise<Uint8Array> {
     type = this.validateType(type)
-    if (['bmp', 'bmp8', 'bmp24', 'bmp32'].includes(type)) return encodeBmp(image, type)
+    if (['bmp', 'bmp8', 'bmp24', 'bmp32'].includes(type)) return this.finish(encodeBmpRows(image, type))
     if (['png', 'png24', 'png32'].includes(type)) {
       const plan = await this.finish(encodePng(image, type !== 'png24', metadata))
       const compressed = await this.compress(plan.filtered)

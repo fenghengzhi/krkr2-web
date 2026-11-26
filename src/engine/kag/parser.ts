@@ -523,7 +523,9 @@ export class KagParser {
     }
   }
   *restore(data: RecordData): Task {
-    const macros = record(data.macros),
+    // Original KAG's saveMacros=false writes void here. Restore deliberately
+    // leaves the running game's definitions intact when no snapshot exists.
+    const macros = data.macros === undefined ? undefined : record(data.macros),
       frames = list(data.callStack).map(record)
     if (frames.length > 4096) throw new Error('Malformed KAG call stack')
     const nameLists = data.macroArgNames === undefined ? undefined : list(data.macroArgNames)
@@ -564,7 +566,7 @@ export class KagParser {
         throw new Error('Malformed KAG call frame')
     }
     yield* this.clearCallStack()
-    yield* this.effect('restoreMacros', macros)
+    if (macros !== undefined) yield* this.effect('restoreMacros', macros)
     this.calls = frames.map((frame) => ({ ...frame }))
     yield* this.effect('restoreParams', params)
     // Preserve restored arguments during ClearBuffer/LoadScenario. Scripts

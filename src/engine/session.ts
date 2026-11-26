@@ -5850,7 +5850,7 @@ export class EngineSession {
             if (session.composer.snapshotNeedsCompletion(source)) {
               // InternalComplete draws the final transition phase before
               // AfterCompletion exchanges owners and invokes the game callback.
-              yield* session.prepareFrame(source, false, () => { pixels = session.composer.snapshot(source, true) })
+              yield* session.prepareFrame(source, false, () => { pixels = session.composer.snapshot(source, true, clippedSource) })
             } else pixels = session.composer.snapshot(source)
             // onPaint can change the destination's clip or replace its image.
             // Keep the original clipped request, but use the current image and
@@ -5930,35 +5930,21 @@ export class EngineSession {
           bitmapClip = intersect(clip, { x: 0, y: 0, width: bitmap.width, height: bitmap.height }),
           fullCopy = operate ? mode === 1 && face === 1 && !layer.holdAlpha && opacity === 255
             : face !== 1 || !layer.holdAlpha,
+          simpleBlt = destination.width > 0 && destination.height > 0 &&
+            destination.width === sourceRect.width && destination.height === sourceRect.height &&
+            covered.width === destination.width && covered.height === destination.height,
           work = fullCopy && filteredCopy(source, sourceRect, destination, bitmapClip, number(10), number(11), id === sourceLayer.id)
-        const output = work
+        const output = simpleBlt ? { pixels: source, left: destination.x, top: destination.y } : work
           ? { pixels: await this.finishGraphics(work), left: destination.x, top: destination.y }
           : stretchPixels(source, destination, sourceRect, bitmapClip, number(10), number(11))
-        if (!output.pixels.width || !output.pixels.height) break
-        if (operate) {
-          if (
-            !bitmap.operate(
-              output.pixels,
-              output.left,
-              output.top,
-              { x: 0, y: 0, width: output.pixels.width, height: output.pixels.height },
-              mode,
-              face,
-              opacity,
-              layer.holdAlpha,
-            )
-          )
-            break
-        } else
-          bitmap.copyPixels(
-            output.pixels,
-            output.left,
-            output.top,
-            { x: 0, y: 0, width: output.pixels.width, height: output.pixels.height },
-            face === 1 && this.layers.get(id).holdAlpha,
-          )
-        this.layers.get(id).imageModified = true
-        this.invalidateLayer(number(0))
+        const inputRect = simpleBlt ? sourceRect : { x: 0, y: 0, width: output.pixels.width, height: output.pixels.height }
+        const changed = operate
+          ? bitmap.operate(output.pixels, output.left, output.top, inputRect, mode, face, opacity, layer.holdAlpha, !simpleBlt)
+          : bitmap.copyPixels(output.pixels, output.left, output.top, inputRect, face === 1 && layer.holdAlpha, bitmapClip)
+        if (changed) {
+          layer.imageModified = true
+          this.invalidateLayer(id)
+        }
         break
       }
       case 'Layer.affineCopy':

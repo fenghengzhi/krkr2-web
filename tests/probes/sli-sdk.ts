@@ -9,6 +9,7 @@ import { waveFadeExpected, waveFadeDelayedExpected, waveFadeSource } from '../he
 import { waveFrequencyExpected, waveFrequencyFiles, waveFrequencySource } from '../helpers/wave-frequency.ts'
 import { waveReopenExpected, waveReopenFiles, waveReopenSource } from '../helpers/wave-reopen.ts'
 import { waveGainSource, waveGainPublicExpected } from '../helpers/wave-gain.ts'
+import { waveSeekFiles, waveSeekSource, waveSeekSdkExpected } from '../helpers/wave-seek.ts'
 import { soundOpenExpected, soundOpenFiles, soundOpenSource } from '../helpers/sound-open.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
@@ -28,11 +29,12 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   ...Object.fromEntries(Object.entries(waveFadeExpected).map(([id, value]) => ['fade-' + id, value])),
   'fade-delayed': waveFadeDelayedExpected, 'frequency-original': waveFrequencyExpected,
   'wave-gain-controls': waveGainPublicExpected,
+  'wave-seek-labels': waveSeekSdkExpected,
   ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
   'xp3-decoder': [xp3SegmentScript, xp3SegmentText, 'stop', '48000', '0', '12000', '36320736', '1452000'].join('~'),
   'xp3-compressed': [xp3SegmentScript, xp3SegmentText, xp3CompressedAudioHeader, 'closed'].join('~') }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles() }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -80,9 +82,11 @@ if (process.argv[2] === 'prepare') {
        try{if(typeof global.xp3CompressedClose!="undefined")xp3CompressedClose();}catch(cleanup){record("xp3-cleanup|"+cleanup.message);}
      }`,
     waveFadeSource,
+    waveSeekSource,
     ...Object.keys(waveFadeExpected).map((id) =>
       `try{record("fade-${id}|"+waveFadeObserve("${id}"));}catch(e){record("fade-${id}|unexpected-error:"+e.message);}`),
-    'fadeDelayedAfter=function(result){global.record("fade-delayed|"+result);global.record("done");global.System.exit();};fadeDelayedStart();',
+    'waveSeekAfter=function(result){global.record("wave-seek-labels|"+result);global.record("done");global.System.exit();};',
+    'fadeDelayedAfter=function(result){global.record("fade-delayed|"+result);global.waveSeekSdkStart();};fadeDelayedStart();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
   save('inputs.json', { commit: process.env.GITHUB_SHA, startupSha256: digest(startup),
@@ -117,6 +121,7 @@ if (process.argv[2] === 'prepare') {
   save('comparison.json', { commit: manifest.commit, complete, observationSha256: digest(raw), results,
     waveReopen: { planned: Object.keys(waveReopenExpected).length,
       matched: results.filter((row) => row.id.startsWith('wave-reopen-') && row.matched).length },
+    waveSeekScope: 'Seven actual-play SLI first-label observations: initial zero output rate, integer millisecond conversion, rejected endpoint/negative/out-of-range requests, exact sample seek, uint64 multiplication wrap, and retained/recreated output rates across reopen. Hardware PCM and elapsed getter positions are not inferred; an unavailable DirectSound device remains a failed observation.',
     xp3Archive: manifest.xp3Archive,
     host: wine ? 'Ubuntu / Wine 32-bit / PulseAudio' : 'Windows / DirectSound',
     processState: sdk.state ?? 'unreported', exitCode: sdk.exitCode ?? null, processReportError,

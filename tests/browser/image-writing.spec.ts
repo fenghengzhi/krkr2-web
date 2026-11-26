@@ -187,7 +187,7 @@ Debug.message("saved-ready:"+string(existing)+":"+string(ok));
     await page.locator('#stop').click()
     expect(errors).toEqual([])
   })
-  for (const format of ['png', 'tlg5', 'tlg6'])
+  for (const format of ['bmp8', 'png', 'tlg5', 'tlg6'])
     test(`${backend}: prompt Stop after the ${format} encoding announcement discards unfinished output`, async ({
       page,
     }) => {

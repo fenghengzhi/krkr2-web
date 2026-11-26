@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 133 批修复原 KAG 关闭宏定义存档后的读档、透明图层写入截图时的颜色和遮罩，以及 Wave 的播放定位。带 8 位缩略图的书签新增实际写入、逐像素读取与刷新恢复验收。131 的主构建已通过，Node 有 11 个失败、2 个超时取消。132 取回时仍在等待运行。[133 实现与验收](decisions/133-game-bookmarks-captured-alpha-and-sound-seeks.md)
+
 第 132 批修正 KAG 存档缩略图的缩放、剧情中含方括号的名字，以及背景音乐和音效的音量与声像。131 的原版已经匹配全部 49 个 KAG 场景和 5 个新增换轨场景。取回时该提交的主构建仍在排队，浏览器验收尚无结果。132 实现提交 `653ca3b` 的验证首次登记为 `pending`。[132 实现与验收](decisions/132-game-thumbnails-embedded-text-and-wave-volume.md) · [132 托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45757288264)
 
 第 131 批修复菜单图层的排序与命中、KAG 宏参数复用、声音换轨时的音量淡变，以及导出字节码时对多级基类名的处理。128 的介绍游戏在 Chromium 和 WebKit 的两个后端完成了菜单存读档、刷新和退出。129、130 均因同一处 XP3 测试类型错误未完成生产构建，本批已修正。实现提交 `2afe64d` 的托管运行首次登记为 `queued`，结果在下一批取回。[131 实现与验收](decisions/131-layer-order-macro-arguments-and-wave-reopen.md) · [131 托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45755797755)

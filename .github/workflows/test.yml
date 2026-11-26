@@ -1118,7 +1118,8 @@ jobs:
         if: ${{ !cancelled() && steps.sdk_chromium.outcome == 'success' && hashFiles('out/verification/native-eri/kag/game/native-bookmark.tjs') != '' }}
         env:
           KRKR_KAG_SDK_IMPORT: '1'
-        run: npx playwright test tests/browser/kag-macro-bookmark.spec.ts --project=chromium --output=out/verification/kag-bookmark-browser
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/verification/kag-bookmark-browser/results.json
+        run: npx playwright test tests/browser/kag-macro-bookmark.spec.ts --project=chromium --output=out/verification/kag-bookmark-browser --reporter=list,json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -1141,7 +1142,8 @@ jobs:
         if: ${{ !cancelled() && steps.download_dct.outcome == 'success' && steps.sdk_chromium.outcome == 'success' }}
         env:
           KRKR_DCT_SDK_IMPORT: '1'
-        run: npx playwright test tests/browser/eri-sdk-pixels.spec.ts --project=chromium --output=out/verification/dct-browser
+          PLAYWRIGHT_JSON_OUTPUT_NAME: out/verification/dct-browser/results.json
+        run: npx playwright test tests/browser/eri-sdk-pixels.spec.ts --project=chromium --output=out/verification/dct-browser --reporter=list,json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() && steps.download_dct.outcome == 'success' }}
         with:

@@ -117,7 +117,7 @@ ${body}
         await session.evaluate(expression)
         await session.idle()
       },
-      async expectPixels(colors: number[]) {
+      async expectPixels(colors: number[], snapshot = colors) {
         const frame = frames.at(-1)
         assert(frame, 'Expected a presented scene frame')
         assert.equal(frame.width, 6)
@@ -126,7 +126,7 @@ ${body}
         assert.deepEqual(render(frame), rgba(colors), 'Presented Frame pixels')
         assert.equal(
           await session.evaluate('snapshotColors'),
-          colors.join(','),
+          snapshot.join(','),
           'Ancestor piledCopy RGB',
         )
       },
@@ -293,7 +293,9 @@ function hideChild(){red.opacity=0;copyBinder();capture();}
     )
     try {
       assert.equal(await session.evaluate('rawPixels'), '16711680,64,255,127')
-      await expectPixels([0x200000, ...Array<number>(11).fill(0)])
+      // The accelerated display rounds to 32. The stock screenshot kernel
+      // mixes (255 * 32) >> 8 into black and stores red 31.
+      await expectPixels([0x200000, ...Array<number>(11).fill(0)], [0x1f0000, ...Array<number>(11).fill(0)])
       await execute('hideBinder()')
       assert.equal(await session.evaluate('rawPixels'), '16711680,64,255,127')
       await expectPixels(Array<number>(12).fill(0))
@@ -353,7 +355,7 @@ var rawPixels=raw.join(",");capture();
         await session.evaluate('rawPixels'),
         '255,127,16711680,64,65280,90,255,127,65280,90,65280,90',
       )
-      await expectPixels([0, 0, 0x200000, ...Array<number>(9).fill(0)])
+      await expectPixels([0, 0, 0x200000, ...Array<number>(9).fill(0)], [0, 0, 0x1f0000, ...Array<number>(9).fill(0)])
     } finally {
       await stop()
     }
@@ -406,7 +408,7 @@ captureSparse();
         await session.evaluate('sparsePixels'),
         '255,127,16711680,64,255,127,255,127,255,127,255,127',
       )
-      await expectPixels([0, 0, 0x200000, ...Array<number>(9).fill(0)])
+      await expectPixels([0, 0, 0x200000, ...Array<number>(9).fill(0)], [0, 0, 0x1f0000, ...Array<number>(9).fill(0)])
     } finally {
       await stop()
     }
@@ -463,18 +465,19 @@ function cacheSparseNested(enabled){sparseNested.cached=enabled;rebuildSparseNes
       // Each sink receives a fresh rebuild: a native warm cache need not
       // forward the red child again. This case does not specify that history.
       const uncached = '255,127,16711680,64,65280,90,255,127,65280,90,65280,90',
-        ancestor = [0, 0, 0x200000, ...Array<number>(9).fill(0)]
+        ancestor = [0, 0, 0x200000, ...Array<number>(9).fill(0)],
+        capture = [0, 0, 0x1f0000, ...Array<number>(9).fill(0)]
       assert.equal(await session.evaluate('sparsePixels'), uncached)
-      await expectPixels(ancestor)
+      await expectPixels(ancestor, capture)
       await execute('cacheSparseNested(true)')
       assert.equal(
         await session.evaluate('sparsePixels'),
         '255,127,65280,90,65280,90,255,127,65280,90,65280,90',
       )
-      await expectPixels(ancestor)
+      await expectPixels(ancestor, capture)
       await execute('cacheSparseNested(false)')
       assert.equal(await session.evaluate('sparsePixels'), uncached)
-      await expectPixels(ancestor)
+      await expectPixels(ancestor, capture)
     } finally {
       await stop()
     }

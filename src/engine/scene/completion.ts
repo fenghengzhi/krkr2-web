@@ -1,5 +1,6 @@
 import { intersect } from '../graphics/bitmap.ts'
 import { autoFace, blendPixel, neutralColor, usesAlpha } from '../graphics/blend.ts'
+import { blendAlphaRow } from '../graphics/alpha-row.ts'
 import type { Pixels, Rect } from '../ports/graphics.ts'
 import type { LayerState, LayerTree } from './layers.ts'
 
@@ -14,6 +15,10 @@ interface Completion {
 interface Surface {
   pixels: Pixels
   bounds: Rect
+}
+export interface CompletedTransition {
+  pixels: Pixels
+  children: boolean
 }
 interface Target {
   complete(completion: Completion): void
@@ -88,10 +93,11 @@ function fill(surface: Surface, rect: Rect, color: number, drawn?: Uint8Array): 
  * their own image first. This is intentionally separate from screen rendering.
  * Explicit cache enablement affects message order; incremental native cache
  * regions and transition pipelines remain the composer's existing boundaries. */
-export function completeBinder(
+export function completeLayer(
   layers: LayerTree,
   id: number,
-  transitioned: ReadonlyMap<number, Pixels> = new Map(),
+  transitioned: ReadonlyMap<number, CompletedTransition>,
+  requested?: Rect,
 ): Pixels {
   const root = layers.get(id),
     bounds = { x: 0, y: 0, width: root.width, height: root.height },
@@ -103,14 +109,15 @@ export function completeBinder(
     y: number,
     requested: Rect,
     target: Target,
-    forcedCache?: Pixels,
+    forcedCache?: Surface,
   ): void => {
     const viewport = { x, y, width: layer.width, height: layer.height },
       rect = intersect(viewport, requested)
     if (!nonempty(rect)) return
     const type = displayType(layer),
       opacity = layer.opacity,
-      main = layer.bitmap,
+      transition = transitioned.get(layer.id),
+      main = transition && !transition.children ? transition.pixels : layer.bitmap?.pixels,
       children = layer.children
         .map((id) => layers.get(id))
         .filter((child) => child.visible && child.opacity > 0),
@@ -122,17 +129,16 @@ export function completeBinder(
           height: child.height,
         }),
       ),
-      color = type === 1 ? layer.neutralColor : neutralColor(layer.type),
-      transition = transitioned.get(layer.id)
+      color = type === 1 ? layer.neutralColor : neutralColor(layer.type)
 
-    if (transition && !forcedCache) {
-      target.complete({ pixels: transition, x, y, rect, type, opacity })
+    if (transition?.children) {
+      target.complete({ pixels: transition.pixels, x, y, rect, type, opacity })
       return
     }
     const own = (area: Rect, sink: (completion: Completion) => void) => {
       if (main)
         sink({
-          pixels: main.pixels,
+          pixels: main,
           x: x + layer.imageLeft,
           y: y + layer.imageTop,
           rect: area,
@@ -145,7 +151,7 @@ export function completeBinder(
     const drawChildren = (area: Rect, destination: Target) => {
       for (const child of children) draw(child, x + child.left, y + child.top, area, destination)
     }
-    const compose = (area: Rect, cached: boolean, destination?: Pixels) => {
+    const compose = (area: Rect, cached: boolean, destination?: Surface) => {
       // An uncached Binder never sends its temporary overlapped image. Its
       // children forward directly; the Binder's own image is exposed-only.
       if (type === 0 && !cached) {
@@ -155,11 +161,9 @@ export function completeBinder(
       // Native totalopaque uses GetDrawTargetBitmap instead of a temporary.
       // Preserve that identity: the parent's completion then skips both its
       // blend and DrawnRegion update, including the cached no-main fill below.
-      const surface = destination
-          ? { pixels: destination, bounds: area }
-          : !cached && type === 1 && opacity === 255
-            ? target.borrow(area)
-            : { pixels: image(area, color), bounds: area },
+      const surface = destination ?? (!cached && type === 1 && opacity === 255
+          ? target.borrow(area)
+          : { pixels: image(area, color), bounds: area }),
         { pixels, bounds } = surface,
         drawn = !main && type !== 0 ? new Uint8Array(pixels.width * pixels.height) : undefined
       if (main) own(area, (source) => copy(pixels, bounds, source))
@@ -174,6 +178,17 @@ export function completeBinder(
                 const covered = intersect(area, source.rect),
                   face = autoFace(type),
                   hold = usesAlpha(type) && ![1, 2, 12].includes(source.type)
+                if (source.type === 2 && face === 1) {
+                  if (drawn) fill(surface, covered, color, drawn)
+                  for (let py = covered.y; py < covered.y + covered.height; py++) {
+                    const x = covered.x - bounds.x, first = (py - bounds.y) * pixels.width + x
+                    blendAlphaRow(pixels.data, first * 4, source.pixels.data,
+                      ((py - source.y) * source.pixels.width + covered.x - source.x) * 4,
+                      x, covered.width, source.opacity)
+                    drawn?.fill(1, first, first + covered.width)
+                  }
+                  return
+                }
                 for (let py = covered.y; py < covered.y + covered.height; py++)
                   for (let px = covered.x; px < covered.x + covered.width; px++) {
                     const index = (py - bounds.y) * pixels.width + px - bounds.x,
@@ -212,7 +227,9 @@ export function completeBinder(
       if (cached && !main) fill(surface, area, color, drawn)
       target.complete({ pixels, x: bounds.x, y: bounds.y, rect: area, type, opacity })
     }
-    if (forcedCache || layer.cached) {
+    // Draw bypasses the layer cache for a divisible main-image transition.
+    // Its exposed and child-covered rectangles are completed separately.
+    if ((forcedCache || layer.cached) && !transition) {
       // Cached Binder children send their messages first, then their own
       // cache is sent. At the root the cache and raw target are the same image.
       compose(rect, true, forcedCache)
@@ -270,12 +287,12 @@ export function completeBinder(
     root,
     0,
     0,
-    bounds,
+    requested ?? bounds,
     {
       complete: (source) => copy(result, bounds, source),
       borrow: () => ({ pixels: result, bounds }),
     },
-    result,
+    { pixels: result, bounds },
   )
   return result
 }

@@ -28,6 +28,23 @@ const frame: TransitionFrame = {
 const blackWhite = image(0, 0, 0, 19, 255, 255, 255, 87)
 const whiteBlack = image(255, 255, 255, 203, 0, 0, 0, 61)
 
+test('a main-image transition still composes children at the requested snapshot width', () => {
+  const layers = new LayerTree(), root = layers.create(0), after = layers.create(root), tile = layers.create(root)
+  const area = { x: 0, y: 0, width: 5, height: 1 }
+  for (const id of [root, after, tile]) { layers.resizeImage(id, 5, 1); layers.resize(id, 5, 1) }
+  layers.fill(root, area, 0xff000000)
+  layers.fill(after, area, 0xff004000)
+  layers.fill(tile, area, 0xffc00000)
+  layers.bitmap(tile).setPixel(1, 0, 0, 'mask')
+  layers.set(tile, 'visible', 1)
+  const composer = new SceneComposer(layers, (id) => id === root
+    ? { ...frame, destination: root, source: after, phase: 1 } : undefined)
+  const full = composer.snapshot(root)
+  assert.deepEqual([...full.data.subarray(0, 8)], [191, 0, 0, 255, 0, 64, 0, 255])
+  const cropped = composer.snapshot(root, true, { ...area, width: 1 })
+  assert.deepEqual([...cropped.data.subarray(0, 4)], [192, 0, 0, 255])
+})
+
 test('opaque crossfade uses signed /256 arithmetic after the 255-step phase', () => {
   assert.deepEqual(
     [...transitionPixels(blackWhite, whiteBlack, frame).data],

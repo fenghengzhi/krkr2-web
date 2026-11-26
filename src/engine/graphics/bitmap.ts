@@ -1,6 +1,7 @@
 import type { Pixels, Rect } from '../ports/graphics.ts'
 import { blendColor } from './color.ts'
 import { blendPixel, blendOpacity, validateBlend } from './blend.ts'
+import { blendAlphaRow } from './alpha-row.ts'
 import type { AffineRaster } from './affine.ts'
 import { gammaTable, type GammaChannel } from './gamma.ts'
 import { convertAlpha, grayscale } from './processing.ts'
@@ -290,19 +291,27 @@ export class Bitmap {
     face: number,
     opacity = 255,
     holdAlpha = false,
+    resampled = false,
   ): boolean {
     validateBlend(mode, face)
     const amount = blendOpacity(opacity)
     if (!amount) return false
     const target = intersect(
-      intersect(this.clip, { x: left, y: top, width: rect.width, height: rect.height }),
+      intersect(intersect(this.clip, { x: 0, y: 0, width: this.width, height: this.height }),
+        { x: left, y: top, width: rect.width, height: rect.height }),
       { x: left - rect.x, y: top - rect.y, width: source.width, height: source.height },
     )
     if (!target.width || !target.height) return false
     // A copy is essential for overlapping self-operations; each source pixel
     // must observe the bitmap before any part of the rectangle was written.
     const data = source.data === this.pixels.data ? source.data.slice() : source.data
-    for (let y = target.y; y < target.y + target.height; y++)
+    for (let y = target.y; y < target.y + target.height; y++) {
+      if (mode === 2 && face === 1 && !holdAlpha && !resampled) {
+        blendAlphaRow(this.pixels.data, (y * this.width + target.x) * 4, data,
+          ((y - top + rect.y) * source.width + target.x - left + rect.x) * 4,
+          target.x, target.width, amount)
+        continue
+      }
       for (let x = target.x; x < target.x + target.width; x++)
         blendPixel(
           this.pixels.data,
@@ -314,6 +323,7 @@ export class Bitmap {
           amount,
           holdAlpha,
         )
+    }
     this.touch()
     return true
   }

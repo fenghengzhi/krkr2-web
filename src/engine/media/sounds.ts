@@ -41,6 +41,8 @@ interface Sound {
   labels: ScriptValue
   position: [number, number, number]
   canControlPan: boolean
+  /** Native secondary-buffer format survives Clear/Open; initially zero. */
+  waveOutputRate: number
   filters?: PhaseVocoderConnection
   cdda?: CddaSelection
   preparedCdda?: { token: number; selection: CddaSelection }
@@ -265,6 +267,7 @@ export class SoundService {
           labels: scriptRecord({}),
           position: [0, 0, 0],
           canControlPan: false,
+          waveOutputRate: 0,
           snapshot: {
             id,
             epoch: 0,
@@ -603,8 +606,10 @@ export class SoundService {
       // Native creates the secondary buffer at StartPlay, not open. Our
       // ordinary software output supports pan, and has no DirectSound3D
       // interface. Stop/unload retain this capability just as native Clear.
-      if (method === 'play' && sound.kind === 'wave' && sound.snapshot.status === 'play')
+      if (method === 'play' && sound.kind === 'wave' && sound.snapshot.status === 'play') {
         sound.canControlPan = true
+        sound.waveOutputRate = sound.snapshot.sampleRate
+      }
       if (sound.snapshot.status !== previous) {
         this.cancelEvents(sound)
         callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
@@ -661,12 +666,31 @@ export class SoundService {
       // WaveImpl takes a tjs_int, after the public setter's TJS integer
       // conversion. Preserve its low 32 bits before the gain/pan clamp or frequency
       // sentinel dispatch (in particular 2^32 becomes original-frequency zero).
-      let setting = sound.kind === 'wave' && ['pan', 'frequency', 'volume', 'volume2'].includes(property) && typeof input[1] === 'bigint'
-        ? Number(BigInt.asIntN(32, input[1])) : numeric(1)
+      const wavePosition = sound.kind === 'wave' && (property === 'position' || property === 'samplePosition') &&
+        sound.snapshot.sampleRate > 0 && sound.snapshot.sampleCount > 0
+      // Keep the original int64 until native uint64 arithmetic/range rejection
+      // is complete; numeric() deliberately rejects unsafe Number conversion.
+      let setting = wavePosition && typeof input[1] === 'bigint' ? 0
+        : sound.kind === 'wave' && ['pan', 'frequency', 'volume', 'volume2'].includes(property) && typeof input[1] === 'bigint'
+          ? Number(BigInt.asIntN(32, input[1])) : numeric(1)
       if (property === 'volume' || property === 'volume2')
         setting = Math.max(0, Math.min(100000, setting))
       if (property === 'pan') setting = Math.max(-100000, Math.min(100000, setting))
-      if (property === 'position') setting = (setting * sound.snapshot.sampleRate) / 1000
+      if (wavePosition) {
+        // WaveIntf converts through tjs_int64 to tjs_uint64. WaveImpl then
+        // multiplies milliseconds in uint64 before integer division; a public
+        // millisecond seek must never introduce an interpolated PCM position.
+        // Format is zero before first play and survives Clear/Open until the
+        // next successful StartPlay recreates the secondary-buffer format.
+        let samples = BigInt.asUintN(64, typeof input[1] === 'bigint' ? input[1] : BigInt(setting))
+        if (property === 'position')
+          samples = BigInt.asUintN(64, samples * BigInt(sound.waveOutputRate)) / 1000n
+        // Native rejects the endpoint as well as larger/negative positions
+        // without rewinding, changing status or resetting SLI traversal.
+        if (samples >= BigInt(sound.snapshot.reportedSampleCount ?? sound.snapshot.sampleCount))
+          return this.result(undefined, callbacks)
+        setting = Number(samples)
+      } else if (property === 'position') setting = (setting * sound.snapshot.sampleRate) / 1000
       const key = property === 'samplePosition' || property === 'position' ? 'position' : property
       if (!['volume', 'volume2', 'pan', 'looping', 'paused', 'frequency', 'position'].includes(key))
         throw new Error(`Unsupported sound property: ${property}`)

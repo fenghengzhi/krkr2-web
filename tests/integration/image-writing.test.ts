@@ -63,7 +63,7 @@ test('failed PNG compression preserves the existing saved file', async () => {
 })
 
 for (const binary of [false, true])
-  for (const format of ['png', 'png24', 'png32', 'tlg', 'tlg5', 'tlg524', 'tlg6', 'tlg624'])
+  for (const format of ['bmp', 'bmp8', 'bmp24', 'bmp32', 'png', 'png24', 'png32', 'tlg', 'tlg5', 'tlg524', 'tlg6', 'tlg624'])
     for (const overwrite of [false, true])
       test(
         `${binary ? 'bytecode' : 'source'}: cancellation at the first ${format} encoder yield ${overwrite ? 'preserves the existing destination' : 'creates no incomplete destination'}`,

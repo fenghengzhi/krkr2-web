@@ -14,6 +14,13 @@ function level(value: number, maximum: number, threshold: number): number {
 }
 /** Windows BITMAPINFOHEADER, bottom-up BGR(A); bmp8 uses TVP's fixed 252-color palette. */
 export function encodeBmp(image: Pixels, mode = 'bmp'): Uint8Array {
+  const work = encodeBmpRows(image, mode)
+  let row = work.next()
+  while (!row.done) row = work.next()
+  return row.value
+}
+
+export function* encodeBmpRows(image: Pixels, mode: string): Generator<void, Uint8Array> {
   const depth =
     mode === 'bmp' || mode === 'bmp32' ? 32 : mode === 'bmp24' ? 24 : mode === 'bmp8' ? 8 : 0
   if (!depth) throw new Error(`Image output format is not implemented: ${mode}`)
@@ -51,7 +58,8 @@ export function encodeBmp(image: Pixels, mode = 'bmp'): Uint8Array {
           result[at + 1] = Math.floor((green * 255) / 6)
           result[at + 2] = Math.floor((red * 255) / 5)
         }
-  for (let y = 0; y < height; y++)
+  const rowsPerSlice = Math.max(1, Math.floor(4096 / width))
+  for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const from = (y * width + x) * 4,
         to = offset + (height - 1 - y) * stride + x * (depth / 8)
@@ -69,6 +77,8 @@ export function encodeBmp(image: Pixels, mode = 'bmp'): Uint8Array {
         if (depth === 32) result[to + 3] = data[from + 3]!
       }
     }
+    if ((y + 1) % rowsPerSlice === 0 && y + 1 < height) yield
+  }
   return result
 }
 

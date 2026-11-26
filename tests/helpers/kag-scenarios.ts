@@ -2,6 +2,7 @@ import { kagEvaluationFiles, kagEvaluationExpected, kagEvaluationSource } from '
 import { kagRoutingFiles, kagRoutingExpected, kagRoutingSource } from './kag-routing.ts'
 import { kagMacroSlotFiles, kagMacroSlotExpected, kagMacroSlotSource } from './kag-macro-slots.ts'
 import { kagEmbeddingFiles, kagEmbeddingExpected, kagEmbeddingSource } from './kag-embedding.ts'
+import { kagOptionalMacroFiles, kagOptionalMacroExpected, kagOptionalMacroSource } from './kag-optional-macros.ts'
 
 /** Shared TJS controls for the 2.32r2 SDK and the Web runtime. The SDK
  * produces its own macro bookmark from a real call into another storage. */
@@ -13,6 +14,7 @@ export const kagFiles = {
   ...kagRoutingFiles,
   ...kagMacroSlotFiles,
   ...kagEmbeddingFiles,
+  ...kagOptionalMacroFiles,
 }
 
 export const kagExpected: Readonly<Record<string, string>> = {
@@ -33,6 +35,7 @@ export const kagExpected: Readonly<Record<string, string>> = {
   ...kagRoutingExpected,
   ...kagMacroSlotExpected,
   ...kagEmbeddingExpected,
+  ...kagOptionalMacroExpected,
 }
 
 export const kagControlSource = String.raw`
@@ -76,6 +79,7 @@ function kagObserve(id){
   if(id.indexOf("routing-")==0){try{return kagRoutingObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("slots-")==0){try{return kagMacroSlotObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("embedding-")==0){try{return kagEmbeddingObserve(id);}catch(e){return e.message;}}
+  if(id.indexOf("optional-macros-")==0){try{return kagOptionalMacroObserve(id);}catch(e){return e.message;}}
   kagHolders();
   var p=new RefParser(),q=new RefParser(),r=new RefParser(),n="case-live.ks",result="",d;
   p.clear();
@@ -147,4 +151,4 @@ function kagObserve(id){
     return "unexpected success";
   }catch(e){return e.message;}
 }
-` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource
+` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource

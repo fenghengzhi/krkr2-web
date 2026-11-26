@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 133 批让使用 `saveMacros=false` 的游戏读回书签时保留当前宏定义。截取画面和软件绘图设备现在按原版的整行运算合成透明层，BMP 编码期间可以暂停或停止。Wave 毫秒定位和超出声音长度的位置赋值也纳入原版对照。[133 兼容范围](../decisions/133-game-bookmarks-captured-alpha-and-sound-seeks.md)
+
 第 132 批按原版滤镜生成 KAG 存档缩略图，修正 `[emb]` 显示方括号和表达式切换剧情后的续读位置。Wave 音量与左右声像接入原版的分贝换算。两种已测头版本的有损 ERI 现在均按原版拒绝 Gamma 编码。缩略图 BMP、实际剧情点击和浏览器混音输出等待同一提交的托管验收。[132 兼容范围](../decisions/132-game-thumbnails-embedded-text-and-wave-volume.md)
 
 第 131 批修正重叠菜单的显示与输入次序、KAG 在同一宏调用深度复用参数字典、Wave 换轨时继续执行淡变，以及多级基类名的字节码导出。130 的原版 ERI 差分已取得三种作者工具有损图片的像素，另有五个输入在原版初始化阶段被拒绝。[131 兼容范围](../decisions/131-layer-order-macro-arguments-and-wave-reopen.md)

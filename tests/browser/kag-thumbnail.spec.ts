@@ -3,7 +3,8 @@ import { expect, test } from '@playwright/test'
 import { evaluate } from '../helpers/browser-expression.ts'
 
 const scene = String.raw`
-var previewPattern;
+var previewPattern,previewOverlay;
+var defaultPreviewWidth=kag.thumbnailWidth,defaultPreviewDepth=kag.thumbnailDepth;
 function configurePreview(){
  kag.saveThumbnail=true;kag.thumbnailWidth=320;kag.thumbnailDepth=24;
 }
@@ -18,6 +19,19 @@ function savePreview(){
 function loadPreview(){
  configurePreview();
  return kag.loadBookMarkFromFile(System.dataPath+"preview132.bmp");
+}
+function configureIndexedPreview(){
+ kag.saveThumbnail=true;kag.thumbnailWidth=defaultPreviewWidth;kag.thumbnailDepth=defaultPreviewDepth;
+}
+function saveIndexedPreview(){
+ configureIndexedPreview();previewPattern.fillRect(0,0,640,480,0xff000000);
+ previewOverlay=new Layer(kag,previewPattern);kag.add(previewOverlay);
+ previewOverlay.type=ltAlpha;previewOverlay.setSize(640,480);
+ previewOverlay.fillRect(0,0,640,480,0xff800000);previewOverlay.visible=true;
+ return kag.saveBookMarkToFile(System.dataPath+"indexed-preview.bmp",false);
+}
+function loadIndexedPreview(){
+ configureIndexedPreview();return kag.loadBookMarkFromFile(System.dataPath+"indexed-preview.bmp");
 }
 Debug.message("thumbnail-game-ready");
 `
@@ -47,6 +61,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       await evaluate(page, '(function(){kag.conductor.loadScenario("save-verification.ks");kag.conductor.startProcess();return 1;})()', '1')
       await expect(page.locator('#logs')).toContainText('save=ready:7')
       await evaluate(page, 'savePreview()', '1')
+      await evaluate(page, 'saveIndexedPreview()', '1')
       const pending = page.waitForEvent('download')
       await page.locator('#export-saves').click()
       const backup = JSON.parse(await readFile((await (await pending).path())!, 'utf8')) as { files: { path: string; base64: string }[] }
@@ -64,9 +79,28 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
         expect(bytes.subarray(start, start + row.length).equals(row), `BMP row ${y}`).toBe(true)
       }
       await info.attach('game-bookmark-thumbnail.bmp', { contentType: 'image/bmp', body: bytes.subarray(0, bmpSize) })
+      // The original default thumbnail is 133x99. Red 128 and 127 select
+      // different palette entries on odd rows in the stock dither pattern.
+      const indexedFile = backup.files.find((entry) => entry.path === 'savedata/indexed-preview.bmp')
+      expect(indexedFile).toBeDefined()
+      const indexed = Buffer.from(indexedFile!.base64, 'base64'), offset = 54 + 1024, stride = 136, size = offset + stride * 99
+      expect([indexed.toString('ascii', 0, 2), indexed.readUInt32LE(2), indexed.readUInt32LE(10),
+        indexed.readInt32LE(18), indexed.readInt32LE(22), indexed.readUInt16LE(28)]).toEqual(['BM', size, offset, 133, 99, 8])
+      expect(indexed.length).toBeGreaterThan(size)
+      expect([...indexed.subarray(54 + 2 * 4, 54 + 4 * 4)]).toEqual([0, 0, 102, 0, 0, 0, 153, 0])
+      for (let y = 0; y < 99; y++) {
+        const start = offset + (98 - y) * stride
+        const expected = Array.from({ length: 133 }, (_, x) => y % 2 === 0 && x % 2 === 1 ? 2 : 3)
+        expect([...indexed.subarray(start, start + 133)], `indexed BMP row ${y}`).toEqual(expected)
+      }
       await page.reload()
       await launch()
       await evaluate(page, 'loadPreview()', '1')
+      await evaluate(page, 'f.saved', '7')
+      await page.reload()
+      await launch()
+      await evaluate(page, '(f.saved=48,f.saved)', '48')
+      await evaluate(page, 'loadIndexedPreview()', '1')
       await evaluate(page, 'f.saved', '7')
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } finally {

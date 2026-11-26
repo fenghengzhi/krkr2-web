@@ -1,9 +1,10 @@
 import type { FrameLayer, Pixels, Rect } from '../ports/graphics.ts'
 import { intersect } from '../graphics/bitmap.ts'
 import { autoFace, blendPixel, neutralColor, usesAlpha } from '../graphics/blend.ts'
+import { blendAlphaRow } from '../graphics/alpha-row.ts'
 import { transitionPixels, type TransitionFrame } from '../graphics/transition.ts'
 import type { LayerTree, LayerState } from './layers.ts'
-import { completeBinder } from './completion.ts'
+import { completeLayer, type CompletedTransition } from './completion.ts'
 interface Composed {
   pixels: Pixels
   revision: number
@@ -202,7 +203,13 @@ export class SceneComposer {
           const mode = compositionType(child.layer),
             face = autoFace(type),
             hold = usesAlpha(type) && mode !== 1 && mode !== 2 && mode !== 12
-          for (let y = child.clip.y; y < child.clip.y + child.clip.height; y++)
+          for (let y = child.clip.y; y < child.clip.y + child.clip.height; y++) {
+            if (mode === 2 && face === 1) {
+              blendAlphaRow(pixels.data, (y * pixels.width + child.clip.x) * 4, child.image.pixels.data,
+                ((y - child.top) * child.image.pixels.width + child.clip.x - child.left) * 4,
+                child.clip.x, child.clip.width, child.layer.opacity)
+              continue
+            }
             for (let x = child.clip.x; x < child.clip.x + child.clip.width; x++)
               blendPixel(
                 pixels.data,
@@ -214,6 +221,7 @@ export class SceneComposer {
                 child.layer.opacity,
                 hold,
               )
+          }
         }
         return pixels
       },
@@ -263,9 +271,9 @@ export class SceneComposer {
     return this.cached(`display-main:${id}`, `${main.revision}:${layer.type}`,
       () => forDisplay(main.pixels, layer.type))
   }
-  private compose(id: number, ancestors = new Set<number>()): Composed {
+  private compose(id: number, software = false, ancestors = new Set<number>()): Composed {
     const layer = this.layers.get(id)
-    if (this.needsRawComposition(id, true)) {
+    if ((software && !binder(layer)) || this.needsRawComposition(id, true)) {
       const source = this.blendTree(id, false, ancestors)
       return this.cached(`blend-display:${id}`, `${source.revision}:${layer.type}`, () =>
         forDisplay(source.pixels, compositionType(layer)),
@@ -293,7 +301,7 @@ export class SceneComposer {
         else
           children.push({
             layer: child,
-            image: this.compose(childId, trail),
+            image: this.compose(childId, false, trail),
             left: x,
             top: y,
             clip: area,
@@ -331,17 +339,17 @@ export class SceneComposer {
       return pixels
     })
   }
-  /** Complete on a binder ends at a raw CopyRect target, rather than the
-   * parent's blend target. Its own pixels and child completion messages are
-   * copied without applying their display type or nonzero opacity. */
-  private copyTree(id: number): Composed {
-    const transitioned = new Map<number, Pixels>()
+  /** Complete populates the requested rectangle of a layer-sized bitmap.
+   * The rectangle's left edge and width affect the native scanline kernels. */
+  private copyTree(id: number, area?: Rect): Composed {
+    const transitioned = new Map<number, CompletedTransition>()
     const signature = (id: number, ancestors = new Set<number>()): unknown[] => {
       if (ancestors.has(id)) throw new Error('Cyclic scene composition')
       const layer = this.layers.get(id),
         trail = new Set(ancestors).add(id),
-        frame = !binder(layer) && this.transition(id) ? this.blendTree(id) : undefined
-      if (frame) transitioned.set(id, frame.pixels)
+        transition = !binder(layer) ? this.transition(id) : undefined,
+        frame = transition?.children ? this.blendTree(id) : transition && layer.bitmap ? this.mainImage(id) : undefined
+      if (frame && transition) transitioned.set(id, { pixels: frame.pixels, children: transition.children })
       return [
         id,
         layer.bitmap?.revision,
@@ -364,8 +372,8 @@ export class SceneComposer {
           .map((id) => signature(id, trail)),
       ]
     }
-    return this.cached(`copy-tree:${id}`, JSON.stringify(signature(id)), () =>
-      completeBinder(this.layers, id, transitioned),
+    return this.cached(`copy-tree:${id}`, JSON.stringify([area, signature(id)]), () =>
+      completeLayer(this.layers, id, transitioned, area),
     )
   }
   /** Native Complete returns MainImage before BeforeCompletion in this case,
@@ -389,19 +397,15 @@ export class SceneComposer {
    * root blends descendants; a binder root receives raw completion copies.
    * A caller which entered BeforeCompletion keeps that branch if onPaint
    * changes the tree while it is suspended. */
-  snapshot(id: number, completing = false): Pixels {
-    const layer = this.layers.get(id), bitmap = this.layers.bitmap(id)
+  snapshot(id: number, completing = false, area?: Rect): Pixels {
+    const bitmap = this.layers.bitmap(id)
     if (!completing && !this.snapshotNeedsCompletion(id))
       return { ...bitmap.pixels, data: bitmap.pixels.data.slice() }
-    if (binder(layer)) {
-      const source = this.copyTree(id).pixels
-      return { ...source, data: source.data.slice() }
-    }
     // Native Complete copies MainImage into its cache, blends children in the
     // layer's format, and PiledCopy copies those raw channels. Display pixels
     // are premultiplied: converting through them loses low/zero-alpha RGB even
     // when a seen child lies outside the copied rectangle and adds no pixels.
-    const source = this.blendTree(id).pixels
+    const source = this.copyTree(id, area).pixels
     return { ...source, data: source.data.slice() }
   }
   frame(
@@ -436,7 +440,7 @@ export class SceneComposer {
           (transition && (transition.children || transition.kind !== 'scroll')) ||
           (layer.opacity < 255 && layer.children.some((id) => this.layers.get(id).visible))
       if (group) {
-        const image = this.compose(layer.id)
+        const image = this.compose(layer.id, software)
         result.push({
           ...rect,
           id: -layer.id,
