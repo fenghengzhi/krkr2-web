@@ -4,6 +4,8 @@
 
 第 184 批处理非 Joliet 游戏盘的本地化名称、图层淡出与 MIDI 叠音。第 173 批 Chromium 游戏库为 106/110 通过，三种浏览器的原版 KAG 与发布兼容用例共 96 项通过。[184 实现与托管证据](decisions/184-oem-disc-names-fades-and-midi-notes.md)
 
+第 184 批实现提交 `026ceca` 登记时为 `pending`，下一批取回结果。[第 184 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45887151151)
+
 第 183 批处理 CloneCD 游戏盘启动与配乐、播放中更换影片轨道和游戏图层双击。第 172 批最终失败，第 173 批的构建、类型检查和三种浏览器的离线用例已通过。[183 实现与托管证据](decisions/183-clonecd-disc-playback-and-input.md)
 
 第 183 批实现提交 `4eb1849` 登记时为 `pending`，结果留到下一批取回。[第 183 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45885531653)

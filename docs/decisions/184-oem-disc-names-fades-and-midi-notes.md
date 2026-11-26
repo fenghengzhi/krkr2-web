@@ -21,3 +21,5 @@
 第 173 批 Chromium 游戏库完整报告为 **106 项通过、4 项失败**。三个用例在原版 KAG 保存后返回同名章节时读到了上一次的访问次数，另一个在链接宽度可用前读取了坐标。归档保留原始失败。本批让章节、访问次数和呈现文本在同一次观察中满足原预期，并等目标链接实际有尺寸后点击。书签字节、恢复后的进度和真实点击仍需分别通过。[第 173 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45861660259) · [KAG 点击验收](../../tests/helpers/kag-game-controls.ts)
 
 第 173 批 Firefox 和 WebKit 的原版 KAG 与发布兼容用例各有 32 项通过，连同 Chromium 共 96 项通过。Node 作业被取消，只记录到 11 项通过，没有套件总数。取回时第 174 至 183 批仍在排队。[第 173 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45861660259) · [第 183 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45885531653)
+
+第 184 批实现提交 `026ceca` 登记时为 `pending`，结果留到下一批取回。[第 184 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45887151151)
