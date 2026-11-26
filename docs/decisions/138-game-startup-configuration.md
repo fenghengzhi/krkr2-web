@@ -20,3 +20,5 @@ route=default
 浏览器验收让游戏按钮写入真实槽位和用户配置，从游戏库重启，再导入另一份用户设置。断言包括启动路线的画面像素、脚本读回值、实际存档文件路径和内容。独立 Windows 作业分别运行仅有默认配置、载入用户设置、命令行覆盖普通参数，以及命令行改选存档目录四种情况。每种都核对脚本日志、原版写入文件的字节和落盘目录。[浏览器验收](../../tests/browser/game-config.spec.ts) · [原版验收](../../tests/probes/player-config-sdk.ts)
 
 本次取回了第 133 批首版 WebKit 游戏库的 19 项结果，全部通过。该版游戏库与离线应用合计 116 项通过，其常规浏览器分片在取回时仍未报告。第 136 和 137 批的公开运行页当时均为 Waiting。第 135 批的作业 API 请求触及匿名限额，已保留该次响应。已取得的 43 个历史归档均完成大小与 SHA-256 核对。[133 首版运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759125623) · [137 运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45766826621)
+
+本批实现提交为 `4a423e725dc4c96f510bbb4c543d8d1d6f393952`，会话协议为 50。首次登记时工作流为 `pending`，下一批取回结果。[第 138 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45768308104)
