@@ -4,6 +4,8 @@
 
 第 172 批修订全屏游戏的画面和点击坐标、WAVE 循环插值与外置设置文件导入。第 170 批生产构建和 UDF 制盘已通过，Chromium 游戏库 66/102 通过。本批修订了其余 36 项中发现的光盘选择、剧情素材与点击输入问题，结果待托管验证。[172 实现与托管证据](decisions/172-fullscreen-options-story-input-and-wave-loops.md)
 
+第 172 批实现提交 `5b76122` 登记时为 `pending`，下一批取回运行结果。[第 172 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217)
+
 第 171 批接入游戏注册表设置、原版 KAG 菜单的键盘访问键与 MIDI 乐谱主音量。第 170 批的测试工具和纯引擎类型检查已经通过，取回时尚无该批应用、UDF 或游戏验收结果。[171 实现与托管证据](decisions/171-game-registry-menu-keys-and-midi-volume.md)
 
 第 171 批实现提交 `1e20b9f` 登记时为 `pending`，下一批取回运行结果。[第 171 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320)

@@ -21,3 +21,5 @@ Chromium 游戏库的 102 项验收中有 66 项通过、36 项失败。自定�
 普通 WAVE 在源采样率与输出速率不同、需要做线性插值时，现在会跨越实际的 SLI 跳转或整曲循环取下一采样。接缝处的输出不再混入已跳过的音频，标签和状态仍在真正经过该位置时交付。验收对照预先展开的音频样本，覆盖缓冲与流式读取、条件跳转、暂停及恢复。[混音器](../../src/engine/media/mixer.ts) · [采样对照](../../tests/conformance/wave-loop-resampling.test.ts) · [浏览器实际声音输出](../../tests/browser/wave-loop-resampling.spec.ts)
 
 第 171 批在本次取回时仍为 `pending`，当时还没有作业结果。第 172 批上述改动等待托管验证。[第 171 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320)
+
+第 172 批实现提交 `5b76122` 登记时为 `pending`，下一批取回运行结果。[第 172 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217)
