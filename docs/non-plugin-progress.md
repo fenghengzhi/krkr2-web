@@ -4,6 +4,8 @@
 
 第 185 批处理只提供修改日期的大型远程游戏包、脚本控制的空间音效和字幕像素验收。取回的第 173 批 Firefox 第 3 分片为 304 项通过、20 项失败。[185 实现与托管证据](decisions/185-dated-game-downloads-and-playback.md)
 
+第 185 批实现提交 `d9cf611` 已推送，登记时尚未查到匹配的运行，下批取回。[第 185 批提交](https://github.com/fenghengzhi/krkr2-web/commit/d9cf611522fb953600f5c36e42511a1cce116ec5)
+
 第 184 批处理非 Joliet 游戏盘的本地化名称、图层淡出与 MIDI 叠音。第 173 批 Chromium 游戏库为 106/110 通过，三种浏览器的原版 KAG 与发布兼容用例共 96 项通过。[184 实现与托管证据](decisions/184-oem-disc-names-fades-and-midi-notes.md)
 
 第 184 批实现提交 `026ceca` 登记时为 `pending`，下一批取回结果。[第 184 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45887151151)
