@@ -3,6 +3,8 @@ import { validateNativeSavePaths } from '../engine/storage/native-save-paths.ts'
 import { BlobSource, inflateRaw } from '../backends/files/blob-source.ts'
 import { checkedCrc32 } from '../formats/binary/crc32.ts'
 import { readZip } from '../formats/zip/archive.ts'
+import { zipNameCodecs } from '../backends/files/zip-names.ts'
+import type { ZipNameEncoding } from '../formats/zip/names.ts'
 
 const maxArchive = 96 * 1024 * 1024
 type Check = () => Promise<void>
@@ -32,15 +34,14 @@ function checkpoint(active: () => void): Check {
 
 /** Data-directory-relative files, containing their original bytes. */
 export async function readNativeSaves(files: readonly File[], folder: boolean,
-  active: () => void = () => {}): Promise<SaveFile[]> {
+  active: () => void = () => {}, zipEncoding?: ZipNameEncoding): Promise<SaveFile[]> {
   const check = checkpoint(active)
   await check()
   let entries: Array<{ name: string; size: number; read(): Promise<Uint8Array> }>
   if (!folder && files.length === 1 && /\.zip$/i.test(files[0]!.name)) {
     const file = files[0]!
     if (file.size > maxArchive) throw new Error('存档 ZIP 超过大小限制')
-    const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
-    entries = await readZip(new BlobSource(file), { utf8: (bytes) => utf8.decode(bytes),
+    entries = await readZip(new BlobSource(file), { ...zipNameCodecs(zipEncoding),
       inflate: (bytes, size) => inflateRaw(bytes, size, check), checkpoint: check })
   } else {
     let root: string | undefined

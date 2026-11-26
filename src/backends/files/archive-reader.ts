@@ -5,6 +5,8 @@ import { openResourceSource } from '../../engine/storage/resource-source.ts'
 import { findXp3Archive, hasXp3Signature, readXp3 } from '../../formats/xp3/archive.ts'
 import { readZip } from '../../formats/zip/archive.ts'
 import { inflate, inflateRaw } from './blob-source.ts'
+import type { ZipNameEncoding } from '../../formats/zip/names.ts'
+import { zipNameCodecs } from './zip-names.ts'
 
 export const archiveReader: ArchiveReader = {
   async probeArchive(resource, checkpoint) {
@@ -22,7 +24,7 @@ export const archiveReader: ArchiveReader = {
   open,
 }
 
-async function open(resource: Resource, checkpoint: () => Promise<void>, pool?: DeflateRangePool): Promise<ArchiveIndex | undefined> {
+async function open(resource: Resource, checkpoint: () => Promise<void>, pool?: DeflateRangePool, zipEncoding?: ZipNameEncoding): Promise<ArchiveIndex | undefined> {
   const { source } = await openResourceSource(resource, { checkpoint }),
     prefix = await source.read(0, Math.min(11, source.size)),
     zip = prefix[0] === 0x50 && prefix[1] === 0x4b &&
@@ -34,15 +36,15 @@ async function open(resource: Resource, checkpoint: () => Promise<void>, pool?: 
   if (xp3) return { kind: 'xp3', entries: await readXp3(xp3, inflate, { checkpoint, compressedSegments: pool ?? createArchiveInflatePool() }) }
   if (/\.zip$/i.test(resource.name) || zip) return { kind: 'zip', entries: await readZip(source, {
     inflate: (bytes, size) => inflateRaw(bytes, size, checkpoint), checkpoint, compressedRanges: pool ?? createArchiveInflatePool(),
-    utf8: (bytes) => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes),
+    ...zipNameCodecs(zipEncoding),
   }) }
   return undefined
 }
 
 /** The playing Session owns a shared cache and bounded forward inflater cursors
  * across all its archives. Metadata-only callers can use archiveReader. */
-export function createSessionArchiveReader(distribution?: Pick<ArchiveReader, 'compact'>) {
+export function createSessionArchiveReader(distribution?: Pick<ArchiveReader, 'compact'>, zipEncoding?: ZipNameEncoding) {
   const pool = createArchiveInflatePool(true)
-  return { ...archiveReader, open: (resource: Resource, checkpoint: () => Promise<void>) => open(resource, checkpoint, pool),
+  return { ...archiveReader, open: (resource: Resource, checkpoint: () => Promise<void>) => open(resource, checkpoint, pool, zipEncoding),
     compact() { pool.compact(); distribution?.compact?.() }, dispose() { pool.dispose() } }
 }

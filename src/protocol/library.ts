@@ -1,5 +1,6 @@
 import type { BackendPreference, GameFile } from './session.ts'
 import type { GameProject } from '../engine/storage/project.ts'
+import type { ZipNameEncoding } from '../formats/zip/names.ts'
 
 export interface LibraryGame {
   id: string
@@ -12,6 +13,7 @@ export interface LibraryGame {
   fileCount: number
   /** Absent in legacy collection records. */
   project?: GameProject
+  zipEncoding?: ZipNameEncoding
   sourceGameId?: string
 }
 export interface LibraryStatus {
@@ -29,6 +31,7 @@ export interface LibraryImport {
   entry: string
   backend: BackendPreference
   expectedGameId: string
+  zipEncoding?: ZipNameEncoding
   project?: GameProject
 }
 export interface LibraryProgress {

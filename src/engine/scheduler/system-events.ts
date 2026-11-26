@@ -23,6 +23,8 @@ export interface EventOptions {
   valid?: () => boolean
   priority?: EventPriority
   discardable?: boolean
+  /** Native continuation. Its body must gate any user callbacks separately. */
+  internal?: boolean
   source?: object
   replace?: boolean
   onTaken?: () => void
@@ -32,6 +34,7 @@ export interface EventOptions {
 }
 interface EventJob {
   source?: object
+  internal?: boolean
   sequence: number
   priority: EventPriority
   valid(): boolean
@@ -51,6 +54,9 @@ interface ContinuousEntry {
   callback?: ScriptObject
 }
 interface Round {
+  /** Native work may finish while script events are disabled. Such a round
+   * has its own cutoff and never enters the script/continuous/window tail. */
+  internalCutoff?: number
   ownsContinuous: boolean
   emptyContinuous: boolean
   checkExclusive: boolean
@@ -75,6 +81,7 @@ export class SystemEvents {
   private token = 0
   private queued = false
   private jobs: EventJob[] = []
+  private pendingInternal = 0
   private rounds = new Map<number, Round>()
   private pump?: ScriptObject
   private entries: ContinuousEntry[] = []
@@ -117,7 +124,8 @@ export class SystemEvents {
 
   /** Readiness for a fresh nested round, without taking jobs or invoking user predicates. */
   hasDispatchableWork(): boolean {
-    if (this.disposed || this.disabled || this.paused || !this.pump) return false
+    if (this.disposed || this.paused || !this.pump) return false
+    if (this.disabled) return this.pendingInternal > 0
     // Invalid jobs still need a round to settle them. A pending continuous tick
     // cannot reenter the continuous delivery that owns an outer callback.
     return this.jobs.length > 0 || (this.continuousPending && !this.continuousProcessing)
@@ -214,6 +222,7 @@ export class SystemEvents {
       valid = () => true,
       priority = 2,
       discardable = false,
+      internal = false,
       source,
       replace,
       onTaken,
@@ -221,7 +230,7 @@ export class SystemEvents {
     } = options
     if (this.disposed) throw new ExecutionCancelled()
     if (![0, 1, 2, 3].includes(priority)) throw new Error('Invalid event priority')
-    const discarded = discardable && this.disabled
+    const discarded = discardable && this.disabled && !internal
     if (!discarded) {
       if (source && replace) this.cancelSource(source)
       // A replacement's settlement hook may have stopped the scheduler.
@@ -235,6 +244,7 @@ export class SystemEvents {
     })
     const job: EventJob = {
       source,
+      internal,
       sequence: this.sequence,
       priority,
       prepare,
@@ -251,7 +261,8 @@ export class SystemEvents {
       return { status: 'discarded', completion }
     }
     this.jobs.push(job)
-    if (priority === 0) this.exclusivePosted = true
+    if (internal) this.pendingInternal++
+    if (priority === 0 && (!internal || !this.disabled)) this.exclusivePosted = true
     this.notifyPending()
     this.kick()
     return { status: 'accepted', completion }
@@ -259,6 +270,7 @@ export class SystemEvents {
   cancelSource(source: object): void {
     const removed = this.jobs.filter((job) => job.source === source)
     this.jobs = this.jobs.filter((job) => job.source !== source)
+    for (const job of removed) if (job.internal) this.pendingInternal--
     for (const job of removed) this.settle(job, { kind: 'dropped', reason: 'source' })
     this.notifyPending()
   }
@@ -268,6 +280,7 @@ export class SystemEvents {
     this.disabled = true
     const jobs = this.jobs
     this.jobs = []
+    this.pendingInternal = 0
     for (const round of this.rounds.values()) {
       if (round.current) jobs.push(round.current)
       round.current = undefined
@@ -284,16 +297,7 @@ export class SystemEvents {
     this.notifyPending()
   }
   private kick(): void {
-    if (
-      this.disposed ||
-      this.disabled ||
-      this.paused ||
-      this.queued ||
-      this.rounds.size ||
-      !this.pump
-    )
-      return
-    if (!this.hasDispatchableWork()) return
+    if (this.queued || this.rounds.size || !this.hasDispatchableWork()) return
     this.queued = true
     let execution: Promise<void>
     try {
@@ -313,14 +317,18 @@ export class SystemEvents {
       })
   }
   private begin(): HostReply {
-    if (this.disposed || this.disabled || this.paused || !this.pump) return empty()
+    if (this.disposed || this.paused || !this.pump || (this.disabled && !this.pendingInternal)) return empty()
     if (this.rounds.size >= 64) throw new Error('System event nesting limit exceeded')
     const token = ++this.token
     // Native TVP keeps a global cutoff: a nested delivery advances the cutoff
     // subsequently seen by its suspended parent. Do not restore an older one.
-    this.cutoff = this.sequence++
-    this.exclusivePosted = false
+    const cutoff = this.sequence++
+    if (!this.disabled) {
+      this.cutoff = cutoff
+      this.exclusivePosted = false
+    }
     this.rounds.set(token, {
+      internalCutoff: this.disabled ? cutoff : undefined,
       checkExclusive: false,
       ownsContinuous: false,
       emptyContinuous: false,
@@ -345,28 +353,32 @@ export class SystemEvents {
     return disabled ? empty() : this.begin()
   }
   private take(round: Round, token: number): EventJob | undefined {
+    if (this.paused) return
+    const internalOnly = round.internalCutoff !== undefined
     if (round.checkExclusive) {
       round.checkExclusive = false
-      if (this.exclusivePosted) return
+      if (!internalOnly && this.exclusivePosted) return
     }
     while (round.group <= 3) {
       const index = this.jobs.findIndex(
         (job) =>
-          job.priority === round.group && (job.priority === 1 || job.sequence <= this.cutoff),
+          (!internalOnly || job.internal) && job.priority === round.group &&
+          (job.priority === 1 || job.sequence <= (round.internalCutoff ?? this.cutoff)),
       )
       if (index < 0) {
         // Exclusive and normal queues finish their eligible group before the
         // native dispatcher checks a newly posted exclusive event.
-        if ((round.group === 0 || round.group === 2) && this.exclusivePosted) return
+        if (!internalOnly && (round.group === 0 || round.group === 2) && this.exclusivePosted) return
         round.group++
         if (round.group === 3) {
           // Native TVP enters idle/continuous/window updates through one gate.
           // Exclusive events posted inside that tail do not revoke its paint.
-          round.windowUpdateAllowed = !this.disabled && !this.paused
+          round.windowUpdateAllowed = !internalOnly && !this.disabled && !this.paused
         }
         continue
       }
       const job = this.jobs.splice(index, 1)[0]!
+      if (job.internal) this.pendingInternal--
       job.roundToken = token
       round.current = job
       let valid: boolean
@@ -385,11 +397,12 @@ export class SystemEvents {
         round.current = undefined
         this.settle(job, { kind: 'invalid' })
         if (this.rounds.get(token) !== round) return
-        if (round.group === 1 && this.exclusivePosted) return
+        if (!internalOnly && round.group === 1 && this.exclusivePosted) return
         continue
       }
       return job
     }
+    if (internalOnly) return
     if (round.continuous < 0) {
       if (!this.continuousPending) return
       this.continuousPending = false
@@ -535,7 +548,7 @@ export class SystemEvents {
       this.rounds.delete(token)
       if (round.ownsContinuous) this.continuousProcessing = false
       if (job) this.settle(job, { kind: 'aborted', error: new Error('System event round aborted') })
-      if (!this.jobs.some((job) => job.priority !== 1)) this.sequence = 0
+      if (round.internalCutoff === undefined && !this.jobs.some((job) => job.priority !== 1)) this.sequence = 0
       this.notifyPending()
       if (!this.rounds.size) {
         this.armContinuous()
@@ -650,6 +663,7 @@ export class SystemEvents {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.pendingInternal = 0
     this.externalContinuous = false
     this.externalRemovalPending = false
     this.admissionReservations.clear()

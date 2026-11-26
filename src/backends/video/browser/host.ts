@@ -53,6 +53,7 @@ interface Movie {
   blocked: boolean
   disposed: boolean
   period: VideoPeriod
+  prepareToken: number
   seeking: boolean
   abort: AbortController
   audio: ReturnType<WebAudioHost['connectMedia']>
@@ -517,8 +518,13 @@ export class WebVideoHost {
   private arm(movie: Movie): void {
     if (movie.disposed || movie.switching || this.isPaused || movie.status !== 'play' || movie.callback !== undefined)
       return
-    movie.callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
+    const epoch = movie.epoch, prepareToken = movie.prepareToken
+    const callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
+      // A callback already queued by the browser can survive cancellation.
+      // Neither an earlier epoch nor an earlier Prepare may consume this arm.
+      if (movie.callback !== callback) return
       movie.callback = undefined
+      if (movie.epoch !== epoch || movie.prepareToken !== prepareToken) { this.arm(movie); return }
       if (movie.disposed || movie.switching || this.isPaused || movie.seeking || movie.status !== 'play') return
       this.observePresentation(movie, metadata)
       try {
@@ -528,6 +534,7 @@ export class WebVideoHost {
           videoClockFrameAt(movie.timeline, metadata.mediaTime * 1000))
         if (movie.inFlight === undefined && (s.mode === 1 || s.mode === 2)) {
           const event = this.frame(movie, metadata.mediaTime * 1000)
+          event.prepareToken = prepareToken
           this.emit(event, true, movie)
           periodFrame = event.callbackFrame ?? event.snapshot.frame
         }
@@ -539,8 +546,10 @@ export class WebVideoHost {
       }
       this.arm(movie)
     })
+    movie.callback = callback
   }
   private period(movie: Movie, frame: number): void {
+    if (movie.prepareToken && movie.settings.mode === 1) return
     if (!movie.period.take(frame)) return
     movie.settings.periodEventFrame = movie.period.frame
     this.emit({ type: 'period', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie), reason: 1 })
@@ -552,7 +561,7 @@ export class WebVideoHost {
     // Segment boundaries use the media clock in both native presentation modes
     // and take precedence over that update's frame/ordinary-period delivery.
     const clockTimeline = this.clockTimeline(movie)
-    if (s.segmentLoopEndFrame > 0 && clockTimeline) {
+    if (!movie.prepareToken && s.segmentLoopEndFrame > 0 && clockTimeline) {
       if (videoClockFrameAt(clockTimeline, time) >= s.segmentLoopEndFrame) {
         const epoch = movie.epoch, targetFrame = Math.max(0, s.segmentLoopStartFrame),
           active = () => !movie.disposed && this.movies.get(movie.id) === movie &&
@@ -997,6 +1006,7 @@ export class WebVideoHost {
         bytes: stage.source.size, lastSelectedIndex: selected, settings: { ...settings }, status: 'stop',
         timeline, mixerMetadata: stage.previous?.mixerMetadata,
         blocked: false, disposed: false, period: new VideoPeriod(settings.periodEventFrame, stage.previous?.period.past), seeking: false,
+        prepareToken: stage.previous?.prepareToken ?? 0,
         seenSamples: new VideoSampleHistory(timeline?.times.length ?? 0),
         abort: stage.abort, audio }
       stage.movie = movie
@@ -1091,6 +1101,7 @@ export class WebVideoHost {
       // Legacy direct hosts do not supply the object latch. Their initial
       // setting is equivalent to setting a cue on an unopened frame-zero graph.
       movie.period.past = command.periodEventPast ?? (command.settings.periodEventFrame <= 0)
+      movie.prepareToken = command.prepareToken ?? 0
       this.movies.set(movie.id, movie)
       const surface = this.windows.get(windowId)?.surface
       if (surface) surface.plane.insertBefore(movie.container, surface.activation)
@@ -1263,6 +1274,7 @@ export class WebVideoHost {
       const stage = this.stages.get(movie.id)
       if (stage?.previous === movie) this.retireStage(stage)
     }
+    if (movie.epoch !== command.epoch) this.cancelFrame(movie)
     movie.epoch = command.epoch
     if (command.op === 'set') {
       const previous = movie
@@ -1285,30 +1297,18 @@ export class WebVideoHost {
             ? videoClockFrameTime(this.clockTimeline(movie), command.frame, movie.element.duration * 1000)
             : command.position!
           : 0
-      if (movie.status !== 'play' && movie.timeline?.times.length)
+      if (!(command.op === 'rewind' && command.silent) && movie.status !== 'play' && movie.timeline?.times.length)
         await this.seekPresented(movie, time, command.op === 'seek' && command.frame !== undefined)
       else await this.seek(movie, time)
       this.current(movie, command.epoch)
       if (command.op === 'rewind') movie.period.rewind()
       else if (command.frame !== undefined) movie.period.seekFrame(command.frame)
-      events.push(this.frame(movie))
+      if (!(command.op === 'rewind' && command.silent)) events.push(this.frame(movie))
     } else if (command.op === 'prepare') {
-      if (movie.settings.mode === 1) {
-        movie.element.pause()
-        this.cancelFrame(movie)
-        movie.status = 'pause'
-        if (movie.timeline?.times.length) await this.seekPresented(movie, 0)
-        else await this.seek(movie, 0)
-        this.current(movie, command.epoch)
-        movie.period.rewind()
-        events.push(this.frame(movie), {
-          type: 'period',
-          id: movie.id,
-          epoch: movie.epoch,
-          snapshot: this.snapshot(movie),
-          reason: 2,
-        })
-      }
+      if (!Number.isSafeInteger(command.token) || command.token < 0)
+        throw new Error('Invalid video prepare token')
+      this.cancelFrame(movie)
+      movie.prepareToken = command.token
     } else if (command.op === 'play') {
       if (movie.element.ended) await this.seek(movie, 0)
       this.current(movie, command.epoch)
@@ -1322,6 +1322,7 @@ export class WebVideoHost {
       this.layout()
     }
     this.current(movie, command.epoch)
+    this.arm(movie)
     return { snapshot: this.snapshot(movie), events }
   }
   private remove(id: number): void {

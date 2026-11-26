@@ -174,7 +174,11 @@ class PathSound extends WaveSoundBuffer {
 var sound=new PathSound();sound.open(Storages.getFullPath("Audio/tone.wav"));sound.looping=true;
 pathCheck(sound.frequency==44100,"canonical-wave-open");
 var frameLayer=new Layer(win,root);frameLayer.visible=true;
-var movie=new VideoOverlay(win);movie.mode=vomLayer;movie.layer1=frameLayer;
+class PathMovie extends VideoOverlay {
+ function PathMovie(w){super.VideoOverlay(w);}
+ function onPeriod(reason){if(reason==perPrepare)Debug.message("storage-public-paths:video-prepared");}
+}
+var movie=new PathMovie(win);movie.mode=vomLayer;movie.layer1=frameLayer;
 movie.open(Storages.getFullPath("Video/colors.mp4"));movie.prepare();
 pathCheck(movie.originalWidth==64 && movie.originalHeight==48 && movie.numberOfFrame==18,"canonical-video-open");
 Debug.message("storage-public-paths:media-ready");
@@ -349,6 +353,7 @@ for (const backend of ['asyncify', 'jspi'] as const) {
           },
         ])
         await ready(page, 'media-ready')
+        await ready(page, 'video-prepared')
         await expect(page.locator('canvas')).toHaveJSProperty('width', 64)
         await expect(page.locator('canvas')).toHaveJSProperty('height', 48)
         const red = await centerPixel(page)

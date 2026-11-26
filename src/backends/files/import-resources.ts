@@ -8,13 +8,15 @@ import type { GameFile } from '../../protocol/session.ts'
 import { resolveFiles, type SourceFile } from './source-files.ts'
 import type { HttpRangePool } from './http-range.ts'
 import { borrowResourceBlob } from '../../engine/storage/resource-source.ts'
+import type { ZipNameEncoding } from '../../formats/zip/names.ts'
+import { zipNameCodecs } from './zip-names.ts'
 
 /** Prepare a complete mount before publishing any of its paths to the running session. */
 export async function importResources(
   files: GameFile[],
   checkpoint: () => Promise<void>,
   pool?: HttpRangePool,
-  options: { lazyArchives?: boolean } = {},
+  options: { lazyArchives?: boolean; zipEncoding?: ZipNameEncoding } = {},
 ): Promise<Resource[]> {
   return importSources(await resolveFiles(files, checkpoint, pool), checkpoint, options)
 }
@@ -22,11 +24,10 @@ export async function importResources(
 export async function importSources(
   files: SourceFile[],
   checkpoint: () => Promise<void>,
-  options: { lazyArchives?: boolean } = {},
+  options: { lazyArchives?: boolean; zipEncoding?: ZipNameEncoding } = {},
 ): Promise<Resource[]> {
   if (files.length > 10000) throw new Error('Import exceeds 10,000 source files')
-  const resources: Resource[] = [], compressedSegments = options.lazyArchives ? undefined : createArchiveInflatePool(),
-    utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+  const resources: Resource[] = [], compressedSegments = options.lazyArchives ? undefined : createArchiveInflatePool()
   const add = (resource: Resource) => {
     if (resources.length >= 250000) throw new Error('Import exceeds 250,000 mounted resource names')
     resources.push(resource)
@@ -75,7 +76,7 @@ export async function importSources(
         : /\.zip$/i.test(name) || zipMagic
           ? await readZip(source, {
               inflate: (bytes, size) => inflateRaw(bytes, size, checkpoint),
-              utf8: (bytes) => utf8.decode(bytes),
+              ...zipNameCodecs(options.zipEncoding),
               compressedRanges: compressedSegments,
               checkpoint,
             })

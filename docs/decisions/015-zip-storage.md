@@ -6,6 +6,8 @@
 
 `formats/zip/archive.ts` 从 ByteSource 建索引，返回普通 Resource 及压缩方法、加密标志和 CRC 元数据。只依赖字节来源、UTF-8 解码、解压与协作调度端口，不访问 DOM、Blob 或 IndexedDB。`names.ts` 提供 CP437 映射；特殊旧文件名编码可通过格式接口的 legacyName 回调配置，页面暂未提供这个选项。
 
+第 145 批已将旧文件名编码接入页面选择、游戏库和原版存档导入。[后续实现与验收](145-zip-file-names-video-prepare-and-text.md)
+
 `backends/files/import-resources.ts` 将文件选择、BlobSource、XP3/ZIP 和会话资源组装分开。输入顺序仍是挂载顺序，同名资源后者覆盖前者；ZIP 中的重名成员保留中央目录顺序。每个归档同时提供普通资源名与 `archive>entry` 地址，可以与 auto-path、写覆盖层、图像缓存和原有 TJS 文件流组合。
 
 选中的 `.zip` 文件按 ZIP 解析；具有 ZIP 普通文件头或空归档签名的其他后缀文件也会识别，例如 `game.data`。归档本身作为一个资源保留。不会猜测补丁名称、重排文件、删除包内目录前缀，或自动递归展开 ZIP 内的 XP3/ZIP。游戏在包装目录内时，启动脚本路径需包含该目录；自动根目录选择和嵌套包处理仍待完成。

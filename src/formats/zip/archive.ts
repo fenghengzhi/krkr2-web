@@ -79,8 +79,7 @@ async function filename(
     name ??= (codecs.legacyName ?? cp437)(raw)
   }
   if (name.includes('>')) throw new Error('ZIP entry contains an archive address delimiter')
-  // ZIP paths stay inside the virtual game root; no filesystem extraction takes place.
-  return normalizePath(name)
+  return name
 }
 
 /** Index central records without decompressing entries. Member payloads are read and checked on demand. */
@@ -212,7 +211,8 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
     }
     if (startDisk !== 0) throw new Error('Split ZIP member is not supported')
     bounds(offset, 30, centralOffset)
-    const name = await filename(rawName, flags, extra, codecs),
+    const decoded = await filename(rawName, flags, extra, codecs),
+      name = normalizePath(decoded),
       unix = madeBy >>> 8 === 3 ? (attributes >>> 16) & 0xf000 : 0
     entries.push({
       name,
@@ -224,8 +224,9 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
       size,
       offset,
       zip64,
-      directory:
-        rawName.at(-1) === 47 || rawName.at(-1) === 92 || !!(attributes & 16) || unix === 0x4000,
+      // In Shift_JIS, 0x5c may finish a character such as ソ. Classify an
+      // actual decoded separator before normalization removes a trailing slash.
+      directory: /[\\/]$/.test(decoded) || !!(attributes & 16) || unix === 0x4000,
       symlink: unix === 0xa000,
     })
   }

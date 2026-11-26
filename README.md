@@ -64,6 +64,8 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 打开含 XP3、补丁和散装资源的 ZIP 发行包时，先在“游戏位置”选择“自动识别游戏目录或 ZIP 发行包”，再选择单个 ZIP 或填写远程链接。游戏库会记住包内的游戏目录。[ZIP 发行包的使用范围与验收](docs/decisions/134-zip-distributions-midi-and-game-playback.md)
 
+旧日文 ZIP 若显示乱码或找不到章节，在导入前将“未标记的 ZIP 文件名编码”选为“日文（Shift_JIS）”。中文发行包也可选择 GBK 或 Big5。游戏库会记住这次选择。另行导入原版存档 ZIP 时，如果来源不同，可在“存档 ZIP 文件名编码”单独选择。[旧 ZIP 文件名与存档](docs/decisions/145-zip-file-names-video-prepare-and-text.md)
+
 导入游戏时，把游戏 EXE、随附的 `.cf` 和原有存档目录一起选入。播放器会读取 EXE 内嵌的默认设置，再应用外部配置。资源合并在游戏 EXE 里时，即使旁边还有安装器，自动模式也能按内嵌 XP3 找到游戏。若有多个内嵌游戏，或需要为散装游戏指定哪个 EXE 的配置生效，在“游戏程序名”填入平时启动的文件名。存档目录里的同名 `.cfu` 在下次启动时生效。[原版启动配置](docs/decisions/138-game-startup-configuration.md) · [内嵌设置与旧脚本模式](docs/decisions/139-embedded-game-options-and-script-modes.md) · [多程序发行包](docs/decisions/144-combined-games-macro-values-and-audio-cues.md)
 
 从桌面版继续游玩时，载入对应游戏，暂停后在“存档与备份”选择“原版游戏存档”，导入存档文件、目录或 ZIP，再用游戏自己的读档菜单恢复。要带回桌面版，可导出 `savedata.zip` 并解压到该游戏的存档目录。[原版存档迁移](docs/decisions/136-native-saves-scenario-loading-and-video-cues.md)

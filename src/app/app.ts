@@ -2,6 +2,7 @@ import { createGamePads } from './game-pads.ts'
 import { createPlayer } from '../player/create-player.ts'
 import { demoFiles } from './demo.ts'
 import { readNativeSaves, writeNativeSaves } from '../player/native-saves.ts'
+import { zipNameEncoding, zipNameEncodings, type ZipNameEncoding } from '../formats/zip/names.ts'
 import { encodeBackup, decodeBackup } from '../player/save-backup.ts'
 import type { BackendPreference, GameInput } from '../protocol/session.ts'
 import type { SessionSnapshot } from '../engine/session.ts'
@@ -53,13 +54,21 @@ export function mountApp(root: HTMLDivElement): void {
   const projectControls = document.createElement('div')
   projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">自动识别游戏目录或 ZIP 发行包</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><label for="project-executable">游戏程序名（可选）</label><input id="project-executable" placeholder="多个游戏程序中选一个，如 Story.exe" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">自动识别支持含 data.xp3 或内嵌游戏 EXE 的发行包。</p>`
   root.querySelector('label[for="entry"]')!.before(projectControls)
+  const zipLabels: Record<ZipNameEncoding, string> = {
+    cp437: 'ZIP 默认（CP437）', shift_jis: '日文（Shift_JIS）', gbk: '简体中文（GBK）',
+    big5: '繁体中文（Big5）', 'utf-8': 'UTF-8',
+  }
+  const zipOptions = zipNameEncodings.map((name) => `<option value="${name}">${zipLabels[name]}</option>`).join('')
+  projectControls.insertAdjacentHTML('beforeend', `<label for="zip-encoding">未标记的 ZIP 文件名编码</label><select id="zip-encoding">${zipOptions}</select>`)
+  el('native-save-hint').insertAdjacentHTML('afterend', `<div id="native-zip-options" hidden><label for="native-zip-encoding">存档 ZIP 文件名编码</label><select id="native-zip-encoding"><option value="">沿用当前游戏</option>${zipOptions}</select></div>`)
   const projectSelection = (): ProjectSelection => {
     const mode = el<HTMLSelectElement>('project-mode').value,
+      zipEncoding = zipNameEncoding(el<HTMLSelectElement>('zip-encoding').value),
       executableDirectory = el<HTMLInputElement>('project-exe-directory').value.trim(),
       executable = el<HTMLInputElement>('project-executable').value.trim() || undefined
     return copyProjectSelection(mode === 'root'
-      ? { mode, directory: el<HTMLInputElement>('project-root').value.trim(), executableDirectory, executable }
-      : mode === 'auto' ? { mode, executableDirectory, executable } : { mode: 'collection' })
+      ? { mode, directory: el<HTMLInputElement>('project-root').value.trim(), executableDirectory, executable, zipEncoding }
+      : mode === 'auto' ? { mode, executableDirectory, executable, zipEncoding } : { mode: 'collection', zipEncoding })
   }
   const updateProjectControls = () => {
     const mode = el<HTMLSelectElement>('project-mode').value
@@ -220,6 +229,7 @@ export function mountApp(root: HTMLDivElement): void {
     const savesBusy = !player || busy || saveJob === player
     el('native-folder-control').hidden = !nativeSaves
     el('native-save-hint').hidden = !nativeSaves
+    el('native-zip-options').hidden = !nativeSaves
     el<HTMLButtonElement>('export-saves').disabled = savesBusy
     el<HTMLButtonElement>('import-saves').disabled = savesBusy || snapshot?.state !== 'paused'
     el<HTMLButtonElement>('choose-native-save-folder').disabled = savesBusy || snapshot?.state !== 'paused'
@@ -559,9 +569,10 @@ export function mountApp(root: HTMLDivElement): void {
       )
       if (current === generation && !stopping) {
         acceptSnapshot(loaded)
-        el('project-status').textContent = loaded.project
+        const projectLocation = loaded.project
           ? `当前游戏：${loaded.project.directory || './'} · 程序目录：${loaded.project.executableDirectory || './'}`
           : '当前游戏：文件集合（兼容已有导入）'
+        el('project-status').textContent = projectLocation + (loaded.zipEncoding ? ' · ZIP 文件名：' + zipLabels[loaded.zipEncoding] : '')
         log('会话就绪。点击画面继续。')
       }
     } catch (error) {
@@ -626,6 +637,7 @@ export function mountApp(root: HTMLDivElement): void {
             entry: el<HTMLInputElement>('entry').value.trim() || 'startup.tjs',
             backend: el<HTMLSelectElement>('backend').value as BackendPreference,
             ...(snapshot?.project ? { project: snapshot.project } : {}),
+            ...(snapshot?.zipEncoding ? { zipEncoding: snapshot.zipEncoding } : {}),
           }
         : undefined,
     canPlay: () => !busy,
@@ -760,7 +772,8 @@ export function mountApp(root: HTMLDivElement): void {
       if (!files.length || (owner && owner !== player)) return
       saveTransfer(async (current, check) => {
         const native = id !== 'save-file'
-        const entries = native ? await readNativeSaves(files, id === 'native-save-folder', check) : await decodeBackup(current.gameId, files[0]!)
+        const encoding = zipNameEncoding(el<HTMLSelectElement>('native-zip-encoding').value || snapshot?.zipEncoding)
+        const entries = native ? await readNativeSaves(files, id === 'native-save-folder', check, encoding) : await decodeBackup(current.gameId, files[0]!)
         check()
         await current.session.importSaves(entries, native ? 'data-directory' : 'all')
         check()

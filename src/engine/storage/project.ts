@@ -1,11 +1,12 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { StorageResolver } from './resolver.ts'
+import { zipNameEncoding, type ZipNameEncoding } from '../../formats/zip/names.ts'
 import { extractStoragePath, parseStoragePath, storageDirectoryPath, storageFilePath, toPublicStoragePath } from './public-path.ts'
 
 /** Host startup configuration; these are not TJS Storages properties. */
-export type ProjectSelection = { mode: 'collection' } |
+export type ProjectSelection = ({ mode: 'collection' } |
   { mode: 'auto'; executableDirectory?: string; executable?: string } |
-  { mode: 'root'; directory: string; executableDirectory?: string; executable?: string; distribution?: string }
+  { mode: 'root'; directory: string; executableDirectory?: string; executable?: string; distribution?: string }) & { zipEncoding?: ZipNameEncoding }
 /** Frozen logical addresses, relative to the imported namespace. */
 export interface GameProject { directory: string; executableDirectory: string; executable?: string; distribution?: string }
 
@@ -38,14 +39,15 @@ export function copyGameProject(value?: GameProject): GameProject | undefined {
 export function copyProjectSelection(value?: ProjectSelection): ProjectSelection {
   if (value === undefined) return { mode: 'collection' }
   if (!value || typeof value !== 'object') throw new Error('Invalid project selection')
-  if (value.mode === 'collection') return { mode: 'collection' }
+  const encoding = zipNameEncoding(value.zipEncoding), zip = encoding === 'cp437' ? {} : { zipEncoding: encoding }
+  if (value.mode === 'collection') return { mode: 'collection', ...zip }
   if (value.mode !== 'auto' && value.mode !== 'root') throw new Error('Unknown project selection')
   const executableDirectory = directory(value.executableDirectory ?? '')
   if (executableDirectory.includes('>')) throw new Error('Executable directory cannot be inside an archive')
   const launcher = value.executable === undefined ? {} : { executable: executablePath(value.executable, executableDirectory) }
-  if (value.mode === 'root') return { mode: 'root', directory: directory(value.directory), executableDirectory, ...launcher,
+  if (value.mode === 'root') return { mode: 'root', directory: directory(value.directory), executableDirectory, ...launcher, ...zip,
     ...(value.distribution === undefined ? {} : { distribution: distributionPath(value.distribution) }) }
-  return { mode: 'auto', executableDirectory, ...launcher }
+  return { mode: 'auto', executableDirectory, ...launcher, ...zip }
 }
 
 /** Use the imported spelling or the combined EXE that supplies the selected

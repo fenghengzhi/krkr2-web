@@ -31,6 +31,7 @@ import {
 import { StorageResolver } from './storage/resolver.ts'
 import { DropStorage } from './storage/drop.ts'
 import { copyGameProject, type GameProject } from './storage/project.ts'
+import { zipNameEncoding, type ZipNameEncoding } from '../formats/zip/names.ts'
 import { CddaDiscs } from './storage/cdda.ts'
 import { copyCddaDiscs, type CddaDisc } from './ports/cdda.ts'
 import {
@@ -173,6 +174,7 @@ const ignoredAdmission = (): SessionAdmission => ({
 })
 export interface SessionSnapshot {
   project?: GameProject
+  zipEncoding?: ZipNameEncoding
   windows?: WindowPresentation[]
   activeWindow?: number
   mainWindow?: number
@@ -252,6 +254,7 @@ export interface SessionDependencies {
   /** Imported virtual CDs. Omission discovers a unique project CUE as D:. */
   cddaDiscs?: readonly CddaDisc[]
   project?: GameProject
+  zipEncoding?: ZipNameEncoding
   archives?: ArchiveReader
   /** The page implements the matching request/reply presentation protocol. */
   windowMoveSupported?: boolean
@@ -334,6 +337,7 @@ export class EngineSession {
   private readonly storageCheckpoint: () => Promise<void>
   private readonly dropped: DropStorage
   private readonly project?: GameProject
+  private readonly zipEncoding: ZipNameEncoding
   private readonly cddaDiscs: CddaDiscs
   private readonly images = new ImageLoader(
     (name, optionalImage) => this.findResource(name, optionalImage),
@@ -538,6 +542,7 @@ export class EngineSession {
       this.applicationActivation = { ...deps.application }
     }
     this.project = copyGameProject(deps.project)
+    this.zipEncoding = zipNameEncoding(deps.zipEncoding)
     const cddaDiscs = copyCddaDiscs(deps.cddaDiscs)
     // Reject invalid configuration before clocks or subscribed host resources
     // are consulted. A failed constructor has no disposal owner yet.
@@ -923,15 +928,16 @@ export class EngineSession {
           if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
           this.invalidateLayer(id)
         },
-        (callback, member, args, valid, before, immediate, source, release) => {
+        (callback, member, args, valid, before, immediate, source, release, internal = false) => {
           return this.acceptEvent(
             () =>
-              member
+              member || args.length
                 ? { kind: 'invoke', callback, member, args }
                 : { kind: 'value', value: undefined },
             {
-              valid: () => valid() && (!immediate || !this.systemEvents!.disabled),
-              discardable: immediate,
+              valid: () => valid() && (internal || !immediate || !this.systemEvents!.disabled),
+              discardable: immediate && !internal,
+              internal,
               source,
             },
             {
@@ -4015,6 +4021,7 @@ export class EngineSession {
       activity: { ...this.activity },
       resources: this.storage.count,
       ...(this.project ? { project: { ...this.project } } : {}),
+      ...(this.zipEncoding === 'cp437' ? {} : { zipEncoding: this.zipEncoding }),
       ...this.layers.inspect(),
       handles: runtime?.handles ?? 0,
       memoryBytes: runtime?.memoryBytes ?? 0,
@@ -4587,8 +4594,10 @@ export class EngineSession {
         return undefined
       })(), controller)
     }
-    if (operation.startsWith('Video.'))
-      return { kind: 'value', value: await this.videos!.host(operation, args, context) }
+    if (operation.startsWith('Video.')) {
+      const continuation = this.videos!.continuation(operation, args)
+      return continuation ?? { kind: 'value', value: await this.videos!.host(operation, args, context) }
+    }
     if (operation === 'System.getArgument') {
       if (typeof args[0] !== 'string') throw new Error('System.getArgument requires an option name')
       return { kind: 'value', value: this.systemArguments.get(args[0]) }

@@ -21,6 +21,7 @@ import {
   scriptList,
   scriptRecord,
   type HostContext,
+  type HostReply,
   type ScriptObject,
   type ScriptWeakObject,
   type ScriptRuntime,
@@ -39,6 +40,7 @@ interface Video {
   sourceCancels: Set<() => void>
   closing?: Promise<void>
   version: number
+  prepareToken: number
   layers: ({ id: number; owner: ScriptWeakObject } | null)[]
 }
 interface Callback {
@@ -74,6 +76,9 @@ export class VideoService {
   private cancelled = false
   private closes = new Set<Promise<void>>()
   private closeErrors: unknown[] = []
+  private nextPrepare = 1
+  private callbackDispatcher?: ScriptObject
+  private frameDispatcher?: ScriptObject
   constructor(
     private readonly objects: ScriptRuntime,
     private readonly backend: VideoBackend | undefined,
@@ -90,6 +95,7 @@ export class VideoService {
       /** A Session receipt invokes this at body settlement and owns the
        * following native/frame boundary. Standalone dispatchers may ignore it. */
       release: () => void,
+      internal?: boolean,
     ) => Promise<void>,
     private readonly error: (error: unknown) => void,
     private readonly cancelQueued: (source: object) => void = () => {},
@@ -108,6 +114,24 @@ export class VideoService {
   }
   get pendingCloses(): number {
     return this.closes.size
+  }
+  /** Native continuations: they invoke retained TJS closures on the existing
+   * VM stack, never enter the runtime from a suspended host import. */
+  continuation(operation: string, args: ScriptValue[]): HostReply | undefined {
+    if (operation === 'Video.bindCallbacks') {
+      if (this.callbackDispatcher || this.frameDispatcher || !isScriptObject(args[0]) || !isScriptObject(args[1]))
+        throw new Error('Invalid video callback binding')
+      const callback = this.objects.retain(args[0])
+      try { this.frameDispatcher = this.objects.retain(args[1]); this.callbackDispatcher = callback }
+      catch (error) { this.objects.release(callback); throw error }
+      return { kind: 'value', value: undefined }
+    }
+    if (operation === 'Video.dispatchCallbacks') {
+      if (!this.callbackDispatcher || !isScriptObject(args[0]) || !isScriptObject(args[1]))
+        throw new Error('Invalid video callbacks')
+      return { kind: 'invoke', callback: this.callbackDispatcher, args }
+    }
+    return undefined
   }
   disconnectWindow(id: number): void {
     for (const video of this.videos.values()) if (video.windowId === id) this.disconnect(video)
@@ -300,16 +324,22 @@ export class VideoService {
       if (event.type === 'error') throw new Error(event.message)
       const video = this.videos.get(event.id)
       if (!video || video.detached || video.snapshot.epoch !== event.epoch) return
+      const layerFrame = event.type === 'frame' && event.snapshot.mode === 1 &&
+        event.snapshot.status === 'play' && !!this.frameDispatcher
+      if ((layerFrame && !video.layers.some(Boolean)) ||
+          ((layerFrame || event.prepareToken !== undefined) && (event.prepareToken ?? 0) !== video.prepareToken)) return
       // Native asynchronous status changes revoke earlier undelivered video
       // events. Frame/period events keep their immediate/discardable semantics.
       if (event.type === 'ended') this.cancelEvents(video)
       video.snapshot = event.snapshot
       const version = video.version
+      const prepareToken = video.prepareToken
       const valid = () =>
         this.videos.get(video.id) === video &&
         !video.detached &&
         video.version === version &&
-        video.snapshot.epoch === event.epoch
+        video.snapshot.epoch === event.epoch &&
+        (!layerFrame || (video.prepareToken === prepareToken && video.layers.some(Boolean)))
       const callbacks = this.callbacks(event)
       lease = this.objects.upgrade(video.owner)
       if (!lease) {
@@ -318,9 +348,9 @@ export class VideoService {
       }
       const callback = callbacks[0]
       await this.dispatch(
-        lease,
-        callback?.name,
-        callback?.args ?? [],
+        layerFrame ? this.frameDispatcher! : lease,
+        layerFrame ? undefined : callback?.name,
+        layerFrame ? [lease, BigInt(event.snapshot.frame < 0 ? -1 : event.callbackFrame ?? event.snapshot.frame)] : callback?.args ?? [],
         valid,
         () => this.pixels(video, event),
         event.type !== 'ended',
@@ -329,6 +359,7 @@ export class VideoService {
           receiptReleased = true
           release()
         },
+        layerFrame && prepareToken !== 0,
       )
     } catch (error) {
       this.error(error)
@@ -369,6 +400,7 @@ export class VideoService {
           inflight: new Set(),
           sourceCancels: new Set(),
           version: 0,
+          prepareToken: 0,
           layers: [null, null],
         }
         video.window = window = this.objects.observe(args[1], () => this.disconnect(video))
@@ -381,6 +413,7 @@ export class VideoService {
       return BigInt(id)
     }
     const video = this.get(Number(args[0]))
+    if (operation === 'Video.preparePending') return BigInt(video.prepareToken !== 0)
     if (operation === 'Video.destroy') {
       this.retire(video.id)
       return
@@ -458,7 +491,16 @@ export class VideoService {
     }
     const identity = () => ({ id: video.id, epoch: video.snapshot.epoch })
     let value: ScriptValue
-    if (method === 'prepareOpen') {
+    if (method === 'canPrepare') {
+      value = BigInt(video.ready && video.snapshot.mode === 1)
+    } else if (method === 'prepareArm' || method === 'prepareClear') {
+      // IsPrepare is an object latch, not a graph preference: native Close,
+      // Open, Stop and Pause do not reset it. A nested prepare is cleared by
+      // the outer EC_UPDATE completion, matching the original boolean field.
+      video.prepareToken = method === 'prepareArm' ? this.nextPrepare++ : 0
+      if (!Number.isSafeInteger(this.nextPrepare)) throw new Error('Video prepare identity budget exceeded')
+      if (video.ready) await apply({ op: 'prepare', ...identity(), token: video.prepareToken })
+    } else if (method === 'prepareOpen') {
       if (input.length < 1) throw new TjsError('TJSBadParamCount')
     } else if (method === 'close') {
       const previous = video.snapshot.status
@@ -494,6 +536,7 @@ export class VideoService {
           // Only the containing VideoOverlay's object fields survive reopening.
           settings: { ...defaultVideoSettings(), ...videoObjectSettings(video.snapshot) },
           periodEventPast: video.snapshot.periodEventPast ?? false,
+          prepareToken: video.prepareToken,
         }, control.check)
       } finally {
         if (!(source instanceof Uint8Array)) source.release()
@@ -501,12 +544,13 @@ export class VideoService {
       control.check()
       video.ready = true
       callbacks.push({ name: 'onStatusChanged', args: [video.snapshot.status] })
-    } else if (['play', 'stop', 'pause', 'rewind', 'prepare'].includes(method)) {
+    } else if (['play', 'stop', 'pause', 'rewind', 'prepareRewind'].includes(method)) {
       if (video.ready) {
         this.cancelEvents(video)
         const previous = video.snapshot.status
         video.snapshot.epoch = this.epoch++
-        await apply({ op: method as 'play', ...identity() })
+        await apply(method === 'prepareRewind' ? { op: 'rewind', ...identity(), silent: true }
+          : { op: method as 'play', ...identity() })
         if (previous !== video.snapshot.status)
           callbacks.unshift({ name: 'onStatusChanged', args: [video.snapshot.status] })
       }
@@ -650,6 +694,13 @@ export class VideoService {
         failed = true
       }
     }
+    for (const callback of [this.callbackDispatcher, this.frameDispatcher]) {
+      if (callback) {
+        try { this.objects.release(callback) }
+        catch (error) { if (!failed) { primary = error; failed = true } }
+      }
+    }
+    this.callbackDispatcher = this.frameDispatcher = undefined
     if (failed) throw primary
   }
 }

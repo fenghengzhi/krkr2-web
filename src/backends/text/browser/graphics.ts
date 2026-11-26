@@ -357,8 +357,22 @@ export class BrowserGraphics implements GraphicsDecoder {
       s = Math.sin(angle)
     const minX = originX + Math.min(0, -metrics.actualBoundingBoxLeft),
       maxX = originX + Math.max(metrics.width, metrics.actualBoundingBoxRight)
-    const minY = Math.min(0, baseline - metrics.actualBoundingBoxAscent),
+    const lineThickness = Math.max(1, size / 16),
+      underlineY = baseline + lineThickness,
+      strikeoutY = baseline - size * 0.3
+    // Decorations are separate Canvas rectangles, not part of TextMetrics.
+    // Include them before rotation/shadow expansion: a face's ascent can put
+    // the underline below both its em box and the current glyph's descender.
+    let minY = Math.min(0, baseline - metrics.actualBoundingBoxAscent),
       maxY = Math.max(size, baseline + metrics.actualBoundingBoxDescent)
+    if (metrics.width > 0 && fontSpec.underline) {
+      minY = Math.min(minY, underlineY)
+      maxY = Math.max(maxY, underlineY + lineThickness)
+    }
+    if (metrics.width > 0 && fontSpec.strikeout) {
+      minY = Math.min(minY, strikeoutY)
+      maxY = Math.max(maxY, strikeoutY + lineThickness)
+    }
     const corners = [
       [minX, minY],
       [maxX, minY],
@@ -399,12 +413,12 @@ export class BrowserGraphics implements GraphicsDecoder {
     if (fontSpec.underline)
       ctx.fillRect(
         originX,
-        baseline + Math.max(1, size / 16),
+        underlineY,
         metrics.width,
-        Math.max(1, size / 16),
+        lineThickness,
       )
     if (fontSpec.strikeout)
-      ctx.fillRect(originX, baseline - size * 0.3, metrics.width, Math.max(1, size / 16))
+      ctx.fillRect(originX, strikeoutY, metrics.width, lineThickness)
     const data = new Uint8Array(ctx.getImageData(0, 0, width, height).data.buffer)
     if (options && !options.antialiased)
       for (let i = 3; i < data.length; i += 4) data[i] = data[i]! >= 128 ? 255 : 0

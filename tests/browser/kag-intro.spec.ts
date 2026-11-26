@@ -46,7 +46,7 @@ for (const backend of ['asyncify', 'jspi'])
     const canvas = page.locator('#stage canvas[data-window-id]')
     const read = async (expression: string): Promise<string> => {
       const prefix = `intro-read-${++evaluation}:`, first = startupRead, began = Date.now(),
-        observation = { prefix, phase: first ? 'startup' : 'gameplay', budgetMs: first ? 30000 : 5000, elapsedMs: 0, complete: false }
+        observation = { prefix, phase: first ? 'startup' : 'gameplay', budgetMs: first ? 30000 : 5000, elapsedMs: 0, complete: false, value: '' }
       startupRead = false
       if (consoleReads.length < 256) consoleReads.push(observation)
       try {
@@ -68,12 +68,16 @@ for (const backend of ['asyncify', 'jspi'])
         // retains the 5-second transaction bound, with no retry or new click.
         await expect(output).toBeVisible({ timeout: observation.budgetMs })
         const value = ((await output.textContent()) ?? '').slice(prefix.length)
+        observation.value = value
         observation.complete = true
         return value
       } finally { observation.elapsedMs = Date.now() - began }
     }
     const state = async (): Promise<State | undefined> => {
-      const separator = '\u001e'
+      const separator = '\u001e', separatorLiteral = String.raw`"\x001e"`
+      // TJS accepts hexadecimal \x escapes, not JSON's \u escape. Keep the
+      // VM string literal separate from the host delimiter; otherwise the
+      // literal "u001e" joins layout fields onto the 11-field game state.
       // Preserve every changed wait, including automatic pagination. Compute
       // its layout only when needed, in the same VM call as the state, then
       // take the separate hidden Font sample after those strings are saved.
@@ -85,7 +89,7 @@ for (const backend of ['asyncify', 'jspi'])
         var layout="",metrics="";
         try{layout="ok:"+(${kagIntroLayoutExpression});}catch(e){layout="error:"+e.message;}
         ${fontMetricsObserved ? '' : `try{metrics="ok:"+(${kagIntroFontMetricExpression});}catch(e){metrics="error:"+e.message;}`}
-        return observedState+${JSON.stringify(separator)}+layout+${JSON.stringify(separator)}+metrics;
+        return observedState+${separatorLiteral}+layout+${separatorLiteral}+metrics;
       })()`)).split(separator), value = parts[0]!
       if (value === 'pending') return undefined
       const [label, waiting, line, pageWait, curLine, curPos, conductor, links, background, storage, lastTag] = value.split('|')

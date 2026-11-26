@@ -6,7 +6,7 @@ class VideoOverlay {
     __videoWindow=window;__videoId=__host("Video.create",this,window,window.__windowId);
   }
   function finalize(){}
-  function __videoDispatch(events,immediate=false){for(var i=0;i<events.count;i++){var event=events[i];if(!immediate || !System.eventDisabled)this[event[0]](event[1]*);}}
+  function __videoDispatch(events,immediate=false){if(events.count)__host("Video.dispatchCallbacks",this,events,immediate);}
   function __videoRun(method,args){var result=__host("Video.call",__videoId,method,args);__videoDispatch(result.callbacks,true);return result.value;}
   function open(args*){
     if(args.count<1){__videoRun("prepareOpen",[]);return;}
@@ -15,7 +15,12 @@ class VideoOverlay {
     var name=string(args[0]);
     __videoRun("close",[]);__videoRun("open",[name]);
   }
-  ${['play', 'stop', 'pause', 'rewind', 'prepare', 'close'].map((name) => `function ${name}(){__videoRun("${name}",[]);}`).join('\n')}
+  ${['play', 'stop', 'pause', 'rewind', 'close'].map((name) => `function ${name}(){__videoRun("${name}",[]);}`).join('\n')}
+  function prepare(){
+    if(!__videoRun("canPrepare",[]))return;
+    __videoRun("pause",[]);__videoRun("prepareRewind",[]);
+    __videoRun("prepareArm",[]);__videoRun("play",[]);
+  }
   function setPos(args*){if(args.count<2)throw new global.Exception("VideoOverlay.setPos requires two arguments");__host("Video.geometry",__videoId,"setPos",int(args[0]),int(args[1]));}
   function setSize(args*){if(args.count<2)throw new global.Exception("VideoOverlay.setSize requires two arguments");__host("Video.geometry",__videoId,"setSize",int(args[0]),int(args[1]));}
   function setBounds(args*){if(args.count<4)throw new global.Exception("VideoOverlay.setBounds requires four arguments");__host("Video.geometry",__videoId,"setBounds",int(args[0]),int(args[1]),int(args[2]),int(args[3]));}
@@ -43,4 +48,34 @@ class VideoOverlay {
   ${['loop', 'mode', 'position', 'frame', 'playRate', 'audioVolume', 'audioBalance', 'periodEventFrame', 'mixingMovieAlpha', 'mixingMovieBGColor'].map((name) => `property ${name}{getter(){return __videoRun("get",["${name}"]);}setter(value){__videoRun("set",["${name}",${name === 'playRate' || name === 'mixingMovieAlpha' ? 'real' : 'int'}(${name === 'loop' ? '!!value' : 'value'})]);}}`).join('\n')}
   ${['status', 'originalWidth', 'originalHeight', 'fps', 'numberOfFrame', 'totalTime', 'numberOfAudioStream', 'numberOfVideoStream', 'segmentLoopStartFrame', 'segmentLoopEndFrame'].map((name) => `property ${name}{getter(){return __videoRun("get",["${name}"]);}}`).join('\n')}
 }
+function __krkrVideoCallbacks(report){
+ return function(movie,events,immediate){
+  for(var i=0;i<events.count;i++){
+   var event=events[i];
+   if(!immediate || !global.System.eventDisabled){
+    try{movie[event[0]](event[1]*);}catch(error){this.report(error);}
+   }
+  }
+ } incontextof %[report:report];
+}
+function __krkrVideoFrame(report){
+ return function(movie,frame){
+  if(frame>=0 && !global.System.eventDisabled){
+   try{movie.onFrameUpdate(frame);}catch(error){this.report(error);}
+  }
+  if(!(isvalid movie))return;
+  // The native WndProc rechecks the object latch AFTER onFrameUpdate. Its
+  // callbacks can reopen, close or prepare the same object recursively.
+  if(global.__host("Video.preparePending",movie.__videoId)){
+   if(!global.System.eventDisabled){
+    try{movie.onPeriod(2);}catch(error){this.report(error);}
+   }
+   if(!(isvalid movie))return;
+   movie.__videoRun("pause",[]);movie.__videoRun("prepareRewind",[]);
+   movie.__videoRun("prepareClear",[]);
+  }
+ } incontextof %[report:report];
+}
+global.__host("Video.bindCallbacks",__krkrVideoCallbacks(global.__krkrImmediateError),__krkrVideoFrame(global.__krkrImmediateError));
+delete global.__krkrVideoCallbacks;delete global.__krkrVideoFrame;delete global.__krkrImmediateError;
 `

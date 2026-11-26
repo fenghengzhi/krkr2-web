@@ -2,6 +2,7 @@ import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { transformWithOxc } from 'vite'
 import { runFontWorker } from '../helpers/font-worker.ts'
+import { highAscentFont } from '../helpers/text-decoration.ts'
 
 // Serve actual source modules to an isolated Worker, with the production font assets.
 async function runWorker<T = unknown>(page: Page, testInfo: TestInfo, body: string, data: unknown): Promise<T> {
@@ -111,6 +112,47 @@ try {
   expect(result.measurements.every((row) => row.actual === row.expected)).toBe(true)
   expect(result.rasterCompared).toBe(true)
   expect(result.requestedWidths).toEqual([10, 10, 18])
+})
+
+test('system glyph decorations retain every pixel beyond the em box, including rotation and shadows', async ({ page }, info) => {
+  const result = await runWorker<{ cases: number; formerlyClipped: number }>(page, info, `
+const backend=new BrowserGraphics(), face=new FontFace('krkr-decoration',new Uint8Array(data));
+await face.load();self.fonts.add(face);
+let cases=0,formerlyClipped=0;
+try {
+ for(const size of [24,96])for(const angle of [0,450,900,2700])for(const style of [0,1,2,3])for(const shadow of [false,true]){
+  const spec={...font,face:'krkr-decoration',height:size,angle,underline:!!(style&1),strikeout:!!(style&2)},
+   options={antialiased:true,shadowLevel:shadow?255:0,shadowWidth:shadow?2:0,shadowX:shadow?3:0,shadowY:shadow?4:0,shadowColor:0x224466};
+  // Independent, generously sized canvas: no allocation/bounds formula from
+  // BrowserGraphics. Translate the complete returned bitmap into this domain.
+  const canvas=new OffscreenCanvas(512,512),ctx=canvas.getContext('2d');
+  ctx.font=size+'px "krkr-decoration",sans-serif';
+  const metrics=ctx.measureText('AV'),baseline=metrics.fontBoundingBoxAscent,thickness=Math.max(1,size/16);
+  check(baseline>=size,'Authored high ascent must expose decoration outside the em box');
+  ctx.translate(256,256);ctx.rotate(-angle*Math.PI/1800);ctx.fillStyle='#ffffff';
+  if(shadow){ctx.shadowColor='#224466';ctx.shadowBlur=2;ctx.shadowOffsetX=3;ctx.shadowOffsetY=4;}
+  ctx.fillText('AV',0,baseline);
+  if(style&1)ctx.fillRect(0,baseline+thickness,metrics.width,thickness);
+  if(style&2)ctx.fillRect(0,baseline-size*.3,metrics.width,thickness);
+  const expected=ctx.getImageData(0,0,512,512).data,actual=backend.text('AV',size,0xffffff,spec,options),
+   placed=new Uint8Array(expected.length),x0=256+actual.left,y0=256+actual.top;
+  check(x0>=0&&y0>=0&&x0+actual.width<=512&&y0+actual.height<=512,'Reference canvas contains complete raster');
+  for(let y=0;y<actual.height;y++)placed.set(actual.data.subarray(y*actual.width*4,(y+1)*actual.width*4),((y0+y)*512+x0)*4);
+  observations.case={size,angle,style,shadow,bounds:[actual.left,actual.top,actual.width,actual.height],baseline};
+  let mismatch=-1;for(let i=0;i<expected.length;i++)if(expected[i]!==placed[i]){mismatch=i;break;}
+  if(mismatch!==-1)observations.mismatch={index:mismatch,expected:expected[mismatch],actual:placed[mismatch]};
+  check(mismatch===-1,'Complete decorated raster '+JSON.stringify(observations.case));
+  if(angle===0&&!shadow&&(style&1)){
+   const oldBottom=Math.ceil(Math.max(size,baseline+metrics.actualBoundingBoxDescent)+1);
+   for(let y=256+oldBottom;y<512;y++)for(let x=0;x<512;x++)if(expected[(y*512+x)*4+3])formerlyClipped++;
+  }
+  cases++;
+ }
+}finally{self.fonts.delete(face);backend.dispose();}
+postMessage({cases,formerlyClipped});
+`, [...highAscentFont(await readFile('tests/fixtures/font/narrow.ttf'))])
+  expect(result.cases).toBe(64)
+  expect(result.formerlyClipped).toBeGreaterThan(0)
 })
 
 test('system bold measures dialogue and places glyphs using distinct regular-face advances', async ({ page }, info) => {

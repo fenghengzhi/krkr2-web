@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 145 批使用逐字节构造的日文、中文 ZIP 验收章节和存档查找。浏览器另核对带装饰线的字幕截图、图层影片的准备帧和回调里重新播放或关闭时的结果。原版介绍游戏路线改用 TJS 支持的分隔符采集状态。[145 验收与历史结果](decisions/145-zip-file-names-video-prepare-and-text.md)
+
 第 144 批让浏览器实际打开安装器旁的游戏，测试选择章节、从游戏库重开和点击读档。原版与 Web 会话另对照 KAG 小数参数和曲尾提示。[144 验收与历史结果](decisions/144-combined-games-macro-values-and-audio-cues.md)
 
 第 143 批在原版 SDK 与 Web 会话对照像素、KAG 宏与参数、Wave 暂停和循环。浏览器验收实际点击后的预览、原版 KAG 模板的对白，以及声音的双声道样本。第 134 批新增的 12 项 KAG 游戏库重开验收均已通过。[143 验收与历史结果](decisions/143-game-sprites-script-names-and-sound.md)

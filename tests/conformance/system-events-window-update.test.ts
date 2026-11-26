@@ -110,6 +110,73 @@ function setup(bind = true) {
   }
 }
 
+test('a disabled script event queue runs only native continuations and retains ordinary priorities, ticks and paint', async (t) => {
+  const h = setup(); t.after(h.cleanup)
+  h.events.setDisabled(true)
+  h.post(40, 3); h.post(30, 2); h.post(10, 0); h.post(20, 1)
+  h.events.add(object(50), 100); h.clock.advance(0)
+  assert.equal(h.events.hasDispatchableWork(), false)
+  assert.equal(h.executions.length, 0)
+  const internals = ([3, 1, 2] as const).map((priority) => h.events.enqueue(
+    () => ({ kind: 'invoke', callback: object(60 + priority), args: [] }),
+    { internal: true, discardable: true, priority },
+  ))
+  assert.equal(h.executions.length, 1)
+  assert(internals.every((entry) => entry.status === 'accepted'))
+  const nativeRound = token(h.executions[0]!.operation())
+  const native: number[] = []
+  while (h.next(nativeRound)) { native.push(h.callback(nativeRound)); h.done(nativeRound) }
+  assert.deepEqual(native, [61, 62, 63])
+  assert.equal(h.windowUpdate(nativeRound), 0n)
+  h.end(nativeRound)
+  await Promise.all(internals.map((entry) => entry.completion))
+  assert.equal(h.events.hasDispatchableWork(), false)
+  const resumed = token(h.events.setDisabled(false)), calls: number[] = []
+  while (h.next(resumed)) { calls.push(h.callback(resumed)); h.done(resumed) }
+  assert.deepEqual(calls, [10, 20, 30, 40, 50])
+  assert.equal(h.windowUpdate(resumed), 1n)
+  h.end(resumed)
+})
+
+test('native work while disabled does not admit later user jobs into a suspended script round', async (t) => {
+  const h = setup(); t.after(h.cleanup)
+  h.post(10)
+  const outer = h.begin()
+  assert.equal(h.next(outer), true); assert.equal(h.callback(outer), 10)
+  h.post(20)
+  h.events.setDisabled(true)
+  const completion = h.events.post(() => ({ kind: 'value', value: undefined }), { internal: true })
+  const inner = h.begin()
+  assert.equal(h.next(inner), true); h.host('Call', inner); h.done(inner)
+  assert.equal(h.next(inner), false); h.end(inner)
+  await completion
+  h.done(outer)
+  assert.equal(h.next(outer), false, 'The original normal-event cutoff is still in force')
+  h.end(outer)
+  const resumed = token(h.events.setDisabled(false))
+  assert.equal(h.next(resumed), true); assert.equal(h.callback(resumed), 20); h.done(resumed)
+  assert.equal(h.next(resumed), false); h.end(resumed)
+})
+
+test('pausing and cancelling a pending native continuation leaves the disabled queue asleep', async (t) => {
+  const h = setup(); t.after(h.cleanup)
+  h.events.setDisabled(true); h.events.pause(); h.post(20)
+  let called = 0
+  const internal = () => { called++; return { kind: 'value' as const, value: undefined } }
+  const source = {}, first = h.events.enqueue(internal, { internal: true, source })
+  assert.equal(h.events.hasDispatchableWork(), false)
+  assert.deepEqual(h.events.beginNested({ windowUpdate: true }), { kind: 'value', value: undefined })
+  h.events.cancelSource(source); await first.completion
+  h.events.resume()
+  assert.equal(h.executions.length, 0); assert.equal(called, 0)
+  const next = h.events.enqueue(internal, { internal: true })
+  assert.equal(h.events.hasDispatchableWork(), true)
+  const round = token(h.executions[0]!.operation())
+  assert.equal(h.next(round), true); h.host('Call', round); h.done(round); h.end(round)
+  await next.completion
+  assert.equal(called, 1); assert.equal(h.events.hasDispatchableWork(), false)
+})
+
 test('window update is allowed only after exclusive, input, normal, idle and continuous delivery', async (t) => {
   const h = setup()
   t.after(h.cleanup)

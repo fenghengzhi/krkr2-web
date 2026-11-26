@@ -6,7 +6,8 @@ import { gameIdentity, projectIdentity } from '../game-identity.ts'
 import { copyGameProject } from '../../engine/storage/project.ts'
 import { prepareProject } from '../../engine/storage/distribution.ts'
 import { importSources } from '../../backends/files/import-resources.ts'
-import { archiveReader } from '../../backends/files/archive-reader.ts'
+import { createSessionArchiveReader } from '../../backends/files/archive-reader.ts'
+import { zipNameEncoding } from '../../formats/zip/names.ts'
 import type {
   LibraryGame,
   LibraryImport,
@@ -80,6 +81,7 @@ export class LibraryService {
   ): Promise<LibraryGame> {
     signal.throwIfAborted()
     const requestedProject = copyGameProject(request.project)
+    const zipEncoding = zipNameEncoding(request.zipEncoding)
     const settings = gameSettings(request, requestedProject)
     if (
       !/^game-[a-f0-9]{64}$/.test(request.expectedGameId) ||
@@ -123,10 +125,14 @@ export class LibraryService {
         }
         const sources = await resolveFiles(request.files, checkpoint, http)
         const sourceGameId = await gameIdentity(sources, checkpoint)
-        const project = requestedProject
-          ? (await prepareProject(await importSources(sources, checkpoint, { lazyArchives: true }),
-            { mode: 'root', ...requestedProject }, archiveReader, checkpoint)).project
-          : undefined
+        let project = requestedProject
+        if (requestedProject) {
+          const reader = createSessionArchiveReader(undefined, zipEncoding)
+          try {
+            project = (await prepareProject(await importSources(sources, checkpoint, { lazyArchives: true }),
+              { mode: 'root', ...requestedProject }, reader, checkpoint)).project
+          } finally { reader.dispose() }
+        }
         const identity = await projectIdentity(sourceGameId, project)
         if (identity !== request.expectedGameId)
           throw new Error('Game sources changed; reload the game before saving it to the library')
@@ -142,6 +148,7 @@ export class LibraryService {
           version: 1,
           id,
           gameId: identity,
+          ...(zipEncoding === 'cp437' ? {} : { zipEncoding }),
           ...(project === undefined ? {} : { project, sourceGameId }),
           ...settings,
           createdAt: Date.now(),

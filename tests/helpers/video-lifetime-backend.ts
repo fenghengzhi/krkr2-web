@@ -102,7 +102,8 @@ export class LifetimeVideoBackend implements VideoBackend {
     else if (command.op === 'set') Object.assign(snapshot, command.settings)
     else if (command.op === 'seek') snapshot.frame = command.frame ?? 0
     else if (command.op === 'rewind') snapshot.frame = 0
-    else if (command.op === 'prepare') snapshot.status = 'pause'
+    // prepare arms a real-frame continuation; it does not fabricate a frame
+    // or pause synchronously. Dedicated prepare fixtures supply frame tokens.
     return { snapshot: { ...snapshot }, events: [] }
   }
   async close(): Promise<void> {

@@ -97,13 +97,17 @@ export type VideoCommand =
       name: string
       settings: VideoSettings
       periodEventPast?: boolean
+      /** Object-owned Prepare latch; the graph only tags actual frame events. */
+      prepareToken?: number
       timeline?: VideoTimeline
     }
   | {
-      op: 'play' | 'stop' | 'pause' | 'rewind' | 'prepare' | 'close' | 'inspect'
+      op: 'play' | 'stop' | 'pause' | 'close' | 'inspect'
       id: number
       epoch: number
     }
+  | { op: 'rewind'; id: number; epoch: number; silent?: boolean }
+  | { op: 'prepare'; id: number; epoch: number; token: number }
   | { op: 'set'; id: number; epoch: number; settings: VideoSettings }
   /** An explicit setter matters even when the numeric cue is unchanged. */
   | { op: 'period'; id: number; epoch: number; frame: number }
@@ -121,6 +125,8 @@ export type VideoEvent =
       snapshot: VideoSnapshot
       /** Frame-event argument, separate from the public media-clock snapshot. */
       callbackFrame?: number
+      /** Captured at rVFC registration, never inferred from readyState/clock. */
+      prepareToken?: number
       reason?: number
       pixels?: Pixels
     }

@@ -1,7 +1,27 @@
 /** Keep nested callback execution inside TJS; queue and registry live in TypeScript. */
 export const systemEventsBridge = String.raw`
-function __krkrMakeSystemEventPump(application,invoke){
- var context=%[application:application,invoke:invoke];
+function __krkrMakeImmediateError(invoke){
+ return function(error){
+  var describe=function(value){
+   try{
+    if(typeof value=="Object" && value!==null && value.message!==void)return string(value.message);
+    return string(value);
+   }catch(ignored){return "Unprintable exception";}
+  };
+  var handled=false,message=describe(error);
+  try{
+   var handler=global.System.exceptionHandler;
+   if(typeof handler=="Object" && handler!==null)handled=!!this.invoke(handler,error);
+  }catch(handlerError){message+="; exception handler: "+describe(handlerError);handled=false;}
+  global.__host("System.eventError",message,int(handled));
+ } incontextof %[invoke:invoke];
+}
+// Bootstrap-only capability, captured by Video's private continuations and
+// deleted before a game script can run. No new System public method.
+global.__krkrImmediateError=__krkrMakeImmediateError(System.__invokeExceptionHandler);
+delete global.__krkrMakeImmediateError;
+function __krkrMakeSystemEventPump(application,report){
+ var context=%[application:application,report:report];
  return function(token,activation=void){
   if(activation!==void){
    if(!activation)global.__host("System.applicationCompact");
@@ -21,22 +41,7 @@ function __krkrMakeSystemEventPump(application,invoke){
       }
       catch(error){
         global.__host("System.eventFailed",token);
-        var describe=function(value){
-          try{
-            if(typeof value=="Object" && value!==null && value.message!==void)return string(value.message);
-            return string(value);
-          }catch(ignored){return "Unprintable exception";}
-        };
-        var handled=false,message=describe(error);
-        try{
-          // Read the closure first, as the native exception dispatcher does.
-          // Native invocation preserves bound objthis and the function-object
-          // fallback, without inheriting this pump's private Dictionary.
-          var handler=global.System.exceptionHandler;
-          if(typeof handler=="Object" && handler!==null)handled=!!this.invoke(handler,error);
-        }
-        catch(handlerError){message+="; exception handler: "+describe(handlerError);handled=false;}
-        global.__host("System.eventError",message,int(handled));
+        this.report(error);
         failed=true;
       }
       // A failed callback is not finished until its exception handler returns.
@@ -56,7 +61,7 @@ function __krkrMakeSystemEventPump(application,invoke){
   global.__host("System.eventEnd",token);
  } incontextof context;
 }
-global.__host("System.bindEvents",__krkrMakeSystemEventPump(System.__applicationEvent,System.__invokeExceptionHandler));
+global.__host("System.bindEvents",__krkrMakeSystemEventPump(System.__applicationEvent,global.__krkrImmediateError));
 delete System.__applicationEvent;
 delete System.__invokeExceptionHandler;
 delete global.__krkrMakeSystemEventPump;
