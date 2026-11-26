@@ -5,7 +5,7 @@ export interface CueTrack {
   number: number; file: number; mode: string; indices: Map<number, number>
   pregap: number; postgap: number; flags: string[]
 }
-export interface CueSheet { files: CueFile[]; tracks: CueTrack[]; leadOut?: number }
+export interface CueSheet { files: CueFile[]; tracks: CueTrack[]; leadOut?: number; scrambledData?: true }
 export type CuePart = ({ kind: 'file'; file: number; startFrame: number; endFrame?: number } |
   { kind: 'silence'; frames: number }) & { preEmphasis?: true }
 export const cueLimits = { bytes: 1024 * 1024, lines: 32768, files: 99, tracks: 99 } as const

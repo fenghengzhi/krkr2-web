@@ -828,9 +828,17 @@ export class BrowserInput {
       type: down ? 'keyDown' : 'keyUp',
       key,
       shift,
+      metaKey: !!event.metaKey,
       ...(event.altKey || key === 18 || key === 121 ? { systemKey: true } : {}),
       ...(down && this.shared?.popupHidePosted?.(event) ? { popupHidePosted: true } : {}),
     })
+    if (down && !event.metaKey && this.input?.systemShortcuts?.some((item) => item.key === key && item.shift === (shift & 7))) {
+      // The Session handles the already queued physical key. Prevent its
+      // browser action and any subsequent text, including Enter's synthetic
+      // text packet. An explicit game menu already returned above.
+      event.preventDefault()
+      return
+    }
     const controls: Record<string, string> = { Enter: '\r', Escape: '\u001b', Backspace: '\b' }
     if (down && controls[event.key] !== undefined) {
       event.preventDefault()

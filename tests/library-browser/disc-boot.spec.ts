@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { test, expect } from '../helpers/library-browser.ts'
 import { discBootInput, discReleaseInput, localizedDiscRelease } from '../helpers/disc-boot.ts'
 import { udfGameDisc, udfMetadataGameDisc, udfSparableGameDisc } from '../helpers/udf-game-discs.ts'
-import { cloneCdDiscInput } from '../helpers/clone-cd-game.ts'
+import { cloneCdDiscInput, scrambledCloneCdDiscInput } from '../helpers/clone-cd-game.ts'
 import { oemGameDiscInput } from '../helpers/oem-game-disc.ts'
 import { kagGameControls } from '../helpers/kag-game-controls.ts'
 
@@ -27,6 +27,8 @@ const editions = [
     names: ['boot-udf250-bridge-source.iso'], open: () => udfMetadataGameDisc(true) },
   { kind: 'ccd', binary: false, label: 'CloneCD mixed-mode source', suffix: ' CCD',
     names: ['boot-clonecd-source.ccd', 'boot-clonecd-source.img'], open: cloneCdDiscInput },
+  { kind: 'ccd', binary: false, label: 'CloneCD scrambled data and CD audio', suffix: ' scrambled CCD',
+    names: ['boot-clonecd-source.ccd', 'boot-clonecd-source.img'], open: scrambledCloneCdDiscInput },
   { kind: 'oem', binary: false, label: 'CP932 primary ISO source', suffix: ' OEM',
     names: ['boot-oem932-source.iso'], open: oemGameDiscInput },
 ]

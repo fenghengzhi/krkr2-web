@@ -110,6 +110,17 @@
   /* Popup rows fill their panel; top-level leaf items share a wrapping bar. */
   width: auto;
 }
+.game-window-menu > .game-menu-group > button,
+.game-window-menu > .game-menu-group > details > summary {
+  /* Adding a leaf to an existing single menu row must not shrink the client
+     by the popup-row button's extra padding. Items can still wrap as a group. */
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 12px;
+  line-height: normal;
+  border: 0;
+  padding: 7px 12px;
+}
 .game-window-body,
 .game-window-content {
   position: relative;

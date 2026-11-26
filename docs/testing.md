@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 186 批从保留物理扇区扰码的混合模式盘启动原版 KAG，核对独立解码的 MP3 音乐样本，并在剧情中通过键盘选章和存读档。浏览器与游戏库作业的执行及上传时间上限增加到 75 分钟。[186 实现与托管证据](decisions/186-disc-sectors-and-game-controls.md)
+
 第 185 批覆盖远程包的修改时间校验、版本变化后的缓存失效及既有小文件的存档身份。空间音效用例录取左右声道，核对移动与拉远音源后的振幅。字幕用例以独立 Worker 中的画面逐字节核对游戏画布，保留页面字体参考。[185 实现与托管证据](decisions/185-dated-game-downloads-and-playback.md)
 
 第 184 批核对独立制作的日文主目录 ISO 的原始路径和文件字节，并在原版 KAG 中保存与刷新读档。另以像素检查淡出终点，以实际渲染的声音检查叠音与延音踏板。[184 实现与托管证据](decisions/184-oem-disc-names-fades-and-midi-notes.md)

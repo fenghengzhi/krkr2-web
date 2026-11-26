@@ -1,0 +1,64 @@
+MP3 decoding for imported CUE audio
+
+Upstream npm module: mpg123-decoder 1.0.3
+https://registry.npmjs.org/mpg123-decoder/-/mpg123-decoder-1.0.3.tgz
+Integrity: sha512-+fjxnWigodWJm3+4pndi+KUg9TBojgn31DPk85zEsim7C6s0X5Ztc/hQYdytXkwuGXH+aB0/aEkG40Emukv6oQ==
+
+Application package: mpg123-decoder 1.0.3-krkr.1. The JS free() method
+calls the C destructor once; that destructor already owns and frees its
+decoder object. The redundant second free was removed from src/MPEGDecoder.js.
+No WASM/codec changes. The version metadata marks this modified distribution.
+The main/exports entry index.js imports that source; its optional Worker
+imports the same constructor. Bundled upstream dist examples are not used.
+Patch and repack instructions are distributed beside this notice.
+Derived archive SHA-256: 7a6611a230041d0ae03e5480cd943786c0f8cadead498cbf558389b0f0477fba
+
+The JS wrapper and build scripts come from wasm-audio-decoders at
+8f2428c1cd96b54dab74836c8471ff75fe35cbee, declared MIT by its package:
+https://github.com/eshaz/wasm-audio-decoders/tree/8f2428c1cd96b54dab74836c8471ff75fe35cbee
+The original MP3/common sources and build recipe are provided in
+wasm-wrapper-8f2428c1-source.tar.gz. Unrelated decoder modules and upstream
+test recordings are omitted from that source subset. The complete original
+repository remains available at the immutable address above.
+
+The embedded libmpg123 is LGPL 2.1; its exact submodule revision is
+08247b317163175e62035893af3ff9e71a5dfefd. Complete corresponding source,
+COPYING and AUTHORS are in mpg123-08247b317163175e62035893af3ff9e71a5dfefd.tar.gz.
+COPYING.txt reproduces the upstream license distribution unchanged.
+https://github.com/madebr/mpg123/tree/08247b317163175e62035893af3ff9e71a5dfefd
+
+The wrapper archive retains the upstream Makefile/build.js and package
+lockfiles. For the upstream rebuild use that fixed repository, initialize
+its recorded submodules, install its build dependencies and Emscripten, and
+follow Makefile targets mpg123-configure and mpg123-decoder. No engine or
+game source is required to rebuild the decoder. The application dynamically
+imports this separate module; replacing the npm package with a compatible
+modified build and rebuilding the application with npm ci / npm run build
+relinks the application without changing its game logic. There is no binary
+signature check that restricts such replacement. npm ci, including with
+--ignore-scripts, installs the same pre-corrected file dependency. There is
+no application postinstall hook.
+
+MIT wrapper license
+Copyright (c) Ethan Halsall
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to
+do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+The shared common package includes puff (zlib license); its unmodified
+source and notice are in the wrapper archive and ../audio-notices.txt.

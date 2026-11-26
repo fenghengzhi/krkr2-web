@@ -406,6 +406,7 @@ jobs:
       udf-sparable-disc: ${{ steps.udf-sparable-disc.outcome }}
       long-vorbis-fixture: ${{ steps.long-vorbis-fixture.outcome }}
       cdda-aiff-fixtures: ${{ steps.cdda-aiff-fixtures.outcome }}
+      cdda-mp3-fixtures: ${{ steps.cdda-mp3-fixtures.outcome }}
     steps:
       - name: Reject conflicting diagnostic selections
         if: ${{ inputs.node-only && inputs.runtime-only }}
@@ -674,6 +675,12 @@ jobs:
         run: |
           mkdir -p out/verification/cdda-aiff
           node scripts/generate-cdda-aiff.mjs 2>&1 | tee out/ci/cdda-aiff.log
+      - name: Encode CD music and independently decode its MP3 track boundaries
+        id: cdda-mp3-fixtures
+        continue-on-error: true
+        run: |
+          mkdir -p out/verification/cdda-mp3
+          node scripts/generate-cdda-mp3-fixtures.mjs 2>&1 | tee out/ci/cdda-mp3.log
       - name: Generate shared project-owned video track fixtures
         run: |
           node scripts/generate-video-track-fixtures.mjs 2>&1 | tee out/ci/video-track-fixtures.log
@@ -718,7 +725,8 @@ jobs:
             out/verification/pwa/fixture-artifacts.json out/verification/video-tracks \
             out/verification/deflate64-games \
             out/verification/long-vorbis out/verification/vorbis-speakers \
-            out/verification/cdda-aiff out/verification/disc-volumes out/verification/clone-cd-game out/verification/oem-game-disc \
+            out/verification/cdda-aiff out/verification/cdda-mp3 out/verification/disc-volumes \
+            out/verification/clone-cd-game out/verification/oem-game-disc \
             out/verification/jpeg-fixtures/inputs \
             out/verification/jpeg-fixtures/case-manifest.json out/verification/jpeg-fixtures/codes.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -853,6 +861,15 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && steps.cdda-mp3-fixtures.outcome == 'failure' }}
+        with:
+          name: cdda-mp3-fixture-failure
+          path: |
+            out/ci/cdda-mp3.log
+            out/verification/cdda-mp3/
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() && (steps.cdda-aiff-fixtures.outcome == 'success' || steps.cdda-aiff-fixtures.outcome == 'failure') }}
         with:
           name: cdda-aiff-fixture-evidence
@@ -912,7 +929,7 @@ jobs:
         run: test "$FIXTURE_OUTCOME" = success
 
   cdda-aiff-fixture-result:
-    name: Independent AIFF track and UDF game disc verification
+    name: Independent CD audio and UDF game disc verification
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -920,6 +937,11 @@ jobs:
       - name: Require independently decoded AIFF disc tracks
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.cdda-aiff-fixtures }}
+        run: test "$FIXTURE_OUTCOME" = success
+      - name: Require independently decoded MP3 disc tracks
+        if: ${{ !cancelled() }}
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.cdda-mp3-fixtures }}
         run: test "$FIXTURE_OUTCOME" = success
       - name: Require both UDF game discs and their kernel and 7-Zip readbacks
         if: ${{ !cancelled() }}
@@ -1092,6 +1114,12 @@ jobs:
           node --import tsx --test --test-concurrency=2 --test-reporter=tap \
             tests/conformance/http-range.test.ts tests/conformance/wave-spatial.test.ts \
             tests/integration/wave-spatial.test.ts tests/integration/wave-quad.test.ts | tee out/ci/game-remote-and-spatial.tap
+      - name: Check compressed CD music and game keyboard shortcuts
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-concurrency=2 --test-reporter=tap \
+            tests/conformance/mp3-source.test.ts tests/conformance/mp3-tags.test.ts tests/integration/cdda-mp3.test.ts \
+            tests/integration/window-system-shortcuts.test.ts | tee out/ci/game-disc-and-keyboard.tap
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ always() }}
         with:
@@ -1099,6 +1127,7 @@ jobs:
           path: |
             out/ci/game-*.tap
             out/ci/vorbis-speakers/
+            out/ci/cdda-mp3/
           if-no-files-found: warn
           retention-days: 90
 
@@ -1212,7 +1241,9 @@ jobs:
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     needs: build
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # The hosted Firefox and WebKit game suites reached the previous 45-minute
+    # job limit before their final cases or report upload. Keep per-test deadlines.
+    timeout-minutes: ${{ matrix.batch.suite == 'pwa' && 45 || 75 }}
     env:
       KRKR_TEST_HEADED: ${{ matrix.headed }}
       KRKR_TEST_BROWSER: ${{ matrix.browser }}

@@ -7,7 +7,7 @@ const caption = (text: string) =>
     .split('\t', 1)[0]!
     .replace(/\(&[^)]\)/g, '')
     .replace(/&&|&/g, (marker) => (marker === '&&' ? '&' : ''))
-const shortcut = (item: MenuView) => item.shortcut || item.caption.split('\t')[1] || ''
+const shortcutHint = (item: MenuView) => item.shortcut || item.caption.split('\t')[1] || ''
 // A snapshot can replace a popup with one from another Window before its old
 // component renders. Preserve the external focus target across that handoff.
 const popupFocusOrigins = new WeakMap<HTMLElement, HTMLElement | null>()
@@ -164,7 +164,7 @@ export function createGameMenus(
         )
         if (item.checked || item.radio) button.setAttribute('aria-pressed', String(item.checked))
         else button.removeAttribute('aria-pressed')
-        const key = shortcut(item)
+        const key = shortcutHint(item)
         const hint = button.lastElementChild as HTMLElement
         hint.hidden = !key
         text(hint, key)
@@ -323,7 +323,9 @@ export function createGameMenus(
     )
       return
     const matches = (item: MenuView): boolean => {
-      const parts = shortcut(item).toLowerCase().split('+')
+      // Caption text after a tab is a display hint. In particular, setting
+      // MenuItem.shortcut="" must disable the command even if that hint stays.
+      const parts = item.shortcut.toLowerCase().split('+')
       const key = parts.pop()
       return (
         !!key &&

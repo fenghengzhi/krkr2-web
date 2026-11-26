@@ -106,6 +106,9 @@ export async function verifyOfflineBuild(directory, base = '/') {
   }
   for (const name of ['LICENSE.TXT', 'FTL.TXT', 'CREDITS.txt'])
     assert(listed.includes('licenses/freetype/' + name))
+  for (const name of ['NOTICE.txt', 'COPYING.txt', 'repack.txt', 'single-owner.patch.txt',
+    'wasm-wrapper-8f2428c1-source.tar.gz', 'mpg123-08247b317163175e62035893af3ff9e71a5dfefd.tar.gz'])
+    assert(listed.includes('licenses/mpg123/' + name), name)
   const imageZlibBytes = await read('image-zlib/manifest.json'),
     imageZlibPath = `image-zlib/manifest-${hash(imageZlibBytes).slice(0, 16)}.json`,
     imageZlib = JSON.parse(imageZlibBytes)

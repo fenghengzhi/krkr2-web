@@ -59,6 +59,9 @@ export type InputPacket = {
   | { type: 'leave' | 'cancel' | 'activate' | 'deactivate' | 'mouseKeyTick' | 'popupHide' }
   | { type: 'wheel'; x: number; y: number; shift: number; delta: number }
   | { type: 'keyDown' | 'keyUp'; key: number; shift: number; systemKey?: boolean;
+      /** DOM Meta is not a TShiftState bit. Preserve it solely for host
+       * accelerator/default handling; script key arguments stay unchanged. */
+      metaKey?: boolean;
       /** The DOM coordinator already queued this system message's popup prelude. */
       popupHidePosted?: boolean }
   | { type: 'text'; text: string }
@@ -98,6 +101,9 @@ export interface VirtualCursor {
   basePhysicalSequence: number
 }
 export interface InputView {
+  /** Frozen WindowForm shortcuts. Optional for older embeddings; only these
+   * keys suppress browser defaults/text while their keyDown reaches the host. */
+  systemShortcuts?: readonly { key: number; shift: number }[]
   /** Session settings interpreted by TJS; joypad enablement is fixed at the
    * first Window, while repeat timing follows later argument changes. */
   gamepad?: { enabled: boolean; delay: number; interval: number }

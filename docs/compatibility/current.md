@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 186 批增加单区段 CloneCD 扰码数据轨、CUE 的 MP3 音轨读取，以及菜单快捷键与普通游戏按键的分派。新行为等待同批托管结果。[186 实现与托管证据](../decisions/186-disc-sectors-and-game-controls.md)
+
 第 185 批加入大型远程游戏的日期版本校验和 Wave 的双扬声器空间音效。第 173 批 Firefox 的字幕报告确认页面和 Worker 的字体度量不同，新验收使用独立 Worker 生成参考画面。[185 实现与托管证据](../decisions/185-dated-game-downloads-and-playback.md)
 
 第 184 批支持独立选择 ISO 主目录文件名和卷标编码，游戏库会保存这项选择。普通图层淡出和同通道 MIDI 叠音的修订也待托管验收。[184 实现与托管证据](../decisions/184-oem-disc-names-fades-and-midi-notes.md)

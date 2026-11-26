@@ -4,12 +4,14 @@ import { HeadlessAudioBackend } from '../../src/backends/audio/headless.ts'
 import { createSessionArchiveReader } from '../../src/backends/files/archive-reader.ts'
 import { prepareProject } from '../../src/engine/storage/distribution.ts'
 import { AudioClock, settleAudioPages } from '../helpers/audio.ts'
-import { cloneCdDiscInput } from '../helpers/clone-cd-game.ts'
+import { cloneCdDiscInput, scrambledCloneCdDiscInput } from '../helpers/clone-cd-game.ts'
 import { headless } from '../helpers/headless.ts'
 import { legacyZip } from '../helpers/legacy-zip-names.ts'
 
-test('a CloneCD game disc supplies both its chapter and the actual stereo samples on track one', { timeout: 60000 }, async (t) => {
-  const { files } = cloneCdDiscInput(), clock = new AudioClock(), output: number[][] = [[], []],
+for (const scrambled of [false, true])
+test(`a ${scrambled ? 'scrambled ' : ''}CloneCD game disc supplies both its chapter and the actual stereo samples on track one`, { timeout: 60000 }, async (t) => {
+  const { files } = scrambled ? scrambledCloneCdDiscInput() : cloneCdDiscInput()
+  const clock = new AudioClock(), output: number[][] = [[], []],
     audio = new HeadlessAudioBackend({ now: () => clock.now, schedule: clock.schedule }, (left, right) => {
       output[0]!.push(...left); output[1]!.push(...right)
     }, 44100)

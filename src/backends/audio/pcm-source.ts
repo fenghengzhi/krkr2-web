@@ -3,6 +3,7 @@ import { audioTag, PcmSourceContext, type PcmSource, type PcmSourceOptions } fro
 import { openWavePcmSource } from '../../formats/audio/wav-source.ts'
 import { openAiffPcmSource } from '../../formats/audio/aiff-source.ts'
 import { openVorbisPcmSource } from '../../formats/audio/vorbis-source.ts'
+import { openMp3PcmSource } from '../../formats/audio/mp3-source.ts'
 
 export type { PcmSource, PcmSourceOptions, PcmCancellationSignal } from '../../formats/audio/pcm-source.ts'
 export { pcmSourceLimits } from '../../formats/audio/pcm-source.ts'
@@ -18,6 +19,7 @@ export async function openPortablePcmSource(source: ByteSource, options: PcmSour
     const signature = audioTag(prefix, 0)
     const result = options.cddaFile && signature === 'FORM' ? await openAiffPcmSource(context, prefix)
       : signature === 'OggS' ? await openVorbisPcmSource(context)
+      : options.cddaFile && signature !== 'RIFF' ? await openMp3PcmSource(context)
       : await openWavePcmSource(context, prefix, { samplerLoops: options.waveSamplerLoops, narrowS32: options.waveNarrowS32,
         nativeRiff: options.waveNativeRiff })
     if (!result) context.close()

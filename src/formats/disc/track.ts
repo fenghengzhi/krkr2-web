@@ -1,5 +1,6 @@
 import { extentBorrower } from '../../engine/storage/resource-source.ts'
 import type { ArchiveReader, ByteSource } from '../../engine/ports/storage.ts'
+import { descrambleCdSectors } from './cd-scrambler.ts'
 
 export interface SectorLayout { bytes: number; payload: number }
 export interface DiscVolumeTrack {
@@ -7,6 +8,7 @@ export interface DiscVolumeTrack {
   first: number
   end?: number
   layout: SectorLayout
+  scrambled?: true
 }
 
 export function isDataSector(bytes: Uint8Array, { bytes: stride, payload }: SectorLayout): boolean {
@@ -41,6 +43,7 @@ export class TrackReader {
     const { bytes, payload } = track.layout
     if (!Number.isSafeInteger(source.size) || source.size < 0 || !Number.isSafeInteger(track.first) || track.first < 0 ||
         (track.end !== undefined && (!Number.isSafeInteger(track.end) || track.end < track.first)) ||
+        (track.scrambled && bytes !== 2352) ||
         !((bytes === 2048 && payload === 0) || (bytes === 2352 && (payload === 16 || payload === 24)) ||
           (bytes === 2336 && payload === 8))) invalid('unsupported track geometry')
     const end = Math.min(Math.floor(source.size / bytes), track.end ?? Infinity)
@@ -49,11 +52,15 @@ export class TrackReader {
     if (!Number.isSafeInteger(this.size)) invalid('track size is not an exact byte offset')
     this.canBorrow = bytes === sectorSize && payload === 0 && !!this.borrow
   }
+  private async readSectors(fileSector: number, length: number): Promise<Uint8Array> {
+    const raw = await this.source.read(fileSector * this.track.layout.bytes, length)
+    return this.track.scrambled && raw.length === length ? descrambleCdSectors(raw) : raw
+  }
   /** Recognition needs only the header, including the XA mode bytes if present. */
   async recognitionHeader(sector: number, length: number): Promise<Uint8Array | undefined> {
-    const { bytes, payload } = this.track.layout
+    const { payload } = this.track.layout
     range(sector * sectorSize, length, this.size)
-    const raw = await this.source.read((this.track.first + sector) * bytes, payload + length)
+    const raw = await this.readSectors(this.track.first + sector, payload + length)
     if (raw.length === payload + length && isDataSector(raw, this.track.layout)) return raw.subarray(payload)
   }
   async borrowBlob(offset: number, length: number, checkpoint?: () => void | Promise<void>) {
@@ -78,8 +85,7 @@ export class TrackReader {
       const at = offset + written, sector = Math.floor(at / sectorSize), within = at % sectorSize,
         sectors = Math.min(Math.floor(65536 / stride), Math.ceil((within + length - written) / sectorSize)),
         count = Math.min(length - written, sectors * sectorSize - within),
-        physical = (this.track.first + sector) * stride,
-        raw = await this.source.read(physical, sectors * stride)
+        raw = await this.readSectors(this.track.first + sector, sectors * stride)
       if (raw.length !== sectors * stride) invalid('short sector read')
       if (stride === sectorSize) out.set(raw.subarray(within, within + count), written)
       else {

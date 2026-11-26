@@ -23,7 +23,7 @@ export function discVolumeTrack(sheet: CueSheet): DiscVolumeTrack | 'audio' | un
     if (previous.file === track.file && layout.bytes !== 2352) return
   }
   const next = sheet.tracks[index + 1]
-  return { file: file.name, layout, first: track.indices.get(1)!,
+  return { file: file.name, layout, first: track.indices.get(1)!, ...(sheet.scrambledData ? { scrambled: true } : {}),
     end: next?.file === track.file ? next.indices.get(0) ?? next.indices.get(1) : !next ? sheet.leadOut : undefined }
 }
 

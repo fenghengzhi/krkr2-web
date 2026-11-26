@@ -1,0 +1,5 @@
+--- a/src/MPEGDecoder.js
++++ b/src/MPEGDecoder.js
+@@ -65,2 +65 @@
+     this._common.wasm.mpeg_frame_decoder_destroy(this._decoder);
+-    this._common.wasm.free(this._decoder);

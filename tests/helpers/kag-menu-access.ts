@@ -38,6 +38,20 @@ keyboardFirst.onClick=function(){global.keyboardActions+="1";Debug.message("keyb
 keyboardSecond.onClick=function(){global.keyboardActions+="2";Debug.message("keyboard-actions:"+global.keyboardActions);};
 var keyboardPopup=new MenuItem(kag,"Popup(&P)");kag.menu.add(keyboardPopup);
 keyboardPopup.onClick=function(){global.keyboardMenu.popup(0,40,40);Debug.message("keyboard-popup-closed");};
+var keyboardHint=new MenuItem(kag,"Chapter key\tShift+F7"),keyboardHintClicks=0,keyboardRouteKeys=0,keyboardSystemKeys=0;
+keyboardMenu.add(keyboardHint);keyboardHint.shortcut="Shift+F7";
+keyboardHint.onClick=function(){global.keyboardHintClicks++;global.keyboardHint.shortcut="";
+ Debug.message("keyboard-hint:"+global.keyboardHintClicks);};
+var keyboardOriginalKeyDown=kag.onKeyDown;
+kag.onKeyDown=function(key,shift){
+ if((key==VK_F1 || key==VK_F4) && shift==ssShift)global.keyboardSystemKeys++;
+ if(key==VK_F7 && shift==ssShift && global.kag.currentLabel=="*title"){
+  global.keyboardRouteKeys++;global.kag.process("","*chapter");return;
+ }
+ global.keyboardOriginalKeyDown(key,shift);
+};
+function keyboardShortcutState(){return [global.keyboardHintClicks,global.keyboardRouteKeys,
+ global.keyboardHint.shortcut,global.keyboardHint.caption].join("|");}
 function keyboardGameState(){var k=global.kag;
  return [f.keyboardProgress,k.currentLabel,k.current.numLinks,k.conductor.status,int(k.historyLayer.visible),
   global.keyboardActions].join("|");

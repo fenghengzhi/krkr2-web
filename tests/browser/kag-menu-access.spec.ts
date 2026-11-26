@@ -20,6 +20,14 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       const fullscreen = page.locator('.leave-fullscreen'); if (await fullscreen.isVisible()) await fullscreen.click()
       await expect(canvas).toHaveCount(1); await expect(canvas).toHaveAttribute('width', '640')
       await expect(canvas).toHaveAttribute('height', '480')
+      const row = await menu.evaluate((element) => [...element.querySelectorAll(':scope > .game-menu-group > button, :scope > .game-menu-group > details > summary')]
+        .map((item) => ({ caption: item.textContent, tag: item.tagName, height: item.getBoundingClientRect().height,
+          font: getComputedStyle(item).font, padding: getComputedStyle(item).padding, border: getComputedStyle(item).borderWidth })))
+      const leaf = row.find((item) => item.tag === 'BUTTON'), heading = row.find((item) => item.tag === 'SUMMARY')
+      expect(leaf).toBeDefined(); expect(heading).toBeDefined()
+      expect(leaf!.height).toBe(heading!.height); expect(leaf!.font).toBe(heading!.font)
+      expect(leaf!.padding).toBe(heading!.padding); expect(leaf!.border).toBe(heading!.border)
+      observations.push({ menuRow: row })
     }
     const state = async (progress: number, label: string, links: number, actions: string) => {
       await expect.poll(() => read('keyboardGameState()'), { timeout: 15000 }).toBe(`${progress}|${label}|${links}|0|0|${actions}`)
@@ -100,6 +108,15 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           : 'Scripts.execStorage("keyboard-game.tjs");') },
       ])
       await ready(); await state(0, '*title', 1, '')
+      // Stock WindowForm owns these shortcuts independently of KAG captions.
+      // Both support panels already exist; exercise only their normal visibility.
+      await page.locator('#toggle-controller').click(); await page.locator('#hide-console').click()
+      await expect(page.locator('#debug-controller')).toBeHidden(); await expect(page.locator('#debug-console')).toBeHidden()
+      await focusGame(); await page.keyboard.press('Shift+F4')
+      await expect(page.locator('#debug-console')).toBeVisible()
+      await expect(keyboard).toBeFocused(); await page.keyboard.press('Shift+F1')
+      await expect(page.locator('#debug-controller')).toBeVisible()
+      expect(await read('keyboardSystemKeys')).toBe('0')
       await page.locator('#expression').fill('host text remains unchanged')
       await page.locator('#expression').press('Alt+z')
       await expect(page.locator('#expression')).toHaveValue('host text remains unchanged')
@@ -118,6 +135,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       const access = menu.locator('details').filter({ has: page.locator('summary', { hasText: /^Access$/ }) })
       await expect(access).toHaveAttribute('open', '')
       await expect(access.getByRole('button', { name: /Once/ })).toBeFocused()
+      await expect(access.getByRole('button', { name: /Chapter key/ }).locator('kbd')).toHaveText('Shift+F7')
       await page.keyboard.press('d'); await expect(access.getByRole('button', { name: 'First', exact: true })).toBeFocused()
       await page.keyboard.press('d'); await expect(access.getByRole('button', { name: 'Second', exact: true })).toBeFocused()
       await expect(page.getByText('keyboard-actions:O', { exact: true })).toHaveCount(1)
@@ -135,7 +153,20 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await page.keyboard.press('Enter')
       await expect(popup).toHaveCount(0); await expect(page.getByText('keyboard-popup-closed', { exact: true })).toBeVisible()
       await expect(page.getByText('keyboard-actions:O22', { exact: true })).toBeVisible(); await expect(keyboard).toBeFocused()
-      await clickLink(0, '*chapter'); await state(7, '*checkpoint', 2, 'O22')
+      // The first real key is an explicitly registered menu shortcut. Its
+      // handler clears shortcut while preserving the caption's tab hint.
+      await page.keyboard.press('Shift+F7')
+      await expect(page.getByText('keyboard-hint:1', { exact: true })).toBeVisible()
+      await state(0, '*title', 1, 'O22')
+      expect(await read('keyboardShortcutState()')).toBe('1|0||Chapter key\tShift+F7')
+      await focusGame(); await page.keyboard.press('Alt+z')
+      await expect(access.getByRole('button', { name: /Chapter key/ }).locator('kbd')).toHaveText('Shift+F7')
+      await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
+      await expect(keyboard).toBeFocused()
+      // With the shortcut disabled, this same physical key must reach the
+      // game's Window handler and enter the real KAG chapter, not the menu.
+      await page.keyboard.press('Shift+F7'); await state(7, '*checkpoint', 2, 'O22')
+      expect(await read('keyboardShortcutState()')).toBe('1|1||Chapter key\tShift+F7')
       await openMenu('System'); await page.keyboard.press('l')
       await expect(keyboard).toBeFocused()
       await expect.poll(() => read('int(kag.historyLayer.visible)'), { timeout: 15000 }).toBe('1')
@@ -156,12 +187,13 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await openMenu('System'); await page.keyboard.press('r'); await confirm(true)
       await state(0, '*title', 1, '')
       await info.attach('returned-title', { body: await canvas.screenshot({ timeout: 5000 }), contentType: 'image/png' })
+      await clickLink(0, '*chapter'); await state(7, '*checkpoint', 2, '')
       expect(errors).toEqual([])
     } catch (error) { failures.push(error) }
     for (const report of [
       () => info.attach('keyboard-menu-source', { body: menuAccessStory + '\n' + menuAccessGameSource, contentType: 'text/plain' }),
       () => info.attach('keyboard-menu-observations', { body: JSON.stringify({ backend, binary, observations, errors,
-        scope: 'Unchanged KAG template menu/History/bookmark/Confirm handlers. Real F10/arrows/access keys/Enter and Yes/No pointer or Escape; console only observes. Authored story and observer are source or compiled bytecode.' }, null, 2), contentType: 'application/json' }),
+        scope: 'Unchanged KAG template menu/History/bookmark/Confirm handlers. Real F10/arrows/access keys/Enter and Yes/No pointer or Escape; explicit Shift+F7 is cleared by its menu callback, then the same key enters a chapter through the authored Window handler despite the retained caption hint. Console only observes. Authored story and observer are source or compiled bytecode.' }, null, 2), contentType: 'application/json' }),
       async () => info.attach('keyboard-menu-log', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }),
     ]) try { await report() } catch (error) { failures.push(error) }
     try {

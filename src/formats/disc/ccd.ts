@@ -1,5 +1,6 @@
 import { cueLimits, type CueSheet, type CueTrack } from '../audio/cue.ts'
 import type { ByteSource } from '../../engine/ports/storage.ts'
+import { descrambleCdSectors } from './cd-scrambler.ts'
 
 const invalid = (message: string): never => { throw new Error('Invalid CloneCD image: ' + message) }
 const integerField = (fields: Map<string, string>, key: string): number => {
@@ -37,8 +38,9 @@ export async function parseCloneCd(text: string, imageName: string, image: ByteS
   }
   const header = sections.get('clonecd'), disc = sections.get('disc')
   if (!header || !disc || ![2, 3].includes(integerField(header, 'version'))) return invalid('unsupported CCD version')
-  if (integerField(disc, 'sessions') !== 1 || (disc.has('datatracksscrambled') && integerField(disc, 'datatracksscrambled') !== 0))
-    return invalid('only single-session, unscrambled images are supported')
+  if (integerField(disc, 'sessions') !== 1) return invalid('only single-session images are supported')
+  const scrambled = disc.has('datatracksscrambled') ? integerField(disc, 'datatracksscrambled') : 0
+  if (scrambled !== 0 && scrambled !== 1) return invalid('invalid DataTracksScrambled flag')
   const toc = new Map<number, { control: number; start: number }>(), trackFields = new Map<number, Map<string, string>>()
   let leadOut = image.size / 2352
   for (const [section, values] of sections) {
@@ -81,8 +83,9 @@ export async function parseCloneCd(text: string, imageName: string, image: ByteS
     if (data) {
       // Some writers put the wrong MODE in an otherwise readable descriptor.
       // A real sector identifies its geometry, also for older TOC-only sheets.
-      const sector = await image.read(first * 2352, 16)
-      if (sector.length !== 16) return invalid('truncated IMG sector header')
+      const raw = await image.read(first * 2352, 16)
+      if (raw.length !== 16) return invalid('truncated IMG sector header')
+      const sector = scrambled ? descrambleCdSectors(raw) : raw
       if (sector[0] === 0 && sector[11] === 0 && sector.subarray(1, 11).every((byte) => byte === 255))
         mode = sector[15]
       if (mode !== 1 && mode !== 2) return invalid('unrecognized data track in the IMG')
@@ -97,5 +100,5 @@ export async function parseCloneCd(text: string, imageName: string, image: ByteS
     tracks.push({ number: id, file: 0, mode: mode === 0 ? 'AUDIO' : `MODE${mode}/2352`,
       indices, flags: [...flags], pregap: 0, postgap: 0 })
   }
-  return { files: [{ name: imageName, type: 'BINARY' }], tracks, leadOut }
+  return { files: [{ name: imageName, type: 'BINARY' }], tracks, leadOut, ...(scrambled ? { scrambledData: true } : {}) }
 }

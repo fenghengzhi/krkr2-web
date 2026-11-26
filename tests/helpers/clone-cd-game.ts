@@ -62,3 +62,35 @@ export function cloneCdDiscInput() {
   })
   return { files, manifest }
 }
+
+// Independently expand Annex B as a bit sequence: b[n+15] = b[n]+b[n+1]
+// over GF(2). Check every byte against the published cdrtools mask digest.
+export function referenceCdMask(): Uint8Array {
+  const bits = new Uint8Array(2340 * 8), bytes = new Uint8Array(2340)
+  bits[0] = 1
+  for (let bit = 0; bit < bits.length; bit++) {
+    if (bit >= 15) bits[bit] = bits[bit - 15]! ^ bits[bit - 14]!
+    bytes[bit >>> 3] = bytes[bit >>> 3]! | (bits[bit]! << (bit & 7))
+  }
+  if (createHash('sha256').update(bytes).digest('hex') !== '12e23b47b7728bbf5fb5c8e36a3aa7040df6e6586f1cc5e35a9eafd83fedd4b6')
+    throw new Error('Reference mask differs from cdrtools libedc/scramble_table')
+  return bytes
+}
+
+export function scrambledCloneCdDiscInput() {
+  const original = cloneCdDiscInput(), mask = referenceCdMask()
+  const files = original.files.map((file) => {
+    if (file.name.endsWith('.ccd')) {
+      const descriptor = file.buffer.toString('ascii')
+      const changed = descriptor.replace(/^(DataTracksScrambled[ \t]*=[ \t]*)0(?=[ \t]*\r?$)/im, (_, key: string) => key + '1')
+      if (changed === descriptor) throw new Error('Missing CloneCD data representation flag')
+      return { ...file, buffer: Buffer.from(changed, 'ascii') }
+    }
+    const buffer = Buffer.from(file.buffer)
+    for (let sector = original.manifest.data.startSector; sector < original.manifest.layout.leadoutSector; sector++)
+      for (let i = 0; i < mask.length; i++) buffer[sector * 2352 + 12 + i]! ^= mask[i]!
+    return { ...file, buffer }
+  })
+  return { files, manifest: { original: original.manifest, dataTracksScrambled: 1,
+    files: files.map(({ name, buffer }) => ({ name, bytes: buffer.length, sha256: createHash('sha256').update(buffer).digest('hex') })) } }
+}

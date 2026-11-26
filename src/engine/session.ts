@@ -18,6 +18,7 @@ import { debugBridge } from './tvp/debug.ts'
 import { DebugLog } from './diagnostics/log.ts'
 import { DebugPanels, type DebugPanel, type DebugVisibility } from './diagnostics/panels.ts'
 import { DebugService } from './diagnostics/service.ts'
+import { WindowSystemShortcuts } from './input/system-shortcuts.ts'
 import { ExecutionCancelled, ExecutionControl, SerialQueue } from './scheduler/control.ts'
 import {
   isScriptObject,
@@ -785,6 +786,7 @@ export class EngineSession {
         }
       }
       this.control.check()
+      this.windowSystemShortcuts = new WindowSystemShortcuts(this.systemArguments, (message) => this.log(message))
       const jpegPrecision = this.systemArguments.get('-jpegdec')
       this.jpegPrecision = jpegPrecision === 'low' || jpegPrecision === 'high' ? jpegPrecision : 'normal'
       const holdAlpha = this.systemArguments.get('-holdalpha')
@@ -2948,6 +2950,8 @@ export class EngineSession {
       typeof packet.systemKey !== 'boolean'
     )
       throw new Error('Invalid system key classification')
+    if ((packet.type === 'keyDown' || packet.type === 'keyUp') && packet.metaKey !== undefined &&
+        typeof packet.metaKey !== 'boolean') throw new Error('Invalid Meta key classification')
     if ((packet.type === 'keyDown' || packet.type === 'keyUp') && packet.popupHidePosted !== undefined &&
         (typeof packet.popupHidePosted !== 'boolean' || packet.type !== 'keyDown' || !packet.systemKey))
       throw new Error('Invalid popup system key prelude')
@@ -3046,6 +3050,16 @@ export class EngineSession {
             packet.keyboardRouteRevision !== route.revision
       )
         return ignoredAdmission()
+      // DOM script-menu shortcuts are consumed before this physical route.
+      // Window.postInputEvent goes directly to the script queue instead, as
+      // in stock WindowImpl.InternalKeyDown (no Form accelerator processing).
+      const systemPanel = packet.type === 'keyDown' && !(packet.metaKey ?? (this.physicalKeys.has(91) || this.physicalKeys.has(92))) &&
+        this.windowSystemShortcuts?.match(packet.key, packet.shift)
+      if (systemPanel && (!additionalValid || additionalValid())) {
+        if (this.windowSystemShortcuts!.canShow())
+          this.debugPanels.set(systemPanel, !this.debugPanels.get(systemPanel))
+        return { status: 'accepted', completion: Promise.resolve() }
+      }
       if (
         receiver.state.trapKey &&
         receiver.state.visible &&
@@ -3646,6 +3660,7 @@ export class EngineSession {
       const cursor = this.currentVirtualCursor(window.id),
         input: InputView = {
           ...view, keyboardRoute: this.keyboardRoute(window),
+          systemShortcuts: this.windowSystemShortcuts?.keys(),
           ...(this.gamepadSettings ? { gamepad: { ...this.gamepadSettings } } : {}),
           virtualCursor: cursor ? { ...cursor.view } : null,
         }
@@ -3659,6 +3674,7 @@ export class EngineSession {
       cursor = active ? this.currentVirtualCursor(active.id) : undefined,
       input: InputView = {
         ...this.inputController.view(),
+        systemShortcuts: this.windowSystemShortcuts?.keys(),
         ...(this.gamepadSettings ? { gamepad: { ...this.gamepadSettings } } : {}),
         ...(active ? { keyboardRoute: this.keyboardRoute(active) } : {}),
         virtualCursor: cursor ? { ...cursor.view } : null,
@@ -4122,6 +4138,7 @@ export class EngineSession {
     this.deps.event({ type: 'state', snapshot: this.snapshot() })
   }
   private readonly debugPanels = new DebugPanels(() => this.notify())
+  private windowSystemShortcuts?: WindowSystemShortcuts
   setDebugVisibility(panel: DebugPanel, visible: boolean): void {
     this.debugPanels.set(panel, visible)
   }

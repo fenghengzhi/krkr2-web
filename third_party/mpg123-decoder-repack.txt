@@ -1,0 +1,34 @@
+Fixed input:
+https://registry.npmjs.org/mpg123-decoder/-/mpg123-decoder-1.0.3.tgz
+SHA-256 5207b35109ec884e7d47ab89b670bc86438399f681e1a6c26716003b3949cc5c
+SHA-512 +fjxnWigodWJm3+4pndi+KUg9TBojgn31DPk85zEsim7C6s0X5Ztc/hQYdytXkwuGXH+aB0/aEkG40Emukv6oQ==
+
+Changes:
+1. Extract the package archive into an empty directory.
+2. Apply mpg123-decoder-1.0.3-single-owner.patch to package/src/MPEGDecoder.js.
+   Original JS SHA-256 ce4644a29d71dda50a1b78615f1de5cc68022b289a9e89ce5a6a6178f9b7904a
+   Corrected JS SHA-256 6f4e0bdf658d94a7e4fd65205b98f3685caaf100eb4c934e3df1af091dc00185
+3. In package/package.json change only version 1.0.3 to 1.0.3-krkr.1.
+4. Preserve file permissions, normalize the nine regular files below to
+   UTC 1985-10-26 08:15:00 (TZ=UTC touch -t 198510260815), and archive them
+   in the listed order with POSIX ustar, uid/gid 0, uname/gname root, gzip -n.
+   Do not include directory entries or local metadata.
+
+package/README.md
+package/dist/mpg123-decoder.min.js
+package/dist/mpg123-decoder.min.js.map
+package/index.js
+package/package.json
+package/src/EmscriptenWasm.js
+package/src/MPEGDecoder.js
+package/src/MPEGDecoderWebWorker.js
+package/types.d.ts
+
+Output third_party/mpg123-decoder-1.0.3-krkr.1.tgz:
+SHA-256 7a6611a230041d0ae03e5480cd943786c0f8cadead498cbf558389b0f0477fba
+SHA-512 X95blNsmV4D9UArfZr7xC4VSLUFvXiKC5rLADwp2sxcFR890f+bYsXNDTPMYRJDVpaGFtDl+55aCMxApix1Kbw==
+
+The package's exports.default and main are ./index.js, which imports
+./src/MPEGDecoder.js. Vite and Node consume that corrected source, not dist.
+No install-time code or WASM execution is needed to apply the correction.
+Source, original build recipe and license are in public/licenses/mpg123/.

@@ -34,6 +34,9 @@ function distributionMember(cue: string, distribution?: string): string | undefi
 }
 
 type BoundDisc = CddaDisc & { imported?: boolean; picked?: StorageResolver; revision?: number }
+function dataTrackKey(track: DiscVolumeTrack): string {
+  return [track.first, track.end, track.layout.bytes, track.layout.payload, !!track.scrambled].join('/')
+}
 interface DiscFile { name: string; resource?: Resource; exact(name: string): Promise<Resource | undefined> }
 type DiscImports = Pick<StorageResolver, 'find' | 'findAsync' | 'knownResources' | 'archiveEntries'>
 
@@ -233,7 +236,7 @@ export class CddaDiscs {
   }
   private async dataFilesystem(file: Resource, track: DiscVolumeTrack) {
     const image = file.cacheToken ?? file
-    const geometry = [track.first, track.end, track.layout.bytes, track.layout.payload].join('/')
+    const geometry = dataTrackKey(track)
     const cached = this.filesystems.get(image)
     if (cached?.geometry === geometry) return { filesystem: cached.fs, image: file.name }
     const { source } = await openResourceSource(file, { checkpoint: () => this.storage.checkpoint() })
@@ -297,7 +300,7 @@ export class CddaDiscs {
     if (!mounted) return
     const { track, file } = mounted
     if (!track) return disc.volumeLabel ?? 'Audio CD'
-    const image = file.cacheToken ?? file, geometry = [track.first, track.end, track.layout.bytes, track.layout.payload].join('/'),
+    const image = file.cacheToken ?? file, geometry = dataTrackKey(track),
       cached = this.labels.get(image)
     if (cached?.geometry === geometry) return disc.volumeLabel ?? cached.value
     const { source } = await openResourceSource(file, { checkpoint: () => this.storage.checkpoint() }),

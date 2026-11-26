@@ -663,6 +663,43 @@ test('system-key popup preludes keep the original admission order even when a me
   } finally { gate.resolve(); f.close() }
 })
 
+test('declared system shortcuts send one physical key without text; explicit menus and unbound game keys keep priority', async () => {
+  const f = fixture()
+  const enter = (consumed = false) => {
+    const event = new Event('keydown', { cancelable: true })
+    Object.assign(event, { key: 'Enter', code: 'Enter', keyCode: 13, shiftKey: false, ctrlKey: false,
+      altKey: false, repeat: false, isComposing: false })
+    if (consumed) event.preventDefault()
+    f.textareas[0]!.dispatchEvent(event)
+    return event
+  }
+  try {
+    f.coordinator.setWindow(101, { ...new WindowState().view(), visible: true })
+    f.coordinator.setInput(101, inputView({ systemShortcuts: [{ key: 13, shift: 0 }] }))
+    f.a.focus(); await settle(); f.packets.length = 0
+    assert.equal(enter().defaultPrevented, true)
+    await settle()
+    assert.deepEqual(f.packets.map((packet) => packet.type), ['keyDown'])
+    assert.equal(f.key(f.textareas[0]!, 'a').defaultPrevented, false)
+    await settle()
+    assert.deepEqual(f.packets.flatMap((packet) => packet.type === 'keyDown' ? [packet.key] : []), [13, 65])
+    enter(true); await settle()
+    assert.equal(f.packets.length, 2, 'An earlier explicit menu consumer owns the key')
+    f.coordinator.setInput(101, inputView({ systemShortcuts: [{ key: 65, shift: 0 }] }))
+    const meta = f.dispatch(f.textareas[0]!, 'keydown', { key: 'a', code: 'KeyA', keyCode: 65,
+      metaKey: true, shiftKey: false, ctrlKey: false, altKey: false, repeat: false, isComposing: false })
+    assert.equal(meta.defaultPrevented, false)
+    await settle()
+    const metaPacket = f.packets.at(-1)
+    assert.equal(metaPacket?.type, 'keyDown')
+    assert.equal(metaPacket?.type === 'keyDown' && metaPacket.metaKey, true)
+    f.coordinator.setInput(101, inputView())
+    enter(); await settle()
+    assert.deepEqual(f.packets.slice(-2).map((packet) => packet.type), ['keyDown', 'text'], 'Older views without the optional list preserve ordinary Enter')
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
+
 test('retiring a surface settles its queued popup admission without waiting for an old transport ACK', async () => {
   const gate = deferred(), f = fixture(async (packet) => {
     if (packet.type === 'down') await gate.promise
