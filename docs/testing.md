@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 170 批由托管 Linux 分别制作 UDF 1.02 和 2.01 游戏光盘。Linux 内核与 7-Zip 各自读回盘内目录和文件，随后在网页中运行原版 KAG、保存剧情进度并刷新读档。会话验收还在同一个盘符更换两张同卷标的光盘。[170 实现与托管证据](decisions/170-udf-game-dvds-and-offline-release.md)
+
 第 169 批以两张在相同路径上保存不同素材的光盘检查运行中换盘，覆盖脚本、KAG 场景、图片、压缩包、CD 音轨和游戏库重开，并扩展原版 Introduction 的实际路线验收。新增行为等待托管结果。[169 实现与托管证据](decisions/169-live-disc-changes-and-kag-outlines.md)
 
 第 168 批的游戏库验收将安装包与剧情盘分开导入，实际进入章节，存档后刷新并读回。新增对照还检查普通 WAVE 的停止回调能否衔接下一句，以及 KAG 控制标签读取宏属性的时序。第 167 批独立 FFmpeg 对照已匹配 10/10 种声道布局。[168 实现与托管证据](decisions/168-companion-game-discs-and-story-callbacks.md)

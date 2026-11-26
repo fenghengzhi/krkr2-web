@@ -17,6 +17,7 @@ const mime = (path: string) => {
     png: 'image/png',
     svg: 'image/svg+xml',
     txt: 'text/plain',
+    patch: 'text/plain',
     gz: 'application/gzip',
   }
   if (!ext || !types[ext]) throw new Error(`No offline MIME type for ${path}`)

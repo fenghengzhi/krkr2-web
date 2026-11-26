@@ -148,6 +148,11 @@ export async function verifyOfflineBuild(directory, base = '/') {
   }
   for (const name of ['FFmpeg-LICENSE.txt', 'OpenH264-LICENSE.txt', 'CREDITS.txt'])
     assert(listed.includes('licenses/legacy-media/' + name))
+  const clockPatchPath = 'licenses/legacy-media/elementary-mpeg1-clock.patch',
+    clockPatch = manifest.assets.find((asset) => asset.path === clockPatchPath)
+  assert(clockPatch, 'The published FFmpeg clock source change must remain available offline')
+  assert.equal(clockPatch.mime, 'text/plain', clockPatchPath)
+  assert.equal(hash(await read(clockPatchPath)), legacy.source.elementaryClockSha256, clockPatchPath)
   assert(listed.some((path) => /transcode\.worker.*\.js$/.test(path)))
   assert(listed.some((path) => /session\.worker.*\.js$/.test(path)))
   assert(listed.some((path) => /library\.worker.*\.js$/.test(path)))

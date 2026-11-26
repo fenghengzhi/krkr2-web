@@ -24,6 +24,7 @@ import { legacyVideoFormat } from '../legacy/format.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
 import { VideoSampleHistory, waitForClockPresentation, type ClockPresentationTarget } from './clock-seek.ts'
 import { VideoPeriod } from '../../../engine/media/video-period.ts'
+import { recoverVideoFirstFrame } from './first-frame-recovery.ts'
 import {
   createVideoMixingSurface,
   releaseVideoMixingSurface,
@@ -65,6 +66,7 @@ interface Movie {
   period: VideoPeriod
   prepareToken: number
   seeking: boolean
+  firstFrameRecovery?: ReturnType<typeof recoverVideoFirstFrame>
   abort: AbortController
   audio: ReturnType<WebAudioHost['connectMedia']>
   surface?: OffscreenCanvas
@@ -116,11 +118,17 @@ export class WebVideoHost {
     this.applyPause()
   }
   private applyPause(): void {
-    for (const movie of this.movies.values())
+    const movies = new Set(this.movies.values())
+    for (const stage of this.stages.values()) if (stage.movie) movies.add(stage.movie)
+    for (const movie of movies)
       if (this.isPaused) {
+        movie.firstFrameRecovery?.suspend()
         movie.element.pause()
         this.cancelFrame(movie)
-      } else if (movie.status === 'play') this.play(movie)
+      } else {
+        movie.firstFrameRecovery?.resume()
+        if (movie.status === 'play') this.play(movie)
+      }
   }
   private nextEvent = 1
   private readonly windows = new Map<number, VideoWindow>()
@@ -835,121 +843,161 @@ export class WebVideoHost {
     // loadeddata may precede the first decoded/presented image. In particular,
     // an immediate paused seek can otherwise be overwritten by that initial
     // image, and layer readback can copy transparent pixels instead of a frame.
-    let restoreTime: number | undefined
-    await new Promise<void>((resolve, reject) => {
-      let loaded = false,
-        presented = false,
-        settled = false
-      let callback: number | undefined
-      let presentation: HTMLDivElement | undefined
-      let cancelTimeout = () => {}
-      const done = (error?: unknown) => {
-        if (settled) return
-        settled = true
-        const failures: unknown[] = error === undefined ? [] : [error]
-        for (const release of [cancelTimeout,
-          () => { if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback) },
-          () => movie.abort.signal.removeEventListener('abort', cancel),
-          () => {
-            if (!presentation) return
-            const surface = presentation
-            presentation = undefined
-            try {
-              if (movie.disposed) movie.element.remove()
-              else movie.container.insertBefore(movie.element, movie.container.firstChild)
-            } finally { surface.remove() }
-          }]) {
-          try { release() } catch (failure) { failures.push(failure) }
-        }
-        if (failures.length > 1)
-          reject(new AggregateError(failures, 'Video first frame or presentation cleanup failed', { cause: failures[0] }))
-        else if (failures.length) reject(failures[0])
-        else resolve()
-      }
-      const complete = () => {
-        if (loaded && presented) done()
-      }
-      const cancel = () => done(new Error('Video operation cancelled'))
-      movie.abort.signal.addEventListener('abort', cancel, { once: true })
-      if (movie.abort.signal.aborted) return cancel()
-      cancelTimeout = this.timeouts.start(15000, () => {
-        // Preserve the actual stalled phase before rollback retires the
-        // candidate. These observations never release the presentation gate:
-        // loadeddata/decoded counters alone do not prove a submitted frame.
-        let observation: unknown
-        try {
-          const element = movie.element, rect = element.getBoundingClientRect(),
-            style = getComputedStyle(element), container = getComputedStyle(movie.container),
-            quality = element.getVideoPlaybackQuality?.()
-          observation = { phase: 'load-first-frame', loaded, presented, callbackHandle: callback,
-            id: movie.id, epoch: movie.epoch, windowId: movie.windowId, mode: movie.settings.mode,
-            videoStream: movie.settings.enabledVideoStream, audioStream: movie.settings.enabledAudioStream,
-            currentTime: element.currentTime, seeking: element.seeking, paused: element.paused,
-            readyState: element.readyState, networkState: element.networkState,
-            width: element.videoWidth, height: element.videoHeight, connected: element.isConnected,
-            documentVisibility: element.ownerDocument.visibilityState,
-            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-            videoStyle: { display: style.display, visibility: style.visibility, opacity: style.opacity },
-            containerStyle: { display: container.display, visibility: container.visibility, opacity: container.opacity },
-            presentedTime: movie.presentedTime, presentedFrames: movie.presentedFrames,
-            independentTime: element.dataset.presentedTime, independentFrames: element.dataset.presentedFrames,
-            quality: quality && { total: quality.totalVideoFrames, dropped: quality.droppedVideoFrames,
-              creationTime: quality.creationTime } }
-        } catch (error) { observation = { observationError: String(error) } }
-        done(new Error('Video first frame timed out; ' + JSON.stringify(observation)))
-      })
-      try {
-        // Loading a second hidden/layer movie must not depend on its game's
-        // visibility, clipping or a surface that has not yet been presented.
-        // Give the actual decoder a connected, nonzero presentation surface;
-        // opacity keeps it out of the game image until the actual first frame
-        // is presented. The staging element never starts playback here.
-        const rect = movie.element.getBoundingClientRect(), style = getComputedStyle(movie.element)
-        if (!movie.element.isConnected || style.visibility !== 'visible' || style.display === 'none' ||
-            rect.width <= 0 || rect.height <= 0) {
-          presentation = document.createElement('div')
-          presentation.className = 'video-presentation-surface'
-          presentation.inert = true
-          presentation.setAttribute('aria-hidden', 'true')
-          Object.assign(presentation.style, { position: 'fixed', left: '0', top: '0',
-            width: '1px', height: '1px', overflow: 'hidden', visibility: 'visible',
-            opacity: '0', pointerEvents: 'none' })
-          // Keep a staged replacement inside its existing parking owner, so
-          // it remains distinguishable from committed video while decoding.
-          ;(movie.container.closest('.video-parking') ?? document.body).append(presentation)
-          presentation.append(movie.element)
-        }
-        callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
-          callback = undefined
+    let restoreTime: number | undefined, recovered = false, primary: unknown
+    const presentation: { element?: HTMLDivElement } = {},
+      stage = this.stages.get(movie.id)!, element = movie.element
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let loaded = false,
+          presented = false,
+          settled = false
+        let callback: number | undefined
+        let cancelTimeout = () => {}
+        const resumeRecovery = () => movie.firstFrameRecovery?.resume()
+        const done = (error?: unknown) => {
           if (settled) return
-          try {
-            this.observePresentation(movie, metadata)
-            presented = true
-            complete()
-          } catch (error) { done(error) }
-        })
-        const element = movie.element
-        void this.wait(movie, 'loadeddata', () => element.readyState >= 2, () => {
-          element.src = movie.url
-          element.load()
-        }).then(async () => {
-          if (settled) return
-          const first = movie.timeline?.times[0], start = element.currentTime
-          if (!presented && first !== undefined && first > start * 1000 && element.paused) {
-            // An MP4 edit may start the video after its audio. At the original
-            // clock there is no picture to submit. Seek the private staged
-            // element to the first sample while its real callback is armed.
-            restoreTime = start
-            await this.seek(movie, first)
+          settled = true
+          const failures: unknown[] = error === undefined ? [] : [error]
+          for (const release of [cancelTimeout,
+            () => { if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback) },
+            () => movie.abort.signal.removeEventListener('abort', cancel),
+            () => {
+              element.removeEventListener('canplaythrough', resumeRecovery)
+              const recovery = movie.firstFrameRecovery
+              movie.firstFrameRecovery = undefined
+              recovery?.close()
+            }]) {
+            try { release() } catch (failure) { failures.push(failure) }
           }
-          loaded = true
-          complete()
-        }).catch(done)
-      } catch (error) {
-        done(error)
+          if (failures.length > 1)
+            reject(new AggregateError(failures, 'Video first frame or presentation cleanup failed', { cause: failures[0] }))
+          else if (failures.length) reject(failures[0])
+          else resolve()
+        }
+        const complete = () => {
+          if (loaded && presented) done()
+        }
+        const cancel = () => done(new Error('Video operation cancelled'))
+        movie.abort.signal.addEventListener('abort', cancel, { once: true })
+        if (movie.abort.signal.aborted) return cancel()
+        cancelTimeout = this.timeouts.start(15000, () => {
+          // Preserve the actual stalled phase before rollback retires the
+          // candidate. These observations never release the presentation gate:
+          // loadeddata/decoded counters alone do not prove a submitted frame.
+          let observation: unknown
+          try {
+            const element = movie.element, rect = element.getBoundingClientRect(),
+              style = getComputedStyle(element), container = getComputedStyle(movie.container),
+              quality = element.getVideoPlaybackQuality?.()
+            observation = { phase: 'load-first-frame', loaded, presented, callbackHandle: callback,
+              id: movie.id, epoch: movie.epoch, windowId: movie.windowId, mode: movie.settings.mode,
+              videoStream: movie.settings.enabledVideoStream, audioStream: movie.settings.enabledAudioStream,
+              currentTime: element.currentTime, seeking: element.seeking, paused: element.paused,
+              readyState: element.readyState, networkState: element.networkState,
+              width: element.videoWidth, height: element.videoHeight, connected: element.isConnected,
+              documentVisibility: element.ownerDocument.visibilityState,
+              rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+              videoStyle: { display: style.display, visibility: style.visibility, opacity: style.opacity },
+              containerStyle: { display: container.display, visibility: container.visibility, opacity: container.opacity },
+              presentedTime: movie.presentedTime, presentedFrames: movie.presentedFrames,
+              independentTime: element.dataset.presentedTime, independentFrames: element.dataset.presentedFrames,
+              recoveryStarted: recovered, autoplayDenied: movie.firstFrameRecovery?.denied,
+              quality: quality && { total: quality.totalVideoFrames, dropped: quality.droppedVideoFrames,
+                creationTime: quality.creationTime } }
+          } catch (error) { observation = { observationError: String(error) } }
+          done(new Error('Video first frame timed out; ' + JSON.stringify(observation)))
+        })
+        try {
+          // Loading a second hidden/layer movie must not depend on its game's
+          // visibility, clipping or a surface that has not yet been presented.
+          // Give the actual decoder a connected, nonzero presentation surface;
+          // opacity keeps it out of the game image until the actual first frame
+          // is presented. Ordinary preloading does not start playback.
+          const rect = movie.element.getBoundingClientRect(), style = getComputedStyle(movie.element)
+          if (!movie.element.isConnected || style.visibility !== 'visible' || style.display === 'none' ||
+              rect.width <= 0 || rect.height <= 0) {
+            const surface = presentation.element = document.createElement('div')
+            surface.className = 'video-presentation-surface'
+            surface.inert = true
+            surface.setAttribute('aria-hidden', 'true')
+            Object.assign(surface.style, { position: 'fixed', left: '0', top: '0',
+              width: '1px', height: '1px', overflow: 'hidden', visibility: 'visible',
+              opacity: '0', pointerEvents: 'none' })
+            // Keep a staged replacement inside its existing parking owner, so
+            // it remains distinguishable from committed video while decoding.
+            ;(movie.container.closest('.video-parking') ?? document.body).append(surface)
+            surface.append(movie.element)
+          }
+          callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
+            callback = undefined
+            if (settled) return
+            try {
+              this.observePresentation(movie, metadata)
+              presented = true
+              complete()
+            } catch (error) { done(error) }
+          })
+          void this.wait(movie, 'loadeddata', () => element.readyState >= 2, () => {
+            element.src = movie.url
+            element.load()
+          }).then(async () => {
+            if (settled) return
+            const first = movie.timeline?.times[0], start = element.currentTime
+            if (!presented && first !== undefined && first > start * 1000 && element.paused) {
+              // An MP4 edit may start the video after its audio. At the original
+              // clock there is no picture to submit. Seek the private staged
+              // element to the first sample while its real callback is armed.
+              restoreTime = start
+              await this.seek(movie, first)
+              if (settled) return
+            }
+            loaded = true
+            if (!presented && movie.timeline?.times.length && movie.timeline.times[0]! >= 0) {
+              movie.firstFrameRecovery = recoverVideoFirstFrame(element, {
+                schedule: (callback, delay) => this.timeouts.start(delay, callback),
+                allowed: () => !settled && !presented && !this.closed && !this.isPaused &&
+                  element.ownerDocument.visibilityState === 'visible' && !movie.disposed &&
+                  !stage.disposed && !stage.abort.signal.aborted && this.stages.get(movie.id) === stage &&
+                  stage.movie === movie && !movie.seeking,
+                started: () => { restoreTime ??= element.currentTime; recovered = true },
+                failed: done,
+              })
+              element.addEventListener('canplaythrough', resumeRecovery)
+            }
+            complete()
+          }).catch(done)
+        } catch (error) {
+          done(error)
+        }
+      })
+      if (recovered) {
+        // The muted candidate may have advanced before its first callback.
+        // Restore the actual first sample while it is still private, requiring
+        // a fresh real presentation when seeking back, before restoring an
+        // initial empty edit's original zero clock. No warmed frame is published.
+        const timeline = movie.timeline!, first = Math.max(0, timeline.times[0]!)
+        await this.seekClockPresented(movie, first, () => this.stageCurrent(stage), undefined, {
+          contains: (time) => videoReportedFrameAt(timeline, time) === 0,
+          exact: (time) => videoPresentedFrameAt(timeline, time) === 0,
+        })
       }
-    })
-    if (restoreTime !== undefined) await this.seekSeconds(movie, restoreTime)
+      if (restoreTime !== undefined) await this.seekSeconds(movie, restoreTime)
+    } catch (error) { primary = error; throw error }
+    finally {
+      const surface = presentation.element
+      if (surface) {
+        try {
+          try {
+            if (movie.disposed) movie.element.remove()
+            else movie.container.insertBefore(movie.element, movie.container.firstChild)
+          } finally { surface.remove() }
+        } catch (error) {
+          if (primary !== undefined) throw new AggregateError([primary, error],
+            'Video first frame or presentation cleanup failed', { cause: primary })
+          throw error
+        }
+      }
+    }
   }
   private applySettings(movie: Movie, settings: VideoSettings): void {
     if (settings.periodEventFrame >= 0 && !movie.timeline?.times.length)

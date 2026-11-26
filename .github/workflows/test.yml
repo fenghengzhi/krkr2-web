@@ -262,6 +262,7 @@ jobs:
       windows-media-fixtures: ${{ steps.windows-media-fixtures.outcome }}
       mpeg2-xvid-fixtures: ${{ steps.mpeg2-xvid-fixtures.outcome }}
       deflate64-fixtures: ${{ steps.deflate64-fixtures.outcome }}
+      udf-discs: ${{ steps.udf-discs.outcome }}
       long-vorbis-fixture: ${{ steps.long-vorbis-fixture.outcome }}
       cdda-aiff-fixtures: ${{ steps.cdda-aiff-fixtures.outcome }}
     steps:
@@ -430,6 +431,13 @@ jobs:
         if: steps.boot-discs.outcome == 'success'
         continue-on-error: true
         run: python3 scripts/generate-disc-releases.py
+      - name: Author and independently mount UDF 1.02 and 2.01 KAG DVDs
+        id: udf-discs
+        if: steps.boot-discs.outcome == 'success'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y udftools 7zip
+          python3 scripts/generate-udf-game-discs.py 2>&1 | tee out/ci/udf-discs.log
       - name: Create interchangeable game discs and independently read their shared paths
         if: steps.disc-volumes.outcome == 'success'
         continue-on-error: true
@@ -588,7 +596,7 @@ jobs:
         run: test "$FIXTURE_OUTCOME" = success
 
   cdda-aiff-fixture-result:
-    name: Independent AIFF disc fixture verification
+    name: Independent AIFF track and UDF game disc verification
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -596,6 +604,11 @@ jobs:
       - name: Require independently decoded AIFF disc tracks
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.cdda-aiff-fixtures }}
+        run: test "$FIXTURE_OUTCOME" = success
+      - name: Require both UDF game discs and their kernel and 7-Zip readbacks
+        if: ${{ !cancelled() }}
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.udf-discs }}
         run: test "$FIXTURE_OUTCOME" = success
 
   legacy-fixture-result:

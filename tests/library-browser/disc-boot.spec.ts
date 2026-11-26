@@ -2,17 +2,19 @@ import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { test, expect } from '../helpers/library-browser.ts'
 import { discBootInput, discReleaseInput } from '../helpers/disc-boot.ts'
+import { udfGameDisc } from '../helpers/udf-game-discs.ts'
 import { kagGameControls } from '../helpers/kag-game-controls.ts'
 
-for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) for (const packaged of [false, true])
-  test(`${backend}/${packaged ? 'ZIP release ' : ''}${binary ? 'CUE+ISO bytecode' : 'ISO-only source'}: importing the complete disc boots original KAG and restores its chapter after library refresh`, async ({ page }, info) => {
+for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) for (const container of ['disc', 'zip', 'udf']) {
+  const packaged = container === 'zip', udf = container === 'udf'
+  test(`${backend}/${udf ? (binary ? 'UDF 2.01 bytecode' : 'UDF 1.02 source') : (packaged ? 'ZIP release ' : '') + (binary ? 'CUE+ISO bytecode' : 'ISO-only source')}: importing the complete disc boots original KAG and restores its chapter after library refresh`, async ({ page }, info) => {
     test.setTimeout(180000)
-    const input = packaged ? discReleaseInput(binary) : discBootInput(binary),
+    const input = udf ? udfGameDisc(binary) : packaged ? discReleaseInput(binary) : discBootInput(binary),
       drive = packaged ? 'G' : 'D', medium = `file://./${drive.toLowerCase()}/`,
       mapping = packaged ? (binary ? 'G=Media/boot.cue' : 'G=StorySource.zip>Media/boot-source.iso') : '',
       launcher = packaged && binary ? 'StoryBytecode.zip>Media/boot.cue' : '',
       errors: string[] = [], observations: unknown[] = [], failures: unknown[] = [],
-      title = `Boot disc ${backend} ${binary}${packaged ? ' ZIP' : ''}`, canvas = page.locator('#stage canvas[data-window-id]'),
+      title = `Boot disc ${backend} ${binary}${udf ? ' UDF' : packaged ? ' ZIP' : ''}`, canvas = page.locator('#stage canvas[data-window-id]'),
       item = page.locator('.library-game').filter({ has: page.getByRole('heading', { name: title, exact: true }) }),
       { read, clickLink } = kagGameControls(page, observations)
     page.on('pageerror', (error) => errors.push(error.message))
@@ -61,14 +63,15 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       return { bytes, gameId: saved.gameId, slot: Buffer.from(slot.base64, 'base64') }
     }
     try {
-      if (binary || packaged) await page.locator('#project-mode').selectOption('auto')
-      await expect(page.locator('#project-mode')).toHaveValue(binary || packaged ? 'auto' : 'collection')
+      if (binary || packaged || udf) await page.locator('#project-mode').selectOption('auto')
+      await expect(page.locator('#project-mode')).toHaveValue(binary || packaged || udf ? 'auto' : 'collection')
       await page.locator('#cdda-discs').fill(mapping)
       if (packaged) {
         await page.locator('#project-exe-directory').fill('')
         await page.locator('#project-executable').fill(launcher)
       }
-      expect(input.files.map((file) => file.name)).toEqual(packaged
+      expect(input.files.map((file) => file.name)).toEqual(udf
+        ? [binary ? 'boot-udf201-bytecode.iso' : 'boot-udf102-source.iso'] : packaged
         ? binary ? ['StoryBytecode.zip.003', 'StoryBytecode.zip.002', 'StoryBytecode.zip.001'] : ['StorySource.zip']
         : binary ? ['boot.cue', 'boot-bytecode.iso'] : ['boot-source.iso'])
       observations.push({ packaged, drive, mapping, launcher,
@@ -114,3 +117,4 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
     if (failures.length === 1) throw failures[0]
     if (failures.length) throw new AggregateError(failures, 'Original disc boot or cleanup failed', { cause: failures[0] })
   })
+}

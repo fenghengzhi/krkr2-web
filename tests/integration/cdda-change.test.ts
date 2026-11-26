@@ -6,7 +6,7 @@ import { AudioClock, settleAudioPages } from '../helpers/audio.ts'
 import { headless, createHeadlessRuntime } from '../helpers/headless.ts'
 import { cddaChangeDiscs, cddaChangeFiles, cddaChangeSource } from '../helpers/cdda-change.ts'
 
-function files(binary: boolean) {
+function files(binary: boolean): Record<string, string | Uint8Array> {
   return { ...cddaChangeFiles(), 'change.tjs': cddaChangeSource,
     'startup.tjs': binary
       ? 'Scripts.compileStorage("change.tjs","savedata/change.cjs",false,true,false);Scripts.execStorage("savedata/change.cjs");'

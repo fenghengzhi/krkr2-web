@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 170 批为只有 UDF 文件系统的游戏 DVD 增加卷标、目录和资源读取，接入直接启动、按盘符取文件和换盘。实现范围为单卷、2048 字节逻辑块和 Type 1 物理分区。UDF 1.02、2.01 独立制盘及实际游玩结果待托管验收。[170 实现与托管证据](../decisions/170-udf-game-dvds-and-offline-release.md)
+
 第 169 批允许在同一盘符更换剧情盘，或弹出后恢复启动时的光盘。已经启动的游戏与存档保持在当前会话。字体阴影和描边支持原版 KAG 使用的强度 512。新增行为等待托管验证。[169 实现与托管证据](../decisions/169-live-disc-changes-and-kag-outlines.md)
 
 第 168 批让 ZIP 发行的游戏读取同次导入的外置 ISO、CUE 或另一份 ZIP 中指定的盘片。KAG 宏属性现在可在内置控制标签执行前更新剧情状态。普通 WAVE 自然播放结束后，停止回调可读取归零的位置。这些行为待托管验证。[168 实现与托管证据](../decisions/168-companion-game-discs-and-story-callbacks.md)

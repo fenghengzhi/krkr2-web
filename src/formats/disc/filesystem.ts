@@ -1,8 +1,9 @@
 import type { ByteSource } from '../../engine/ports/storage.ts'
-import { isDataSector, type DiscVolumeTrack } from './volume-label.ts'
+import { TrackReader, type DiscVolumeTrack } from './track.ts'
+import { foldDiscName as fold, discPathParts as pathParts } from './path.ts'
+import { openUdfVolume } from './udf.ts'
 
-/** Read-only ECMA-119/Joliet namespace. Names retain their recorded case;
- * ordinary lookups ignore case and use the first recorded file version. */
+/** Read-only optical namespace with recorded spelling and case-insensitive lookup. */
 export interface DiscEntry { readonly name: string; readonly size: number; readonly directory: boolean }
 export interface DiscFilesystem {
   file(path: string): Promise<ByteSource | undefined>
@@ -27,95 +28,16 @@ function both32(bytes: Uint8Array, at: number) {
   return value
 }
 
-/** Map logical 2048-byte sectors to the selected CUE track, preserving the
- * headers of raw sectors for Mode 1 / Mode 2 Form 1 validation. */
-class TrackReader {
-  readonly size: number
-  readonly canBorrow: boolean
-  private readonly track: DiscVolumeTrack
-  private readonly borrow: ByteSource['borrowBlob']
-  constructor(private readonly source: ByteSource, track: DiscVolumeTrack) {
-    this.track = { ...track, layout: { ...track.layout } }
-    this.borrow = source.borrowBlob?.bind(source)
-    const { bytes, payload } = track.layout
-    if (!Number.isSafeInteger(source.size) || source.size < 0 || !Number.isSafeInteger(track.first) || track.first < 0 ||
-        (track.end !== undefined && (!Number.isSafeInteger(track.end) || track.end < track.first)) ||
-        !((bytes === 2048 && payload === 0) || (bytes === 2352 && (payload === 16 || payload === 24)) ||
-          (bytes === 2336 && payload === 8))) invalid('unsupported track geometry')
-    const end = Math.min(Math.floor(source.size / bytes), track.end ?? Infinity)
-    if (track.first > end) invalid('track starts after its data')
-    this.size = (end - track.first) * sectorSize
-    if (!Number.isSafeInteger(this.size)) invalid('track size is not an exact byte offset')
-    this.canBorrow = bytes === sectorSize && payload === 0 && !!this.borrow
-  }
-  async borrowBlob(offset: number, length: number, checkpoint?: () => void | Promise<void>) {
-    range(offset, length, this.size)
-    if (!this.canBorrow || !this.borrow) throw new Error('Disc track has no contiguous Blob backing')
-    await checkpoint?.()
-    const blob = await this.borrow(this.track.first * sectorSize + offset, length, checkpoint)
-    await checkpoint?.()
-    if (blob.size !== length) invalid('borrowed Blob has an inconsistent size')
-    return blob
-  }
-  async read(offset: number, length: number): Promise<Uint8Array> {
-    range(offset, length, this.size)
-    if (length > maxRead) invalid('single read exceeds 64 MiB')
-    const out = new Uint8Array(length), { bytes: stride, payload } = this.track.layout
-    let written = 0
-    while (written < length) {
-      const at = offset + written, sector = Math.floor(at / sectorSize), within = at % sectorSize,
-        sectors = Math.min(Math.floor(65536 / stride), Math.ceil((within + length - written) / sectorSize)),
-        count = Math.min(length - written, sectors * sectorSize - within),
-        physical = (this.track.first + sector) * stride,
-        raw = await this.source.read(physical, sectors * stride)
-      if (raw.length !== sectors * stride) invalid('short sector read')
-      if (stride === sectorSize) out.set(raw.subarray(within, within + count), written)
-      else {
-        let remaining = count, skip = within, destination = written
-        for (let i = 0; i < sectors; i++) {
-          const data = raw.subarray(i * stride, (i + 1) * stride)
-          if (!isDataSector(data, this.track.layout)) invalid('unsupported or incomplete data sector')
-          const take = Math.min(remaining, sectorSize - skip)
-          out.set(data.subarray(payload + skip, payload + skip + take), destination)
-          remaining -= take; destination += take; skip = 0
-        }
-      }
-      written += count
-    }
-    return out
-  }
-}
-
 interface Section { start: number; size: number; unit: number; gap: number }
 interface Entry extends DiscEntry { size: number; key: number; identifier: string; version: string; flags: number; sections: Section[] }
 interface Directory { entries: Entry[]; charge: number }
 interface Volume { bytes: number; block: number; sequence: number; joliet: boolean; root: Entry }
 
-// CDFS NameSup/DirSup separate ';version', remove one empty-extension dot and
-// upcase UTF-16 characters. Preserve characters whose JS uppercase expands.
-function fold(text: string): string {
-  let out = ''
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i]!, upper = char.toUpperCase()
-    out += upper.length === 1 ? upper : char
-  }
-  return out
-}
+// CDFS NameSup/DirSup separate ';version' and remove one empty-extension dot.
 function splitName(text: string) {
   const separator = text.indexOf(';'), name = separator < 0 ? text : text.slice(0, separator),
     version = separator < 0 ? '' : text.slice(separator + 1)
   return { name: name.endsWith('.') ? name.slice(0, -1) : name, version }
-}
-function pathParts(path: string): string[] {
-  if (path.length > 32768 || /^[\\/]/.test(path) || /[\0:]/.test(path)) invalid('expected a relative disc path')
-  const parts: string[] = []
-  for (const part of path.replace(/\\/g, '/').split('/')) {
-    if (!part || part === '.') continue
-    if (part === '..') { if (!parts.length) invalid('path leaves the disc root'); parts.pop() }
-    else parts.push(part)
-    if (parts.length > 256) invalid('directory depth exceeds 256')
-  }
-  return parts
 }
 function identifier(bytes: Uint8Array, joliet: boolean): string {
   if (joliet && bytes.length % 2) invalid('odd Joliet identifier length')
@@ -290,15 +212,16 @@ class Filesystem implements DiscFilesystem {
   }
 }
 
-/** ECMA-119:1987 §§8/9, Microsoft CDFS DirSup/NameSup. Ordinary ISO and
- * Joliet are selected independently of UDF/Rock Ridge extension metadata.
- * https://github.com/microsoft/Windows-driver-samples/tree/main/filesys/cdfs */
+/** Preserve ISO/Joliet selection on bridged discs. A UDF recognition area
+ * in place of an ISO descriptor selects the UDF volume on the same track. */
 export async function openDiscFilesystem(source: ByteSource, track: DiscVolumeTrack): Promise<DiscFilesystem | undefined> {
   const reader = new TrackReader(source, track)
   let primary: Volume | undefined
   for (let sector = 16; sector < 80 && (sector + 1) * sectorSize <= reader.size; sector++) {
     const bytes = await reader.read(sector * sectorSize, sectorSize)
-    if (String.fromCharCode(...bytes.subarray(1, 6)) !== 'CD001' || bytes[6] !== 1) {
+    const id = String.fromCharCode(...bytes.subarray(1, 6))
+    if (!primary && id === 'BEA01' && bytes[0] === 0 && bytes[6] === 1) return openUdfVolume(reader, sector)
+    if (id !== 'CD001' || bytes[6] !== 1) {
       if (primary) invalid('incomplete volume descriptor sequence')
       return
     }
