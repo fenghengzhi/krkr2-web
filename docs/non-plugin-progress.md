@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 185 批处理只提供修改日期的大型远程游戏包、脚本控制的空间音效和字幕像素验收。取回的第 173 批 Firefox 第 3 分片为 304 项通过、20 项失败。[185 实现与托管证据](decisions/185-dated-game-downloads-and-playback.md)
+
 第 184 批处理非 Joliet 游戏盘的本地化名称、图层淡出与 MIDI 叠音。第 173 批 Chromium 游戏库为 106/110 通过，三种浏览器的原版 KAG 与发布兼容用例共 96 项通过。[184 实现与托管证据](decisions/184-oem-disc-names-fades-and-midi-notes.md)
 
 第 184 批实现提交 `026ceca` 登记时为 `pending`，下一批取回结果。[第 184 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45887151151)

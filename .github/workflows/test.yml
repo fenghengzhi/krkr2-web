@@ -1086,6 +1086,12 @@ jobs:
           node --import tsx --test --test-concurrency=2 --test-reporter=tap \
             tests/integration/layer-color-opacity.test.ts tests/conformance/midi-channel-mode.test.ts \
             tests/integration/midi-channel-mode.test.ts | tee out/ci/game-fade-and-music.tap
+      - name: Check remote game versions and positional Wave playback
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-concurrency=2 --test-reporter=tap \
+            tests/conformance/http-range.test.ts tests/conformance/wave-spatial.test.ts \
+            tests/integration/wave-spatial.test.ts tests/integration/wave-quad.test.ts | tee out/ci/game-remote-and-spatial.tap
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ always() }}
         with:

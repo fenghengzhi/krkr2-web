@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 185 批处理大型远程游戏按日期固定版本的加载，以及游戏脚本控制的空间音效。新行为等待托管验收。[185 实现与托管证据](docs/decisions/185-dated-game-downloads-and-playback.md)
+
 第 184 批支持按代码页读取游戏光盘上的日文章节名和卷标，修订不透明图层淡出最后一帧的脚本异常，以及 MIDI 同音叠加后无法松音的问题。新行为等待托管验收。[184 实现与托管证据](docs/decisions/184-oem-disc-names-fades-and-midi-notes.md)
 
 第 183 批支持从 CloneCD 游戏盘启动和播放光盘配乐，并修订影片播放中换轨的停止时刻和游戏图层的双击位置。新行为等待托管验收。[183 实现与托管证据](docs/decisions/183-clonecd-disc-playback-and-input.md)
@@ -126,7 +128,7 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 菜单更新保留仍存在的项目节点，避免更新打断展开或点击。视频打开等待真实首帧，周期和区间事件使用媒体时钟补充呈现回调；错误历史和精度边界见 [视频首帧与时钟](docs/decisions/035-video-readiness.md)。
 
-页面现在也支持“远程文件链接”。支持 Range 和强 ETag 的 XP3/ZIP 服务器可按需读取；小文件可在预算内完整下载。跨域配置、版本与存档身份见 [HTTP 来源](docs/decisions/016-http-sources.md)。
+页面支持“远程文件链接”。播放器可从支持 Range 和强 ETag 的服务器按需读取 XP3 或 ZIP，也可在预算内完整下载小文件。对于超过 64 MiB、只有修改日期的游戏包，第 185 批加入了按日期固定版本的读取方式。[HTTP 来源](docs/decisions/016-http-sources.md) · [按日期读取与跨域配置](docs/decisions/185-dated-game-downloads-and-playback.md)
 
 远程游戏分成主包、补丁和散装文件时，在“远程来源”选择“游戏目录清单（JSON）”，输入发布者提供的清单链接。下面这份 UTF-8 清单列出三个文件。
 
@@ -139,7 +141,7 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 这里游戏看到的补丁文件名是 `patch.xp3`，服务器实际提供 `packages/update.bin`。相对链接从清单最终所在的目录解析。点击“保存当前游戏”后，游戏库会复制列出的文件，之后可从库中离线启动。[远程目录格式与验收](docs/decisions/148-remote-games-layer-options-and-midi-reset.md)
 
-将远程游戏保存到游戏库时，如果中途断线，可重新打开页面并点游戏库里的“继续下载”。服务器需支持 Range 和强 ETag。播放器会确认文件版本，校验磁盘上已保存的块，再下载剩余部分。含本地文件的游戏需重新选择同组文件后再保存。[下载恢复与版本校验](docs/decisions/154-remote-downloads-script-cursor-and-background-audio.md)
+将远程游戏保存到游戏库时，如果中途断线，可重新打开页面并点游戏库里的“继续下载”。播放器会重新打开支持范围读取的来源，确认文件版本，校验磁盘上已保存的块，再下载剩余部分。含本地文件的游戏需重新选择同组文件后再保存。[下载恢复与版本校验](docs/decisions/154-remote-downloads-script-cursor-and-background-audio.md) · [大型游戏包的日期校验](docs/decisions/185-dated-game-downloads-and-playback.md)
 
 打开含 XP3、补丁和散装资源的 ZIP 发行包时，先在“游戏位置”选择“自动识别游戏目录或 ZIP 发行包”，再选择单个 ZIP 或填写远程链接。游戏库会记住包内的游戏目录。[ZIP 发行包的使用范围与验收](docs/decisions/134-zip-distributions-midi-and-game-playback.md)
 

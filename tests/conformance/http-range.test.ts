@@ -116,6 +116,79 @@ test('HTTP cache is one bounded LRU across sources; zero budget retains no block
   assert.equal(zero.inspect().cacheBytes, 0)
 })
 
+const modified = 'Wed, 15 Nov 1995 06:25:24 GMT'
+const responseDate = 'Wed, 15 Nov 1995 06:26:24 GMT'
+
+test('large dated game files read distant bytes conditionally and invalidate previously cached blocks', async (t) => {
+  const total = 2 ** 32 + B + 13
+  for (const changed of [null, 'Wed, 15 Nov 1995 06:25:23 GMT', 'Wed, 15 Nov 1995 06:25:25 GMT']) {
+    const m = mock(total)
+    m.transform((r) => mutate(r, { ETag: null, Date: responseDate, 'Last-Modified': modified }))
+    const pool = new HttpRangePool({ fetch: m.fetcher })
+    t.after(() => pool.close())
+    const source = await pool.open(URL)
+    assert.equal(source.mode, 'range')
+    assert.equal(source.identity, JSON.stringify([URL, URL, ['last-modified', modified, total]]))
+    const offset = total - 3
+    assert.deepEqual(
+      await source.read(offset, 3),
+      Uint8Array.from({ length: 3 }, (_, i) => (offset + i) % 251),
+    )
+    const headers = new Headers(m.calls[1]!.headers)
+    assert.equal(headers.get('if-unmodified-since'), modified)
+    assert.equal(headers.get('if-match'), null)
+    m.transform((r) => mutate(r, { ETag: null, 'Last-Modified': changed }))
+    await assert.rejects(source.read(0, 1), /version changed/)
+    await assert.rejects(source.read(offset, 3), /version changed/)
+    assert.equal(pool.inspect().cacheBytes, 0)
+  }
+})
+
+test('large date-based ranges require two canonical server dates sufficiently far apart', async (t) => {
+  for (const [lastModified, date] of [
+    [null, responseDate], [modified, null], [modified, modified],
+    [modified, 'Wed, 15 Nov 1995 06:26:23 GMT'], [responseDate, modified],
+    ['1995-11-15', responseDate], ['Thu, 15 Nov 1995 06:25:24 GMT', responseDate],
+  ] as const) {
+    const m = mock(MAX + 1)
+    m.transform((r) => mutate(r, { ETag: null, Date: date, 'Last-Modified': lastModified }))
+    const pool = new HttpRangePool({ fetch: m.fetcher })
+    t.after(() => pool.close())
+    await assert.rejects(pool.open(URL), /strong validator/)
+    assert.equal(m.calls.length, 1)
+  }
+})
+
+test('strong ETags keep precedence when a large game also supplies a modification date', async (t) => {
+  const m = mock(MAX + 1)
+  m.transform((r) => mutate(r, { Date: responseDate, 'Last-Modified': modified }))
+  const pool = new HttpRangePool({ fetch: m.fetcher })
+  t.after(() => pool.close())
+  const source = await pool.open(URL)
+  assert.equal(source.identity, JSON.stringify([URL, URL, '"v1"']))
+  await source.read(0, 1)
+  const headers = new Headers(m.calls[1]!.headers)
+  assert.equal(headers.get('if-match'), '"v1"')
+  assert.equal(headers.get('if-unmodified-since'), null)
+})
+
+test('existing small date-stamped game files keep their snapshot and SHA-256 save identity', async (t) => {
+  const headers = { 'Last-Modified': modified, Date: responseDate }
+  const pool = new HttpRangePool({
+    fetch: async (_input, init) =>
+      new Headers(init?.headers).has('range')
+        ? new Response('a', { status: 206, headers: { ...headers, 'Content-Range': 'bytes 0-0/3' } })
+        : new Response('abc', { headers }),
+  })
+  t.after(() => pool.close())
+  const source = await pool.open(URL)
+  assert.equal(source.mode, 'snapshot')
+  assert.equal(
+    source.identity,
+    JSON.stringify([URL, URL, 'sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad']),
+  )
+})
+
 test('HTTP reads preserve offsets over 4 GiB and reject unsafe or oversized intervals', async (t) => {
   const total = 2 ** 32 + B + 9,
     m = mock(total),

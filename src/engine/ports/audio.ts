@@ -93,6 +93,9 @@ export interface SoundSettings {
   waveConversion?: WaveConversion
   /** Frozen -wsexpandquad output option; absent preserves the source layout. */
   waveExpandQuad?: boolean
+  /** Frozen -wsuse3d policy and public source coordinates; omitted is legacy. */
+  waveUse3d?: boolean
+  wavePosition?: readonly [number, number, number]
   volume: number
   volume2: number
   pan: number
@@ -102,6 +105,8 @@ export interface SoundSettings {
   position: number
 }
 export interface SoundSnapshot extends AudioInfo, SoundSettings {
+  /** This media actually uses spatial output (explicit layouts opt out). */
+  waveSpatial?: boolean
   id: number
   epoch: number
   status: 'unload' | 'stop' | 'play'
@@ -135,7 +140,8 @@ export type MixerCommand =
   /** Wave freeDirectSound destroys rendering buffers after Stop callbacks,
    * retaining the open decoder, loop manager and inherited fade controls. */
   | { op: 'releaseWaveBuffer'; id: number }
-  | { op: 'set'; id: number; property: Exclude<keyof SoundSettings, 'waveConversion' | 'waveExpandQuad'>; value: number | boolean }
+  | { op: 'set'; id: number; property: Exclude<keyof SoundSettings, 'waveConversion' | 'waveExpandQuad' | 'waveUse3d' | 'wavePosition'>; value: number | boolean }
+  | { op: 'wavePosition'; id: number; position: readonly [number, number, number] }
   /** Commit a streamed seek only after its target sample has reached the
    * consumer cache. No render tick or change to the old play state is needed. */
   | { op: 'seekSource'; id: number; streamId: number; position: number }

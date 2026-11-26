@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { textDecorationGameSource } from '../helpers/text-decoration.ts'
 import { canvasPixels } from '../helpers/canvas-pixels.ts'
-import { observeTextDecorationFailure } from '../helpers/text-decoration-observation.ts'
+import { observeTextDecorationFailure, textDecorationReferences, textDecorationRasterSummary } from '../helpers/text-decoration-observation.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: player clicks change complete underlined and struck-through subtitles`, async ({ page }, info) => {
@@ -25,8 +25,9 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await canvas.scrollIntoViewIfNeeded()
       for (const style of [0, 1, 2, 3, 4]) {
         await expect(page.getByText(`subtitle-decoration:${style}`, { exact: true })).toBeVisible({ timeout: 20000 })
-        const reference = await page.evaluate((style) => {
-          // Independent native Canvas drawing on a full output-size surface.
+        const pageReference = await page.evaluate((style) => {
+          // Keep the original page context as an independent comparison. In
+          // archived Firefox its generic serif differs from the Worker's.
           // The actual game uses FontService -> per-glyph BrowserGraphics ->
           // Layer bitmap -> Worker renderer. No returned raster bounds are used.
           const width = 384, height = 224, size = 128, glyph = new OffscreenCanvas(width, height),
@@ -55,25 +56,37 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           return { pixels: [...pixels], metrics, font: ctx.font, documentLanguage: document.documentElement.lang,
             contextLanguage: (ctx as unknown as { lang?: string }).lang ?? null, language: navigator.language }
         }, style)
+        const worker = await textDecorationReferences(page, info, style, 'subtitle-reference-' + style),
+          reference = worker.variants[0]!
         let captured: Awaited<ReturnType<typeof canvasPixels>> | undefined
         await expect.poll(async () => {
           const actual = captured = await canvasPixels(canvas)
           if (actual.width !== 384 || actual.height !== 224) {
             const difference = { dimensions: [actual.width, actual.height] }
-            failedFrame = { style, actual, reference, difference }; return difference
+            failedFrame = { style, actual, reference, pageReference, difference }; return difference
           }
           for (let at = 0; at < actual.rgba.length; at++)
             if (actual.rgba[at] !== reference.pixels[at]) {
               const difference = { at, actual: actual.rgba[at], expected: reference.pixels[at] }
-              failedFrame = { style, actual, reference, difference }; return difference
+              failedFrame = { style, actual, reference, pageReference, difference }; return difference
             }
           failedFrame = undefined
           return null
         }, { timeout: 12000 }).toBeNull()
-        observations.push({ style, metrics: reference.metrics, width: captured!.width, height: captured!.height,
-          bounds: captured!.bounds, devicePixelRatio: captured!.devicePixelRatio })
+        const { pixels: pagePixels, ...pageMetadata } = pageReference
+        observations.push({ style, width: captured!.width, height: captured!.height,
+          bounds: captured!.bounds, devicePixelRatio: captured!.devicePixelRatio,
+          actual: textDecorationRasterSummary(captured!.rgba, captured!.width, captured!.height),
+          workerEnvironment: { language: worker.language, languages: worker.languages },
+          workerReferences: worker.variants.map(({ pixels, ...metadata }) => ({ ...metadata,
+            ...textDecorationRasterSummary(pixels, 384, 224),
+            matchesActual: pixels.every((value, at) => captured!.rgba[at] === value) })),
+          pageReference: { ...pageMetadata, ...textDecorationRasterSummary(pagePixels, 384, 224),
+            matchesWorker: pagePixels.every((value, at) => reference.pixels[at] === value) } })
         await info.attach('subtitle-style-' + style, { body: await canvas.screenshot({ scale: 'css' }), contentType: 'image/png' })
         await info.attach(`subtitle-style-${style}-rgba`, { body: Buffer.from(captured!.rgba), contentType: 'application/octet-stream' })
+        await info.attach(`subtitle-style-${style}-worker-reference-rgba`, { body: Buffer.from(reference.pixels), contentType: 'application/octet-stream' })
+        await info.attach(`subtitle-style-${style}-page-reference-rgba`, { body: Buffer.from(pagePixels), contentType: 'application/octet-stream' })
         await expect(page.locator('#logs .error')).toHaveCount(0)
         if (style < 4) {
           const box = await canvas.boundingBox()
@@ -90,7 +103,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     try {
       await info.attach('subtitle-decoration-observations', { body: JSON.stringify({ observations, pageErrors,
         logs: await page.locator('#logs').innerText(), source: textDecorationGameSource,
-        scope: 'Actual source/bytecode Layer.drawText, five complete backing-canvas RGBA comparisons and real player clicks. Unmodified screen PNGs retain fractional CSS placement separately. System font pixels are compared to the same browser Canvas font; this is not a claim of Win32 raster equality.' }, null, 2), contentType: 'application/json' })
+        scope: 'Actual source/bytecode Layer.drawText, five complete backing-canvas RGBA comparisons against an independent Worker Canvas and real player clicks. The Worker oracle uses no production font/raster code. Original page-context metrics, hashes and full RGBA remain separately observable; generic font selection can differ between these contexts. Unmodified screen PNGs retain fractional CSS placement separately. This does not claim Win32 raster equality.' }, null, 2), contentType: 'application/json' })
     } catch (error) { failures.push(error) }
     try {
       if (await page.locator('#stop').isEnabled()) await page.locator('#stop').press('Enter', { timeout: 5000 })

@@ -44,7 +44,21 @@ self.onmessage=({data})=>{
 };
 `
 
-function rasterSummary(pixels: readonly number[], width: number, height: number) {
+/** The independent Worker uses the same host context as the game without
+ * importing its font backend, raster bounds or compositing implementation. */
+export async function textDecorationReferences(page: Page, info: TestInfo, style: number,
+  name = 'subtitle-font-context') {
+  const result = await runFontWorker<{ variants?: Raster[]; language?: string; languages?: string[]; error?: string }>(page, info, {
+    name, source: workerSource, data: { style }, modulePrefix: '/src/backends/text/',
+  })
+  if (result.error || result.variants?.length !== 2) throw new Error(result.error ?? 'Incomplete independent font context report')
+  for (const raster of result.variants)
+    if (raster.width !== 384 || raster.height !== 224 || raster.pixels.length !== 384 * 224 * 4)
+      throw new Error('Invalid independent font context raster')
+  return { variants: result.variants, language: result.language, languages: result.languages }
+}
+
+export function textDecorationRasterSummary(pixels: readonly number[], width: number, height: number) {
   let left = width, top = height, right = 0, bottom = 0, ink = 0
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const at = (y * width + x) * 4
@@ -66,33 +80,33 @@ export async function observeTextDecorationFailure(page: Page, info: TestInfo, f
   style: number
   actual: { width: number; height: number; rgba: number[]; bounds: unknown; devicePixelRatio: number }
   reference: { pixels: number[]; metrics: unknown[] }
+  pageReference: { pixels: number[]; metrics: unknown[] }
   difference: unknown
 }) {
   const errors: unknown[] = [], { pixels, ...referenceMetadata } = frame.reference,
+    { pixels: pagePixels, ...pageMetadata } = frame.pageReference,
     observation: Record<string, unknown> = { style: frame.style, firstFailure: frame.difference,
-      actual: { ...rasterSummary(frame.actual.rgba, frame.actual.width, frame.actual.height),
+      actual: { ...textDecorationRasterSummary(frame.actual.rgba, frame.actual.width, frame.actual.height),
         bounds: frame.actual.bounds, devicePixelRatio: frame.actual.devicePixelRatio },
-      pageReference: { ...referenceMetadata, ...rasterSummary(pixels, 384, 224) },
-      workerReferences: [], scope: 'Passive failure evidence only; the original page-reference byte comparison remains authoritative for this test.' }
-  // Keep both original arrays even if creating the independent Worker fails.
-  for (const [name, bytes] of [['subtitle-failed-backing-rgba', frame.actual.rgba], ['subtitle-failed-page-reference-rgba', pixels]] as const)
+      expectedWorkerReference: { ...referenceMetadata, ...textDecorationRasterSummary(pixels, 384, 224) },
+      pageReference: { ...pageMetadata, ...textDecorationRasterSummary(pagePixels, 384, 224) },
+      workerReferences: [], scope: 'The complete independent Worker raster is the strict oracle. The page reference and repeated Worker variants preserve host-context differences without changing that assertion.' }
+  // Keep the actual and both original references even if a repeated Worker fails.
+  for (const [name, bytes] of [['subtitle-failed-backing-rgba', frame.actual.rgba],
+    ['subtitle-failed-expected-worker-rgba', pixels], ['subtitle-failed-page-reference-rgba', pagePixels]] as const)
     try { await info.attach(name, { body: Buffer.from(bytes), contentType: 'application/octet-stream' }) }
     catch (error) { errors.push(error) }
   try {
-    const result = await runFontWorker<{ variants?: Raster[]; language?: string; languages?: string[]; error?: string }>(page, info, {
-      name: 'subtitle-font-context', source: workerSource, data: { style: frame.style }, modulePrefix: '/src/backends/text/',
-    })
-    if (result.error || result.variants?.length !== 2) throw new Error(result.error ?? 'Incomplete independent font context report')
+    const result = await textDecorationReferences(page, info, frame.style)
     observation.workerEnvironment = { language: result.language, languages: result.languages }
     const variants: unknown[] = []
     observation.workerReferences = variants
     for (const [index, raster] of result.variants.entries()) {
-      if (raster.width !== 384 || raster.height !== 224 || raster.pixels.length !== 384 * 224 * 4)
-        throw new Error('Invalid independent font context raster')
       const { pixels: bytes, ...metadata } = raster
-      variants.push({ ...metadata, ...rasterSummary(bytes, raster.width, raster.height),
+      variants.push({ ...metadata, ...textDecorationRasterSummary(bytes, raster.width, raster.height),
         firstDifferenceFromActual: difference(frame.actual.rgba, bytes),
-        firstDifferenceFromPageReference: difference(pixels, bytes) })
+        firstDifferenceFromExpectedWorker: difference(pixels, bytes),
+        firstDifferenceFromPageReference: difference(pagePixels, bytes) })
       try { await info.attach('subtitle-failed-worker-reference-' + index + '-rgba', {
         body: Buffer.from(bytes), contentType: 'application/octet-stream',
       }) } catch (error) { errors.push(error) }

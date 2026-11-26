@@ -30,6 +30,26 @@ export function remoteUrl(value: string): string {
 function strongTag(value: string | null): string | undefined {
   return value && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value) ? value : undefined
 }
+type RangeValidator = { header: 'ETag' | 'Last-Modified'; value: string }
+
+function httpDate(value: string | null): number {
+  if (value?.length !== 29) return NaN
+  const date = new Date(value)
+  return date.toUTCString() === value ? date.getTime() : NaN
+}
+
+function rangeValidator(headers: Headers, total: number): RangeValidator | undefined {
+  const etag = strongTag(headers.get('etag'))
+  if (etag) return { header: 'ETag', value: etag }
+  // Already playable small files retain their content-hash identity and saves.
+  if (total <= MAX_RESOURCE_BYTES) return undefined
+  const modified = headers.get('last-modified')
+  // RFC 9110 §8.8.2.2. Allow a minute for clocks to differ. Both dates
+  // come from the probe response, including when the player's clock is wrong.
+  if (modified && httpDate(headers.get('date')) - httpDate(modified) >= 60_000)
+    return { header: 'Last-Modified', value: modified }
+  return undefined
+}
 function size(value: string): number {
   if (!/^\d+$/.test(value)) throw new ProtocolError('Invalid HTTP byte count')
   const number = Number(value)
@@ -323,10 +343,10 @@ export class HttpRangePool {
         const encoding = response.headers.get('content-encoding')
         if (encoding && encoding.toLowerCase() !== 'identity')
           throw new ProtocolError('HTTP ranges must use identity content encoding')
-        const etag = strongTag(response.headers.get('etag'))
-        if (!etag) {
+        const validator = rangeValidator(response.headers, range.total)
+        if (!validator) {
           if (range.total > MAX_RESOURCE_BYTES)
-            throw new Error('Large remote files require Range and a strong, CORS-exposed ETag')
+            throw new Error('Large remote files require Range and a strong validator. Expose a strong ETag or both Date and Last-Modified.')
           return undefined
         }
         if (
@@ -336,7 +356,7 @@ export class HttpRangePool {
           throw new ProtocolError('HTTP probe Content-Length mismatch')
         await this.body(response, signal, 1, 1)
         check(signal)
-        const source = new RangeSource(this, `${++this.next}:`, url, finalUrl, range.total, etag)
+        const source = new RangeSource(this, `${++this.next}:`, url, finalUrl, range.total, validator)
         this.cleanups.add(() => source.close())
         return source
       },
@@ -365,7 +385,7 @@ export class HttpRangePool {
         : undefined
     if ((available <= 0 && length !== 0) || (length !== undefined && length > available))
       throw new Error(
-        'HTTP full snapshots exceed the shared 64 MiB budget; a Range server with a strong ETag is required',
+        'HTTP full snapshots exceed the shared 64 MiB budget. A Range server with a strong validator is required.',
       )
     const reservation = length ?? available
     this.reserved += reservation
@@ -429,9 +449,11 @@ class RangeSource implements HttpSource {
     originalUrl: string,
     private readonly url: string,
     readonly size: number,
-    private readonly etag: string,
+    private readonly validator: RangeValidator,
   ) {
-    this.identity = JSON.stringify([originalUrl, this.url, etag])
+    const version =
+      validator.header === 'ETag' ? validator.value : ['last-modified', validator.value, size]
+    this.identity = JSON.stringify([originalUrl, this.url, version])
   }
   private check(): void {
     check(this.pool.signal)
@@ -445,10 +467,11 @@ class RangeSource implements HttpSource {
   private load(first: number, count: number): void {
     const start = first * HTTP_BLOCK_BYTES,
       end = Math.min(this.size, (first + count) * HTTP_BLOCK_BYTES) - 1
+    const condition = this.validator.header === 'ETag' ? 'If-Match' : 'If-Unmodified-Since'
     const group = this.pool
       .request(
         this.url,
-        { Range: `bytes=${start}-${end}`, 'If-Match': this.etag },
+        { Range: `bytes=${start}-${end}`, [condition]: this.validator.value },
         this.abort.signal,
         async (response, signal) => {
           if (response.status === 412 || response.status === 200)
@@ -460,7 +483,7 @@ class RangeSource implements HttpSource {
           const range = contentRange(response.headers.get('content-range'))
           if (
             remoteUrl(response.url || this.url) !== this.url ||
-            strongTag(response.headers.get('etag')) !== this.etag ||
+            response.headers.get(this.validator.header) !== this.validator.value ||
             range.total !== this.size
           )
             throw new ProtocolError('Remote file version changed; reload the game')

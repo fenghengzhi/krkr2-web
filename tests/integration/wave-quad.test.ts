@@ -22,10 +22,11 @@ for (const binary of [false, true])
         }, 1000), { session } = await headless({ ...quadFiles(), 'quad.tjs': quadSource,
           'startup.tjs': binary ? 'Scripts.compileStorage("quad.tjs","savedata/quad.cjs",false,true,false);Scripts.execStorage("savedata/quad.cjs");'
             : 'Scripts.execStorage("quad.tjs");' }, { audio, now: () => clock.now, schedule: clock.schedule }),
-        channels = entry.mono ? 1 : entry.expanded ? 4 : 2,
+        spatial = entry.use3d !== undefined && entry.use3d !== 'no',
+        channels = entry.mono || spatial ? 1 : entry.expanded ? 4 : 2,
         expected = (frames: number, start: number, masked = false) => [0, 1].map((channel) => Array.from({ length: frames }, (_, at) => {
-          const row = quadRows[(start + at) % 8]!, value = entry.mono ? (row[0] + row[1]) / 2 : row[channel]!,
-            gain = entry.expanded && !entry.mono && !masked ? quadGain : 1
+          const row = quadRows[(start + at) % 8]!, value = entry.mono || (spatial && !masked) ? (row[0] + row[1]) / 2 : row[channel]!,
+            gain = spatial && !masked ? Math.SQRT1_2 : entry.expanded && !entry.mono && !masked ? quadGain : 1
           return value === 0 ? 0 : Math.fround(value * gain)
         })), take = async (ms: number, wanted: number[][]) => {
           await settleAudioPages(audio); output.forEach((plane) => { plane.length = 0 })
@@ -39,7 +40,7 @@ for (const binary of [false, true])
         if (entry.option !== undefined) await session.evaluate(`System.setArgument("-wsexpandquad",${JSON.stringify(entry.option)})`)
         if (entry.use3d !== undefined) await session.evaluate(`System.setArgument("-wsuse3d",${JSON.stringify(entry.use3d)})`)
         if (entry.mono) await session.evaluate('System.setArgument("-wsforcecnv","i16m")')
-        assert.equal(await session.evaluate('quadOpen("quad-stereo.wav")'), entry.expanded || entry.mono ? '0,0' : '16,2')
+        assert.equal(await session.evaluate('quadOpen("quad-stereo.wav")'), entry.expanded || entry.mono || spatial ? '0,0' : '16,2')
         await session.evaluate('(quadMusic.samplePosition=8188,0)')
         assert.equal(await session.evaluate('quadPlay()'), `play,16,${channels}`)
         await take(40, expected(40, 8188))

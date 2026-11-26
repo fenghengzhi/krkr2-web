@@ -31,6 +31,7 @@ import type { EventClock } from '../scheduler/events.ts'
 import { MidiOutputExecutor } from './midi-output.ts'
 import { CddaDiscs, InvalidCddaDrive, openCddaSelection, type CddaSelection } from '../storage/cdda.ts'
 import { waveConversionOption, waveExpandQuadOption } from './wave-output.ts'
+import { waveUse3dOption, wavePosition } from './wave-spatial.ts'
 import { readWaveFocusOptions, type WaveFocusOptions } from './wave-focus.ts'
 interface Sound {
   id: number
@@ -75,6 +76,7 @@ export class SoundService {
   private waveOptionsInitialized = false
   private waveConversion?: WaveConversion
   private waveExpandQuad = false
+  private waveUse3d = false
   private waveFocus: WaveFocusOptions = { mode: 0, volume: 0 }
   private disposed = false
   private closes = new Set<Promise<void>>()
@@ -342,6 +344,7 @@ export class SoundService {
         const focus = readWaveFocusOptions(mode, percent === undefined ? undefined : Number(BigInt.asIntN(32, percent)))
         this.waveConversion = waveConversionOption(conversion)
         this.waveExpandQuad = waveExpandQuadOption(quad, use3d)
+        this.waveUse3d = waveUse3dOption(use3d)
         this.waveFocus = focus
         this.waveOptionsInitialized = true
         if (this.backend && (focus.mode || focus.volume))
@@ -376,6 +379,7 @@ export class SoundService {
             ...defaultSoundSettings(),
             ...(kind === 'wave' && this.waveConversion ? { waveConversion: this.waveConversion } : {}),
             ...(kind === 'wave' && this.waveExpandQuad ? { waveExpandQuad: true } : {}),
+            ...(kind === 'wave' && this.waveUse3d ? { waveUse3d: true, wavePosition: [0, 0, 0] as const } : {}),
             status: 'unload',
             fading: false,
             flags: Array(16).fill(0),
@@ -552,6 +556,16 @@ export class SoundService {
         })
       }
     }
+    const submitPosition = async () => {
+      if (!sound.snapshot.waveUse3d) return
+      // Native stores every converted float and ignores SetPosition's HRESULT.
+      // Preserve those public coordinates independently of the last usable
+      // render position, including across reopen and before first play.
+      const position = wavePosition(sound.position)
+      if (!position) return
+      sound.snapshot.wavePosition = position
+      if (sound.ready) await apply({ op: 'wavePosition', id: sound.id, position })
+    }
     if (method === 'prepareMidi') {
       if (sound.kind !== 'midi') throw new Error('Invalid MIDI owner')
       const name = text(0), resource = this.resourceSource
@@ -617,6 +631,7 @@ export class SoundService {
       if (input.length < 3) throw new TjsError('TJSBadParamCount')
       const x = coordinate(0), y = coordinate(1), z = coordinate(2)
       sound.position[0] = x; sound.position[1] = y; sound.position[2] = z
+      await submitPosition()
     } else if (method === 'prepareCdda') {
       if (sound.kind !== 'cdda') throw new Error('Invalid CDDA owner')
       const version = sound.version, preparing: { drive?: string } = {}
@@ -806,10 +821,10 @@ export class SoundService {
       const previous = sound.snapshot.status
       if (sound.ready) await apply({ op: method === 'play' ? 'play' : 'stop', id: sound.id })
       // Native creates the secondary buffer at StartPlay, not open. Our
-      // ordinary software output supports pan, and has no DirectSound3D
-      // interface. Stop/unload retain this capability just as native Clear.
+      // spatial source uses coordinates instead of the flat pan control.
+      // Stop/unload retain this capability just as native Clear.
       if (method === 'play' && sound.kind === 'wave' && sound.snapshot.status === 'play') {
-        sound.canControlPan = true
+        sound.canControlPan = !sound.snapshot.waveSpatial
         sound.waveOutputRate = sound.snapshot.sampleRate
         sound.waveOutputBits = sound.snapshot.bits
         sound.waveOutputChannels = sound.snapshot.channels
@@ -843,7 +858,7 @@ export class SoundService {
         if (result.snapshot) sound.snapshot = result.snapshot
       }
       const state = sound.snapshot
-      if (sound.kind === 'wave' && (state.waveConversion || state.waveExpandQuad) && (property === 'bits' || property === 'channels'))
+      if (sound.kind === 'wave' && (state.waveConversion || state.waveExpandQuad || state.waveUse3d) && (property === 'bits' || property === 'channels'))
         value = BigInt(property === 'bits' ? sound.waveOutputBits : sound.waveOutputChannels)
       else if (property === 'position')
         value = BigInt(
@@ -867,6 +882,7 @@ export class SoundService {
       const axis = positionAxis(property)
       if (axis !== undefined && sound.kind === 'wave') {
         sound.position[axis] = coordinate(1)
+        await submitPosition()
         return this.result(undefined, callbacks)
       }
       // WaveImpl takes a tjs_int, after the public setter's TJS integer
@@ -911,11 +927,12 @@ export class SoundService {
       if (resetPosition) {
         // WaveImpl::SetPan also does this before a secondary buffer exists,
         // even with the default 3D option disabled. The inverse does not hold:
-        // setPos never changes pan or invents a spatial-to-stereo conversion.
+        // setPos never changes the public pan property.
         let x = Math.fround(setting / 100000)
         x = Math.fround(x * (x * 0.003))
         sound.position[0] = setting < 0 ? -x : x
         sound.position[1] = Math.fround(0.001); sound.position[2] = 0
+        await submitPosition()
       }
     } else throw new Error(`Unsupported sound method: ${method}`)
     return this.result(value, callbacks)

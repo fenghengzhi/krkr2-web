@@ -8,7 +8,7 @@ export interface SourceFile {
   path: string
   source: ByteSource
   remoteIdentity?: string
-  /** Reopenable strong-ETag ranges; a full snapshot is fetched afresh. */
+  /** Reopenable ranges pinned to a strong validator. */
   resumable?: boolean
 }
 

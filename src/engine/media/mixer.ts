@@ -31,6 +31,7 @@ import { applySliExpression, sliExpressionTarget } from '../../formats/audio/sli
 import { waveAudioGains } from './wave-audio.ts'
 import { convertWaveOutput } from './wave-output.ts'
 import { waveSpeakerMix, type StereoSpeakerMix } from './wave-speaker-mask.ts'
+import { wavePosition, waveSpatialSource, waveSpatialGains } from './wave-spatial.ts'
 interface Fade {
   target: number
   delta: number
@@ -65,6 +66,8 @@ interface Voice {
   decodeUnitFrames?: number
   speakerMix?: StereoSpeakerMix
   expandedQuad?: boolean
+  spatialGains?: readonly [number, number]
+  outputConversion?: SoundSettings['waveConversion']
   ended?: boolean
   interpolationPreview?: {
     position: number; labelIndex: number; linkDirty: boolean; link?: LoopLink; flags: number[]
@@ -149,7 +152,7 @@ export class AudioMixer {
     return voice
   }
   private waveGains(voice: Voice) {
-    const { volume, volume2, pan } = voice.settings, cached = voice.gains,
+    const { volume, volume2 } = voice.settings, pan = voice.spatialGains ? 0 : voice.settings.pan, cached = voice.gains,
       focusVolume = this.waveMuted ? this.waveMuteVolume : 100000
     if (cached && cached.volume === volume && cached.volume2 === volume2 && cached.pan === pan &&
         cached.globalVolume === this.globalVolume && cached.focusVolume === focusVolume) return cached
@@ -163,6 +166,8 @@ export class AudioMixer {
       asset = voice.asset
     return {
       ...voice.settings,
+      ...(voice.settings.wavePosition ? { wavePosition: [...voice.settings.wavePosition] as [number, number, number] } : {}),
+      ...(voice.spatialGains ? { waveSpatial: true } : {}),
       id,
       epoch: voice.epoch,
       position: voice.bufferReleased ? 0 : Math.floor(voice.settings.position),
@@ -172,8 +177,8 @@ export class AudioMixer {
       sampleRate: asset?.sampleRate ?? 0,
       sampleCount: asset?.sampleCount ?? 0,
       ...(asset?.reportedSampleCount === undefined ? {} : { reportedSampleCount: asset.reportedSampleCount }),
-      channels: asset ? voice.expandedQuad ? 4 : voice.settings.waveConversion === 'i16m' ? 1 : asset.channels : 0,
-      bits: asset && voice.settings.waveConversion ? 16 : voice.filters?.length ? 32 : (asset?.bits ?? 0),
+      channels: asset ? voice.expandedQuad ? 4 : voice.outputConversion === 'i16m' ? 1 : asset.channels : 0,
+      bits: asset && voice.outputConversion ? 16 : voice.filters?.length ? 32 : (asset?.bits ?? 0),
     }
   }
   private event(voice: Voice, type: SoundEvent['type'], label?: string): void {
@@ -188,17 +193,19 @@ export class AudioMixer {
   private create(id: number, settings: SoundSettings, kind: SoundKind = 'wave'): Voice {
     if (!this.voices.has(id) && this.voices.size >= 256)
       throw new Error('Audio voice budget exceeded')
-    const { volume, volume2, pan, frequency, looping, paused, position, waveConversion, waveExpandQuad } = settings
+    const { volume, volume2, pan, frequency, looping, paused, position, waveConversion, waveExpandQuad, waveUse3d } = settings
     if (waveConversion !== undefined && waveConversion !== 'i16' && waveConversion !== 'i16m')
       throw new Error('Invalid Wave output conversion')
     if (waveExpandQuad !== undefined && typeof waveExpandQuad !== 'boolean') throw new Error('Invalid Wave quad expansion')
+    if (waveUse3d !== undefined && typeof waveUse3d !== 'boolean') throw new Error('Invalid Wave 3D option')
     const voice: Voice = {
       id,
       kind,
       epoch: this.nextEpoch++,
       settings: { volume, volume2, pan, frequency, looping, paused, position,
         ...(kind === 'wave' && waveConversion ? { waveConversion } : {}),
-        ...(kind === 'wave' && waveExpandQuad ? { waveExpandQuad: true } : {}) },
+        ...(kind === 'wave' && waveExpandQuad ? { waveExpandQuad: true } : {}),
+        ...(kind === 'wave' && waveUse3d ? { waveUse3d: true, wavePosition: wavePosition(settings.wavePosition) ?? [0, 0, 0] } : {}) },
       status: 'unload',
       clock: 0,
       flags: Array(16).fill(0),
@@ -261,7 +268,7 @@ export class AudioMixer {
       count += connected.length
       const otherSmooth = voice.asset.kind !== 'midi' && voice.asset.loops.links.some((link) => link.smooth)
       reserve(voice.asset.channels, connected, voice.filterChain?.windows() ?? [],
-        otherSmooth || !!voice.settings.waveConversion || !!voice.decodeUnitFrames, voice.decodeUnitFrames)
+        otherSmooth || !!voice.outputConversion || !!voice.decodeUnitFrames, voice.decodeUnitFrames)
       if ((connected.length || otherSmooth) && voice.asset.kind !== 'midi')
         bytes += filteredWaveSourceMemoryBytes(voice.asset)
     }
@@ -348,8 +355,12 @@ export class AudioMixer {
           throw new Error('SLI link is outside the decoded audio')
       const kind = command.kind ?? (asset.kind === 'midi' ? 'midi' : 'wave'), previous = this.voices.get(id),
         retained = previous?.kind === kind && previous.unloaded ? previous : undefined
-      const decodeUnitFrames = conditionalDecodeFrames(kind, asset, command.filters ?? []),
-        filters = this.filters(id, asset, command.filters ?? [], [], kind === 'wave' && !!(retained?.settings ?? settings).waveConversion, decodeUnitFrames)
+      const controls = retained?.settings ?? settings, spatial = waveSpatialSource(kind, controls, asset),
+        // DirectSound 3D secondary buffers are mono; WaveImpl's final retry
+        // requests 16-bit mono for an ordinary stereo input (lines 2149ff).
+        outputConversion = kind === 'wave' ? spatial && asset.channels === 2 ? 'i16m' : controls.waveConversion : undefined,
+        decodeUnitFrames = conditionalDecodeFrames(kind, asset, command.filters ?? []),
+        filters = this.filters(id, asset, command.filters ?? [], [], !!outputConversion, decodeUnitFrames)
       const stream = asset.kind === 'stream' ? new StreamPcm(id, asset) : undefined
       const voice = this.create(
         id,
@@ -359,13 +370,16 @@ export class AudioMixer {
       if (retained) { voice.fade = retained.fade; voice.clock = retained.clock }
       voice.asset = stream ? stream.asset : asset
       voice.speakerMix = speakerMix
+      voice.outputConversion = outputConversion
+      if (spatial) voice.spatialGains = waveSpatialGains(voice.settings.wavePosition!)
       voice.expandedQuad = kind === 'wave' && !!voice.settings.waveExpandQuad &&
+        !voice.settings.waveUse3d &&
         voice.settings.waveConversion !== 'i16m' && asset.kind !== 'midi' &&
         !asset.speakerMask && asset.channels <= 2
       voice.stream = stream
       voice.filters = filters
       voice.decodeUnitFrames = decodeUnitFrames
-      voice.sourcePipeline = asset.kind !== 'midi' && (filters.length > 0 || asset.loops.links.some((link) => link.smooth) || !!voice.settings.waveConversion || !!decodeUnitFrames)
+      voice.sourcePipeline = asset.kind !== 'midi' && (filters.length > 0 || asset.loops.links.some((link) => link.smooth) || !!outputConversion || !!decodeUnitFrames)
       voice.status = 'stop'
       voice.settings.frequency = asset.sampleRate
       voice.settings.position = 0
@@ -439,7 +453,7 @@ export class AudioMixer {
           )
         )
           throw new Error('Connected audio filter order cannot change before reopen')
-        const filters = this.filters(id, voice.asset, command.filters, voice.filterChain?.windows(), !!voice.settings.waveConversion, voice.decodeUnitFrames)
+        const filters = this.filters(id, voice.asset, command.filters, voice.filterChain?.windows(), !!voice.outputConversion, voice.decodeUnitFrames)
         voice.filterChain?.configure(filters)
         voice.filters = filters
       } else if (command.op === 'seekSource') {
@@ -459,6 +473,13 @@ export class AudioMixer {
         if (!voice.bufferReleased) this.prefetchStream(voice, true)
         voice.epoch = this.nextEpoch++
         return { snapshot: this.snapshot(id), events: this.pending.splice(start), sourceReady: true }
+      } else if (command.op === 'wavePosition') {
+        if (voice.kind !== 'wave') throw new Error('Spatial position requires a Wave voice')
+        const position = wavePosition(command.position)
+        if (position) {
+          settings.wavePosition = position
+          if (voice.spatialGains) voice.spatialGains = waveSpatialGains(position)
+        }
       } else if (command.op === 'set') {
         const { property, value } = command
         if (property === 'looping' || property === 'paused') {
@@ -560,8 +581,8 @@ export class AudioMixer {
         voice.asset!.channels,
         voice.filters ?? [],
         voice.filterSource,
-        voice.settings.waveConversion ? (data, frames) => convertWaveOutput(data, frames,
-          voice.settings.waveConversion!, voice.filters?.length ? 'f32' : voice.asset!.pcmEncoding) : undefined,
+        voice.outputConversion ? (data, frames) => convertWaveOutput(data, frames,
+          voice.outputConversion!, voice.filters?.length ? 'f32' : voice.asset!.pcmEncoding) : undefined,
         voice.decodeUnitFrames,
       )
     }
@@ -916,6 +937,9 @@ export class AudioMixer {
             voice.synth!.render(settings.position / asset.sampleRate, step / asset.sampleRate)
             l = voice.synth!.left
             r = voice.synth!.right
+          } else if (voice.spatialGains) {
+            const mono = sample(0)
+            l = mono * voice.spatialGains[0]; r = mono * voice.spatialGains[1]
           } else if (voice.expandedQuad) {
             // WaveImpl copies mono to FL/FR/BL/BR, or stereo to L/R/L/R,
             // after source filtering and forced bit-depth conversion. Keep
@@ -924,7 +948,7 @@ export class AudioMixer {
             const frontLeft = sample(0), frontRight = asset.channels === 1 ? frontLeft : sample(1)
             l = frontLeft + frontLeft * 0.70710678
             r = frontRight + frontRight * 0.70710678
-          } else if (voice.speakerMix && settings.waveConversion !== 'i16m') {
+          } else if (voice.speakerMix && voice.outputConversion !== 'i16m') {
             l = r = 0
             for (let channel = 0; channel < voice.speakerMix.length; channel++) {
               const gains = voice.speakerMix[channel]!, value = sample(channel)
@@ -933,7 +957,7 @@ export class AudioMixer {
             }
           } else {
             l = sample(0)
-            const channels = settings.waveConversion === 'i16m' ? 1 : asset.channels
+            const channels = voice.outputConversion === 'i16m' ? 1 : asset.channels
             r = channels === 1 ? l : sample(1)
             if (channels === 4) {
               l += sample(2) * 0.70710678
