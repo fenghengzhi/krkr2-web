@@ -4,6 +4,8 @@
 
 第 170 批接入纯 UDF 游戏 DVD，修复离线打包处理许可证目录中补丁文件时的错误，并针对 Firefox 在切换影片时可能等不到第一帧的问题补上恢复路径。第 168 批的应用、Worker 和纯引擎类型检查已经通过，生产打包失败。[170 实现与托管证据](decisions/170-udf-game-dvds-and-offline-release.md)
 
+第 170 批实现提交 `77b8934` 登记时为 `queued`，下一批取回运行结果。[第 170 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668)
+
 第 169 批接通运行中换盘，修订换盘时的 CD 音轨和存储缓存，并支持原版 KAG 的高强度描边对白。上批的纯引擎类型检查已通过，四项新 KAG 原版对照全部匹配，另有一处测试类型错误在本批修正。[169 实现与托管证据](decisions/169-live-disc-changes-and-kag-outlines.md)
 
 第 169 批实现提交 `a37a69f` 登记时为 `queued`，运行结果在下一批取回。[第 169 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45852398659)

@@ -21,3 +21,5 @@
 第 169 批在取回时仍在运行。纯引擎类型检查通过，测试工具类型检查报告换盘用例用字符串索引三个资源名时发生 TS7053。本批给该资源表补齐键类型，保留原有 ZIP 延迟读取和换盘断言。取证时尚无该批应用构建和浏览器结果，第 170 批新增行为等待托管验收。[第 169 批类型检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/45852398659/job/140021867754) · [换盘用例](../../tests/integration/cdda-change.test.ts)
 
 第 169 批的图层与转场像素对照为 128/128，新增的两项高强度描边均匹配。KAG 原版对照为 136/138。第 168 批的 Wine 声音对照为 60/60，Windows 声音对照为 50/60，余下 10 项记录为缺少声音驱动。[第 169 批图层与 KAG 对照](https://github.com/fenghengzhi/krkr2-web/actions/runs/45852398659/job/140021868176) · [第 168 批声音作业](https://github.com/fenghengzhi/krkr2-web/actions/runs/45849334408)
+
+第 170 批实现提交 `77b8934` 登记时为 `queued`，下一批取回运行结果。[第 170 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668)
