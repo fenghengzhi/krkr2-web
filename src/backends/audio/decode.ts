@@ -8,11 +8,12 @@ import { encodedSampleRate } from '../../formats/audio/encoded-rate.ts'
 export async function decodePortableAudio(
   bytes: Uint8Array,
   kind: SoundKind,
+  options: { narrowS32?: boolean } = {},
 ): Promise<AudioAsset | undefined> {
   if (kind === 'midi') return decodeMidi(bytes)
   // WaveIntf's RIFF decoder reads fmt/data only. Sampler metadata belongs to
   // instrument editors, not the game's whole-file/explicit SLI loop policy.
-  const wave = decodeWav(bytes, { samplerLoops: kind !== 'wave' })
+  const wave = decodeWav(bytes, { samplerLoops: kind !== 'wave', narrowS32: options.narrowS32 })
   if (wave) return wave
   if (bytes.length < 28 || String.fromCharCode(...bytes.subarray(0, 4)) !== 'OggS') return
   const header = 27 + bytes[26]!

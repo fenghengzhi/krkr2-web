@@ -22,6 +22,9 @@ export interface PcmSourceOptions {
   /** Generic RIFF readers retain sampler loops by default. Stock
    * WaveSoundBuffer uses its own whole-file/SLI loop manager instead. */
   waveSamplerLoops?: boolean
+  /** Safe direct Wave output path: retain original s32 high bits before
+   * normalization. Filters/Smooth leave this off and consume full precision. */
+  waveNarrowS32?: boolean
 }
 export const pcmSourceLimits = Object.freeze({
   readFrames: 65536,

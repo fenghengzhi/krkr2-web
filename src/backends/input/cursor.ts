@@ -68,6 +68,8 @@ export interface CursorRasterLayer {
   readonly background?: string
   readonly opacity?: number
   readonly smoothing?: boolean
+  /** Filter on the video source, before its opacity and the mixing bitmap. */
+  readonly colorMatrix?: readonly number[]
 }
 export interface CursorScene {
   /** A clipped, pointer-transparent plane above game/video and below controls. */
@@ -105,6 +107,45 @@ function clip(context: CanvasRenderingContext2D, rectangle: CursorRectangle, lef
   context.beginPath()
   context.rect(rectangle.left - left, rectangle.top - top, rectangle.width, rectangle.height)
   context.clip()
+}
+
+const colorScratch = new WeakMap<CanvasRenderingContext2D, CanvasRenderingContext2D>()
+
+function drawCursorLayer(context: CanvasRenderingContext2D, layer: CursorRasterLayer, left: number, top: number) {
+  const source = layer.source
+  if (!source) return
+  const { width, height } = layer.rectangle
+  context.imageSmoothingEnabled = layer.smoothing !== false
+  const m = layer.colorMatrix
+  if (!m) {
+    context.drawImage(source, left, top, width, height)
+    return
+  }
+  // drawImage(video) returns the decoded source without its CSS filter.
+  // Process only the cursor-sized sample, before compositing over the game.
+  let scratch = colorScratch.get(context)
+  if (!scratch) {
+    const buffer = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+    if (!buffer) throw new Error('Video cursor sample canvas is unavailable')
+    scratch = buffer
+    colorScratch.set(context, scratch)
+  }
+  const w = context.canvas.width, h = context.canvas.height
+  if (scratch.canvas.width !== w) scratch.canvas.width = w
+  if (scratch.canvas.height !== h) scratch.canvas.height = h
+  scratch.clearRect(0, 0, w, h)
+  scratch.imageSmoothingEnabled = context.imageSmoothingEnabled
+  scratch.drawImage(source, left, top, width, height)
+  const pixels = scratch.getImageData(0, 0, w, h), data = pixels.data
+  for (let at = 0; at < data.length; at += 4) {
+    const r = data[at]!, g = data[at + 1]!, b = data[at + 2]!
+    for (let row = 0; row < 3; row++) {
+      const i = row * 5
+      data[at + row] = r * m[i]! + g * m[i + 1]! + b * m[i + 2]! + 255 * m[i + 4]!
+    }
+  }
+  scratch.putImageData(pixels, 0, 0)
+  context.drawImage(scratch.canvas, 0, 0)
 }
 
 /** Sample the committed DOM canvas bitmap and the host's ordered video layers.
@@ -159,10 +200,7 @@ export function composeCursorBackdrop(
           context.fillStyle = layer.background
           context.fillRect(rectangle.left - sampleLeft, rectangle.top - sampleTop, rectangle.width, rectangle.height)
         }
-        if (layer.source) {
-          context.imageSmoothingEnabled = layer.smoothing !== false
-          context.drawImage(layer.source, rectangle.left - sampleLeft, rectangle.top - sampleTop, rectangle.width, rectangle.height)
-        }
+        drawCursorLayer(context, layer, rectangle.left - sampleLeft, rectangle.top - sampleTop)
       } finally { context.restore() }
     }
   } finally { context.restore() }

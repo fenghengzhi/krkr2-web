@@ -305,7 +305,7 @@ class Layer {
     .map(
       (name) => `property ${name} {
     getter(){return __host("Layer.get",__id,"${name}");}
-    setter(value){__host("Layer.set",__id,"${name}",${name === 'cursor' ? '(typeof value=="String"?value:int(value))' : ['useAttention', 'showParentHint', 'visible', 'enabled', 'focusable', 'joinFocusChain', 'cached', 'callOnPaint'].includes(name) ? 'int(!!value)' : `${name === 'name' || name === 'hint' ? 'string' : 'int'}(value)`});}
+    setter(value){__host("Layer.set",__id,"${name}",${name === 'cursor' ? '(typeof value=="String"?value:int(value))' : ['useAttention', 'showParentHint', 'visible', 'enabled', 'focusable', 'joinFocusChain', 'cached', 'callOnPaint', 'hasImage', 'imageModified'].includes(name) ? 'int(!!value)' : `${name === 'name' || name === 'hint' ? 'string' : 'int'}(value)`});}
   }`,
     )
     .join('\n')}

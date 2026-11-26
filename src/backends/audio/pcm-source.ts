@@ -15,7 +15,7 @@ export async function openPortablePcmSource(source: ByteSource, options: PcmSour
   try {
     const prefix = await context.read(0, Math.min(12, source.size))
     const result = audioTag(prefix, 0) === 'OggS' ? await openVorbisPcmSource(context)
-      : await openWavePcmSource(context, prefix, { samplerLoops: options.waveSamplerLoops })
+      : await openWavePcmSource(context, prefix, { samplerLoops: options.waveSamplerLoops, narrowS32: options.waveNarrowS32 })
     if (!result) context.close()
     else context.assertOpen()
     return result

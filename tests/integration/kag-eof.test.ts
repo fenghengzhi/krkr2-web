@@ -4,7 +4,7 @@ import { headless } from '../helpers/headless.ts'
 import { kagEofFiles, kagEofExpected, kagEofSource } from '../helpers/kag-eof.ts'
 
 for (const binary of [false, true])
-  test(`${binary ? 'bytecode' : 'source'}: KAG entry EOF preserves a live last option while parsing and errors still clear it`, { timeout: 60000 }, async () => {
+  test(`${binary ? 'bytecode' : 'source'}: KAG entry EOF preserves a live last option while parsing clears its old fields and retains error-time attributes`, { timeout: 60000 }, async () => {
     const { session } = await headless({ ...kagEofFiles, 'eof.tjs': kagEofSource,
       'startup.tjs': binary
         ? 'Scripts.compileStorage("eof.tjs","savedata/eof.cjs",false,true,false);Scripts.execStorage("savedata/eof.cjs");'

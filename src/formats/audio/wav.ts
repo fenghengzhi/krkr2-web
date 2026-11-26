@@ -6,7 +6,7 @@ const MAX_PCM_BYTES = 128 * 1024 * 1024
 /** RIFF/WAVE integer/float PCM, including WAVE_FORMAT_EXTENSIBLE containers.
  * Keep original sample rate and frame numbers; Web Audio's decoder resamples.
  * Generic callers keep sampler loops; stock WaveSoundBuffer opts out. */
-export function decodeWav(bytes: Uint8Array, options: { samplerLoops?: boolean } = {}): PcmAsset | undefined {
+export function decodeWav(bytes: Uint8Array, options: { samplerLoops?: boolean; narrowS32?: boolean } = {}): PcmAsset | undefined {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const text = (at: number, count: number) => String.fromCharCode(...bytes.subarray(at, at + count))
   if (bytes.length < 12 || text(0, 4) !== 'RIFF' || text(8, 4) !== 'WAVE') return
@@ -49,6 +49,6 @@ export function decodeWav(bytes: Uint8Array, options: { samplerLoops?: boolean }
   const info = waveInfo(format, data.length)
   if (info.sampleCount * info.channels * 4 > MAX_PCM_BYTES) throw new Error('Decoded audio exceeds 128 MiB budget')
   const samples = Array.from({ length: info.channels }, () => new Float32Array(info.sampleCount))
-  copyWaveSamples(format, data, samples, 0)
+  copyWaveSamples(format, data, samples, 0, options.narrowS32)
   return { kind: 'pcm', ...info, data: samples, loops }
 }

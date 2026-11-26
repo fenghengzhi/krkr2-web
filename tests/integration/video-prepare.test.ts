@@ -207,8 +207,8 @@ for (const binary of [false, true]) {
       const completed = await session.evaluate('trace.join("|")')
       // Same current epoch, but an old prepare token: cannot resurrect play or
       // apply a decoder's old pixels after its native completion cleared it.
-      const late = { ...live, epoch: backend.movies.get(backend.onlyId())!.epoch }
-      if (late.type !== 'error') late.snapshot = { ...late.snapshot, epoch: late.epoch }
+      const epoch = backend.movies.get(backend.onlyId())!.epoch
+      const late = { ...live, epoch, snapshot: { ...live.snapshot, epoch } }
       await backend.deliver(late)
       assert.equal(await session.evaluate('trace.join("|")'), completed)
       assert.equal(await session.evaluate('movie.status'), 'pause')

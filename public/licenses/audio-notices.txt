@@ -6,6 +6,10 @@ original license. Its complete notice and original license are distributed in
 phase-vocoder/NOTICE.txt and phase-vocoder/license-original.txt, with a UTF-8
 reading copy and the upstream GPL alternative in the same directory.
 
+The 16-bit WAVE output conversion also adapts routines in KRKR2 2.32stable
+WaveIntf.cpp, Copyright (C) 2000 W.Dee and contributors, under the same
+Kirikiri original license. The Web implementation is in wave-output.ts.
+
 The npm dependencies are pinned by package-lock.json.
 The codec-parser source archive is supplied alongside this notice. Rebuild the application with npm ci and npm run build to use a modified library.
 

@@ -7,7 +7,7 @@ import { readWaveFormat, waveInfo, copyWaveSamples, type WaveFormat } from './wa
  * extensible subtype and optional smpl-loop interpretation. Unknown chunks/data bodies
  * are skipped while scanning metadata; no full data allocation is performed. */
 export async function openWavePcmSource(context: PcmSourceContext, initial: Uint8Array,
-  options: { samplerLoops?: boolean } = {}): Promise<PcmSource | undefined> {
+  options: { samplerLoops?: boolean; narrowS32?: boolean } = {}): Promise<PcmSource | undefined> {
   if (initial.length < 12 || audioTag(initial, 0) !== 'RIFF' || audioTag(initial, 8) !== 'WAVE') return
   const end = audioView(initial).getUint32(4, true) + 8
   if (end < 12 || end > context.source.size) throw new Error('Truncated WAVE file')
@@ -38,12 +38,13 @@ export async function openWavePcmSource(context: PcmSourceContext, initial: Uint
   }
   if (!format) return
   if (!data) throw new Error('Unsupported WAVE PCM format')
-  return new WavePcmSource(context, format, data.offset, data.length, loops)
+  return new WavePcmSource(context, format, data.offset, data.length, loops, options.narrowS32)
 }
 
 class WavePcmSource extends OwnedPcmSource {
   constructor(context: PcmSourceContext, private readonly format: WaveFormat,
-    private readonly dataOffset: number, dataBytes: number, loops: ReturnType<typeof emptyLoops>) {
+    private readonly dataOffset: number, dataBytes: number, loops: ReturnType<typeof emptyLoops>,
+    private readonly narrowS32 = false) {
     super({ ...waveInfo(format, dataBytes), loops }, context)
   }
   protected async readFrames(position: number, frames: number): Promise<Float32Array[]> {
@@ -53,7 +54,7 @@ class WavePcmSource extends OwnedPcmSource {
     for (let written = 0; written < frames;) {
       const count = Math.min(unit, frames - written),
         bytes = await this.context.read(this.dataOffset + (position + written) * align, count * align)
-      copyWaveSamples(this.format, bytes, result, written)
+      copyWaveSamples(this.format, bytes, result, written, this.narrowS32)
       written += count
     }
     return result

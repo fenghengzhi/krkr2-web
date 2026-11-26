@@ -1,3 +1,5 @@
+import { videoColorRanges } from '../media/video-color.ts'
+
 export const videoClass = String.raw`
 class VideoOverlay {
   var __videoId,__videoWindow;
@@ -39,6 +41,10 @@ class VideoOverlay {
     __host("Video.mixingLayer",__videoId,args[0]);
   }
   function resetMixingLayer(){__host("Video.mixingLayer",__videoId,null);}
+  ${Object.entries(videoColorRanges).map(([name, range]) => `
+    property ${name}{getter(){return __videoRun("colorGet",["${name}",""]);}setter(value){__videoRun("colorSet",["${name}",real(value)]);}}
+    ${Object.keys(range).map((field) => `property ${name}${field}{getter(){return __videoRun("colorGet",["${name}","${field}"]);}}`).join('\n')}
+  `).join('\n')}
   function onStatusChanged(status){if(typeof __videoWindow.action!="undefined")__videoWindow.action(%[type:"onStatusChanged",target:this,status:status]);}
   function onPeriod(reason){if(typeof __videoWindow.action!="undefined")__videoWindow.action(%[type:"onPeriod",target:this,reason:reason]);}
   function onFrameUpdate(frame){if(typeof __videoWindow.action!="undefined")__videoWindow.action(%[type:"onFrameUpdate",target:this,frame:frame]);}

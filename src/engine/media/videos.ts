@@ -14,6 +14,7 @@ import {
 import type { Pixels } from '../ports/graphics.ts'
 import { videoBalanceReadback } from './video-audio.ts'
 import { VideoPeriod } from './video-period.ts'
+import { videoColorRanges, videoColorSetting, type VideoColorControl, type VideoColorRangeField } from './video-color.ts'
 import { TjsError } from '../system/tjs-error.ts'
 import { ExecutionCancelled } from '../scheduler/control.ts'
 import {
@@ -54,10 +55,13 @@ export interface VideoLayerGeometry {
    * Layer1/Layer2 reads. Weak bindings must not survive invalidation/rebinding. */
   layer(channel: number): number | undefined
 }
-export const videoSettings = (state: VideoSnapshot): VideoSettings =>
-  Object.fromEntries(
+export function videoSettings(state: VideoSnapshot): VideoSettings {
+  const settings = Object.fromEntries(
     Object.keys(defaultVideoSettings()).map((key) => [key, state[key as keyof VideoSettings]]),
   ) as unknown as VideoSettings
+  if (state.color) settings.color = { ...state.color }
+  return settings
+}
 /** Native VideoOverlay owns these fields across Close/Open. Rate, mixer and
  * audio controls belong to the media graph, which Open constructs afresh. */
 const videoObjectSettings = (state: VideoSnapshot) => ({
@@ -331,7 +335,9 @@ export class VideoService {
       // Native asynchronous status changes revoke earlier undelivered video
       // events. Frame/period events keep their immediate/discardable semantics.
       if (event.type === 'ended') this.cancelEvents(video)
-      video.snapshot = event.snapshot
+      // A frame may already be in transit when the game changes the mixer.
+      // Playback events report the clock, but only a command changes colors.
+      video.snapshot = video.snapshot.color ? { ...event.snapshot, color: video.snapshot.color } : event.snapshot
       const version = video.version
       const prepareToken = video.prepareToken
       const valid = () =>
@@ -553,6 +559,18 @@ export class VideoService {
           : { op: method as 'play', ...identity() })
         if (previous !== video.snapshot.status)
           callbacks.unshift({ name: 'onStatusChanged', args: [video.snapshot.status] })
+      }
+    } else if (method === 'colorGet' || method === 'colorSet') {
+      const control = text(0) as VideoColorControl
+      if (!Object.hasOwn(videoColorRanges, control)) throw new Error('Unknown video color control')
+      const colors = video.ready && video.snapshot.mode === 2 ? video.snapshot.color : undefined
+      if (method === 'colorGet') {
+        const field = text(1) as VideoColorRangeField | ''
+        if (field && !Object.hasOwn(videoColorRanges[control], field)) throw new Error('Unknown video color range')
+        value = colors ? field ? Math.fround(videoColorRanges[control][field]) : colors[control] : -1
+      } else if (colors) {
+        const color = { ...colors, [control]: videoColorSetting(control, number(1)) }
+        await apply({ op: 'set', ...identity(), settings: { ...videoSettings(video.snapshot), color } })
       }
     } else if (method === 'get') {
       const property = text(0)

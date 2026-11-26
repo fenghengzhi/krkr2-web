@@ -29,6 +29,7 @@ import { phaseVocoderMemoryBytes, validatePhaseVocoderParameters } from './phase
 import { StreamPcm, streamPcmReservation } from './stream-pcm.ts'
 import { applySliExpression } from '../../formats/audio/sli.ts'
 import { waveAudioGains } from './wave-audio.ts'
+import { convertWaveOutput } from './wave-output.ts'
 interface Fade {
   target: number
   delta: number
@@ -146,8 +147,8 @@ export class AudioMixer {
       sampleRate: asset?.sampleRate ?? 0,
       sampleCount: asset?.sampleCount ?? 0,
       ...(asset?.reportedSampleCount === undefined ? {} : { reportedSampleCount: asset.reportedSampleCount }),
-      channels: asset?.channels ?? 0,
-      bits: voice.filters?.length ? 32 : (asset?.bits ?? 0),
+      channels: asset ? voice.settings.waveConversion === 'i16m' ? 1 : asset.channels : 0,
+      bits: asset && voice.settings.waveConversion ? 16 : voice.filters?.length ? 32 : (asset?.bits ?? 0),
     }
   }
   private event(voice: Voice, type: SoundEvent['type'], label?: string): void {
@@ -162,12 +163,15 @@ export class AudioMixer {
   private create(id: number, settings: SoundSettings, kind: SoundKind = 'wave'): Voice {
     if (!this.voices.has(id) && this.voices.size >= 256)
       throw new Error('Audio voice budget exceeded')
-    const { volume, volume2, pan, frequency, looping, paused, position } = settings
+    const { volume, volume2, pan, frequency, looping, paused, position, waveConversion } = settings
+    if (waveConversion !== undefined && waveConversion !== 'i16' && waveConversion !== 'i16m')
+      throw new Error('Invalid Wave output conversion')
     const voice: Voice = {
       id,
       kind,
       epoch: this.nextEpoch++,
-      settings: { volume, volume2, pan, frequency, looping, paused, position },
+      settings: { volume, volume2, pan, frequency, looping, paused, position,
+        ...(kind === 'wave' && waveConversion ? { waveConversion } : {}) },
       status: 'unload',
       clock: 0,
       flags: Array(16).fill(0),
@@ -183,6 +187,7 @@ export class AudioMixer {
     asset: AudioAsset,
     filters: readonly PhaseVocoderFilter[],
     activeWindows: readonly number[] = [],
+    conversion = false,
   ): PhaseVocoderFilter[] {
     if (filters.length > 4) throw new Error('Audio filter chain exceeds four stages')
     if (filters.length && asset.kind === 'midi') throw new Error('Audio filters require PCM audio')
@@ -216,7 +221,7 @@ export class AudioMixer {
       if (items.length || smooth) bytes += audioFilterChainMemoryBytes(channels)
     }
     const smooth = asset.kind !== 'midi' && asset.loops.links.some((link) => link.smooth)
-    reserve(asset.channels, next, activeWindows, smooth)
+    reserve(asset.channels, next, activeWindows, smooth || conversion)
     if ((next.length || smooth) && asset.kind !== 'midi') bytes += filteredWaveSourceMemoryBytes(asset)
     for (const voice of this.voices.values()) {
       if (voice.id === id || !voice.asset) continue
@@ -226,7 +231,7 @@ export class AudioMixer {
           throw new Error('Audio filter is already connected to a voice')
       count += connected.length
       const otherSmooth = voice.asset.kind !== 'midi' && voice.asset.loops.links.some((link) => link.smooth)
-      reserve(voice.asset.channels, connected, voice.filterChain?.windows() ?? [], otherSmooth)
+      reserve(voice.asset.channels, connected, voice.filterChain?.windows() ?? [], otherSmooth || !!voice.settings.waveConversion)
       if ((connected.length || otherSmooth) && voice.asset.kind !== 'midi')
         bytes += filteredWaveSourceMemoryBytes(voice.asset)
     }
@@ -306,10 +311,10 @@ export class AudioMixer {
           link.to < 0
         )
           throw new Error('SLI link is outside the decoded audio')
-      const filters = this.filters(id, asset, command.filters ?? [])
-      const stream = asset.kind === 'stream' ? new StreamPcm(id, asset) : undefined
       const kind = command.kind ?? (asset.kind === 'midi' ? 'midi' : 'wave'), previous = this.voices.get(id),
         retained = previous?.kind === kind && (kind === 'wave' || kind === 'midi') && previous.unloaded ? previous : undefined
+      const filters = this.filters(id, asset, command.filters ?? [], [], kind === 'wave' && !!(retained?.settings ?? settings).waveConversion)
+      const stream = asset.kind === 'stream' ? new StreamPcm(id, asset) : undefined
       const voice = this.create(
         id,
         retained?.settings ?? settings,
@@ -319,7 +324,7 @@ export class AudioMixer {
       voice.asset = stream ? stream.asset : asset
       voice.stream = stream
       voice.filters = filters
-      voice.sourcePipeline = asset.kind !== 'midi' && (filters.length > 0 || asset.loops.links.some((link) => link.smooth))
+      voice.sourcePipeline = asset.kind !== 'midi' && (filters.length > 0 || asset.loops.links.some((link) => link.smooth) || !!voice.settings.waveConversion)
       voice.status = 'stop'
       voice.settings.frequency = asset.sampleRate
       voice.settings.position = 0
@@ -370,7 +375,7 @@ export class AudioMixer {
           )
         )
           throw new Error('Connected audio filter order cannot change before reopen')
-        const filters = this.filters(id, voice.asset, command.filters, voice.filterChain?.windows())
+        const filters = this.filters(id, voice.asset, command.filters, voice.filterChain?.windows(), !!voice.settings.waveConversion)
         voice.filterChain?.configure(filters)
         voice.filters = filters
       } else if (command.op === 'set') {
@@ -466,6 +471,8 @@ export class AudioMixer {
         voice.asset!.channels,
         voice.filters ?? [],
         voice.filterSource,
+        voice.settings.waveConversion ? (data, frames) => convertWaveOutput(data, frames,
+          voice.settings.waveConversion!, voice.filters?.length ? 'f32' : voice.asset!.pcmEncoding) : undefined,
       )
     }
     voice.filterChain.setBudget(budget)
@@ -720,18 +727,19 @@ export class AudioMixer {
             r = voice.synth!.right
           } else {
             l = sample(0)
-            r = asset.channels === 1 ? l : sample(1)
-            if (asset.channels === 4) {
+            const channels = settings.waveConversion === 'i16m' ? 1 : asset.channels
+            r = channels === 1 ? l : sample(1)
+            if (channels === 4) {
               l += sample(2) * 0.70710678
               r += sample(3) * 0.70710678
-            } else if (asset.channels >= 3) {
+            } else if (channels >= 3) {
               const center = sample(2) * 0.70710678
               l += center
               r += center
-              if (asset.channels >= 5) l += sample(4) * 0.70710678
-              if (asset.channels >= 6) r += sample(5) * 0.70710678
-              if (asset.channels >= 7) l += sample(6) * 0.5
-              if (asset.channels >= 8) r += sample(7) * 0.5
+              if (channels >= 5) l += sample(4) * 0.70710678
+              if (channels >= 6) r += sample(5) * 0.70710678
+              if (channels >= 7) l += sample(6) * 0.5
+              if (channels >= 8) r += sample(7) * 0.5
             }
           }
           const gain = asset.kind === 'midi' ? 1 : ((settings.volume / 100000) * settings.volume2) / 100000,

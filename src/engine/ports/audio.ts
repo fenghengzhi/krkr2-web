@@ -1,6 +1,7 @@
 import type { ByteSource } from './storage.ts'
 import type { CddaPcmTrack } from './cdda.ts'
 export type SoundKind = 'wave' | 'midi' | 'cdda'
+export type WaveConversion = 'i16' | 'i16m'
 export type PcmEncoding = 'u8' | 's16' | 's24' | 's32' | 'f32' | 'f64'
 export interface AudioInfo {
   sampleRate: number
@@ -86,6 +87,8 @@ export interface PhaseVocoderFilter {
   time: number
 }
 export interface SoundSettings {
+  /** Frozen native -wsforcecnv output policy; absent keeps existing output. */
+  waveConversion?: WaveConversion
   volume: number
   volume2: number
   pan: number
@@ -124,7 +127,7 @@ export type MixerCommand =
   /** Wave Clear / MIDI replacement retire media while the inherited fade stays alive. */
   | { op: 'unload'; id: number }
   | { op: 'play' | 'stop' | 'close' | 'inspect'; id: number }
-  | { op: 'set'; id: number; property: keyof SoundSettings; value: number | boolean }
+  | { op: 'set'; id: number; property: Exclude<keyof SoundSettings, 'waveConversion'>; value: number | boolean }
   | { op: 'flag'; id: number; index: number; value: number }
   | { op: 'fade'; id: number; target: number; time: number; delay: number }
   | { op: 'stopFade'; id: number; finish: boolean }

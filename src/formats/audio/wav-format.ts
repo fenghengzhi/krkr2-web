@@ -60,7 +60,8 @@ export function waveInfo(format: WaveFormat, size: number): AudioInfo {
     ...(reportedSampleCount === sampleCount ? {} : { reportedSampleCount }) }
 }
 
-export function copyWaveSamples(format: WaveFormat, bytes: Uint8Array, output: Float32Array[], destination: number): void {
+export function copyWaveSamples(format: WaveFormat, bytes: Uint8Array, output: Float32Array[], destination: number,
+  narrowS32 = false): void {
   const { align, channels, containerBits, bits, floating } = format,
     input = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     sampleBytes = containerBits / 8, padding = containerBits - bits, scale = 2 ** (bits - 1)
@@ -73,7 +74,9 @@ export function copyWaveSamples(format: WaveFormat, bytes: Uint8Array, output: F
       else {
         const signed = containerBits === 16 ? input.getInt16(at, true) : containerBits === 32 ? input.getInt32(at, true) :
           input.getUint16(at, true) + input.getInt8(at + 2) * 65536
-        value = (signed >> padding) / scale
+        value = narrowS32 && containerBits === 32
+          ? (((signed >> padding) << padding) >> 16) / 32768
+          : (signed >> padding) / scale
       }
       if (!Number.isFinite(value)) throw new Error('WAVE contains a non-finite sample')
       output[channel]![frame] = value

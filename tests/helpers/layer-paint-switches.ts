@@ -10,6 +10,8 @@ export const layerPaintPixels = [
 export const layerPaintCases = [
   { id: 'paint-bool-cached', expected: matrix },
   { id: 'paint-bool-callOnPaint', expected: matrix },
+  { id: 'paint-bool-hasImage', expected: matrix },
+  { id: 'paint-bool-imageModified', expected: matrix },
   { id: 'paint-bool-render', expected: layerPaintStates.map((state, i) => state + '|' + layerPaintPixels[i]).join(';') },
 ] as const
 
@@ -22,6 +24,14 @@ function paintSwitchPixels(){
 }
 function paintSwitchApply(){
  var phase=global.paintSwitchPhase;
+ var child=global.paintSwitchChild;
+ child.setClip(1,1,1,1);
+ child.hasImage=phase==0?0.5:phase==1?%[]:phase==2?-0.5:[];
+ if(!child.hasImage || !child.imageModified || child.clipLeft!=0 || child.clipWidth!=child.imageWidth
+  || child.getMainPixel(0,0)!=0x008000 || child.getProvincePixel(0,0)!=7)
+   throw new Exception("The choice lost its pixels, hit region or drawing area");
+ child.imageModified=phase==2?"0.5":phase==3?<%00%>:0.5;
+ if(int(child.imageModified)!=int(phase!=2))throw new Exception("Wrong choice image change flag");
  global.paintSwitchGroup.cached=phase==0?0.5:phase==1?"0.5":phase==2?%[]:<%00%>;
  global.paintSwitchGroup.update();global.paintSwitchPanel.update();
  global.paintSwitchPanel.callOnPaint=phase==0?0.5:phase==1?-0.5:phase==2?"0.5":[];
@@ -45,6 +55,7 @@ function paintSwitchMenu(){
  global.paintSwitchChild=new Layer(paintSwitchWindow,paintSwitchGroup);paintSwitchWindow.add(paintSwitchChild);
  paintSwitchChild.type=ltOpaque;paintSwitchChild.holdAlpha=false;paintSwitchChild.setPos(120,0,120,100);
  paintSwitchChild.fillRect(0,0,120,100,0xff008000);paintSwitchChild.visible=true;
+ paintSwitchChild.setProvincePixel(0,0,7);
  global.paintSwitchPanel=new Layer(paintSwitchWindow,paintSwitchRoot);paintSwitchWindow.add(paintSwitchPanel);
  paintSwitchPanel.type=ltOpaque;paintSwitchPanel.holdAlpha=false;paintSwitchPanel.setPos(0,100,240,60);paintSwitchPanel.visible=true;
  paintSwitchPanel.onPaint=function(){

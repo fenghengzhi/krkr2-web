@@ -7,6 +7,7 @@ import {
   type VideoSnapshot,
 } from '../../src/engine/ports/video.ts'
 import { soundGate } from './sound-lifetime-audio.ts'
+import { defaultVideoColors } from '../../src/engine/media/video-color.ts'
 export { soundGate as videoGate } from './sound-lifetime-audio.ts'
 
 /** The fake owns independent resources, including before a failed open returns. */
@@ -58,6 +59,7 @@ export class LifetimeVideoBackend implements VideoBackend {
       const snapshot: VideoSnapshot = {
         ...emptyVideoSnapshot(command.id, command.epoch),
         ...command.settings,
+        ...(command.settings.mode === 2 && { color: { ...defaultVideoColors } }),
         status: 'stop',
         originalWidth: 1,
         originalHeight: 1,

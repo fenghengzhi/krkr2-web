@@ -53,6 +53,7 @@ test('missing proportional Mincho uses an available named serif while requested 
     selected: string
     measurements: { height: number; bold: boolean; text: string; expected: number; actual: number }[]
     rasterCompared: boolean
+    rasterDiscrimination: unknown
     requestedWidths: number[]
   }>(page, info, `
 const backend=new BrowserGraphics(), owned=[], localFaces=[], candidates=[];
@@ -90,6 +91,52 @@ try {
  observations.phase='raster-local-reference';
  const expected=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:chosen.alias,height:24});
  observations.raster.expected={...expected,data:[...expected.data]};
+ // The ordinary CSS family and a local() FontFace alias can resolve through
+ // different platform paths despite identical rounded advances. Observe the
+ // actual first/second-word glyphs as well as the original string, without
+ // replacing the strict raster assertions below or changing font selection.
+ observations.phase='observe-named-serif-raster';
+ observations.rasterDiscrimination={scope:'Passive single-family Canvas versus backend stack/local alias, common text origin',complete:false,cases:[]};
+ try {
+  const w=320,h=96,ox=16,oy=32;
+  const place=(image)=>{
+   const bytes=new Uint8Array(w*h*4),x=ox+(image.left??0),y=oy+(image.top??0);
+   if(x<0||y<0||x+image.width>w||y+image.height>h)throw new Error('Font observation exceeds fixed canvas');
+   for(let row=0;row<image.height;row++)bytes.set(image.data.subarray(row*image.width*4,(row+1)*image.width*4),((y+row)*w+x)*4);
+   return bytes;
+  };
+  const summarize=async(bytes)=>{
+   let x0=w,y0=h,x1=-1,y1=-1;
+   for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(bytes[(y*w+x)*4+3]){x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}
+   const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+   return {canvas:[w,h],origin:[ox,oy],ink:x1<0?null:{left:x0-ox,top:y0-oy,width:x1-x0+1,height:y1-y0+1},
+    rgbaSha256:[...hash].map(v=>v.toString(16).padStart(2,'0')).join('')};
+  };
+  const families=[...['MS PMincho','Times New Roman','Liberation Serif','Times','serif'].map(name=>({kind:'ordinary-family',name})),
+   ...candidates.map(face=>({kind:'loaded-local-alias',name:face.alias,localName:face.name}))];
+  for(const text of ['A','W','AVATAR WAVE']){
+   const a=text==='AVATAR WAVE'?actual:backend.text(text,24,0xffffff,{...font,face:'MS PMincho',height:24}),
+    b=text==='AVATAR WAVE'?expected:backend.text(text,24,0xffffff,{...font,face:chosen.alias,height:24}),aa=place(a),bb=place(b),
+    entry={text,actual:{raster:[a.left,a.top,a.width,a.height],...await summarize(aa)},
+     reference:{raster:[b.left,b.top,b.width,b.height],...await summarize(bb)},families:[]};
+   observations.rasterDiscrimination.cases.push(entry);
+   for(const face of families){
+    const canvas=new OffscreenCanvas(w,h),ctx=canvas.getContext('2d'),requestedFont='24px '+(face.name==='serif'?'serif':JSON.stringify(face.name));
+    ctx.font=requestedFont;const m=ctx.measureText(text),baseline=m.fontBoundingBoxAscent??24*.8;
+    const metrics={};for(const key of ['width','actualBoundingBoxLeft','actualBoundingBoxRight','actualBoundingBoxAscent','actualBoundingBoxDescent',
+     'fontBoundingBoxAscent','fontBoundingBoxDescent','emHeightAscent','emHeightDescent','hangingBaseline','alphabeticBaseline','ideographicBaseline'])
+     if(typeof m[key]==='number')metrics[key]=m[key];
+    if(ox-m.actualBoundingBoxLeft<1||ox+m.actualBoundingBoxRight>=w-1||oy+baseline-m.actualBoundingBoxAscent<1||oy+baseline+m.actualBoundingBoxDescent>=h-1)
+     throw new Error('Single-family font observation exceeds fixed canvas');
+    ctx.fillStyle='#ffffff';ctx.textBaseline='alphabetic';ctx.fillText(text,ox,oy+baseline);
+    const pixels=new Uint8Array(ctx.getImageData(0,0,w,h).data.buffer),state={};
+    for(const key of ['fontKerning','fontStretch','fontVariantCaps','textRendering','letterSpacing','wordSpacing','direction'])if(key in ctx)state[key]=ctx[key];
+    entry.families.push({...face,requestedFont,resolvedFont:ctx.font,metrics,baseline,state,...await summarize(pixels),
+     matchesActual:pixels.every((v,i)=>v===aa[i]),matchesReference:pixels.every((v,i)=>v===bb[i])});
+   }
+  }
+  observations.rasterDiscrimination.complete=true;
+ }catch(error){observations.rasterDiscrimination.error=String(error);}
  observations.phase='compare-named-serif-raster';
  check(JSON.stringify([actual.width,actual.height,actual.left,actual.top])===JSON.stringify([expected.width,expected.height,expected.left,expected.top]),'Named serif raster bounds');
  check(actual.data.length===expected.data.length&&actual.data.every((v,i)=>v===expected.data[i]),'Named serif raster bytes');
@@ -102,7 +149,7 @@ try {
  const requestedWidths=['MS PMincho','MS PMincho,Game Face','Game Face,MS PMincho'].map(face=>backend.measure('A',{...font,face}).width);
  observations.requestedWidths=requestedWidths;
  check(JSON.stringify(requestedWidths)==='[10,10,18]','Requested face priority '+JSON.stringify(requestedWidths));
- postMessage({localFaces,selected:chosen.name,measurements,rasterCompared:true,requestedWidths});
+ postMessage({localFaces,selected:chosen.name,measurements,rasterCompared:true,rasterDiscrimination:observations.rasterDiscrimination,requestedWidths});
 } finally {for(const face of owned)self.fonts.delete(face);backend.dispose();}
 `, { narrow: [...await readFile('tests/fixtures/font/narrow.ttf')], wide: [...await readFile('tests/fixtures/font/wide.ttf')] })
   await info.attach('system-serif-selection', { body: JSON.stringify(result, null, 2), contentType: 'application/json' })

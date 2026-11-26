@@ -12,6 +12,8 @@ import {
 import { videoFrameAt, videoPresentedFrameAt, videoReportedFrameAt,
   videoClockFrameAt, videoClockFrameTime, videoClockMilliseconds, videoClockSnapshot, videoClockFrameUpdate } from '../../../engine/media/video-time.ts'
 import { videoOutputRectangle } from '../../../engine/media/video-mixing.ts'
+import { defaultVideoColors, videoColorRanges, videoColorSetting, type VideoColorControl } from '../../../engine/media/video-color.ts'
+import { setMovieColorFilter, type MovieColorFilter } from './color-filter.ts'
 import type { Pixels } from '../../../engine/ports/graphics.ts'
 import type { WindowView } from '../../../engine/scene/window.ts'
 import type { VideoMessage, VideoRequest } from '../../../protocol/video.ts'
@@ -46,6 +48,7 @@ interface Movie {
   switching?: VideoStage
   bytes: number
   settings: VideoSettings
+  colorFilter?: MovieColorFilter
   status: VideoSnapshot['status']
   timeline?: VideoTimeline
   mixerMetadata?: { width: number; height: number; timeline?: VideoTimeline }
@@ -198,7 +201,7 @@ export class WebVideoHost {
       if (video.readyState >= 2 && video.videoWidth && video.videoHeight &&
           videoStyle.display !== 'none' && videoStyle.visibility === 'visible')
         layers.push({ source: video, rectangle: video.getBoundingClientRect(), clip: rectangle,
-          opacity: Number(videoStyle.opacity),
+          opacity: Number(videoStyle.opacity), colorMatrix: movie.colorFilter?.matrix,
           smoothing: videoStyle.imageRendering !== 'pixelated' && videoStyle.imageRendering !== 'crisp-edges' })
       const bitmap = movie.mixing?.canvas
       if (bitmap?.parentElement === movie.container) {
@@ -920,9 +923,16 @@ export class WebVideoHost {
     if (!Number.isSafeInteger(settings.enabledVideoStream) || settings.enabledVideoStream < 0 ||
         settings.enabledVideoStream >= (movie.timeline?.videoStreams ?? 1))
       throw new Error('Invalid video stream')
+    let color
+    if (settings.mode === 2) {
+      color = { ...defaultVideoColors }
+      if (settings.color) for (const control of Object.keys(videoColorRanges) as VideoColorControl[])
+        color[control] = videoColorSetting(control, settings.color[control])
+    }
     if (settings.periodEventFrame !== movie.settings.periodEventFrame)
       movie.period.set(settings.periodEventFrame, this.snapshot(movie).frame)
-    movie.settings = { ...settings,
+    movie.colorFilter = setMovieColorFilter(movie.element, movie.container, color ?? defaultVideoColors, movie.colorFilter)
+    movie.settings = { ...settings, color,
       ...(movie.timeline?.audioStreams === 0 ? { enabledAudioStream: -1 } : {}) }
     movie.element.playbackRate = settings.playRate
     movie.element.preservesPitch = false

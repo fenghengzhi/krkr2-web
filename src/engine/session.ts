@@ -890,6 +890,7 @@ export class EngineSession {
             this.control.check()
           },
         },
+        () => this.systemArguments.get('-wsforcecnv'),
       )
       this.events = new ScriptEvents(
         { now: this.deps.now, schedule: this.deps.schedule },

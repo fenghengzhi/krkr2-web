@@ -218,20 +218,30 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await canvas.scrollIntoViewIfNeeded()
       const before = (await canvas.boundingBox())!,
         clip = { x: Math.round(before.x + before.width * 60 / 200 - 8),
-          y: Math.round(before.y + before.height * 50 / 120 - 8), width: 32, height: 32 },
-        background = await page.screenshot({ clip, scale: 'css' }),
-        backdrop = await screenshotPixels(page, background, [{ x: 18, y: 8 }, { x: 26, y: 8 }])
-      await info.attach('actual-video-backdrop', { body: background, contentType: 'image/png' })
-      await evaluate(page, '(cursorRoot.cursor="mono.cur",cursorRoot.setCursorPos(60,50),0)', '0')
-      await expect(marker).toBeVisible()
-      await expect.poll(async () => {
-        const current = await pixels(marker)
-        return Math.max(...[0, 1, 2].flatMap((channel) => [
-          Math.abs(current[2]![channel]! - backdrop[0]![channel]!),
-          Math.abs(current[3]![channel]! - (255 - backdrop[1]![channel]!)),
-        ]))
-      }).toBeLessThanOrEqual(3)
-      await info.attach('actual-video-and-xor', { body: await marker.screenshot({ scale: 'css' }), contentType: 'image/png' })
+          y: Math.round(before.y + before.height * 50 / 120 - 8), width: 32, height: 32 }
+      let original: number[] | undefined
+      for (const adjusted of [false, true]) {
+        if (adjusted) {
+          await evaluate(page, '(cursorRoot.cursor=crNone,cursorMovie.saturation=0,cursorMovie.brightness=25,0)', '0')
+          await expect(marker).toHaveCount(0)
+        }
+        const background = await page.screenshot({ clip, scale: 'css' }),
+          backdrop = await screenshotPixels(page, background, [{ x: 18, y: 8 }, { x: 26, y: 8 }]),
+          suffix = adjusted ? '-adjusted' : ''
+        if (original) expect(backdrop[0]).not.toEqual(original)
+        original = backdrop[0]
+        await info.attach('actual-video-backdrop' + suffix, { body: background, contentType: 'image/png' })
+        await evaluate(page, '(cursorRoot.cursor="mono.cur",cursorRoot.setCursorPos(60,50),0)', '0')
+        await expect(marker).toBeVisible()
+        await expect.poll(async () => {
+          const current = await pixels(marker)
+          return Math.max(...[0, 1, 2].flatMap((channel) => [
+            Math.abs(current[2]![channel]! - backdrop[0]![channel]!),
+            Math.abs(current[3]![channel]! - (255 - backdrop[1]![channel]!)),
+          ]))
+        }).toBeLessThanOrEqual(3)
+        await info.attach('actual-video-and-xor' + suffix, { body: await marker.screenshot({ scale: 'css' }), contentType: 'image/png' })
+      }
 
       // Pause/hidden/leave must consume the virtual position; resume does not
       // resurrect it. A new script write or real mouse sample can present again.

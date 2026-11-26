@@ -1,4 +1,5 @@
 import type { Pixels } from './graphics.ts'
+import type { VideoColorValues } from '../media/video-color.ts'
 import type { ImmutableBlob, Resource } from './storage.ts'
 export const videoSourceLimits = {
   bufferedBytes: 128 * 1024 ** 2,
@@ -61,6 +62,8 @@ export interface VideoSettings {
   periodEventFrame: number
   mixingMovieAlpha: number
   mixingMovieBGColor: number
+  /** Present when the active mixer provides picture adjustment controls. */
+  color?: VideoColorValues
 }
 export interface VideoSnapshot extends VideoSettings {
   /** Private object state, retained across graph close/open. Legacy backends

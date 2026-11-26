@@ -44,6 +44,11 @@ bytes, hashes and changes are documented in [phase-vocoder/README.md](phase-voco
 the complete license and notice are distributed in `public/licenses/phase-vocoder/`.
 The accompanying complex FFT is project-owned and does not copy the NAS real FFT.
 
+The WAVE output conversion in `src/engine/media/wave-output.ts` adapts the
+integer and scalar floating-point routines by W.Dee and contributors in
+KRKR2 2.32stable. The same Kirikiri original license is distributed with the
+audio notices. [Original conversion routines](https://github.com/krkrz/krkr2/blob/dec49af97e174d31059c3ccd7efc700ba3c6b788/kirikiri2/branches/2.32stable/kirikiri2/src/core/sound/WaveIntf.cpp#L104-L286)
+
 Audio decoding also uses npm-pinned `@wasm-audio-decoders/ogg-vorbis` 0.1.20 and
 `@wasm-audio-decoders/common` 9.0.7 from
 [wasm-audio-decoders](https://github.com/eshaz/wasm-audio-decoders), declared MIT.

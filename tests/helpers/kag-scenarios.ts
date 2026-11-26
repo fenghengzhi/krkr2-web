@@ -10,6 +10,7 @@ import { kagNameFiles, kagNameExpected, kagNameSource } from './kag-names.ts'
 import { kagRealFiles, kagRealExpected, kagRealSource } from './kag-real-params.ts'
 import { kagEofFiles, kagEofExpected, kagEofSource } from './kag-eof.ts'
 import { kagPartialFiles, kagPartialExpected, kagPartialSource } from './kag-partial-state.ts'
+import { kagLiveFiles, kagLiveExpected, kagLiveSource } from './kag-live-tags.ts'
 
 /** Shared TJS controls for the 2.32r2 SDK and the Web runtime. The SDK
  * produces its own macro bookmark from a real call into another storage. */
@@ -29,6 +30,7 @@ export const kagFiles = {
   ...kagRealFiles,
   ...kagEofFiles,
   ...kagPartialFiles,
+  ...kagLiveFiles,
 }
 
 export const kagExpected: Readonly<Record<string, string>> = {
@@ -57,6 +59,7 @@ export const kagExpected: Readonly<Record<string, string>> = {
   ...kagRealExpected,
   ...kagEofExpected,
   ...kagPartialExpected,
+  ...kagLiveExpected,
 }
 
 export const kagControlSource = String.raw`
@@ -96,6 +99,7 @@ function kagResumePoint(d){
   return restored+"|"+q.getNextTag().tagname+"|"+q.callStackDepth+"|"+int(q.macroParams===null);
 }
 function kagObserve(id){
+  if(id.indexOf("live-")==0){try{return kagLiveObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("partial-")==0){try{return kagPartialObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("reals-")==0){try{return kagRealObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("eof-")==0){try{return kagEofObserve(id);}catch(e){return e.message;}}
@@ -179,4 +183,4 @@ function kagObserve(id){
     return "unexpected success";
   }catch(e){return e.message;}
 }
-` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource + kagRewindSource + kagModeSource + kagNameSource + kagRealSource + kagEofSource + kagPartialSource
+` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource + kagRewindSource + kagModeSource + kagNameSource + kagRealSource + kagEofSource + kagPartialSource + kagLiveSource

@@ -1,5 +1,5 @@
 import { Scenario } from './scenario.ts'
-import { KagTagSyntaxError, lexTag, lowerKagName, type LexedTag } from './lexer.ts'
+import { KagTagSyntaxError, lexTag, lowerKagName, type Attribute, type LexedTag } from './lexer.ts'
 import { KagReference, integer, list, record, string, tagReferences, type Data, type RecordData } from './data.ts'
 import { TvpError } from '../system/tvp-error.ts'
 
@@ -8,7 +8,8 @@ export interface Effect {
   args: Data[]
 }
 export type Task<Result = Data> = Generator<Effect, Result, Data | Scenario>
-interface ParsedTag { token: LexedTag; values: RecordData; condition: boolean; kind: string }
+interface TagState { values: RecordData; names: Data[]; published: boolean }
+interface ParsedTag { token: LexedTag; state: TagState; condition: boolean; kind: string }
 const special = new Set([
   'if',
   'ignore',
@@ -83,17 +84,7 @@ export class KagParser {
     return value instanceof KagReference
       ? string(yield* this.effect('string', value.index)) : string(value)
   }
-  private *evaluate(expression: Data, boolean = false): Task {
-    return yield* this.effect('eval', yield* this.text(expression), boolean, this.curStorage, this.tagLine)
-  }
-  private *controlExpression(expression: Data, boolean = false): Task {
-    const source = yield* this.text(expression)
-    if (!source) throw new TvpError('TVPKAGSyntaxError')
-    return yield* this.evaluate(source, boolean)
-  }
-  private *parameters(): Task<{ values: RecordData; names: Data[] } | null> {
-    const input = yield* this.effect('params')
-    if (input === null) return null
+  private decodeFields(input: Data): { values: RecordData; names: Data[] } {
     const encoded = record(input), values = record(encoded.values)
     for (const item of list(encoded.references)) {
       const pair = list(item), name = string(pair[0]), index = integer(pair[1])
@@ -102,6 +93,38 @@ export class KagParser {
       values[name] = new KagReference(index)
     }
     return { values, names: list(encoded.names) }
+  }
+  private *tagEffect(state: TagState, kind: string, ...args: Data[]): Task {
+    state.published = true
+    const reply = record(yield* this.effect('tag', kind, args,
+      tagReferences({ ...state.values, taglist: state.names })))
+    const current = this.decodeFields(reply.tag)
+    // Expressions can edit the same dictionary retained by an earlier caller.
+    // Preserve those writes, including deletes and live object values.
+    for (const name of Object.keys(state.values)) delete state.values[name]
+    Object.assign(state.values, current.values)
+    state.names.length = 0
+    for (const name of current.names) state.names.push(name)
+    state.values.taglist = state.names
+    return reply.value
+  }
+  private *evaluate(expression: Data, boolean = false, state?: TagState): Task {
+    const source = yield* this.text(expression)
+    if (state) return yield* this.tagEffect(state, 'eval', source, boolean, this.curStorage, this.tagLine)
+    return yield* this.effect('eval', source, boolean, this.curStorage, this.tagLine)
+  }
+  private *controlExpression(expression: Data, boolean = false, state?: TagState): Task {
+    const source = yield* this.text(expression)
+    if (!source) {
+      if (state) yield* this.effect('publishTag', tagReferences({ ...state.values, taglist: state.names }))
+      throw new TvpError('TVPKAGSyntaxError')
+    }
+    return yield* this.evaluate(source, boolean, state)
+  }
+  private *parameters(state: TagState): Task<{ values: RecordData; names: Data[] } | null> {
+    const input = yield* this.tagEffect(state, 'params')
+    if (input === null) return null
+    return this.decodeFields(input)
   }
   private *popTo(depth: number): Task {
     if (depth < 0 || depth > this.macroDepth) throw new Error('KAG macro argument stack underflow')
@@ -325,30 +348,43 @@ export class KagParser {
   private *readTag(source: string, start: number, lineCommand: boolean): Task<ParsedTag> {
     const { name, fields } = lexTag(source, start, lineCommand)
     const kind = this.processSpecialTags && special.has(name) ? name : ''
-    let values: RecordData = Object.assign(Object.create(null), { tagname: name })
-    let names: Data[] = ['tagname']
+    const state: TagState = { values: Object.assign(Object.create(null), { tagname: name }), names: ['tagname'], published: false }
+    const { values, names } = state
     let condition = true
     // Native evaluates each attribute before examining the next delimiter.
     // An expression can observe curPos or take effect before a later error.
     for (;;) {
-      const next = fields.next()
+      let next: IteratorResult<Attribute, LexedTag>
+      try { next = fields.next() }
+      catch (error) {
+        if (error instanceof KagTagSyntaxError) {
+          this.curPos = error.position
+          yield* this.effect('publishTag', tagReferences({ ...values, taglist: names }))
+        }
+        throw error
+      }
       if (next.done) {
         const token = next.value
         this.curPos = token.lineCommand ? token.end : token.end - 1
         values.taglist = names
-        return { token, values, condition, kind }
+        return { token, state, condition, kind }
       }
       const attribute = next.value
       this.curPos = attribute.end
       if (attribute.forward) {
         if (!this.recording) {
-          const current = yield* this.parameters()
+          const current = yield* this.parameters(state)
           if (current !== null) {
             const params = current.values
-            values = Object.assign(Object.create(null), params, { tagname: name })
+            for (const key of Object.keys(values)) delete values[key]
+            Object.assign(values, params, { tagname: name })
             const ordered = current.names.map(string).filter((name) => name !== 'tagname' && Object.hasOwn(params, name))
             const known = new Set(ordered)
-            names = ['tagname', ...ordered, ...Object.keys(params).filter((name) => name !== 'tagname' && !known.has(name))]
+            names.length = 0
+            names.push('tagname')
+            for (const field of ordered) names.push(field)
+            for (const field of Object.keys(params))
+              if (field !== 'tagname' && !known.has(field)) names.push(field)
           }
         }
         continue
@@ -358,9 +394,9 @@ export class KagParser {
         (!this.recording && this.excludeLevel === -1) ||
         kind === 'elsif'
       ) {
-        if (attribute.entity) value = yield* this.evaluate(value)
+        if (attribute.entity) value = yield* this.evaluate(value, false, state)
         else if (attribute.parameter) {
-          const current = yield* this.parameters()
+          const current = yield* this.parameters(state)
           if (current !== null) {
             const params = current.values,
               separator = attribute.value.indexOf('|')
@@ -369,7 +405,7 @@ export class KagParser {
           }
         }
         if (attribute.name === 'cond') {
-          condition = !!(yield* this.evaluate(value, true))
+          condition = !!(yield* this.evaluate(value, true, state))
           continue
         }
       }
@@ -384,7 +420,9 @@ export class KagParser {
     // A field's finalizer can read/reenter this parser or request interrupt.
     // Entry EOF above deliberately does not clear the previous result.
     yield* this.effect('clearTag')
+    let clearPublishedTag = false
     for (let work = 0; ; work++) {
+      if (clearPublishedTag) { yield* this.effect('clearTag'); clearPublishedTag = false }
       // Long skipped text and macro definitions remain cancellable in a Worker.
       if (work % 1024 === 1023) yield* this.effect('yield')
       if (this.interrupted) {
@@ -427,7 +465,10 @@ export class KagParser {
         if (error instanceof KagTagSyntaxError) this.curPos = error.position
         throw error
       }
-      const { token, values, condition, kind } = parsed
+      const { token, state, condition, kind } = parsed, { values } = state
+      // A consumed control tag must be cleared before the next internal
+      // iteration, just as a returned tag is cleared at the next public call.
+      clearPublishedTag = state.published
       if (condition && this.excludeLevel === -1) {
         if (kind === 'endmacro') {
           if (!this.recording) throw new TvpError('TVPKAGSyntaxError')
@@ -446,7 +487,8 @@ export class KagParser {
         this.excludes.push(this.excludeLevel)
         this.executed.push(false)
         if (this.excludeLevel === -1) {
-          let included = !!(yield* this.controlExpression(values.exp, true))
+          let included = !!(yield* this.controlExpression(values.exp, true, state))
+          clearPublishedTag = true
           if (kind === 'ignore') included = !included
           this.executed[this.executed.length - 1] = included
           if (!included) this.excludeLevel = this.ifLevel
@@ -456,7 +498,7 @@ export class KagParser {
           if (this.executed.at(-1)) this.excludeLevel = this.ifLevel
           else if (
             this.ifLevel === this.excludeLevel &&
-            (kind === 'else' || !!(yield* this.controlExpression(values.exp, true)))
+            (kind === 'else' || !!(yield* this.controlExpression(values.exp, true, state)))
           ) {
             this.executed[this.executed.length - 1] = true
             this.excludeLevel = -1
@@ -470,15 +512,17 @@ export class KagParser {
         continue
       }
       if (!condition || this.excludeLevel !== -1) {
+        clearPublishedTag ||= state.published
         this.advance(token)
         continue
       }
-      const macro = !kind || kind === 'emb' ? yield* this.effect('getMacro', token.name) : undefined
+      const macro = !kind || kind === 'emb' ? yield* this.tagEffect(state, 'getMacro', token.name) : undefined
+      clearPublishedTag ||= state.published
       if (kind === 'emb' || macro !== undefined) {
         // The closing delimiter is consumed before evaluating emb. A
         // callback observing/reentering this parser must see the suffix.
         if (!token.lineCommand) this.curPos++
-        let content = macro === undefined ? string(yield* this.controlExpression(values.exp)) : string(macro)
+        let content = macro === undefined ? string(yield* this.controlExpression(values.exp, false, state)) : string(macro)
         // Original emb always produces text, regardless of an escape field.
         // A real macro (including a macro named emb) still inserts tag source.
         if (macro === undefined) content = content.replace(/\[/g, '[[')
@@ -491,6 +535,7 @@ export class KagParser {
         continue
       }
       if (kind === 'jump' || kind === 'call' || kind === 'return') {
+        clearPublishedTag = true
         // Native copies/converts these before the callback. Parameter values
         // can be live objects even though ordinary expression entities are strings.
         const storage = yield* this.text(values.storage), target = yield* this.text(values.target)

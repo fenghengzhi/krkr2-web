@@ -13,7 +13,7 @@ export const kagEofExpected: Readonly<Record<string, string>> = {
   'eof-line': 'choice|CONTINUE|*picked|1|1|retained|1|interrupt|1|choice|AFTER|1',
   'eof-blank': '1|0|after|1|0',
   'eof-clear': '1|CONTINUE|retained|1|AFTER|1',
-  'eof-error': '1|0|1|AFTER',
+  'eof-error': '1|1|1|AFTER',
   'eof-finalize': '1:0|interrupt|1:0|1|S',
 }
 export const kagEofSource = String.raw`
@@ -31,7 +31,12 @@ class EofTagValue {
 // Return from the allocating frame so its temporary registers cannot retain
 // the value. The reused tag is the sole owner when the next parse clears it.
 function eofAttachValue(tag){tag.payload=new EofTagValue();}
-function eofFieldCount(value){var fields=[];fields.assign(value);return fields.count/2;}
+function eofFieldCount(value){
+ var fields=[],count=0;fields.assign(value);
+ // taglist is the existing Web-only ordering metadata, not a stock field.
+ for(var i=0;i<fields.count;i+=2)if(fields[i]!="taglist")count++;
+ return count;
+}
 function kagEofRun(id,p){
  var held,next,result,failed=false;
  p.loadScenario("eof-choice.ks");held=p.getNextTag();held.user="retained";

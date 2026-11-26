@@ -8,6 +8,7 @@ import type {
   WireAudioCommand,
 } from '../../engine/ports/audio.ts'
 import { selectPlaybackLoops } from '../../engine/ports/audio.ts'
+import { waveNarrowS32 } from '../../engine/media/wave-output.ts'
 import type { AudioMessage, AudioRequest } from '../../protocol/audio.ts'
 import { decodePortableAudio } from './decode.ts'
 import { VoiceOperations } from './voice-operations.ts'
@@ -125,7 +126,7 @@ export class PortAudioBackend implements AudioBackend {
       this.streams.cancelPreparing(id)
       let finishPublication: (() => void) | undefined
       try {
-        const asset = await this.waitDecode(this.decode(command.bytes, command.kind))
+        const asset = await this.waitDecode(this.decode(command.bytes, command.kind, { narrowS32: waveNarrowS32(command) }))
         if (this.closed) throw new Error('Audio backend closed during decoding')
         this.operations.assertCurrent(id, ticket)
         if (asset) {
@@ -175,7 +176,8 @@ export class PortAudioBackend implements AudioBackend {
       if (candidate.asset) outgoing = { op: 'load', id: command.id, asset: candidate.asset,
         settings: command.settings, kind: command.kind, filters: command.filters }
       else {
-        const bytes = await this.streams.fallbackBytes(candidate), asset = await this.waitDecode(this.decode(bytes, command.kind))
+        const bytes = await this.streams.fallbackBytes(candidate),
+          asset = await this.waitDecode(this.decode(bytes, command.kind, { narrowS32: waveNarrowS32(command) }))
         assertCurrent()
         if (asset) {
           asset.loops = selectPlaybackLoops(command.kind, command.loops, asset.loops)

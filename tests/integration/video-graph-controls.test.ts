@@ -2,9 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { videoFixture } from '../helpers/video-lifetime.ts'
 import { expectedVideoSegments, videoSegmentSource } from '../helpers/video-segment.ts'
+import { closedVideoColorCases, closedVideoColorSource } from '../helpers/video-colors.ts'
 
 const source = `
 ${videoSegmentSource}
+${closedVideoColorSource}
 makeMovie();movie.mode=vomMixer;movie.setBounds(3,4,32,24);
 function controls(){return [movie.playRate,movie.audioVolume,movie.audioBalance,movie.mixingMovieAlpha,movie.enabledAudioStream,movie.enabledVideoStream].join(",");}
 function preferences(){return [movie.left,movie.top,movie.width,movie.height,movie.visible,movie.loop,movie.mode,movie.segmentLoopStartFrame,movie.segmentLoopEndFrame,movie.periodEventFrame].join(",");}
@@ -24,6 +26,30 @@ async function scenario(binary: boolean, body: (f: Fixture) => Promise<void>) {
 
 for (const binary of [false, true]) {
   const label = binary ? 'bytecode' : 'source'
+  test(`${label}: active mixer exposes four graph-local picture controls and their read-only ranges`, { timeout: 60000 },
+    () => scenario(binary, async (f) => {
+      for (const row of closedVideoColorCases)
+        assert.equal(await f.session.evaluate(`observeClosedVideoControl(movie,"${row.name}")`), row.expected)
+      await f.execute(`function colors(){
+        return [int(movie.brightness),int(100*movie.contrast),int(movie.hue),int(100*movie.saturation)].join("|");
+      }`)
+      assert.equal(await f.session.evaluate('colors()'), '-1|-100|-1|-100')
+      await f.execute('movie.brightness=60;movie.hue=90;movie.open("movie.mp4");')
+      assert.equal(await f.session.evaluate('colors()'), '0|100|0|100')
+      assert.equal(await f.session.evaluate('[int(movie.hueRangeMin),int(movie.hueRangeMax),int(movie.contrastDefaultValue),int(movie.brightnessStepSize)].join("|")'), '-180|180|1|1')
+      const oldFrame = { ...f.video.movies.get(f.video.onlyId())! }
+      await f.execute('movie.brightness=21;movie.contrast=1.5;movie.hue=-25;movie.saturation=.5;movie.loop=true;')
+      for (const receive of f.video.listeners)
+        await receive({ type: 'frame', id: oldFrame.id, epoch: oldFrame.epoch, snapshot: oldFrame })
+      assert.equal(await f.session.evaluate('colors()'), '21|150|-25|50')
+      for (const statement of ['movie.hue=181', 'movie.contrast=%[]', 'movie.saturationRangeMax=0'])
+        assert.equal(await f.session.evaluate(`(function(){try{${statement};}catch(e){return 1;}return 0;})()`), '1')
+      assert.equal(await f.session.evaluate('colors()'), '21|150|-25|50')
+      await f.execute('movie.close();movie.mode=vomLayer;movie.open("movie.mp4");movie.hue=1000;')
+      assert.equal(await f.session.evaluate('colors()'), '-1|-100|-1|-100')
+      await f.execute('movie.close();movie.mode=vomMixer;movie.open("movie.mp4");')
+      assert.equal(await f.session.evaluate('colors()'), '0|100|0|100')
+    }))
   test(`${label}: segment bounds use native integer and arity rules before and after open`, { timeout: 60000 },
     () => scenario(binary, async (f) => {
       assert.equal(await f.session.evaluate('segmentChecks(movie)'), expectedVideoSegments)

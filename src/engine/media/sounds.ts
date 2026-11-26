@@ -8,6 +8,7 @@ import {
   type SoundKind,
   type SoundSnapshot,
   type LoopInfo,
+  type WaveConversion,
 } from '../ports/audio.ts'
 import { TvpError } from '../system/tvp-error.ts'
 import { TjsError } from '../system/tjs-error.ts'
@@ -29,6 +30,7 @@ import { AudioResourceSources, type AudioSourceLease } from '../storage/audio-so
 import type { EventClock } from '../scheduler/events.ts'
 import { MidiOutputExecutor } from './midi-output.ts'
 import { CddaDiscs, InvalidCddaDrive, openCddaSelection, type CddaSelection } from '../storage/cdda.ts'
+import { waveConversionOption } from './wave-output.ts'
 interface Sound {
   id: number
   kind: SoundKind
@@ -43,6 +45,8 @@ interface Sound {
   canControlPan: boolean
   /** Native secondary-buffer format survives Clear/Open; initially zero. */
   waveOutputRate: number
+  waveOutputBits: number
+  waveOutputChannels: number
   filters?: PhaseVocoderConnection
   cdda?: CddaSelection
   preparedCdda?: { token: number; selection: CddaSelection }
@@ -62,6 +66,8 @@ export class SoundService {
   private unsubscribe?: () => void
   private globalVolume = 100000
   private globalFocusMode = 0
+  private waveOptionsInitialized = false
+  private waveConversion?: WaveConversion
   private disposed = false
   private closes = new Set<Promise<void>>()
   private closeErrors: unknown[] = []
@@ -85,6 +91,7 @@ export class SoundService {
       resolve(name: string): Resource | Promise<Resource>
       checkpoint(): void | Promise<void>
     },
+    private readonly getWaveConversionOption: () => string | undefined = () => undefined,
   ) {
     this.midiOutput = new MidiOutputExecutor(midiClock,
       (message) => this.command({ op: 'midiMessage', message }))
@@ -274,6 +281,12 @@ export class SoundService {
       if (!['wave', 'midi', 'cdda'].includes(String(kind)) || !isScriptObject(callback))
         throw new Error('Invalid sound constructor')
       if (this.buffers.size >= 256) throw new Error('Sound buffer budget exceeded')
+      // WaveImpl initializes its process sound options in the first Wave
+      // instance constructor, not in script bootstrap or on every Open.
+      if (kind === 'wave' && !this.waveOptionsInitialized) {
+        this.waveConversion = waveConversionOption(this.getWaveConversionOption())
+        this.waveOptionsInitialized = true
+      }
       const id = this.nextId++
       const owner = this.objects.observe(callback, () => this.retire(id))
       try {
@@ -289,12 +302,15 @@ export class SoundService {
           position: [0, 0, 0],
           canControlPan: false,
           waveOutputRate: 0,
+          waveOutputBits: 0,
+          waveOutputChannels: 0,
           preparedMidi: new Map(),
           midiWaiters: new Set(),
           snapshot: {
             id,
             epoch: 0,
             ...defaultSoundSettings(),
+            ...(kind === 'wave' && this.waveConversion ? { waveConversion: this.waveConversion } : {}),
             status: 'unload',
             fading: false,
             flags: Array(16).fill(0),
@@ -690,6 +706,8 @@ export class SoundService {
       if (method === 'play' && sound.kind === 'wave' && sound.snapshot.status === 'play') {
         sound.canControlPan = true
         sound.waveOutputRate = sound.snapshot.sampleRate
+        sound.waveOutputBits = sound.snapshot.bits
+        sound.waveOutputChannels = sound.snapshot.channels
       }
       if (sound.snapshot.status !== previous) {
         this.cancelEvents(sound)
@@ -720,7 +738,9 @@ export class SoundService {
         if (result.snapshot) sound.snapshot = result.snapshot
       }
       const state = sound.snapshot
-      if (property === 'position')
+      if (sound.kind === 'wave' && state.waveConversion && (property === 'bits' || property === 'channels'))
+        value = BigInt(property === 'bits' ? sound.waveOutputBits : sound.waveOutputChannels)
+      else if (property === 'position')
         value = BigInt(
           state.sampleRate ? Math.floor((state.position * 1000) / state.sampleRate) : 0,
         )

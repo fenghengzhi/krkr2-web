@@ -8,6 +8,7 @@ import type {
 } from '../../../engine/ports/audio.ts'
 import { emptyLoops, selectPlaybackLoops } from '../../../engine/ports/audio.ts'
 import { decodeWav } from '../../../formats/audio/wav.ts'
+import { waveNarrowS32 } from '../../../engine/media/wave-output.ts'
 import { decodeMidi } from '../../../formats/audio/midi.ts'
 import { encodedSampleRate } from '../../../formats/audio/encoded-rate.ts'
 import { VoiceOperations } from '../voice-operations.ts'
@@ -395,7 +396,8 @@ export class WebAudioHost {
       this.operations.assertCurrent(command.id, ticket)
       if (command.op !== 'open') return await this.send(node, command)
       let asset: AudioAsset | undefined =
-        command.kind === 'midi' ? decodeMidi(command.bytes) : decodeWav(command.bytes, { samplerLoops: command.kind !== 'wave' })
+        command.kind === 'midi' ? decodeMidi(command.bytes) : decodeWav(command.bytes,
+          { samplerLoops: command.kind !== 'wave', narrowS32: waveNarrowS32(command) })
       if (!asset) {
         const rate = encodedSampleRate(command.bytes)
         if (rate === undefined && (command.loops.links.length || command.loops.labels.length))

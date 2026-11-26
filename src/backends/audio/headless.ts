@@ -7,6 +7,7 @@ import type {
 import { selectPlaybackLoops } from '../../engine/ports/audio.ts'
 import type { EventClock } from '../../engine/scheduler/events.ts'
 import { AudioMixer } from '../../engine/media/mixer.ts'
+import { waveNarrowS32 } from '../../engine/media/wave-output.ts'
 import { decodePortableAudio } from './decode.ts'
 import { VoiceOperations } from './voice-operations.ts'
 import { PcmStreamPool, type PcmSourceFactory, type PreparedPcmStream } from './stream-pool.ts'
@@ -108,7 +109,7 @@ export class HeadlessAudioBackend implements AudioBackend {
       this.streams.cancelPreparing(command.id)
       this.arm()
       try {
-        const asset = await this.waitDecode(this.decode(command.bytes, command.kind))
+        const asset = await this.waitDecode(this.decode(command.bytes, command.kind, { narrowS32: waveNarrowS32(command) }))
         if (this.closed) throw new Error('Headless audio closed during decoding')
         this.operations.assertCurrent(command.id, ticket)
         if (!asset)
@@ -167,7 +168,8 @@ export class HeadlessAudioBackend implements AudioBackend {
     let candidate: PreparedPcmStream | undefined, committed = false
     try {
       candidate = await this.streams.prepare(command, assertCurrent)
-      const asset = candidate.asset ?? await this.waitDecode(this.decode(await this.streams.fallbackBytes(candidate), command.kind))
+      const asset = candidate.asset ?? await this.waitDecode(this.decode(await this.streams.fallbackBytes(candidate), command.kind,
+        { narrowS32: waveNarrowS32(command) }))
       assertCurrent()
       if (!asset) throw new Error('Headless audio supports PCM WAVE, Vorbis and Standard MIDI Files')
       asset.loops = selectPlaybackLoops(command.kind, command.loops, asset.loops)

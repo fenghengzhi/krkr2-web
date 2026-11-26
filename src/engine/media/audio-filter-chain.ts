@@ -238,7 +238,8 @@ export class AudioFilterChain {
   private lastSourcePosition = 0
   private budget!: AudioFilterBudget
   starved = false
-  constructor(channels: number, filters: readonly PhaseVocoderFilter[], source: FilterPcmSource) {
+  constructor(channels: number, filters: readonly PhaseVocoderFilter[], source: FilterPcmSource,
+    private readonly convertOutput?: (data: readonly Float32Array[], frames: number) => void) {
     this.stages = []
     let upstream = source
     for (const filter of filters) {
@@ -272,6 +273,7 @@ export class AudioFilterChain {
       read = this.final.read(destination, available, block.segments)
     if (!Number.isInteger(read) || read < 0 || read > available)
       throw new Error('Audio filter source returned an invalid playback frame count')
+    this.convertOutput?.(destination, read)
     block.frames += read
     block.complete = block.frames === playbackBlockFrames || !this.final.starved
   }

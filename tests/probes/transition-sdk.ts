@@ -11,6 +11,7 @@ import { layerAlphaRows, layerAlphaSource } from '../helpers/layer-alpha-rows.ts
 import { spriteSamplingCases, spriteSamplingSource } from '../helpers/sprite-sampling.ts'
 import { layerInputBooleanCases, layerInputBooleanSource } from '../helpers/layer-input-booleans.ts'
 import { layerPaintCases, layerPaintSource } from '../helpers/layer-paint-switches.ts'
+import { closedVideoColorCases, closedVideoColorSource } from '../helpers/video-colors.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -18,7 +19,7 @@ assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/transition'), game = resolve(output, 'game')
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const files = transitionOptionFiles()
-const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases, ...spriteSamplingCases, ...layerInputBooleanCases, ...layerPaintCases]
+const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases, ...spriteSamplingCases, ...layerInputBooleanCases, ...layerPaintCases, ...closedVideoColorCases]
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 
 if (process.argv[2] === 'prepare') {
@@ -53,6 +54,10 @@ if (process.argv[2] === 'prepare') {
     ...layerInputBooleanCases.map(({ id }) => `try{record("${id}|"+layerInputBooleanObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
     layerPaintSource,
     ...layerPaintCases.map(({ id }) => `try{record("${id}|"+layerPaintObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
+    closedVideoColorSource,
+    'var colorProbeWindow=new Window(),colorProbeMovie=new VideoOverlay(colorProbeWindow);',
+    ...closedVideoColorCases.map(({ id, name }) => `try{record("${id}|"+observeClosedVideoControl(colorProbeMovie,"${name}"));}catch(e){record("${id}|error:"+e.message);}`),
+    'invalidate colorProbeMovie;invalidate colorProbeWindow;',
     'record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
@@ -67,9 +72,10 @@ if (process.argv[2] === 'prepare') {
     spriteHelperSha256: sha(readFileSync('tests/helpers/sprite-sampling.ts')),
     layerInputBooleanHelperSha256: sha(readFileSync('tests/helpers/layer-input-booleans.ts')),
     layerPaintHelperSha256: sha(readFileSync('tests/helpers/layer-paint-switches.ts')),
+    videoColorHelperSha256: sha(readFileSync('tests/helpers/video-colors.ts')),
     cases,
     files: Object.entries(files).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) })),
-    scope: 'Original transition options, gamma contrast, layer order, hit targets, thumbnail resampling, alpha rows, shared images, transformed sprite pixels and Layer input/paint boolean conversion.',
+    scope: 'Original transitions, gamma, layer order, hit targets, thumbnail resampling, alpha rows, shared images, transformed sprites, Layer booleans and closed video color controls.',
   })
 } else if (process.argv[2] === 'compare') {
   mkdirSync(output, { recursive: true })
@@ -96,6 +102,7 @@ if (process.argv[2] === 'prepare') {
     [resolve('tests/helpers/sprite-sampling.ts'), manifest?.spriteHelperSha256],
     [resolve('tests/helpers/layer-input-booleans.ts'), manifest?.layerInputBooleanHelperSha256],
     [resolve('tests/helpers/layer-paint-switches.ts'), manifest?.layerPaintHelperSha256],
+    [resolve('tests/helpers/video-colors.ts'), manifest?.videoColorHelperSha256],
   ] as const) {
     if (!existsSync(name) || sha(readFileSync(name)) !== expected) evidenceErrors.push(`${name}: source hash differs or is missing`)
   }
@@ -133,10 +140,12 @@ if (process.argv[2] === 'prepare') {
       matched: results.filter((row) => row.id.startsWith('layer-bool-') && row.matched).length },
     paintBooleans: { planned: layerPaintCases.length,
       matched: results.filter((row) => row.id.startsWith('paint-bool-') && row.matched).length },
+    closedVideoColors: { planned: closedVideoColorCases.length,
+      matched: results.filter((row) => row.id.startsWith('closed-video-') && row.matched).length },
     complete, sequenceMatches, evidenceErrors, sdkState: sdk?.state ?? 'unreported',
     sdkExitCode: sdk?.exitCode ?? null, sdkTimedOut: sdk?.timedOut ?? null, results, lines,
     observationSha256: sha(raw),
-    scope: 'Stock SDK option reads, gamma, hit targets, resampling, alpha rows, shared images, transformed sprite pixels and Layer input/paint boolean conversion. Web and on-screen results are recorded by their respective jobs.',
+    scope: 'Stock SDK option reads, gamma, hit targets, resampling, alpha rows, shared images, transformed sprite pixels, Layer boolean conversion and unopened VideoOverlay color controls. Web playback and on-screen results are recorded by their respective jobs.',
   })
   assert(complete, 'Original transition option observations differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

@@ -18,10 +18,10 @@ class KAGParser {
     }
     return value;
   }
-  function __kagEncodeParams(references) {
-    if(!__kagParamDepth)return null;
-    var fields=[],values=%[],bindings=[];fields.assign(__kagParams[__kagParamDepth-1]);
+  function __kagEncodeFields(references,dictionary,names,tag=false) {
+    var fields=[],values=%[],bindings=[];fields.assign(dictionary);
     for(var i=0;i<fields.count;i+=2){
+      if(tag && fields[i]=="taglist")continue;
       var value=fields[i+1],kind=typeof value;
       // Keep native Real variants as well: the host's parser-state numbers
       // represent integers, which must not erase a real's type or signed zero.
@@ -30,7 +30,11 @@ class KAGParser {
         values[fields[i]]=void;bindings.add([fields[i],references.count]);references.add(value);
       }else values[fields[i]]=value;
     }
-    return %[values:values,names:__kagParamNames[__kagParamDepth-1],references:bindings];
+    return %[values:values,names:names,references:bindings];
+  }
+  function __kagEncodeParams(references) {
+    if(!__kagParamDepth)return null;
+    return __kagEncodeFields(references,__kagParams[__kagParamDepth-1],__kagParamNames[__kagParamDepth-1]);
   }
   function __kagShape(values) {
     var result=%[],fields=[];fields.assign(values);
@@ -47,10 +51,30 @@ class KAGParser {
       try {
         switch(operation.kind) {
           case "clearTag":
+            // The preceding tag's temporary bridge copies are no longer
+            // needed. Drop them before its real Dictionary releases fields.
+            references=void;
             (Dictionary.clear incontextof __kagTag)();__kagTagList.clear();break;
+          case "publishTag":
+            __kagAcceptTag(__kagResolveTag(a[0].value,references,a[0].references));break;
+          case "tag":
+            var tagOperation=a[0],tagArgs=a[1],tagPacket=a[2];
+            __kagAcceptTag(__kagResolveTag(tagPacket.value,references,tagPacket.references));
+            if(references===void)references=[];
+            if(tagOperation=="eval"){
+              result=Scripts.eval(tagArgs[0],tagArgs[2],tagArgs[3],global);
+              if(tagArgs[1])result=!!result;else if(result!==void)result=string(result);
+            }else if(tagOperation=="params")result=__kagEncodeParams(references);
+            else if(tagOperation=="getMacro"){
+              result=__kagMacros[tagArgs[0]];if(result!==void)result=string(result);
+            }else throw new Exception("Unknown KAG tag operation");
+            result=%[value:result,tag:__kagEncodeFields(references,__kagTag,__kagTagList,true)];
+            tagPacket=void;tagArgs=void;
+            break;
           case "callback":
             if(a[0] == "onJump" || a[0] == "onCall" || a[0] == "onReturn") {
               var packet=a[1][0];a[1][0]=__kagAcceptTag(__kagResolveTag(packet.value,references,packet.references));
+              packet=void;
             }
             else if(a[0] == "onLabel" || a[0] == "onScript") { (Dictionary.clear incontextof __kagTag)(); __kagTagList.clear(); }
             result = this[a[0]](a[1]*);
@@ -63,14 +87,10 @@ class KAGParser {
             else if(result !== void) result = string(result);
             break;
           case "string": result=string(references[a[0]]);break;
-          case "getMacro": result = __kagMacros[a[0]]; if(result !== void) result = string(result); break;
           case "boolean": result = !!a[0]; break;
           case "setMacro": __kagMacros[a[0]] = a[1]; break;
           case "eraseMacro":
             result = delete __kagMacros[a[0]]; break;
-          case "params":
-            if(references===void)references=[];
-            result = __kagEncodeParams(references);break;
           case "pushParams": __kagPushParams(__kagResolveTag(a[0].value,references,a[0].references)); break;
           case "popParams": __kagParamDepth = a[0]; break;
           case "clearParams": __kagClearParams(); break;
