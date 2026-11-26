@@ -75,6 +75,8 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 打开含 XP3、补丁和散装资源的 ZIP 发行包时，先在“游戏位置”选择“自动识别游戏目录或 ZIP 发行包”，再选择单个 ZIP 或填写远程链接。游戏库会记住包内的游戏目录。[ZIP 发行包的使用范围与验收](docs/decisions/134-zip-distributions-midi-and-game-playback.md)
 
+选择本地文件夹或远程游戏清单时，即使游戏装在 `合集/Novel/` 这样的子目录，也可以将“程序所在目录”留空。若同一批文件包含两款并列的游戏，填写其中一款的程序目录，或输入能唯一识别它的程序名。自动识别与手动选择同一目录可继续使用原来的存档。[发行目录与存档](docs/decisions/149-wrapped-directories-paint-and-midi.md)
+
 旧日文 ZIP 若显示乱码或找不到章节，在导入前将“未标记的 ZIP 文件名编码”选为“日文（Shift_JIS）”。中文发行包也可选择 GBK 或 Big5。游戏库会记住这次选择。另行导入原版存档 ZIP 时，如果来源不同，可在“存档 ZIP 文件名编码”单独选择。[旧 ZIP 文件名与存档](docs/decisions/145-zip-file-names-video-prepare-and-text.md)
 
 如果文件名正确，但启动脚本报文字转换错误或游戏对白显示乱码，在载入前选择“无 BOM 的脚本与剧情编码”。旧汉化版常用 GBK 或 Big5，西欧语言版本可选择 Windows-1252。默认自动模式先尝试 UTF-8，再尝试 Shift_JIS。加入游戏库时会保存本次选择。

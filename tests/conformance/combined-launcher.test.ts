@@ -90,3 +90,66 @@ test('an interrupted launcher search publishes no choice and a subsequent import
   }), /launch cancelled/)
   assert.equal((await prepareProject([zip], { mode: 'auto' }, archives, checkpoint)).project?.directory, 'Novel.exe>')
 })
+
+test('a loose release discovers the wrapped game, keeps its patch and retains the manually selected save namespace', async (t) => {
+  const archives = createSessionArchiveReader(); t.after(() => archives.dispose())
+  const probed: string[] = []
+  const reader = { ...archives, probeXp3(file: Resource, check: () => Promise<void>) {
+    probed.push(file.name); return archives.probeXp3(file, check)
+  } }
+  const files = [resource('Setup.exe', ordinaryExe), resource('Edition/Novel.exe', gameExe),
+    resource('Edition/patch.xp3', xp3Fixture({ 'route.tjs': '"patch"' }).bytes),
+    resource('Edition/Demo/startup.tjs', Buffer.from('demo'))]
+  const auto = await prepareProject(files, { mode: 'auto' }, reader, checkpoint)
+  assert.equal(auto.resources, files)
+  assert.deepEqual(auto.project, { directory: 'Edition/Novel.exe>', executableDirectory: 'Edition/' })
+  assert.deepEqual(probed, ['Setup.exe', 'Edition/Novel.exe'])
+  const manual = await prepareProject(files, { mode: 'auto', executableDirectory: 'edition/' }, reader, checkpoint)
+  assert.equal(await projectIdentity(base, auto.project), await projectIdentity(base, manual.project))
+  const saved = await prepareProject(files, { mode: 'root', ...auto.project! }, reader, checkpoint)
+  assert.deepEqual(saved.project, manual.project)
+})
+
+test('sibling loose editions require a choice and a bare launcher name resolves under its owning directory', async (t) => {
+  const reader = createSessionArchiveReader(); t.after(() => reader.dispose())
+  const files = [resource('包/A/Story.exe', ordinaryExe), resource('包/A/data.xp3', xp3Fixture({ 'startup.tjs': '42' }).bytes),
+    resource('包/B/Novel.exe', gameExe), resource('包/B/Tools/Setup.exe', ordinaryExe)]
+  await assert.rejects(prepareProject(files, { mode: 'auto' }, reader, checkpoint), /多个游戏/)
+  for (const name of ['novel.exe', '包/B/Novel.exe']) {
+    const choice = await prepareProject(files, { mode: 'auto', executable: name }, reader, checkpoint)
+    assert.deepEqual(choice.project, { directory: '包/B/Novel.exe>', executableDirectory: '包/B/' })
+  }
+  const duplicate = [...files, resource('包/A/Novel.exe', ordinaryExe)]
+  await assert.rejects(prepareProject(duplicate, { mode: 'auto', executable: 'Novel.exe' }, reader, checkpoint), /同名程序/)
+  const selectedA = await prepareProject(duplicate, { mode: 'auto', executable: 'Novel.exe', executableDirectory: '包/A/' }, reader, checkpoint)
+  assert.deepEqual(selectedA.project, { directory: '包/A/data.xp3>', executableDirectory: '包/A/', executable: 'game://./包/A/Novel.exe' })
+  await assert.rejects(prepareProject(duplicate, { mode: 'auto', executableDirectory: '包/A/', executable: 'absent.exe' }, reader, checkpoint),
+    /未找到指定的游戏程序/)
+})
+
+test('existing loose custom-entry roots, non-game collections, and an explicitly selected root retain their layout', async (t) => {
+  const archives = createSessionArchiveReader(); t.after(() => archives.dispose())
+  const noProbe = { ...archives, async probeXp3() { return assert.fail('A frozen or conventional root must not inspect the bundled tool') } }
+  const nested = [resource('Bonus/Novel.exe', gameExe), resource('Bonus/data.xp3', xp3Fixture({ 'startup.tjs': '42' }).bytes)]
+  for (const [path, directory] of [['content-data/start-here.tjs', 'content-data/'], ['data/alternate.tjs', 'data/'], ['startup.tjs', '']] as const) {
+    const auto = await prepareProject([resource(path, Buffer.from('42')), ...nested], { mode: 'auto' }, noProbe, checkpoint)
+    assert.deepEqual(auto.project, { directory, executableDirectory: '' })
+  }
+  const flat = { directory: '', executableDirectory: '' }
+  assert.deepEqual((await prepareProject(nested, { mode: 'root', ...flat }, noProbe, checkpoint)).project, flat)
+  assert.deepEqual((await prepareProject([resource('Extras/tool.exe', ordinaryExe)], { mode: 'auto' }, archives, checkpoint)).project, flat)
+  assert.equal((await prepareProject(nested, { mode: 'collection' }, noProbe, checkpoint)).project, undefined)
+})
+
+test('the chosen startup filename participates in loose directory discovery without displacing an existing entry', async (t) => {
+  const reader = createSessionArchiveReader(); t.after(() => reader.dispose())
+  const boot = resource('Edition/Story/Begin.TJS', Buffer.from('42')), selection = { mode: 'auto' as const }
+  assert.deepEqual((await prepareProject([boot], selection, reader, checkpoint, 'begin.tjs')).project,
+    { directory: 'Edition/Story/', executableDirectory: 'Edition/Story/' })
+  const example = resource('Samples/Demo/startup.tjs', Buffer.from('0'))
+  for (const entry of ['Begin.tjs', 'scripts/begin.tjs', 'other.xp3>begin.tjs']) {
+    const original = resource(entry.split('>')[0]!, Buffer.from('original entry'))
+    const result = await prepareProject([example, original], selection, reader, checkpoint, entry)
+    assert.deepEqual(result.project, { directory: '', executableDirectory: '' }, entry)
+  }
+})

@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 149 批增加本地与远程发行目录的子目录识别，修正脚本控制的画面重绘和 MIDI 重播时的乐器选择。这些行为等待托管验证。[149 范围与验收](../decisions/149-wrapped-directories-paint-and-midi.md)
+
 第 148 批加入远程多文件游戏目录，支持保存至浏览器游戏库。图层可见性、可点击性和键盘焦点按原版解释脚本值，MIDI 播放加入了模块复位后的等待。新增行为等待托管验证。[148 范围与验收](../decisions/148-remote-games-layer-options-and-midi-reset.md)
 
 第 147 批按游戏注册顺序匹配补丁中的大小写文件名，保留 KAG 到达剧情末尾时已有的标签数据，并调整了 MIDI 换曲和音量渐变的时序。新增行为等待托管验证。[147 范围与验收](../decisions/147-game-patches-scenario-end-and-midi.md)

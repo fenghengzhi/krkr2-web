@@ -5,9 +5,25 @@ import { MemorySaveStore } from '../../src/engine/ports/saves.ts'
 import type { SessionDependencies } from '../../src/engine/session.ts'
 import type { GameProject } from '../../src/engine/storage/project.ts'
 import { selectProject } from '../../src/engine/storage/project.ts'
+import { prepareProject } from '../../src/engine/storage/distribution.ts'
+import { archiveReader } from '../../src/backends/files/archive-reader.ts'
 import { importResources } from '../../src/backends/files/import-resources.ts'
 import { archivePatchFiles, kagAutoPathProgram, solidBmp, patchColors } from '../helpers/archive-patch.ts'
 import { xp3Fixture } from '../helpers/xp3-fixtures.ts'
+
+test('an existing parent-relative startup script resolves from the detected data directory', async () => {
+  const resources = await importResources([
+    { path: 'data/scene.tjs', blob: new Blob(['"opening"']) },
+    { path: 'boot.tjs', blob: new Blob(['System.exitOnNoWindowStartup=false; var chapter=Scripts.evalStorage("scene.tjs");']) },
+  ], async () => {}, undefined, { lazyArchives: true })
+  const entry = '../boot.tjs', selected = await prepareProject(resources, { mode: 'auto' }, archiveReader, async () => {}, entry)
+  assert.deepEqual(selected.project, { directory: 'data/', executableDirectory: '' })
+  const { session } = await headless({}, { project: selected.project })
+  try {
+    session.mount(selected.resources); await session.start(entry)
+    assert.equal(await session.evaluate('chapter'), 'opening')
+  } finally { await session.stop() }
+})
 
 const demand = `function demand(a,b,label){if(a!==b)throw label+": expected ["+b+"] actual ["+a+"]";}\n`
 const startup = (binary: boolean) => binary

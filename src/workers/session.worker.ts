@@ -107,7 +107,7 @@ async function completeInput(operation: (target: EngineSession) => Promise<void>
   }
 }
 const api: SessionApi = {
-  async prepare(files, selection) {
+  async prepare(files, selection, entry) {
     sources.signal.throwIfAborted()
     if (session || preparing || prepared) throw new Error('Worker already owns a game source')
     preparing = true
@@ -148,7 +148,7 @@ const api: SessionApi = {
       if (requested.mode !== 'collection') {
         distributionReader = createSessionArchiveReader(undefined, preparedEncodings.zipEncoding)
         resources = await importSources(filesReady, checkpoint, { lazyArchives: true })
-        const mount = await prepareProject(resources, requested, distributionReader, checkpoint)
+        const mount = await prepareProject(resources, requested, distributionReader, checkpoint, entry)
         resources = mount.resources
         project = mount.project
         const actual = await projectIdentity(libraryLease?.record.sourceGameId ?? identity, project)

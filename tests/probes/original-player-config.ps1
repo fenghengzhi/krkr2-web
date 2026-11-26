@@ -3,7 +3,10 @@ if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hos
   throw 'External configuration reference requires a GitHub-hosted Windows runner.'
 }
 $output = Join-Path $env:GITHUB_WORKSPACE 'out/verification/native-player-config'
-$inputs = Get-Content (Join-Path $output 'inputs.json') -Raw | ConvertFrom-Json
+# The authored argument controls intentionally contain both Case and case.
+# PSCustomObject conversion rejects those JSON keys before any SDK process
+# runs; the case-sensitive JSON hashtable preserves both original controls.
+$inputs = Get-Content (Join-Path $output 'inputs.json') -Raw | ConvertFrom-Json -AsHashtable
 if ($inputs.commit -cne $env:GITHUB_SHA -or $inputs.run -cne $env:GITHUB_RUN_ID) { throw 'Input manifest identity differs.' }
 $pin = Get-Content tests/fixtures/native-reference/sdk.json -Raw | ConvertFrom-Json
 $work = Join-Path $env:RUNNER_TEMP ('krkr-config-' + [Guid]::NewGuid().ToString('N'))

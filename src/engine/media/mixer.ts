@@ -349,7 +349,7 @@ export class AudioMixer {
       const voice = this.get(id),
         settings = voice.settings
       if (command.op === 'play' && voice.asset && voice.status !== 'play') {
-        if (voice.ended || settings.position >= voice.asset.sampleCount) this.seek(voice, 0)
+        if (voice.ended || settings.position >= voice.asset.sampleCount) this.seek(voice, 0, true)
         else this.resetFilters(voice)
         voice.stream?.ready(Math.floor(settings.position), 2)
         voice.status = 'play'
@@ -357,7 +357,7 @@ export class AudioMixer {
       } else if (command.op === 'stop') {
         if (voice.asset) voice.status = 'stop'
         voice.epoch = this.nextEpoch++
-        this.seek(voice, 0)
+        this.seek(voice, 0, true)
       } else if (command.op === 'filters') {
         if (!voice.asset) throw new Error('Audio filters require an open voice')
         const previous = voice.filters ?? []
@@ -431,7 +431,7 @@ export class AudioMixer {
     voice.fade = undefined
     this.event(voice, 'fade')
   }
-  private seek(voice: Voice, position: number): void {
+  private seek(voice: Voice, position: number, rewind = false): void {
     voice.ended = false
     voice.settings.position = position
     voice.labelIndex = lowerBound(
@@ -440,7 +440,11 @@ export class AudioMixer {
       (label) => label.position,
     )
     voice.linkDirty = true
-    voice.synth?.seek(position / (voice.asset?.sampleRate ?? 44100))
+    if (voice.synth) {
+      const time = position / voice.asset!.sampleRate
+      if (rewind) voice.synth.rewind(time)
+      else voice.synth.seek(time)
+    }
     this.resetFilters(voice)
   }
   private resetFilters(voice: Voice): void {
@@ -526,13 +530,17 @@ export class AudioMixer {
         continue
       }
       if (settings.position >= asset.sampleCount) {
+        // A MIDI ProgramChange on the same tick as EOT still reaches the
+        // device. Settle only this score's due messages, without rendering an
+        // extra sample or applying future events during manual Stop/seek.
+        voice.synth?.advanceEvents(asset.sampleCount / asset.sampleRate)
         // WaveLoopManager queues labels before the decoder reports its short
         // final read; WaveImpl flushes those events before natural stop. An
         // explicit link at EOF still wins above, and manual seek/stop never
         // enter this playback boundary.
         this.labelsThrough(voice, asset.sampleCount)
         if (settings.looping) {
-          this.seek(voice, settings.position % asset.sampleCount)
+          this.seek(voice, settings.position % asset.sampleCount, true)
           continue
         }
         settings.position = asset.sampleCount

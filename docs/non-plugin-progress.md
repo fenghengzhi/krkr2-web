@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 149 批让本地文件夹和远程清单可以定位子目录中的游戏，修正图层重绘和缓存开关，以及 MIDI 循环或重播时的乐器选择。第 138、139 批的应用构建仍因视频命令类型错误失败，Windows 配置对照缺少原版进程记录。[149 实现与验证](decisions/149-wrapped-directories-paint-and-midi.md)
+
 第 148 批支持从远程目录清单打开含主包、补丁和散装资源的游戏，修正图层按钮的布尔属性与 MIDI 初始化后的首音时刻。第 135 批常规浏览器报告已收齐。136 和 137 的应用构建均在视频命令类型检查处失败。148 的提交 `22b6eaa` 已登记排队。[148 实现与验证](decisions/148-remote-games-layer-options-and-midi-reset.md) · [第 148 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45791223343)
 
 第 147 批修正补丁文件名大小写造成的章节和贴图选错、KAG 在剧情末尾清空最后一个选项，以及 MIDI 换曲失败时旧音乐被提前切断。第 135 批已取回八份常规浏览器报告，2,985 项通过、81 项失败、2 项跳过，仍缺一份 WebKit 报告。147 的提交 `457775e` 已登记排队。[147 实现与验证](decisions/147-game-patches-scenario-end-and-midi.md) · [第 147 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45788518065)

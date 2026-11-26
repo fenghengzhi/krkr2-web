@@ -88,6 +88,7 @@ export function mountApp(root: HTMLDivElement): void {
     const mode = el<HTMLSelectElement>('project-mode').value
     el('project-directory-fields').hidden = mode === 'collection'
     el('project-root-field').hidden = mode !== 'root'
+    el<HTMLInputElement>('project-exe-directory').placeholder = mode === 'auto' ? '留空自动查找游戏' : '留空表示导入根目录'
   }
   el('project-mode').addEventListener('change', updateProjectControls)
   el('remote-kind').addEventListener('change', () => {

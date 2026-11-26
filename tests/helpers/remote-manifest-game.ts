@@ -43,9 +43,7 @@ function remoteStored(){var saved=Scripts.evalStorage(kag.getBookMarkFileNameAtN
  return [saved.user.remoteProgress,saved.core.mainConductor.curLabel].join("|");}
 Debug.message("remote-manifest-game-ready");
 `
-export const remotePathsExpected = 'game://./|game://./savedata/|game://./data.xp3>startup.tjs|game://./patch.xp3>first.ks|remote literal'
-
-export async function remoteManifestGame(binary: boolean) {
+export async function remoteManifestGame(binary: boolean, gameDirectory = '') {
   const base = await readFile(new URL('../fixtures/compatibility/kag3_template.xp3', import.meta.url)),
     sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
     wide = (text: string) => Buffer.from('\ufeff' + text, 'utf16le')
@@ -59,8 +57,10 @@ export async function remoteManifestGame(binary: boolean) {
       : 'Scripts.execStorage(System.exePath+"observer.tjs");') },
     { path: 'observer.tjs', url: '/release/observer.tjs', bytes: wide(observer) },
     { path: 'extras/prompt #1.tjs', url: '/release/extras/prompt%20%231.tjs', bytes: wide('"remote literal"') },
-  ], manifest = Buffer.from(JSON.stringify({ version: 1, files: ['data.xp3',
-    { path: 'patch.xp3', url: 'packages/update.bin' }, 'AfterInit2.tjs', 'observer.tjs', 'extras/prompt #1.tjs'] })),
+  ].map((file) => ({ ...file, path: gameDirectory + file.path })),
+    manifest = Buffer.from(JSON.stringify({ version: 1, files: gameDirectory
+      ? inputs.map((file) => ({ path: file.path, url: file.url.slice('/release/'.length) }))
+      : ['data.xp3', { path: 'patch.xp3', url: 'packages/update.bin' }, 'AfterInit2.tjs', 'observer.tjs', 'extras/prompt #1.tjs'] })),
     invalid = Buffer.from(JSON.stringify({ version: 1, files: ['must-not-load.tjs', '../escape.tjs'] })),
     heldBytes = Buffer.from(JSON.stringify({ version: 1, files: ['not-started.tjs'] })),
     held: { seen: number; aborted: boolean; released: boolean; response?: ServerResponse } = { seen: 0, aborted: false, released: false },
@@ -110,7 +110,7 @@ export async function submitRemoteManifest(page: Page, url: string) {
   await page.locator('#load-url').click()
 }
 
-export function remoteManifestUi(page: Page, info: TestInfo) {
+export function remoteManifestUi(page: Page, info: TestInfo, gameDirectory = '') {
   const observations: unknown[] = [], errors: string[] = []
   let sequence = 0
   page.on('pageerror', (error) => errors.push(error.message))
@@ -141,7 +141,8 @@ export function remoteManifestUi(page: Page, info: TestInfo) {
     await expect(page.locator('#status')).toHaveText('运行中')
     await expect(canvas).toHaveCount(1)
     await expect(canvas).toHaveAttribute('width', '640'); await expect(canvas).toHaveAttribute('height', '480')
-    expect(await read('remotePaths()')).toBe(remotePathsExpected)
+    const paths = ['', 'savedata/', 'data.xp3>startup.tjs', 'patch.xp3>first.ks'].map((path) => 'game://./' + gameDirectory + path)
+    expect(await read('remotePaths()')).toBe([...paths, 'remote literal'].join('|'))
   }
   const clickLink = async (index: number, target: string) => {
     const fields = (await read(`(function(){var m=kag.current,l=m.links[${index}];
@@ -165,13 +166,13 @@ export function remoteManifestUi(page: Page, info: TestInfo) {
     expect(await download.failure()).toBeNull()
     const path = await download.path(); expect(path).not.toBeNull()
     const bytes = await readFile(path!), value = JSON.parse(bytes.toString()) as { gameId: string; files: { path: string; base64: string }[] },
-      saved = value.files.find((file) => file.path === 'savedata/manifest0.kdt')
+      saved = value.files.find((file) => file.path === gameDirectory + 'savedata/manifest0.kdt')
     await info.attach(name, { body: bytes, contentType: 'application/json' })
     expect(saved).toBeDefined()
     const slot = Buffer.from(saved!.base64, 'base64')
     expect(slot.toString('utf16le')).toContain('remoteProgress'); expect(slot.toString('utf16le')).toContain('*checkpoint')
     if (binary) {
-      const compiled = value.files.find((file) => file.path === 'savedata/remote-observer.cjs')
+      const compiled = value.files.find((file) => file.path === gameDirectory + 'savedata/remote-observer.cjs')
       expect(compiled).toBeDefined(); expect(Buffer.from(compiled!.base64, 'base64').toString('ascii', 0, 4)).toBe('TJS2')
     }
     observations.push({ backup: name, gameId: value.gameId, slotSha256: createHash('sha256').update(slot).digest('hex') })
@@ -193,7 +194,7 @@ export function remoteManifestUi(page: Page, info: TestInfo) {
       () => info.attach('remote-manifest-observations', { body: JSON.stringify({ inputs: fixture.evidence, observations, errors, extra,
         requests: fixture.server.requests, transport: fixture.server.stats(),
         held: { seen: fixture.held.seen, aborted: fixture.held.aborted, released: fixture.held.released },
-        scope: 'Unchanged original KAG system plus authored XP3 scenario and source/bytecode observer, loaded through the remote manifest form. Literal filenames and explicit relative URLs resolve from the redirected manifest URL.' }, null, 2), contentType: 'application/json' }),
+        scope: 'Unchanged original KAG system plus authored XP3 scenario and source/bytecode observer. Observations include the real loaded storage paths, chapter link targets and bookmark bytes when exported.' }, null, 2), contentType: 'application/json' }),
       () => info.attach('remote-manifest-input.json', { body: fixture.manifest, contentType: 'application/json' }),
       () => info.attach('remote-manifest-authored-source', { body: fixture.source, contentType: 'text/plain' }),
       async () => info.attach('remote-manifest-logs', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }),

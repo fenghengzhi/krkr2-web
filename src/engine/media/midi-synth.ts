@@ -73,14 +73,30 @@ export class MidiSynth {
       if (c.used) c.level = Math.trunc(c.volume * value / 127) / 127
   }
   reset(): void {
-    this.channels = Array.from({ length: 16 }, () => channel(this.bufferVolume))
+    this.resetSequence(false)
+  }
+  private resetSequence(keepPrograms: boolean): void {
+    this.channels = this.channels.map((previous) => {
+      const next = channel(this.bufferVolume)
+      if (keepPrograms) next.program = previous.program
+      return next
+    })
     this.notes = []
     this.exclusive = undefined
     this.cursor = 0
     this.time = 0
   }
   seek(time: number): void {
-    this.reset()
+    this.position(time, false)
+  }
+  /** MIDIImpl StopPlay/StartPlay rewinds tracks, silences notes and resets
+   * controllers, but sends no ProgramChange. An instrument selected later in
+   * the same song therefore remains selected on its next loop or replay. */
+  rewind(time: number): void {
+    this.position(time, true)
+  }
+  private position(time: number, keepPrograms: boolean): void {
+    this.resetSequence(keepPrograms)
     if (this.asset)
       while (
         this.cursor < this.asset.events.length &&
@@ -193,13 +209,18 @@ export class MidiSynth {
       }
     }
   }
-  render(time: number, step: number): void {
-    if (time + 1e-8 < this.time) this.seek(time)
+  /** Consume due messages without generating a sample. MIDIImpl processes
+   * every event at the final tick before noticing EOT and rewinding/stopping. */
+  advanceEvents(time: number): void {
     this.time = time
     if (this.asset)
       while (this.cursor < this.asset.events.length &&
           (this.asset.events[this.cursor]!.outputTime ?? this.asset.events[this.cursor]!.time) <= time)
         this.message(this.asset.events[this.cursor++]!)
+  }
+  render(time: number, step: number): void {
+    if (time + 1e-8 < this.time) this.seek(time)
+    this.advanceEvents(time)
     this.left = this.right = 0
     for (let i = this.notes.length - 1; i >= 0; i--) {
       const note = this.notes[i]!,
