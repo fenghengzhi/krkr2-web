@@ -36,6 +36,7 @@ export interface TextDraw {
   pixels: TextPixels
   x: number
   y: number
+  native65?: boolean
 }
 export const fontKey = (font: FontSpec): string =>
   JSON.stringify([
@@ -368,7 +369,7 @@ export class FontService {
         shadows: TextDraw[] = [],
         cache = new Map<
           number,
-          { front: TextPixels; shadow?: TextPixels; dx: number; dy: number }
+          { front: TextPixels; shadow?: TextPixels; dx: number; dy: number; native65?: boolean }
         >()
       let x = 0,
         y = 0,
@@ -387,6 +388,7 @@ export class FontService {
               left: glyph.originX + geometry.ascentX,
               top: -glyph.originY + geometry.ascentY,
               coverage: glyph.coverage,
+              native65: true,
             }
             dx = glyph.incX
             dy = spec.angle < 1800 ? -Math.abs(glyph.incY) : Math.abs(glyph.incY)
@@ -448,16 +450,16 @@ export class FontService {
                 : undefined
           bytes += front.data.length + (shadow?.data.length ?? 0)
           if (bytes > 64 * 1024 * 1024) throw new Error('Text raster exceeds 64 MiB')
-          cached = { front, shadow, dx, dy }
+          cached = { front, shadow, dx, dy, native65: mask.native65 }
           cache.set(code, cached)
         }
         if (cached.front.width && cached.front.height) {
           samples += cached.front.data.length / 4 + (cached.shadow?.data.length ?? 0) / 4
           if (samples > 64 * 1024 * 1024)
             throw new Error('Text composition exceeds 64 million samples')
-          fronts.push({ pixels: cached.front, x, y })
+          fronts.push({ pixels: cached.front, x, y, native65: cached.native65 })
           if (cached.shadow)
-            shadows.push({ pixels: cached.shadow, x: x + options.shadowX, y: y + options.shadowY })
+            shadows.push({ pixels: cached.shadow, x: x + options.shadowX, y: y + options.shadowY, native65: cached.native65 })
         }
         x += cached.dx
         y += cached.dy

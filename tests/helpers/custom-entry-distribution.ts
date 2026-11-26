@@ -41,7 +41,7 @@ function customState(){return [f.customProgress,global.customRendered,global.cus
 function customStored(){var saved=Scripts.evalStorage(kag.getBookMarkFileNameAtNum(0));return [saved.user.customProgress,saved.core.mainConductor.curLabel].join("|");}
 Debug.message("custom-entry-game-ready");
 `
-export async function customEntryDistribution(binary: boolean, container: 'zip' | 'sfx' = 'zip') {
+export async function customEntryDistribution(binary: boolean, container: 'zip' | 'sfx' | 'deflate64' = 'zip') {
   const original = await readFile(new URL('../fixtures/compatibility/kag3_template.xp3', import.meta.url)),
     hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
     originalSha256 = hash(original), wide = (text: string) => Buffer.from('\ufeff' + text, 'utf16le')
@@ -56,8 +56,30 @@ export async function customEntryDistribution(binary: boolean, container: 'zip' 
       ? 'Scripts.compileStorage(System.exePath+"observer.tjs",System.dataPath+"custom-observer.cjs",false,true,false);Scripts.execStorage(System.dataPath+"custom-observer.cjs");'
       : 'Scripts.execStorage(System.exePath+"observer.tjs");') },
     { name: 'Release/Tools/startup.tjs', bytes: wide('throw new Exception("A bundled tools sample was launched instead of boot.tjs");') },
-  ], zip = distributionZip(files.map((file) => member(file.name, file.bytes))),
+  ], inputs = files.map((file) => ({ name: file.name, bytes: file.bytes.length, sha256: hash(file.bytes) })),
     prefix = container === 'sfx' ? Buffer.alloc(4096) : Buffer.alloc(0)
+  let zip: Buffer, reference: unknown
+  if (container === 'deflate64') {
+    // The shared Ubuntu build authored and independently tested these bytes
+    // with 7-Zip. Browser runners never need to encode or install a codec.
+    const directory = new URL('../../out/verification/deflate64-games/', import.meta.url),
+      manifest = JSON.parse(await readFile(new URL('manifest.json', directory), 'utf8')) as {
+        version: number; status: string; tool: string; games: {
+          id: string; file: string; bytes: number; sha256: string; inputs: typeof inputs; methods: number[]
+          entries: { name: string; method: number }[]
+        }[]
+      }, id = binary ? 'bytecode' : 'source', record = manifest.games.find((game) => game.id === id)
+    if (manifest.version !== 1 || manifest.status !== 'complete' || !record || record.file !== id + '.zip' ||
+        record.inputs.length !== inputs.length || inputs.some((file, i) =>
+          file.name !== record.inputs[i].name || file.bytes !== record.inputs[i].bytes || file.sha256 !== record.inputs[i].sha256) ||
+        !record.methods.includes(9) || record.methods.some((method) => method !== 0 && method !== 9) ||
+        !record.entries.some((entry) => entry.method === 9 &&
+          ['Release/data/engine.xp3', 'Release/data/first.ks', 'Release/observer.tjs'].includes(entry.name)))
+      throw new Error('Shared Deflate64 game reference does not match this authored game')
+    zip = await readFile(new URL(record.file, directory))
+    if (zip.length !== record.bytes || hash(zip) !== record.sha256) throw new Error('Shared Deflate64 game bytes changed')
+    reference = { tool: manifest.tool, ...record }
+  } else zip = distributionZip(files.map((file) => member(file.name, file.bytes)))
   // This deliberately is not an executable PE image. The browser receives
   // it only as archive bytes. ZIP offsets remain relative to the ZIP payload.
   if (prefix.length) prefix.write('MZ inert SFX fixture; do not execute. ZIP starts at byte 4096.\r\n', 'ascii')
@@ -65,7 +87,7 @@ export async function customEntryDistribution(binary: boolean, container: 'zip' 
     mimeType = container === 'sfx' ? 'application/octet-stream' : 'application/zip'
   return { bytes, name, mimeType, evidence: { originalSha256, originalBytes: original.length,
     container, prefixBytes: prefix.length, prefixSha256: hash(prefix), inputSha256: hash(bytes), inputBytes: bytes.length,
-    zipSha256: hash(zip), zipBytes: zip.length,
-    files: files.map((file) => ({ name: file.name, bytes: file.bytes.length, sha256: hash(file.bytes) })),
+    zipSha256: hash(zip), zipBytes: zip.length, ...(reference ? { deflate64Reference: reference } : {}),
+    files: inputs,
     scope: 'Unmodified original KAG template in an independently named archive, started by an authored boot.tjs and public auto-path/exec APIs. An unrelated tools startup is retained as a negative control. Only the observer is compiled in the bytecode arm. The optional MZ prefix is inert input and is never executed.' } }
 }

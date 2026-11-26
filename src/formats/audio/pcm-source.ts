@@ -34,6 +34,8 @@ export const pcmSourceLimits = Object.freeze({
   oggPacketBytes: 128 * 1024,
   oggPages: 1024 * 1024,
   oggLinks: 256,
+  /** Sparse metadata only; coarsened across the whole physical stream. */
+  oggSeekPoints: 8192,
   waveChunks: 65536,
   waveLoops: 4096,
 })

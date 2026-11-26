@@ -3967,6 +3967,9 @@ export class EngineSession {
           8 + draw.x + (draw.pixels.left ?? 0),
           8 + draw.y + (draw.pixels.top ?? 0),
           0,
+          255,
+          false,
+          draw.native65,
         )
         await this.yieldGraphics()
       }
@@ -5735,7 +5738,7 @@ export class EngineSession {
           top = clipInteger(2)
         await this.finishGraphics(
           (function* () {
-            for (const { pixels, x, y } of draws) {
+            for (const { pixels, x, y, native65 } of draws) {
               if (
                 session.layers.composite(
                   id,
@@ -5743,6 +5746,7 @@ export class EngineSession {
                   left + x + (pixels.left ?? 0),
                   top + y + (pixels.top ?? 0),
                   opacity,
+                  native65,
                 )
               )
                 session.invalidateLayer(id)

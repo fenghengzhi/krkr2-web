@@ -66,13 +66,17 @@ for (const version of [0, 1])
     const { session } = await headless(
       {
         'startup.tjs':
-          setup + `a.font.mapPrerenderedFont("font.tft");a.drawText(0,0,"AB",0x123456);`,
+          setup + `a.font.mapPrerenderedFont("font.tft");var beforeInk=a.getMainPixel(1,5)+","+a.getMaskPixel(1,5);a.drawText(0,0,"AB",0x123456);`,
         'font.tft': fixture(`coverage-v${version}.tft`),
       },
       { graphics },
     )
     try {
       await session.start()
+      // The shared default image is transparent WHITE. The stock /256 mix
+      // reaches this darker source exactly; an explicitly black destination
+      // is covered separately by layer-assign-images-font and mapped-text.
+      assert.equal(await session.evaluate('beforeInk'), '16777215,0')
       assert.equal(await session.evaluate('a.getMainPixel(1,5)'), String(0x123456))
       assert.equal(await session.evaluate('a.getMainPixel(6,4)'), String(0x123456))
       assert.equal(await session.evaluate('a.getMaskPixel(1,4)'), '64')

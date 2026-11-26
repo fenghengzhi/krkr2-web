@@ -8,9 +8,11 @@ export interface DeflateRange {
   offset: number | (() => Promise<number>)
   size: number
   stored: number
-  /** ZIP method 8 has raw framing and a CRC in its central directory.
+  /** ZIP methods 8 and 9 have raw framing and a CRC in its central directory.
    * XP3 segments use zlib's embedded integrity check. */
   zip?: { name: string; crc32: number }
+  /** Method-specific decoding shares the same range, integrity and cache lifecycle. */
+  decode?: (source: ByteSource, start: number, length: number, check: Checkpoint) => AsyncGenerator<Uint8Array>
 }
 type Checkpoint = () => void | Promise<void>
 type InflateChunks = (source: ByteSource, start: number, length: number, check: Checkpoint, format: 'deflate' | 'deflate-raw') => AsyncGenerator<Uint8Array>
@@ -135,7 +137,8 @@ export class DeflateRangePool {
           await previous?.close()
           const offset = typeof segment.offset === 'number' ? segment.offset : await segment.offset()
           await check()
-          const stream = this.inflate(source, offset, segment.stored, check, segment.zip ? 'deflate-raw' : 'deflate')
+          const stream = segment.decode ? segment.decode(source, offset, segment.stored, check)
+            : this.inflate(source, offset, segment.stored, check, segment.zip ? 'deflate-raw' : 'deflate')
           cursor = new SegmentCursor(segment, stream, check, full && !!segment.zip)
         }
         if (full) await cursor.finish(start, buffer)

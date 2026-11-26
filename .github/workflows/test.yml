@@ -208,6 +208,8 @@ jobs:
     outputs:
       legacy-fixtures: ${{ steps.legacy-fixtures.outcome }}
       windows-media-fixtures: ${{ steps.windows-media-fixtures.outcome }}
+      deflate64-fixtures: ${{ steps.deflate64-fixtures.outcome }}
+      long-vorbis-fixture: ${{ steps.long-vorbis-fixture.outcome }}
     steps:
       - name: Reject conflicting diagnostic selections
         if: ${{ inputs.node-only && inputs.runtime-only }}
@@ -300,6 +302,15 @@ jobs:
           exit "$failed"
       - name: Build offline update fixtures
         run: node scripts/build-pwa-fixtures.mjs 2>&1 | tee out/ci/pwa-build.log
+      - name: Independently encode and read back Deflate64 games
+        id: deflate64-fixtures
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          mkdir -p out/verification/deflate64-games
+          sudo apt-get update 2>&1 | tee out/ci/deflate64-apt-update.log
+          sudo apt-get install -y 7zip 2>&1 | tee out/ci/deflate64-apt-install.log
+          node --import tsx scripts/generate-deflate64-game-fixtures.mjs 2>&1 | tee out/ci/deflate64-fixtures.log
       - name: Install independent movie fixture encoders
         run: |
           sudo apt-get update
@@ -315,6 +326,12 @@ jobs:
           mkdirSync(directory, { recursive: true })
           generateWindowsMediaFixtures(directory)
           JS
+      - name: Encode and independently decode long Vorbis music
+        id: long-vorbis-fixture
+        continue-on-error: true
+        run: |
+          mkdir -p out/verification/long-vorbis
+          node scripts/generate-long-vorbis-fixture.mjs 2>&1 | tee out/ci/long-vorbis-fixture.log
       - name: Generate shared project-owned video track fixtures
         run: |
           node scripts/generate-video-track-fixtures.mjs 2>&1 | tee out/ci/video-track-fixtures.log
@@ -356,6 +373,8 @@ jobs:
             public/licenses/image-zlib public/licenses/image-jpeg public/licenses/legacy-media \
             out/verification/pwa/site-a out/verification/pwa/site-b \
             out/verification/pwa/fixture-artifacts.json out/verification/video-tracks \
+            out/verification/deflate64-games \
+            out/verification/long-vorbis \
             out/verification/jpeg-fixtures/inputs \
             out/verification/jpeg-fixtures/case-manifest.json out/verification/jpeg-fixtures/codes.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -371,12 +390,28 @@ jobs:
           path: out/ci/
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.deflate64-fixtures.outcome == 'success' || steps.deflate64-fixtures.outcome == 'failure') }}
+        with:
+          name: deflate64-fixture-evidence
+          path: |
+            out/verification/deflate64-games/
+            out/ci/deflate64*.log
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() && (steps.windows-media-fixtures.outcome == 'success' || steps.windows-media-fixtures.outcome == 'failure') }}
         with:
           name: windows-media-fixture-evidence
           path: |
             out/verification/video-tracks/windows-media*
             out/verification/video-tracks/legacy-wmv*
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.long-vorbis-fixture.outcome == 'success' || steps.long-vorbis-fixture.outcome == 'failure') }}
+        with:
+          name: long-vorbis-fixture-evidence
+          path: out/verification/long-vorbis/
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -392,6 +427,27 @@ jobs:
             out/verification/video-tracks/legacy-authored.*
           if-no-files-found: error
           retention-days: 90
+
+  deflate64-fixture-result:
+    name: Independent Deflate64 fixture verification
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require complete 7-Zip games and multi-window reference
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.deflate64-fixtures }}
+        run: test "$FIXTURE_OUTCOME" = success
+
+  long-vorbis-fixture-result:
+    name: Independent long Vorbis music fixture verification
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require the full long music reference
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.long-vorbis-fixture }}
+        run: test "$FIXTURE_OUTCOME" = success
 
   legacy-fixture-result:
     name: Independent legacy movie fixture verification
@@ -844,7 +900,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, legacy-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
+    needs: [build, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

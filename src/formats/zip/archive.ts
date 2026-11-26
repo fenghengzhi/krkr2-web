@@ -1,6 +1,7 @@
 import { BinaryReader } from '../binary/reader.ts'
 import { checkedCrc32 } from '../binary/crc32.ts'
-import type { DeflateRange, DeflateRangePool } from '../binary/deflate-ranges.ts'
+import { inflateDeflate64 } from './deflate64.ts'
+import { type DeflateRange, DeflateRangePool } from '../binary/deflate-ranges.ts'
 import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import type { ByteSource, Inflater, Resource } from '../../engine/ports/storage.ts'
@@ -274,6 +275,7 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs,
     boundaries = new Map(
       offsets.map((offset, index) => [offset, offsets[index + 1] ?? centralOffset]),
     )
+  let method9Ranges: DeflateRangePool | undefined
   return entries
     .filter((entry) => !entry.directory)
     .map((entry): ZipResource => {
@@ -281,7 +283,7 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs,
         const { name, flags, method } = entry
         if (entry.symlink) throw new Error(`ZIP symbolic links are not supported: ${name}`)
         if (flags & 0x2041) throw new Error(`Encrypted ZIP member is not supported: ${name}`)
-        if (method !== 0 && method !== 8)
+        if (method !== 0 && method !== 8 && method !== 9)
           throw new Error(`Unsupported ZIP compression method ${method}: ${name}`)
         if (flags & ~0x80e) throw new Error(`Unsupported ZIP member flags: ${name}`)
       }
@@ -379,7 +381,9 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs,
       // cancellation never rejects or poisons another reader's shared flight.
       const verifyStored = () => verified ??= Promise.resolve().then(() => scanStored())
       const readable = !entry.symlink && !(entry.flags & ~0x80e) && !(entry.flags & 0x2041)
-      const pool = readable && entry.method === 8 ? codecs.compressedRanges : undefined
+      const pool = !readable ? undefined : entry.method === 9
+        ? codecs.compressedRanges ?? (method9Ranges ??= new DeflateRangePool(inflateDeflate64, false))
+        : entry.method === 8 ? codecs.compressedRanges : undefined
       let position: Promise<number> | undefined, compressed: DeflateRange | undefined
       const range: ByteSource | undefined = readable && ((entry.method === 0 && entry.size === entry.stored) || pool) ? {
         size: entry.size,
@@ -400,6 +404,7 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs,
           compressed ??= {
             offset: () => position ??= locate().catch((error: unknown) => { position = undefined; throw error }),
             size: entry.size, stored: entry.stored, zip: { name: entry.name, crc32: entry.checksum },
+            ...(entry.method === 9 && { decode: inflateDeflate64 }),
           }
           const output = new Uint8Array(length)
           await pool.read(source, compressed, offset, output, check)

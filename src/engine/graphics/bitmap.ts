@@ -7,6 +7,7 @@ import { gammaTable, type GammaChannel } from './gamma.ts'
 import { convertAlpha, grayscale } from './processing.ts'
 import { ImagePlane, type CheckImageShare } from './image-plane.ts'
 import { TvpError } from '../system/tvp-error.ts'
+import { colorMap65Row } from './glyph-color.ts'
 
 export const intersect = (a: Rect, b: Rect): Rect => {
   const x = Math.max(a.x, b.x),
@@ -363,6 +364,7 @@ export class Bitmap extends ImagePlane {
     face: number,
     opacity = 255,
     holdAlpha = false,
+    native65 = false,
   ): boolean {
     opacity = textOpacity(face, opacity)
     // Native DrawText returns before font/raster work when opacity clamps to
@@ -372,6 +374,13 @@ export class Bitmap extends ImagePlane {
     if (!area.width || !area.height) return false
     this.independ()
     const data = this.storage.data
+    if (native65) {
+      for (let y = area.y; y < area.y + area.height; y++)
+        colorMap65Row(data, (y * this.width + area.x) * 4, image.data,
+          ((y - top) * image.width + area.x - left) * 4, area.width, face, opacity, holdAlpha)
+      this.touch()
+      return true
+    }
     for (let y = area.y; y < area.y + area.height; y++)
       for (let x = area.x; x < area.x + area.width; x++) {
         const src = ((y - top) * image.width + x - left) * 4,

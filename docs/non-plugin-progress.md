@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 159 批补齐 Deflate64 游戏包与存档导入，改进长 Ogg 配乐的跳转和预渲染字幕的混合。第 158 批原版图形对照已取回，113/113 匹配。其主浏览器结果在此次快照中尚未报告。[159 实现与托管证据](decisions/159-deflate64-games-vorbis-seek-and-text.md)
+
 第 158 批增加自解压 ZIP、Windows Media 过场，并修正字体测量。第 157 批的四项原版字体差异指向丢弃返回值时的行为，本批增加针对性对照。第 155 至 157 批的主浏览器验收均被跳过。[158 实现与托管证据](decisions/158-executable-zip-windows-media-and-font-calls.md)
 
 提交 `355ed18` 的托管验证登记时为 `queued`。结果留到下一批取回。[第 158 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45821629019)

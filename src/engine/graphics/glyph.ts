@@ -5,7 +5,11 @@ export interface GlyphMask {
   left: number
   top: number
   coverage: Uint8Array
+  /** Mapped TFT coverage is encoded losslessly as min(255, nativeLevel * 4). */
+  native65?: boolean
 }
+const decode65 = (value: number) => value === 255 ? 64 : value >>> 2
+const encode65 = (level: number) => Math.min(255, level * 4)
 export function* colorGlyph(mask: GlyphMask, color: number): Generator<void, TextPixels> {
   const data = new Uint8Array(mask.coverage.length * 4)
   for (let i = 0; i < mask.coverage.length; i++) {
@@ -26,7 +30,9 @@ export function* shadowGlyph(
   if (level === 255 && signedWidth === 0) return mask
   const radius = Math.abs(signedWidth)
   if (!radius) {
-    const coverage = Uint8Array.from(mask.coverage, (value) => (value * level) >> 8)
+    const coverage = Uint8Array.from(mask.coverage, (value) => mask.native65
+      ? encode65((decode65(value) * level) >> 8)
+      : (value * level) >> 8)
     return { ...mask, coverage }
   }
   const width = mask.width + radius * 2,
@@ -55,12 +61,13 @@ export function* shadowGlyph(
       const src = sy * mask.width,
         dest = (y + sy + radius) * width + x + radius
       for (let sx = 0; sx < mask.width; sx++)
-        coverage[dest + sx] = Math.min(
-          255,
-          coverage[dest + sx]! + ((mask.coverage[src + sx]! * amount) >> 18),
-        )
+        if (mask.native65) {
+          const value = mask.coverage[src + sx]!, existing = coverage[dest + sx]!
+          coverage[dest + sx] = encode65(decode65(existing) + ((decode65(value) * amount) >> 18))
+        } else coverage[dest + sx] = Math.min(255, coverage[dest + sx]! + ((mask.coverage[src + sx]! * amount) >> 18))
       yield
     }
   }
-  return { width, height, left: mask.left - signedWidth, top: mask.top - signedWidth, coverage }
+  return { width, height, left: mask.left - signedWidth, top: mask.top - signedWidth, coverage,
+    ...(mask.native65 && { native65: true }) }
 }

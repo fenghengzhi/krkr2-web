@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 159 批接入 Deflate64 压缩的游戏及存档 ZIP，改进长 Ogg 配乐定位，并按原版的 65 级字形覆盖度绘制预渲染字幕。新增行为等待托管验证。[159 实现与验证](docs/decisions/159-deflate64-games-vorbis-seek-and-text.md)
+
 第 158 批接入 ZIP 格式自解压游戏和 WMV 7／8 过场，并按原版行为修正游戏脚本丢弃文字尺寸返回值时的对白排版。新增行为等待托管验证。[158 实现与验证](docs/decisions/158-executable-zip-windows-media-and-font-calls.md)
 
 第 157 批让玩家在更新后的游戏中复制同一浏览器里的旧版存档，同时修正影片帧标记回调和空对白行的高度。新增行为等待托管验证。[157 实现与验证](docs/decisions/157-game-version-saves-and-playback.md)

@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 159 批加入 ZIP 方法 9，支持从此类发行包读取游戏，以及导入用该方法压缩的原版存档。Ogg 配乐可借助页索引跳转，预渲染 TFT 字体采用 65 级覆盖度混合。新增行为等待托管验收。[159 范围与验证](../decisions/159-deflate64-games-vorbis-seek-and-text.md)
+
 第 158 批在自动模式下可从 ZIP 格式的自解压 EXE 读取游戏，并支持含 WMV1／WMV2 视频的 ASF 过场。字体度量按脚本是否取用结果决定是否更新文字尺寸缓存。新增行为等待托管验收。[158 范围与验证](../decisions/158-executable-zip-windows-media-and-font-calls.md)
 
 第 157 批支持暂停后从此浏览器内另一版本的存档目录复制文件，默认保留当前版本的同名文件。图层影片按每帧回调执行后的标记触发时间点，图层空文本高度跟随位图最近一次度量。新增行为等待托管验收。[157 范围与验证](../decisions/157-game-version-saves-and-playback.md)
@@ -345,7 +347,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 - `Scripts.compileStorage(input, output, result=false, debug=false, expression=false)`、`getClassNames(object)`、`setCallMissing(object)`、`textEncoding`；原生类、编译输出和编码边界见 [原生 Scripts](../decisions/032-native-scripts.md)。
 - `Scripts.execStorage/evalStorage(name, mode, context)` 和 `Scripts.exec/eval(source, name, lineOffset, context)`，支持嵌套执行、上下文和来源行偏移。
 - `Storages.isExistentStorage(name)`、`Storages.addAutoPath/removeAutoPath(directory)`、`getPlacedPath`、路径提取函数。
-- ZIP 支持 stored/deflate、ZIP64、UTF-8/CP437/Unicode Path、按需读取与 CRC 校验，提供普通名称和 `archive>entry` 地址。无效写入目标在 TJS 创建文本/二进制流时预检；原始归档保持只读。详见 [ZIP 资源决策](../decisions/015-zip-storage.md)。
+- ZIP 支持 stored、Deflate、ZIP64、UTF-8/CP437/Unicode Path、按需读取与 CRC 校验。第 159 批新增的 Deflate64 读取等待托管验证。成员提供普通名称和 `archive>entry` 地址。无效写入目标在 TJS 创建文本/二进制流时预检；原始归档保持只读。详见 [ZIP 资源决策](../decisions/015-zip-storage.md)。
 - `Window`：尺寸/位置/显示偏移/缩放、外观属性、`add/remove` 管理对象、`onResize`、`onCloseQuery/close`、`showModal`、`menu`、`primaryLayer`。只读 `mainWindow` 返回实际主窗口实例或 null，类／派生类／实例均可查询；登记不额外持有窗口，失效开始即撤销查询身份，详见 [047](../decisions/047-window-main-instance.md)。新窗口初始不可见，普通显示需设置 `visible=true`；`showModal()` 要求进入前保持隐藏且非全屏，调用期间继续处理输入和计时事件，接受关闭后隐藏并解除阻塞，详见 [052](../decisions/052-modal-scopes.md)。多个存活窗口分别登记，主窗口和当前活动窗口分开；默认关闭主窗口退出会话，exitOnWindowClose=false 可保留其他窗口。画布就绪与生命周期见 [051](../decisions/051-multiwindow.md)。
 - `Layer`：尺寸/图像尺寸与偏移、`setSizeToImageSize/setClip`、`fillRect/colorRect/copyRect/assignImages`、`loadImages`、`drawText`、像素访问、parent/children、order/absolute、moveBefore/moveBehind、翻转、命中及显式销毁。
 - `Layer.neutralColor`：每实例保存低 32 位 ARGB，设置本身不改现有像素或请求重绘；扩容、主图重新分配及仿射 clear 使用该值，真正改变 type 时恢复类型默认值。无主图 opaque 图层仍填色并参与祖先快照；`piledCopy` 在 onPaint 前拒绝无主图的来源或目标。详见[决策 046](../decisions/046-layer-neutral-color.md)。

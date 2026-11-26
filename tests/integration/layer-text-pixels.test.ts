@@ -70,7 +70,9 @@ reset(a,dfOpaque,false);reset(b,dfOpaque,true);
 a.drawText(0,0,"A",0xabcdef);b.drawText(0,0,"A",0xabcdef);
 for(var y=4;y<6;y++)for(var x=0;x<3;x++) {
   opaqueRGB=opaqueRGB && a.getMainPixel(x,y)==b.getMainPixel(x,y);
-  opaqueMasks=opaqueMasks && a.getMaskPixel(x,y)==0 && b.getMaskPixel(x,y)==64;
+  // Stock Win32 full-opacity colormap interpolates the destination mask;
+  // HDA retains it. Glyph A's native levels are 0,16,32 / 48,64,64.
+  opaqueMasks=opaqueMasks && a.getMaskPixel(x,y)==[64,48,32,16,0,0][(y-4)*3+x] && b.getMaskPixel(x,y)==64;
 }
 var outsideMask=a.getMaskPixel(3,4),zeroCoverageColor=a.getMainPixel(0,4);
 `,

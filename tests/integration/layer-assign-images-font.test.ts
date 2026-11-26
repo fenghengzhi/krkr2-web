@@ -145,10 +145,10 @@ ${sourceImage ? 'var afterSourceCoverage=coverage(source),afterSourceColor=sourc
             if (sourceImage) assert.equal(await session.evaluate('copiedCoverage'), sourceCoverage)
             assert.equal(await session.evaluate('afterWidths'), '6,6,6')
             assert.equal(await session.evaluate('afterTargetCoverage'), targetCoverage)
-            assert.equal(await session.evaluate('afterTargetColor'), String(0x123456))
+            assert.equal(await session.evaluate('afterTargetColor'), String(0x113355))
             if (sourceImage) {
               assert.equal(await session.evaluate('afterSourceCoverage'), sourceCoverage)
-              assert.equal(await session.evaluate('afterSourceColor'), String(0xabcdef))
+              assert.equal(await session.evaluate('afterSourceColor'), String(0xaaccee))
             }
           } finally {
             await stop()

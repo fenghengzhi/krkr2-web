@@ -1,18 +1,22 @@
 // TVP scalar colorRect arithmetic (tvpgl.cpp / tvpgl.h): 8-bit fixed-point
 // factors and the original opacity table. This deliberately is not CSS blending.
-export const opacityTable = new Uint8Array(65536)
-for (let source = 0; source < 256; source++)
-  for (let destination = 0; destination < 256; destination++) {
-    let weight = 255
-    if (destination) {
-      const a = Math.fround(destination / 255),
-        b = Math.fround(source / 255)
-      let c = Math.fround(b / a)
-      c = Math.fround(c / (1 - b + c))
-      weight = Math.min(255, Math.trunc(Math.fround(c * 255)))
+export function makeOpacityTable(maxSource: 64 | 255): Uint8Array {
+  const table = new Uint8Array((maxSource + 1) * 256)
+  for (let source = 0; source <= maxSource; source++)
+    for (let destination = 0; destination < 256; destination++) {
+      let weight = 255
+      if (destination) {
+        const a = Math.fround(destination / 255),
+          b = Math.fround(source / maxSource)
+        let c = Math.fround(b / a)
+        c = Math.fround(c / (1 - b + c))
+        weight = Math.min(255, Math.trunc(Math.fround(c * 255)))
+      }
+      table[source * 256 + destination] = weight
     }
-    opacityTable[source * 256 + destination] = weight
-  }
+  return table
+}
+export const opacityTable = makeOpacityTable(255)
 export function blendColor(
   data: Uint8Array,
   at: number,

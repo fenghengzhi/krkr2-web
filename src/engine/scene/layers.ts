@@ -899,7 +899,7 @@ export class LayerTree {
     this.bitmap(id)
     return textOpacity(this.face(id), opacity)
   }
-  composite(id: number, image: Pixels, left: number, top: number, opacity = 255): boolean {
+  composite(id: number, image: Pixels, left: number, top: number, opacity = 255, native65 = false): boolean {
     const layer = this.get(id),
       bitmap = this.bitmap(id),
       face = this.face(id)
@@ -910,6 +910,7 @@ export class LayerTree {
       face,
       opacity,
       layer.holdAlpha,
+      native65,
     )
     if (drawn) layer.imageModified = true
     return drawn

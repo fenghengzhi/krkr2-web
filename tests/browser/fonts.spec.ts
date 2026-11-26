@@ -27,6 +27,7 @@ Debug.message("file-width="+a.font.getTextWidth("AV"));
 a.drawText(0,0,"AV",0xffffff);
 a.font.mapPrerenderedFont("coverage-v1.tft");
 Debug.message("mapped-width="+b.font.getTextWidth("AB"));
+var mappedBefore=a.getMainPixel(21,15);
 a.drawText(20,0,"AB",0x123456);
 a.saveLayerImage("savedata/font.bmp","bmp32");
 Debug.message("fonts-ready");
@@ -39,6 +40,7 @@ Debug.message("fonts-ready");
     await expect(page.locator('#logs')).toContainText('file-width=24')
     await expect(page.locator('#logs')).toContainText('mapped-width=11')
     await expect(page.locator('#logs')).toContainText('fonts-ready')
+    await evaluate(page, 'mappedBefore', '16777215')
     await evaluate(page, 'a.getMainPixel(21,15)', String(0x123456))
     await evaluate(page, 'a.getMaskPixel(21,14)', '64')
     await evaluate(

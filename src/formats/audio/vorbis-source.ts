@@ -10,7 +10,9 @@ interface PageHeader {
 interface VorbisLink {
   start: number; end: number; serial: number; position: number; samples: number
   channels: number; rate: number; origin: number; skip: number
+  headerEnd: number; seekPoints: VorbisSeekPoint[]
 }
+interface VorbisSeekPoint { start: number; sequence: number; granule: number }
 interface DecodedBlock { position: number; data: Float32Array[] }
 const unknownGranule = 0xffffffffffffffffn
 const speakerOrder: Record<number, number[]> = {
@@ -35,19 +37,23 @@ async function pageHeader(context: PcmSourceContext, start: number, end: number)
 
 /** Only headers/lacing and the first 30 bytes of each Vorbis header are read.
  * Data pages are skipped by offset. No encoded-file or decoded-PCM allocation
- * is proportional to duration; the bounded index records logical links only. */
+ * is proportional to duration. A bounded, adaptively coarsened index records
+ * complete audio-page starts and their ending granules, not encoded packets. */
 async function scanLinks(context: PcmSourceContext): Promise<VorbisLink[] | undefined> {
-  const links: VorbisLink[] = []
-  let at = 0, pages = 0
+  const links: VorbisLink[] = [], indexes: VorbisSeekPoint[][] = []
+  let at = 0, pages = 0, pointCount = 0, spacingSeconds = 1
   while (at < context.source.size) {
     if (links.length >= pcmSourceLimits.oggLinks) throw new Error('Ogg logical stream budget exceeded')
     const start = at
     let serial: number | undefined, sequence = 0, packetLength = 0, packet = 0,
-      prefixLength = 0, rate = 0, channels = 0, ended = false, lastGranule = 0n
+      prefixLength = 0, rate = 0, channels = 0, ended = false, lastGranule = 0n, headerEnd = 0
+    const seekPoints: VorbisSeekPoint[] = []
+    indexes.push(seekPoints)
     const prefix = new Uint8Array(30)
     while (at < context.source.size) {
       if (++pages > pcmSourceLimits.oggPages) throw new Error('Ogg page budget exceeded')
       const page = await pageHeader(context, at, context.source.size)
+      const packetsBefore = packet
       if (serial === undefined) {
         if (!(page.flags & 2) || (page.flags & 1) || page.sequence !== 0)
           throw new Error('Ogg logical stream must begin with an initial page')
@@ -94,13 +100,35 @@ async function scanLinks(context: PcmSourceContext): Promise<VorbisLink[] | unde
         if (page.granule < lastGranule) throw new Error('Ogg granule position moved backwards')
         lastGranule = page.granule
       }
+      // Only restart after headers ending on a complete page. Less usual
+      // header/audio cohabitation keeps the existing exact sequential path.
+      if (packet === 3 && packetLength === 0) headerEnd = page.end
+      if (headerEnd && page.start >= headerEnd && packetsBefore >= 3 && packet > packetsBefore &&
+          !(page.flags & (1 | 4)) && page.granule !== unknownGranule &&
+          page.granule <= BigInt(Number.MAX_SAFE_INTEGER)) {
+        if (pointCount === pcmSourceLimits.oggSeekPoints) {
+          // Keep coverage over the entire long song instead of exhausting
+          // the index near its beginning. At most 256 logical-link first
+          // anchors survive a coarsening without another point being removed.
+          pointCount = 0; spacingSeconds *= 2
+          for (const points of indexes) {
+            let kept = 0
+            for (let i = 0; i < points.length; i += 2) points[kept++] = points[i]!
+            points.length = kept; pointCount += kept
+          }
+        }
+        const granule = Number(page.granule), previous = seekPoints.at(-1)
+        if (!previous || granule - previous.granule >= rate * spacingSeconds) {
+          seekPoints.push({ start: page.start, sequence: page.sequence, granule }); pointCount++
+        }
+      }
       at = page.end
       if (page.flags & 4) {
         if (packetLength || packet < 3 || page.granule === unknownGranule ||
             page.granule > BigInt(Number.MAX_SAFE_INTEGER))
           throw new Error('Invalid Vorbis end-of-stream position')
         const samples = Number(page.granule)
-        links.push({ start, end: at, serial, position: 0, samples, rate, channels, origin: 0, skip: 0 })
+        links.push({ start, end: at, serial, position: 0, samples, rate, channels, origin: 0, skip: 0, headerEnd, seekPoints })
         ended = true
         break
       }
@@ -122,11 +150,15 @@ function verifyPageChecksum(bytes: Uint8Array): void {
 
 /** A parser iterator is drained between chunks. At most one encoded page and
  * one continued packet are retained; the pre-scan and replay both bound packets. */
-async function* parsedPages(context: PcmSourceContext, link: VorbisLink): AsyncGenerator<OggPage> {
+async function* parsedPages(context: PcmSourceContext, link: VorbisLink, seek?: VorbisSeekPoint): AsyncGenerator<OggPage> {
   const parser = new CodecParser<OggPage>('audio/ogg', { enableFrameCRC32: false, enableLogging: false,
     onCodec(codec) { if (codec !== 'vorbis') throw new Error('Vorbis source codec changed while reading') } })
   let at = link.start, sequence = 0, packetLength = 0, finalSequence = -1
   while (at < link.end) {
+    if (seek && at === link.headerEnd) {
+      if (packetLength) throw new Error('Vorbis seek headers ended inside a packet')
+      at = seek.start; sequence = seek.sequence
+    }
     const page = await pageHeader(context, at, link.end)
     if (page.serial !== link.serial || page.sequence !== sequence++ ||
         !!(page.flags & 1) !== (packetLength > 0) || !!(page.flags & 2) !== (at === link.start) ||
@@ -235,10 +267,12 @@ class VorbisPcmSource extends OwnedPcmSource {
       channels: first.channels, bits: 16, loops: emptyLoops() }, context)
   }
 
-  /** Replaying from the logical link's beginning preserves decoder overlap and
-   * priming exactly. Backward seeks cost O(prefix); this is not a granule-anchor
-   * approximation. Chained links receive separate decoders and parser state. */
-  private async *decodeLink(link: VorbisLink): AsyncGenerator<DecodedBlock> {
+  /** Vorbis I 4.3.8/A.2 permits restart at a complete packet after setup.
+   * Decode an entire preceding page to prime overlap, then derive its output
+   * origin from its actual ending granule and fresh parser packet spans. This
+   * discards priming PCM; it never synthesizes a sample or approximates a seek.
+   * Each restart still rereads/checks real headers and every page it consumes. */
+  private async *decodeLink(link: VorbisLink, seek?: VorbisSeekPoint): AsyncGenerator<DecodedBlock> {
     await this.context.checkpoint()
     const { OggVorbisDecoder: Decoder } = await import('@wasm-audio-decoders/ogg-vorbis')
     this.context.assertOpen()
@@ -248,9 +282,16 @@ class VorbisPcmSource extends OwnedPcmSource {
       await decoder.ready
       ready = true
       this.context.assertOpen()
-      for await (const page of parsedPages(this.context, link)) {
-        const nominal = nominalSamples(page), granule = BigInt(page.absoluteGranulePosition),
-          expected = BigInt(position + nominal) + BigInt(link.origin) - BigInt(link.skip),
+      for await (const page of parsedPages(this.context, link, seek)) {
+        const nominal = nominalSamples(page), granule = BigInt(page.absoluteGranulePosition)
+        if (seek && page.pageSequenceNumber === seek.sequence) {
+          if (granule !== BigInt(seek.granule) || page.isLastPage || !page.codecFrames.length)
+            throw new Error('Vorbis seek page changed while reading')
+          position = seek.granule - link.origin + link.skip - nominal
+          if (!Number.isSafeInteger(position) || position < 0)
+            throw new Error('Vorbis seek page has an invalid PCM origin')
+        }
+        const expected = BigInt(position + nominal) + BigInt(link.origin) - BigInt(link.skip),
           primingOnly = !position && !nominal && !page.isLastPage && granule === 0n
         if (page.codecFrames.length && !primingOnly && (granule < 0n || granule === unknownGranule ||
             (!page.isLastPage && granule !== expected) || (page.isLastPage && granule > expected)))
@@ -295,10 +336,22 @@ class VorbisPcmSource extends OwnedPcmSource {
     }
   }
 
-  private async resetLink(index: number): Promise<void> {
+  private seekPoint(link: VorbisLink, wanted: number): VorbisSeekPoint | undefined {
+    const target = wanted + link.origin, points = link.seekPoints
+    let low = 0, high = points.length
+    while (low < high) {
+      const middle = (low + high) >>> 1
+      if (points[middle]!.granule <= target) low = middle + 1
+      else high = middle
+    }
+    const found = points[low - 1]
+    // A separately paged initial priming packet can precede a nonzero origin.
+    return found && found.granule > link.origin ? found : undefined
+  }
+  private async resetLink(index: number, seek?: VorbisSeekPoint): Promise<void> {
     if (this.blocks) await this.blocks.return(undefined)
     this.blocks = undefined; this.block = undefined; this.linkIndex = index
-    if (index >= 0) this.blocks = this.decodeLink(this.links[index]!)
+    if (index >= 0) this.blocks = this.decodeLink(this.links[index]!, seek)
   }
   protected async readFrames(position: number, frames: number): Promise<Float32Array[]> {
     const result = Array.from({ length: this.info.channels }, () => new Float32Array(frames))
@@ -308,8 +361,10 @@ class VorbisPcmSource extends OwnedPcmSource {
           index = this.links.findIndex((link) => absolute >= link.position && absolute < link.position + link.samples),
           link = this.links[index]!
         if (index < 0) throw new Error('Vorbis sample is outside all logical streams')
-        const wanted = absolute - link.position
-        if (index !== this.linkIndex || (this.block && wanted < this.block.position)) await this.resetLink(index)
+        const wanted = absolute - link.position, seek = this.seekPoint(link, wanted)
+        if (index !== this.linkIndex || (this.block && (wanted < this.block.position ||
+            (seek && seek.granule - link.origin > this.block.position + this.block.data[0]!.length))))
+          await this.resetLink(index, seek)
         while (!this.block || wanted >= this.block.position + this.block.data[0]!.length) {
           const next = await this.blocks!.next()
           if (next.done) throw new Error('Vorbis decoded length disagrees with its end position')

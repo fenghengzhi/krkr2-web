@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { test, expect } from '../helpers/library-browser.ts'
 import { customEntryDistribution, customEntryObserver, customEntryPaths, customEntryStory } from '../helpers/custom-entry-distribution.ts'
 
-for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) for (const container of ['zip', 'sfx'] as const)
+for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) for (const container of ['zip', 'sfx', 'deflate64'] as const)
   test(`${backend}/${binary ? 'bytecode' : 'source'}/${container}: a chosen ZIP entry launches the original game and retains its route when reopened from the library`, async ({ page }, info) => {
     test.setTimeout(150000)
     const failures: unknown[] = [], errors: string[] = [], observations: unknown[] = []
@@ -116,7 +116,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
     } catch (error) { failures.push(error) }
     for (const report of [
       () => info.attach('custom-entry-observations', { body: JSON.stringify({ input: fixture.evidence, observations, errors,
-        scope: 'Player-selected ZIP startup, including inert MZ-prefixed EXE archive input, unmodified original KAG system, real route/save/load links, frozen library project/entry and unchanged native bookmark bytes after a full refresh. The host never executes the input stub.' }, null, 2), contentType: 'application/json' }),
+        scope: 'Player-selected ZIP startup, including inert MZ-prefixed EXE and shared 7-Zip Deflate64 input, unmodified original KAG system, real route/save/load links, frozen library project/entry and unchanged native bookmark bytes after a full refresh. The host never executes the input stub.' }, null, 2), contentType: 'application/json' }),
       () => info.attach('custom-entry-input', { body: fixture.bytes, contentType: fixture.mimeType }),
       () => info.attach('custom-entry-source', { body: customEntryStory + '\n' + customEntryObserver, contentType: 'text/plain' }),
       async () => info.attach('custom-entry-logs', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }),

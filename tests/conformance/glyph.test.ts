@@ -40,3 +40,15 @@ test('glyph coloring preserves every coverage byte and excludes color alpha', ()
   for (let i = 0; i < mask.coverage.length; i++)
     assert.deepEqual([...pixels.data.subarray(i * 4, i * 4 + 4)], [18, 52, 86, mask.coverage[i]])
 })
+
+test('mapped TFT shadows retain their native 65-level rounding before expansion to public RGBA', () => {
+  const row = [0,64,128,192,255,192,64,0], glyph = { width: 8, height: 3, left: 0, top: 0,
+    native65: true, coverage: Uint8Array.from([...row, ...row, ...row]) }
+  const half = finish(shadowGlyph(glyph, 128, 0))
+  assert.equal(half.native65, true)
+  assert.deepEqual([...half.coverage.slice(0, 8)], [0,32,64,96,128,96,32,0])
+  const blurred = finish(shadowGlyph(glyph, 255, 1))
+  assert.equal(blurred.native65, true)
+  assert.deepEqual([blurred.width, blurred.height, blurred.left, blurred.top], [10,5,-1,-1])
+  assert.deepEqual([...blurred.coverage.slice(20, 30)], [0,12,56,108,176,192,152,68,12,0])
+})
