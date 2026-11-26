@@ -14,7 +14,7 @@ var fragmentRoot=new Layer(fragmentWindow,null);fragmentWindow.add(fragmentRoot)
 var fragmentImage=new Layer(fragmentWindow,fragmentRoot),fragmentCopy=new Layer(fragmentWindow,fragmentRoot);
 fragmentWindow.add(fragmentImage);fragmentWindow.add(fragmentCopy);fragmentImage.visible=fragmentCopy.visible=true;fragmentCopy.left=80;
 var fragmentMovie=new VideoOverlay(fragmentWindow);fragmentMovie.mode=vomLayer;fragmentMovie.layer1=fragmentImage;fragmentMovie.layer2=fragmentCopy;fragmentMovie.visible=true;
-fragmentMovie.open("cutscene.mp4");fragmentMovie.loop=true;fragmentMovie.pause();fragmentMovie.position=2000;
+fragmentMovie.open("cutscene.mp4");fragmentMovie.loop=true;fragmentMovie.pause();
 var fragmentDuration=fragmentMovie.totalTime,fragmentSerial=0;
 if(fragmentDuration<6000 || fragmentDuration>7000)throw new Exception("Incomplete cutscene duration: "+fragmentDuration);
 function fragmentAction(action){
@@ -35,7 +35,7 @@ fragmentPlay.holdAlpha=fragmentLanguage.holdAlpha=fragmentPause.holdAlpha=false;
 fragmentPlay.fillRect(0,0,50,32,0xff307040);fragmentLanguage.fillRect(0,0,50,32,0xff305080);fragmentPause.fillRect(0,0,50,32,0xff804030);
 fragmentPlay.visible=fragmentLanguage.visible=fragmentPause.visible=true;
 fragmentPlay.onClick=function(){global.fragmentAction(0);};fragmentLanguage.onClick=function(){global.fragmentAction(1);};fragmentPause.onClick=function(){global.fragmentAction(2);};
-Debug.message("fragment-menu-ready:__CONTAINER__:"+fragmentMovie.position+":"+fragmentMovie.status);
+Debug.message("fragment-menu-ready:__CONTAINER__");
 `
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
@@ -74,7 +74,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           { name: 'language.tjs', mimeType: 'text/plain', buffer: Buffer.from(source.replaceAll('__CONTAINER__', container)) },
           { name: 'cutscene.mp4', mimeType: 'video/mp4', buffer: readFileSync(`out/verification/video-tracks/${container}.mp4`) },
         ])
-        await expect(page.getByText(`fragment-menu-ready:${container}:2000:pause`, { exact: true })).toBeVisible()
+        await expect(page.getByText(`fragment-menu-ready:${container}`, { exact: true })).toBeVisible()
         await expect(page.locator('#evaluate')).toBeEnabled()
         if (await page.locator('#sound-toggle').textContent() === '开启声音') await page.locator('#sound-toggle').click()
         let serial = 0
@@ -82,14 +82,14 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           const point = await pointerPixel(canvas, action * 55 + 25, 76)
           await page.mouse.click(point.x, point.y)
           await expect(page.getByText(`fragment-button:${container}:${serial++}:${action}:${status}:${stream}`, { exact: true })).toBeVisible()
-        }, capture = async (label: string) => {
+        }, capture = async (label: string, expectedSeconds = 2) => {
           const result = await selectionReadbacks(canvas)
           await info.attach(`${container}-${label}`, { contentType: 'application/gzip', body: gzipSync(Buffer.from(JSON.stringify(result))) })
           expect(result.videos).toHaveLength(1)
           const video = result.videos[0]!
           expect(video.error).toBeUndefined(); expect(video.after).toEqual(video.before)
           expect(video.before.paused).toBe(true); expect(video.before.seeking).toBe(false)
-          expect(Math.abs(video.before.position - 2)).toBeLessThanOrEqual(.000001)
+          expect(Math.abs(video.before.position - expectedSeconds)).toBeLessThanOrEqual(.000001)
           expect(video.before.duration).toBeGreaterThan(6)
           expect(Number(video.before.presentedFrames)).toBeGreaterThan(0)
           const image = video.capture!
@@ -97,6 +97,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           expect(image.reads.cpuRepeated).toEqual(image.reads.cpu); expect(image.reads.cpuRedrawn).toEqual(image.reads.cpu)
           expect(image.production).toBeDefined(); expect(image.production!.willReadFrequently).toBe(true)
           expect(image.production!.source).toBe(video.before.source)
+          expect(Math.abs(image.production!.position - video.before.position)).toBeLessThanOrEqual(.000001)
           expect(image.production!.pixels).toEqual(image.reads.cpu)
           expect([result.paint!.width, result.paint!.height]).toEqual([160, 96])
           for (const x of [0, 80]) {
@@ -107,7 +108,33 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           readings.push({ container, label, state: video.before, rgbaSha256: createHash('sha256').update(Uint8Array.from(image.reads.cpu)).digest('hex') })
           return image.reads.cpu
         }
+        const origin = await page.locator('video[data-video-id]').evaluate((node) => {
+          const video = node as HTMLVideoElement
+          return { clock: video.currentTime, first: Number(video.dataset.presentedTime),
+            frames: Number(video.dataset.presentedFrames),
+            seekable: Array.from({ length: video.seekable.length }, (_, at) =>
+              [video.seekable.start(at), video.seekable.end(at)]) }
+        }), firstClock = origin.seekable[0]?.[0]
+        readings.push({ container, phase: 'initial-addressable-clock', ...origin })
+        expect(firstClock).toBeDefined()
+        expect(firstClock!).toBeGreaterThanOrEqual(0)
+        // Authored streams have a two-frame initial offset at 12 fps. Engines
+        // may expose the empty edit at zero or start their seekable range at
+        // its end. Both must submit the actual first PTS, without moving A/V.
+        expect(firstClock!).toBeLessThanOrEqual(1 / 6 + .000001)
+        expect(Math.abs(origin.clock - firstClock!)).toBeLessThanOrEqual(.000001)
+        expect(Math.abs(origin.first - 1 / 6)).toBeLessThanOrEqual(.000001)
+        expect(origin.frames).toBeGreaterThan(0)
+        const firstImage = await capture('opened-first-sample', firstClock!)
+        await evaluate(page, '(function(){fragmentMovie.frame=0;return fragmentMovie.position;})()',
+          String(Math.trunc(firstClock! * 1000 + .5)))
+        expect(await capture('frame-zero-addressable-sample', firstClock!)).toEqual(firstImage)
+        await evaluate(page, '(function(){fragmentMovie.position=0;return fragmentMovie.position;})()',
+          String(Math.trunc(firstClock! * 1000 + .5)))
+        expect(await capture('time-zero-addressable-sample', firstClock!)).toEqual(firstImage)
+        await click(2, 'pause', 0)
         const before = await capture('initial-two-second-frame')
+        expect(before).not.toEqual(firstImage)
         await click(1, 'pause', 1)
         expect(await capture('paused-language-one')).toEqual(before)
         await click(0, 'play', 1); readings.push({ container, phase: 'language-one-playing', audio: await audio(880) })

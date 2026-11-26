@@ -1,6 +1,18 @@
 import type { VideoTimeline } from '../../../engine/ports/video.ts'
 import { videoPresentedFrameAt } from '../../../engine/media/video-time.ts'
 
+/** The HTML seeking algorithm clamps a request before the earliest available
+ * media position to seekable.start(0). A finite MP4 can start after zero (for
+ * example after an initial empty edit). Keep that clock on the original time
+ * line; do not subtract the offset from video PTS or from its audio tracks.
+ * Interior gaps and an unavailable seekable range retain the strict request. */
+export function videoSeekTime(video: Pick<HTMLMediaElement, 'seekable'>, time: number): number {
+  const ranges = video.seekable
+  if (!ranges.length) return time
+  const start = ranges.start(0)
+  return Number.isFinite(time) && time >= 0 && Number.isFinite(start) && start > time ? start : time
+}
+
 export interface ClockPresentationSource {
   timeline: VideoTimeline
   previousTime: number

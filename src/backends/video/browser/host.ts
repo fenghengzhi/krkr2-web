@@ -22,7 +22,7 @@ import type { CursorRasterLayer, CursorScene } from '../../input/cursor.ts'
 import { selectVideoTimeline } from '../../../formats/video/mp4.ts'
 import { legacyVideoFormat } from '../legacy/format.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
-import { VideoSampleHistory, waitForClockPresentation, type ClockPresentationTarget } from './clock-seek.ts'
+import { VideoSampleHistory, videoSeekTime, waitForClockPresentation, type ClockPresentationTarget } from './clock-seek.ts'
 import { VideoPeriod } from '../../../engine/media/video-period.ts'
 import { recoverVideoFirstFrame } from './first-frame-recovery.ts'
 import {
@@ -707,6 +707,7 @@ export class WebVideoHost {
   private async seekSeconds(movie: Movie, time: number): Promise<void> {
     if (!Number.isFinite(time) || time < 0 || time > movie.element.duration)
       throw new Error('Video position is outside the stream')
+    time = videoSeekTime(movie.element, time)
     movie.seeking = true
     this.cancelFrame(movie)
     try {
@@ -718,7 +719,8 @@ export class WebVideoHost {
           // A playing clock has already advanced when seeked reaches the
           // main thread. Frozen 093 media events show successful seeks at
           // 2.002–2.011 s for a 2 s target; equality then waits until timeout.
-          // Paused candidates still require the exact requested media clock.
+          // Paused candidates require the exact addressable media clock. The
+          // browser cannot return to zero before its first seekable position.
           () => !movie.element.seeking && movie.element.readyState >= 2 &&
             (playing ? movie.element.currentTime >= time - 1e-6
               : Math.abs(movie.element.currentTime - time) < 1e-6),
@@ -734,6 +736,10 @@ export class WebVideoHost {
   private async seekClockPresented(movie: Movie, position: number, current: () => void, exactSeconds?: number,
     target?: ClockPresentationTarget): Promise<void> {
     current()
+    // A selected-track replacement must preserve its frozen old-graph clock,
+    // including when the new track cannot address it. Only public/startup
+    // seeks adopt the normal HTML earliest-position behavior.
+    if (exactSeconds === undefined) position = videoSeekTime(movie.element, position / 1000) * 1000
     const seek = () => exactSeconds === undefined ? this.seek(movie, position) : this.seekSeconds(movie, exactSeconds)
     // A true no-op has no seek event or new compositor submission to await.
     if (!movie.element.seeking && movie.element.readyState >= 2 &&
@@ -751,6 +757,7 @@ export class WebVideoHost {
         : undefined, target)
   }
   private async seekPresented(movie: Movie, position: number, frameSeek = false): Promise<void> {
+    position = videoSeekTime(movie.element, position / 1000) * 1000
     const epoch = movie.epoch, timeline = movie.timeline!, target = videoFrameAt(timeline, position)
     // A normal time seek still selects the containing source sample. Firefox
     // can report the requested clock inside that sample (the frozen interleaved
@@ -981,6 +988,9 @@ export class WebVideoHost {
           exact: (time) => videoPresentedFrameAt(timeline, time) === 0,
         })
       }
+      // Restoring an initial empty edit can clamp to the browser's earliest
+      // seekable position. The real first frame is already proven above; keep
+      // the browser's actual clock rather than waiting forever for zero.
       if (restoreTime !== undefined) await this.seekSeconds(movie, restoreTime)
     } catch (error) { primary = error; throw error }
     finally {

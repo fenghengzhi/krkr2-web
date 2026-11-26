@@ -111,6 +111,7 @@ export interface BrowserInputHooks {
   /** A live popup covering this surface is not a physical pointer departure. */
   menuCover?(target: EventTarget | null): boolean
   mouse(type: 'down' | 'move' | 'up', buttons: number): boolean
+  cancelTouchClick(modifiers: number): void
 }
 /** Retained by the coordinator across replacement surfaces of one Window. */
 export interface BrowserCursorState {
@@ -162,6 +163,7 @@ export class BrowserInput {
   private mouseTouch: number | undefined
   private primaryClickCount = 0
   private lastMouseDownPoint?: { x: number; y: number }
+  private lastMouseMovePoint?: { x: number; y: number }
   private view?: WindowView
   private input?: InputView
   private sourceWindowId?: number
@@ -382,6 +384,7 @@ export class BrowserInput {
       this.mouseTouch = undefined
       this.primaryClickCount = 0
       this.lastMouseDownPoint = undefined
+      this.lastMouseMovePoint = undefined
       this.touches.clear()
       this.pressed.clear()
       this.releasePointerCaptures()
@@ -400,6 +403,7 @@ export class BrowserInput {
       this.touches.clear()
       this.primaryClickCount = 0
       this.lastMouseDownPoint = undefined
+      this.lastMouseMovePoint = undefined
       this.pressed.clear()
       this.cancelComposition()
       this.releasePointerCaptures()
@@ -737,7 +741,7 @@ export class BrowserInput {
     this.physicalCursor = undefined
     this.retireVirtualCursor()
     event.preventDefault()
-    const p = this.point(event.clientX, event.clientY),
+    const p = this.point(event.clientX, event.clientY), modifiers = shiftState(event) & 7,
       bounds = this.canvas.getBoundingClientRect()
     const packet = {
       ...p,
@@ -746,25 +750,26 @@ export class BrowserInput {
       id: event.pointerId,
     }
     if (event.type === 'pointerdown') {
-      this.focus()
+      if (event.isPrimary) this.focus()
       this.canvas.setPointerCapture(event.pointerId)
       this.touches.set(event.pointerId, { ...p, startX: p.x, startY: p.y })
       this.push({ type: 'touchDown', ...packet })
-      if (this.touches.size === 1) {
+      if (this.touches.size === 1 && event.isPrimary) {
         this.mouseTouch = event.pointerId
-        this.push({ type: 'down', ...p, button: 0, shift: 8, clicks: 0 })
-      } else if (this.mouseTouch !== undefined) {
-        const first = this.touches.get(this.mouseTouch)!
-        this.push({ type: 'up', x: first.x, y: first.y, button: 0, shift: 0, clicks: 0 })
-        this.mouseTouch = undefined
-      }
+        // Mouse-oriented games select the hovered link before MouseDown.
+        // A browser may already have delivered the move for this contact.
+        if (this.lastMouseMovePoint?.x !== p.x || this.lastMouseMovePoint?.y !== p.y)
+          this.push({ type: 'move', ...p, button: 0, shift: modifiers, clicks: 0 })
+        this.push({ type: 'down', ...p, button: 0, shift: modifiers | 8, clicks: 0 })
+      } else if (this.shared) this.shared.cancelTouchClick(modifiers)
+      else this.cancelTouchClick(modifiers)
     } else if (this.touches.has(event.pointerId)) {
       const previous = this.touches.get(event.pointerId)!
       if (event.type === 'pointermove') {
         Object.assign(previous, p)
         this.push({ type: 'touchMove', ...packet })
         if (this.mouseTouch === event.pointerId)
-          this.push({ type: 'move', ...p, button: 0, shift: 8, clicks: 0 })
+          this.push({ type: 'move', ...p, button: 0, shift: modifiers | 8, clicks: 0 })
       } else {
         this.push({ type: 'touchUp', ...packet })
         if (this.mouseTouch === event.pointerId) {
@@ -772,7 +777,7 @@ export class BrowserInput {
             type: 'up',
             ...p,
             button: 0,
-            shift: 0,
+            shift: modifiers,
             clicks: event.type === 'pointercancel' ? 0 : 1,
           })
           this.mouseTouch = undefined
@@ -780,6 +785,12 @@ export class BrowserInput {
         this.touches.delete(event.pointerId)
       }
     }
+  }
+  cancelTouchClick(modifiers: number): void {
+    if (this.mouseTouch === undefined) return
+    const first = this.touches.get(this.mouseTouch)!
+    this.mouseTouch = undefined
+    this.push({ type: 'up', x: first.x, y: first.y, button: 0, shift: modifiers, clicks: 0 })
   }
   private key(event: KeyboardEvent, down: boolean): void {
     if (!this.keyboard(event)) return
@@ -863,6 +874,7 @@ export class BrowserInput {
     this.mouseButtons = 0
     this.primaryClickCount = 0
     this.lastMouseDownPoint = undefined
+    this.lastMouseMovePoint = undefined
     this.touches.clear()
     this.releasePointerCaptures()
     this.mouseTouch = undefined
@@ -921,6 +933,7 @@ export class BrowserInput {
       const capturedPoint = this.view && paintBoxPoint(this.view, packet.x, packet.y),
         sequence = this.observePointer(packet.x, packet.y, packet.physicalScreen)
       if (sequence === undefined) return
+      this.lastMouseMovePoint = packet.type === 'move' ? { x: packet.x, y: packet.y } : undefined
       // WindowForm's Click later uses exactly the point posted for MouseDown,
       // not another projection sampled around focus/hook callbacks.
       if (packet.type === 'down') this.lastMouseDownPoint = capturedPoint && { ...capturedPoint }
@@ -934,6 +947,7 @@ export class BrowserInput {
       }
     }
     if (packet.type === 'leave' || packet.type === 'cancel') {
+      this.lastMouseMovePoint = undefined
       this.physicalCursor = undefined
       this.retireVirtualCursor()
     }

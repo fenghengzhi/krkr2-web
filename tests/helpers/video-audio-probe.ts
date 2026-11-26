@@ -20,6 +20,7 @@ interface VideoMediaState {
   playbackRate: number
   readyState: number
   networkState: number
+  seekable: [number, number][]
   presentedTime: string | null
   presentedFrames: string | null
   error: { code: number; message: string } | null
@@ -53,6 +54,8 @@ export async function installVideoAudioProbe(page: Page): Promise<void> {
         position: video.currentTime, duration: Number.isFinite(video.duration) ? video.duration : null,
         paused: video.paused, seeking: video.seeking, ended: video.ended, playbackRate: video.playbackRate,
         readyState: video.readyState, networkState: video.networkState,
+        seekable: Array.from({ length: video.seekable.length }, (_, index) =>
+          [video.seekable.start(index), video.seekable.end(index)] as [number, number]),
         presentedTime: video.getAttribute('data-presented-time'),
         presentedFrames: video.getAttribute('data-presented-frames'),
         error: video.error ? { code: video.error.code, message: video.error.message } : null }

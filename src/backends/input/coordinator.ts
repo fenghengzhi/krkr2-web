@@ -372,6 +372,12 @@ export class BrowserInputCoordinator {
         else if (type === 'up' && !buttons) this.mouseOwner = undefined
         return true
       },
+      cancelTouchClick: (modifiers) => {
+        if (!current()) return
+        // A second finger can land on another game Window while the first
+        // Window still owns the emulated left button.
+        for (const target of this.surfaces.values()) target.input.cancelTouchClick(modifiers)
+      },
     }
     let cursorState = this.cursorStates.get(windowId)
     if (!cursorState) {

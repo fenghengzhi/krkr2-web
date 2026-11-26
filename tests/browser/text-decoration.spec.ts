@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test'
 import { textDecorationGameSource } from '../helpers/text-decoration.ts'
 import { canvasPixels } from '../helpers/canvas-pixels.ts'
+import { observeTextDecorationFailure } from '../helpers/text-decoration-observation.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: player clicks change complete underlined and struck-through subtitles`, async ({ page }, info) => {
     test.setTimeout(90000)
     const failures: unknown[] = [], pageErrors: string[] = [], observations: unknown[] = []
+    let failedFrame: Parameters<typeof observeTextDecorationFailure>[2] | undefined
     page.on('pageerror', (error) => pageErrors.push(error.message))
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !await page.evaluate(() => 'Suspending' in WebAssembly), 'JSPI unavailable')
@@ -44,17 +46,28 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
             // each character independently before compositing, as its API does.
             for (let at = 0; at < pixels.length; at += 4)
               if (ink[at + 3]! >= 128) pixels.set([255, 255, 255, 255], at)
-            metrics.push({ character, x, width: m.width, baseline, underlineBottom: baseline + thickness * 2 })
+            metrics.push({ character, x, width: m.width, baseline, underlineBottom: baseline + thickness * 2,
+              fontBoundingBoxAscent: m.fontBoundingBoxAscent ?? null, fontBoundingBoxDescent: m.fontBoundingBoxDescent ?? null,
+              actualBoundingBoxLeft: m.actualBoundingBoxLeft, actualBoundingBoxRight: m.actualBoundingBoxRight,
+              actualBoundingBoxAscent: m.actualBoundingBoxAscent, actualBoundingBoxDescent: m.actualBoundingBoxDescent })
             x += Math.round(m.width)
           }
-          return { pixels: [...pixels], metrics }
+          return { pixels: [...pixels], metrics, font: ctx.font, documentLanguage: document.documentElement.lang,
+            contextLanguage: (ctx as unknown as { lang?: string }).lang ?? null, language: navigator.language }
         }, style)
         let captured: Awaited<ReturnType<typeof canvasPixels>> | undefined
         await expect.poll(async () => {
           const actual = captured = await canvasPixels(canvas)
-          if (actual.width !== 384 || actual.height !== 224) return { dimensions: [actual.width, actual.height] }
+          if (actual.width !== 384 || actual.height !== 224) {
+            const difference = { dimensions: [actual.width, actual.height] }
+            failedFrame = { style, actual, reference, difference }; return difference
+          }
           for (let at = 0; at < actual.rgba.length; at++)
-            if (actual.rgba[at] !== reference.pixels[at]) return { at, actual: actual.rgba[at], expected: reference.pixels[at] }
+            if (actual.rgba[at] !== reference.pixels[at]) {
+              const difference = { at, actual: actual.rgba[at], expected: reference.pixels[at] }
+              failedFrame = { style, actual, reference, difference }; return difference
+            }
+          failedFrame = undefined
           return null
         }, { timeout: 12000 }).toBeNull()
         observations.push({ style, metrics: reference.metrics, width: captured!.width, height: captured!.height,
@@ -69,7 +82,11 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         }
       }
       expect(pageErrors).toEqual([])
-    } catch (error) { failures.push(error) }
+    } catch (error) {
+      failures.push(error)
+      if (failedFrame) try { await observeTextDecorationFailure(page, info, failedFrame) }
+      catch (observationError) { failures.push(observationError) }
+    }
     try {
       await info.attach('subtitle-decoration-observations', { body: JSON.stringify({ observations, pageErrors,
         logs: await page.locator('#logs').innerText(), source: textDecorationGameSource,

@@ -1,9 +1,28 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { hasClockAlignedPresentation, VideoSampleHistory, waitForClockPresentation,
+import { hasClockAlignedPresentation, VideoSampleHistory, videoSeekTime, waitForClockPresentation,
   type ClockPresentationSource, type ClockPresentationTarget } from '../../src/backends/video/browser/clock-seek.ts'
 import type { VideoTimeline } from '../../src/engine/ports/video.ts'
 import { videoFrameAt, videoPresentedFrameAt, videoReportedFrameAt } from '../../src/engine/media/video-time.ts'
+
+function seekable(ranges: readonly (readonly [number, number])[]) {
+  return { seekable: { length: ranges.length,
+    start: (index: number) => ranges[index]![0], end: (index: number) => ranges[index]![1] } }
+}
+
+test('finite video seeks preserve the media origin and clamp only before the actual seekable start', () => {
+  // 170 Firefox fragmented/interleaved: first PTS 1/6 s; seek(0) produced
+  // another real presentation at that same clock, never a zero-clock seeked.
+  const offset = seekable([[1 / 6, 37 / 6]]), ordinary = seekable([[0, 6]])
+  for (const time of [0, 0.05, 1 / 6]) assert.equal(videoSeekTime(offset, time), 1 / 6)
+  for (const time of [0.25, 2, 6]) assert.equal(videoSeekTime(offset, time), time)
+  assert.equal(videoSeekTime(ordinary, 0), 0, 'A browser which can address the initial edit keeps zero')
+  assert.equal(videoSeekTime(seekable([]), 0), 0, 'No guessed origin without an available range')
+  assert.equal(videoSeekTime(seekable([[0, 1], [3, 6]]), 2), 2, 'No permissive interior-gap fallback')
+  assert.equal(videoSeekTime(offset, -1), -1, 'Invalid public requests still reach normal validation')
+  assert.equal(videoSeekTime(offset, 7), 7, 'No permissive end-of-stream fallback')
+  assert.equal(videoSeekTime(seekable([[Number.NaN, 6]]), 0), 0)
+})
 
 /** Controlled media/callback boundaries; real decoding and complete RGBA
  * handoffs remain in the three-browser video-audio-tracks/handoff suites. */
@@ -57,6 +76,28 @@ test('clock frame seek accepts a fresh 0.666667 PTS at the exact 0.5 media clock
   assert.equal(f.state.currentTime, 0.5)
   assert.equal(f.timerCleared, true)
   assert.equal(f.callbacks.size, 0)
+})
+
+test('an earliest-position seek still requires a newly submitted first sample and the actual clamped clock', async () => {
+  const timeline: VideoTimeline = { times: [1000 / 6, 250, 1000 / 3], duration: 1000,
+    frameDuration: 1000 / 12, videoStreams: 1, audioStreams: 2 },
+    position = videoSeekTime(seekable([[1 / 6, 1]]), 0) * 1000,
+    target: ClockPresentationTarget = {
+      contains: (time) => videoReportedFrameAt(timeline, time) === 0,
+      exact: (time) => videoPresentedFrameAt(timeline, time) === 0,
+    }, f = fixture(false, undefined, target, position)
+  try {
+    f.seeked()
+    f.fire({ mediaTime: 0.166667, presentedFrames: 7 })
+    f.fire({ mediaTime: 0.25, presentedFrames: 8 })
+    await Promise.resolve()
+    assert.equal(f.outcome, 'pending', 'Neither an old counter nor the next sample proves the requested first frame')
+    f.fire({ mediaTime: 0.166667, presentedFrames: 8 })
+    await f.pending
+    assert.deepEqual(f.observed, [0.166667])
+    assert.equal(f.state.currentTime, 1 / 6)
+    assert.equal(f.callbacks.size, 0); assert.equal(f.timerCleared, true)
+  } finally { f.abort.abort(); await f.pending.catch(() => {}) }
 })
 
 test('a normal time seek accepts Firefox\'s fresh clock inside the selected sample, never an adjacent sample', async () => {

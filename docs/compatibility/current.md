@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 173 批在触屏按下前把实际接触位置交给鼠标驱动的游戏，并让影片在浏览器能定位的最早位置接收首帧。新增行为等待验证。[173 实现与托管证据](../decisions/173-touch-choices-and-movie-start.md)
+
 第 172 批按 `-fszoom` 配置选择全屏缩放与居中裁切，游戏可从外置设置文件读取选项，普通 WAVE 在非整数采样位置按循环或跳转后的素材插值。新增行为等待托管验证。[172 实现与托管证据](../decisions/172-fullscreen-options-story-input-and-wave-loops.md)
 
 第 171 批让脚本通过 `System.readRegValue` 读取玩家指定的游戏设置，并补齐 KAG 菜单访问键与 MIDI 乐谱内的主音量变化。新增兼容行为等待托管验证。[171 实现与托管证据](../decisions/171-game-registry-menu-keys-and-midi-volume.md)

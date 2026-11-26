@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 173 批修订触屏点击时的章节选择，以及影片起点在零秒之后的定位。第 170 批 Firefox 游戏库有 65 项通过、37 项失败，WebKit 离线验收 21 项全部通过。[173 实现与托管证据](decisions/173-touch-choices-and-movie-start.md)
+
 第 172 批修订全屏游戏的画面和点击坐标、WAVE 循环插值与外置设置文件导入。第 170 批生产构建和 UDF 制盘已通过，Chromium 游戏库 66/102 通过。本批修订了其余 36 项中发现的光盘选择、剧情素材与点击输入问题，结果待托管验证。[172 实现与托管证据](decisions/172-fullscreen-options-story-input-and-wave-loops.md)
 
 第 172 批实现提交 `5b76122` 登记时为 `pending`，下一批取回运行结果。[第 172 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217)

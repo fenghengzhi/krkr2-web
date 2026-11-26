@@ -340,6 +340,42 @@ function fixture(
   }
 }
 
+test('touch compatibility moves to the actual contact before pressing and cancels the click on a second finger', async () => {
+  const f = fixture()
+  const touch = (type: string, id: number, x: number, isPrimary: boolean, canvas = f.a) =>
+    f.dispatch(canvas, type, { pointerType: 'touch', pointerId: id, isPrimary,
+      clientX: x, clientY: 10, width: 2, height: 2, ctrlKey: true })
+  try {
+    f.coordinator.focus(101)
+    touch('pointerdown', 1, 20, true)
+    touch('pointerup', 1, 20, true)
+    f.mouse(f.a, 'mousemove', 0, 30) // Browser has already supplied this approach.
+    touch('pointerdown', 2, 30, true)
+    touch('pointerdown', 3, 60, false)
+    touch('pointerup', 2, 30, true)
+    touch('pointerup', 3, 60, false)
+    // A second game Window takes its raw contact without stealing keyboard focus.
+    touch('pointerdown', 4, 50, true)
+    touch('pointerdown', 5, 70, false, f.b)
+    touch('pointerup', 4, 50, true)
+    touch('pointerup', 5, 70, false, f.b)
+    await settle()
+    assert.equal(f.coordinator.isActive(101), true)
+    assert.deepEqual(f.packets.flatMap((packet) => 'clicks' in packet
+      ? [[packet.type, packet.x, packet.y, packet.shift, packet.clicks]] : []), [
+      ['move', 20, 10, 4, 0], ['down', 20, 10, 12, 0], ['up', 20, 10, 4, 1],
+      ['move', 30, 10, 0, 0], ['down', 30, 10, 12, 0], ['up', 30, 10, 4, 0],
+      ['move', 50, 10, 4, 0], ['down', 50, 10, 12, 0], ['up', 50, 10, 4, 0],
+    ])
+    assert.deepEqual(f.packets.flatMap((packet) => 'id' in packet ? [[packet.type, packet.id, packet.windowId]] : []), [
+      ['touchDown', 1, 101], ['touchUp', 1, 101], ['touchDown', 2, 101], ['touchDown', 3, 101],
+      ['touchUp', 2, 101], ['touchUp', 3, 101], ['touchDown', 4, 101], ['touchDown', 5, 202],
+      ['touchUp', 4, 101], ['touchUp', 5, 202],
+    ])
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
+
 test('menu cursor override preserves logical changes and is scoped to a visible current Window surface', { timeout: 30000 }, async () => {
   const f = fixture(), view = { ...new WindowState().view(), visible: true, mouseCursorState: 2 }
   try {
