@@ -61,14 +61,16 @@ test('condition changes preserve already decoded music; a missing far phrase ret
     assert.equal(mixer.snapshot(1).flags[0], 0, 'A script assignment does not rerun a queued flag label')
     mixer.command({ op: 'flag', id: 1, index: 0, value: 1 })
     const held = render(mixer, 1000)
-    assert.deepEqual([...held.left], [...Array(200).fill(.125), ...Array(800).fill(0)])
-    assert.deepEqual(held.events, []); assert.equal(mixer.snapshot(1).position, 400)
+    // The final old sample needs the next segment's position to commit its
+    // advance. It remains pending with the transition until the page arrives.
+    assert.deepEqual([...held.left], [...Array(199).fill(.125), ...Array(801).fill(0)])
+    assert.deepEqual(held.events, []); assert.equal(mixer.snapshot(1).position, 399)
     const requests = mixer.takeStreamRequests()
     assert(requests.some((request) => request.position === 12288))
     mixer.command({ op: 'flag', id: 1, index: 0, value: 0 })
     for (const request of requests) mixer.command({ op: 'streamData', request, data: read(asset, request.position, request.frames) })
     const resumed = render(mixer, 800)
-    assert.deepEqual([...resumed.left], [...Array(400).fill(.5), ...Array(400).fill(.125)])
+    assert.deepEqual([...resumed.left], [.125, ...Array(400).fill(.5), ...Array(399).fill(.125)])
     assert.equal(resumed.events.filter((event) => event.type === 'label' && event.label === 'next').length, 1)
     assert(mixer.inspectStreams().pending <= 4)
   } finally { mixer.command({ op: 'shutdown' }) }

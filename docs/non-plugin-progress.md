@@ -4,6 +4,8 @@
 
 第 178 批处理 UDF 2.50 游戏盘、从旧版浏览器备份迁移存档、条件循环配乐和影片暂停时钟。本次取回的第 171 批三份浏览器报告合计 692 项通过、62 项失败。[178 实现与托管证据](decisions/178-metadata-discs-and-game-restoration.md)
 
+第 178 批实现提交 `b3974a2` 登记时为 `pending`。登记后修正了一条流式配乐测试的单采样边界预期，该修订随下一批验证。[第 178 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45873527327)
+
 第 177 批处理双语过场、大型 AVI、原版存档导入与 Wave 四声道扩展。新取回的第 171 批 Chromium 游戏库有 70 项通过、36 项失败，四组注册表剧情全部通过。[177 实现与托管证据](decisions/177-bilingual-cutscenes-and-native-saves.md)
 
 第 177 批实现提交 `74d2e5d` 登记时为 `pending`，下一批取回结果。[第 177 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45870448777)

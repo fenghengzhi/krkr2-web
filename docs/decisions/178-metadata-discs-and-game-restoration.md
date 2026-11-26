@@ -29,3 +29,5 @@
 第 171 批取回时仍在运行。新增的 Firefox 游戏库报告有 69 项通过、37 项失败。Firefox 常规第 3 分片有 302 项通过、22 项失败，WebKit 常规第 3 分片有 321 项通过、3 项失败。三份报告合计 692 项通过、62 项失败。Node 作业已取消，报告只留下 14 个通过的顶层项目，剩余范围未报告。第 172 至 177 批取回时都在排队。[第 171 批托管记录](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320) · [第 177 批托管记录](https://github.com/fenghengzhi/krkr2-web/actions/runs/45870448777)
 
 第 170 批 Chromium 常规套件取消时，还有 721 项未报告。自本批起，三款浏览器的常规用例都分在四台托管 runner 上，每个分片保留自己的日志和结果。游戏库和离线套件各自整组运行。[第 170 批 Chromium 作业](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668/job/140032169086) · [托管批次配置](../../.github/workflows/test.yml)
+
+第 178 批实现提交 `b3974a2` 登记时为 `pending`。登记后修正了一条流式配乐测试的单采样边界预期，该修订随下一批验证。[第 178 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45873527327)
