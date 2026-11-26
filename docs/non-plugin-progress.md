@@ -4,6 +4,8 @@
 
 第 165 批支持按盘符读取光盘内的剧情与立绘，并处理分段 MP4 切换音轨时遇到的时长差异。已取回的第 160 批记录确认，原版 Introduction 样例的第一条路线、书签和刷新恢复在三款浏览器、两个脚本后端的六个组合中通过。新批次等待托管验证。[165 实现与托管证据](decisions/165-disc-files-and-fragmented-movies.md)
 
+第 165 批实现提交 `bb7fcd0` 登记时为 `pending`。结果留到下一批取回。[第 165 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45840946389)
+
 第 164 批让游戏按卷标选择导入的光盘，处理换轨淡出、预渲染字幕字体和 WebKit 过场起始帧。此次取回的第 160 批六份浏览器报告共有 1,234 项通过、272 项失败、1 项跳过。第 161 至 163 批在取回时仍排队。[164 实现与托管证据](decisions/164-disc-volumes-fades-and-game-rendering.md)
 
 第 164 批实现提交 `86c415d` 登记时为 `pending`。结果留到下一批取回。[第 164 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45837990362)

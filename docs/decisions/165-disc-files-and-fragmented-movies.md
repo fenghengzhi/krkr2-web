@@ -29,3 +29,5 @@ Windows 托管对照只读挂载同一组 ISO，先由系统读取日文文件�
 本批取回第 160 批的三份新浏览器报告。Firefox 第 4 分片完成 322 项，其中 271 项通过、51 项失败。Chromium 主浏览器和 WebKit 第 1 分片的作业均已取消。三份报告合计记录 1,568 项通过、205 项失败、1 项跳过，另有 211 项未报告。原版 `kag3_intro.xp3` 的第一条路线、书签和刷新恢复在 Chromium、Firefox、WebKit 上的 Asyncify 与 JSPI 六个组合均已通过。第 161 至 164 批在取回时均为 `pending`。[第 160 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404) · [第 160 批 Firefox 第 4 分片](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404/job/139938356276)
 
 旧配乐焦点测试在页面切换后仍报告拥有焦点，播放器也没有收到后台音量命令。本批将 Chromium 的四个组合放到现有的独立浏览器进程中，使用实际标签页切换，核对可信焦点事件、音量命令及左右声道的采样。Firefox 与 WebKit 继续保留原焦点验收。三份新产物共 440,878,681 字节，连同此前存档的 50 份，53 份普通原件的大小和 SHA-256 均与本次目录一致。归档摘要存放在 `out/verification/github-actions/165-archive-summary.md`。[焦点验收](../../tests/helpers/wave-focus-browser.ts) · [独立 Chromium 入口](../../tests/activity-native-browser/wave-focus.spec.ts)
+
+第 165 批实现提交 `bb7fcd0f08edfa7ddc6b0ab52b9ccd6f1a6d50c2` 登记时为 `pending`。结果留到下一批取回。[第 165 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45840946389)
