@@ -19,3 +19,5 @@
 Firefox 的四项字幕报告均在普通字形阶段出现首个像素差，当时尚未画下划线或删除线。此前记录的画布尺寸问题已越过。为区分字体选择与实际绘图差异，本批会在失败时保存游戏画布、页面参考和独立 Worker 用两组字体设置绘出的字形、测量值及首个不同字节。五个样式仍按整幅像素逐字节核对。[字幕像素验收](../../tests/browser/text-decoration.spec.ts) · [字体测量与图像记录](../../tests/helpers/text-decoration-observation.ts)
 
 第 170 批 Firefox 主浏览器第 3 分片有 302 项通过、22 项失败。其中 16 项涉及影片启动或换音轨，4 项是文字像素对照，2 项是声音结束位置。Node 作业在运行期间被取消，顶层 TAP 文件只写出了 14 项通过记录，缺少完整结果。此次取回的第 171、172 批均尚无作业结果。[Firefox 主浏览器分片](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668/job/140032169122) · [Node 作业](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668/job/140032168400) · [第 171 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320) · [第 172 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217)
+
+第 173 批实现提交 `5c22ca8` 登记时为 `pending`，下一批取回运行结果。[第 173 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45861660259)
