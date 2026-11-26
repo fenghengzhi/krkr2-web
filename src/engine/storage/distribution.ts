@@ -1,5 +1,5 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
-import { copyGameProject, copyProjectSelection, selectProjectLazy, type GameProject, type ProjectSelection } from './project.ts'
+import { copyGameProject, copyProjectSelection, findProjectExecutable, selectProjectLazy, type GameProject, type ProjectSelection } from './project.ts'
 import { extractStoragePath, parseStoragePath, toPublicStoragePath } from './public-path.ts'
 
 // An outer ZIP can be the directory tree a player would normally unpack.
@@ -25,24 +25,35 @@ async function gameFolder(entries: readonly Resource[], checkpoint: () => Promis
   return first
 }
 
-async function selectInside(entries: readonly Resource[], selection: Exclude<ProjectSelection, { mode: 'collection' }>,
-  checkpoint: () => Promise<void>): Promise<ProjectSelection | undefined> {
+type ProjectLocation = Exclude<ProjectSelection, { mode: 'collection' }>
+async function selectInside(entries: readonly Resource[], selection: ProjectLocation,
+  checkpoint: () => Promise<void>): Promise<ProjectLocation | undefined> {
   if (selection.mode === 'root') return selection
   const executables = entries.filter((file) => /\.exe$/i.test(file.name))
   const selectedExe = selection.executable && parseStoragePath(selection.executable)
   let folder = selection.executableDirectory || (selectedExe ? extractStoragePath(selectedExe) : await gameFolder(entries, checkpoint))
   if (folder === undefined && executables.length === 1) folder = extractStoragePath(executables[0]!.name)
   if (folder === undefined) return
-  const dir = folder.toLowerCase()
-  const localExes = executables.filter((file) => extractStoragePath(file.name).toLowerCase() === dir)
-  const executable = selectedExe ?? (localExes.length === 1 ? localExes[0]!.name : undefined)
-  return { mode: 'auto', executableDirectory: folder, executable: executable && toPublicStoragePath(executable) }
+  return { mode: 'auto', executableDirectory: folder, executable: selection.executable }
 }
 
 export async function prepareProject(resources: Resource[], requested: ProjectSelection, reader: ArchiveReader,
   checkpoint: () => Promise<void>): Promise<{ resources: Resource[]; project?: GameProject }> {
   const selection = copyProjectSelection(requested)
   if (selection.mode === 'collection') return { resources }
+  const select = async (files: Resource[], choice: ProjectLocation) => {
+    const inferred = choice.mode === 'auto' && !choice.executable
+      ? findProjectExecutable(files, { directory: '', executableDirectory: choice.executableDirectory ?? '' })
+      : undefined
+    const project = (await selectProjectLazy(files, inferred ? { ...choice, executable: toPublicStoragePath(inferred) } : choice,
+      reader, checkpoint))!
+    if (!choice.executable) return project
+    const chosen = findProjectExecutable(files, project, choice.executable)
+    if (chosen && chosen === findProjectExecutable(files, project)) return project
+    // Keep the player's choice across library reopen when more than one
+    // launcher shares the project. Existing project/save IDs stay stable.
+    return copyGameProject({ ...project, executable: chosen ? toPublicStoragePath(chosen) : choice.executable })!
+  }
   const savedZip = selection.mode === 'root' ? selection.distribution : undefined
   const archive = savedZip !== undefined ? resources.find((file) => file.name === savedZip)
     : selection.mode === 'auto' && resources.length === 1 && /\.zip$/i.test(resources[0]!.name) ? resources[0] : undefined
@@ -60,10 +71,10 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
           names.add(entry.name)
           if (names.size % 256 === 0) await checkpoint()
         }
-        const project = await selectProjectLazy(members, inner, reader, checkpoint)
-        return { resources: members, project: copyGameProject({ ...project!, distribution: archive.name }) }
+        const project = await select(members, inner)
+        return { resources: members, project: copyGameProject({ ...project, distribution: archive.name }) }
       }
     }
   }
-  return { resources, project: await selectProjectLazy(resources, selection, reader, checkpoint) }
+  return { resources, project: await select(resources, selection) }
 }

@@ -2,7 +2,7 @@ import packageInfo from '../../../package.json' with { type: 'json' }
 import { normalizePath } from '../storage/resolver.ts'
 import { SystemDisplay, type SystemDisplayMetrics } from './display.ts'
 import type { GameProject } from '../storage/project.ts'
-import { storageDirectoryPath, toPublicStoragePath } from '../storage/public-path.ts'
+import { extractStoragePath, storageDirectoryPath, toPublicStoragePath } from '../storage/public-path.ts'
 
 const packageVersion = packageInfo.version
 if (!/^\d+\.\d+\.\d+$/.test(packageVersion))
@@ -61,11 +61,11 @@ export function normalizeSystemDataPath(input?: string, executableDirectory?: st
 /** Paths are prefixes in the mounted game's VFS, never host filesystem paths. */
 export class SystemEnvironment {
   readonly display: SystemDisplay
-  readonly exePath: string
-  readonly exeName = 'krkr2-web'
-  readonly personalPath: string
-  readonly appDataPath: string
-  readonly dataPath: string
+  exePath: string
+  exeName = 'krkr2-web'
+  personalPath: string
+  appDataPath: string
+  dataPath: string
   readonly platformName = 'Web'
   readonly osName = 'Web'
   readonly versionString = packageVersion + '.0'
@@ -82,6 +82,14 @@ export class SystemEnvironment {
     this.exePath = project ? toPublicStoragePath(project.executableDirectory) : ''
     this.personalPath = this.appDataPath = project ? toPublicStoragePath(project.executableDirectory + 'savedata/') : 'savedata/'
     this.dataPath = project ? toPublicStoragePath(path) : path
+  }
+
+  selectExecutable(executable: string, dataDirectory: string): void {
+    const directory = extractStoragePath(executable)
+    this.exeName = toPublicStoragePath(executable)
+    this.exePath = toPublicStoragePath(directory)
+    this.personalPath = this.appDataPath = toPublicStoragePath(directory + 'savedata/')
+    this.dataPath = toPublicStoragePath(dataDirectory)
   }
 
   versionInformation(languageVersion: string | undefined): string {

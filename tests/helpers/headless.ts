@@ -63,12 +63,11 @@ export async function headless(
     ...overrides,
   })
   session.control.onCancel(() => archives.dispose())
-  await session.initialize()
-  session.mount(
-    Object.entries(files).map(([name, text]) => {
-      const bytes = typeof text === 'string' ? new TextEncoder().encode(text) : text
-      return { name, size: bytes.length, read: async () => bytes }
-    }),
-  )
+  const resources = Object.entries(files).map(([name, text]) => {
+    const bytes = typeof text === 'string' ? new TextEncoder().encode(text) : text
+    return { name, size: bytes.length, read: async () => bytes }
+  })
+  await session.initialize(resources)
+  session.mount(resources)
   return { session, logs, events }
 }

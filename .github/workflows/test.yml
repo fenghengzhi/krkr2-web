@@ -718,7 +718,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -1157,6 +1157,37 @@ jobs:
         with:
           name: original-dct-browser-comparison
           path: out/verification/dct-browser/
+          if-no-files-found: error
+          retention-days: 90
+
+  native-player-config:
+    name: Original Windows external configuration and data directory
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - name: Prepare independent external configuration inputs
+        id: prepare_config
+        run: node --import tsx tests/probes/player-config-sdk.ts prepare
+      - name: Observe four isolated original engine processes
+        shell: pwsh
+        run: ./tests/probes/original-player-config.ps1
+      - name: Compare argument precedence and the actual saved data paths
+        if: ${{ !cancelled() && steps.prepare_config.outcome == 'success' }}
+        run: node --import tsx tests/probes/player-config-sdk.ts compare
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-player-config
+          path: out/verification/native-player-config/
           if-no-files-found: error
           retention-days: 90
 

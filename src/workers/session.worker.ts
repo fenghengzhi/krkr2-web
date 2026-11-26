@@ -183,7 +183,7 @@ const api: SessionApi = {
     session = createSession(request, preparedProject, preparedProject?.distribution ? distributionReader : undefined)
     generation = request.generation
     session.control.onCancel(() => sources.close())
-    await session.initialize()
+    await session.initialize(preparedResources)
     sources.signal.throwIfAborted()
     syncFrames()
     return session.snapshot()

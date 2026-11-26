@@ -71,6 +71,7 @@ import { SystemEvents, type EventOptions, type EventOutcome } from './scheduler/
 import { systemEventsBridge } from './tvp/system.ts'
 import { systemClassValue, systemReadonlyProperties } from './tvp/system-class.ts'
 import { SystemEnvironment } from './system/environment.ts'
+import { readProjectConfig } from './system/project-config.ts'
 import {
   systemDisplayProperties,
   type SystemDisplayMetrics,
@@ -461,7 +462,7 @@ export class EngineSession {
   private attemptedFrameVersion = 0
   private eventYieldAt = 0
   private readonly systemArguments: Map<string, string>
-  private readonly jpegPrecision: ImageJpegPrecision
+  private jpegPrecision: ImageJpegPrecision = 'normal'
   private events?: ScriptEvents
   private sounds?: SoundService
   private videos?: VideoService
@@ -539,8 +540,6 @@ export class EngineSession {
     // are consulted. A failed constructor has no disposal owner yet.
     this.systemColors = new SystemColors(deps.systemColors)
     this.systemArguments = new Map(deps.arguments)
-    const jpegPrecision = this.systemArguments.get('-jpegdec')
-    this.jpegPrecision = jpegPrecision === 'low' || jpegPrecision === 'high' ? jpegPrecision : 'normal'
     this.systemEnvironment = new SystemEnvironment(
       this.systemArguments,
       deps.fillRandomBytes,
@@ -720,9 +719,24 @@ export class EngineSession {
     })
   }
 
-  initialize(): Promise<void> {
+  initialize(projectFiles?: readonly Resource[]): Promise<void> {
     return this.queue.enqueue(async () => {
       await this.saves.initialize()
+      if (this.project && projectFiles) {
+        const startup = await readProjectConfig(this.project, projectFiles, this.systemArguments, {
+          saved: (path) => this.saves.resource(path),
+          decode: (bytes) => this.deps.readText(bytes, '', 'shift_jis', 'plain'),
+          check: () => this.control.check(),
+          warn: (message) => this.log(message),
+        })
+        if (startup) {
+          for (const [name, value] of startup.arguments) this.systemArguments.set(name, value)
+          this.systemEnvironment.selectExecutable(startup.executable, startup.dataDirectory)
+        }
+      }
+      this.control.check()
+      const jpegPrecision = this.systemArguments.get('-jpegdec')
+      this.jpegPrecision = jpegPrecision === 'low' || jpegPrecision === 'high' ? jpegPrecision : 'normal'
       this.runtime = await this.deps.createRuntime((...args) => this.host(...args), this.control, {
         debugMode: this.systemArguments.get('-debug') === 'yes',
       })

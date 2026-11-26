@@ -64,6 +64,8 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 打开含 XP3、补丁和散装资源的 ZIP 发行包时，先在“游戏位置”选择“自动识别游戏目录或 ZIP 发行包”，再选择单个 ZIP 或填写远程链接。游戏库会记住包内的游戏目录。[ZIP 发行包的使用范围与验收](docs/decisions/134-zip-distributions-midi-and-game-playback.md)
 
+导入带启动配置的游戏时，把游戏 EXE、同名的 `.cf` 和原有存档目录一起选入。目录中有多个 EXE 时，在“游戏程序名”填写平时启动游戏的文件名。游戏下次启动时会读取存档目录里的同名 `.cfu`。[原版启动配置](docs/decisions/138-game-startup-configuration.md)
+
 从桌面版继续游玩时，载入对应游戏，暂停后在“存档与备份”选择“原版游戏存档”，导入存档文件、目录或 ZIP，再用游戏自己的读档菜单恢复。要带回桌面版，可导出 `savedata.zip` 并解压到该游戏的存档目录。[原版存档迁移](docs/decisions/136-native-saves-scenario-loading-and-video-cues.md)
 
 载入后可点击“保存当前游戏”，将资源保存在浏览器游戏库中。刷新或重开浏览器后，可直接从库中启动并继续使用原存档；也可修改启动设置、移除资源或取消正在进行的导入。远程来源会完整保存，之后读取游戏资源不再依赖原服务器。设计与存储限制见 [OPFS 游戏库](docs/decisions/017-game-library.md)。
