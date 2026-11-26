@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 184 批核对独立制作的日文主目录 ISO 的原始路径和文件字节，并在原版 KAG 中保存与刷新读档。另以像素检查淡出终点，以实际渲染的声音检查叠音与延音踏板。[184 实现与托管证据](decisions/184-oem-disc-names-fades-and-midi-notes.md)
+
 第 183 批用独立工具制作带原版 KAG 和立体声配乐的 CloneCD 光盘，核对原盘文件、游戏内音轨与存读档。浏览器验收另检查换轨冻结的播放时刻及双击坐标。Windows 对照保留原版游戏窗口收到的双击事件。[183 实现与托管证据](decisions/183-clonecd-disc-playback-and-input.md)
 
 第 182 批通过原版 KAG 菜单选取外部 KDT 或缩略图 BMP 并另存进度，检查模态阅读区与确认按钮的焦点顺序，用独立 FFmpeg 混音对照游戏的 Vorbis 播放。设备文件和配乐各保留单独的 Node TAP。[182 实现与托管证据](decisions/182-device-bookmarks-modal-focus-and-vorbis.md)

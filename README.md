@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 184 批支持按代码页读取游戏光盘上的日文章节名和卷标，修订不透明图层淡出最后一帧的脚本异常，以及 MIDI 同音叠加后无法松音的问题。新行为等待托管验收。[184 实现与托管证据](docs/decisions/184-oem-disc-names-fades-and-midi-notes.md)
+
 第 183 批支持从 CloneCD 游戏盘启动和播放光盘配乐，并修订影片播放中换轨的停止时刻和游戏图层的双击位置。新行为等待托管验收。[183 实现与托管证据](docs/decisions/183-clonecd-disc-playback-and-input.md)
 
 第 182 批让原版 KAG 从设备打开书签、继续游玩并另存进度，同时修订模态阅读层的初始焦点和多声道 Vorbis 配乐的扬声器位置。新行为等待托管验收。[182 实现与托管证据](docs/decisions/182-device-bookmarks-modal-focus-and-vorbis.md)

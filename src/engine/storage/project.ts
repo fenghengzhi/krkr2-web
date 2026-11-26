@@ -2,6 +2,7 @@ import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { isDiscMedium } from '../ports/cdda.ts'
 import { StorageResolver } from './resolver.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../../formats/zip/names.ts'
+import { legacyNameEncoding, type LegacyNameEncoding } from '../../formats/text/legacy-names.ts'
 import { scriptEncoding, type ScriptEncoding } from '../script/text-encoding.ts'
 import { discAddress, extractStoragePath, nativeDiscPath, parseStoragePath, storageDirectoryPath, storageFilePath, toPublicStoragePath } from './public-path.ts'
 
@@ -11,6 +12,8 @@ export interface GameEncodings {
   scriptEncoding?: ScriptEncoding
   /** CUE filenames follow the disc author's code page independently of game scripts. */
   cueEncoding?: ScriptEncoding
+  /** Non-Unicode names and volume labels on the primary ISO filesystem. */
+  discNameEncoding?: LegacyNameEncoding
   /** Explicit imported .reg resource; omitted never reads a registry file. */
   registryFile?: string
 }
@@ -24,11 +27,13 @@ export function registryResourceFile(value: unknown): string | undefined {
 }
 export function copyGameEncodings(value: GameEncodings): GameEncodings {
   const zip = zipNameEncoding(value.zipEncoding), script = scriptEncoding(value.scriptEncoding),
-    cue = scriptEncoding(value.cueEncoding, ' CUE '), registryFile = registryResourceFile(value.registryFile)
+    cue = scriptEncoding(value.cueEncoding, ' CUE '), disc = legacyNameEncoding(value.discNameEncoding, '光盘文件名'),
+    registryFile = registryResourceFile(value.registryFile)
   return {
     ...(zip === 'cp437' ? {} : { zipEncoding: zip }),
     ...(script === 'auto' ? {} : { scriptEncoding: script }),
     ...(cue === 'auto' ? {} : { cueEncoding: cue }),
+    ...(disc === 'cp437' ? {} : { discNameEncoding: disc }),
     ...(registryFile === undefined ? {} : { registryFile }),
   }
 }

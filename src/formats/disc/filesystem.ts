@@ -2,6 +2,7 @@ import type { ArchiveReader, ByteSource } from '../../engine/ports/storage.ts'
 import { TrackReader, type DiscVolumeTrack } from './track.ts'
 import { foldDiscName as fold, discPathParts as pathParts } from './path.ts'
 import { openBridgedUdf, openUdfVolume } from './udf.ts'
+import { cp437 } from '../text/legacy-names.ts'
 
 /** Read-only optical namespace with recorded spelling and case-insensitive lookup. */
 export interface DiscEntry { readonly name: string; readonly size: number; readonly directory: boolean }
@@ -31,7 +32,7 @@ function both32(bytes: Uint8Array, at: number) {
 interface Section { start: number; size: number; unit: number; gap: number }
 interface Entry extends DiscEntry { size: number; key: number; identifier: string; version: string; flags: number; sections: Section[] }
 interface Directory { entries: Entry[]; charge: number }
-interface Volume { bytes: number; block: number; sequence: number; joliet: boolean; root: Entry }
+interface Volume { bytes: number; block: number; sequence: number; joliet: boolean; decodeName: (bytes: Uint8Array) => string; root: Entry }
 
 // CDFS NameSup/DirSup separate ';version' and remove one empty-extension dot.
 function splitName(text: string) {
@@ -39,14 +40,15 @@ function splitName(text: string) {
     version = separator < 0 ? '' : text.slice(separator + 1)
   return { name: name.endsWith('.') ? name.slice(0, -1) : name, version }
 }
-function identifier(bytes: Uint8Array, joliet: boolean): string {
-  if (joliet && bytes.length % 2) invalid('odd Joliet identifier length')
+function identifier(bytes: Uint8Array, volume: Omit<Volume, 'root'>): string {
   let text = ''
-  for (let at = 0; at < bytes.length; at += joliet ? 2 : 1) {
-    const code = joliet ? bytes[at]! * 256 + bytes[at + 1]! : bytes[at]!
-    if (!code || code === 47 || code === 92 || (!joliet && code > 127)) invalid('unsupported file identifier')
-    text += String.fromCharCode(code)
-  }
+  if (volume.joliet) {
+    if (bytes.length % 2) invalid('odd Joliet identifier length')
+    for (let at = 0; at < bytes.length; at += 2) text += String.fromCharCode(bytes[at]! * 256 + bytes[at + 1]!)
+  } else text = volume.decodeName(bytes)
+  // 0x5c can be part of a Japanese multibyte character. Check separators
+  // only after decoding the entire directory record's filename.
+  if (/[\0/\\]/.test(text)) invalid(volume.joliet ? 'unsupported file identifier' : 'unsupported file identifier（请核对 ISO 主目录文件名编码）')
   return text
 }
 function record(bytes: Uint8Array, key: number, volume: Omit<Volume, 'root'>): Entry {
@@ -56,7 +58,7 @@ function record(bytes: Uint8Array, key: number, volume: Omit<Volume, 'root'>): E
     unit = bytes[26]! * volume.block, gap = bytes[27]! * volume.block, attributes = bytes[1]! * volume.block,
     start = location * volume.block + attributes + (unit && attributes ? gap : 0), directory = !!(flags & 2),
     special = bytes[32] === 1 && bytes[33]! <= 1,
-    rawName = special ? (bytes[33] === 0 ? '.' : '..') : identifier(bytes.subarray(33, 33 + bytes[32]!), volume.joliet),
+    rawName = special ? (bytes[33] === 0 ? '.' : '..') : identifier(bytes.subarray(33, 33 + bytes[32]!), volume),
     { name, version } = special ? { name: rawName, version: '' } : splitName(rawName)
   if (!name || (!special && (name === '.' || name === '..')) || (special && !directory)) invalid('invalid directory identifier')
   if (both16(bytes, 28) !== volume.sequence) invalid('file section belongs to another volume')
@@ -67,13 +69,13 @@ function record(bytes: Uint8Array, key: number, volume: Omit<Volume, 'root'>): E
   range(start, span, volume.bytes)
   return { key, identifier: rawName, name, version, size, directory, flags, sections: [{ start, size, unit, gap }] }
 }
-function readVolume(bytes: Uint8Array, joliet: boolean, available: number): Volume {
+function readVolume(bytes: Uint8Array, joliet: boolean, available: number, decodeName: Volume['decodeName']): Volume {
   const block = both16(bytes, 128), blocks = both32(bytes, 80), sequence = both16(bytes, 124),
     volumeBytes = blocks * block, setSize = both16(bytes, 120)
   if (![512, 1024, 2048].includes(block) || !blocks || !sequence || sequence > setSize || bytes[881] !== 1)
     invalid('unsupported volume description')
   range(0, volumeBytes, available)
-  const volume = { bytes: volumeBytes, block, sequence, joliet },
+  const volume = { bytes: volumeBytes, block, sequence, joliet, decodeName },
     root = record(bytes.subarray(156, 156 + bytes[156]!), 156, volume)
   if (!root.directory || root.name !== '.') invalid('missing root directory')
   return { ...volume, root }
@@ -209,10 +211,11 @@ class Filesystem implements DiscFilesystem {
 
 /** Prefer a recognized UDF namespace on a bridge. When the independent UDF
  * volume cannot be mounted, use the first Joliet or primary ISO directory. */
-export async function openDiscFilesystem(source: ByteSource, track: DiscVolumeTrack, joinBlobs?: ArchiveReader['joinBlobs']): Promise<DiscFilesystem | undefined> {
+export async function openDiscFilesystem(source: ByteSource, track: DiscVolumeTrack, joinBlobs?: ArchiveReader['joinBlobs'],
+  decodeName: Volume['decodeName'] = cp437): Promise<DiscFilesystem | undefined> {
   const reader = new TrackReader(source, track, joinBlobs)
   const openBridge = async (at: number, terminated: boolean, fallback: Uint8Array, joliet: boolean) =>
-    await openBridgedUdf(reader, at, terminated) ?? new Filesystem(reader, readVolume(fallback, joliet, reader.size))
+    await openBridgedUdf(reader, at, terminated) ?? new Filesystem(reader, readVolume(fallback, joliet, reader.size, decodeName))
   let primary: Uint8Array | undefined
   for (let sector = 16; sector < 80 && (sector + 1) * sectorSize <= reader.size; sector++) {
     const bytes = await reader.read(sector * sectorSize, sectorSize)

@@ -8,6 +8,7 @@ import { locateExecutableZip } from '../../formats/zip/executable.ts'
 import { decodePlainText, inflate, inflateRaw } from './blob-source.ts'
 import type { ZipNameEncoding } from '../../formats/zip/names.ts'
 import { zipNameCodecs } from './zip-names.ts'
+import { legacyNameDecoder } from './text-decoder.ts'
 import { joinArchiveVolumes } from './archive-volumes.ts'
 
 export const archiveReader: ArchiveReader = {
@@ -19,6 +20,7 @@ export const archiveReader: ArchiveReader = {
   },
   joinVolumes: joinArchiveVolumes,
   decodeText: decodePlainText,
+  discNameDecoder: legacyNameDecoder,
   async probeArchive(resource, checkpoint) {
     if (resource.zipDiskOffsets) return true
     const { source } = await openResourceSource(resource, { checkpoint }),

@@ -4,6 +4,7 @@ import { test, expect } from '../helpers/library-browser.ts'
 import { discBootInput, discReleaseInput, localizedDiscRelease } from '../helpers/disc-boot.ts'
 import { udfGameDisc, udfMetadataGameDisc, udfSparableGameDisc } from '../helpers/udf-game-discs.ts'
 import { cloneCdDiscInput } from '../helpers/clone-cd-game.ts'
+import { oemGameDiscInput } from '../helpers/oem-game-disc.ts'
 import { kagGameControls } from '../helpers/kag-game-controls.ts'
 
 const editions = [
@@ -26,14 +27,18 @@ const editions = [
     names: ['boot-udf250-bridge-source.iso'], open: () => udfMetadataGameDisc(true) },
   { kind: 'ccd', binary: false, label: 'CloneCD mixed-mode source', suffix: ' CCD',
     names: ['boot-clonecd-source.ccd', 'boot-clonecd-source.img'], open: cloneCdDiscInput },
+  { kind: 'oem', binary: false, label: 'CP932 primary ISO source', suffix: ' OEM',
+    names: ['boot-oem932-source.iso'], open: oemGameDiscInput },
 ]
 
 for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
-  const { binary, kind } = edition, localized = kind === 'localized-zip', packaged = kind === 'zip' || localized, udf = kind.startsWith('udf')
+  const { binary, kind } = edition, localized = kind === 'localized-zip', packaged = kind === 'zip' || localized,
+    udf = kind.startsWith('udf'), oem = kind === 'oem'
   test(`${backend}/${edition.label}: importing the complete disc boots original KAG and restores its chapter after library refresh`, async ({ page }, info) => {
     test.setTimeout(180000)
     const input = edition.open(),
       drive = packaged ? 'G' : 'D', medium = `file://./${drive.toLowerCase()}/`,
+      gameDirectory = oem ? '表game/' : 'discgame/',
       localizedCue = 'Release.zip>Media/' + (binary ? 'Диск.cue' : '한글.cue'),
       mapping = localized ? 'G=' + localizedCue : packaged ? (binary ? 'G=Media/boot.cue' : 'G=StorySource.zip>Media/boot-source.iso') : '',
       launcher = localized ? localizedCue : packaged && binary ? 'StoryBytecode.zip>Media/boot.cue' : '',
@@ -50,17 +55,18 @@ for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
       if (await leave.isVisible()) await leave.click()
       await expect.poll(() => read('discState()')).toBe('*choice|2|0|0')
       expect(await read('discBootPaths()')).toBe([
-        medium + 'discgame/', medium + 'discgame/data.xp3>', 'game://./savedata/',
-        medium + 'discgame/data.xp3>startup.tjs', medium + 'discgame/patch.xp3>first.ks', medium + 'discgame/',
+        medium + gameDirectory, medium + gameDirectory + 'data.xp3>', 'game://./savedata/',
+        medium + gameDirectory + 'data.xp3>startup.tjs', medium + gameDirectory + 'patch.xp3>first.ks', medium + gameDirectory,
       ].join('|'))
       expect(await read('System.exeName+"|"+System.getArgument("-disc-edition")'))
-        .toBe(medium + 'discgame/story.exe|pressing')
+        .toBe(medium + gameDirectory + 'story.exe|pressing')
+      if (oem) expect(await read('discOemPaths()')).toBe(`${drive}|${medium}表/表.ks|42`)
       expect(await read('Storages.getPlacedPath("game://./startup.tjs")')).not.toBe('game://./startup.tjs')
     }, chapter = async (progress: number, visits: number) => {
-      await expect.poll(() => read('discState()')).toBe(`*arrival|2|0|${progress}`)
-      expect(await read('discVisits')).toBe(String(visits))
-      expect(await read('discRendered')).toBe(`Moon disc scene ${progress}`)
-      expect(await read('Storages.getPlacedPath("story.ks")')).toBe(medium + 'routes/story.ks')
+      await expect.poll(() => read('[discState(),discVisits,discRendered].join("|")'))
+        .toBe(`*arrival|2|0|${progress}|${visits}|Moon disc scene ${progress}`)
+      expect(await read(oem ? 'Storages.getPlacedPath("表.ks")' : 'Storages.getPlacedPath("story.ks")'))
+        .toBe(medium + (oem ? '表/表.ks' : 'routes/story.ks'))
       expect(await read('kag.fore.base.getMainPixel(0,0)')).toBe(String(0x336699))
     }, stop = async () => {
       if (await page.locator('#stop').isEnabled()) await page.locator('#stop').press('Enter')
@@ -87,9 +93,13 @@ for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
       return { bytes, gameId: saved.gameId, slot: Buffer.from(slot.base64, 'base64') }
     }
     try {
-      if (binary || packaged || udf || kind === 'ccd') await page.locator('#project-mode').selectOption('auto')
-      await expect(page.locator('#project-mode')).toHaveValue(binary || packaged || udf || kind === 'ccd' ? 'auto' : 'collection')
+      if (binary || packaged || udf || kind === 'ccd' || oem) await page.locator('#project-mode').selectOption('auto')
+      await expect(page.locator('#project-mode')).toHaveValue(binary || packaged || udf || kind === 'ccd' || oem ? 'auto' : 'collection')
       await page.locator('#cdda-discs').fill(mapping)
+      if (oem) {
+        await expect(page.locator('#disc-name-encoding')).toHaveValue('cp437')
+        await page.locator('#disc-name-encoding').selectOption('shift_jis')
+      }
       if (localized) {
         await page.locator('#zip-encoding').selectOption(binary ? 'windows-1251' : 'euc-kr')
         await page.locator('#cue-encoding').selectOption(binary ? 'euc-kr' : 'windows-1251')
@@ -151,6 +161,13 @@ for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
         // Reopening the saved game must use its recorded disc binding, rather
         // than the unrelated next-import settings left in the page form.
         await page.locator('#cdda-discs').fill('D=missing-next-import.iso')
+      }
+      if (oem) {
+        // The saved project must retain the primary-directory encoding even
+        // when the player chooses a different encoding for the next import.
+        await page.locator('#disc-name-encoding').selectOption('cp437')
+        await expect(page.locator('#disc-name-encoding')).toHaveValue('cp437')
+        observations.push({ nextImportDiscEncoding: 'cp437', savedDiscEncoding: 'shift_jis' })
       }
       await item.getByRole('button', { name: '启动', exact: true }).click()
       await ready()

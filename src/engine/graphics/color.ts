@@ -24,6 +24,9 @@ export function blendColor(
   opacity: number,
   face: number,
 ): void {
+  // FillColor checks opa==0 before clamping negative values. Its caller still
+  // marks that draw as modified, but the RGB and destination alpha are intact.
+  if (face === 1 && opacity < 0) return
   const amount = Math.max(0, Math.min(255, Math.trunc(Math.abs(opacity)))),
     alpha = data[at + 3]!
   if (!amount) return

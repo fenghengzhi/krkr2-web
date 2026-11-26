@@ -1,3 +1,4 @@
+import { dosNameDecoder, type LegacyNameEncoding } from '../../formats/text/legacy-names.ts'
 import koreanIndex from '../../formats/text/euc-kr-index.json' with { type: 'json' }
 
 /** WHATWG EUC-KR includes the Windows-949 Hangul extension. Host ICU's
@@ -31,4 +32,11 @@ export function strictTextDecoder(label: string, ignoreBOM = false): { decode(by
   if (label === 'euc-kr') return koreanDecoder
   const decoder = new TextDecoder(label, { fatal: true, ignoreBOM })
   return decoder.encoding === 'euc-kr' ? koreanDecoder : decoder
+}
+
+export function legacyNameDecoder(encoding: LegacyNameEncoding): (bytes: Uint8Array) => string {
+  const dos = dosNameDecoder(encoding)
+  if (dos) return dos
+  const decoder = strictTextDecoder(encoding, true)
+  return (bytes) => decoder.decode(bytes)
 }

@@ -241,7 +241,9 @@ export class Bitmap extends ImagePlane {
       this.fill(rect, color, face, true)
       return
     }
-    if (opacity < 0 && face !== 0) throw new Error('Negative opacity requires dfAlpha')
+    // Stock dfOpaque FillColor clamps a negative opacity to zero, while
+    // dfAlpha uses it as an eraser and dfAddAlpha rejects it.
+    if (opacity < 0 && face !== 0 && face !== 1) throw new Error('Negative opacity requires dfAlpha')
     const area = intersect(this.clip, rect)
     if (!area.width || !area.height) return
     this.independ()

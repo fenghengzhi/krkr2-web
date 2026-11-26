@@ -9,6 +9,7 @@ import { observeNativePhaseMixer, openPhaseCapture, closePhaseCapture, beginPhas
 const stages = [
   { name: 'polyphonic-chord', chord: true }, { name: 'monophonic-lead', chord: false },
   { name: 'monophonic-damper', chord: false }, { name: 'polyphonic-restored', chord: true },
+  { name: 'overlapping-note-offs', chord: false }, { name: 'overlapping-damper-release', chord: false },
 ]
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])

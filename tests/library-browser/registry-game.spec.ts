@@ -31,9 +31,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       if (configured) await expect(page.locator('#project-status')).toContainText(fixture.publicRegistryFile)
       else await expect(page.locator('#project-status')).not.toContainText('游戏注册表：')
     }, chapter = async (value: number, visits: number) => {
-      await expect.poll(() => read('registryState()')).toBe(`*checkpoint|2|0|${value}`)
-      expect(await read('registryVisits')).toBe(String(visits))
-      expect(await read('registryRendered')).toBe(`REGISTRY SAVED ${value}`)
+      await expect.poll(() => read('[registryState(),registryVisits,registryRendered].join("|")'))
+        .toBe(`*checkpoint|2|0|${value}|${visits}|REGISTRY SAVED ${value}`)
       await expect(page.locator('#logs .error')).toHaveCount(0)
     }, stop = async () => {
       if (await page.locator('#stop').isEnabled()) await page.locator('#stop').press('Enter', { timeout: 5000 })

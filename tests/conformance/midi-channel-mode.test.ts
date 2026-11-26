@@ -4,7 +4,7 @@ import { AudioMixer } from '../../src/engine/media/mixer.ts'
 import { defaultSoundSettings } from '../../src/engine/ports/audio.ts'
 import { decodeMidi } from '../../src/formats/audio/midi.ts'
 import { midi } from '../helpers/audio.ts'
-import { midiChannelModeFile, midiLateMonoFile } from '../helpers/midi-channel-mode.ts'
+import { midiChannelModeFile, midiLateMonoFile, midiOverlappingFile } from '../helpers/midi-channel-mode.ts'
 
 function player(bytes?: Uint8Array, looping = false) {
   const mixer = new AudioMixer(44100)
@@ -51,6 +51,18 @@ test('SMF mono mode releases only the addressed melodic channel, including dampe
     reference = player(midi([track(midiChannelModeFile('mono', true)), track(midiChannelModeFile('poly', true, 7))], 100))
   try { assert.deepEqual(render(actual, 44100), render(reference, 44100)) }
   finally { close(actual, reference) }
+  for (const damper of [false, true]) {
+    const actual = player(midiOverlappingFile(damper), true), reference = player(midiOverlappingFile(damper, true), true)
+    try {
+      const heard = render(actual, 52920)
+      assert.deepEqual(heard, render(reference, 52920), 'One note-off must release both overlapping A4s')
+      assert(heard.left.subarray(50000).some((sample) => sample !== 0))
+      for (const mixer of [actual, reference]) mixer.command({ op: 'set', id: 1, property: 'position', value: 11025 })
+      assert.deepEqual(render(actual, 44100), render(reference, 44100), 'Seek reconstructs every matching released/damper-held note')
+      for (const mixer of [actual, reference]) { mixer.command({ op: 'stop', id: 1 }); mixer.command({ op: 'play', id: 1 }) }
+      assert.deepEqual(render(actual, 176400), render(reference, 176400), 'Loop and replay start without held notes from the prior phrase')
+    } finally { close(actual, reference) }
+  }
 })
 
 test('raw mono/poly messages hush one channel, retain the selected mode across CC121 and do not restart prior release tails', () => {
@@ -75,6 +87,29 @@ test('raw mono/poly messages hush one channel, retain the selected mode across C
       raw(actual, [0xb0, 127, value]); raw(reference, [0xb0, 120, 0])
       for (const mixer of [actual, reference]) raw(mixer, [0x90, 69, 100, 0x90, 76, 100])
       assert.deepEqual(render(actual, 44100), render(reference, 44100), 'Poly restores a simultaneous chord')
+    } finally { close(actual, reference) }
+  }
+  for (const damper of [false, true]) {
+    const actual = player(), reference = player()
+    try {
+      const setup = [0xc0, 80, 0xc1, 80, 0xc2, 80,
+        ...(damper ? [0xb0, 64, 127, 0xb1, 64, 127] : []),
+        0x90, 69, 80, 0x90, 76, 100, 0x92, 69, 70]
+      for (const mixer of [actual, reference]) raw(mixer, setup)
+      assert.deepEqual(render(actual, 4410), render(reference, 4410))
+      raw(actual, [0x90, 69, 40]); raw(reference, [0x91, 69, 40])
+      assert.deepEqual(render(actual, 4410), render(reference, 4410))
+      raw(actual, [0x90, 69, 0]); raw(reference, [0x80, 69, 0, 0x81, 69, 0])
+      assert.deepEqual(render(actual, 4410), render(reference, 4410), 'Velocity zero releases both A4s on channel zero, not channel two')
+      raw(actual, [0xb0, 123, 0]); raw(reference, [0x80, 76, 0])
+      assert.deepEqual(render(actual, 4410), render(reference, 4410), 'All Notes Off releases only the remaining held E5')
+      for (const mixer of [actual, reference]) raw(mixer, [0xb0, 64, 0, 0xb1, 64, 0])
+      assert.deepEqual(render(actual, 4410), render(reference, 4410))
+      raw(actual, [0xb0, 123, 0, 0x80, 69, 0, 0xb0, 121, 0])
+      const tail = render(actual, 44100)
+      assert.deepEqual(tail, render(reference, 44100), 'Repeated off messages must not restart existing release envelopes')
+      assert.equal(actual.inspect().liveMidiNotes, 1, 'Same-pitch notes on another channel remain sounding')
+      assert(tail.left.subarray(40000).some((sample) => sample !== 0))
     } finally { close(actual, reference) }
   }
 })

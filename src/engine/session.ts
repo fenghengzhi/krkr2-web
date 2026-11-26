@@ -33,8 +33,9 @@ import {
 import { StorageResolver } from './storage/resolver.ts'
 import { DropStorage } from './storage/drop.ts'
 import { copyGameProject, registryResourceFile, type GameProject } from './storage/project.ts'
+import { legacyNameEncoding, type LegacyNameEncoding } from '../formats/text/legacy-names.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../formats/zip/names.ts'
-import { CddaDiscs } from './storage/cdda.ts'
+import { CddaDiscs, discNameDecoder } from './storage/cdda.ts'
 import { copyCddaDiscs, isDiscMedium, isDiscSheet, type CddaDisc, type DiscChange } from './ports/cdda.ts'
 import {
   chopStorageExt,
@@ -182,6 +183,7 @@ const ignoredAdmission = (): SessionAdmission => ({
 export interface SessionSnapshot {
   project?: GameProject
   zipEncoding?: ZipNameEncoding
+  discNameEncoding?: LegacyNameEncoding
   scriptEncoding?: ScriptEncoding
   cueEncoding?: ScriptEncoding
   registryFile?: string
@@ -266,6 +268,7 @@ export interface SessionDependencies {
   discImports?: { resources: Resource[]; archives: ArchiveReader }
   project?: GameProject
   zipEncoding?: ZipNameEncoding
+  discNameEncoding?: LegacyNameEncoding
   scriptEncoding?: ScriptEncoding
   cueEncoding?: ScriptEncoding
   registryFile?: string
@@ -352,6 +355,7 @@ export class EngineSession {
   private readonly storageCheckpoint: () => Promise<void>
   private readonly dropped: DropStorage
   private readonly project?: GameProject
+  private readonly discNameEncoding: LegacyNameEncoding
   private readonly zipEncoding: ZipNameEncoding
   private readonly cueEncoding: ScriptEncoding
   private readonly registryFile?: string
@@ -562,6 +566,7 @@ export class EngineSession {
       this.applicationActivation = { ...deps.application }
     }
     this.project = copyGameProject(deps.project)
+    this.discNameEncoding = legacyNameEncoding(deps.discNameEncoding, '光盘文件名')
     this.zipEncoding = zipNameEncoding(deps.zipEncoding)
     this.cueEncoding = scriptEncoding(deps.cueEncoding, ' CUE ')
     this.registryFile = registryResourceFile(deps.registryFile)
@@ -592,6 +597,7 @@ export class EngineSession {
     if (imports && deps.discImports) imports.mount(deps.discImports.resources)
     this.registryImports = imports
     this.cddaDiscs = new CddaDiscs({
+      decodeName: discNameDecoder(deps.archives, this.discNameEncoding),
       joinBlobs: deps.archives?.joinBlobs,
       currentDirectory: boot ? '' : this.project?.directory ?? '',
       exists: async (name) => {
@@ -4092,6 +4098,7 @@ export class EngineSession {
       activity: { ...this.activity },
       resources: this.storage.count,
       ...(this.project ? { project: { ...this.project } } : {}),
+      ...(this.discNameEncoding === 'cp437' ? {} : { discNameEncoding: this.discNameEncoding }),
       ...(this.zipEncoding === 'cp437' ? {} : { zipEncoding: this.zipEncoding }),
       ...(this.textEncoding.initial === 'auto' ? {} : { scriptEncoding: this.textEncoding.initial }),
       ...(this.cueEncoding === 'auto' ? {} : { cueEncoding: this.cueEncoding }),

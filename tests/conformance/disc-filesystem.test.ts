@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import type { ByteSource, ImmutableBlob } from '../../src/engine/ports/storage.ts'
 import { openDiscFilesystem } from '../../src/formats/disc/filesystem.ts'
-import type { DiscVolumeTrack } from '../../src/formats/disc/volume-label.ts'
+import { readDiscVolumeLabel, type DiscVolumeTrack } from '../../src/formats/disc/volume-label.ts'
+import { legacyNameDecoder } from '../../src/backends/files/text-decoder.ts'
 
 const sector = 2048, ascii = (text: string) => new TextEncoder().encode(text),
   fixture = (name: string) => new Uint8Array(readFileSync(new URL(`../../out/verification/disc-volumes/${name}.iso`, import.meta.url))),
@@ -25,8 +26,8 @@ function dual32(bytes: Uint8Array, offset: number, value: number) {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   v.setUint32(offset, value, true); v.setUint32(offset + 4, value)
 }
-function dirent(name: string | number, block: number, size: number, flags = 0, unit = 0, gap = 0, attributes = 0) {
-  const identifier = typeof name === 'number' ? Uint8Array.of(name) : ascii(name),
+function dirent(name: string | number | Uint8Array, block: number, size: number, flags = 0, unit = 0, gap = 0, attributes = 0) {
+  const identifier = typeof name === 'number' ? Uint8Array.of(name) : typeof name === 'string' ? ascii(name) : name,
     bytes = new Uint8Array(33 + identifier.length + (identifier.length % 2 === 0 ? 1 : 0))
   bytes[0] = bytes.length; bytes[1] = attributes; dual32(bytes, 2, block); dual32(bytes, 10, size)
   bytes[25] = flags; bytes[26] = unit; bytes[27] = gap; dual16(bytes, 28, 1)
@@ -59,6 +60,33 @@ function author(entries: Uint8Array[], blocks = 40) {
     } }
   return { source, regions, reads, header }
 }
+
+test('the primary ISO code page determines file names and volume labels, including a Shift-JIS trail byte 5c', async () => {
+  for (const [encoding, hex, title] of [
+    ['cp437', '9b', '¢'], ['cp850', '9b', 'ø'], ['cp866', '84', 'Д'],
+    ['shift_jis', '955c', '表'], ['gbk', 'd6d0', '中'], ['big5', 'a4a4', '中'],
+    ['euc-kr', 'b0a1', '가'], ['windows-1251', 'c4', 'Д'], ['windows-1252', 'e9', 'é'], ['utf-8', 'e8a1a8', '表'],
+  ] as const) {
+    const name = Buffer.from(hex, 'hex'), disc = author([dirent(Buffer.concat([name, ascii('.TJS;1')]), 30, 2)]),
+      decode = legacyNameDecoder(encoding)
+    disc.header.fill(0x20, 40, 72); disc.header.set(name, 40)
+    disc.regions.set(30 * sector, ascii('42'))
+    const fs = await openDiscFilesystem(disc.source, track(), undefined, decode)
+    assert(fs)
+    assert.deepEqual(await fs.list(), [{ name: title + '.TJS', size: 2, directory: false }])
+    assert.deepEqual(await contents(await fs.file(title + '.tjs;1')), ascii('42'))
+    assert.equal(await readDiscVolumeLabel(disc.source, track(), decode), title)
+  }
+})
+
+test('a Joliet disc reads its own Unicode label and names even if the primary code page cannot decode them', async () => {
+  const bytes = fixture('joliet'), source = bufferSource(bytes)
+  bytes.fill(0xff, 16 * sector + 40, 16 * sector + 72)
+  const rejectPrimary = (): never => { throw new Error('Unexpected primary namespace read') }
+  const fs = await openDiscFilesystem(source, track(), undefined, rejectPrimary)
+  assert(fs); assert(await fs.file('SCENE.TXT'))
+  assert.equal(await readDiscVolumeLabel(source, track(), rejectPrimary), 'KIRIKIRI_DISC')
+})
 
 test('reads independent genisoimage files through all cooked/raw MODE layouts and nonzero CUE INDEX', async () => {
   for (const name of ['plain', 'joliet']) for (const [stride, payload] of [[2048, 0], [2352, 16], [2336, 8], [2352, 24]] as const) {

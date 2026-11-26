@@ -234,11 +234,16 @@ export class MidiSynth {
         percussion: c.percussion,
       })
     } else if (kind === 0x80 || kind === 0x90) {
-      const note = this.notes.find((note) => note.channel === id && note.key === a && note.held)
-      if (note) {
-        note.held = false
-        if (!c.sustain) note.released = this.time
-      }
+      // KRKR forwards note-off (including velocity-zero note-on) unchanged.
+      // The selected Windows GS behavior releases every still-held voice for
+      // this channel/key, not just one overlapping note. Other pitches and
+      // channels, damper-held notes and already running release tails survive.
+      // Microsoft MIDI 4db4520 SynthEngine::NoteOff / AllNotesOff.
+      for (const note of this.notes)
+        if (note.channel === id && note.key === a && note.held) {
+          note.held = false
+          if (!c.sustain) note.released = this.time
+        }
     } else if (kind === 0xc0) c.program = a
     else if (kind === 0xe0) c.bend = (a + (b << 7) - 8192) / 8192
     else if (kind === 0xb0) {
@@ -263,7 +268,7 @@ export class MidiSynth {
         this.notes = this.notes.filter((note) => note.channel !== id)
       } else if (a === 123) {
         for (const note of this.notes)
-          if (note.channel === id) {
+          if (note.channel === id && note.held) {
             note.held = false
             if (!c.sustain) note.released = this.time
           }
@@ -281,7 +286,7 @@ export class MidiSynth {
         reset.used = fromFile || c.used
         this.channels[id] = reset
         for (const note of this.notes)
-          if (note.channel === id && !note.held) note.released = this.time
+          if (note.channel === id && !note.held && note.released === undefined) note.released = this.time
       }
     }
   }

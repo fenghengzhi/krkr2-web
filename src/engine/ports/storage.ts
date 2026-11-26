@@ -1,3 +1,5 @@
+import type { LegacyNameEncoding } from '../../formats/text/legacy-names.ts'
+
 export const MAX_RESOURCE_BYTES = 64 * 1024 * 1024
 
 /** DOM-independent immutable Blob view. This does not grant whole-buffer reads
@@ -51,6 +53,8 @@ export interface ArchiveReader {
   /** Decode disc metadata with BOM precedence. Without a BOM, honor the
    * selected code page or use automatic UTF-8/Shift-JIS decoding. */
   decodeText?(bytes: Uint8Array, fallbackEncoding?: string): string | Promise<string>
+  /** Decode a complete primary ISO field using the selected Windows/OEM code page. */
+  discNameDecoder?(encoding: LegacyNameEncoding): (bytes: Uint8Array) => string
   /** Release shared decoded segment caches. Open resource handles stay usable. */
   compact?(): void
   open(resource: Resource, checkpoint: () => Promise<void>): Promise<ArchiveIndex | undefined>

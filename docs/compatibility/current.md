@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 184 批支持独立选择 ISO 主目录文件名和卷标编码，游戏库会保存这项选择。普通图层淡出和同通道 MIDI 叠音的修订也待托管验收。[184 实现与托管证据](../decisions/184-oem-disc-names-fades-and-midi-notes.md)
+
 第 183 批接入单区段、未扰码的 CloneCD 2／3 光盘。游戏库和运行中换盘可读取 CCD 与同名 IMG，游戏脚本可读取数据轨、播放立体声 CD 音轨。影片换轨与图层双击也有修订，等待托管验收。[183 实现与托管证据](../decisions/183-clonecd-disc-playback-and-input.md)
 
 第 182 批支持在游戏的打开对话框选取设备文件，之后可在游戏存档目录另存。进入模态时的阅读区焦点，以及 5.0、6.1 等 Vorbis 音轨的声道位置已修订，等待托管验收。[182 实现与托管证据](../decisions/182-device-bookmarks-modal-focus-and-vorbis.md)

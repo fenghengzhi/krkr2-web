@@ -2,6 +2,7 @@ import type { ByteSource } from '../../engine/ports/storage.ts'
 import type { CueSheet } from '../audio/cue.ts'
 import { TrackReader, type DiscVolumeTrack, type SectorLayout } from './track.ts'
 import { openBridgedUdf, openUdfVolume } from './udf.ts'
+import { cp437 } from '../text/legacy-names.ts'
 export { isDataSector, type DiscVolumeTrack } from './track.ts'
 
 const layouts = new Map<string, SectorLayout>([
@@ -30,29 +31,30 @@ export function discVolumeTrack(sheet: CueSheet): DiscVolumeTrack | 'audio' | un
  * keeps the first primary descriptor and prefers the first following Joliet
  * descriptor with a recognized escape sequence. Read their headers only.
  * A mounted UDF namespace supplies its logical volume label, including on bridges. */
-export async function readDiscVolumeLabel(source: ByteSource, track: DiscVolumeTrack): Promise<string | undefined> {
+export async function readDiscVolumeLabel(source: ByteSource, track: DiscVolumeTrack,
+  decodeName: (bytes: Uint8Array) => string = cp437): Promise<string | undefined> {
   const reader = new TrackReader(source, track)
-  const bridgeLabel = async (at: number, terminated: boolean, fallback: string | undefined) =>
-    (await openBridgedUdf(reader, at, terminated))?.label ?? fallback
-  let primary: string | undefined, foundPrimary = false
+  let primary: Uint8Array | undefined
+  const primaryLabel = () => primary && decodeName(primary).replace(/[\0 ]+$/, '')
   for (let i = 16; i < 80 && (i + 1) * 2048 <= reader.size; i++) {
     const header = await reader.recognitionHeader(i, 91)
     if (!header) break
     const id = String.fromCharCode(...header.subarray(1, 6))
-    if (!foundPrimary && id === 'BEA01' && header[0] === 0 && header[6] === 1)
+    if (!primary && id === 'BEA01' && header[0] === 0 && header[6] === 1)
       return (await openUdfVolume(reader, i))?.label
     if (id !== 'CD001' || header[6] !== 1) break
-    if (header[0] === 255) return foundPrimary ? bridgeLabel(i, true, primary) : undefined
+    if (header[0] === 255) return primary ? (await openBridgedUdf(reader, i, true))?.label ?? primaryLabel() : undefined
     const field = header.subarray(40, 72)
-    if (header[0] === 1 && !foundPrimary) {
-      foundPrimary = true
-      if (field.every((byte) => byte < 128)) primary = String.fromCharCode(...field).replace(/[\0 ]+$/, '')
-    } else if (header[0] === 2 && foundPrimary && header[88] === 37 && header[89] === 47 &&
+    if (header[0] === 1 && !primary) {
+      // A bridge may contain a primary label in a different code page. Only
+      // decode it if no Joliet or UDF volume supplied its own Unicode label.
+      primary = field.slice()
+    } else if (header[0] === 2 && primary && header[88] === 37 && header[89] === 47 &&
         (header[90] === 64 || header[90] === 67 || header[90] === 69)) {
       let label = ''
       for (let p = 0; p < field.length; p += 2) label += String.fromCharCode((field[p]! << 8) | field[p + 1]!)
-      return bridgeLabel(i, false, label.replace(/[\0 ]+$/, ''))
+      return (await openBridgedUdf(reader, i, false))?.label ?? label.replace(/[\0 ]+$/, '')
     }
   }
-  return primary
+  return primaryLabel()
 }

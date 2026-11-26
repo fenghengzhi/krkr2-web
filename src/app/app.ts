@@ -3,6 +3,7 @@ import { attachGameFileDrop } from './game-file-drop.ts'
 import { createPlayer } from '../player/create-player.ts'
 import { demoFiles } from './demo.ts'
 import { readNativeSaves, writeNativeSaves } from '../player/native-saves.ts'
+import { legacyNameEncoding, legacyNameEncodings } from '../formats/text/legacy-names.ts'
 import { zipNameEncoding, zipNameEncodings, type ZipNameEncoding } from '../formats/zip/names.ts'
 import { scriptEncoding, scriptEncodings } from '../engine/script/text-encoding.ts'
 import { encodeBackup, decodeBackup } from '../player/save-backup.ts'
@@ -74,11 +75,13 @@ export function mountApp(root: HTMLDivElement): void {
   const projectControls = document.createElement('div')
   projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">自动识别游戏目录、ZIP 或光盘</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><label for="project-executable">游戏程序名或发行包（可选）</label><input id="project-executable" placeholder="例如 Story.exe 或 Release.zip&gt;Media/Disc1.cue" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">可从游戏目录、ZIP、自解压 ZIP 或光盘镜像启动。支持 ISO 9660、Joliet 和 UDF 游戏光盘。ZIP 内含光盘时请选择自动识别。CUE 需要配套轨道文件，CloneCD 光盘请选择 CCD 和同名 IMG。</p>`
   root.querySelector('label[for="entry"]')!.before(projectControls)
-  const zipLabels: Record<ZipNameEncoding, string> = {
-    ...textEncodingLabels, cp437: 'ZIP 默认（CP437）',
-  }
+  const discNameLabels = { ...textEncodingLabels, cp437: '美式 DOS（CP437）',
+    cp850: '西欧 DOS（CP850）', cp866: '西里尔 DOS（CP866）' }
+  const zipLabels: Record<ZipNameEncoding, string> = { ...discNameLabels, cp437: 'ZIP 默认（CP437）' }
   const zipOptions = zipNameEncodings.map((name) => `<option value="${name}">${zipLabels[name]}</option>`).join('')
   projectControls.insertAdjacentHTML('beforeend', `<label for="zip-encoding">未标记的 ZIP 文件名编码</label><select id="zip-encoding">${zipOptions}</select>`)
+  const discNameOptions = legacyNameEncodings.map((name) => `<option value="${name}">${discNameLabels[name]}</option>`).join('')
+  projectControls.insertAdjacentHTML('beforeend', `<label for="disc-name-encoding">ISO 主目录文件名与卷标编码</label><select id="disc-name-encoding">${discNameOptions}</select>`)
   const scriptOptions = scriptEncodings.map((name) => `<option value="${name}">${textEncodingLabels[name]}</option>`).join('')
   projectControls.insertAdjacentHTML('beforeend', `<label for="script-encoding">无 BOM 的脚本与剧情编码</label><select id="script-encoding">${scriptOptions}</select>`)
   projectControls.insertAdjacentHTML('beforeend', `<label for="registry-file">游戏注册表文件（可选）</label><input id="registry-file" placeholder="例如 Game/settings.reg 或 data.xp3&gt;settings.reg" spellcheck="false"><p class="muted">填写已导入游戏中的文件路径。留空不读取注册表文件。</p>`)
@@ -91,6 +94,7 @@ export function mountApp(root: HTMLDivElement): void {
       encodings = {
         zipEncoding: zipNameEncoding(el<HTMLSelectElement>('zip-encoding').value),
         scriptEncoding: scriptEncoding(el<HTMLSelectElement>('script-encoding').value),
+        discNameEncoding: legacyNameEncoding(el<HTMLSelectElement>('disc-name-encoding').value, '光盘文件名'),
         cueEncoding: scriptEncoding(discSettings.encoding.value, ' CUE '),
         registryFile: el<HTMLInputElement>('registry-file').value.trim() || undefined,
       },
@@ -640,6 +644,7 @@ export function mountApp(root: HTMLDivElement): void {
             (loaded.project.distribution ? loaded.project.distribution + '>' : '') + loaded.project.bootDisc : '') +
           (loaded.zipEncoding ? ' · ZIP 文件名：' + zipLabels[loaded.zipEncoding] : '') +
           (loaded.scriptEncoding ? ' · 脚本与剧情：' + textEncodingLabels[loaded.scriptEncoding] : '') +
+          (loaded.discNameEncoding ? ' · ISO 文件名：' + discNameLabels[loaded.discNameEncoding] : '') +
           (loaded.cueEncoding ? ' · CUE：' + textEncodingLabels[loaded.cueEncoding] : '') +
           (loaded.registryFile ? ' · 游戏注册表：' + loaded.registryFile : '')
         log('会话就绪。点击画面继续。')
@@ -709,6 +714,7 @@ export function mountApp(root: HTMLDivElement): void {
             ...(snapshot?.project ? { project: snapshot.project } : {}),
             ...(snapshot?.zipEncoding ? { zipEncoding: snapshot.zipEncoding } : {}),
             ...(snapshot?.scriptEncoding ? { scriptEncoding: snapshot.scriptEncoding } : {}),
+            ...(snapshot?.discNameEncoding ? { discNameEncoding: snapshot.discNameEncoding } : {}),
             ...(snapshot?.cueEncoding ? { cueEncoding: snapshot.cueEncoding } : {}),
             ...(snapshot?.registryFile ? { registryFile: snapshot.registryFile } : {}),
             ...(currentCddaDiscs === undefined ? {} : { cddaDiscs: currentCddaDiscs }),

@@ -160,7 +160,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
       const hint = entryDisc ? entryDisc.path.split('>', 1)[0]!.toLowerCase() : entryName
       const game = await locateGame(files, choice, checkpoint, probe, 'files', hint, relativeEntry || !!entryDisc, false)
       return game && select(files, game)
-    }, entryDisc?.drive, distribution, optionalMedia)
+    }, entryDisc?.drive, distribution, optionalMedia, setting.discNameEncoding)
   const mountDistribution = async (archive: Resource, choice: ProjectLocation,
     mode: 'selected' | 'frozen' | 'candidate' = 'selected') => {
     const frozen = mode === 'frozen', optionalZip = mode === 'candidate'

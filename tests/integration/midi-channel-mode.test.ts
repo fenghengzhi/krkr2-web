@@ -27,7 +27,7 @@ for (const binary of [false, true])
       }
     try {
       await session.start()
-      for (const mode of ['poly', 'mono', 'sustain', 'restored']) {
+      for (const mode of ['poly', 'mono', 'sustain', 'restored', 'overlap-release', 'overlap-damper']) {
         reference.command({ op: 'load', id: 1, kind: 'midi', asset: decodeMidi(files[`${mode}-reference.mid`]!), settings: defaultSoundSettings() })
         reference.command({ op: 'play', id: 1 })
         assert.equal(await session.evaluate(`modeStart("${mode}.mid",false)`), 'play')
@@ -35,6 +35,18 @@ for (const binary of [false, true])
         await take(800, renderReference(35280))
         assert(output[0]!.some((sample) => sample !== 0))
         assert.deepEqual(output[0], output[1])
+        if (mode.startsWith('overlap-')) {
+          await take(300, renderReference(13230))
+          assert.equal(await session.evaluate('modeMusic.status+"|"+modeMusic.samplePosition'), 'play|52920')
+          await session.evaluate('modeMusic.paused=true')
+          await take(100, [[], []])
+          await session.evaluate('modeMusic.paused=false')
+          await take(20, renderReference(882))
+          await session.evaluate('modeMusic.samplePosition=11025')
+          reference.command({ op: 'set', id: 1, property: 'position', value: 11025 })
+          await take(1000, renderReference(44100))
+          assert.equal(await session.evaluate('modeMusic.status+"|"+modeMusic.samplePosition'), 'play|55125')
+        }
         // Real stop/replay clears owned notes and starts the score's mode
         // controls again at its next first tick.
         await session.evaluate('modeMusic.stop()'); reference.command({ op: 'stop', id: 1 })

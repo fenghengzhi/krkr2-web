@@ -18,6 +18,7 @@ const file = (bytes: Buffer) => new File([Uint8Array.from(bytes).buffer], 'saved
 
 for (const [encoding, raw, decoded] of [
   ['cp437', [0x82], 'é'], ['shift_jis', [0x83, 0x5c], 'ソ'], ['gbk', [0xd6, 0xd0], '中'],
+  ['cp850', [0x9b], 'ø'], ['cp866', [0x84, 0xa8, 0xe1, 0xaa], 'Диск'], ['windows-1252', [0xe9], 'é'],
   ['big5', [0xa4, 0xa4], '中'], ['utf-8', [0xe6, 0x97, 0xa5], '日'],
   ['euc-kr', [0x81, 0x41], '갂'], ['windows-1251', [0xc4, 0xe8, 0xf1, 0xea], 'Диск'],
 ] as const) test(`ZIP ${encoding}: both mount paths honor original byte names and Unicode declarations`, async () => {

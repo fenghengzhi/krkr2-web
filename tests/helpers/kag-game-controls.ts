@@ -2,11 +2,19 @@ import { expect, type Page } from '@playwright/test'
 
 /** Read the rendered link rectangle without changing selection or calling a game handler. */
 export async function kagGameLinkPoint(read: (expression: string) => Promise<string>, index: number, target: string) {
-  const fields = (await read(`(function(){var m=kag.current,l=m.links[${index}];
+  const geometry = `(function(){var m=kag.current,l=m.links[${index}];
+      if(l===void || l===null)return "";
       var x=l.x[0]+(l.w[0]>>1),y=l.y[0]+(l.h[0]>>1),root=m;
       if(!l.fixed[0]){x+=m.lineLayerOriginX+m.getLineLayerLeftOffset();y+=m.lineLayerOriginY+m.getLineLayerTopOffset();}
       for(var p=m;p!==null;p=p.parent){x+=p.left;y+=p.top;root=p;}
-      return [x,y,l.w[0],l.h[0],l.target,int(m.selProcessLock),root.width,root.height,int(m.selClickLock)].join("|");})()`)).split('|')
+      return [x,y,l.w[0],l.h[0],l.target,int(m.selProcessLock),root.width,root.height,int(m.selClickLock)].join("|");})()`
+  // Registering the hyperlink and painting its first text run occur on
+  // different KAG steps. Click only the measured rectangle of this target.
+  let fields: string[] = []
+  await expect.poll(async () => {
+    fields = (await read(geometry)).split('|')
+    return [fields[4], fields[5], Number(fields[2]) > 0, Number(fields[3]) > 0]
+  }, { message: `Wait for the rendered link ${target}` }).toEqual([target, '0', true, true])
   expect(fields).toHaveLength(9)
   expect(fields[4]).toBe(target)
   expect(fields[5]).toBe('0')

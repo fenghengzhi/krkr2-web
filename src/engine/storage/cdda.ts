@@ -1,6 +1,7 @@
 import { cueLimits, cueTrackParts, parseCue, type CueSheet } from '../../formats/audio/cue.ts'
 import { copyCddaDiscs, isDiscMedium, isDiscSheet, type CddaDisc, type CddaPcmPart, type CddaPcmTrack, type DiscChange } from '../ports/cdda.ts'
 import { parseCloneCd } from '../../formats/disc/ccd.ts'
+import { dosNameDecoder, type LegacyNameEncoding } from '../../formats/text/legacy-names.ts'
 import { discVolumeTrack, readDiscVolumeLabel, type DiscVolumeTrack } from '../../formats/disc/volume-label.ts'
 import { openDiscFilesystem, type DiscFilesystem } from '../../formats/disc/filesystem.ts'
 import { openResourceSource } from './resource-source.ts'
@@ -57,6 +58,7 @@ export class InvalidCddaDrive extends TvpError {
   constructor() { super('TVPInvalidCDDADrive') }
 }
 export interface CddaStorage {
+  decodeName?(bytes: Uint8Array): string
   joinBlobs?: ArchiveReader['joinBlobs']
   /** Ordinary existing files retain the historical direct-file open path. */
   exists(name: string): Promise<boolean>
@@ -66,6 +68,10 @@ export interface CddaStorage {
   decodeText(bytes: Uint8Array): string | Promise<string>
   checkpoint(): Promise<void>
   currentDirectory: string
+}
+export function discNameDecoder(reader?: ArchiveReader, encoding: LegacyNameEncoding = 'cp437') {
+  return dosNameDecoder(encoding) ?? reader?.discNameDecoder?.(encoding) ??
+    (() => { throw new Error('光盘文件名解码器不可用：' + encoding) })
 }
 export class CddaDiscs {
   private readonly supplied?: readonly CddaDisc[]
@@ -231,7 +237,7 @@ export class CddaDiscs {
     const cached = this.filesystems.get(image)
     if (cached?.geometry === geometry) return { filesystem: cached.fs, image: file.name }
     const { source } = await openResourceSource(file, { checkpoint: () => this.storage.checkpoint() })
-    const fs = await openDiscFilesystem(source, track, this.storage.joinBlobs)
+    const fs = await openDiscFilesystem(source, track, this.storage.joinBlobs, this.storage.decodeName)
     if (fs) {
       this.filesystems.set(image, { geometry, fs })
       return { filesystem: fs, image: file.name }
@@ -295,7 +301,7 @@ export class CddaDiscs {
       cached = this.labels.get(image)
     if (cached?.geometry === geometry) return disc.volumeLabel ?? cached.value
     const { source } = await openResourceSource(file, { checkpoint: () => this.storage.checkpoint() }),
-      value = await readDiscVolumeLabel(source, track)
+      value = await readDiscVolumeLabel(source, track, this.storage.decodeName)
     if (value !== undefined) {
       this.labels.set(image, { geometry, value })
       return disc.volumeLabel ?? value

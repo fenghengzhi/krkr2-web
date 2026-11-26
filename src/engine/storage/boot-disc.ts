@@ -1,7 +1,8 @@
 import type { DiscFilesystem } from '../../formats/disc/filesystem.ts'
 import { copyCddaDiscs, isDiscMedium, isDiscSheet, type CddaDisc } from '../ports/cdda.ts'
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
-import { CddaDiscs } from './cdda.ts'
+import { CddaDiscs, discNameDecoder } from './cdda.ts'
+import type { LegacyNameEncoding } from '../../formats/text/legacy-names.ts'
 import { copyGameProject, type GameProject, type ProjectSelection } from './project.ts'
 import { discAddress, discStoragePath, extractStoragePath, parseStoragePath, storageFilePath, toPublicStoragePath } from './public-path.ts'
 import { resourceReadBounds } from './resource-source.ts'
@@ -42,7 +43,7 @@ async function projectFiles(fs: DiscFilesystem, directories: string[], recursive
 
 export async function selectBootDisc(resources: Resource[], selection: Location, supplied: readonly CddaDisc[] | undefined,
   reader: ArchiveReader, checkpoint: () => Promise<void>, decodeText: ArchiveReader['decodeText'], select: Select, entryDrive?: string,
-  distribution?: string, optionalMedia = false) {
+  distribution?: string, optionalMedia = false, discNameEncoding?: LegacyNameEncoding) {
   const frozen = selection.mode === 'root' && selection.bootDisc
   const at = discAddress(selection.executableDirectory ?? '') ?? (selection.mode === 'root' ? discAddress(selection.directory) : undefined)
     ?? discAddress(selection.executable ?? '')
@@ -75,7 +76,7 @@ export async function selectBootDisc(resources: Resource[], selection: Location,
     let unreadable: unknown
     const open = async ({ file, drive }: typeof choices[number]) => {
       const discs = new CddaDiscs({ currentDirectory: '', exists: async (name) => !!storage.find(name),
-        joinBlobs: reader.joinBlobs,
+        joinBlobs: reader.joinBlobs, decodeName: discNameDecoder(reader, discNameEncoding),
         exact: (name) => storage.findAsync(name), cues: async () => [], read: (resource) => resource.read(),
         decodeText: (bytes) => {
           if (!decodeText) throw new Error('A host text decoder is required to open a CUE sheet')

@@ -34,22 +34,50 @@ export function midiLateMonoFile(initialMono = false): Uint8Array {
     40, 0xb0, 126, 0, 0, 0xff, 0x2f, 0,
   ]], 100)
 }
-export const midiChannelModeFiles = () => Object.fromEntries(
-  (['poly', 'mono', 'sustain', 'restored'] as const).flatMap((mode) => [
+/** Overlapping A4s share one channel in the game score. The independent
+ * reference puts them on two channels with one note-off each, so even the old
+ * first-match implementation can render that reference correctly. E5 stays
+ * held on channel zero as the unrelated-key control. 100 PPQ = 5 ms/tick. */
+export function midiOverlappingFile(damper = false, explicit = false, long = false): Uint8Array {
+  const delta = (value: number): number[] => {
+    const bytes = [value & 127]
+    while ((value = Math.floor(value / 128))) bytes.unshift((value & 127) | 128)
+    return bytes
+  }, end = long ? 120000 : 400,
+    part = (id: number, second: boolean): number[] => {
+      const cc = 0xb0 + id, on = 0x90 + id, off = 0x80 + id,
+        primaryOff = damper && !explicit ? on : off
+      return [0, 0xc0 + id, 80, ...(damper ? [0, cc, 64, 127] : []),
+        second ? 20 : 0, on, 69, second ? 40 : 80,
+        ...(!second ? [0, on, 76, 100] : []),
+        ...(!explicit ? [20, on, 69, 40] : []),
+        explicit && !second ? 40 : 20, primaryOff, 69, 0,
+        40, cc, 64, 0, // No second note-off can hide a stuck overlapping A4.
+        ...delta(end - 80), cc, 120, 0, 0, 0xff, 0x2f, 0]
+    }
+  return midi(explicit ? [part(0, false), part(1, true)] : [part(0, false)], 100)
+}
+export const midiChannelModeFiles = () => Object.fromEntries([
+  ...(['poly', 'mono', 'sustain', 'restored'] as const).flatMap((mode) => [
     [`${mode}.mid`, midiChannelModeFile(mode)],
     [`${mode}-reference.mid`, midiChannelModeFile(mode, true)],
     [`${mode}-long.mid`, midiChannelModeFile(mode, false, 0, true)],
   ]),
-) as Record<string, Uint8Array>
+  ...(['overlap-release', 'overlap-damper'] as const).flatMap((name) => [
+    [`${name}.mid`, midiOverlappingFile(name === 'overlap-damper')],
+    [`${name}-reference.mid`, midiOverlappingFile(name === 'overlap-damper', true)],
+    [`${name}-long.mid`, midiOverlappingFile(name === 'overlap-damper', false, true)],
+  ]),
+]) as Record<string, Uint8Array>
 
 export const midiChannelModeSource = String.raw`
 System.exitOnNoWindowStartup=false;
 var modeMusic=new MIDISoundBuffer(null), modeStep=0;
 function modeStart(name,loop){modeMusic.open(name);modeMusic.looping=loop;modeMusic.play();return modeMusic.status;}
 function modeNext(){
- if(modeStep>=3)return;
+ if(modeStep>=5)return;
  modeStep++;
- var names=["poly","mono","sustain","restored"];
+ var names=["poly","mono","sustain","restored","overlap-release","overlap-damper"];
  modeStart(names[modeStep]+"-long.mid",false);
  Debug.message("channel-mode-step:"+modeStep+":"+modeMusic.status);
 }

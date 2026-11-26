@@ -641,6 +641,11 @@ jobs:
         run: |
           sudo apt-get install -y build-essential cmake flex bison bchunk
           python3 scripts/generate-ccd-game.py
+      - name: Author a Japanese primary ISO and read back its original name bytes and game files
+        id: oem-game-disc
+        if: steps.boot-discs.outcome == 'success'
+        continue-on-error: true
+        run: python3 scripts/generate-oem-game-disc.py
       - name: Package original KAG discs in single and numbered ZIP releases
         if: steps.boot-discs.outcome == 'success'
         continue-on-error: true
@@ -705,7 +710,7 @@ jobs:
             },
           }, null, 2) + '\n')
           JS
-          mkdir -p out/verification/clone-cd-game
+          mkdir -p out/verification/clone-cd-game out/verification/oem-game-disc
           tar -czf "$RUNNER_TEMP/test-build.tar.gz" \
             .generated dist out/ci/build-info.json \
             public/licenses/image-zlib public/licenses/image-jpeg public/licenses/legacy-media \
@@ -713,7 +718,7 @@ jobs:
             out/verification/pwa/fixture-artifacts.json out/verification/video-tracks \
             out/verification/deflate64-games \
             out/verification/long-vorbis out/verification/vorbis-speakers \
-            out/verification/cdda-aiff out/verification/disc-volumes out/verification/clone-cd-game \
+            out/verification/cdda-aiff out/verification/disc-volumes out/verification/clone-cd-game out/verification/oem-game-disc \
             out/verification/jpeg-fixtures/inputs \
             out/verification/jpeg-fixtures/case-manifest.json out/verification/jpeg-fixtures/codes.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -824,6 +829,13 @@ jobs:
         with:
           name: clone-cd-game-reference
           path: out/verification/clone-cd-game/
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.oem-game-disc.outcome == 'success' || steps.oem-game-disc.outcome == 'failure') }}
+        with:
+          name: oem-game-disc-reference
+          path: out/verification/oem-game-disc/
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -1063,6 +1075,17 @@ jobs:
         run: |
           node --import tsx --test --test-concurrency=2 --test-reporter=tap \
             tests/integration/mouse-click-origin.test.ts tests/conformance/video-first-frame-recovery.test.ts | tee out/ci/game-mouse-and-movie.tap
+      - name: Verify primary ISO code pages and chapters across a disc change
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-concurrency=2 --test-reporter=tap \
+            tests/conformance/disc-filesystem.test.ts tests/integration/oem-game-disc.test.ts | tee out/ci/game-oem-disc.tap
+      - name: Verify opaque fades and overlapping MIDI notes in games
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-concurrency=2 --test-reporter=tap \
+            tests/integration/layer-color-opacity.test.ts tests/conformance/midi-channel-mode.test.ts \
+            tests/integration/midi-channel-mode.test.ts | tee out/ci/game-fade-and-music.tap
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ always() }}
         with:
