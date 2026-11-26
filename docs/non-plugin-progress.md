@@ -4,6 +4,8 @@
 
 第 157 批接入跨版本存档复制，修正影片标记和空字符串的文字度量。取回的第 153、154 批均通过类型检查和生产构建，但旧影片测试素材生成失败，依赖这些构建的网页游戏验收被跳过。[157 实现与托管证据](decisions/157-game-version-saves-and-playback.md)
 
+提交 `b7a2dfa` 的验证已登记，登记时为 `queued`。结果留到下一批取回。[第 157 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45818780023)
+
 第 156 批接入分卷游戏的启动、补丁读取和入库离线重开，修正新图层默认对白字号并实现 MIDI 单音声道。取回的第 151、152 批原版图形均为 93/93 匹配，KAG 均为 98/102 匹配。两批的网页游戏验收因当时的类型错误跳过。[156 实现与托管证据](decisions/156-split-game-archives-default-font-and-midi.md)
 
 实现提交 `8f9460d` 已在 GitHub-hosted Actions 登记，登记时为 `pending`。结果留到下一批取回。[第 156 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45815768302)

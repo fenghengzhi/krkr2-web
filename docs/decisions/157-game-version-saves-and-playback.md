@@ -23,3 +23,5 @@
 第 153、154 批的原版图形对照均为 99/99，Wine 声音对照均为 46/46。原版 KAG 分别为 105/108 和 112/114。第 154 批已匹配部分调用书签和两项剧情结尾用例，仍有两项涉及隐式终结时机的差异。此次取回 56 份新的原始归档，共 174,900,741 字节，并复用 25 份既有原件。第 155、156 批在此次快照中仍在队列里。[第 155 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45813557063) · [第 156 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45815768302)
 
 本批新增 9 项 Node 用例、每个常规浏览器项目 9 项用例、每个游戏库浏览器项目 4 项用例及 5 项原版 SDK 字体对照。结果等待托管运行。
+
+实现提交 `b7a2dfa353f077af7d072da9a56e614a182e6b0c` 的应用与兼容性验证登记时为 `queued`，结果留到下一批取回。[第 157 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45818780023)
