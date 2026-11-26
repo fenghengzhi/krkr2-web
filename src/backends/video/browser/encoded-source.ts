@@ -41,7 +41,7 @@ export class VideoEncodedResources {
       throw new Error('Video owned encoded resource budget exceeded')
     this.ownedBytes += bytes
   }
-  source(input: OpenBytes): VideoEncodedSource {
+  source(input: OpenBytes, takeRelease?: () => (() => void) | undefined): VideoEncodedSource {
     let data: Uint8Array | Blob, borrowed = false
     if (input instanceof Uint8Array) data = input
     else {
@@ -57,7 +57,7 @@ export class VideoEncodedResources {
     if (!borrowed) this.charge(size)
     this[pool] += size
     this.sources++
-    const record: SourceRecord = { data, size, references: 0 }
+    const record: SourceRecord = { data, size, references: 0 }, onRelease = takeRelease?.()
     const lease = (): VideoEncodedSource => {
       record.references++
       let live = true
@@ -78,6 +78,7 @@ export class VideoEncodedResources {
           this[pool] -= record.size
           if (!borrowed) this.ownedBytes -= record.size
           this.sources--
+          onRelease?.()
         },
       }
     }

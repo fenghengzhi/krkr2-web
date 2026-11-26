@@ -88,6 +88,7 @@ interface PhaseCaptureState {
   ownsContext: boolean
   serial: number
   events: CapturedPhaseAudio['events']
+  eventBase: number
   eventCursor: number
   pending?: Promise<CapturedPhaseAudio>
   observer?: (event: MessageEvent<AudioMessage>) => void
@@ -223,6 +224,7 @@ export async function openPhaseCapture(page: Page, releaseUrl?: string) {
         ownsContext: !!releaseUrl,
         serial: -1000000,
         events: [],
+        eventBase: 0,
         eventCursor: 0,
         send(command) {
           return new Promise((resolve, reject) => {
@@ -273,22 +275,24 @@ export async function phaseCommand(page: Page, command: MixerCommand): Promise<A
     command,
   )
 }
-/** Read a voice that the real player has already reported as playing. */
-export async function nativePhasePosition(page: Page) {
-  return page.evaluate(async () => {
+/** Read the unique playing voice, or an explicitly retained real voice id
+ * when observing its paused/stopped lifetime. Never substitute another id. */
+export async function nativePhasePosition(page: Page, voiceId?: number) {
+  return page.evaluate(async (voiceId) => {
     const root = globalThis as PhaseWindow,
       state = root.__phaseCapture!,
       active = [...(root.__phaseObservedVoices?.values() ?? [])].filter(
-        (voice) => voice.status === 'play',
+        (voice) => voiceId === undefined ? voice.status === 'play' : voice.id === voiceId,
       )
-    if (active.length !== 1) throw new Error('Expected one observed real playing voice')
+    if (active.length !== 1) throw new Error(voiceId === undefined
+      ? 'Expected one observed real playing voice' : `Expected observed real voice ${voiceId}`)
     const serial = state.serial - 1,
       before = state.context.currentTime,
       result = await state.send({ op: 'inspect', id: active[0]!.id }),
       after = state.context.currentTime
     if (!result.snapshot) throw new Error('Actual mixer omitted its position snapshot')
     return { serial, before, after, snapshot: result.snapshot }
-  })
+  }, voiceId)
 }
 export async function loadPhasePcm(
   page: Page,
@@ -351,8 +355,8 @@ export async function beginPhaseCapture(
       // Keep one bounded observer journal. Events after the previous capture's
       // reply barrier belong to its following gap, never silently to this stage.
       const gapStart = state.eventCursor,
-        eventStart = state.events.length,
-        gapEvents = state.events.slice(gapStart, eventStart)
+        eventStart = state.eventBase + state.events.length,
+        gapEvents = state.events.slice(gapStart - state.eventBase, eventStart - state.eventBase)
       let armed!: () => void, failArm!: (error: Error) => void
       const ready = new Promise<void>((resolve, reject) => {
         armed = resolve
@@ -439,13 +443,12 @@ export async function beginPhaseCapture(
                   completionPause?.error || completionPosition?.error
                     ? undefined
                     : state.context.currentTime,
-                eventEnd = state.events.length,
-                events = state.events.slice(eventStart, eventEnd)
-              state.eventCursor = eventEnd
+                eventEnd = state.eventBase + state.events.length,
+                events = state.events.slice(eventStart - state.eventBase, eventEnd - state.eventBase)
               const materializeStartedAt = state.context.currentTime,
                 channels = packet.channels!.map((channel) => Array.from(channel)),
                 materializeFinishedAt = state.context.currentTime
-              return {
+              const result: CapturedPhaseAudio = {
                 sampleRate: state.context.sampleRate,
                 startFrame: packet.startFrame,
                 endFrame: packet.endFrame,
@@ -459,6 +462,12 @@ export async function beginPhaseCapture(
                 gapEvents,
                 events,
               }
+              // gapEvents/events now own the complete returned prefix. Keep
+              // absolute ranges while retiring only that delivered journal;
+              // the 4096-event limit still applies to every unreported gap.
+              state.events.splice(0, eventEnd - state.eventBase)
+              state.eventBase = state.eventCursor = eventEnd
+              return result
             }
             void finish().then(resolve, reject)
           },

@@ -11,6 +11,7 @@ import { waveNarrowS32 } from '../../engine/media/wave-output.ts'
 import { decodePortableAudio } from './decode.ts'
 import { VoiceOperations } from './voice-operations.ts'
 import { PcmStreamPool, type PcmSourceFactory, type PreparedPcmStream } from './stream-pool.ts'
+import { SourceSeeks } from './source-seeks.ts'
 export class HeadlessAudioBackend implements AudioBackend {
   readonly streaming = true
   readonly mixer: AudioMixer
@@ -20,6 +21,7 @@ export class HeadlessAudioBackend implements AudioBackend {
   private cancelWake?: () => void
   private wakeVersion = 0
   private readonly operations = new VoiceOperations()
+  private readonly seeks = new SourceSeeks()
   private closed = false
   private closing?: Promise<void>
   private cancelled = false
@@ -57,12 +59,12 @@ export class HeadlessAudioBackend implements AudioBackend {
   }
   private fillStreams(): void {
     for (const request of this.mixer.takeStreamRequests()) {
-      void this.streams.read(request).then((command) => {
+      void this.seeks.track(request, this.streams.read(request).then((command) => {
         if (this.closed || !command || !this.streams.isCurrent(request)) return
         const result = this.mixer.command(command)
         for (const event of result.events) for (const listener of this.listeners) listener(event)
         this.arm()
-      }).catch((error: unknown) => {
+      })).catch((error: unknown) => {
         if (!this.closed && this.streams.isCurrent(request)) {
           this.mixer.command({ op: 'streamData', request,
             error: error instanceof Error ? error.message : String(error) })
@@ -94,12 +96,23 @@ export class HeadlessAudioBackend implements AudioBackend {
       if (command.op === 'openSource') command.releaseSource?.()
       throw new Error('Headless audio is closed')
     }
+    this.seeks.cancel(command)
     if (command.op === 'shutdown') {
       await this.close()
       return { events: [] }
     }
     if (command.op === 'openSource') return this.openSource(command)
     this.advance()
+    if (command.op === 'set' && command.property === 'position') {
+      const stream = this.streams.current(command.id)
+      if (stream?.asset)
+        return this.seeks.run({ op: 'seekSource', id: command.id, streamId: stream.streamId,
+          position: Number(command.value) }, async (attempt) => {
+          this.advance()
+          try { return this.mixer.command(attempt) }
+          finally { this.fillStreams(); this.arm() }
+        })
+    }
     if (command.op === 'focusMode') {
       this.arm()
       return { events: [] }
@@ -214,6 +227,7 @@ export class HeadlessAudioBackend implements AudioBackend {
   }
   private retireDecodes(): void {
     this.cancelled = true
+    this.seeks.cancel()
     for (const cancel of this.decodeWaiters) cancel(new Error('Headless audio decoding was closed or cancelled'))
     this.decodeWaiters.clear()
   }

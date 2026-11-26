@@ -428,6 +428,23 @@ export class AudioMixer {
         const filters = this.filters(id, voice.asset, command.filters, voice.filterChain?.windows(), !!voice.settings.waveConversion, voice.decodeUnitFrames)
         voice.filterChain?.configure(filters)
         voice.filters = filters
+      } else if (command.op === 'seekSource') {
+        if (!voice.stream || voice.stream.asset.streamId !== command.streamId)
+          throw new Error('Audio source seek belongs to a retired stream')
+        const position = command.position
+        if (!Number.isFinite(position) || position < 0 || position > voice.asset!.sampleCount)
+          throw new Error('Sound position is outside the stream')
+        // Match the unfiltered consumer's first sample/advance lookahead,
+        // including a physical neighbor when the target is a page's last
+        // frame. Do not wait for the three-page background prefetch horizon.
+        const step = (voice.kind === 'wave' && settings.frequency === 0
+          ? voice.asset!.sampleRate : settings.frequency) / this.sampleRate
+        if (!voice.bufferReleased && !voice.stream.ready(Math.floor(position), Math.ceil(step) + 2))
+          return { snapshot: this.snapshot(id), events: this.pending.splice(start), sourceReady: false }
+        this.seek(voice, position)
+        if (!voice.bufferReleased) this.prefetchStream(voice, true)
+        voice.epoch = this.nextEpoch++
+        return { snapshot: this.snapshot(id), events: this.pending.splice(start), sourceReady: true }
       } else if (command.op === 'set') {
         const { property, value } = command
         if (property === 'looping' || property === 'paused') {

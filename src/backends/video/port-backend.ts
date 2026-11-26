@@ -12,6 +12,7 @@ import { videoSourceLimits } from '../../engine/ports/video.ts'
 import type { Resource } from '../../engine/ports/storage.ts'
 import { ExecutionCancelled } from '../../engine/scheduler/control.ts'
 import { prepareVideoBlob } from '../files/video-source.ts'
+import { TemporaryMovieFiles } from '../files/temporary-movies.ts'
 import type { VideoMessage, VideoRequest } from '../../protocol/video.ts'
 import { readVideoTimeline, readVideoTimelineBlob, type VideoTimelineOptions } from '../../formats/video/mp4.ts'
 import { mp4MetadataByteLimit } from '../../formats/video/mp4-source.ts'
@@ -47,31 +48,48 @@ export class PortVideoBackend implements VideoBackend {
   private readonly sources = new Map<object, number>()
   private sourceBytes = 0
   private metadataBytes = 0
-  private readonly preparedLeases = new WeakMap<VideoBlobPayload, { control: VideoSourceControl; retain(): () => void }>()
+  private stagedBytes = 0
+  private readonly movieFiles = new TemporaryMovieFiles()
+  private readonly hostFiles = new Map<number, () => void>()
+  private readonly preparedLeases = new WeakMap<VideoBlobPayload, { control: VideoSourceControl; staged: boolean; retain(): () => void }>()
   /** Owned payload accounting, not a measurement of the JavaScript heap. */
   inspectSources(): { preparations: number; bufferedBytes: number; metadataBytes: number } {
     return { preparations: this.sources.size, bufferedBytes: this.sourceBytes, metadataBytes: this.metadataBytes }
   }
   async prepareSource(resource: Resource, control: VideoSourceControl): Promise<PreparedVideoSource> {
     if (this.closed) throw new Error('Video backend is closed')
-    const size = resource.size, buffered = !resource.source?.borrowBlob
+    const size = resource.size, source = resource.source
     if (!Number.isSafeInteger(size) || size < 0) throw new Error('Invalid video source size')
+    const staged = !!source && !source.borrowBlob && size > videoSourceLimits.bufferedBytes
+    const buffered = !staged && !source?.borrowBlob
     if (size > (buffered ? videoSourceLimits.bufferedBytes : videoSourceLimits.borrowedBytes))
       throw new Error('Video source exceeds source budget')
-    if (this.sources.size >= 64 || this.sourceBytes + (buffered ? size : 0) > videoSourceLimits.bufferedBytes)
+    if (source && source.size !== size) throw new Error('Video resource source size mismatch')
+    if (this.sources.size >= 64 || this.sourceBytes + (buffered ? size : 0) > videoSourceLimits.bufferedBytes ||
+        (staged && size > videoSourceLimits.borrowedBytes - this.stagedBytes))
       throw new Error('Video source preparation budget exceeded')
     const token = {}, charge = buffered ? size : 0
     this.sources.set(token, charge); this.sourceBytes += charge
+    if (staged) this.stagedBytes += size
+    let file: Awaited<ReturnType<TemporaryMovieFiles['stage']>> | undefined
     let prepared: VideoBlobPayload | undefined, owners = 1, released = false
     const drop = () => {
       if (--owners !== 0 || !this.sources.delete(token)) return
       this.sourceBytes -= charge
+      if (file) void file.release().then(() => { this.stagedBytes -= size })
+      else if (staged) this.stagedBytes -= size
       if (prepared) this.preparedLeases.delete(prepared)
     }
     const release = () => { if (!released) { released = true; drop() } }
     let cancelled = false, rejectCancel!: (error: unknown) => void
     const cancellation = new Promise<never>((_resolve, reject) => { rejectCancel = reject })
-    const cancel = () => { cancelled = true; rejectCancel(new ExecutionCancelled()) }
+    const stageCancel = staged ? new AbortController() : undefined
+    const cancel = () => {
+      cancelled = true
+      const error = new ExecutionCancelled()
+      stageCancel?.abort(error)
+      rejectCancel(error)
+    }
     this.sourceCancels.add(cancel)
     const unlisten = control.onCancel(cancel)
     const check = () => {
@@ -81,13 +99,15 @@ export class PortVideoBackend implements VideoBackend {
     const actual = (async () => {
       try {
         check()
-        const bytes = await prepareVideoBlob(resource, {
+        const preparation = {
           check, onCancel: control.onCancel,
           checkpoint: async () => { check(); await control.checkpoint(); check() },
-        })
+        }
+        if (stageCancel && source) file = await this.movieFiles.stage(source, preparation, stageCancel.signal)
+        const bytes = file ? { blob: file.blob, buffered: false } : await prepareVideoBlob(resource, preparation)
         check()
         prepared = bytes
-        this.preparedLeases.set(bytes, { control, retain: () => {
+        this.preparedLeases.set(bytes, { control, staged, retain: () => {
           owners++
           let retired = false
           return () => { if (!retired) { retired = true; drop() } }
@@ -118,7 +138,9 @@ export class PortVideoBackend implements VideoBackend {
   ) {
     port.onmessage = (event: MessageEvent<VideoMessage>) => {
       const message = event.data
-      if (message.type === 'reply') {
+      if (message.type === 'sourceReleased') {
+        this.releaseHostFile(message.serial)
+      } else if (message.type === 'reply') {
         const pending = this.pending.get(message.serial)
         if (!pending) return
         pending.cancelTimeout()
@@ -135,6 +157,11 @@ export class PortVideoBackend implements VideoBackend {
           })
       }
     }
+  }
+  private releaseHostFile(serial: number): void {
+    const release = this.hostFiles.get(serial)
+    this.hostFiles.delete(serial)
+    release?.()
   }
   private retireOpening(id: number): void {
     const opening = this.openings.get(id)
@@ -302,7 +329,7 @@ export class PortVideoBackend implements VideoBackend {
             // Same epoch retirement cannot close a later graph. Do not wait for
             // the lost open reply; the host processes close while open awaits IO.
             void this.send({ op: 'close', id, epoch: outgoing.epoch }).catch(() => {})
-          })
+          }, prepared?.staged && !convertedCharge ? prepared.retain() : undefined)
         } catch (error) {
           checkpoint()
           if (quickTimeFailure) throw withOriginalError(error)
@@ -336,8 +363,9 @@ export class PortVideoBackend implements VideoBackend {
     }
     return this.send(command)
   }
-  private send(command: VideoCommand, onTimeout?: () => void): Promise<VideoResult> {
+  private send(command: VideoCommand, onTimeout?: () => void, releaseFile?: () => void): Promise<VideoResult> {
     const serial = this.next++
+    if (releaseFile) this.hostFiles.set(serial, releaseFile)
     return new Promise((resolve, reject) => {
       const cancelTimeout = this.timeouts.start(20000, () => {
         this.pending.delete(serial)
@@ -347,7 +375,7 @@ export class PortVideoBackend implements VideoBackend {
       this.pending.set(serial, { resolve, reject, cancelTimeout })
       try {
         this.port.postMessage(
-          { serial, command } satisfies VideoRequest,
+          { serial, command, ...(releaseFile ? { holdSource: true as const } : {}) } satisfies VideoRequest,
           command.op === 'open' && command.bytes instanceof Uint8Array
             ? [command.bytes.buffer as ArrayBuffer]
             : command.op === 'mixing' && command.bitmap
@@ -355,6 +383,7 @@ export class PortVideoBackend implements VideoBackend {
               : [],
         )
       } catch (error) {
+        this.releaseHostFile(serial)
         cancelTimeout()
         this.pending.delete(serial)
         reject(error)
@@ -384,6 +413,8 @@ export class PortVideoBackend implements VideoBackend {
         }
         this.pending.clear()
         this.listeners.clear()
+        for (const serial of this.hostFiles.keys()) this.releaseHostFile(serial)
+        await this.movieFiles.close()
       }
     })()
     return this.closing

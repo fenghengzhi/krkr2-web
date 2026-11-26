@@ -8,6 +8,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: a game plays original RIFF recordings and their first music chunk with real seek, pause and SLI playback`, async ({ page }, info) => {
     test.setTimeout(120000)
     const failures: unknown[] = [], errors: string[] = [], observations: unknown[] = []
+    let voiceId: number | undefined
     page.on('pageerror', (error) => errors.push(error.message))
     await observeNativePhaseMixer(page); await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !await page.evaluate(() => 'Suspending' in WebAssembly), 'JSPI unavailable')
@@ -17,6 +18,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         await expect(page.getByText(marker, { exact: true })).toBeVisible()
       }, capture = async (name: string, seconds = .5) => {
         const before = (await nativePhasePosition(page)).snapshot
+        voiceId = before.id
         await beginPhaseCapture(page, seconds, { positionVoiceOnComplete: before.id })
         const output = await endPhaseCapture(page), metrics = await attachPhaseCapture(info, name, output, { before, expectedHz: 440 }),
           after = output.completionPosition?.observation?.snapshot
@@ -60,7 +62,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         const count = Math.round(tail.sampleRate / 5)
         expect(plane.slice(-count)).toEqual(Array(count).fill(0))
       }
-      expect((await nativePhasePosition(page)).snapshot.status).toBe('stop')
+      expect(voiceId).toBeDefined()
+      expect((await nativePhasePosition(page, voiceId)).snapshot.status).toBe('stop')
       await info.attach('recording-menu', { body: await canvas.screenshot(), contentType: 'image/png' })
       await expect(page.locator('#logs .error')).toHaveCount(0); expect(errors).toEqual([])
     } catch (error) { failures.push(error) }

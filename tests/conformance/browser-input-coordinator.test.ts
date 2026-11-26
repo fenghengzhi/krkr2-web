@@ -349,6 +349,45 @@ function fixture(
   }
 }
 
+test('horizontal wheel remains native page scrolling and fractional vertical input never becomes a zero game event', async () => {
+  const f = fixture(),
+    wheel = (canvas: typeof f.a, x: number, y: number, mode = 0) => f.dispatch(canvas, 'wheel', {
+      clientX: 20, clientY: 10, deltaX: x, deltaY: y, deltaMode: mode,
+      buttons: 0, shiftKey: false, ctrlKey: false, altKey: false,
+    }),
+    deltas = () => f.packets.flatMap((packet) => packet.type === 'wheel' ? [[packet.windowId, packet.delta]] : [])
+  try {
+    for (const id of [101, 202]) {
+      f.coordinator.setWindow(id, { ...new WindowState().view(), visible: true })
+      f.coordinator.setInput(id, inputView({ keyboardRoute: { windowId: id, revision: 1, focused: 11, imeMode: 1 } }))
+    }
+    f.a.focus(); await settle(); f.packets.length = 0; f.pointers.length = 0
+    assert.equal(wheel(f.a, 120, 0).defaultPrevented, false)
+    assert.equal(wheel(f.a, -120, 0).defaultPrevented, false)
+    for (let i = 0; i < 3; i++) assert.equal(wheel(f.a, 0, -.25).defaultPrevented, true)
+    await settle(); assert.deepEqual(deltas(), [])
+    assert.equal(f.pointers.length, 5, 'physical pointer observation survives non-game wheel samples')
+    wheel(f.a, 0, -.25); await settle(); assert.deepEqual(deltas(), [[101, 1]])
+    wheel(f.a, 0, 120); wheel(f.a, 0, -3, 1); await settle()
+    assert.deepEqual(deltas(), [[101, 1], [101, -120], [101, 120]])
+    f.packets.length = 0
+    wheel(f.a, 0, -.75)
+    f.coordinator.setSuspended(true)
+    assert.equal(wheel(f.a, 0, -120).defaultPrevented, false)
+    f.coordinator.setSuspended(false)
+    wheel(f.a, 0, -.25); await settle(); assert.deepEqual(deltas(), [])
+    wheel(f.a, 0, -.5)
+    f.coordinator.focus(202); f.coordinator.focus(101)
+    wheel(f.a, 0, -.25); await settle(); assert.deepEqual(deltas(), [])
+    wheel(f.b, 0, -.75); await settle(); assert.deepEqual(deltas(), [], 'a second Window has no borrowed residual')
+    wheel(f.a, 0, -.5)
+    f.coordinator.setMenuActive(101, 1, true); f.coordinator.setMenuActive(101, 1, false)
+    wheel(f.a, 0, -.25); await settle(); assert.deepEqual(deltas(), [])
+    wheel(f.a, 0, -.75); await settle(); assert.deepEqual(deltas(), [[101, 1]])
+    assert.deepEqual(f.errors, [])
+  } finally { f.close() }
+})
+
 test('touch compatibility moves to the actual contact before pressing and cancels the click on a second finger', async () => {
   const f = fixture()
   const touch = (type: string, id: number, x: number, isPrimary: boolean, canvas = f.a) =>

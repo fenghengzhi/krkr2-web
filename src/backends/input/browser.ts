@@ -2,6 +2,7 @@ import type { InputPacket, InputView, MouseKeyObservation, PhysicalPointerScreen
 import type { WindowView } from '../../engine/scene/window.ts'
 import { paintBoxPoint } from '../../engine/scene/draw-device.ts'
 import { BrowserCursorPresenter, type BrowserCursorOptions, type CursorPosition } from './cursor.ts'
+import { VerticalWheel } from './wheel.ts'
 const cursors: Record<number, string> = {
   0: 'default',
   [-1]: 'none',
@@ -162,6 +163,7 @@ export class BrowserInput {
   private touches = new Map<number, { x: number; y: number; startX: number; startY: number }>()
   private mouseTouch: number | undefined
   private primaryClickCount = 0
+  private readonly wheel = new VerticalWheel()
   private lastMouseDownPoint?: { x: number; y: number }
   private lastMouseMovePoint?: { x: number; y: number }
   private view?: WindowView
@@ -251,15 +253,17 @@ export class BrowserInput {
     canvas.addEventListener(
       'wheel',
       (event) => {
-        event.preventDefault()
-        if (!this.suspended && !this.disposed)
-          this.physicalCursor = { x: event.clientX, y: event.clientY }
-        const p = this.point(event.clientX, event.clientY)
-        const delta = Math.round(
-          -event.deltaY *
-            (event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? this.canvas.clientHeight : 1),
-        )
-        this.push({ type: 'wheel', ...p, shift: shiftState(event), delta, ...this.screenEvent(event) })
+        if (this.suspended || this.disposed || this.hostMoving) { this.wheel.clear(); return }
+        this.physicalCursor = { x: event.clientX, y: event.clientY }
+        const p = this.point(event.clientX, event.clientY), screen = this.screenEvent(event),
+          delta = this.wheel.sample(event.deltaY, event.deltaMode, this.canvas.clientHeight)
+        // Horizontal scrolling has no stock onMouseWheel equivalent. Leave
+        // it to the page/scrollbox, while still observing the physical cursor.
+        // A fractional vertical gesture belongs to the game even before it
+        // accumulates one integer unit, so it must not scroll the page too.
+        if (event.deltaY) event.preventDefault()
+        if (delta) this.push({ type: 'wheel', ...p, shift: shiftState(event), delta, ...screen })
+        else this.observePointer(p.x, p.y, screen.physicalScreen)
       },
       { ...options, passive: false },
     )
@@ -374,6 +378,7 @@ export class BrowserInput {
     if (this.disposed || this.suspended === suspended) return
     this.suspended = suspended
     if (suspended) {
+      this.wheel.clear()
       this.epoch++
       this.physicalCursor = undefined
       this.retireVirtualCursor()
@@ -398,6 +403,7 @@ export class BrowserInput {
     if (this.disposed || this.hostMoving === moving) return
     this.hostMoving = moving
     if (moving) {
+      this.wheel.clear()
       this.mouseButtons = 0
       this.mouseTouch = undefined
       this.touches.clear()
@@ -413,6 +419,7 @@ export class BrowserInput {
    * menu must not change logical hidden state or retire a script cursor. */
   setMenuActive(active: boolean): void {
     if (this.disposed || this.menuActive === active) return
+    this.wheel.clear()
     this.menuActive = active
     this.cursorAppearance()
   }
@@ -870,6 +877,7 @@ export class BrowserInput {
     if (!active) this.clearTransient()
   }
   private clearTransient(): void {
+    this.wheel.clear()
     this.mouseButtons = 0
     this.primaryClickCount = 0
     this.lastMouseDownPoint = undefined

@@ -13,10 +13,12 @@ import type { AudioMessage, AudioRequest } from '../../protocol/audio.ts'
 import { decodePortableAudio } from './decode.ts'
 import { VoiceOperations } from './voice-operations.ts'
 import { PcmStreamPool, type PcmSourceFactory, type PreparedPcmStream } from './stream-pool.ts'
+import { SourceSeeks } from './source-seeks.ts'
 export class PortAudioBackend implements AudioBackend {
   readonly streaming = true
   private readonly streams: PcmStreamPool
   private readonly timeouts = new PausableTimeouts()
+  private readonly seeks = new SourceSeeks((expire) => this.timeouts.start(20000, expire))
   setRequestTimeoutsPaused(paused: boolean): void {
     this.timeouts.setPaused(paused)
   }
@@ -46,7 +48,11 @@ export class PortAudioBackend implements AudioBackend {
     port.onmessage = (event: MessageEvent<AudioMessage>) => {
       const message = event.data
       if (message.type === 'streamRead') {
-        if (!this.closed) void this.fillStream(message.request)
+        if (!this.closed) void this.seeks.track(message.request, this.fillStream(message.request)).catch((error: unknown) => {
+          if (!this.closed && this.streams.isCurrent(message.request))
+            for (const listener of this.listeners)
+              listener({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+        })
       } else if (message.type === 'event' && !this.closed) {
         for (const listener of this.listeners) listener(message.event)
       } else if (message.type === 'reply') {
@@ -75,6 +81,7 @@ export class PortAudioBackend implements AudioBackend {
       if (command.op === 'openSource') command.releaseSource?.()
       throw new Error('Audio backend is closed')
     }
+    this.seeks.cancel(command)
     if (command.op === 'open' || command.op === 'openSource' || command.op === 'load' || command.op === 'create') {
       // Once a load was dispatched, the consumer may already own its asset.
       // Wait for its ACK/commit before a new preparation can supersede it.
@@ -150,6 +157,12 @@ export class PortAudioBackend implements AudioBackend {
         finishPublication?.()
       }
     }
+    if (command.op === 'set' && command.property === 'position') {
+      const stream = this.streams.current(command.id)
+      if (stream?.asset)
+        return this.seeks.run({ op: 'seekSource', id: command.id, streamId: stream.streamId,
+          position: Number(command.value) }, (attempt) => this.send(attempt))
+    }
     return this.send(command)
   }
   private beginPublication(id: number): () => void {
@@ -202,15 +215,9 @@ export class PortAudioBackend implements AudioBackend {
     } finally { this.operations.finish(command.id, ticket); finishPublication?.() }
   }
   private async fillStream(request: PcmReadRequest): Promise<void> {
-    try {
-      const command = await this.streams.read(request)
-      if (!command || this.closed || !this.streams.isCurrent(request)) return
-      await this.send(command)
-    } catch (error) {
-      if (!this.closed && this.streams.isCurrent(request))
-        for (const listener of this.listeners)
-          listener({ type: 'error', message: error instanceof Error ? error.message : String(error) })
-    }
+    const command = await this.streams.read(request)
+    if (!command || this.closed || !this.streams.isCurrent(request)) return
+    await this.send(command)
   }
   private send(command: WireAudioCommand): Promise<AudioResult> {
     const serial = this.next++
@@ -269,6 +276,7 @@ export class PortAudioBackend implements AudioBackend {
   }
   private retireDecodes(): void {
     this.cancelled = true
+    this.seeks.cancel()
     for (const cancel of this.decodeWaiters) cancel(new Error('Audio decoding was closed or cancelled'))
     this.decodeWaiters.clear()
   }

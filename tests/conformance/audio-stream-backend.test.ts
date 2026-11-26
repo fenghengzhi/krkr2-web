@@ -424,7 +424,7 @@ test('port rejected candidate/direct loads and create preserve the old stream, j
 test('a later source opening waits for an installed load ACK and its failure leaves that stream able to refill', { timeout: 30000 }, async (t) => {
   const channel = new MessageChannel(), mixer = new AudioMixer(1000),
     installed = deferred<{ serial: number; result: AudioResult; streamId: number }>(),
-    refilled = deferred<PcmReadRequest>(), positions: number[] = []
+    refilled = deferred<PcmReadRequest>(), positions: number[] = [], requests: PcmReadRequest[] = []
   let factories = 0, firstReleased = 0, secondReleased = 0
   channel.port2.onmessage = ({ data }: MessageEvent<AudioRequest>) => {
     const { serial, command } = data
@@ -440,7 +440,12 @@ test('a later source opening waits for an installed load ACK and its failure lea
         return
       }
       if (command.op === 'streamData' && command.data) refilled.resolve(command.request)
+      const flush = () => {
+        for (const request of mixer.takeStreamRequests()) { requests.push(request); channel.port2.postMessage({ type: 'streamRead', request }) }
+      }
+      if (command.op === 'seekSource' && result.sourceReady === false) flush()
       channel.port2.postMessage({ type: 'reply', serial, result })
+      flush()
     } catch (error) {
       channel.port2.postMessage({ type: 'reply', serial, error: error instanceof Error ? error.message : String(error) })
     }
@@ -467,10 +472,8 @@ test('a later source opening waits for an installed load ACK and its failure lea
     await audio.command({ op: 'set', id: 1, property: 'position', value: 8192 })
     await audio.command({ op: 'play', id: 1 })
     mixer.render(new Float32Array(32), new Float32Array(32))
-    const requests = mixer.takeStreamRequests()
     assert.ok(requests.length)
     assert.ok(requests.every((request) => request.streamId === held.streamId))
-    for (const request of requests) channel.port2.postMessage({ type: 'streamRead', request })
     assert.equal((await observed(t.signal, refilled.promise)).streamId, held.streamId)
     const left = new Float32Array(32), right = new Float32Array(32)
     assert.deepEqual(mixer.render(left, right), [])

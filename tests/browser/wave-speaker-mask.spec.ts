@@ -3,12 +3,24 @@ import { evaluate } from '../helpers/browser-expression.ts'
 import { pointerPixel } from '../helpers/pointer-pixel.ts'
 import { waveMaskCases, waveMaskFiles, waveMaskSource } from '../helpers/wave-speaker-mask.ts'
 import { observeNativePhaseMixer, openPhaseCapture, closePhaseCapture, beginPhaseCapture,
-  endPhaseCapture, attachPhaseCapture, nativePhasePosition } from '../helpers/web-phase-vocoder.ts'
+  endPhaseCapture, attachPhaseCapture, nativePhasePosition, type CapturedPhaseAudio } from '../helpers/web-phase-vocoder.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: surround music buttons keep center dialogue balanced, distinguish back speakers and omit the LFE plane`, async ({ page }, info) => {
     test.setTimeout(90000)
     const failures: unknown[] = [], errors: string[] = [], observations: unknown[] = []
+    let deliveredEvents = 0, deliveredLabels = 0
+    const recordEvents = (output: CapturedPhaseAudio) => {
+      const range = output.eventRange
+      expect(range).toBeDefined(); expect(range!.gapStart).toBe(deliveredEvents)
+      expect(range!.start - range!.gapStart).toBe(output.gapEvents!.length)
+      expect(range!.end - range!.start).toBe(output.events.length)
+      for (const { message } of [...output.gapEvents!, ...output.events])
+        if (message.type === 'event' && message.event.type === 'label') {
+          expect(message.event.label).toBe('phrase'); deliveredLabels++
+        }
+      deliveredEvents = range!.end
+    }
     page.on('pageerror', (error) => errors.push(error.message))
     await observeNativePhaseMixer(page); await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !await page.evaluate(() => 'Suspending' in WebAssembly), 'JSPI unavailable')
@@ -18,6 +30,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         await expect.poll(() => page.locator('#sound-level').evaluate((node) => (node as HTMLMeterElement).value)).toBe(0)
         await beginPhaseCapture(page, .1); const output = await endPhaseCapture(page)
         await attachPhaseCapture(info, label, output)
+        recordEvents(output)
         expect(output.channels).toHaveLength(2)
         for (const channel of output.channels) {
           expect(channel).toHaveLength(Math.ceil(output.sampleRate * .1))
@@ -47,6 +60,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           await beginPhaseCapture(page, .25, { positionVoiceOnComplete: before.id })
           const output = await endPhaseCapture(page), metrics = await attachPhaseCapture(info, label, output,
             { mask: entry.mask, namedInput: entry.name, stereoAmplitude: entry.stereo }), after = output.completionPosition?.observation?.snapshot
+          recordEvents(output)
           expect(output.completionPosition?.error).toBeUndefined(); expect(after).toBeDefined()
           expect(after!.id).toBe(before.id); expect(after!.status).toBe('play')
           expect(output.channels).toHaveLength(2)
@@ -79,9 +93,10 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       }
       await info.attach('surround-music-menu', { body: await canvas.screenshot(), contentType: 'image/png' })
       await evaluate(page, '(maskMusic.stop(),maskMusic.status)', 'stop'); await silence('stopped-music')
+      expect(deliveredLabels).toBeGreaterThan(0)
       await expect(page.locator('#logs .error')).toHaveCount(0); expect(errors).toEqual([])
     } catch (error) { failures.push(error) }
-    try { await info.attach('wave-mask-observations', { body: JSON.stringify({ observations, errors,
+    try { await info.attach('wave-mask-observations', { body: JSON.stringify({ observations, errors, deliveredEvents, deliveredLabels,
       logs: await page.locator('#logs').innerText() }, null, 2), contentType: 'application/json' }) }
     catch (error) { failures.push(error) }
     try { if (capturing) await closePhaseCapture(page) } catch (error) { failures.push(error) }

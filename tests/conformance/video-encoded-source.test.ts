@@ -113,17 +113,20 @@ test('a cancelled video replacement refunds its copy and preserves the active UR
 })
 
 test('file-backed video URLs retain one backing through close and do not consume the byte-copy budget', async () => {
+  let releases = 0
   const contents = fixture(), blob = new Blob([Uint8Array.from(contents)]),
     resources = new VideoEncodedResources({ borrowedBytes: blob.size, sourceBytes: 0, ownedBytes: 0 }),
-    source = resources.source({ blob, buffered: false }), first = resources.original(source, 'video/mp4')
+    source = resources.source({ blob, buffered: false }, () => () => { releases++ }), first = resources.original(source, 'video/mp4')
   try {
     const second = resources.original(source, 'video/mp4')
     source.release(); second.release()
+    assert.equal(releases, 0)
     assert.deepEqual(resources.inspect(), { sources: 1, sourceBytes: blob.size, ownedBytes: 0 })
     assert.throws(() => resources.source({ blob, buffered: false }), /source resource budget/)
     assert.throws(() => source.blob, /closed/)
     assert.deepEqual(new Uint8Array(await (await fetch(first.url)).arrayBuffer()), contents)
   } finally { first.release(); source.release() }
+  assert.equal(releases, 1)
   assert.deepEqual(resources.inspect(), { sources: 0, sourceBytes: 0, ownedBytes: 0 })
   assert.throws(() => resources.source({ blob, buffered: true }), /source resource budget/)
 })

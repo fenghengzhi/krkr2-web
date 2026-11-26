@@ -136,6 +136,9 @@ export type MixerCommand =
    * retaining the open decoder, loop manager and inherited fade controls. */
   | { op: 'releaseWaveBuffer'; id: number }
   | { op: 'set'; id: number; property: Exclude<keyof SoundSettings, 'waveConversion' | 'waveExpandQuad'>; value: number | boolean }
+  /** Commit a streamed seek only after its target sample has reached the
+   * consumer cache. No render tick or change to the old play state is needed. */
+  | { op: 'seekSource'; id: number; streamId: number; position: number }
   | { op: 'flag'; id: number; index: number; value: number }
   /** Native WaveFlags.reset clears all flags under one loop-manager lock. */
   | { op: 'resetFlags'; id: number }
@@ -180,6 +183,8 @@ export type WireAudioCommand = Exclude<AudioCommand, { op: 'openSource' }>
 export interface AudioResult {
   snapshot?: SoundSnapshot
   events: AudioEvent[]
+  /** Private source-seek ACK: false means no position/epoch was committed. */
+  sourceReady?: boolean
 }
 export interface AudioBackend {
   readonly streaming?: boolean

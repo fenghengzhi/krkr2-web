@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
-import { open, readFile } from 'node:fs/promises'
+import { open, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { largeVideoGame } from './large-video-game.ts'
 
 /** Use the original genisoimage primary descriptor, path tables and root.
  * Replace the one scene record with ISO level 3 multi-extent movie records.
  * A sector of unrelated bytes separates the two sections inside the mdat. */
-export async function largeVideoDisc(directory: string, startup: string) {
+export async function largeVideoDisc(directory: string, startup: string, raw = false) {
   const { paths, size, mediaStart } = await largeVideoGame(directory, false, startup)
   const sector = 2048, base = await readFile('out/verification/disc-volumes/plain.iso')
   const pvd = base.subarray(16 * sector, 17 * sector)
@@ -50,5 +50,25 @@ export async function largeVideoDisc(directory: string, startup: string) {
       await put(tail.subarray(split - mediaStart), gap + sector)
     } finally { await iso.close() }
   } finally { await movie.close() }
-  return { paths: [paths[0]!, path], size, mediaStart }
+  if (!raw) return { paths: [paths[0]!, path], size, mediaStart }
+  const bin = join(directory, 'Game.bin'), cue = join(directory, 'Game.cue')
+  const cooked = await open(path, 'r')
+  try {
+    const dest = await open(bin, 'wx')
+    try {
+      const input = Buffer.alloc(256 * sector), output = Buffer.alloc(256 * 2352)
+      for (let at = 0; at < pvd.readUInt32LE(80); at += 256) {
+        const sectors = Math.min(256, pvd.readUInt32LE(80) - at), count = sectors * sector
+        assert.equal((await cooked.read(input, 0, count, at * sector)).bytesRead, count)
+        for (let n = 0; n < sectors; n++) {
+          const frame = output.subarray(n * 2352, (n + 1) * 2352)
+          frame.fill(255, 1, 11); frame[15] = 1
+          input.copy(frame, 16, n * sector, (n + 1) * sector)
+        }
+        assert.equal((await dest.write(output, 0, sectors * 2352, at * 2352)).bytesWritten, sectors * 2352)
+      }
+    } finally { await dest.close() }
+  } finally { await cooked.close() }
+  await writeFile(cue, 'FILE "Game.bin" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n')
+  return { paths: [paths[0]!, cue, bin], size, mediaStart }
 }

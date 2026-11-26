@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, expect, observeVideoFrames } from '../helpers/video-presentation-browser.ts'
@@ -6,6 +7,8 @@ import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia } from '..
 import { largeVideoGame } from '../helpers/large-video-game.ts'
 import { largeVideoDisc } from '../helpers/large-video-disc.ts'
 import { installVideoSourceObservation, observeVideoSources } from '../helpers/video-source-observation.ts'
+import { temporaryMovieDirectory } from '../../src/backends/files/temporary-movies.ts'
+import { pointerPixel } from '../helpers/pointer-pixel.ts'
 
 const game = String.raw`
 var w=new Window();w.setInnerSize(96,84);w.visible=true;
@@ -19,11 +22,12 @@ function report(){Debug.message("cutscene:"+[phase,film.numberOfVideoStream,film
 button.onClick=function(){
  if(global.phase==0){global.film.enabledVideoStream=1;global.film.enabledAudioStream=1;global.film.position=3000;global.phase=1;global.report();}
  else if(global.phase==1){global.film.play();global.phase=2;Debug.message("cutscene-playing");}
+ else if(global.phase==2){global.film.close();global.phase=3;Debug.message("cutscene-closed");}
 };
 report();
 `
 
-for (const mode of ['loose', 'xp3', 'disc']) for (const backend of ['asyncify', 'jspi'])
+for (const mode of ['loose', 'xp3', 'disc', 'raw-cue', 'deflated-zip']) for (const backend of ['asyncify', 'jspi'])
   test(`${backend}/${mode}: play a two-track movie whose packets and index are past 144 MiB`, async ({ page }, info) => {
     test.setTimeout(120000)
     await installVideoAudioProbe(page)
@@ -35,18 +39,36 @@ for (const mode of ['loose', 'xp3', 'disc']) for (const backend of ['asyncify', 
     page.on('pageerror', (error) => errors.push(error.message))
     const canvas = page.locator('canvas[data-window-id]').first()
     try {
-      const asset = mode === 'disc'
-        ? await largeVideoDisc(directory, game.replace('film.open("cutscene.mp4")', 'film.open("D:/MOVIE.MP4")'))
+      const disc = mode === 'disc' || mode === 'raw-cue'
+      const staged = mode === 'raw-cue' || mode === 'deflated-zip'
+      const asset = disc
+        ? await largeVideoDisc(directory, game.replace('film.open("cutscene.mp4")', 'film.open("D:/MOVIE.MP4")'), mode === 'raw-cue')
         : await largeVideoGame(directory, mode === 'xp3', game)
-      if (mode === 'disc') await page.locator('#cdda-discs').fill('D=Game.iso')
+      if (disc) await page.locator('#cdda-discs').fill(mode === 'raw-cue' ? 'D=Game.cue' : 'D=Game.iso')
+      const temporarySizes = () => page.evaluate(async (name) => {
+        const root = await navigator.storage.getDirectory()
+        const folder = await root.getDirectoryHandle(name) as FileSystemDirectoryHandle & { keys(): AsyncIterable<string> }
+        const sizes = []
+        for await (const key of folder.keys()) sizes.push((await (await folder.getFileHandle(key)).getFile()).size)
+        return sizes
+      }, temporaryMovieDirectory)
       observations.push({ size: asset.size, firstPacketRegion: asset.mediaStart })
-      await page.locator('#files').setInputFiles(asset.paths)
-      await expect.poll(async () => (await observeVideoSources(page)).opens.length, { timeout: 30000 }).toBe(1)
+      if (mode === 'deflated-zip') {
+        execFileSync('python3', ['-m', 'zipfile', '-c', 'Release.zip', 'startup.tjs', 'cutscene.mp4'], { cwd: directory })
+        await page.locator('#project-mode').selectOption('auto')
+        await page.locator('#files').setInputFiles(join(directory, 'Release.zip'))
+      } else await page.locator('#files').setInputFiles(asset.paths)
+      await expect.poll(async () => (await observeVideoSources(page)).opens.length, { timeout: staged ? 70000 : 30000 }).toBe(1)
       const sources = await observeVideoSources(page)
       observations.push(sources)
       expect(sources.dropped).toBe(0)
       expect(sources.opens).toHaveLength(1)
       expect(sources.opens[0]).toMatchObject({ kind: 'blob', buffered: false, bytes: asset.size })
+      if (staged) {
+        const sizes = await temporarySizes()
+        observations.push({ temporaryFilesAtOpen: sizes })
+        expect(sizes).toEqual([asset.size])
+      }
       await expect(page.getByText('cutscene:0|2|2|0|0|64|48|1000|pause', { exact: true })).toBeVisible({ timeout: 30000 })
       const picture = async (alternate: boolean) => {
         const video = page.locator('video[data-video-id]')
@@ -81,11 +103,15 @@ for (const mode of ['loose', 'xp3', 'disc']) for (const backend of ['asyncify', 
         await info.attach(alternate ? 'second-track' : 'first-track', { body: await canvas.screenshot(), contentType: 'image/png' })
       }
       await picture(false)
-      await canvas.click({ position: { x: 30, y: 74 } })
+      const pressButton = async () => {
+        const point = await pointerPixel(canvas, 30, 74)
+        await page.mouse.click(point.x, point.y)
+      }
+      await pressButton()
       await expect(page.getByText('cutscene:1|2|2|1|1|80|60|3000|pause', { exact: true })).toBeVisible({ timeout: 30000 })
       await picture(true)
       if ((await page.locator('#sound-toggle').textContent()) === '开启声音') await page.locator('#sound-toggle').click()
-      await canvas.click({ position: { x: 30, y: 74 } })
+      await pressButton()
       await expect(page.getByText('cutscene-playing', { exact: true })).toBeVisible()
       await expect(async () => {
         const activation = page.getByRole('button', { name: '播放视频', exact: true })
@@ -98,6 +124,11 @@ for (const mode of ['loose', 'xp3', 'disc']) for (const backend of ['asyncify', 
       }).toPass({ timeout: 10000 })
       observations.push(await observeVideoAudio(page))
       await expect(page.locator('#logs .error')).toHaveCount(0)
+      if (staged) {
+        await pressButton()
+        await expect(page.getByText('cutscene-closed', { exact: true })).toBeVisible()
+        await expect.poll(temporarySizes).toEqual([])
+      }
       await page.locator('#stop').click()
       await expect(page.locator('#status')).toHaveText('待机')
       await expect(page.locator('video')).toHaveCount(0)

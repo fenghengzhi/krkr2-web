@@ -2,8 +2,8 @@ import { MAX_RESOURCE_BYTES, type Resource } from '../../engine/ports/storage.ts
 import { videoSourceLimits, type VideoBlobPayload, type VideoSourceControl } from '../../engine/ports/video.ts'
 import { borrowResourceBlob, resourceViewBounds } from '../../engine/storage/resource-source.ts'
 
-/** This adapter is the only materialization boundary: a constructed Blob is
- * always charged as buffered, even though Blob itself is immutable. */
+/** Borrow existing file views or make a bounded in-memory copy for small
+ * sources. A constructed Blob is always charged as buffered. */
 export async function prepareVideoBlob(resource: Resource, control: VideoSourceControl): Promise<VideoBlobPayload> {
   const size = resource.size, source = resource.source
   resourceViewBounds(size, 0, size)

@@ -165,7 +165,15 @@ export class WebVideoHost {
             }
         return
       }
-      void this.command(message.command)
+      let release = message.holdSource ? () => port.postMessage({
+        type: 'sourceReleased', serial: message.serial,
+      } satisfies VideoMessage) : undefined
+      void this.command(message.command, () => {
+        const callback = release
+        release = undefined
+        return callback
+      })
+        .finally(() => release?.())
         .then(
           (result) =>
             port.postMessage(
@@ -1184,7 +1192,7 @@ export class WebVideoHost {
     if (movie.settings.mode === 2 && !movie.mixerMetadata)
       movie.mixerMetadata = { width: movie.element.videoWidth, height: movie.element.videoHeight, timeline: movie.timeline }
   }
-  private async open(command: Extract<VideoCommand, { op: 'open' }>): Promise<VideoResult> {
+  private async open(command: Extract<VideoCommand, { op: 'open' }>, takeRelease?: () => (() => void) | undefined): Promise<VideoResult> {
     const windowId = command.windowId ?? 0
     if (this.retiredWindows.has(windowId)) throw new Error('Video Window is closed')
     if (!Number.isSafeInteger(windowId) || windowId < 0)
@@ -1208,7 +1216,7 @@ export class WebVideoHost {
             ? 'video/mp4'
             : ''
     const timeline = command.timeline && selectVideoTimeline(command.timeline, command.settings.enabledVideoStream),
-      source = this.encoded.source(command.bytes),
+      source = this.encoded.source(command.bytes, takeRelease),
       stage: VideoStage = { id: command.id, epoch: command.epoch, windowId, source, abort: new AbortController(), disposed: false },
       selected = Math.max(0, command.settings.enabledAudioStream)
     this.stages.set(stage.id, stage)
@@ -1353,7 +1361,7 @@ export class WebVideoHost {
       this.retainedFrameBytes -= reserved
     }
   }
-  private async command(command: VideoCommand): Promise<VideoResult> {
+  private async command(command: VideoCommand, takeRelease?: () => (() => void) | undefined): Promise<VideoResult> {
     if (command.op === 'shutdown') {
       await this.close()
       return { events: [] }
@@ -1379,7 +1387,7 @@ export class WebVideoHost {
       this.applyPause()
       return { events: [] }
     }
-    if (command.op === 'open') return this.open(command)
+    if (command.op === 'open') return this.open(command, takeRelease)
     if (command.op === 'close') {
       const movie = this.movies.get(command.id), stage = this.stages.get(command.id)
       if ((movie && command.epoch < movie.epoch) || (stage && command.epoch < stage.epoch)) return { events: [] }

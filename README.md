@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 180 批处理压缩包与原始光盘里的大过场、触控板横向滚动误跳对白，以及长音轨定位后一小段静音的问题。新行为等待托管验证。[180 实现与托管证据](docs/decisions/180-large-cutscenes-and-story-input.md)
+
 第 179 批接入 WMV 9、VC-1、WMA Professional，以及 QuickTime Animation 和 MPEG-4 Part 2 过场。原版 KAG 可以双击命名书签读档，GS 乐谱可以为其他 MIDI 通道指定鼓声。新增行为等待托管验证。[179 实现与托管证据](docs/decisions/179-windows-cutscenes-and-named-bookmarks.md)
 
 第 178 批扩展游戏光盘读取，让玩家能使用 UDF 2.50 盘和桥接盘中的日文章节名。本批还处理从旧版浏览器备份恢复进度、配乐的条件循环和影片暂停时钟。新增行为等待托管验证。[178 实现与托管证据](docs/decisions/178-metadata-discs-and-game-restoration.md)
