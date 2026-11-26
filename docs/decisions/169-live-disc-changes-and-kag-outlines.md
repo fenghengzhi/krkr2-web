@@ -19,3 +19,5 @@
 第 167 批最终失败，应用构建仍遇到此前的 `TextDecoder` 类型错误。第 168 批在独立作业中用纯引擎配置检查成功。同一作业的工具类型检查遇到一处新的测试断言类型错误。第 169 批改用数组长度验证此前没有读取 ZIP，后续实际开盘和命中缓存的断言一并保留。取证时第 168 批的应用构建仍在运行，尚无新的主浏览器或游戏库报告。[第 167 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45846712743) · [第 168 批类型检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/45849334408/job/140011251690) · [第 168 批应用构建](https://github.com/fenghengzhi/krkr2-web/actions/runs/45849334408/job/140011737201)
 
 第 168 批的 KAG 原版比较为 136/138，四项新增的宏目录、条件、章节选择和书签对照全部匹配。Windows 声音对照记录了两种 WAVE 曲尾用例的运行环境缺少声音驱动。第 169 批的换盘与描边结果等待后续批次取回。[第 168 批原版对照](https://github.com/fenghengzhi/krkr2-web/actions/runs/45849334408)
+
+第 169 批实现提交 `a37a69f` 登记时为 `queued`，运行结果在下一批取回。[第 169 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45852398659)

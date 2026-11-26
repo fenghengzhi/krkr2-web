@@ -4,6 +4,8 @@
 
 第 169 批接通运行中换盘，修订换盘时的 CD 音轨和存储缓存，并支持原版 KAG 的高强度描边对白。上批的纯引擎类型检查已通过，四项新 KAG 原版对照全部匹配，另有一处测试类型错误在本批修正。[169 实现与托管证据](decisions/169-live-disc-changes-and-kag-outlines.md)
 
+第 169 批实现提交 `a37a69f` 登记时为 `queued`，运行结果在下一批取回。[第 169 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45852398659)
+
 第 168 批支持 ZIP 游戏使用另行导入的剧情盘和 CD 配乐，修订 KAG 控制标签及 WAVE 曲尾回调，并修复上一批取证发现的 CUE 解码依赖构建错误。第 167 批的 FFmpeg 声道对照匹配 10/10。[168 实现与托管证据](decisions/168-companion-game-discs-and-story-callbacks.md)
 
 第 168 批实现提交 `fea67c6` 登记时为 `queued`，运行结果在下一批取回。[第 168 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45849334408)
