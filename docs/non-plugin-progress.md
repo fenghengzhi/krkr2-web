@@ -2,7 +2,7 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
-第 131 批修复菜单图层的排序与命中、KAG 宏参数复用、声音换轨时的音量淡变，以及导出字节码时对多级基类名的处理。128 的介绍游戏在 Chromium 和 WebKit 的两个后端完成了菜单存读档、刷新和退出。129、130 均因同一处 XP3 测试类型错误未完成生产构建，本批已修正。[131 实现与验收](decisions/131-layer-order-macro-arguments-and-wave-reopen.md)
+第 131 批修复菜单图层的排序与命中、KAG 宏参数复用、声音换轨时的音量淡变，以及导出字节码时对多级基类名的处理。128 的介绍游戏在 Chromium 和 WebKit 的两个后端完成了菜单存读档、刷新和退出。129、130 均因同一处 XP3 测试类型错误未完成生产构建，本批已修正。实现提交 `2afe64d` 的托管运行首次登记为 `queued`，结果在下一批取回。[131 实现与验收](decisions/131-layer-order-macro-arguments-and-wave-reopen.md) · [131 托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45755797755)
 
 第 130 批修正长十进制坐标的读取和字节码保存，扩充影片暂停定位、手柄映射到鼠标键及图层对比度调整。128 的主构建成功，原版介绍游戏出现三个链接，绘图设备和四组字体观察匹配。有损 ERI 的原版像素对照受作者工具空帧阻断，此批已调整生成方式与逐项记录。129 取回时尚在排队。130 实现提交 `c986126` 的托管验证首次登记为 `pending`，下一批取回结果。[130 实现与证据](decisions/130-decimal-values-dct-and-game-input.md) · [130 全套验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45518090473)
 
