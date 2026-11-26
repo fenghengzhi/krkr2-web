@@ -29,3 +29,5 @@ Web 播放器把解码器实际提交的帧与本次准备操作对应起来。�
 第 134 批已经结束，记录为失败。Firefox 和 WebKit 的常规浏览器报告合计 2,132 项通过、72 项失败、2 项跳过。该批新增的发行包音乐和 MIDI 音量组合 16/16 通过。Chromium 常规浏览器原件下载失败，三浏览器的兼容、游戏库和 PWA 仍分别按此前取回的报告统计。Node 为 4,066 项通过、4 项图层断言失败。第 135 至 144 批在这次取回时仍在队列中。[第 134 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45761489263)
 
 介绍游戏的四项 Firefox 和 WebKit 路线都停在首次读取状态。测试传给 TJS 的分隔符写成了 JSON Unicode 转义，TJS 将其解释为普通文字，导致状态、排版和字体读数粘在一起，期望的 11 个字段被读成 46 个。本批改用 TJS 支持的十六进制转义，并保存原始读数，供下次核对实际游玩到了哪一步。[原版介绍游戏路线](../../tests/browser/kag-intro.spec.ts)
+
+第 145 批实现提交为 `67fd93e180afe9cfe330ace5c00c75a9b2107db8`，GitHub 首次登记状态为 `pending`。结果留到下一批取回。[第 145 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45783361496)
