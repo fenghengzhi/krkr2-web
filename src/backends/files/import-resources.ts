@@ -7,6 +7,7 @@ import { normalizePath } from '../../engine/storage/resolver.ts'
 import type { GameFile } from '../../protocol/session.ts'
 import { resolveFiles, type SourceFile } from './source-files.ts'
 import type { HttpRangePool } from './http-range.ts'
+import { borrowResourceBlob } from '../../engine/storage/resource-source.ts'
 
 /** Prepare a complete mount before publishing any of its paths to the running session. */
 export async function importResources(
@@ -40,6 +41,9 @@ export async function importSources(
       size: source.size,
       source: {
         size: source.size,
+        ...(source.borrowBlob ? { async borrowBlob(offset: number, length: number, check?: () => void | Promise<void>) {
+          return borrowResourceBlob(source, offset, length, async () => { await checkpoint(); await check?.() })
+        } } : {}),
         async read(offset, length) {
           await checkpoint()
           const bytes = await source.read(offset, length)

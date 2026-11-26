@@ -4,7 +4,7 @@ import type { Xp3Segment, Xp3SegmentPool } from './segments.ts'
 import { BinaryReader } from '../binary/reader.ts'
 import type { ByteSource, Inflater, Resource } from '../../engine/ports/storage.ts'
 import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
-import { resourceReadBounds } from '../../engine/storage/resource-source.ts'
+import { borrowResourceBlob, resourceReadBounds, resourceViewBounds } from '../../engine/storage/resource-source.ts'
 export { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 
 const signature = [0x58, 0x50, 0x33, 0x0d, 0x0a, 0x20, 0x0a, 0x1a, 0x8b, 0x67, 0x01]
@@ -38,6 +38,10 @@ export async function findXp3Archive(source: ByteSource,
       if (!hasXp3Signature(bytes, at)) continue
       const base = offset + at, size = source.size - base
       return { offset: base, source: { size,
+        ...(source.borrowBlob ? { async borrowBlob(offset: number, length: number, checkpoint?: () => void | Promise<void>) {
+          resourceViewBounds(size, offset, length)
+          return borrowResourceBlob(source, base + offset, length, async () => { await options.checkpoint?.(); await checkpoint?.() })
+        } } : {}),
         async read(offset, length) {
           resourceReadBounds(size, offset, length)
           return read(base + offset, length)
@@ -175,8 +179,19 @@ export async function readXp3(
         await options.checkpoint?.()
         return output
       }
+      // Only physically contiguous, unprotected stored bytes can be borrowed.
+      // Compressed members must keep their existing verified range decoder.
+      const borrowedStart = segments[0]?.offset,
+        borrowable = source.borrowBlob && !protectedStorage && borrowedStart !== undefined &&
+          segments.every((segment) => !segment.compressed && segment.offset === borrowedStart + segment.logical)
       const ranged = !options.verifyAdler32 && (options.compressedSegments || segments.every((s) => !s.compressed))
-        ? { size: fileSize, read: readRange } : undefined
+        ? { size: fileSize, read: readRange,
+            ...(borrowable ? { async borrowBlob(offset: number, length: number, checkpoint?: () => void | Promise<void>) {
+              resourceViewBounds(fileSize, offset, length)
+              return borrowResourceBlob(source, borrowedStart! + offset, length,
+                async () => { await options.checkpoint?.(); await checkpoint?.() })
+            } } : {}),
+          } : undefined
       resources.push({
         name,
         size: fileSize,

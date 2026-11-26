@@ -2,11 +2,17 @@ import type { ByteSource } from '../../engine/ports/storage.ts'
 import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { BinaryWriter } from '../../formats/binary/writer.ts'
 import { CompressionError } from '../../formats/binary/compression-error.ts'
+import { resourceViewBounds } from '../../engine/storage/resource-source.ts'
 
 export class BlobSource implements ByteSource {
   readonly size: number
   constructor(private readonly blob: Blob) {
     this.size = blob.size
+  }
+  async borrowBlob(offset: number, length: number, checkpoint?: () => void | Promise<void>): Promise<Blob> {
+    resourceViewBounds(this.size, offset, length)
+    await checkpoint?.()
+    return this.blob.slice(offset, offset + length)
   }
   async read(offset: number, length: number): Promise<Uint8Array> {
     if (

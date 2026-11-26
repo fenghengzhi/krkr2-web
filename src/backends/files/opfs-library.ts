@@ -131,19 +131,30 @@ export class OpfsReadPool {
   source(key: string, blob: Blob, record: LibraryFile): ByteSource {
     this.check()
     if (blob.size !== record.size) throw new Error(`Library file is incomplete: ${record.path}`)
+    const inBounds = (offset: number, length: number) => Number.isSafeInteger(offset) &&
+      Number.isSafeInteger(length) && offset >= 0 && length >= 0 && length <= record.size - offset
     return {
       size: record.size,
+      borrowBlob: async (offset, length, checkpoint?: () => void | Promise<void>) => {
+        this.check()
+        if (!inBounds(offset, length)) throw new Error('Library Blob view exceeds bounds')
+        // The media element cannot consult the read pool once given a URL.
+        // Verify every touched block of this File snapshot before its handoff,
+        // including the portions outside an unaligned archive member's edges.
+        for (let at = offset; at < offset + length;) {
+          await checkpoint?.()
+          const block = Math.floor(at / BLOCK)
+          await this.block(`${key}:${block}`, blob, block, record)
+          this.check()
+          at = (block + 1) * BLOCK
+        }
+        await checkpoint?.()
+        this.check()
+        return blob.slice(offset, offset + length)
+      },
       read: async (offset, length) => {
         this.check()
-        if (
-          !Number.isSafeInteger(offset) ||
-          !Number.isSafeInteger(length) ||
-          offset < 0 ||
-          length < 0 ||
-          offset > record.size ||
-          length > record.size - offset ||
-          length > MAX_RESOURCE_BYTES
-        )
+        if (!inBounds(offset, length) || length > MAX_RESOURCE_BYTES)
           throw new Error('Library read exceeds bounds or 64 MiB budget')
         if (this.reading + length > MAX_RESOURCE_BYTES * 2)
           throw new Error('Library pending reads exceed 128 MiB budget')

@@ -1,7 +1,7 @@
 import { dropLimits, type DropResourceTree, type DropRoot } from '../ports/storage-drop.ts'
 import { MAX_RESOURCE_BYTES, type ByteSource, type Resource } from '../ports/storage.ts'
 import { normalizeResourcePath, toPublicStoragePath } from './public-path.ts'
-import { resourceReadBounds } from './resource-source.ts'
+import { borrowResourceBlob, resourceReadBounds } from './resource-source.ts'
 import { StorageResolver } from './resolver.ts'
 
 interface SnapshotEntry { root: number; path: string; kind: 'file' | 'directory'; source?: ByteSource }
@@ -105,7 +105,9 @@ export class DropStorage {
       const source = entry.source, size = source?.size
       if (!source || !Number.isSafeInteger(size) || size < 0 || size > dropLimits.sourceBytes || typeof source.read !== 'function')
         throw new Error('Invalid dropped file capability')
-      return { root: entry.root, path, kind: 'file', source: { size, read: source.read.bind(source) } }
+      return { root: entry.root, path, kind: 'file', source: { size, read: source.read.bind(source),
+        ...(source.borrowBlob ? { borrowBlob: source.borrowBlob.bind(source) } : {}),
+      } }
     }), byName = new Map<string, SnapshotEntry>(), charge = empty()
     let batchUnits = roots.reduce((sum, root) => sum + root.name.length, 0)
     for (const entry of entries) {
@@ -147,6 +149,12 @@ export class DropStorage {
       else {
         const original = entry.source!, source: ByteSource = {
           size: original.size, read: (offset, length) => this.read(original, offset, length),
+          ...(original.borrowBlob ? { borrowBlob: (offset: number, length: number, checkpoint?: () => void | Promise<void>) => {
+            this.check()
+            return this.wait(borrowResourceBlob(original, offset, length, async () => {
+              this.check(); await this.checkpoint(); await checkpoint?.(); this.check()
+            }))
+          } } : {}),
         }
         resources.push({ name, size: source.size, source, cacheToken: {}, archiveAliases: false,
           read: () => {

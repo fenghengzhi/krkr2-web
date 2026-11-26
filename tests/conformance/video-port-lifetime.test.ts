@@ -22,14 +22,14 @@ const timeline = (duration = 100): VideoTimeline => ({
   audioStreams: 0,
   videoStreams: 1,
 })
-const open = (epoch = 1): Extract<VideoCommand, { op: 'open' }> => ({
+const open = (epoch = 1) => ({
   op: 'open',
   id: 7,
   epoch,
   name: 'movie.mp4',
   bytes: new Uint8Array([1, 2, 3]),
   settings: defaultVideoSettings(),
-})
+}) satisfies Extract<VideoCommand, { op: 'open' }>
 
 for (const operation of ['close', 'supersede', 'cancel', 'shutdown'] as const)
   test(
@@ -116,7 +116,10 @@ test(
     const posted: number[][] = []
     let parsed: Uint8Array | undefined
     channel.port2.onmessage = ({ data }: MessageEvent<VideoRequest>) => {
-      if (data.command.op === 'open') posted.push([...data.command.bytes])
+      if (data.command.op === 'open') {
+        assert.ok(data.command.bytes instanceof Uint8Array)
+        posted.push([...data.command.bytes])
+      }
       channel.port2.postMessage({ type: 'reply', serial: data.serial, result: { events: [] } })
     }
     const video = new PortVideoBackend(channel.port1, (bytes) => {

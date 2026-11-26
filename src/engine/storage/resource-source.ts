@@ -1,4 +1,4 @@
-import { MAX_RESOURCE_BYTES, type ByteSource, type Resource } from '../ports/storage.ts'
+import { MAX_RESOURCE_BYTES, type ByteSource, type ImmutableBlob, type Resource } from '../ports/storage.ts'
 
 export interface ResourceSourceOptions {
   /** Complete-file fallback limit; callers may reduce the existing 64 MiB cap. */
@@ -13,12 +13,27 @@ export interface OpenedResourceSource {
   readonly bufferedBytes: number
 }
 
-export function resourceReadBounds(size: number, offset: number, length: number): void {
+export function resourceViewBounds(size: number, offset: number, length: number): void {
   if (!Number.isSafeInteger(size) || size < 0 ||
       !Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 ||
       offset > size || length > size - offset)
     throw new Error('Resource read outside valid range')
+}
+export function resourceReadBounds(size: number, offset: number, length: number): void {
+  resourceViewBounds(size, offset, length)
   if (length > MAX_RESOURCE_BYTES) throw new Error('Resource read exceeds 64 MiB budget')
+}
+export async function borrowResourceBlob(source: ByteSource, offset: number, length: number,
+  checkpoint?: () => void | Promise<void>,
+): Promise<ImmutableBlob> {
+  resourceViewBounds(source.size, offset, length)
+  if (!source.borrowBlob) throw new Error('Resource has no immutable Blob capability')
+  await checkpoint?.()
+  const blob = await source.borrowBlob(offset, length, checkpoint)
+  await checkpoint?.()
+  if (blob.size !== length || typeof blob.slice !== 'function' || typeof blob.arrayBuffer !== 'function')
+    throw new Error('Resource returned an invalid immutable Blob view')
+  return blob
 }
 
 /** Borrow true source reads, or explicitly own one bounded complete fallback.
@@ -40,6 +55,9 @@ export async function openResourceSource(
       throw new Error('Resource source size or reader mismatch')
     return { mode: 'range', bufferedBytes: 0, source: {
       size,
+      ...(original.borrowBlob ? { async borrowBlob(offset: number, length: number, check?: () => void | Promise<void>) {
+        return borrowResourceBlob(original, offset, length, async () => { await checkpoint?.(); await check?.() })
+      } } : {}),
       async read(offset, length) {
         resourceReadBounds(size, offset, length)
         await checkpoint?.()

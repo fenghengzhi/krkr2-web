@@ -111,3 +111,68 @@ test('a cancelled video replacement refunds its copy and preserves the active UR
     assert.deepEqual(resources.inspect(), { sources: 1, sourceBytes: bytes.length, ownedBytes: bytes.length * 2 })
   } finally { active.release(); source.release() }
 })
+
+test('file-backed video URLs retain one backing through close and do not consume the byte-copy budget', async () => {
+  const contents = fixture(), blob = new Blob([Uint8Array.from(contents)]),
+    resources = new VideoEncodedResources({ borrowedBytes: blob.size, sourceBytes: 0, ownedBytes: 0 }),
+    source = resources.source({ blob, buffered: false }), first = resources.original(source, 'video/mp4')
+  try {
+    const second = resources.original(source, 'video/mp4')
+    source.release(); second.release()
+    assert.deepEqual(resources.inspect(), { sources: 1, sourceBytes: blob.size, ownedBytes: 0 })
+    assert.throws(() => resources.source({ blob, buffered: false }), /source resource budget/)
+    assert.throws(() => source.blob, /closed/)
+    assert.deepEqual(new Uint8Array(await (await fetch(first.url)).arrayBuffer()), contents)
+  } finally { first.release(); source.release() }
+  assert.deepEqual(resources.inspect(), { sources: 0, sourceBytes: 0, ownedBytes: 0 })
+  assert.throws(() => resources.source({ blob, buffered: true }), /source resource budget/)
+})
+
+test('materialized Blob storage is charged once while an active URL outlives its graph', () => {
+  const blob = new Blob(['wave']), resources = new VideoEncodedResources({ sourceBytes: 4, ownedBytes: 4, borrowedBytes: 0 }),
+    source = resources.source({ blob, buffered: true }), variant = resources.original(source, 'video/mp4')
+  source.release()
+  try {
+    assert.deepEqual(resources.inspect(), { sources: 1, sourceBytes: 4, ownedBytes: 4 })
+    assert.throws(() => resources.source({ blob, buffered: true }), /source resource budget/)
+  } finally { variant.release() }
+  assert.deepEqual(resources.inspect(), { sources: 0, sourceBytes: 0, ownedBytes: 0 })
+})
+
+test('MP4 Blob track patches retain the original file, refund metadata work and preserve the previous URL on failure', async () => {
+  const bytes = Uint8Array.from(readFileSync('out/verification/video-tracks/video-multitrack.mp4')),
+    timeline = await readVideoTimeline(bytes)
+  assert.ok(timeline)
+  const blob = new Blob([bytes]), selectedTimeline = selectVideoTimeline(timeline, 1),
+    resources = new VideoEncodedResources({ borrowedBytes: blob.size }),
+    source = resources.source({ blob, buffered: false }), active = resources.original(source, 'video/mp4')
+  try {
+    let calls = 0
+    await assert.rejects(resources.select(source, 1, selectedTimeline, 'video/mp4', () => {
+      if (++calls > 2) throw new Error('graph closed while reading metadata')
+    }), /graph closed/)
+    assert.deepEqual(resources.inspect(), { sources: 1, sourceBytes: blob.size, ownedBytes: 0 })
+    const selected = await resources.select(source, 1, selectedTimeline, 'video/mp4', () => {})
+    try {
+      const changed = new Uint8Array(await (await fetch(selected.url)).arrayBuffer()),
+        result = await readVideoTimeline(changed)
+      assert.ok(result)
+      assert.deepEqual([result.audioStreams, result.videoStreams, result.videoTracks?.[0]?.id],
+        [1, 1, selectedTimeline.videoTracks![1]!.id])
+      assert.deepEqual(result.times, selectedTimeline.times)
+      assert.equal(changed.byteLength, blob.size)
+      assert(resources.inspect().ownedBytes > 0 && resources.inspect().ownedBytes < blob.size)
+      source.release(); active.release()
+      assert.equal(resources.inspect().sources, 1, 'the selected URL keeps its original sample storage alive')
+    } finally { selected.release() }
+  } finally { active.release(); source.release() }
+  assert.deepEqual(resources.inspect(), { sources: 0, sourceBytes: 0, ownedBytes: 0 })
+
+  const limited = new VideoEncodedResources({ ownedBytes: 0 }), kept = limited.source({ blob, buffered: false }),
+    initial = limited.original(kept, 'video/mp4')
+  try {
+    await assert.rejects(limited.select(kept, 1, selectedTimeline, 'video/mp4', () => {}), /owned encoded resource budget/)
+    assert.deepEqual(new Uint8Array(await (await fetch(initial.url)).arrayBuffer()), bytes)
+    assert.equal(limited.inspect().ownedBytes, 0)
+  } finally { initial.release(); kept.release() }
+})

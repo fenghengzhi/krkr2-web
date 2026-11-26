@@ -898,7 +898,21 @@ export class EngineSession {
       this.videos = new VideoService(
         this.runtime,
         this.deps.video,
-        (name) => this.readResource(name),
+        async (name, sourceControl) => {
+          if (!this.deps.video?.prepareSource) return this.readResource(name)
+          const check = () => { this.control.check(); sourceControl.check() }
+          check()
+          const resource = await this.resolveResource(name, 'TVPCannotOpenStorage')
+          check()
+          return this.deps.video.prepareSource(resource, {
+            check,
+            checkpoint: async () => { check(); await this.storageCheckpoint(); check() },
+            onCancel: (callback) => {
+              const offSession = this.control.onCancel(callback), offSource = sourceControl.onCancel(callback)
+              return () => { offSession(); offSource() }
+            },
+          })
+        },
         (id, pixels) => {
           if (!this.layers.has(id)) return
           const previousWindow = this.layerWindow(id)

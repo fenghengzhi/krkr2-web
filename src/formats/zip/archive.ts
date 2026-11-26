@@ -5,7 +5,7 @@ import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import type { ByteSource, Inflater, Resource } from '../../engine/ports/storage.ts'
 import { cp437 } from './names.ts'
-import { resourceReadBounds } from '../../engine/storage/resource-source.ts'
+import { borrowResourceBlob, resourceReadBounds, resourceViewBounds } from '../../engine/storage/resource-source.ts'
 
 export const MAX_ZIP_ENTRIES = 100000
 export interface ZipCodecs {
@@ -319,27 +319,42 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
         }
         return start
       }
-      let verified: Promise<number> | undefined
-      // Register the flight before a checkpoint can reenter this source.
-      const verifyStored = () => verified ??= Promise.resolve().then(async () => {
+      let verified: Promise<number> | undefined, verifiedStart: number | undefined
+      const scanStored = async (checkpoint?: () => void | Promise<void>) => {
+        await checkpoint?.()
+        if (verifiedStart !== undefined) return verifiedStart
         const start = await locate()
         let crc = 0
         // Before returning even one stored-member byte, preserve ZIP's full
         // payload CRC contract. This is a bounded-memory complete scan, not a
         // claim that first playback can begin without reading the whole item.
         for (let offset = 0; offset < entry.size; offset += 1024 * 1024) {
+          await checkpoint?.()
           const bytes = await read(start + offset, Math.min(1024 * 1024, entry.size - offset))
-          crc = await checkedCrc32(bytes, check, crc)
+          crc = await checkedCrc32(bytes, async () => { await check(); await checkpoint?.() }, crc)
         }
         if (crc !== entry.checksum) throw new Error(`ZIP CRC32 mismatch: ${entry.name}`)
         await codecs.checkpoint()
+        await checkpoint?.()
+        verifiedStart = start
         return start
-      })
+      }
+      // Ordinary range readers share their verification. A video-specific
+      // cancellation never rejects or poisons another reader's shared flight.
+      const verifyStored = () => verified ??= Promise.resolve().then(() => scanStored())
       const readable = !entry.symlink && !(entry.flags & ~0x80e) && !(entry.flags & 0x2041)
       const pool = readable && entry.method === 8 ? codecs.compressedRanges : undefined
       let position: Promise<number> | undefined, compressed: DeflateRange | undefined
       const range: ByteSource | undefined = readable && ((entry.method === 0 && entry.size === entry.stored) || pool) ? {
         size: entry.size,
+        ...(entry.method === 0 && source.borrowBlob ? {
+          async borrowBlob(offset: number, length: number, checkpoint?: () => void | Promise<void>) {
+            resourceViewBounds(entry.size, offset, length)
+            const start = await scanStored(checkpoint)
+            return borrowResourceBlob(source, start + offset, length,
+              async () => { await codecs.checkpoint(); await checkpoint?.() })
+          },
+        } : {}),
         async read(offset, length) {
           resourceReadBounds(entry.size, offset, length)
           await codecs.checkpoint()

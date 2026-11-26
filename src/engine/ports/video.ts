@@ -1,4 +1,24 @@
 import type { Pixels } from './graphics.ts'
+import type { ImmutableBlob, Resource } from './storage.ts'
+export const videoSourceLimits = {
+  bufferedBytes: 128 * 1024 ** 2,
+  borrowedBytes: 2 * 1024 ** 3,
+}
+/** buffered distinguishes owned materialization from an immutable file view. */
+export interface VideoBlobPayload {
+  blob: ImmutableBlob
+  buffered: boolean
+}
+export interface VideoSourceControl {
+  check(): void
+  checkpoint(): Promise<void>
+  onCancel(callback: () => void): () => void
+}
+/** Worker-local preparation lease; never sent over the video wire. */
+export interface PreparedVideoSource {
+  bytes: VideoBlobPayload
+  release(): void
+}
 export type VideoStatus = 'unload' | 'stop' | 'play' | 'pause' | 'ready'
 export type VideoMode = 0 | 1 | 2 | 3
 /** One encoded video track in original container order. */
@@ -73,7 +93,7 @@ export type VideoCommand =
       windowId?: number
       id: number
       epoch: number
-      bytes: Uint8Array
+      bytes: Uint8Array | VideoBlobPayload
       name: string
       settings: VideoSettings
       periodEventPast?: boolean
@@ -109,6 +129,7 @@ export interface VideoResult {
   events: VideoEvent[]
 }
 export interface VideoBackend {
+  prepareSource?(resource: Resource, control: VideoSourceControl): Promise<PreparedVideoSource>
   setRequestTimeoutsPaused?(paused: boolean): void
   command(command: VideoCommand): Promise<VideoResult>
   listen(callback: (event: VideoEvent) => void | Promise<void>): () => void

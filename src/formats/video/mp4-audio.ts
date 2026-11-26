@@ -1,3 +1,7 @@
+import { Mp4Data, mp4Tag, mp4SelectionStarts, readMp4Blob, cooperateMp4,
+  type Mp4BlobSource, type Mp4MetadataOptions, type Mp4Patch } from './mp4-source.ts'
+export type { Mp4BlobSource, Mp4MetadataOptions, Mp4Patch } from './mp4-source.ts'
+
 export interface SelectedMp4Audio {
   bytes: Uint8Array
   /** Original file counts; the returned file contains only the selected audio. */
@@ -5,11 +9,7 @@ export interface SelectedMp4Audio {
   videoStreams: number
   selectedTrackId: number
 }
-export interface Mp4AudioSelectionOptions {
-  checkpoint?(): void | Promise<void>
-  /** Host-injected task yield; this format module has no DOM/timer dependency. */
-  yieldControl?(): void | Promise<void>
-}
+export interface Mp4AudioSelectionOptions extends Mp4MetadataOptions {}
 export interface Mp4TrackSelection {
   /** Omitted categories remain intact. Indices refer to the original file. */
   audio?: number
@@ -21,6 +21,12 @@ export interface SelectedMp4Tracks {
   videoStreams: number
   selectedAudioTrackId?: number
   selectedVideoTrackId?: number
+}
+export interface SelectedMp4BlobTracks extends Omit<SelectedMp4Tracks, 'bytes'> {
+  size: number
+  /** Original offsets, sorted/nonoverlapping; compose with source Blob.slice.
+   * Views own only loaded metadata, never mdat payload. */
+  patches: Mp4Patch[]
 }
 interface Box { kind: string; start: number; body: number; end: number }
 interface Track { id: number; handler: string; box: Box; header: Box; alternate: number; descriptions: number; samples: number; regularSamples: number }
@@ -35,20 +41,39 @@ const padding = ['free', 'skip', 'wide']
  */
 export async function selectMp4Tracks(input: Uint8Array, selection: Mp4TrackSelection,
   options: Mp4AudioSelectionOptions = {}): Promise<SelectedMp4Tracks | undefined> {
+  const choice = { audio: selection.audio, video: selection.video }
+  validateSelection(choice)
+  if (input.length < 8 || !mp4SelectionStarts.includes(mp4Tag(input, 4))) return
+  if (input.length > MAX_BYTES) throw new Error('MP4 track selection exceeds the 64 MiB input budget')
+  // Snapshot before the dynamic parser import can yield to the caller.
+  const data = Mp4Data.owned(Uint8Array.from(input)), selected = await selectTracks(data, choice, options)
+  return { bytes: data.contiguous!, ...selected }
+}
+
+export async function selectMp4TracksBlob(source: Mp4BlobSource, selection: Mp4TrackSelection,
+  options: Mp4AudioSelectionOptions = {}): Promise<SelectedMp4BlobTracks | undefined> {
+  // Capture caller-owned choice fields before any range read can suspend.
+  const choice = { audio: selection.audio, video: selection.video }
+  validateSelection(choice)
+  const data = await readMp4Blob(source, mp4SelectionStarts, options)
+  if (!data) return
+  const selected = await selectTracks(data, choice, options)
+  await options.checkpoint?.()
+  return { size: data.length, patches: data.patches(), ...selected }
+}
+
+function validateSelection(selection: Mp4TrackSelection): void {
   const audioIndex = selection.audio, videoIndex = selection.video
   for (const [kind, index] of [['audio', audioIndex], ['video', videoIndex]] as const)
     if (index !== undefined && (!Number.isSafeInteger(index) || index < 0))
       throw new Error(`MP4 ${kind} index must be a non-negative safe integer`)
-  const tag = (bytes: Uint8Array, at: number) => String.fromCharCode(...bytes.subarray(at, at + 4))
-  if (input.length < 8 || !['ftyp', 'moov', 'mdat', 'styp', 'moof', 'mfra', 'sidx', 'pdin', 'pssh', 'uuid', ...padding].includes(tag(input, 4))) return
-  if (input.length > MAX_BYTES) throw new Error('MP4 track selection exceeds the 64 MiB input budget')
-  // Snapshot before the dynamic parser import can yield to the caller.
-  const bytes = Uint8Array.from(input), view = new DataView(bytes.buffer)
-  const cooperate = async () => {
-    await options.checkpoint?.()
-    await options.yieldControl?.()
-    await options.checkpoint?.()
-  }
+}
+
+async function selectTracks(bytes: Mp4Data, selection: Mp4TrackSelection,
+  options: Mp4AudioSelectionOptions): Promise<Omit<SelectedMp4Tracks, 'bytes'>> {
+  const audioIndex = selection.audio, videoIndex = selection.video,
+    tag = (source: Mp4Data, at: number) => source.tag(at), view = bytes,
+    cooperate = () => cooperateMp4(options)
   let boxCount = 0, tableSamples = 0
   const need = (box: Box, at: number, length: number) => {
     if (!Number.isSafeInteger(length) || length < 0 || at < box.body || at > box.end || length > box.end - at)
@@ -89,7 +114,7 @@ export async function selectMp4Tracks(input: Uint8Array, selection: Mp4TrackSele
   }
   const full = (box: Box, versions = [0], mask = 0) => {
     need(box, box.body, 4)
-    const version = bytes[box.body]!, flags = view.getUint32(box.body) & 0xffffff
+    const version = bytes.getUint8(box.body), flags = view.getUint32(box.body) & 0xffffff
     if (!versions.includes(version) || (flags & ~mask)) throw new Error(`Unsupported MP4 ${box.kind} version or flags`)
     return { version, flags }
   }
@@ -240,7 +265,7 @@ export async function selectMp4Tracks(input: Uint8Array, selection: Mp4TrackSele
         const samples = view.getUint32(table.body + 8)
         if (samples > MAX_SAMPLES) throw new Error('MP4 size sample budget exceeded')
         sizeSamples = samples
-        const width = table.kind === 'stsz' ? (view.getUint32(table.body + 4) ? 0 : 32) : bytes[table.body + 7]!
+        const width = table.kind === 'stsz' ? (view.getUint32(table.body + 4) ? 0 : 32) : bytes.getUint8(table.body + 7)
         if (table.kind === 'stz2' && ![4, 8, 16].includes(width)) throw new Error('Unsupported MP4 compact sample width')
         exact(table, table.body + 12 + Math.ceil(samples * width / 8))
       } else if (table.kind === 'sdtp') {
@@ -403,7 +428,7 @@ export async function selectMp4Tracks(input: Uint8Array, selection: Mp4TrackSele
       const unsigned = (width: number) => {
         need(box, at, width)
         let value = 0
-        for (let i = 0; i < width; i++) value = value * 256 + bytes[at++]!
+        for (let i = 0; i < width; i++) value = value * 256 + bytes.getUint8(at++)
         return value
       }
       for (let i = 0; i < entries; i++) {
@@ -457,10 +482,9 @@ export async function selectMp4Tracks(input: Uint8Array, selection: Mp4TrackSele
   await cooperate()
   const { createFile } = await import('mp4box'), file = createFile(false)
   file.onError = (message) => { throw new Error(`MP4 track metadata: ${message}`) }
-  // v2.4.1 appendBuffer accepts ArrayBuffer + fileStart; fromArrayBuffer would
-  // silently allocate a second complete input. One private contiguous buffer
-  // also avoids MultiBufferStream's overlap/concatenation copies.
-  file.appendBuffer(Object.assign(bytes.buffer, { fileStart: 0, usedBytes: 0 })); file.flush()
+  // Each metadata box is contiguous, but mdat/padding payload need not be in
+  // memory. MP4Box receives original fileStart offsets, with extraction off.
+  await bytes.appendTo((buffer) => file.appendBuffer(buffer), options); file.flush()
   await cooperate()
   let total = 0, inspected = 0
   for (const track of tracks) {
@@ -480,15 +504,17 @@ export async function selectMp4Tracks(input: Uint8Array, selection: Mp4TrackSele
     bytes.set([102, 114, 101, 101], box.start + 4)
   }
   for (const selected of [selectedAudio, selectedVideo]) if (selected) {
-    bytes[selected.header.body + 3] = bytes[selected.header.body + 3]! | 3 // enabled and in-movie
+    bytes.set([bytes.getUint8(selected.header.body + 3) | 3], selected.header.body + 3) // enabled and in-movie
     view.setUint16(selected.alternate, 0)
   }
   for (const write of writes) {
     if (!(committed++ % 4096)) await cooperate()
     let value = write.value
-    for (let i = write.width - 1; i >= 0; i--) { bytes[write.at + i] = value & 255; value = Math.floor(value / 256) }
+    const encoded = Array<number>(write.width)
+    for (let i = write.width - 1; i >= 0; i--) { encoded[i] = value & 255; value = Math.floor(value / 256) }
+    bytes.set(encoded, write.at)
   }
-  return { bytes, audioStreams: audio.length, videoStreams: video.length,
+  return { audioStreams: audio.length, videoStreams: video.length,
     ...(selectedAudio ? { selectedAudioTrackId: selectedAudio.id } : {}),
     ...(selectedVideo ? { selectedVideoTrackId: selectedVideo.id } : {}) }
 }

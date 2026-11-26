@@ -353,3 +353,38 @@ test('OPFS verified sources retain offsets above 4 GiB and validate all read bou
   assert.equal((await source.read(total, 0)).length, 0)
   pool.close()
 })
+
+test('an OPFS movie view verifies both edge blocks before exposing bytes from an archive', async () => {
+  const data = new Uint8Array(2 * B + 1)
+  data.set([17, 34, 51], B - 1)
+  const pool = new OpfsReadPool(new AbortController().signal), source = pool.source('movie', new Blob([data]), {
+    path: 'game.xp3', size: data.length,
+    hashes: [await hashBlock(data.subarray(0, B)), await hashBlock(data.subarray(B, 2 * B)), '0'.repeat(64)],
+  })
+  try {
+    const view = await source.borrowBlob!(B - 1, 3)
+    assert.deepEqual([...new Uint8Array(await view.arrayBuffer())], [17, 34, 51])
+    await assert.rejects(source.borrowBlob!(data.length, 1), /bounds/)
+    await assert.rejects(source.borrowBlob!(2 * B - 1, 2), /checksum/)
+    await assert.rejects(source.borrowBlob!(0, 1), /checksum/)
+    assert.equal(pool.inspect().cacheBytes, 0)
+  } finally { pool.close() }
+})
+
+test('borrowing a large OPFS view checks bounded blocks and a cancelled scan leaves the file reusable', async () => {
+  const piece = new Blob([new Uint8Array(B)]), digest = await hashBlock(new Uint8Array(B)), blocks = 129,
+    snapshot = new Blob(Array<Blob>(blocks).fill(piece)), pool = new OpfsReadPool(new AbortController().signal, B),
+    source = pool.source('movie', snapshot, { path: 'cutscene.mp4', size: snapshot.size, hashes: Array<string>(blocks).fill(digest) })
+  try {
+    let checked = 0
+    await assert.rejects(source.borrowBlob!(0, snapshot.size, () => {
+      if (++checked === 3) throw new Error('video overlay closed')
+    }), /video overlay closed/)
+    assert.equal(checked, 3)
+    const view = await source.borrowBlob!(0, snapshot.size)
+    assert.equal(view.size, blocks * B)
+    assert.equal((await view.slice(view.size - 1).arrayBuffer()).byteLength, 1)
+    assert.deepEqual(pool.inspect(), { cacheBytes: B, pendingBlocks: 0, pendingReadBytes: 0 })
+    await assert.rejects(source.read(0, snapshot.size), /64 MiB budget/)
+  } finally { pool.close() }
+})

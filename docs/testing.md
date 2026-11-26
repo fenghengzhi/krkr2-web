@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 142 批在浏览器播放媒体数据及尾部索引均位于 144 MiB 之后的双视频轨影片，检查真实像素、声音、存入游戏库后重开，以及 HTTP 读取取消。格式层另比较普通与分段 MP4 的整文件选轨结果及稀疏元数据选轨结果。[142 验收](decisions/142-large-game-movies.md)
+
 第 141 批把影片循环参数读回交给原版 Windows 和 Web 源码、字节码对照。浏览器用实际影片检查负起点回环、超过片长的边界和剧情提示回调。[141 验收](decisions/141-video-playback.md)
 
 第 140 批把原版图像缓存启动值和脚本改限与源码、字节码和实际浏览器画廊对照。已有检验缓存命中、图片独立副本和清理的脚本显式启用 `gcsAuto`，继续检查原有断言。[140 验收](decisions/140-game-graphics-cache.md)

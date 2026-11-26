@@ -8,6 +8,8 @@ import {
   type VideoSnapshot,
   type VideoResult,
   type VideoMixingBitmap,
+  type PreparedVideoSource,
+  type VideoSourceControl,
 } from '../ports/video.ts'
 import type { Pixels } from '../ports/graphics.ts'
 import { videoBalanceReadback } from './video-audio.ts'
@@ -34,6 +36,7 @@ interface Video {
   detached: boolean
   resourceRequested: boolean
   inflight: Set<Promise<VideoResult>>
+  sourceCancels: Set<() => void>
   closing?: Promise<void>
   version: number
   layers: ({ id: number; owner: ScriptWeakObject } | null)[]
@@ -74,7 +77,7 @@ export class VideoService {
   constructor(
     private readonly objects: ScriptRuntime,
     private readonly backend: VideoBackend | undefined,
-    private readonly read: (name: string) => Promise<Uint8Array>,
+    private readonly read: (name: string, control: VideoSourceControl) => Promise<Uint8Array | PreparedVideoSource>,
     private readonly frame: (id: number, pixels: Pixels) => void,
     private readonly dispatch: (
       callback: ScriptObject,
@@ -111,7 +114,34 @@ export class VideoService {
   }
   private cancelEvents(video: Video): void {
     video.version++
+    for (const cancel of video.sourceCancels) cancel()
+    video.sourceCancels.clear()
     this.cancelQueued(video)
+  }
+  private sourceControl(video: Video): VideoSourceControl {
+    const version = video.version
+    const check = () => {
+      if (this.cancelled || this.disposed || video.detached || this.videos.get(video.id) !== video || version !== video.version)
+        throw new ExecutionCancelled()
+    }
+    return {
+      check, checkpoint: async () => check(),
+      onCancel: (callback) => {
+        if (this.cancelled || this.disposed || video.detached || this.videos.get(video.id) !== video || version !== video.version) callback()
+        else video.sourceCancels.add(callback)
+        return () => { video.sourceCancels.delete(callback) }
+      },
+    }
+  }
+  private readSource(name: string, control: VideoSourceControl): Promise<Uint8Array | PreparedVideoSource> {
+    let off = () => {}, rejectCancel!: (error: unknown) => void
+    const cancelled = new Promise<never>((_resolve, reject) => { rejectCancel = reject })
+    off = control.onCancel(() => rejectCancel(new ExecutionCancelled()))
+    const actual = Promise.resolve().then(() => { control.check(); return this.read(name, control) }).then((value) => {
+      try { control.check(); return value }
+      catch (error) { if (!(value instanceof Uint8Array)) value.release(); throw error }
+    })
+    return Promise.race([actual, cancelled]).finally(() => off())
   }
   private queueClose(video: Video): void {
     if (!video.resourceRequested || video.closing) return
@@ -337,6 +367,7 @@ export class VideoService {
           detached: false,
           resourceRequested: false,
           inflight: new Set(),
+          sourceCancels: new Set(),
           version: 0,
           layers: [null, null],
         }
@@ -416,8 +447,9 @@ export class VideoService {
       const value = input[i]
       return Number(BigInt.asIntN(32, typeof value === 'bigint' ? value : BigInt(number(i))))
     }
-    const apply = async (command: VideoCommand) => {
+    const apply = async (command: VideoCommand, check?: () => void) => {
       const result = await this.videoCommand(video, command)
+      check?.()
       if (result.snapshot) video.snapshot = result.snapshot
       for (const event of result.events) {
         this.pixels(video, event)
@@ -449,17 +481,24 @@ export class VideoService {
       const name = text(0)
       this.cancelEvents(video)
       video.snapshot.epoch = this.epoch++
-      await apply({
-        op: 'open',
-        ...identity(),
-        windowId: video.windowId,
-        name,
-        bytes: await this.read(name.split('?')[0]!),
-        // Native graph controls are not preferences carried across files.
-        // Only the containing VideoOverlay's object fields survive reopening.
-        settings: { ...defaultVideoSettings(), ...videoObjectSettings(video.snapshot) },
-        periodEventPast: video.snapshot.periodEventPast ?? false,
-      })
+      const epoch = video.snapshot.epoch, control = this.sourceControl(video),
+        source = await this.readSource(name.split('?')[0]!, control)
+      try {
+        control.check()
+        await apply({
+          op: 'open', id: video.id, epoch,
+          windowId: video.windowId,
+          name,
+          bytes: source instanceof Uint8Array ? source : source.bytes,
+          // Native graph controls are not preferences carried across files.
+          // Only the containing VideoOverlay's object fields survive reopening.
+          settings: { ...defaultVideoSettings(), ...videoObjectSettings(video.snapshot) },
+          periodEventPast: video.snapshot.periodEventPast ?? false,
+        }, control.check)
+      } finally {
+        if (!(source instanceof Uint8Array)) source.release()
+      }
+      control.check()
       video.ready = true
       callbacks.push({ name: 'onStatusChanged', args: [video.snapshot.status] })
     } else if (['play', 'stop', 'pause', 'rewind', 'prepare'].includes(method)) {

@@ -1,5 +1,8 @@
 import type { VideoTimeline, VideoTrackTimeline } from '../../engine/ports/video.ts'
 import { readAvcFrameDuration } from './avc-timing.ts'
+import { Mp4Data, mp4Tag, mp4TimelineStarts, readMp4Blob, cooperateMp4,
+  type Mp4BlobSource, type Mp4MetadataOptions } from './mp4-source.ts'
+export type { Mp4BlobSource, Mp4MetadataOptions } from './mp4-source.ts'
 const MAX_SAMPLES = 1000000
 /** Retain the original catalog while projecting one selected video timeline. */
 export function selectVideoTimeline(original: VideoTimeline, index: number): VideoTimeline {
@@ -41,13 +44,20 @@ export function selectVideoTimeline(original: VideoTimeline, index: number): Vid
 /** MP4Box supplies DTS/CTS and fragmented sample tables; this adapter applies
  * edit lists and exposes presentation order instead of decoding order. */
 export async function readVideoTimeline(input: Uint8Array): Promise<VideoTimeline | undefined> {
-  if (input.length < 8 || !['ftyp', 'moov', 'free', 'wide', 'mdat'].includes(
-    String.fromCharCode(...input.subarray(4, 8)))) return
+  if (input.length < 8 || !mp4TimelineStarts.includes(mp4Tag(input, 4))) return
   // Own the complete source before the parser import can suspend. All video
   // catalogs refer to this same immutable observation, not a later caller view.
-  const bytes = Uint8Array.from(input)
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const text = (at: number) => String.fromCharCode(...bytes.subarray(at, at + 4))
+  return parseVideoTimeline(Mp4Data.owned(Uint8Array.from(input)), {})
+}
+
+export async function readVideoTimelineBlob(source: Mp4BlobSource,
+  options: Mp4MetadataOptions = {}): Promise<VideoTimeline | undefined> {
+  const data = await readMp4Blob(source, mp4TimelineStarts, options)
+  return data && parseVideoTimeline(data, options)
+}
+
+async function parseVideoTimeline(bytes: Mp4Data, options: Mp4MetadataOptions): Promise<VideoTimeline | undefined> {
+  const view = bytes, text = (at: number) => bytes.tag(at)
   let boxes = 0,
     totalSamples = 0
   const inspect = (start: number, end: number, depth = 0) => {
@@ -92,12 +102,14 @@ export async function readVideoTimeline(input: Uint8Array): Promise<VideoTimelin
     }
   }
   inspect(0, bytes.length)
+  await cooperateMp4(options)
   const { createFile } = await import('mp4box')
+  await options.checkpoint?.()
   const file = createFile(false)
   file.onError = (message) => {
     throw new Error(`MP4 metadata: ${message}`)
   }
-  file.appendBuffer(Object.assign(bytes.buffer, { fileStart: 0, usedBytes: 0 }))
+  await bytes.appendTo((buffer) => file.appendBuffer(buffer), options)
   file.flush()
   const info = file.getInfo(), catalog: VideoTrackTimeline[] = [], ids = new Set<number>()
   if (!info.videoTracks.length) return
@@ -105,6 +117,7 @@ export async function readVideoTimeline(input: Uint8Array): Promise<VideoTimelin
   let videoSamples = 0, editedSamples = 0, editWork = 0
   const avcBudget = { remaining: 1024 * 1024 }, descriptionDurations = new Map<unknown, number | undefined>()
   for (const track of info.videoTracks) {
+    await cooperateMp4(options)
     const samples = file.getTrackSamplesInfo(track.id),
       width = track.video?.width ?? track.track_width, height = track.video?.height ?? track.track_height
     if (!Number.isSafeInteger(track.id) || track.id <= 0 || ids.has(track.id) ||
@@ -120,7 +133,9 @@ export async function readVideoTimeline(input: Uint8Array): Promise<VideoTimelin
     // other codecs/configuration changes retain the container-derived estimate.
     let sampleDuration = 0
     const descriptions = new Set<unknown>()
+    let inspected = 0
     for (const sample of samples) {
+      if (!(inspected++ % 4096)) await cooperateMp4(options)
       if (!Number.isSafeInteger(sample.duration) || sample.duration < 0 || !Number.isSafeInteger(sample.cts))
         throw new Error('Invalid MP4 video sample duration or timestamp')
       sampleDuration += sample.duration
@@ -174,6 +189,7 @@ export async function readVideoTimeline(input: Uint8Array): Promise<VideoTimelin
     catalog.push({ id: track.id, width, height, times, duration, frameDuration })
   }
   const first = catalog[0]!
+  await options.checkpoint?.()
   return {
     times: first.times,
     duration: first.duration,

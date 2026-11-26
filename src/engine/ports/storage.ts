@@ -1,8 +1,19 @@
 export const MAX_RESOURCE_BYTES = 64 * 1024 * 1024
 
+/** DOM-independent immutable Blob view. This does not grant whole-buffer reads
+ * to ordinary storage consumers; those retain their existing read budgets. */
+export interface ImmutableBlob {
+  readonly size: number
+  slice(start?: number, end?: number, contentType?: string): ImmutableBlob
+  arrayBuffer(): Promise<ArrayBuffer>
+}
 export interface ByteSource {
   readonly size: number
   read(offset: number, length: number): Promise<Uint8Array>
+  /** Borrow existing immutable backing, after the resource's required integrity
+   * checks. Implementations must not materialize new byte buffers as a borrowed
+   * source. The view is independent of the lifetime of a particular reader. */
+  borrowBlob?(offset: number, length: number, checkpoint?: () => void | Promise<void>): Promise<ImmutableBlob>
 }
 export interface Resource {
   readonly name: string

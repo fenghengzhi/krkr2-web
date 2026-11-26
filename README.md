@@ -124,7 +124,7 @@ docs/             架构、已验证决策与兼容范围
 
 [音频时钟与解码边界](docs/decisions/004-audio-clock.md)说明 TypeScript 混音、声音回调、按需 Vorbis WASM 及浏览器解码差异。
 
-[视频呈现与生命周期](docs/decisions/005-video-presentation.md)说明 MP4 帧索引、双图层输出、遮盖模式、媒体声音与取消清理。
+影片可以使用 MP4 帧索引、双图层输出、遮盖模式和媒体声音。第 142 批接入大体积本地影片的文件切片和多轨播放，游戏库文件在播放前会校验相应数据块。新增路径等待托管验证。[视频呈现与生命周期](docs/decisions/005-video-presentation.md) · [大过场影片的来源和大小限制](docs/decisions/142-large-game-movies.md)
 
 [输入与焦点](docs/decisions/006-input-routing.md)说明浏览器事件、TJS 回调、图层命中/捕获、模态状态与文字输入之间的边界。
 
