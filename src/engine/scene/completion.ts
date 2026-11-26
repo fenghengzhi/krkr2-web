@@ -15,6 +15,9 @@ interface Completion {
 interface Surface {
   pixels: Pixels
   bounds: Rect
+  // A cropped piece of a persistent native layer cache still aligns its
+  // scanlines relative to the layer viewport, including when borrowed.
+  cacheLeft?: number
 }
 export interface CompletedTransition {
   pixels: Pixels
@@ -161,9 +164,9 @@ export function completeLayer(
       // Native totalopaque uses GetDrawTargetBitmap instead of a temporary.
       // Preserve that identity: the parent's completion then skips both its
       // blend and DrawnRegion update, including the cached no-main fill below.
-      const surface = destination ?? (!cached && type === 1 && opacity === 255
+      const surface: Surface = destination ?? (!cached && type === 1 && opacity === 255
           ? target.borrow(area)
-          : { pixels: image(area, color), bounds: area }),
+          : { pixels: image(area, color), bounds: area, cacheLeft: cached ? viewport.x : area.x }),
         { pixels, bounds } = surface,
         drawn = !main && type !== 0 ? new Uint8Array(pixels.width * pixels.height) : undefined
       if (main) own(area, (source) => copy(pixels, bounds, source))
@@ -184,7 +187,7 @@ export function completeLayer(
                     const x = covered.x - bounds.x, first = (py - bounds.y) * pixels.width + x
                     blendAlphaRow(pixels.data, first * 4, source.pixels.data,
                       ((py - source.y) * source.pixels.width + covered.x - source.x) * 4,
-                      x, covered.width, source.opacity)
+                      covered.x - (surface.cacheLeft ?? bounds.x), covered.width, source.opacity)
                     drawn?.fill(1, first, first + covered.width)
                   }
                   return

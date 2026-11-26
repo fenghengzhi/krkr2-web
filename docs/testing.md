@@ -2,7 +2,7 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
-第 133 批原版 KAG 解析器对照扩至 61 项，Windows 图层组增加 10 项截图及矩形混合的颜色和遮罩观察。浏览器另以模板默认的 133 × 99、8 位缩略图验证书签读写，实际点击测试覆盖关闭宏存档后的继续剧情。原版书签和有损 ERI 的 Chromium 比较将保留 Playwright JSON 报告，便于检查逐用例结果及附件。[133 验收记录](decisions/133-game-bookmarks-captured-alpha-and-sound-seeks.md)
+第 133 批原版 KAG 解析器对照扩至 61 项，Windows 图层组增加 11 项截图及矩形混合的颜色和遮罩观察。浏览器另以模板默认的 133 × 99、8 位缩略图验证书签读写，实际点击测试覆盖关闭宏存档后的继续剧情。原版书签和有损 ERI 的 Chromium 比较将保留 Playwright JSON 报告，便于检查逐用例结果及附件。[133 验收记录](decisions/133-game-bookmarks-captured-alpha-and-sound-seeks.md)
 
 第 132 批新增 9 个 Node 用例，每个浏览器项目新增 12 个用例。三条浏览器路线分别核对 KAG 存档缩略图的每个像素及刷新读档、实际点击推进带方括号的剧情、AudioWorklet 左右声道的采样。原版 SDK 共用 11 个新增图层缩放场景及 8 个新增 KAG 场景。声音对照现有 40 个场景，分别记录脚本和解码器观察及需要音频设备的结果。[132 验收记录](decisions/132-game-thumbnails-embedded-text-and-wave-volume.md)
 
