@@ -5,6 +5,7 @@ import { createStorageSelectorView } from './storage-selector-view.ts'
 interface DialogActions {
   discPanel?(dialog?: HTMLElement): void
   browse?(id: number, directory: string): Promise<StorageSelectorDirectory | null>
+  openFile?(id: number, filterIndex: number, file: File): Promise<boolean>
   choose(id: number, value: string | null): Promise<unknown> | undefined
   stop(): Promise<void>
 }
@@ -79,7 +80,7 @@ export function createGameDialogs(actions: DialogActions) {
     if (live(view) && !view.selector?.rejected(reason))
       view.status.textContent = reason instanceof Error ? reason.message : String(reason)
   }
-  const choose = async (view: DialogView, value: string | null) => {
+  const choose = async (view: DialogView, value: string | null | { file: File; filterIndex: number }) => {
     if (
       !active(view) ||
       !enabled ||
@@ -93,7 +94,9 @@ export function createGameDialogs(actions: DialogActions) {
     view.status.textContent = '正在提交…'
     controls(view)
     try {
-      const operation = actions.choose(view.request.id, value)
+      const operation = value !== null && typeof value === 'object'
+        ? actions.openFile?.(view.request.id, value.filterIndex, value.file)
+        : actions.choose(view.request.id, value)
       if (!operation) throw new Error('游戏会话已结束。')
       const accepted = await operation
       // A pause or a new child scope can win the race to the Worker. An
@@ -129,6 +132,7 @@ export function createGameDialogs(actions: DialogActions) {
   const hide = () => {
     const view = current
     if (!view) return false
+    view.selector?.releaseDeviceSelection()
     const focused = document.activeElement,
       ownedFocus = focused instanceof HTMLElement && view.dialog.contains(focused)
     if (ownedFocus) {
@@ -212,6 +216,7 @@ export function createGameDialogs(actions: DialogActions) {
       dialog.classList.add('game-storage-selector')
       view.selector = createStorageSelectorView(request.id, request.selector, {
         browse: actions.browse ? (directory) => actions.browse!(request.id, directory) : undefined,
+        openFile: actions.openFile ? (file, filterIndex) => void choose(view, { file, filterIndex }) : undefined,
         available: () =>
           active(view) &&
           enabled &&

@@ -1,10 +1,15 @@
 /** Fixed LayerIntf.cpp focus (7890–7898): omitted direction=true, supplied
  * direction=variant bool, return integer SetFocusTo result. LayerManager.cpp
- * 646–703 rejects nonfocusable/unchanged targets after ordinary redirection. */
+ * 646–703 rejects nonfocusable/unchanged targets after ordinary redirection.
+ * SetModeTo at 734 uses SearchFirstFocusable's default ignore-chain=true;
+ * ordinary next/previous searches still require JoinFocusChain. */
 export const layerFocusCases = [
   { id: 'focus-result-change', expected: '1,0,0,0,0,1|1|before:A:1,focus:A:1,before:A:1,before:B:1,focus:B:1' },
   { id: 'focus-result-direction', expected: '1,1,1,1,1,1,1|1,1,1,0,0,0,1|1' },
   { id: 'focus-result-redirect', expected: '0,1,1|1|before:B:1,before:B:0,focus:C:0,before:A:1' },
+  { id: 'focus-modal-self', expected: '1|1|0|1|1|1|0' },
+  { id: 'focus-modal-child', expected: '1|1|0|0|1|1|1' },
+  { id: 'focus-modal-chain', expected: '1|1|1|1|1' },
 ] as const
 
 export const layerFocusSource = String.raw`
@@ -24,6 +29,32 @@ function layerFocusRun(id,owned){
  var w=new Window();owned.add(w);var root=new Layer(w,null);w.add(root);root.setSize(8,8);root.visible=true;
  var a=new FocusResultLayer(w,root,"A"),b=new FocusResultLayer(w,root,"B"),c=new FocusResultLayer(w,root,"C");
  w.add(a);w.add(b);w.add(c);var results=[];
+ if(id.substr(0,12)=="focus-modal-"){
+  var panel=new FocusResultLayer(w,root,"panel");w.add(panel);panel.joinFocusChain=false;
+  var hidden=new FocusResultLayer(w,panel,"hidden"),disabled=new FocusResultLayer(w,panel,"disabled");
+  var reader=new FocusResultLayer(w,panel,"reader"),button=new FocusResultLayer(w,panel,"button");
+  w.add(hidden);w.add(disabled);w.add(reader);w.add(button);
+  hidden.visible=false;disabled.enabled=false;reader.joinFocusChain=false;
+  a.focus();
+  if(id!="focus-modal-self")panel.focusable=false;
+  panel.setMode();
+  if(id=="focus-modal-self"){
+   results.add(int(w.focusedLayer===panel));results.add(int(w.currentModalLayer===panel));
+   results.add(int(a.nodeEnabled));results.add(int(button.nodeEnabled));
+   results.add(int(panel.focusNext()===button));results.add(int(w.focusedLayer===button));
+   results.add(int(panel.joinFocusChain));return results.join("|");
+  }
+  if(id=="focus-modal-child"){
+   results.add(int(w.focusedLayer===reader));results.add(int(w.currentModalLayer===panel));
+   results.add(int(hidden.nodeFocusable));results.add(int(disabled.nodeFocusable));
+   results.add(int(reader.nodeFocusable));results.add(int(reader.focusNext()===button));
+   results.add(int(w.focusedLayer===button));return results.join("|");
+  }
+  results.add(int(w.focusedLayer===reader));results.add(int(reader.nextFocusable===button));
+  button.focus();results.add(int(button.prevFocusable===button));
+  results.add(int(button.focusPrev()===button));results.add(int(w.focusedLayer===button));
+  return results.join("|");
+ }
  if(id=="focus-result-change"){
   results.add(a.focus());results.add(a.focus());
   b.visible=false;results.add(b.focus());b.visible=true;

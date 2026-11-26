@@ -3,6 +3,7 @@ export interface StorageSelectorEntry {
   readonly name: string
   readonly size: number
   readonly archive: boolean
+  readonly readOnly?: boolean
 }
 
 export interface StorageSelectorFilter {
@@ -36,3 +37,11 @@ export interface StorageSelectorChoice {
   readonly filterIndex: number
   readonly overwrite: boolean
 }
+
+export function validSelectorFilterIndex(presentation: StorageSelectorPresentation, index: number): boolean {
+  const count = presentation.filters.length
+  return Number.isSafeInteger(index) && (count ? index >= 1 && index <= count : index === 0)
+}
+
+/** Native selectFile writes back the one-based filter index and exact file name. */
+export const storageSelectorResult = (index: number, name: string): string => index + '\n' + name

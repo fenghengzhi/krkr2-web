@@ -1,7 +1,12 @@
 import type { SystemDialogRequest } from '../ports/system-dialogs.ts'
 import type { HostReply } from '../script/runtime.ts'
 import type { ModalLoop } from '../scheduler/modal-loop.ts'
-import type { StorageSelectorDirectory, StorageSelectorPresentation } from '../ports/storage-selector.ts'
+import {
+  storageSelectorResult,
+  validSelectorFilterIndex,
+  type StorageSelectorDirectory,
+  type StorageSelectorPresentation,
+} from '../ports/storage-selector.ts'
 
 export interface SystemDialogSnapshot {
   readonly request: SystemDialogRequest | null
@@ -84,7 +89,7 @@ export class SystemDialogs {
           id,
           kind: 'storage-selector',
           caption,
-          text: selector.save ? '选择游戏内的存档位置。' : '选择已载入游戏或浏览器存档中的文件。',
+          text: selector.save ? '选择游戏内的存档位置。' : '选择要打开的文件。',
           value: '',
           selector,
         }),
@@ -249,13 +254,44 @@ export class SystemDialogs {
     return true
   }
 
+  /** The device picker supplied an actual file. Its published name is exact,
+   * including for extensionless files in a dialog with a default extension. */
+  async openFile(id: number, filterIndex: number,
+    mount: (valid: () => boolean, publish: (name: string) => void) => Promise<void>,
+    available: () => boolean): Promise<boolean> {
+    const record = [...this.records.values()].find((entry) => entry.request.id === id)
+    if (!record || record.request.kind !== 'storage-selector' || record.request.selector.save ||
+        record.choosing || record.browsing || !available() || !this.active(record)) return false
+    if (!validSelectorFilterIndex(record.request.selector, filterIndex)) throw new Error('Invalid file selector filter index')
+    record.choosing = true
+    let accepted = false, cancel!: () => void
+    const cancelled = new Promise<void>((resolve) => { cancel = resolve })
+    const valid = () => this.active(record) && available()
+    record.waiters.add(cancel)
+    try {
+      const mounting = mount(valid, (name) => {
+        if (!valid()) throw new Error('File selector is no longer active')
+        // Other operations retire when we accept. This response still owns
+        // its publication and must see any error raised by that publication.
+        record.waiters.delete(cancel)
+        accepted = true
+        this.accept(record, storageSelectorResult(filterIndex, name))
+      })
+      await Promise.race([mounting, cancelled])
+      return accepted
+    } catch (error) {
+      if (!accepted && !valid()) return false
+      throw error
+    } finally { record.waiters.delete(cancel); record.choosing = false }
+  }
+
   /** Direct host RPC while the script is suspended in this exact selector.
    * Directory reads never enter the VM or retire its modal scope. */
   async browse(id: number, directory: string, available: () => boolean = () => true): Promise<StorageSelectorDirectory | null> {
     if (!Number.isSafeInteger(id) || id <= 0 || typeof directory !== 'string' || directory.length > 4096)
       throw new Error('Invalid file selector directory request')
     const record = [...this.records.values()].find((entry) => entry.request.id === id)
-    if (!record || !record.browse || !this.active(record) || !available()) return null
+    if (!record || !record.browse || record.choosing || !this.active(record) || !available()) return null
     if (record.browsing) throw new Error('File selector directory read is already running')
     record.browsing = true
     try {

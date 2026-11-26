@@ -2,6 +2,7 @@ import CodecParser, { type OggPage } from 'codec-parser'
 import type { OggVorbisDecoder } from '@wasm-audio-decoders/ogg-vorbis'
 import { emptyLoops } from '../../engine/ports/audio.ts'
 import { audioTag, audioView, OwnedPcmSource, PcmSourceContext, pcmSourceLimits, type PcmSource } from './pcm-source.ts'
+import { vorbisLayout } from './vorbis-layout.ts'
 
 interface PageHeader {
   start: number; body: number; end: number; flags: number; serial: number; sequence: number
@@ -15,10 +16,6 @@ interface VorbisLink {
 interface VorbisSeekPoint { start: number; sequence: number; granule: number }
 interface DecodedBlock { position: number; data: Float32Array[] }
 const unknownGranule = 0xffffffffffffffffn
-const speakerOrder: Record<number, number[]> = {
-  3: [0, 2, 1], 5: [0, 2, 1, 3, 4], 6: [0, 2, 1, 5, 3, 4],
-  7: [0, 2, 1, 6, 3, 4, 5], 8: [0, 2, 1, 7, 5, 6, 3, 4],
-}
 
 async function pageHeader(context: PcmSourceContext, start: number, end: number): Promise<PageHeader> {
   if (end - start < 27) throw new Error('Truncated Ogg page header')
@@ -262,9 +259,10 @@ class VorbisPcmSource extends OwnedPcmSource {
   private block?: DecodedBlock
   private linkIndex = -1
   constructor(context: PcmSourceContext, private readonly links: VorbisLink[]) {
-    const first = links[0]!, last = links[links.length - 1]!
+    const first = links[0]!, last = links[links.length - 1]!, { speakerMask } = vorbisLayout(first.channels)
     super({ sampleRate: first.rate, sampleCount: last.position + last.samples,
-      channels: first.channels, bits: 16, loops: emptyLoops() }, context)
+      channels: first.channels, bits: 16, loops: emptyLoops(),
+      ...(speakerMask === undefined ? {} : { speakerMask }) }, context)
   }
 
   /** Vorbis I 4.3.8/A.2 permits restart at a complete packet after setup.
@@ -323,7 +321,7 @@ class VorbisPcmSource extends OwnedPcmSource {
           for (const channel of decoded.channelData) for (const value of channel)
             if (!Number.isFinite(value)) throw new Error('Vorbis contains a non-finite sample')
           if (keep) {
-            const order = speakerOrder[link.channels], channels = order?.map((index) => decoded.channelData[index]!) ?? decoded.channelData
+            const { order } = vorbisLayout(link.channels), channels = order?.map((index) => decoded.channelData[index]!) ?? decoded.channelData
             yield { position: start, data: channels.map((channel) => new Float32Array(channel.subarray(discard, discard + keep))) }
           }
         }

@@ -255,6 +255,9 @@ export class SessionClient {
   selectSystemDialog(id: number, value: string | null) {
     return this.call('selectSystemDialog', id, value)
   }
+  openStorageFile(id: number, filterIndex: number, file: File) {
+    return this.call('openStorageFile', id, filterIndex, file)
+  }
   browseStorageSelector(id: number, directory: string) {
     return this.call('browseStorageSelector', id, directory)
   }

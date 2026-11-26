@@ -11,6 +11,7 @@ import { discOnlyInput, prepareProject } from '../engine/storage/distribution.ts
 import { discAddress, discStoragePath, nativeDiscPath } from '../engine/storage/public-path.ts'
 import { createSessionArchiveReader } from '../backends/files/archive-reader.ts'
 import { prepareDroppedResources } from '../backends/files/drop-resources.ts'
+import { BlobSource } from '../backends/files/blob-source.ts'
 import type { Resource } from '../engine/ports/storage.ts'
 import { PROTOCOL_VERSION, type InputAdmissionAck, type RemoteGameFile, type SessionApi } from '../protocol/session.ts'
 import type { EngineSession, SessionAdmission } from '../engine/session.ts'
@@ -369,6 +370,10 @@ const api: SessionApi = {
   },
   async selectSystemDialog(id, value) {
     return active().selectSystemDialog(id, value)
+  },
+  async openStorageFile(id, filterIndex, file) {
+    if (!(file instanceof File)) throw new Error('请选择设备上的文件。')
+    return active().openStorageFile(id, filterIndex, file.name, new BlobSource(file))
   },
   async browseStorageSelector(id, directory) {
     return active().browseStorageSelector(id, directory)

@@ -1,14 +1,17 @@
 /** Author configuration uses KAG's documented override hook before the stock
  * menus are created. The original file selectors and bookmark methods stay
  * unchanged (MainWindow.tjs saveBookMarkToFileWithAsk/loadBookMarkFromFileWithAsk). */
-export const namedBookmarkSource = String.raw`
+export const namedBookmarkSource = (thumbnail: boolean) => String.raw`
 function KAGWindow_config_override(){
- freeSaveDataMode=true;saveThumbnail=false;saveDataMode="";dataName="named";saveDataLocation=System.dataPath;
+ freeSaveDataMode=true;saveThumbnail=${thumbnail};thumbnailWidth=64;thumbnailDepth=24;
+ saveDataMode="";dataName="named";saveDataLocation=System.dataPath;
 }
 var namedVisits=0,namedRendered="";
 function namedState(){return [f.namedValue,global.namedRendered,global.namedVisits,kag.currentLabel,
  kag.current.numLinks,kag.conductor.status,int(kag.freeSaveDataMode)].join("|");}
-function namedStored(){var data=Scripts.evalStorage(System.dataPath+"旅のしおり.kdt");
+function namedStored(name=void){
+ if(name===void)name=System.dataPath+(kag.saveThumbnail?"旅のしおり.bmp":"旅のしおり.kdt");
+ var data=Scripts.evalStorage(name,kag.saveThumbnail?"o"+kag.calcThumbnailSize().size:"");
  return data.user.namedValue+"|"+data.core.mainConductor.curLabel;}
 `
 

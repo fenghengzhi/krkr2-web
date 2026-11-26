@@ -381,6 +381,141 @@ function selectAtFunctionLimit(remaining){
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
 
+  test(`${mode}: device-picked extensionless files retain their exact name and filter while saves use writable dataPath`, async () => {
+    const bytes = Buffer.from('\ufeff41+1', 'utf16le')
+    let reads = 0
+    const source = { size: bytes.length, async read(offset: number, length: number) {
+      assert.ok(offset >= 0 && length >= 0 && offset + length <= bytes.length)
+      reads++
+      return bytes.slice(offset, offset + length)
+    } }
+    const f = await fixture(binary, String.raw`
+var deviceOptions=%[title:"Device bookmark",name:"scripts/expression.tjs",defaultExt:"kdt",
+ filter:["Bookmark|*.kdt","All|*.*"],filterIndex:1];
+function deviceRemembered(){var options=%[title:"Remembered device",defaultExt:"kdt",filter:"Bookmark|*.kdt",
+ name:"game://./.krkr-drop-37/0/Bookmark",initialDir:""];
+ var result=Storages.selectFile(options),readable=0;
+ try{Scripts.evalStorage(options.name);readable=1;}catch(e){}
+ return result+"|"+int(Storages.isExistentStorage(options.name))+"|"+readable;}
+function run(){var result=Storages.selectFile(deviceOptions);
+ return result+"|"+deviceOptions.name+"|"+deviceOptions.filterIndex+"|"+Scripts.evalStorage(deviceOptions.name);}
+function deviceWrite(){var blocked=0;
+ try{["changed"].save(deviceOptions.name);}catch(e){blocked=1;}
+ return blocked+"|"+Scripts.evalStorage(deviceOptions.name);}
+function deviceSaveCopy(){var options=%[title:"Device save copy",save:true,name:deviceOptions.name,
+ defaultExt:"kdt",filter:"Bookmark|*.kdt",filterIndex:1];
+ var result=Storages.selectFile(options);
+ if(result===1){var data=%[progress:42];(Dictionary.saveStruct incontextof data)(options.name,"b");}
+ return result+"|"+options.name+"|"+Scripts.evalStorage(options.name).progress;}
+`, { dataPath: 'user/device-slots/' })
+    try {
+      const baseline = f.session.snapshot().resources, remembered = f.open('deviceRemembered()'),
+        previous = await f.waitSelector('Remembered device', 1, remembered)
+      // Original KAG can retain lastSaveDataNameGlobal in scflags across
+      // sessions. That filename is not permission to reopen the device file.
+      assert.equal(previous.selector.initialDirectory, 'game://./user/device-slots/')
+      assert.ok(previous.selector.directories.every((directory) => !directory.includes('.krkr-drop-')))
+      assert.equal(f.respond(previous, null), true)
+      assert.equal(await f.settled(remembered), '0|0|0')
+      assert.equal(f.session.snapshot().resources, baseline)
+      const opening = f.open(),
+        request = await f.waitSelector('Device bookmark', 1, opening)
+      assert.equal(request.selector.defaultExtension, 'kdt')
+      for (const index of [0, 3]) {
+        await assert.rejects(f.session.openStorageFile(request.id, index, 'Bookmark', source), /filter index/)
+        assert.equal(f.dialog()?.id, request.id)
+        assert.equal(f.session.snapshot().resources, baseline)
+      }
+      assert.equal(await f.session.openStorageFile(request.id, 2, 'Bookmark', source), true)
+      const result = await f.settled(opening), name = String(await f.session.evaluate('deviceOptions.name'))
+      assert.match(name, /^game:\/\/\.\/\.krkr-drop-\d+\/0\/Bookmark$/)
+      assert.equal(result, `1|${name}|2|42`, 'The real selected file must not acquire the dialog default extension')
+      assert.ok(reads > 0, 'The real script decoder must read the selected source')
+      assert.equal(f.session.snapshot().resources, baseline + 1)
+      assert.equal(await f.session.evaluate('deviceWrite()'), '1|42', 'A failed write must not shadow the selected bytes')
+
+      const saving = f.open('deviceSaveCopy()'), save = await f.waitSelector('Device save copy', 1, saving)
+      assert.equal(save.selector.save, true)
+      assert.equal(save.selector.initialDirectory, 'game://./user/device-slots/')
+      assert.ok(save.selector.directories.every((directory) => !directory.includes('.krkr-drop-')))
+      const neverAdmitted = {
+        get size(): number { throw new Error('A save dialog must not inspect a picked file') },
+        async read(): Promise<Uint8Array> { throw new Error('A save dialog must not read a picked file') },
+      }
+      assert.equal(await f.session.openStorageFile(save.id, 1, 'ignored.kdt', neverAdmitted), false)
+      assert.equal(f.dialog()?.id, save.id)
+      assert.equal(saving.settled(), false)
+      await assert.rejects(async () => f.choose(save, name, 1, true), /read-only/)
+      assert.equal(await f.choose(save, 'game://./user/device-slots/copy'), true)
+      assert.equal(await f.settled(saving), '1|game://./user/device-slots/copy.kdt|42')
+      assert.equal(f.session.snapshot().resources, baseline + 1)
+      assert.ok(f.session.exportSaves().some((file) => file.path === 'user/device-slots/copy.kdt' && file.bytes.length > 0))
+      assert.ok(f.session.exportSaves().every((file) => !file.path.includes('.krkr-drop-')))
+      assert.equal(await f.session.evaluate('Scripts.evalStorage(deviceOptions.name)'), '42')
+    } finally { await f.stop() }
+  })
+
+  test(`${mode}: device-picked cancellation retires a held publication and cannot deliver it into the next selector`, async () => {
+    let holdNext = false, entered = false, release!: () => void, reads = 0
+    const held = new Promise<void>((resolve) => { release = resolve }), bytes = Buffer.from('84/2'),
+      source = { size: bytes.length, async read(offset: number, length: number) {
+        reads++
+        return bytes.slice(offset, offset + length)
+      } }
+    const f = await fixture(binary, String.raw`
+var deviceOptions=%[title:"Cancelled device",name:"scripts/./expression.tjs",defaultExt:"kdt",
+ filter:["Bookmark|*.kdt","All|*.*"],filterIndex:2];
+function run(){var result=Storages.selectFile(deviceOptions);
+ return result+"|"+deviceOptions.name+"|"+deviceOptions.filterIndex;}
+function deviceNext(){var options=%[title:"Current device",filter:"All|*.*",filterIndex:1,defaultExt:"kdt"];
+ var result=Storages.selectFile(options);
+ return result+"|"+options.name+"|"+options.filterIndex+"|"+Scripts.evalStorage(options.name);}
+`, {}, {
+      yieldToHost: () => {
+        // Arm immediately before openStorageFile. That call synchronously
+        // reaches DropStorage's first pre-publication checkpoint; the modal
+        // pump and all later ordinary yields continue on their real schedule.
+        if (holdNext) { holdNext = false; entered = true; return held }
+        return new Promise<void>((resolve) => setTimeout(resolve, 0))
+      },
+    })
+    try {
+      const baseline = f.session.snapshot().resources, opening = f.open(),
+        cancelled = await f.waitSelector('Cancelled device', 1, opening)
+      holdNext = true
+      const picking = f.track(f.session.openStorageFile(cancelled.id, 2, 'late-bookmark', source))
+      assert.equal(entered, true)
+      assert.equal(picking.settled(), false)
+      assert.equal(f.session.snapshot().resources, baseline)
+      assert.equal(f.respond(cancelled, null), true)
+      assert.equal(await succeeded(picking, 'cancel held device publication'), false)
+      assert.equal(await f.settled(opening), '0|scripts/./expression.tjs|2')
+      assert.equal(reads, 0)
+
+      const next = f.open('deviceNext()'), current = await f.waitSelector('Current device', 1, next, cancelled.id)
+      assert.equal(await f.session.openStorageFile(cancelled.id, 2, 'stale-bookmark', source), false)
+      release()
+      // Drain the old gate's promise continuation before observing the new
+      // directory. No repeated selection, manufactured result, or VM entry
+      // drives the suspended script past either selector.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const listing = await f.session.browseStorageSelector(current.id, 'game://./')
+      assert.ok(listing)
+      assert.ok(listing.directories.every((name) => !name.includes('.krkr-drop-')))
+      assert.ok(listing.entries.every((entry) => !entry.name.includes('.krkr-drop-')))
+      assert.equal(f.session.snapshot().resources, baseline)
+      assert.equal(f.dialog()?.id, current.id)
+      assert.equal(next.settled(), false)
+      assert.equal(reads, 0)
+      assert.equal(await f.session.openStorageFile(current.id, 1, 'current-bookmark', source), true)
+      const result = await f.settled(next)
+      assert.match(result, /^1\|game:\/\/\.\/\.krkr-drop-\d+\/0\/current-bookmark\|1\|42$/)
+      assert.equal(f.session.snapshot().resources, baseline + 1)
+      assert.ok(reads > 0)
+      assert.equal(await f.session.evaluate('int(Storages.isExistentStorage("game://./.krkr-drop-1/0/late-bookmark"))'), '0')
+    } finally { release(); await f.stop() }
+  })
+
   test(`${mode}: lazy selector browsing opens only the requested archive and recovers after a corrupt directory`, async () => {
     const opened: string[] = [], f = await fixture(binary, `
 function run(){var options=%[title:"Lazy archive",initialDir:"game://./",filter:"All|*.*"];

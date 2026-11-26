@@ -7,6 +7,14 @@ import { StorageResolver } from './resolver.ts'
 interface SnapshotEntry { root: number; path: string; kind: 'file' | 'directory'; source?: ByteSource }
 interface Charge { files: number; directories: number; bytes: number; units: number }
 const empty = (): Charge => ({ files: 0, directories: 0, bytes: 0, units: 0 })
+const dropNamespace = '.krkr-drop-'
+
+/** KAG can remember this filename after the session that owned the file ends. */
+export function isSessionImportPath(path: string): boolean {
+  return path.slice(0, dropNamespace.length).toLowerCase() === dropNamespace &&
+    /^[1-9]\d*\/\d+\//.test(path.slice(dropNamespace.length))
+}
+
 export function dropBasename(name: unknown): string {
   if (typeof name !== 'string' || !name || name === '.' || name === '..' || /[\\/>\0]/.test(name) ||
       name.length > dropLimits.pathUnits || normalizeResourcePath(name) !== name)
@@ -87,7 +95,7 @@ export class DropStorage {
     })()
     return this.wait(actual)
   }
-  async commit(tree: DropResourceTree, valid: () => boolean): Promise<string[]> {
+  async commit(tree: DropResourceTree, valid: () => boolean, published?: (names: readonly string[]) => void): Promise<string[]> {
     this.check(valid)
     if (!tree || !Array.isArray(tree.roots) || !Array.isArray(tree.entries) ||
         tree.roots.length > dropLimits.roots || tree.entries.length > dropLimits.entries)
@@ -134,7 +142,7 @@ export class DropStorage {
     let prefix: string, collisions = 0
     do {
       if (++this.serial > 1000000) throw new Error('Drop namespace identity exhausted')
-      prefix = `.krkr-drop-${this.serial}/`
+      prefix = `${dropNamespace}${this.serial}/`
       if (!this.resolver.hasTree(prefix, this.savedNames())) break
       if (!(++collisions % 16)) { await this.wait(this.checkpoint()); this.check(valid) }
     } while (true)
@@ -177,11 +185,16 @@ export class DropStorage {
       if (this.resolver.hasTree(prefix, this.savedNames())) throw new Error('Drop namespace collided before commit')
       // Keep namespace publication and image-cache revocation synchronous.
       this.beforePublish()
+      this.check(valid)
       this.resolver.mount(resources, { directories: [...directories], readonlyRoots: [prefix] })
       this.batches++
       this.retained.files += charge.files; this.retained.directories += charge.directories
       this.retained.bytes += charge.bytes; this.retained.units += charge.units
-      return names.map((name, index) => toPublicStoragePath(name + (roots[index]!.kind === 'directory' ? '/' : '')))
+      const paths = names.map((name, index) => toPublicStoragePath(name + (roots[index]!.kind === 'directory' ? '/' : '')))
+      // A file dialog completes in the same turn that makes its chosen file
+      // visible. A cancelled dialog cannot leave a late mount behind.
+      published?.(paths)
+      return paths
     } finally { this.pending.delete(charge) }
   }
   inspect() {

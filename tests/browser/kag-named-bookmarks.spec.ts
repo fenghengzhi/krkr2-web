@@ -4,19 +4,20 @@ import { expect, test } from '@playwright/test'
 import { kagGameControls } from '../helpers/kag-game-controls.ts'
 import { namedBookmarkSource, namedBookmarkStory } from '../helpers/kag-named-bookmarks.ts'
 
-for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
-  test(`${backend}/${binary ? 'bytecode' : 'source'}: stock KAG double-clicks a named bookmark to resume its chapter after reload`, async ({ page }, info) => {
+for (const backend of ['asyncify', 'jspi']) for (const mode of ['source', 'bytecode', 'thumbnail'])
+  test(`${backend}/${mode}: stock KAG double-clicks a named bookmark to resume its chapter after reload`, async ({ page }, info) => {
     test.setTimeout(180000)
     const failures: unknown[] = [], errors: string[] = [], observations: unknown[] = [],
       { read, clickLink } = kagGameControls(page, observations, { firstReadTimeout: 30000 }),
       canvas = page.locator('#stage canvas[data-window-id]'), menu = page.locator('#game-menus'),
       original = await readFile(new URL('../fixtures/compatibility/kag3_template.xp3', import.meta.url)),
-      filename = '旅のしおり.kdt', path = 'savedata/' + filename,
+      binary = mode === 'bytecode', thumbnail = mode === 'thumbnail', author = namedBookmarkSource(thumbnail),
+      ext = thumbnail ? '.bmp' : '.kdt', filename = '旅のしおり' + ext, path = 'savedata/' + filename,
       wide = (value: string) => Buffer.from('\ufeff' + value, 'utf16le'),
       files = [
         { name: 'kag3_template.xp3', mimeType: 'application/octet-stream', buffer: original },
         { name: 'first.ks', mimeType: 'text/plain', buffer: wide(namedBookmarkStory) },
-        { name: 'named-bookmarks.tjs', mimeType: 'text/plain', buffer: wide(namedBookmarkSource) },
+        { name: 'named-bookmarks.tjs', mimeType: 'text/plain', buffer: wide(author) },
         { name: 'Override2.tjs', mimeType: 'text/plain', buffer: wide(binary
           ? 'Scripts.compileStorage("named-bookmarks.tjs","savedata/named-bookmarks.cjs",false,true,false);Scripts.execStorage("savedata/named-bookmarks.cjs");'
           : 'Scripts.execStorage("named-bookmarks.tjs");') },
@@ -57,13 +58,20 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         found = data.files.find((entry) => entry.path === path)
       expect(found).toBeDefined()
       const slot = Buffer.from(found!.base64, 'base64')
-      expect(slot.toString('utf16le')).toContain('namedValue'); expect(slot.toString('utf16le')).toContain('*checkpoint')
+      let offset = 0
+      if (thumbnail) {
+        expect(slot.toString('ascii', 0, 2)).toBe('BM')
+        offset = slot.readUInt32LE(2)
+        expect(offset).toBeGreaterThan(54); expect(offset).toBeLessThan(slot.length)
+      }
+      const text = slot.toString('utf16le', offset)
+      expect(text).toContain('namedValue'); expect(text).toContain('*checkpoint')
       if (binary) {
         const observer = data.files.find((entry) => entry.path === 'savedata/named-bookmarks.cjs')
         expect(observer).toBeDefined(); expect(Buffer.from(observer!.base64, 'base64').toString('ascii', 0, 4)).toBe('TJS2')
       }
       await info.attach(label, { body: bytes, contentType: 'application/json' })
-      return { slot, gameId: data.gameId }
+      return { slot, gameId: data.gameId, paths: data.files.map((entry) => entry.path) }
     }
     const load = async (visits: number) => {
       const dialog = await open(false), entry = dialog.getByRole('button', { name: filename, exact: true })
@@ -118,12 +126,34 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         .toBe('*continue|CONTINUE 7|1')
       await canvas.press('Enter'); await state(7, 3)
       await info.attach('named-bookmark-resumed-chapter', { body: await canvas.screenshot({ timeout: 5000 }), contentType: 'image/png' })
+      await clickLink(0, '*ninety'); await state(99, 4)
+      const device = await open(false), externalName = '外からのしおり' + ext
+      const [chooser] = await Promise.all([
+        page.waitForEvent('filechooser'), device.getByRole('button', { name: '从设备打开文件…' }).click(),
+      ])
+      expect(await chooser.element().getAttribute('accept')).toBe(ext)
+      await chooser.setFiles({ name: externalName, mimeType: 'application/octet-stream', buffer: persisted.slot })
+      await closed(); await state(7, 5)
+      const selected = await read('kag.lastSaveDataNameGlobal')
+      expect(selected).toMatch(/^game:\/\/\.\/\.krkr-drop-\d+\/0\//)
+      expect(selected.endsWith('/' + externalName)).toBe(true)
+      expect(await read('namedStored(kag.lastSaveDataNameGlobal)')).toBe('7|*checkpoint')
+      const copy = await open(true)
+      await expect(copy.getByRole('button', { name: '从设备打开文件…' })).toHaveCount(0)
+      await copy.getByLabel('文件名', { exact: true }).fill('続き')
+      await copy.getByRole('button', { name: '保存', exact: true }).click(); await closed()
+      expect(await read('kag.lastSaveDataNameGlobal')).toBe('game://./savedata/続き' + ext)
+      expect(await read('namedStored(kag.lastSaveDataNameGlobal)')).toBe('7|*checkpoint')
+      const copied = await backup('named-bookmark-after-device-open-and-save.json')
+      expect(copied.slot.equals(persisted.slot)).toBe(true)
+      expect(copied.paths).toContain('savedata/続き' + ext)
+      expect(copied.paths.some((name) => name.startsWith('.krkr-drop-'))).toBe(false)
       await expect(page.locator('#logs .error')).toHaveCount(0); expect(errors).toEqual([])
     } catch (error) { failures.push(error) }
     for (const report of [
-      () => info.attach('named-bookmark-author-source', { body: namedBookmarkSource + '\n' + namedBookmarkStory, contentType: 'text/plain' }),
-      () => info.attach('named-bookmark-observations', { body: JSON.stringify({ backend, binary, observations, errors,
-        scope: 'Unmodified KAG3 template; author freeSaveDataMode configuration, original Save/Load menus and native Storages.selectFile continuation. Real pointer file selection/double-click, explicit overwrite cancellation, unchanged named slot bytes across application reload, original chapter continuation. No test invokes a save/load function.' }, null, 2), contentType: 'application/json' }),
+      () => info.attach('named-bookmark-author-source', { body: author + '\n' + namedBookmarkStory, contentType: 'text/plain' }),
+      () => info.attach('named-bookmark-observations', { body: JSON.stringify({ backend, mode, observations, errors,
+        scope: 'Stock KAG Save/Load menus, double-click, overwrite, chapter continuation after reload, and a player-selected device file followed by a writable local bookmark.' }, null, 2), contentType: 'application/json' }),
       async () => info.attach('named-bookmark-log', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }),
     ]) try { await report() } catch (error) { failures.push(error) }
     try {

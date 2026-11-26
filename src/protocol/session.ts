@@ -14,7 +14,7 @@ import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
 import type { CddaDisc, DiscChange } from '../engine/ports/cdda.ts'
-export const PROTOCOL_VERSION = 68
+export const PROTOCOL_VERSION = 69
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
   readonly tree: DroppedTree<Blob>
@@ -108,6 +108,7 @@ export interface SessionApi {
   setDebugVisibility(panel: DebugPanel, visible: boolean): Promise<SessionSnapshot>
   selectFont(id: number, face: string | null): Promise<void>
   selectSystemDialog(id: number, value: string | null): Promise<boolean>
+  openStorageFile(id: number, filterIndex: number, file: File): Promise<boolean>
   browseStorageSelector(id: number, directory: string): Promise<import('../engine/ports/storage-selector.ts').StorageSelectorDirectory | null>
   pad(message: PadMessage): Promise<PadAck>
   padFont(generation: number, id: number, epoch: number): Promise<PadFontData | null>

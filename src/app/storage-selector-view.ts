@@ -14,6 +14,7 @@ import {
 
 interface SelectorActions {
   browse?(directory: string): Promise<StorageSelectorDirectory | null>
+  openFile?(file: File, filterIndex: number): void
   available(): boolean
   choose(value: string): void
   status(value: string): void
@@ -149,6 +150,43 @@ export function createStorageSelectorView(
   overwriteActions.append(back, replace)
   overwrite.append(overwriteText, overwriteActions)
   root.append(directoryLabel, directory, list, filenameLabel, input, filterLabel, filter, overwrite)
+  const deviceButton = !presentation.save && actions.openFile ? element('button', '从设备打开文件…') : undefined
+  let openedFilter: number | undefined, picked: { file: File; filterIndex: number } | undefined
+  const releaseDeviceSelection = () => { openedFilter = undefined; picked = undefined }
+  const submitDeviceSelection = () => {
+    if (!picked || disposed || browsing || !enabled || !actions.available()) return
+    const { file, filterIndex } = picked
+    picked = undefined
+    actions.openFile?.(file, filterIndex)
+  }
+  if (deviceButton) {
+    const picker = element('input')
+    picker.type = 'file'
+    picker.hidden = true
+    deviceButton.type = 'button'
+    deviceButton.title = '选中的文件仅在本次游戏中以只读方式打开'
+    deviceButton.addEventListener('click', () => {
+      if (disposed || browsing || !enabled || !actions.available()) return
+      openedFilter = Number(filter.value)
+      const patterns = presentation.filters[openedFilter - 1]?.pattern.split(';').map((part) => part.trim())
+      picker.accept = patterns?.every((part) => /^\*\.[a-z0-9._+-]+$/i.test(part))
+        ? patterns.map((part) => part.slice(1)).join(',') : ''
+      picker.click()
+    })
+    picker.addEventListener('change', () => {
+      const file = picker.files?.[0], index = openedFilter
+      openedFilter = undefined
+      picker.value = ''
+      // The OS picker may return before the running game regains foreground.
+      // Retain its one file until this exact dialog can accept input again.
+      if (file && index !== undefined && !disposed && !browsing) {
+        picked = { file, filterIndex: index }
+        submitDeviceSelection()
+      }
+    })
+    picker.addEventListener('cancel', () => { openedFilter = undefined })
+    root.append(deviceButton, picker)
+  }
 
   const clearOverwrite = () => {
     pendingOverwrite = undefined
@@ -160,6 +198,7 @@ export function createStorageSelectorView(
     const disabled = !enabled || browsing || disposed
     root.setAttribute('aria-busy', String(browsing))
     directory.disabled = filter.disabled = replace.disabled = back.disabled = disabled
+    if (deviceButton) deviceButton.disabled = disabled
     input.readOnly = disabled
     for (const button of list.querySelectorAll('button')) button.disabled = disabled
   }
@@ -229,7 +268,7 @@ export function createStorageSelectorView(
         if (!matches(basename)) continue
         const button = element('button'),
           label = element('span', basename),
-          detail = element('span', `${entry.size} B${entry.archive ? ' · 只读' : ''}`)
+          detail = element('span', `${entry.size} B${entry.archive || entry.readOnly ? ' · 只读' : ''}`)
         button.type = 'button'
         button.className = 'storage-selector-file'
         button.dataset.entryName = entry.name
@@ -330,10 +369,12 @@ export function createStorageSelectorView(
   return {
     element: root,
     input,
-    dispose() { disposed = true; navigation++; browsing = false },
+    releaseDeviceSelection,
+    dispose() { disposed = true; navigation++; browsing = false; releaseDeviceSelection() },
     enabled(value: boolean) {
       enabled = value
       applyEnabled()
+      if (enabled) submitDeviceSelection()
     },
     rejected(reason: unknown): boolean {
       const message = reason instanceof Error ? reason.message : String(reason)

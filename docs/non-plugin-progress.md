@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 182 批处理设备书签读档与另存、模态阅读区初始焦点和多声道 Vorbis 配乐。新取得的第 172 批 Firefox 游戏库报告为 109/110 通过，尚有一个大影片换轨用例超时。[182 实现与托管证据](decisions/182-device-bookmarks-modal-focus-and-vorbis.md)
+
 第 181 批处理本地化游戏盘、姓名输入以及普通配乐起播。第 172 批 Chromium 游戏库 110/110 通过，第 171 批在该套件中的 36 项失败已逐项转为通过。第 172 批 Node 作业被取消，未报告的用例继续保留。[181 实现与托管证据](decisions/181-localized-discs-focus-and-wave-startup.md)
 
 第 181 批实现提交 `bbfd04b` 登记时为 `pending`，下一批取回结果。[第 181 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45880484737)

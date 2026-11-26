@@ -5,6 +5,7 @@ import { build } from 'vite'
 import type { SystemDialogRequest } from '../../src/engine/ports/system-dialogs.ts'
 
 type DialogAction = { kind: 'choose'; id: number; value: string | null } | { kind: 'stop' }
+  | { kind: 'openFile'; id: number; filterIndex: number; filename: string; size: number }
 interface SystemDialogHost {
   update(request: SystemDialogRequest | null, pendingIds: number[]): void
   state(active: boolean): void
@@ -81,6 +82,10 @@ async function launch(page: Page) {
       choose(id, value) {
         actions.push({ kind: 'choose', id, value })
         return operation()
+      },
+      openFile(id, filterIndex, file) {
+        actions.push({ kind: 'openFile', id, filterIndex, filename: file.name, size: file.size })
+        return operation().then(accepted => accepted !== false)
       },
       stop() {
         actions.push({ kind: 'stop' })
@@ -448,6 +453,76 @@ test('inactive dialogs keep Stop available, report a failed Stop and ignore dupl
     window.systemDialogHost.settle(1)
   })
   await expect(page.locator(dialog)).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('a device picker resumes once after a pause but discards files when another dialog takes over', async ({ page }) => {
+  const errors = await launch(page), expected: DialogAction[] = []
+  const selector = (id: number): SystemDialogRequest => ({
+    id, kind: 'storage-selector', caption: `Open bookmark ${id}`, text: 'Choose a game bookmark', value: '',
+    selector: { save: false, name: '', initialDirectory: 'game://./savedata/', defaultExtension: 'kdt',
+      filters: [{ label: 'Bookmark', pattern: '*.kdt' }, { label: 'All files', pattern: '*.*' }],
+      filterIndex: 1, entries: [], directories: ['game://./savedata/'] },
+  })
+  const show = (value: SystemDialogRequest, ids = [value.id]) =>
+    page.evaluate(({ value, ids }) => window.systemDialogHost.update(value, ids), { value, ids })
+  const openPicker = async () => {
+    const chooser = page.waitForEvent('filechooser')
+    await page.getByRole('button', { name: '从设备打开文件…', exact: true }).click()
+    return chooser
+  }
+  const assertActions = () => expect.poll(() => page.evaluate(() => window.systemDialogHost.actions())).toEqual(expected)
+  await show(selector(20))
+  await page.getByLabel('文件类型', { exact: true }).selectOption('2')
+  const first = await openPicker()
+  await page.evaluate(() => window.systemDialogHost.state(false))
+  await first.setFiles({ name: '旅のしおり', mimeType: 'application/octet-stream', buffer: Buffer.from([1, 2, 3, 4]) })
+  expect(await page.evaluate(() => window.systemDialogHost.actions())).toEqual([])
+  await expect(page.locator(confirm)).toBeDisabled()
+  await page.evaluate(() => window.systemDialogHost.state(true))
+  expected.push({ kind: 'openFile', id: 20, filterIndex: 2, filename: '旅のしおり', size: 4 })
+  await assertActions()
+  // Repeated activation notifications and the eventual transport receipt
+  // cannot submit the same OS selection a second time.
+  await page.evaluate(() => {
+    window.systemDialogHost.state(false); window.systemDialogHost.state(true)
+    window.systemDialogHost.state(true); window.systemDialogHost.settle(0, undefined, true)
+  })
+  await expect(page.locator(confirm)).toBeDisabled(); await assertActions()
+  await page.evaluate(() => window.systemDialogHost.update(null, []))
+
+  for (const [id, retained] of [[21, true], [23, false]] as const) {
+    const parent = selector(id), child = request(id + 1, 'inform')
+    await show(parent)
+    const late = await openPicker()
+    await page.evaluate(() => window.systemDialogHost.state(false))
+    await late.setFiles({ name: 'old-selection.kdt', mimeType: 'application/octet-stream', buffer: Buffer.from([9, 9]) })
+    expect(await page.evaluate(() => window.systemDialogHost.actions())).toEqual(expected)
+    // Cover the retained parent, or retire it completely while paused.
+    await show(child, retained ? [id, child.id] : [child.id])
+    await page.evaluate(() => window.systemDialogHost.state(true))
+    await expect(page.getByRole('dialog', { name: child.caption, exact: true })).toBeVisible()
+    expect(await page.evaluate(() => window.systemDialogHost.actions())).toEqual(expected)
+    await page.locator(confirm).click()
+    expected.push({ kind: 'choose', id: child.id, value: '' })
+    await assertActions()
+    await page.evaluate(index => window.systemDialogHost.settle(index), expected.length - 1)
+    const next = retained ? parent : selector(id + 100)
+    await show(next)
+    await page.evaluate(() => { window.systemDialogHost.state(false); window.systemDialogHost.state(true) })
+    await expect(page.getByRole('button', { name: '从设备打开文件…', exact: true })).toBeEnabled()
+    expect(await page.evaluate(() => window.systemDialogHost.actions())).toEqual(expected)
+    // A fresh user selection still works after the obsolete file was retired.
+    const fresh = await openPicker()
+    await fresh.setFiles({ name: 'current.kdt', mimeType: 'application/octet-stream', buffer: Buffer.from([7]) })
+    expected.push({ kind: 'openFile', id: next.id, filterIndex: 1, filename: 'current.kdt', size: 1 })
+    await assertActions()
+    await page.evaluate(index => {
+      window.systemDialogHost.settle(index, undefined, true)
+      window.systemDialogHost.update(null, [])
+    }, expected.length - 1)
+  }
+  await page.evaluate(() => window.systemDialogHost.dispose())
   expect(errors).toEqual([])
 })
 

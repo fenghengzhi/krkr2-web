@@ -3,6 +3,7 @@ import { emptyLoops } from '../../engine/ports/audio.ts'
 import { decodeWav } from '../../formats/audio/wav.ts'
 import { decodeMidi } from '../../formats/audio/midi.ts'
 import { encodedSampleRate } from '../../formats/audio/encoded-rate.ts'
+import { vorbisLayout } from '../../formats/audio/vorbis-layout.ts'
 
 /** Runs in the session Worker (or headless host), never the realtime worklet. */
 export async function decodePortableAudio(
@@ -74,14 +75,8 @@ export async function decodePortableAudio(
     if (position !== samples)
       throw new Error('Vorbis decoded length disagrees with its end position')
     // Convert Vorbis speaker order to the WAVE/Web Audio order used by the mixer.
-    const order: Record<number, number[]> = {
-      3: [0, 2, 1],
-      5: [0, 2, 1, 3, 4],
-      6: [0, 2, 1, 5, 3, 4],
-      7: [0, 2, 1, 6, 3, 4, 5],
-      8: [0, 2, 1, 7, 5, 6, 3, 4],
-    }
-    const data = order[channels]?.map((index) => decoded[index]!) ?? decoded
+    const { order, speakerMask } = vorbisLayout(channels),
+      data = order?.map((index) => decoded[index]!) ?? decoded
     return {
       kind: 'pcm',
       sampleRate,
@@ -89,6 +84,7 @@ export async function decodePortableAudio(
       channels,
       bits: 16,
       data,
+      ...(speakerMask === undefined ? {} : { speakerMask }),
       loops: emptyLoops(),
     }
   } finally {

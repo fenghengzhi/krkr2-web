@@ -593,6 +593,12 @@ jobs:
         run: |
           mkdir -p out/verification/long-vorbis
           node scripts/generate-long-vorbis-fixture.mjs 2>&1 | tee out/ci/long-vorbis-fixture.log
+      - name: Encode and independently mix multichannel Vorbis game music
+        id: vorbis-speakers
+        continue-on-error: true
+        run: |
+          mkdir -p out/verification/vorbis-speakers
+          node scripts/generate-vorbis-speaker-fixtures.mjs 2>&1 | tee out/ci/vorbis-speakers.log
       - name: Include the same-run IMAPI game disc in the browser and Node test inputs
         if: needs.udf-metadata-disc.outputs.disc-readback == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -698,7 +704,7 @@ jobs:
             out/verification/pwa/site-a out/verification/pwa/site-b \
             out/verification/pwa/fixture-artifacts.json out/verification/video-tracks \
             out/verification/deflate64-games \
-            out/verification/long-vorbis \
+            out/verification/long-vorbis out/verification/vorbis-speakers \
             out/verification/cdda-aiff out/verification/disc-volumes \
             out/verification/jpeg-fixtures/inputs \
             out/verification/jpeg-fixtures/case-manifest.json out/verification/jpeg-fixtures/codes.json
@@ -794,6 +800,15 @@ jobs:
         with:
           name: long-vorbis-fixture-evidence
           path: out/verification/long-vorbis/
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.vorbis-speakers.outcome == 'success' || steps.vorbis-speakers.outcome == 'failure') }}
+        with:
+          name: vorbis-speaker-reference
+          path: |
+            out/verification/vorbis-speakers/
+            out/ci/vorbis-speakers.log
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -1013,11 +1028,23 @@ jobs:
         run: |
           node --import tsx --test --test-reporter=tap --test-name-pattern='startup, chapter and compiled scripts before a game sets its decoder' \
             tests/integration/scripts.test.ts | tee out/ci/game-script-encoding.tap
+      - name: Check Vorbis speaker routing against the independent mix
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-concurrency=2 --test-reporter=tap \
+            tests/conformance/vorbis-speakers.test.ts tests/integration/vorbis-speakers.test.ts | tee out/ci/game-vorbis-speakers.tap
+      - name: Open a device file and continue saving in the game directory
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-reporter=tap --test-name-pattern=device-picked \
+            tests/integration/storage-selector.test.ts | tee out/ci/game-device-files.tap
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ always() }}
         with:
           name: game-loading-and-playback
-          path: out/ci/game-*.tap
+          path: |
+            out/ci/game-*.tap
+            out/ci/vorbis-speakers/
           if-no-files-found: warn
           retention-days: 90
 

@@ -387,7 +387,9 @@ export class InputController {
       this.layers.set(id, 'visible', 1)
       if (!this.visible(id) || !this.enabled(id, false))
         throw new Error('Cannot set mode to a disabled or hidden layer tree')
-      yield* this.focus(this.first(id), true)
+      // SetModeTo uses SearchFirstFocusable's native default: the modal
+      // reader may receive initial focus without joining ordinary Tab order.
+      yield* this.focus(this.first(id, true), true)
       if (this.attached(id)) {
         yield* this.own(`modal:${id}`, id, this.manager(id))
         this.modal.push(id)

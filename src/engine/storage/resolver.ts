@@ -249,13 +249,17 @@ export class StorageResolver {
       return name === root || name.startsWith(beginning) || root.startsWith(name + '/')
     })
   }
-  private assertOutsideReadonly(path: string): void {
+  isReadonlyImport(path: string): boolean {
     const name = path.replace(/\/$/, '').toLowerCase()
     for (const prefix of this.readonlyRoots) {
-      const root = prefix.slice(0, -1)
-      if (name === root || name.startsWith(prefix) || root.startsWith(name + '/'))
-        throw new Error('Dropped storage is read-only')
+      if (name === prefix.slice(0, -1) || name.startsWith(prefix)) return true
     }
+    return false
+  }
+  private assertOutsideReadonly(path: string): void {
+    if (this.isReadonlyImport(path)) throw new Error('Dropped storage is read-only')
+    const parent = path.replace(/\/$/, '').toLowerCase() + '/'
+    for (const root of this.readonlyRoots) if (root.startsWith(parent)) throw new Error('Dropped storage is read-only')
   }
   assertWritable(path: string): void {
     const name = parseStoragePath(path)

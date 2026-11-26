@@ -1,11 +1,14 @@
-import type {
-  StorageSelectorChoice,
-  StorageSelectorDirectory,
-  StorageSelectorPresentation,
+import {
+  storageSelectorResult,
+  validSelectorFilterIndex,
+  type StorageSelectorChoice,
+  type StorageSelectorDirectory,
+  type StorageSelectorPresentation,
 } from '../ports/storage-selector.ts'
 import type { ScriptValue } from '../script/runtime.ts'
 import { StorageResolver } from './resolver.ts'
 import { SaveOverlay } from './save-overlay.ts'
+import { isSessionImportPath } from './drop.ts'
 import {
   discAddress,
   discStoragePath,
@@ -112,7 +115,7 @@ export class StorageSelector {
         if (!value) return undefined
         const normalized = normalizeSelectorPath(toPublicStoragePath(parseStoragePath(await this.resources.qualifyDrive(value), this.resources.currentDirectory)))
         const candidate = /[/>]$/.test(normalized) ? normalized : normalized + '/'
-        if (save && (discAddress(candidate) || candidate.includes('>'))) return undefined
+        if (save && (discAddress(candidate) || candidate.includes('>') || this.resources.isReadonlyImport(parseStoragePath(candidate)))) return undefined
         try { return await this.browse(save, candidate) }
         catch (error) {
           if (error instanceof Error && error.message.startsWith('Storage directory not found:')) return undefined
@@ -123,6 +126,9 @@ export class StorageSelector {
         ? await directory(extractStoragePath(toPublicStoragePath(existingName?.name ?? requestedName)))
         : undefined,
       initialListing = nameDirectory ?? await directory(initial) ??
+        // A stock KAG may remember a device bookmark across restarts. Once
+        // its directory is unavailable, offer the game's normal save folder.
+        (isSessionImportPath(requestedName) ? await directory(this.dataPath) : undefined) ??
         await directory(toPublicStoragePath(this.resources.currentDirectory)) ?? await this.browse(save, 'game://./'),
       rawIndex = Number(args[0]),
       filterIndex = filters.length
@@ -155,6 +161,7 @@ export class StorageSelector {
     if (logical && !/[/>]$/.test(logical)) throw new Error('File selector directory requires a trailing delimiter')
     if (save && logical.includes('>')) throw new Error('Archive directories are read-only')
     if (save && discAddress(logical)) throw new Error('CD storage is read-only')
+    if (save && this.resources.isReadonlyImport(logical)) throw new Error('Dropped storage is read-only')
     const overlays = this.saves.list().map((file) => this.saves.resource(file.name)!),
       fallback = this.directory(path, virtual)
     let listed: Awaited<ReturnType<StorageResolver['listDirectory']>>
@@ -164,15 +171,17 @@ export class StorageSelector {
       listed = { name: parseStoragePath(fallback), entries: [], directories: [] }
     }
     const name = normalizeSelectorPath(listed.name),
-      entries = new Map<string, { name: string; size: number; archive: boolean }>(),
+      entries = new Map<string, StorageSelectorDirectory['entries'][number]>(),
       directories = new Set<string>(['game://./', name])
     for (const entry of listed.entries) {
       const publicName = normalizeSelectorPath(entry.name)
       if (!save || !publicName.includes('>')) entries.set(publicName,
-        Object.freeze({ name: publicName, size: entry.size, archive: publicName.includes('>') }))
+        Object.freeze({ name: publicName, size: entry.size, archive: publicName.includes('>'),
+          ...(discAddress(entry.name) || this.resources.isReadonlyImport(entry.name) ? { readOnly: true } : {}) }))
     }
     for (const entry of [...listed.directories.map(normalizeSelectorPath), ...virtual])
-      if ((!save || !entry.includes('>')) && extractStoragePath(entry.slice(0, -1)) === name) directories.add(entry)
+      if ((!save || (!entry.includes('>') && !this.resources.isReadonlyImport(parseStoragePath(entry)))) &&
+          extractStoragePath(entry.slice(0, -1)) === name) directories.add(entry)
     // Retain navigation to ancestors without enumerating their archives.
     if (!save && name === 'game://./') for (const root of await this.resources.discRoots()) directories.add(root)
     const current = parseStoragePath(name), disc = discAddress(current)
@@ -201,10 +210,7 @@ export class StorageSelector {
     if (
       typeof name !== 'string' ||
       typeof overwrite !== 'boolean' ||
-      !Number.isSafeInteger(filterIndex) ||
-      (request.filters.length
-        ? filterIndex < 1 || filterIndex > request.filters.length
-        : filterIndex !== 0)
+      !validSelectorFilterIndex(request, filterIndex)
     )
       throw new Error('Invalid file selector choice')
     if (name.length > 4096) throw new Error('File selector path exceeds 4096 characters')
@@ -213,6 +219,7 @@ export class StorageSelector {
     // Appending follows the filename, never the directory. A final dot opts out.
     path = selectorExtension(path, request.defaultExtension)
     path = request.save ? storageWritePath(path) : storageFilePath(path)
+    if (request.save) this.resources.assertWritable(path)
     // Resolve the complete filename first. Distinct Foo/ and foo/ directories
     // must not make FOO/a.sav ambiguous when only Foo/a.sav actually exists.
     // Autopath fallback would silently select another directory, so use find.
@@ -228,9 +235,10 @@ export class StorageSelector {
     // Directory/header I/O can yield to a Timer that writes a save. Recheck
     // the overlay after the final await before granting overwrite permission.
     const existing = this.saves.resource(path) ?? original
+    if (request.save) this.resources.assertWritable(path)
     if (!request.save && !existing) throw new Error('选择的文件不存在。')
     if (request.save && existing && !overwrite) throw new Error('文件已存在，请确认覆盖。')
     const selected = normalizeSelectorPath(existing?.name ?? path)
-    return `${filterIndex}\n${selected}`
+    return storageSelectorResult(filterIndex, selected)
   }
 }

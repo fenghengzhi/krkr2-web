@@ -63,7 +63,7 @@ import { deviceInt, deviceMulDiv, drawDeviceGeometry, fromPrimary, paintBoxPoint
 import { LayerService } from './scene/layer-objects.ts'
 import { captureVideoMixingBitmap } from './media/video-mixing.ts'
 import type { DecodedImage, GraphicsDecoder, Pixels, Renderer, RendererStatus } from './ports/graphics.ts'
-import type { ArchiveReader, Inflater, Resource } from './ports/storage.ts'
+import type { ArchiveReader, ByteSource, Inflater, Resource } from './ports/storage.ts'
 import { MemorySaveStore, type SaveStore, type SaveFile, type SaveScope } from './ports/saves.ts'
 import { SaveOverlay } from './storage/save-overlay.ts'
 import { StorageSelector, normalizeSelectorPath } from './storage/selector.ts'
@@ -3972,6 +3972,13 @@ export class EngineSession {
   async browseStorageSelector(id: number, directory: string): Promise<import('./ports/storage-selector.ts').StorageSelectorDirectory | null> {
     if (!this.canUseSystemDialog()) return null
     return this.systemDialogs?.browse(id, directory, () => this.canUseSystemDialog()) ?? null
+  }
+  async openStorageFile(id: number, filterIndex: number, name: string, source: ByteSource): Promise<boolean> {
+    if (!this.canUseSystemDialog() || !this.systemDialogs) return false
+    return this.systemDialogs.openFile(id, filterIndex, async (valid, publish) => {
+      await this.dropped.commit({ roots: [{ name, kind: 'file' }], entries: [{ root: 0, path: '', kind: 'file', source }] },
+        valid, (paths) => publish(paths[0]!))
+    }, () => this.canUseSystemDialog())
   }
   async previewFont(
     id: number,

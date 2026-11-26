@@ -570,6 +570,11 @@ export function mountApp(root: HTMLDivElement): void {
       gameHelp = createGameHelp(el('stage').parentElement!)
       gameDialogs = createGameDialogs({
         discPanel: (dialog) => liveDisc.place(dialog),
+        openFile: (id, filterIndex, file) => {
+          if (current !== generation || instance.session.isDisposed || clipboardSelecting || stopRequested)
+            return Promise.resolve(false)
+          return instance.session.openStorageFile(id, filterIndex, file)
+        },
         browse: (id, directory) => {
           if (current !== generation || instance.session.isDisposed || clipboardSelecting || stopRequested)
             return Promise.resolve(null)
