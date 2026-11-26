@@ -17,3 +17,5 @@
 另有 20 项在比较像素时读到多一行的元素截图。托管记录显示绘图缓冲区尺寸正确，画布的 CSS 顶部落在小数坐标上。现在按绘图缓冲区宽高检查全部像素，另存实际页面截图。还有四项鼠标用例已经在正确坐标收到真实右键事件，但场景对窗口自身的事件也读取了图层名，脚本随即中断。本批让场景在读取名称前检查目标是否为图层，继续核对左键选择、右键菜单、中键历史、双击及图层命中结果。[默认字体画面](../../tests/browser/layer-default-font.spec.ts) · [按钮与事件次序](../../tests/browser/mouse-button-choice.spec.ts)
 
 同次取回的 WebKit 第 3 分片为 320 项通过、4 项失败。第 171 至 173 批在此次取回时仍在排队。[WebKit 原始报告](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668/job/140032169006) · [第 171 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320) · [第 172 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217) · [第 173 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45861660259)
+
+第 174 批实现提交 `972205a` 登记时为 `pending`，下一批取回运行结果。[第 174 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45863379478)
