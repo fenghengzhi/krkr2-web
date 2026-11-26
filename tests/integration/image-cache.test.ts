@@ -17,7 +17,7 @@ test('TJS preloading retains finished requests independently of aliases and colo
     'broken.png': Uint8Array.of(1),
   })
   try {
-    assert.equal(await session.evaluate('System.graphicCacheLimit'), String(32 * 1024 * 1024))
+    assert.equal(await session.evaluate('System.graphicCacheLimit'), '0')
     assert.equal(await session.evaluate('typeof global.__graphicCacheLimit'), 'undefined')
     await exec(
       session,
@@ -53,12 +53,12 @@ test('TJS preloading retains finished requests independently of aliases and colo
     assert.equal(session.snapshot().imageCacheMisses, initial.imageCacheMisses + 4)
     assert.equal(session.snapshot().imageCacheEntries, 0)
     await exec(session, 'System.graphicCacheLimit=gcsAuto;')
-    assert.equal(session.snapshot().imageCacheLimit, 32 * 1024 * 1024)
+    assert.equal(session.snapshot().imageCacheLimit, 64 * 1024 * 1024)
     await exec(
       session,
-      'var caught=0;try{System.touchImages("main");}catch(e){caught++;}try{System.graphicCacheLimit=-2;}catch(e){caught++;}try{System.touchImages([],0,-1);}catch(e){caught++;}try{b.loadImages("broken");}catch(e){caught++;}',
+      'var caught=0;try{System.touchImages("main");}catch(e){caught++;}System.graphicCacheLimit=-2;System.touchImages([],0,-1);try{b.loadImages("broken");}catch(e){caught++;}',
     )
-    assert.equal(await session.evaluate('caught'), '4')
+    assert.equal(await session.evaluate('caught'), '2')
   } finally {
     await session.stop()
   }
@@ -86,7 +86,7 @@ test('saved-image overwrites, imports and companion replacement invalidate cache
   try {
     await exec(
       session,
-      'Storages.addAutoPath("savedata/");var w=new Window(),a=new Layer(w,null),b=new Layer(w,a);a.loadImages("main");System.touchImages(["art/picture.bmp"]);a.fillRect(0,0,1,1,0xff090000);',
+      'System.graphicCacheLimit=gcsAuto;Storages.addAutoPath("savedata/");var w=new Window(),a=new Layer(w,null),b=new Layer(w,a);a.loadImages("main");System.touchImages(["art/picture.bmp"]);a.fillRect(0,0,1,1,0xff090000);',
     )
     assert.equal(session.snapshot().imageCacheEntries, 2)
     await exec(session, 'a.saveLayerImage("savedata/main.bmp","bmp32");')
@@ -128,7 +128,7 @@ test('preload array getters cannot grow the entry snapshot during enumeration', 
   try {
     await exec(
       session,
-      'var names=[];property growingName { getter(){names.add("b");return "a";} } names[0]=&growingName;System.touchImages(names);',
+      'System.graphicCacheLimit=gcsAuto;var names=[];property growingName { getter(){names.add("b");return "a";} } names[0]=&growingName;System.touchImages(names);',
     )
     assert.equal(await session.evaluate('names.count'), '2')
     assert.equal(session.snapshot().imageCacheEntries, 1)
@@ -156,7 +156,7 @@ test('pausing then stopping preloading releases retained images and does not exe
       'a.bmp': bmp(1),
       'b.bmp': bmp(2),
       'startup.tjs':
-        'Debug.message("preload-start");System.touchImages(["a","b"]);Debug.message("preload-finished");',
+        'System.graphicCacheLimit=gcsAuto;Debug.message("preload-start");System.touchImages(["a","b"]);Debug.message("preload-finished");',
     },
     {
       now: () => (ticks += 10),

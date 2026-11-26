@@ -13,6 +13,7 @@ function paintText(){root.fillRect(0,0,160,64,0xff112233);root.drawText(40,10,"A
 paintText();var measured=root.font.getTextWidth("AB");
 var sourceImage=new Layer(win,root);win.add(sourceImage);sourceImage.setImageSize(16,16);sourceImage.fillRect(0,0,16,16,0xffff2200);
 sourceImage.saveLayerImage("savedata/image.png","png");
+System.graphicCacheLimit=gcsAuto;
 var visibleImage=new Layer(win,root);win.add(visibleImage);visibleImage.loadImages("savedata/image.png");visibleImage.setPos(8,8);visibleImage.visible=true;
 System.touchImages(["savedata/image.png"]);visibleImage.cursor="solid.cur";var cursorId=visibleImage.cursor;
 Storages.addAutoPath("pack.xp3>");var fromArchive=[].load("inside.txt","utf-8")[0];

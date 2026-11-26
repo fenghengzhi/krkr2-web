@@ -134,7 +134,7 @@ docs/             架构、已验证决策与兼容范围
 
 [图像写出](docs/decisions/013-image-writing.md)说明 PNG/TLG5/TLG6 保存、TLG 图层类型标签、Web CompressionStream、可取消编码与独立原生/Pillow 验证。输出通过现有存档事务、备份导出和刷新恢复。
 
-[图像缓存](docs/decisions/014-image-cache.md)说明解码结果复用、LRU 容量、存档覆盖失效和 System 预加载接口。缓存默认 32 MiB；不同图层和颜色键仍使用独立像素副本。
+游戏启动时图像缓存关闭。脚本写入 `System.graphicCacheLimit=gcsAuto` 后使用游戏配置的上限，Web 自动档为 64 MiB。不同图层和颜色键仍使用独立的像素副本。[缓存与预加载](docs/decisions/014-image-cache.md) · [启动设置与实际容量](docs/decisions/140-game-graphics-cache.md)
 
 [ZIP 资源](docs/decisions/015-zip-storage.md)说明 TypeScript 索引、Web 按需解压、ZIP64、Unicode 文件名、CRC 校验及 `archive>entry` 地址。文件导入支持 ZIP，游戏写入继续进入存档覆盖层。
 

@@ -45,6 +45,7 @@ export function pngNativeFiles(): Record<string, Buffer> {
 export const pngMetadataExpected = '-3,5,pixel,-1,-2147483648,meter,-2147483648,-1,unknown'
 export const pngNativeSource = String.raw`
 System.exitOnWindowClose=false;
+System.graphicCacheLimit=gcsAuto;
 var pngWindow=new Window();pngWindow.caption="PNG native contract";pngWindow.visible=true;
 var pngRoot=new Layer(pngWindow,null);pngWindow.add(pngRoot);pngRoot.type=ltOpaque;
 pngRoot.setSize(12,8);pngRoot.fillRect(0,0,12,8,0xff010203);pngWindow.setInnerSize(12,8);

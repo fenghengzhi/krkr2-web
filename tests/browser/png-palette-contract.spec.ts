@@ -5,6 +5,7 @@ import { paletteFiles, paletteRgba, packedKeyRgba, paletteGray } from '../helper
 
 const source = String.raw`
 System.exitOnWindowClose=false;
+System.graphicCacheLimit=gcsAuto;
 System.assignMessage("TVPPNGLoadError","palette-png:%1");
 var paletteWindow=new Window();paletteWindow.caption="PNG palette contract";paletteWindow.setInnerSize(4,6);paletteWindow.visible=true;
 var paletteRoot=new Layer(paletteWindow,null);paletteWindow.add(paletteRoot);paletteRoot.type=ltOpaque;

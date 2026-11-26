@@ -56,6 +56,7 @@ interface WindowElement extends GameWindowSurface {
   readonly scrollbox: HTMLElement
   readonly scrollSpace: HTMLElement
   scrollSequence: number
+  presentedScroll?: WindowGeometry['scroll'] & { revision: number }
   readonly body: HTMLElement
   readonly title: HTMLElement
   readonly close: HTMLButtonElement
@@ -220,13 +221,24 @@ export function createGameWindows(
       surface.scrollbox.style.overflow = view.showScrollBars ? 'auto' : 'hidden'
       surface.scrollSpace.style.width = `${Math.max(viewport.width, paintBox.x - viewport.x + scroll.x + paintBox.width)}px`
       surface.scrollSpace.style.height = `${Math.max(viewport.height, paintBox.y - viewport.y + scroll.y + paintBox.height)}px`
-      if (surface.scrollbox.scrollLeft !== scroll.x) surface.scrollbox.scrollLeft = scroll.x
-      if (surface.scrollbox.scrollTop !== scroll.y) surface.scrollbox.scrollTop = scroll.y
+      const previousScroll = surface.presentedScroll
+      // A native DOM scroll is visible before its scroll event and Worker
+      // observation round-trip. Repeated Window state must not write the old
+      // position over it. New coordinates, bounds or a measured revision are
+      // still authoritative, including script-driven geometry resets.
+      if (!previousScroll || previousScroll.revision !== measured.revision ||
+          previousScroll.x !== scroll.x || previousScroll.y !== scroll.y ||
+          previousScroll.maxX !== scroll.maxX || previousScroll.maxY !== scroll.maxY) {
+        if (surface.scrollbox.scrollLeft !== scroll.x) surface.scrollbox.scrollLeft = scroll.x
+        if (surface.scrollbox.scrollTop !== scroll.y) surface.scrollbox.scrollTop = scroll.y
+      }
+      surface.presentedScroll = { ...scroll, revision: measured.revision }
       box(surface.content, 0, 0, viewport.width, viewport.height)
       canvas.style.aspectRatio = `${viewport.width} / ${viewport.height}`
       surface.content.style.overflow = 'hidden'
       element.dataset.geometryRevision = String(measured.revision)
     } else {
+      surface.presentedScroll = undefined
       canvas.style.aspectRatio = `${geometry.width} / ${geometry.height}`
       surface.content.style.overflow = view.showScrollBars ? 'auto' : 'hidden'
     }

@@ -8,6 +8,7 @@ import { xp3Fixture } from '../helpers/xp3-fixtures.ts'
 import { nativeSaveZipFiles } from '../helpers/native-saves.ts'
 import { readScreenshotPng } from '../helpers/screenshot-png.ts'
 import { startupScriptModesSource } from '../helpers/startup-script-modes.ts'
+import { assertGameDirectoryInput, attachGameDirectoryInput, chooseGameDirectory, observeGameDirectoryInput } from '../helpers/game-directory-input.ts'
 
 const embedded = '; embedded game defaults\r\nroute=embedded\r\nshared=exe-file\r\nonlydefault=embedded-retained\r\nonlyembedded=retained-exe\r\nflag=no\r\nholdalpha=yes\r\nevalcontext=global\r\nunaryaster=compat\r\ndatapath=$(exepath)/EmbeddedProfiles\r\n',
   defaults = '; shipped defaults\r\nroute=default\r\nshared=default-file\r\nonlydefault=retained\r\nflag\r\nholdalpha=no\r\nevalcontext=instance\r\nunaryaster=amp\r\ndatapath=$(exepath)/Profiles\r\n',
@@ -87,7 +88,9 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     test.setTimeout(180000)
     const failures: unknown[] = [], errors: string[] = [], evidence: unknown[] = []
     let directory: string | undefined
+    let directorySelection: Awaited<ReturnType<typeof chooseGameDirectory>> | undefined
     page.on('pageerror', (error) => errors.push(error.message))
+    await observeGameDirectoryInput(page)
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !await page.evaluate(() => 'Suspending' in WebAssembly), 'JSPI unavailable')
     const base = binary ? 'Adventure/' : '', dataDirectory = binary ? 'Profiles/' : 'EmbeddedProfiles/',
@@ -185,9 +188,11 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           const path = join(directory, name)
           await mkdir(dirname(path), { recursive: true }); await writeFile(path, bytes)
         }
-        await page.locator('#folder').setInputFiles(directory, { timeout: 15000 })
+        directorySelection = await chooseGameDirectory(page, directory)
       }
       await ready(initialRoute, 'none')
+      if (directorySelection) await assertGameDirectoryInput(page, info, directorySelection,
+        [...files].map(([path, bytes]) => ({ path, bytes: bytes.length })), 'auto', 'game-config')
       await expect(page.locator('#save-library')).toBeEnabled(); await page.locator('#library-title').fill(title)
       await page.locator('#save-library').click(); await expect(item()).toBeVisible()
       await expect(page.locator('#cancel-library')).toBeHidden()
@@ -232,6 +237,9 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       if (binary) expect(exported.get('game.cjs')!.toString('ascii', 0, 4)).toBe('TJS2')
       await expect(page.locator('#logs .error')).toHaveCount(0); expect(errors).toEqual([])
     } catch (error) { failures.push(error) }
+    if (failures.length && directory) {
+      try { await attachGameDirectoryInput(page, info, 'game-config-failure') } catch (error) { failures.push(error) }
+    }
     try { await info.attach('config-observations.json', { body: JSON.stringify({ evidence, errors, logs: await page.locator('#logs').innerText() }), contentType: 'application/json' }) }
     catch (error) { failures.push(error) }
     try { await stop() } catch (error) { failures.push(error) }

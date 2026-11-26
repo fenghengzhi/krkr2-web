@@ -55,6 +55,7 @@ export const jpegError = (code: number) => `jpeg-holder:<error code : ${code}>`
 
 export const jpegContractSource = String.raw`
 System.exitOnWindowClose=false;
+System.graphicCacheLimit=gcsAuto;
 System.assignMessage("TVPJPEGLoadError","jpeg-holder:<%1>");
 System.assignMessage("TJSReadError","wrong-jpeg-read-holder");
 var jpegWindow=new Window();jpegWindow.caption="JPEG native contract";jpegWindow.setInnerSize(8,16);jpegWindow.visible=true;

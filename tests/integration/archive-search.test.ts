@@ -6,6 +6,7 @@ import { importResources } from '../../src/backends/files/import-resources.ts'
 import { MemorySaveStore } from '../../src/engine/ports/saves.ts'
 
 const program = String.raw`
+System.graphicCacheLimit=gcsAuto;
 System.assignMessage("TVPCannotWriteToArchive","archive-search:readonly");
 var patchWindow=new Window();patchWindow.setInnerSize(4,3);
 var patchRoot=new Layer(patchWindow,null);patchRoot.setSize(4,3);

@@ -198,6 +198,7 @@ export function eriTruecolorFiles(): Record<string, Uint8Array> {
 
 export const eriTruecolorSource = String.raw`
 System.exitOnWindowClose=false;
+System.graphicCacheLimit=gcsAuto;
 System.assignMessage("TVPERILoadError","eri-true:<%1>");
 System.assignMessage("TJSReadError","wrong-eri-short-read");
 var tcWindow=new Window();tcWindow.caption="ERI truecolor";tcWindow.setInnerSize(3,6);tcWindow.visible=true;

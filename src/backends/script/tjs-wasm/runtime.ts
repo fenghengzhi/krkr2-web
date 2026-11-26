@@ -987,6 +987,22 @@ export class TjsWasmRuntime implements ScriptRuntime {
       throw new Error('TJS WASM is missing game script operator settings')
     this.call('krkr_set_script_operators', Number(globalEval), Number(compatAsterisk))
   }
+  parseOptionInteger(text: string): number {
+    this.assertAlive()
+    if (this.busy) throw new Error('Cannot parse startup options while TJS is running')
+    this.control.check()
+    if (typeof text !== 'string') throw new Error('Startup integer option must be a string')
+    if (typeof this.module._krkr_parse_option_integer !== 'function')
+      throw new Error('TJS WASM is missing native startup integer conversion')
+    const request = this.call('krkr_reply_new', 0)
+    try {
+      this.writeValue(this.call('krkr_reply_value', request), text)
+      const value = this.consumeReply(this.call('krkr_parse_option_integer', request))
+      if (typeof value !== 'bigint' || value < -0x80000000n || value > 0x7fffffffn)
+        throw new Error('Invalid native startup integer result')
+      return Number(value)
+    } finally { this.call('krkr_reply_delete', request) }
+  }
   async invoke(
     callback: ScriptObject,
     args: ScriptValue[] = [],

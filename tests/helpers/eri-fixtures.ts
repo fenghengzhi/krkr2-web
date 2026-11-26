@@ -106,6 +106,7 @@ export const eriContractCases: readonly EriContractCase[] = [
 
 export const eriContractSource = String.raw`
 System.exitOnWindowClose=false;
+System.graphicCacheLimit=gcsAuto;
 System.assignMessage("TVPERILoadError","eri-holder:<%1>");
 System.assignMessage("TJSReadError","wrong-eri-read-holder");
 var eriWindow=new Window();eriWindow.caption="ERI native contract";eriWindow.setInnerSize(3,4);eriWindow.visible=true;

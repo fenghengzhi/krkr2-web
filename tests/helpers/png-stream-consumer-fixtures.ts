@@ -53,6 +53,7 @@ export function pngStreamConsumerFiles(): Record<string, Buffer> {
 
 export const pngStreamConsumerSource = String.raw`
 System.exitOnWindowClose=false;
+System.graphicCacheLimit=gcsAuto;
 System.assignMessage("TVPPNGLoadError","stream-png:%1");
 var streamWindow=new Window();streamWindow.caption="PNG stream";streamWindow.visible=true;
 var streamRoot=new Layer(streamWindow,null);streamWindow.add(streamRoot);

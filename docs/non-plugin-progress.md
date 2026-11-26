@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 140 批接入 `-gclim`，按原版区分启动上限、脚本启用与实际预加载。133 首版的介绍游戏路线现已 6/6 通过，全部常规浏览器分片合计仍有 98 项失败。[140 实现与验收](decisions/140-game-graphics-cache.md)
+
 第 139 批读取游戏内嵌选项，使存档目录、图层遮罩和旧 TJS 运算符按游戏配置生效。第 133 批首版的 KAG 缩略图存读档已在 12 个组合通过，其常规浏览器分片仍有失败。139 的提交 `06ee58c` 首次登记为 `pending`。[139 范围与验收](decisions/139-embedded-game-options-and-script-modes.md) · [第 139 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45769721383)
 
 第 138 批接入游戏自带的 `.cf`、用户存档目录下的 `.cfu` 和多个 EXE 时的程序选择。已取回第 133 批首版 WebKit 游戏库的 19 项通过结果，136 和 137 当时仍在排队。138 实现提交 `4a423e7` 的托管验证首次登记为 `pending`。[138 配置与验收](decisions/138-game-startup-configuration.md) · [第 138 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45768308104)

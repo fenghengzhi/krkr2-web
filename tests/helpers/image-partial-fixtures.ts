@@ -92,6 +92,7 @@ export function imagePartialFiles(): Record<string, Buffer> {
 
 export const imagePartialSource = String.raw`
 System.exitOnWindowClose=false;
+System.graphicCacheLimit=gcsAuto;
 System.assignMessage("TVPImageLoadError","partial-bmp:%1");
 System.assignMessage("TVPPNGLoadError","partial-png:%1");
 System.assignMessage("TVPMaskSizeMismatch","partial-mask-size");

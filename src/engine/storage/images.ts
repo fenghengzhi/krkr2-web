@@ -79,6 +79,9 @@ export class ImageLoader {
   setLimit(value: number): void {
     this.cache.setLimit(value)
   }
+  configureSystemLimit(bytes: number): void {
+    this.cache.configureSystemLimit(bytes)
+  }
   clear(): void {
     this.cache.clear()
   }
@@ -94,20 +97,22 @@ export class ImageLoader {
   snapshot() {
     return this.cache.snapshot()
   }
-  async touch(names: string[], limitBytes = 0, timeout = 0): Promise<void> {
+  async touch(names: string[], limitBytes = 0, timeout: number | bigint = 0): Promise<void> {
     if (names.length > 4096 || names.some((name) => typeof name !== 'string'))
       throw new Error('Invalid image preload list')
-    if (!Number.isSafeInteger(limitBytes) || !Number.isSafeInteger(timeout) || timeout < 0)
+    if (!Number.isSafeInteger(limitBytes) || (typeof timeout !== 'bigint' && !Number.isSafeInteger(timeout)) || timeout < 0)
       throw new Error('Invalid image preload limit or timeout')
     const capacity = this.cache.limit,
       limit = limitBytes <= 0 ? capacity + limitBytes : Math.min(capacity, limitBytes)
     if (!capacity || limit <= 0) return
     const start = this.scheduler.now()
+    // Win32 adds the caller's unsigned 64-bit timeout to its tick count.
+    const deadline = timeout ? BigInt.asUintN(64, BigInt(Math.trunc(start)) + BigInt(timeout)) : undefined
     let yieldAt = start + 8, bytes = 0, attempted = 0
     try {
       while (attempted < names.length) {
         this.scheduler.check()
-        if (bytes >= limit || (timeout && this.scheduler.now() - start >= timeout)) break
+        if (bytes >= limit || (deadline !== undefined && BigInt(Math.trunc(this.scheduler.now())) >= deadline)) break
         const name = names[attempted++]!
         try {
           // TVPLoadGraphic always discovers the province name internally,
@@ -116,7 +121,7 @@ export class ImageLoader {
           const image = await this.read(this.request(name, noColorKey, 'normal'))
           // Count every successful result, including repeated cache hits.
           // Mask/province/metadata buffers are not separate preload charges.
-          bytes += image.width * image.height * 4
+          bytes = (bytes + image.width * image.height * 4) >>> 0
         } catch {
           // Loading errors are ignored by touchImages; cancellation must still unwind the VM.
           this.scheduler.check()

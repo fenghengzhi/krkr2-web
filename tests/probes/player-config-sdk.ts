@@ -18,19 +18,19 @@ const defaults = [
   'datapath=$(exepath)/Profiles', 'quoted="hello world"', "single='one two'",
   'escaped="line\\nend"', 'quote="A\\"B"', 'empty=', 'first=one', 'first=two',
   'Case=upper', 'case=lower',
-  'holdalpha=yes', 'evalcontext=global', 'unaryaster=compat',
+  'holdalpha=yes', 'evalcontext=global', 'unaryaster=compat', 'gclim=1',
 ].join('\r\n') + '\r\n'
 const user = ['route=user', 'route=user-duplicate', 'flag=user-flag',
   'datapath=$(exepath)/Ignored', 'quoted="user value"', 'useronly=present',
-  'holdalpha=true', 'evalcontext=instance', 'unaryaster=normal'].join('\r\n') + '\r\n'
+  'holdalpha=true', 'evalcontext=instance', 'unaryaster=normal', 'gclim=2'].join('\r\n') + '\r\n'
 const cliUser = ['route=cli-directory-user', 'route=ignored-duplicate', 'flag=cli-directory-flag',
   'datapath=$(exepath)/IgnoredAgain', 'useronly=cli-directory',
-  'holdalpha=disabled', 'evalcontext=other', 'unaryaster=other'].join('\r\n') + '\r\n'
+  'holdalpha=disabled', 'evalcontext=other', 'unaryaster=other', 'gclim=1'].join('\r\n') + '\r\n'
 const trap = 'route=wrong-directory\r\nflag=wrong-directory\r\n'
 const common: Record<string, string | null> = {
   flag: 'yes', route: 'default', datapath: '$(exepath)/Profiles', quoted: 'hello world', single: 'one two',
   escaped: 'line\nend', quote: 'A"B', empty: '', first: 'one', Case: 'upper', case: 'lower', useronly: null,
-  holdalpha: 'yes', evalcontext: 'global', unaryaster: 'compat',
+  holdalpha: 'yes', evalcontext: 'global', unaryaster: 'compat', gclim: '1',
 }
 interface ConfigCase {
   id: string
@@ -39,25 +39,26 @@ interface ConfigCase {
   configs: Record<string, string>
   expected: Record<string, string | null>
   modes: string
+  cacheLimit: number | 'auto'
 }
 const cases: ConfigCase[] = [
   { id: 'embedded-empty', args: [], directory: 'savedata', configs: {},
-    expected: Object.fromEntries(Object.keys(common).map((key) => [key, null])), modes: 'instance:1:0|amp|0|255' },
+    expected: Object.fromEntries(Object.keys(common).map((key) => [key, null])), modes: 'instance:1:0|amp|0|255', cacheLimit: 'auto' },
   { id: 'defaults', args: [], directory: 'Profiles', configs: { 'krkr.cf': defaults }, expected: { ...common },
-    modes: 'global:0:1|star|1|73' },
+    modes: 'global:0:1|star|1|73', cacheLimit: 1048576 },
   { id: 'user', args: [], directory: 'Profiles', configs: {
     'krkr.cf': defaults, 'Profiles/krkr.cfu': user, 'Ignored/krkr.cfu': trap,
   }, expected: { ...common, flag: 'user-flag', route: 'user', datapath: '$(exepath)/Ignored', quoted: 'user value', useronly: 'present',
-    holdalpha: 'true', evalcontext: 'instance', unaryaster: 'normal' }, modes: 'instance:1:0|amp|1|73' },
+    holdalpha: 'true', evalcontext: 'instance', unaryaster: 'normal', gclim: '2' }, modes: 'instance:1:0|amp|1|73', cacheLimit: 2097152 },
   { id: 'command-line', args: ['-route=command', '-route=late-duplicate', '-flag=command-flag',
-    '-holdalpha=no', '-evalcontext=global', '-unaryaster=compat'], directory: 'Profiles', configs: {
+    '-holdalpha=no', '-evalcontext=global', '-unaryaster=compat', '-gclim=0'], directory: 'Profiles', configs: {
     'krkr.cf': defaults, 'Profiles/krkr.cfu': user, 'Ignored/krkr.cfu': trap,
   }, expected: { ...common, flag: 'command-flag', route: 'command', datapath: '$(exepath)/Ignored', quoted: 'user value', useronly: 'present',
-    holdalpha: 'no' }, modes: 'global:0:1|star|0|255' },
+    holdalpha: 'no', gclim: '0' }, modes: 'global:0:1|star|0|255', cacheLimit: 0 },
   { id: 'command-data-directory', args: ['-datapath=$(exepath)/CliProfiles'], directory: 'CliProfiles', configs: {
-    'krkr.cf': defaults, 'Profiles/krkr.cfu': user, 'CliProfiles/krkr.cfu': cliUser, 'IgnoredAgain/krkr.cfu': trap,
+    'krkr.cf': defaults.replace('gclim=1', 'gclim=2'), 'Profiles/krkr.cfu': user, 'CliProfiles/krkr.cfu': cliUser, 'IgnoredAgain/krkr.cfu': trap,
   }, expected: { ...common, flag: 'cli-directory-flag', route: 'cli-directory-user', datapath: '$(exepath)/CliProfiles', useronly: 'cli-directory',
-    holdalpha: 'disabled', evalcontext: 'other', unaryaster: 'other' }, modes: 'instance:1:0|amp|0|255' },
+    holdalpha: 'disabled', evalcontext: 'other', unaryaster: 'other' }, modes: 'instance:1:0|amp|0|255', cacheLimit: 1048576 },
 ]
 const script = (id: string) => String.raw`
 System.exitOnNoWindowStartup=false;System.exitOnWindowClose=false;
@@ -69,6 +70,14 @@ System.exceptionHandler=function(e){record("fatal|"+e.message.escape());System.e
 try{
  record("exe|"+System.exePath);record("data|"+System.dataPath);
  ${Object.keys(common).map((key) => `record(${JSON.stringify('argument|' + key + '|')}+argument(${JSON.stringify('-' + key)}));`).join('\n')}
+ record("cache|initial|"+System.graphicCacheLimit);
+ System.graphicCacheLimit=gcsAuto;record("cache|auto|"+System.graphicCacheLimit);
+ System.graphicCacheLimit=3145728;record("cache|above|"+System.graphicCacheLimit);
+ System.graphicCacheLimit=4096;record("cache|small|"+System.graphicCacheLimit);
+ System.graphicCacheLimit=4294967297;record("cache|wide|"+System.graphicCacheLimit);
+ System.graphicCacheLimit=-2;record("cache|negative|"+System.graphicCacheLimit);
+ System.graphicCacheLimit=0;record("cache|zero|"+System.graphicCacheLimit);
+ System.graphicCacheLimit=gcsAuto;record("cache|restored|"+System.graphicCacheLimit);
  Scripts.execStorage("modes.tjs");record("modes|"+startupScriptModes());
  var proof=${JSON.stringify('config-proof:' + id + '|')}+argument("-route")+"|"+argument("-datapath");
  [proof].save(System.dataPath+"config-proof.txt");
@@ -78,6 +87,14 @@ System.exit();
 `
 const escape = (value: string) => value.replaceAll('\\', '\\\\').replaceAll('\r', '\\r')
   .replaceAll('\n', '\\n').replaceAll('\t', '\\t').replaceAll('"', '\\"').replaceAll("'", "\\'")
+// Independent literal requests and native uint32/clamp contracts. The unconfigured
+// process records its host-dependent automatic maximum; it is not assumed to be
+// the Web player's default or a fixed value for all Windows runners.
+const cacheRows = (limit: number) => [
+  'cache|initial|0', `cache|auto|${limit}`, `cache|above|${Math.min(3145728, limit)}`,
+  `cache|small|${Math.min(4096, limit)}`, `cache|wide|${Math.min(1, limit)}`,
+  `cache|negative|${limit}`, 'cache|zero|0', `cache|restored|${limit}`,
+]
 
 if (process.argv[2] === 'inspect-stock') {
   const path = process.argv[3]; assert(path)
@@ -121,7 +138,7 @@ if (process.argv[2] === 'inspect-stock') {
     writeFileSync(resolve(directory, 'game/modes.tjs'), modes)
     files.push({ name: 'game/modes.tjs', bytes: modes.length, sha256: sha(modes) })
     manifest.push({ id: item.id, args: item.args, expectedDataDirectory: item.directory,
-      expectedArguments: item.expected, expectedModes: item.modes, files })
+      expectedArguments: item.expected, expectedModes: item.modes, expectedCacheLimit: item.cacheLimit, files })
   }
   writeFileSync(resolve(root, 'inputs.json'), JSON.stringify({ commit: process.env.GITHUB_SHA,
     run: process.env.GITHUB_RUN_ID, cases: manifest,
@@ -144,15 +161,27 @@ if (process.argv[2] === 'inspect-stock') {
     const directory = resolve(root, 'cases', item.id), errors: string[] = [], expectedProof =
       `config-proof:${item.id}|${item.expected.route ?? '<void>'}|${item.expected.datapath ?? '<void>'}`
     let processState: Record<string, unknown> | undefined, actual: string[] = [], normalized: string[] = [],
+      observedAutoLimit: number | undefined,
       journalSha256: string | undefined, proofSha256: string | undefined
-    const expected = ['start', 'exe|<exe>/', `data|<exe>/${item.directory.toLowerCase()}/`,
+    const prefix = ['start', 'exe|<exe>/', `data|<exe>/${item.directory.toLowerCase()}/`,
       ...Object.entries(item.expected).map(([key, value]) => `argument|${key}|${value === null ? '<void>' : escape(value)}`),
-      `modes|${item.modes}`, `saved|${expectedProof}`, 'done']
+    ], suffix = [`modes|${item.modes}`, `saved|${expectedProof}`, 'done']
+    let expected = [...prefix, ...(item.cacheLimit === 'auto' ? ['<host automatic cache observations>'] : cacheRows(item.cacheLimit)), ...suffix]
     try {
       processState = JSON.parse(readFileSync(resolve(directory, 'sdk-process.json'), 'utf8').replace(/^\ufeff/, ''))
       const bytes = readFileSync(resolve(directory, 'native-events.txt'))
       journalSha256 = sha(bytes); assert.equal(bytes.readUInt16LE(0), 0xfeff)
       actual = bytes.toString('utf16le').replace(/^\ufeff/, '').trimEnd().split(/\r?\n/)
+      const autoLines = actual.filter((line) => line.startsWith('cache|auto|'))
+      assert.equal(autoLines.length, 1)
+      assert.match(autoLines[0]!, /^cache\|auto\|\d+$/)
+      observedAutoLimit = Number(autoLines[0]!.slice('cache|auto|'.length))
+      if (item.cacheLimit === 'auto') {
+        // SysInitImpl's memory tiers are independently constrained, while the
+        // exact native host tier remains an observation rather than an oracle.
+        assert([0, 4, 8, 12, 20, 40, 64].map((mb) => mb * 1048576).includes(observedAutoLimit))
+        expected = [...prefix, ...cacheRows(observedAutoLimit), ...suffix]
+      } else assert.equal(observedAutoLimit, item.cacheLimit)
       assert.equal(processState!.commit, process.env.GITHUB_SHA)
       assert.equal(processState!.state, 'observed'); assert.equal(processState!.timedOut, false)
       assert.equal(processState!.exitCode, 0)
@@ -176,11 +205,13 @@ if (process.argv[2] === 'inspect-stock') {
       }
     } catch (error) { errors.push(String(error)) }
     results.push({ id: item.id, matched: errors.length === 0, expected, actual, normalized, errors,
+      configuredCacheLimit: item.cacheLimit, observedAutoLimit,
+      cacheScope: item.cacheLimit === 'auto' ? 'Automatic host tier observed; legal native tiers and subsequent setter relations checked, not a fixed host-memory prediction.' : 'Exact authored MiB ceiling and script uint32/clamp observations.',
       journalSha256, proofSha256, processState })
   }
   const complete = embeddedErrors.length === 0 && results.length === cases.length && results.every((row) => row.matched)
   writeFileSync(resolve(root, 'comparison.json'), JSON.stringify({ commit: process.env.GITHUB_SHA,
     planned: cases.length, reported: results.filter((row) => row.actual.length > 0).length, complete, results, embeddedOptions, embeddedErrors,
-    scope: 'Five isolated original Windows processes: empty embedded stock baseline plus four external configuration controls, real startup script operators/Layer masks and saved data files. Empty stock text is observed, not treated as evidence of non-empty embedded options. Missing/timeouts are failures; Web behavior is verified separately.' }, null, 2))
+    scope: 'Five isolated original Windows processes: empty embedded stock baseline plus four external configuration controls, real startup script operators/Layer masks, graphic cache limits and saved data files. The automatic cache host tier is observed; authored 0/1/2 MiB limits, initial disabled state, uint32 setters and clamps are checked exactly. Empty stock text is not evidence of non-empty embedded options. Missing/timeouts are failures; Web behavior is verified separately.' }, null, 2))
   assert(complete, 'Original external configuration precedence or data-directory observations differ')
 } else throw new Error('Expected inspect-stock, prepare or compare')

@@ -72,6 +72,7 @@ import { systemEventsBridge } from './tvp/system.ts'
 import { systemClassValue, systemReadonlyProperties } from './tvp/system-class.ts'
 import { SystemEnvironment } from './system/environment.ts'
 import { readProjectConfig } from './system/project-config.ts'
+import { graphicCacheSystemLimit } from './system/graphic-cache-option.ts'
 import {
   systemDisplayProperties,
   type SystemDisplayMetrics,
@@ -744,6 +745,9 @@ export class EngineSession {
         debugMode: this.systemArguments.get('-debug') === 'yes',
       })
       this.control.check()
+      const systemCacheBytes = graphicCacheSystemLimit(this.systemArguments.get('-gclim'),
+        this.runtime.parseOptionInteger?.bind(this.runtime))
+      this.images.configureSystemLimit(systemCacheBytes)
       this.debug = new DebugService(this.diagnostics, this.runtime, this.systemArguments)
       this.runtime.setConsoleOutput((text) =>
         this.debug!.dispatch(
@@ -4695,8 +4699,11 @@ export class EngineSession {
         value = BigInt(Math.trunc(this.deps.now()))
         break
       case 'System.cacheLimit':
-        if (args.length) this.images.setLimit(number(0))
-        value = BigInt(this.images.limit)
+        if (args.length) {
+          const requested = clipInteger(0)
+          this.images.setLimit(requested === -1 ? -1 : requested >>> 0)
+        }
+        value = BigInt(this.images.limit | 0)
         break
       case 'System.clearGraphicCache':
         this.images.clear()
@@ -4736,7 +4743,9 @@ export class EngineSession {
         if (names.type !== 'array' || names.items.some((name) => typeof name !== 'string'))
           throw new Error('System.touchImages requires an Array of names')
         this.materializeLogs()
-        await this.images.touch(names.items as string[], number(1), number(2))
+        const timeout = args[2]
+        await this.images.touch(names.items as string[], clipInteger(1),
+          BigInt.asUintN(64, typeof timeout === 'bigint' ? timeout : BigInt(number(2))))
         break
       }
       case 'System.createAppLock':

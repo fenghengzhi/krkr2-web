@@ -58,6 +58,7 @@ var complete=true;
 
   test(`${mode}: real archive project starts original KAG auto-path slice and preserves patch/cache identities`, { timeout: 60000 }, async (t) => {
     const original = await kagAutoPathProgram(), program = original.source + demand + String.raw`
+System.graphicCacheLimit=gcsAuto;
 var window=new Window();window.setInnerSize(4,3);var root=new Layer(window,null);window.add(root);root.setSize(4,3);var image=new Layer(window,root);
 function readPatch(){image.loadImages("patch-probe.bmp");return Scripts.evalStorage("patch-value.tjs")+"|"+Storages.getPlacedPath("patch-value.tjs")+"|"+image.getMainPixel(1,1);}
 function removePatch(path){Storages.removeAutoPath(System.exePath+path);return readPatch();}

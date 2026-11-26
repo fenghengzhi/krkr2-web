@@ -24,6 +24,7 @@ export function processedCacheFiles(): Record<string, Uint8Array> {
   }
 }
 export const processedCacheSource = String.raw`
+System.graphicCacheLimit=gcsAuto;
 System.exitOnWindowClose=false;
 var cacheWindow=new Window();cacheWindow.visible=true;cacheWindow.setInnerSize(3,2);
 var cacheRoot=new Layer(cacheWindow,null),cacheImage=new Layer(cacheWindow,cacheRoot),cacheBack=new Layer(cacheWindow,cacheRoot);

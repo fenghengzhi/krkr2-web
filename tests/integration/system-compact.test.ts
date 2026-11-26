@@ -19,6 +19,7 @@ async function using(binary: boolean, body: string,
     'a.ttf': new Uint8Array([7]), 'coverage.tft': coverage,
     'pack.xp3': xp3Fixture({ 'inside.txt': 'archive bytes' }).bytes,
     'compact.tjs': String.raw`
+System.graphicCacheLimit=gcsAuto;
 var win=new Window();win.setInnerSize(12,4);win.visible=true;
 var root=new Layer(win,null);win.add(root);root.setSize(12,4);root.fillRect(0,0,12,4,0xffabcdef);
 var layer=new Layer(win,root);win.add(layer);layer.loadImages("image.bmp");layer.visible=true;

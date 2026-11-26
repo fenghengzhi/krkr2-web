@@ -149,6 +149,8 @@ export class ProcessedImageCache {
   private generation = 0
   private disposed = false
   private maximum = autoImageCacheBytes
+  private systemLimit?: number
+  private enabled = true
   private logical = 0
   private resident = 0
   private progressResident = 0
@@ -181,11 +183,20 @@ export class ProcessedImageCache {
     for (const flight of this.active) flight.observations.disable()
     if (detach) this.flights.clear()
   }
+  /** The player's startup option sets a ceiling. The game enables caching
+   * by writing System.graphicCacheLimit, often in KAG's Config.tjs. */
+  configureSystemLimit(bytes: number): void {
+    this.live()
+    if (!Number.isInteger(bytes) || bytes < 0 || bytes > 0xffffffff) throw new Error('Invalid graphic cache system limit')
+    this.systemLimit = bytes
+    this.setLimit(0)
+  }
   setLimit(value: number): void {
     this.live()
     if (!Number.isSafeInteger(value) || value < -1) throw new Error('Invalid graphic cache limit')
-    this.maximum = value === -1 ? autoImageCacheBytes : Math.min(value, maximumImageCacheBytes)
-    if (this.maximum === 0) this.clear()
+    this.enabled = value !== 0
+    this.maximum = value === -1 ? (this.systemLimit ?? autoImageCacheBytes) : Math.min(value, this.systemLimit ?? maximumImageCacheBytes)
+    if (!this.enabled) this.clear()
     else this.trimSoft()
   }
   clear(): void {
@@ -211,7 +222,7 @@ export class ProcessedImageCache {
     // New reads are forbidden, and late successful results cannot be retained.
   }
   touch(request: ProcessedImageRequest): void {
-    if (this.disposed || !this.maximum) return
+    if (this.disposed || !this.enabled) return
     const key = requestKey(requestCopy(request)), entry = this.entries.get(key)
     if (entry) { this.entries.delete(key); this.entries.set(key, entry) }
   }
@@ -225,13 +236,13 @@ export class ProcessedImageCache {
   }
   async read(input: ProcessedImageRequest, progress?: ImageLoadProgress): Promise<ProcessedImage> {
     this.live()
-    const request = requestCopy(input), key = requestKey(request), entry = this.maximum ? this.entries.get(key) : undefined
+    const request = requestCopy(input), key = requestKey(request), entry = this.enabled ? this.entries.get(key) : undefined
     if (entry) {
       this.hits++
       this.entries.delete(key); this.entries.set(key, entry)
       return copy(entry.image)
     }
-    let flight = this.maximum ? this.flights.get(key) : undefined
+    let flight = this.enabled ? this.flights.get(key) : undefined
     if (flight) this.hits++
     else {
       if (this.active.size >= maximumProcessedImagePending) throw new Error('Too many pending processed image loads')
@@ -262,7 +273,7 @@ export class ProcessedImageCache {
         const image = copy(result, transferred)
         observations.seal()
         const resident = payload + key.length * 2 + observations.bytes
-        if (this.maximum && generation === this.generation && this.flights.get(key) === pending && observations.retainable) {
+        if (this.enabled && generation === this.generation && this.flights.get(key) === pending && observations.retainable) {
           // Native checks the old logical total, then inserts without a second
           // soft-limit trim. A hit never trims the resulting one-image overshoot.
           this.trimSoft()
@@ -291,7 +302,7 @@ export class ProcessedImageCache {
         if (this.flights.get(key) === pending) this.flights.delete(key)
       })
       this.active.add(pending)
-      if (this.maximum) this.flights.set(key, pending)
+      if (this.enabled) this.flights.set(key, pending)
       flight = pending
     }
     const subscription = progress ? flight.observations.progress.subscribe(progress) : undefined

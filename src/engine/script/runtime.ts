@@ -166,6 +166,9 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
   readonly nativeWindowInput?: boolean
   /** Select the game's TJS operator conventions after installing the platform classes. */
   setScriptOperators?(globalEval: boolean, compatAsterisk: boolean): void
+  /** Original string-variant conversion followed by the native signed32 cast;
+   * this does not evaluate the option as a script expression. */
+  parseOptionInteger?(text: string): number
   /** Attach a native instance without retaining its owner. Its host operation
    * receives [identifier, owner] during native invalidation, before member deletion.
    * Optional private state is strongly owned until successful native invalidation

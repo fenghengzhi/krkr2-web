@@ -1883,6 +1883,24 @@ API Reply* krkr_format_tjs_message(const Reply* request) {
     }
     return reply.release();
 }
+// Startup options are strings, not expressions. Use the original variant
+// conversion (TJSParseNumber -> int64 -> tjs_int) without entering a script,
+// draining releases, or consuming a pending CleanupErrors scope.
+API Reply* krkr_parse_option_integer(const Reply* request) {
+    auto reply = std::make_unique<Reply>();
+    try {
+        if(!request || request->kind != 0 || request->value.Type() != tvtString || !request->args.empty())
+            TJS_eTJSError(u"Invalid startup integer option");
+        reply->value = static_cast<tjs_int>(request->value);
+    } catch(const eTJS& error) {
+        reply->kind = 1;
+        reply->value = error.GetMessage();
+    } catch(const std::exception& error) {
+        reply->kind = 1;
+        reply->value = ttstr(error.what());
+    }
+    return reply.release();
+}
 API Reply* krkr_execute(Vm* vm, const void* source, unsigned length, const tjs_char* name, int mode) {
     deadline = emscripten_get_now() + 8;
     return captureVm(vm, [&](tTJSVariant& value) {

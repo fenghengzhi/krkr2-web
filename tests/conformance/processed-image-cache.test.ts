@@ -19,6 +19,29 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
+test('explicit disable detaches an in-flight image before an auto-zero cache is re-enabled', async () => {
+  const first = deferred<ProcessedImage>(), entered = deferred<void>()
+  let calls = 0
+  const cache = new ProcessedImageCache(() => {
+    if (++calls === 1) { entered.resolve(); return first.promise }
+    return image('normal', 23)
+  })
+  cache.configureSystemLimit(0)
+  cache.setLimit(-1)
+  const old = cache.read(request())
+  await entered.promise
+  cache.setLimit(0)
+  cache.setLimit(-1)
+  assert.equal((await cache.read(request())).data[0], 23)
+  first.resolve(image('normal', 17))
+  assert.equal((await old).data[0], 17)
+  assert.equal((await cache.read(request())).data[0], 23)
+  assert.equal(calls, 2)
+  assert.equal(cache.limit, 0)
+  assert.equal(cache.snapshot().imageCacheEntries, 1)
+  cache.dispose()
+})
+
 test('processed hits precede every processor/lookup and preserve all five native key components', { timeout: 30_000 }, async () => {
   const seen: ProcessedImageRequest[] = [], cache = new ProcessedImageCache((value) => {
     seen.push(value)

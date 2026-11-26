@@ -28,7 +28,7 @@ a.fillRect(0,0,1,1,0xff0000ff);var isolated=b.getMainPixel(0,0)==0xff0000;
 src.fillRect(0,0,1,1,0xffffff00);src.saveLayerImage("savedata/red.tlg","tlg6");b.loadImages("savedata/red.tlg");
 System.clearGraphicCache();var preserved=a.getMainPixel(0,0)==0xff && b.getMainPixel(0,0)==0xffff00 && c.getMainPixel(0,0)==0xff00;
 System.graphicCacheLimit=0;d.loadImages("savedata/green.png");var disabled=System.graphicCacheLimit==0;
-System.graphicCacheLimit=gcsAuto;Debug.message("cache-ready:"+string(isolated && preserved && disabled && ret===void && System.graphicCacheLimit==33554432));
+System.graphicCacheLimit=gcsAuto;Debug.message("cache-ready:"+string(isolated && preserved && disabled && ret===void && System.graphicCacheLimit==67108864));
 `),
     })
     await expect(page.locator('#logs')).toContainText('cache-ready:1')
@@ -82,7 +82,7 @@ System.graphicCacheLimit=gcsAuto;Debug.message("cache-ready:"+string(isolated &&
         name: 'startup.tjs',
         mimeType: 'text/plain',
         buffer: Buffer.from(
-          'Debug.message("preload-start");System.touchImages(["large-gray.png"]);Debug.message("preload-finished");',
+          'System.graphicCacheLimit=gcsAuto;Debug.message("preload-start");System.touchImages(["large-gray.png"]);Debug.message("preload-finished");',
         ),
       },
       {
