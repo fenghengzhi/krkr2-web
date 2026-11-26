@@ -242,6 +242,71 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
         cueEvidence.push({ phase: mode === 0 ? 'default-overlay-clock' : 'unbound-layer-clock', event })
         await send({ op: 'stop', id: 7, epoch })
         holdFrames = false
+        if (mode === 1) {
+          await send({ op: 'seek', id: 7, epoch, position: 0 })
+          await send({ op: 'period', id: 7, epoch, frame: 6 })
+          cueEvents.length = 0
+          // VideoService drops unbound Layer frames by acknowledging their
+          // receipt without running the native frame continuation/frameDone.
+          await send({ op: 'play', id: 7, epoch })
+          await until(() => cueEvents.some((event) => event.type === 'period' && event.reason === 1))
+          check(cueEvents.some((event) => event.type === 'frame'), 'Unbound Layer control never received a real frame')
+          cueEvidence.push({ phase: 'unbound-layer-discarded-frames', events: cueEvents.map((event) => event.type) })
+          await send({ op: 'stop', id: 7, epoch })
+        }
+      }
+      for (const mode of [1, 2] as const) {
+        const epoch = mode + 3
+        holdFrames = false; holdReceipt = true; heldReceipts.length = 0
+        await openCue(epoch, mode)
+        cueEvents.length = 0
+        await send({ op: 'period', id: 7, epoch, frame: 6 })
+        await send({ op: 'play', id: 7, epoch })
+        await until(() => heldReceipts.length === 1)
+        const first = heldReceipts[0]!
+        check(first.event.callbackFrame! < 6, 'The first real playback frame must precede this cue')
+        // Complete the callback AND receipt, then withhold the next native
+        // callback while actual media time continues. This distinguishes the
+        // inter-frame race from the existing unfinished-callback barrier.
+        holdFrames = true
+        await send({ op: 'frameDone', id: 7, epoch, token: first.serial })
+        channel.port2.postMessage({ type: 'ack', serial: first.serial } satisfies VideoMessage)
+        heldReceipts.length = 0
+        const element = node.querySelector('video')!
+        await until(() => held.size > 0 && element.currentTime >= 0.8)
+        check(!cueEvents.some((event) => event.type === 'period'), 'The clock overtook the last delivered layer/mixer frame')
+        const entry = held.entries().next().value!
+        held.delete(entry[0]); frames.delete(entry[0]); holdFrames = false
+        // Forward the genuine native callback unchanged. Delayed delivery uses
+        // the original EC_UPDATE current-clock correction, not fabricated PTS.
+        entry[1].callback(entry[1].now, entry[1].metadata)
+        await until(() => heldReceipts.length === 1)
+        const later = heldReceipts[0]!, frame = later.event.callbackFrame!
+        check(frame >= 6, 'A later actual frame did not cross the cue')
+        const take = await send({ op: 'periodTake', id: 7, epoch, frame }),
+          again = await send({ op: 'periodTake', id: 7, epoch, frame })
+        check(take.events.filter((event) => event.type === 'period' && event.reason === 1).length === 1 &&
+          !again.events.some((event) => event.type === 'period'), 'The delivered-frame cue did not fire exactly once')
+        await send({ op: 'frameDone', id: 7, epoch, token: later.serial })
+        await until(() => element.ended)
+        await until(() => cueEvents.some((event) => event.type === 'ended'))
+        check((await send({ op: 'inspect', id: 7, epoch })).snapshot?.status === 'stop',
+          'Natural EOF waited for a screen receipt after the completed frame callback')
+        holdReceipt = false
+        channel.port2.postMessage({ type: 'ack', serial: later.serial } satisfies VideoMessage)
+        // Changing renderer mode clears that delivery history. With no frame
+        // from the replacement mode, its established clock fallback is live.
+        await send({ op: 'set', id: 7, epoch, settings: { ...defaultVideoSettings(), mode: mode === 1 ? 2 : 1, visible: true } })
+        await send({ op: 'seek', id: 7, epoch, position: 0 })
+        await send({ op: 'period', id: 7, epoch, frame: 6 })
+        cueEvents.length = 0; holdFrames = true
+        await send({ op: 'play', id: 7, epoch })
+        await until(() => cueEvents.some((event) => event.type === 'period' && event.reason === 1))
+        check(!cueEvents.some((event) => event.type === 'frame'), 'Replacement-mode playback callbacks were not withheld')
+        cueEvidence.push({ phase: mode === 1 ? 'layer-delivered-cue' : 'mixer-delivered-cue',
+          first: first.event.callbackFrame, later: frame, periods: take.events, screenReceiptHeldAtEOF: true,
+          replacementModeEvents: cueEvents.map((event) => event.type) })
+        await send({ op: 'stop', id: 7, epoch }); holdFrames = false
       }
     } else if (name === 'hidden-first-frames') {
       const results = [await open(7), await open(8, 1, { ...defaultVideoSettings(), mode: 1 })]

@@ -121,16 +121,37 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           near([pixel >>> 16, (pixel >>> 8) & 255, pixel & 255, 255], raw.pixel, 3, 'ordinary Layer')
           readings.push({ stage, values, raw, layerPixel: pixel }); continue
         }
-        let screenshot: Buffer | undefined, screen: number[] = [], overlay: number[] = []
+        let screenshot: Buffer | undefined, screen: number[] = [], overlay: number[] = [], mixingGeometry: unknown
         const stageFailures: unknown[] = []
         try {
           await expect(async () => {
+            if (index >= 3) {
+              const bitmap = container.locator('canvas.video-mixing-bitmap'), captured = await bitmap.evaluate((node) => {
+                const canvas = node as HTMLCanvasElement, bounds = canvas.getBoundingClientRect(),
+                  output = canvas.parentElement!.getBoundingClientRect(), context = canvas.getContext('2d')!
+                return { width: canvas.width, height: canvas.height,
+                  relative: [(bounds.x - output.x) / output.width, (bounds.y - output.y) / output.height,
+                    bounds.width / output.width, bounds.height / output.height],
+                  pixels: [...context.getImageData(0, 0, canvas.width, canvas.height).data] }
+              })
+              mixingGeometry = { width: captured.width, height: captured.height, relative: captured.relative }
+              expect([captured.width, captured.height]).toEqual([16, 12])
+              // Fixed dsmixer.cpp SetMixingBitmap uses the output rectangle
+              // (200x150), explicitly not the video's 64x48 dimensions. Its
+              // half-pixel bias places this bitmap at (8.5,8.5), size 16x12.
+              for (const [axis, value] of [8.5 / 200, 8.5 / 150, 16 / 200, 12 / 150].entries())
+                expect(captured.relative[axis]).toBeCloseTo(value, 3)
+              expect(captured.pixels).toEqual(Array.from({ length: 16 * 12 }, () => [255, 0, 255, 255]).flat())
+            }
             screenshot = await container.screenshot({ timeout: 5000 })
             const image = readScreenshotPng(screenshot), at = (x: number, y: number) => {
               const offset = (Math.floor(y / 150 * image.height) * image.width + Math.floor(x / 200 * image.width)) * 4
               return [...image.rgba.subarray(offset, offset + 4)]
             }
-            screen = at(150, 100); overlay = at(40, 40)
+            // (40,40) is outside the native destination and samples the movie
+            // barcode. Use an interior point of the independently derived
+            // rectangle, keeping the original per-channel tolerance unchanged.
+            screen = at(150, 100); overlay = at(16, 14)
             expect(screen[3]).toBe(255)
             if (stage === 'overlay' || stage === 'mixer-default' || stage === 'reopened-default') near(screen, raw.pixel, 12, stage)
             if (index >= 3) near(overlay, [255, 0, 255], 3, stage + ' captured mixing Layer')
@@ -153,7 +174,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           }).toPass({ timeout: 10000 })
         } catch (error) { stageFailures.push(error) }
         finally {
-          readings.push({ stage, values, raw, screen, overlay })
+          readings.push({ stage, values, raw, screen, overlay, mixingGeometry })
           if (screenshot) try { await info.attach('video-color-' + stage, { body: screenshot, contentType: 'image/png' }) }
           catch (error) { stageFailures.push(error) }
         }

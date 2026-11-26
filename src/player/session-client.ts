@@ -158,8 +158,8 @@ export class SessionClient {
       return Promise.resolve({ status: 'ignored' as const })
     return this.call('pad', message)
   }
-  async prepare(files: GameInput, project?: ProjectSelection, entry?: string): Promise<string> {
-    const result = await this.call('prepare', files, project, entry)
+  async prepare(files: GameInput, project?: ProjectSelection, entry?: string, discs?: readonly CddaDisc[]): Promise<string> {
+    const result = await this.call('prepare', files, project, entry, discs)
     if (this.disposed) throw new Error('Session client is disposed')
     // The library copies exactly the sources that established this game's
     // identity, even if the remote directory listing is edited after launch.

@@ -393,6 +393,10 @@ jobs:
           cmp files/SCENE.TXT joliet-scene.txt
           python3 "$GITHUB_WORKSPACE/scripts/generate-story-disc.py"
           sha256sum plain.iso joliet.iso story.iso > SHA256SUMS
+      - name: Author bootable KAG discs and extract the original project files independently
+        if: steps.disc-volumes.outcome == 'success'
+        continue-on-error: true
+        run: node --import tsx scripts/generate-boot-disc.mjs
       - name: Encode and independently decode AIFF disc tracks
         id: cdda-aiff-fixtures
         continue-on-error: true
@@ -1479,11 +1483,11 @@ jobs:
           retention-days: 90
 
   original-disc-search:
-    name: Original Windows game finds imported volume labels
+    name: Original Windows game reads mounted discs and KAG project files
     needs: build
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     runs-on: windows-2022
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -1495,11 +1499,22 @@ jobs:
       - name: Compare original TJS drive lookup and argument handling with Windows
         shell: pwsh
         run: ./tests/probes/disc-volume.ps1
+      - name: Read the boot disc project with the original KRKR2 runtime
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: ./tests/probes/disc-boot.ps1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: original-disc-volume-search
           path: out/verification/native-eri/disc-volume/
+          retention-days: 90
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-disc-boot-project
+          path: out/verification/native-eri/disc-boot/
           retention-days: 90
           if-no-files-found: error
 

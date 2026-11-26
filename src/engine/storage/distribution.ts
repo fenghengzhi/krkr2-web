@@ -1,6 +1,8 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
+import type { CddaDisc } from '../ports/cdda.ts'
+import { selectBootDisc } from './boot-disc.ts'
 import { copyGameProject, copyProjectSelection, findProjectExecutable, selectProjectLazy, type GameProject, type ProjectSelection } from './project.ts'
-import { extractStorageName, extractStoragePath, parseStoragePath, toPublicStoragePath } from './public-path.ts'
+import { discAddress, extractStorageName, extractStoragePath, nativeDiscPath, parseStoragePath, toPublicStoragePath } from './public-path.ts'
 
 // Identify the launcher directory in an imported tree before applying KRKR's
 // native project selection. Wrapping directories remain part of every path.
@@ -94,14 +96,23 @@ async function locateGame(entries: readonly Resource[], selection: ProjectLocati
   return { mode: 'auto', executableDirectory: folder, executable: selectedExe && toPublicStoragePath(selectedExe) }
 }
 
+/** Collection mode can try optical boot when no loose game script or
+ * container was supplied. An existing loose game's selection is unchanged. */
+export function discOnlyInput(names: readonly string[]): boolean {
+  return names.some((name) => /\.(?:iso|cue)$/i.test(name)) &&
+    names.every((name) => /\.(?:iso|cue|bin|img|wav|mp3|aiff?|txt|md)$/i.test(name))
+}
 export async function prepareProject(resources: Resource[], requested: ProjectSelection, reader: ArchiveReader,
-  checkpoint: () => Promise<void>, entry = 'startup.tjs'): Promise<{ resources: Resource[]; project?: GameProject }> {
-  const selection = copyProjectSelection(requested)
-  if (selection.mode === 'collection') return { resources }
+  checkpoint: () => Promise<void>, entry = 'startup.tjs', discs?: readonly CddaDisc[]): Promise<{ resources: Resource[]; project?: GameProject; configFiles?: Resource[] }> {
+  const setting = copyProjectSelection(requested)
+  const collection = setting.mode === 'collection'
+  const onlyDiscs = discOnlyInput(resources.map((file) => file.name))
+  if (collection && !onlyDiscs) return { resources }
+  const selection: ProjectLocation = setting.mode === 'collection' ? { mode: 'auto' } : setting
   // Use the same optional entry hint for ZIP members and loose imports. The
   // original address is still resolved from the selected project by start().
   let entryName = '', entryInArchive = false
-  const relativeEntry = !/^(?:game:|[\\/])/i.test(entry)
+  const relativeEntry = !/^(?:[a-z][a-z0-9+.-]*:|[\\/])/i.test(entry)
   try {
     const path = parseStoragePath(entry)
     entryName = path.split('>', 1)[0]!.toLowerCase()
@@ -188,6 +199,21 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     const project = await select(members, inner)
     return { resources: members, project: copyGameProject({ ...project, distribution: archive.name })! }
   }
+  const entryDisc = discAddress(nativeDiscPath(entry) ?? entry)
+  const boot = () => selectBootDisc(resources, selection, discs, reader, checkpoint, async (files, choice) => {
+    const hint = entryDisc ? entryDisc.path.split('>', 1)[0]!.toLowerCase() : entryName
+    const location = await locateGame(files, choice, checkpoint, probe, 'files', hint, relativeEntry || !!entryDisc, false)
+    return location && select(files, location)
+  }, entryDisc?.drive)
+  if (collection) return await boot() ?? { resources }
+  if ((selection.mode === 'root' && (selection.bootDisc || discAddress(selection.directory))) ||
+      discAddress(selection.executableDirectory ?? '') || discAddress(selection.executable ?? '') ||
+      (selection.executable && /\.(?:cue|iso)$/i.test(selection.executable)) ||
+      (onlyDiscs && (entryDisc || selection.executableDirectory || selection.executable || selection.mode === 'root' && !selection.distribution))) {
+    const mounted = await boot()
+    if (!mounted) throw new Error('找不到指定的启动光盘。')
+    return mounted
+  }
   if (selection.mode === 'root') {
     if (selection.distribution !== undefined) {
       const archive = resources.find((file) => file.name === selection.distribution)
@@ -240,6 +266,10 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
       }
       if (ordinary) return ordinary
     }
+  }
+  if (!location && !entryInArchive && !selection.executable) {
+    const mounted = await boot()
+    if (mounted) return mounted
   }
   return { resources, project: await select(resources, location ?? selection) }
 }

@@ -12,7 +12,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     const failures: unknown[] = [], errors: string[] = [], readings: unknown[] = [], traces: unknown[] = []
     let sequence = 0
     page.on('pageerror', (error) => errors.push(error.message))
-    await observeVideoFrames(page); await installHandoffReadbacks(page); await installVideoAudioProbe(page)
+    await observeVideoFrames(page, { passive: true }); await installHandoffReadbacks(page); await installVideoAudioProbe(page)
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !await page.evaluate(() => 'Suspending' in WebAssembly), 'JSPI unavailable')
     const canvas = page.locator('.game-window').filter({ has: page.locator('.game-window-title', { hasText: /^Movie frame cue order$/ }) }).locator('canvas[data-window-id]'),

@@ -1,12 +1,15 @@
 import type { SourceFile } from '../backends/files/source-files.ts'
 import { copyGameProject, type GameProject } from '../engine/storage/project.ts'
+import { discAddress } from '../engine/storage/public-path.ts'
 /** Existing collection identities remain unchanged. Project namespaces
  * isolate saves when one imported collection contains several games. */
 export async function projectIdentity(base: string, project?: GameProject): Promise<string> {
   if (!/^game-[a-f0-9]{64}$/.test(base)) throw new Error('Invalid source game identity')
   const clean = copyGameProject(project)
   if (!clean) return base
-  const key = ['krkr2-project-v1', base, clean.directory, clean.executableDirectory]
+  const key = clean.bootDisc ? ['krkr2-disc-project-v1', base, clean.bootDisc,
+    discAddress(clean.directory)!.path, discAddress(clean.executableDirectory)!.path]
+    : ['krkr2-project-v1', base, clean.directory, clean.executableDirectory]
   if (clean.distribution !== undefined) key.push(clean.distribution)
   const data = new TextEncoder().encode(JSON.stringify(key)),
     hash = new Uint8Array(await crypto.subtle.digest('SHA-256', data))

@@ -1,8 +1,23 @@
 import { test as base, expect, type Page } from '@playwright/test'
 
 /** Observe the frame submitted for presentation, separately from seek completion. */
-export async function observeVideoFrames(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+export async function observeVideoFrames(page: Page, options: { passive?: boolean } = {}): Promise<void> {
+  await page.addInitScript((passive: boolean) => {
+    if (passive) {
+      // A loadedmetadata subscriber can miss a paused element's sole initial
+      // submission. Record the host's already-armed real callback instead of
+      // adding another request or treating loadeddata as presentation proof.
+      const request = HTMLVideoElement.prototype.requestVideoFrameCallback
+      HTMLVideoElement.prototype.requestVideoFrameCallback = function (callback) {
+        const video = this
+        return request.call(video, function (this: unknown, now, metadata) {
+          video.dataset.presentedTime = String(metadata.mediaTime)
+          video.dataset.presentedFrames = String(metadata.presentedFrames)
+          callback.call(this, now, metadata)
+        })
+      }
+      return
+    }
     document.addEventListener(
       'loadedmetadata',
       (event) => {
@@ -17,7 +32,7 @@ export async function observeVideoFrames(page: Page): Promise<void> {
       },
       true,
     )
-  })
+  }, options.passive === true)
 }
 
 type ProbeWindow = Window & { videoPresentation?: unknown[] }

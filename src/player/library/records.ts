@@ -1,7 +1,7 @@
 import type { LibraryDownload, LibraryGame } from '../../protocol/library.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import { copyGameEncodings, copyGameProject, type GameProject } from '../../engine/storage/project.ts'
-import { storageFilePath, toPublicStoragePath } from '../../engine/storage/public-path.ts'
+import { nativeDiscPath, storageFilePath, toPublicStoragePath } from '../../engine/storage/public-path.ts'
 import { copyCddaDiscs } from '../../engine/ports/cdda.ts'
 
 export const LIBRARY_DIRECTORY = 'krkr2-library-v1'
@@ -50,7 +50,8 @@ export function gameSettings(
     throw new Error('Game name must contain 1–200 characters')
   if (typeof value.entry !== 'string' || value.entry.length > 1024)
     throw new Error('Invalid game entry script')
-  const logicalEntry = storageFilePath(value.entry, copyGameProject(project)?.directory)
+  const validated = copyGameProject(project)
+  const logicalEntry = storageFilePath((validated?.bootDisc && nativeDiscPath(value.entry)) || value.entry, validated?.directory)
   let entry = toPublicStoragePath(logicalEntry)
   if (!/^(?:game:|[\\/])/i.test(value.entry)) {
     // Retain ordinary relative startup settings. A parent reference that is
@@ -165,6 +166,6 @@ function projectMetadata(game: LibraryGame): void {
   if (!/^game-[a-f0-9]{64}$/.test(game.sourceGameId ?? '') ||
       project.directory !== game.project!.directory ||
       project.executableDirectory !== game.project!.executableDirectory || project.distribution !== game.project!.distribution ||
-      project.executable !== game.project!.executable)
+      project.executable !== game.project!.executable || project.bootDisc !== game.project!.bootDisc)
     throw new Error('Invalid library project metadata')
 }

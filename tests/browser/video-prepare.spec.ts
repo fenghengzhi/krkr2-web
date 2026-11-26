@@ -94,30 +94,39 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       const box = await canvas.boundingBox(); expect(box).not.toBeNull()
       await canvas.click({ position: { x: x * box!.width / 160, y: 68 * box!.height / 80 }, timeout: 5000 })
     }
-    const capture = async (phase: string, clock: number, prepared = false) => {
-      const sample = await canvas.evaluate((node) => {
+    const capture = async (phase: string, clock: number, prepared = false, retainedSource?: string) => {
+      const sample = await canvas.evaluate((node, retainedSource) => {
         const canvas = node as HTMLCanvasElement,
           video = document.querySelector<HTMLVideoElement>(`video[data-video-id][data-window-id="${canvas.dataset.windowId}"]`)
         if (!video || video.readyState < 2 || !video.paused || video.seeking)
           throw new Error('Prepare capture requires the actual settled paused decoder')
-        return { ...((window as unknown as ProbeWindow).handoffReadbacks.capture(video, canvas)),
+        const probe = (window as unknown as ProbeWindow).handoffReadbacks, current = probe.capture(video, canvas)
+        return { ...current, source: video.currentSrc || video.src,
+          retainedProduction: retainedSource === null ? undefined : probe.readProduction(retainedSource),
           presentedTime: Number(video.dataset.presentedTime), presentedFrames: Number(video.dataset.presentedFrames) }
-      })
+      }, retainedSource ?? null)
       readings.push({ phase, ...sample })
       expect(sample.dropped).toBe(0)
       expect(sample.media.position).toBe(clock); expect(sample.media.paused).toBe(true); expect(sample.media.seeking).toBe(false)
       expect([sample.media.width, sample.media.height, sample.media.pixels.length]).toEqual([64, 48, 12288])
-      expect(sample.production).toBeDefined(); expect(sample.production!.willReadFrequently).toBe(true)
-      expect([sample.production!.width, sample.production!.height]).toEqual([64, 48])
+      // perPrepare may replace the decoder after the old frame was published.
+      // Native then pauses/rewinds the replacement without redrawing the Layer.
+      // Keep both observations: current decoder readback (possibly absent) and
+      // the last actual production readback from the explicitly retained source.
+      const layerProduction = retainedSource === undefined ? sample.production : sample.retainedProduction
+      expect(layerProduction).toBeDefined(); expect(layerProduction!.willReadFrequently).toBe(true)
+      expect(layerProduction!.source).toBe(retainedSource ?? sample.source)
+      if (retainedSource !== undefined) expect(sample.source).not.toBe(retainedSource)
+      expect([layerProduction!.width, layerProduction!.height]).toEqual([64, 48])
       if (prepared) {
         // Native Prepare keeps the Layer from its first delivered frame;
         // its final rewind changes the clock without another Layer update.
         // The fixture's first six actual frames share the initial red image.
-        expect(sample.production!.position).toBeGreaterThanOrEqual(0)
-        expect(sample.production!.position).toBeLessThan(0.5)
-      } else expect(sample.production!.position).toBe(clock)
+        expect(layerProduction!.position).toBeGreaterThanOrEqual(0)
+        expect(layerProduction!.position).toBeLessThan(0.5)
+      } else expect(layerProduction!.position).toBe(clock)
       expect(sample.reads.cpuRepeated).toEqual(sample.reads.cpu); expect(sample.reads.cpuRedrawn).toEqual(sample.reads.cpu)
-      expect(sample.production!.pixels).toEqual(sample.media.pixels)
+      expect(layerProduction!.pixels).toEqual(sample.media.pixels)
       expect([sample.paint.width, sample.paint.height]).toEqual([160, 80])
       for (const x of [0, 80]) {
         const pixels: number[] = []
@@ -181,7 +190,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           await expect(page.locator('video')).toHaveCount(0)
           expect((await observeVideoAudio(page)).liveUrls).toBe(0)
         } else {
-          const after = await capture(action + '-complete', 0, true)
+          const after = await capture(action + '-complete', 0, true, action === 'reopen' ? blue.source : undefined)
           expect(after.media.pixels).toEqual(initial.media.pixels)
           if (action !== 'reopen') expect(after.presentedFrames).toBeGreaterThan(blue.presentedFrames)
           else expect((await observeVideoAudio(page)).createdUrls).toBeGreaterThan(createdUrls)

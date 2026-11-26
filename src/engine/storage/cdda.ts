@@ -76,7 +76,7 @@ export class CddaDiscs {
   async drives(): Promise<string[]> {
     return (await this.bindings(false)).map((disc) => disc.drive)
   }
-  async filesystem(drive: string): Promise<DiscFilesystem | undefined> {
+  async openDataDisc(drive: string): Promise<{ filesystem: DiscFilesystem; image: string } | undefined> {
     const disc = (await this.bindings(false)).find((disc) => disc.drive === drive)
     if (!disc) return
     const mounted = await this.mountedVolume(disc).catch((error: unknown) => {
@@ -87,11 +87,16 @@ export class CddaDiscs {
     const { file, track } = mounted, image = file.cacheToken ?? file
     const geometry = [track.first, track.end, track.layout.bytes, track.layout.payload].join('/')
     const cached = this.filesystems.get(image)
-    if (cached?.geometry === geometry) return cached.fs
+    if (cached?.geometry === geometry) return { filesystem: cached.fs, image: file.name }
     const { source } = await openResourceSource(file, { checkpoint: () => this.storage.checkpoint() })
     const fs = await openDiscFilesystem(source, track)
-    if (fs) this.filesystems.set(image, { geometry, fs })
-    return fs
+    if (fs) {
+      this.filesystems.set(image, { geometry, fs })
+      return { filesystem: fs, image: file.name }
+    }
+  }
+  async filesystem(drive: string): Promise<DiscFilesystem | undefined> {
+    return (await this.openDataDisc(drive))?.filesystem
   }
   private async volumeLabel(disc: CddaDisc): Promise<string | undefined> {
     const mounted = await this.mountedVolume(disc, true)

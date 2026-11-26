@@ -2,7 +2,7 @@ import packageInfo from '../../../package.json' with { type: 'json' }
 import { normalizePath } from '../storage/resolver.ts'
 import { SystemDisplay, type SystemDisplayMetrics } from './display.ts'
 import type { GameProject } from '../storage/project.ts'
-import { extractStoragePath, storageDirectoryPath, toPublicStoragePath } from '../storage/public-path.ts'
+import { discAddress, extractStoragePath, storageDirectoryPath, toPublicStoragePath } from '../storage/public-path.ts'
 
 const packageVersion = packageInfo.version
 if (!/^\d+\.\d+\.\d+$/.test(packageVersion))
@@ -23,11 +23,14 @@ export function normalizeSystemDataPath(input?: string, executableDirectory?: st
   validateSystemDataPathTemplate(input)
   const template = input || '$(exepath)/savedata'
   if (executableDirectory !== undefined) {
-    const base = toPublicStoragePath(executableDirectory).replace(/\/$/, ''),
+    // A boot CD has no writable installation directory. The game's private
+    // save store supplies the writable base for relative paths and macros.
+    const writable = discAddress(executableDirectory) ? '' : executableDirectory
+    const base = toPublicStoragePath(writable).replace(/\/$/, ''),
       prefixes: Record<string, string> = { exepath: base, personalpath: base + '/savedata',
         appdatapath: base + '/savedata', vistapath: base + '/savedata' },
       expanded = template.replace(/\$\(([^)]+)\)/g, (macro, name: string) => prefixes[name] ?? macro),
-      path = storageDirectoryPath(/[\\/]$/.test(expanded) ? expanded : expanded + '/', executableDirectory)
+      path = storageDirectoryPath(/[\\/]$/.test(expanded) ? expanded : expanded + '/', writable)
     if (path.length > 4096) throw new Error('System dataPath exceeds 4096 characters')
     return path
   }
@@ -80,7 +83,7 @@ export class SystemEnvironment {
     this.display = new SystemDisplay(display)
     const path = normalizeSystemDataPath(arguments_?.get('-datapath'), project?.executableDirectory)
     this.exePath = project ? toPublicStoragePath(project.executableDirectory) : ''
-    this.personalPath = this.appDataPath = project ? toPublicStoragePath(project.executableDirectory + 'savedata/') : 'savedata/'
+    this.personalPath = this.appDataPath = project ? toPublicStoragePath(normalizeSystemDataPath(undefined, project.executableDirectory)) : 'savedata/'
     this.dataPath = project ? toPublicStoragePath(path) : path
   }
 
@@ -88,7 +91,7 @@ export class SystemEnvironment {
     const directory = extractStoragePath(executable)
     this.exeName = toPublicStoragePath(executable)
     this.exePath = toPublicStoragePath(directory)
-    this.personalPath = this.appDataPath = toPublicStoragePath(directory + 'savedata/')
+    this.personalPath = this.appDataPath = toPublicStoragePath(normalizeSystemDataPath(undefined, directory))
     this.dataPath = toPublicStoragePath(dataDirectory)
   }
 

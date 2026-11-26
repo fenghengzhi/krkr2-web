@@ -10,6 +10,9 @@ interface Readback {
   pixels: number[]
 }
 export interface HandoffProbe {
+  /** Last real production readback of this exact encoded source, including
+   * a retired decoder whose already-published Layer pixels remain visible. */
+  readProduction(source: string): Readback | undefined
   capture(video: HTMLVideoElement, canvas: HTMLCanvasElement): {
     media: { position: number; paused: boolean; seeking: boolean; width: number; height: number; pixels: number[] }
     reads: { default: number[]; defaultRepeated: number[]; defaultRedrawn: number[];
@@ -67,6 +70,10 @@ export async function installHandoffReadbacks(page: Page): Promise<void> {
       return image
     } as typeof read
     ;(window as unknown as ProbeWindow).handoffReadbacks = {
+      readProduction(source) {
+        const value = records.get(source)
+        return value && { ...value, pixels: value.pixels.slice() }
+      },
       capture(video, canvas) {
         const source = video.currentSrc || video.src,
           production = records.get(source)

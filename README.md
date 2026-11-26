@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 166 批支持从单个 ISO 或 CUE 光盘组直接启动原版游戏，并将存档写入独立目录。同批修订影片提示帧的触发时机，以及此前阻断网页构建的两处错误。[166 实现与托管证据](docs/decisions/166-bootable-game-discs-and-movie-cues.md)
+
 第 165 批加入数据光盘文件读取。游戏可以按卷标找到导入的 ISO 或 CUE，从盘中加载剧情和立绘。此批也处理分段 MP4 切换音轨时的时长判断。结果等待托管验证。[165 实现与托管证据](docs/decisions/165-disc-files-and-fragmented-movies.md)
 
 第 164 批让多盘游戏按卷标找到配乐光盘，切轨时继续当前淡出，并处理预渲染字幕选错字体、WebKit 在过场首帧前停住的问题。新增行为等待托管验收。[164 实现与托管证据](docs/decisions/164-disc-volumes-fades-and-game-rendering.md)

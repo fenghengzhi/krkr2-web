@@ -54,7 +54,11 @@ interface Movie {
   mixerMetadata?: { width: number; height: number; timeline?: VideoTimeline }
   callback?: number
   inFlight?: number
+  inFlightMode?: VideoSettings['mode']
   frameCallbackDone?: boolean
+  /** Once playback has delivered real layer/mixer frames, their continuation
+   * owns the cue. A newer media clock must not overtake the delivered image. */
+  hasPlaybackFrame: boolean
   endedPending?: boolean
   blocked: boolean
   disposed: boolean
@@ -143,6 +147,7 @@ export class WebVideoHost {
           for (const movie of this.movies.values())
             if (movie.inFlight === message.serial) {
               movie.inFlight = undefined
+              movie.inFlightMode = undefined
               if (movie.endedPending) {
                 movie.endedPending = false
                 // Its last frame/cue may have paused, sought or replaced the
@@ -473,6 +478,7 @@ export class WebVideoHost {
     const serial = this.nextEvent++
     if (frame && movie) {
       movie.inFlight = serial
+      movie.inFlightMode = movie.settings.mode
       movie.frameCallbackDone = false
       if (event.type === 'frame' && event.deferredPeriod) event.deliveryToken = serial
     }
@@ -607,11 +613,13 @@ export class WebVideoHost {
         return true
       }
     }
-    // Keep the established clock fallback (including overlays, absent Layers
-    // and a browser withholding rVFC). Once a real frame HAS been delivered,
-    // its immediate game callback must complete before this fallback can race
-    // its cancellation/rearming. The rVFC path never consumes before dispatch.
-    if (fallbackPeriod && (movie.inFlight === undefined || movie.frameCallbackDone))
+    // Overlay and a renderer which has delivered no playback frame retain the
+    // clock fallback. Once layer/mixer delivery starts, EC_UPDATE's curFrame
+    // owns the cue, even between callbacks: timeupdate can round to frame 17
+    // before the last actual delivered frame 16 is replaced. A later delivered
+    // frame >= the cue consumes it once; a missing rVFC never fabricates a frame.
+    if (fallbackPeriod && (s.mode === 0 || !movie.hasPlaybackFrame) &&
+        (movie.inFlight === undefined || movie.frameCallbackDone))
       this.period(movie, videoClockFrameAt(clockTimeline, time))
     return false
   }
@@ -961,6 +969,10 @@ export class WebVideoHost {
     if (settings.periodEventFrame !== movie.settings.periodEventFrame)
       movie.period.set(settings.periodEventFrame, this.snapshot(movie).frame)
     movie.colorFilter = setMovieColorFilter(movie.element, movie.container, color ?? defaultVideoColors, movie.colorFilter)
+    if (settings.mode !== movie.settings.mode) {
+      movie.hasPlaybackFrame = false
+      movie.inFlightMode = undefined
+    }
     movie.settings = { ...settings, color,
       ...(movie.timeline?.audioStreams === 0 ? { enabledAudioStream: -1 } : {}) }
     movie.element.playbackRate = settings.playRate
@@ -1047,6 +1059,7 @@ export class WebVideoHost {
         timeline, mixerMetadata: stage.previous?.mixerMetadata,
         blocked: false, disposed: false, period: new VideoPeriod(settings.periodEventFrame, stage.previous?.period.past), seeking: false,
         prepareToken: stage.previous?.prepareToken ?? 0,
+        hasPlaybackFrame: false,
         seenSamples: new VideoSampleHistory(timeline?.times.length ?? 0),
         abort: stage.abort, audio }
       stage.movie = movie
@@ -1310,6 +1323,12 @@ export class WebVideoHost {
       // A seek/pause may change epoch on this same decoder. The unique frame
       // token still owns its callback; a replaced decoder cannot match it.
       if (movie && movie.inFlight === command.token) {
+        // An unbound Layer drops the frame with only a screen ack, retaining
+        // its clock fallback. This completion proves that the frame consumer
+        // actually ran. A mode change invalidates only this cue ownership,
+        // not the original callback token's EOF cleanup responsibility.
+        if (movie.inFlightMode === movie.settings.mode && (movie.settings.mode === 1 || movie.settings.mode === 2))
+          movie.hasPlaybackFrame = true
         movie.frameCallbackDone = true
         if (movie.endedPending) {
           movie.endedPending = false

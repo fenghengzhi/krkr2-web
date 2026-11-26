@@ -47,8 +47,13 @@ with tarfile.open(archive) as bundle:
 const h264 = resolve(sources, source.openh264.directory), ffmpeg = resolve(sources, source.ffmpeg.directory),
   makeH264 = ['-j2', 'OS=linux', 'ARCH=wasm', 'USE_ASM=No', 'USE_STACK_PROTECTOR=No', 'CC=emcc', 'CXX=em++', 'AR=emar',
     'CFLAGS_OPT=-O2', 'STATIC_LDFLAGS=-lc++ -lm', `PREFIX=${prefix}`]
-const clockPatch = resolve(root, 'native/legacy-media/elementary-mpeg1-clock.patch')
-run('patch', ['--batch', '--fuzz=0', '-p1', '-i', clockPatch], ffmpeg)
+const clockPatch = resolve(root, 'native/legacy-media/elementary-mpeg1-clock.patch'),
+  clockSource = resolve(ffmpeg, 'fftools/ffmpeg.c')
+// Preserve the exact ordinary build input even when patch rejects its context.
+console.log(JSON.stringify({ phase: 'elementary-clock-patch-input',
+  sourceSha256: hash(readFileSync(clockSource)), patchSha256: hash(readFileSync(clockPatch)) }))
+run('patch', ['--batch', '--fuzz=0', '--verbose', '-p1', '-i', clockPatch], ffmpeg)
+console.log(JSON.stringify({ phase: 'elementary-clock-patch-output', sourceSha256: hash(readFileSync(clockSource)) }))
 run('make', [...makeH264, 'install-static'], h264)
 const link = ['-O2', '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sEXPORT_NAME=createLegacyMedia',
   '-sENVIRONMENT=worker,node', '-sFORCE_FILESYSTEM=1', '-lworkerfs.js',

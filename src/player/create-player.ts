@@ -551,7 +551,7 @@ export function createPlayer(
       debugMode = false,
       project?: ProjectSelection,
     ) {
-      identity = await session.prepare(files, 'libraryId' in files || project === undefined ? undefined : copyProjectSelection(project), entry)
+      identity = await session.prepare(files, 'libraryId' in files || project === undefined ? undefined : copyProjectSelection(project), entry, cddaDiscs)
       await session.initialize(
         surfaceChannel.port2,
         backend,

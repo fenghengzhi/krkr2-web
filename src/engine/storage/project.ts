@@ -2,7 +2,7 @@ import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { StorageResolver } from './resolver.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../../formats/zip/names.ts'
 import { scriptEncoding, type ScriptEncoding } from '../script/text-encoding.ts'
-import { discAddress, extractStoragePath, parseStoragePath, storageDirectoryPath, storageFilePath, toPublicStoragePath } from './public-path.ts'
+import { discAddress, extractStoragePath, nativeDiscPath, parseStoragePath, storageDirectoryPath, storageFilePath, toPublicStoragePath } from './public-path.ts'
 
 /** Host startup configuration; these are not TJS Storages properties. */
 export interface GameEncodings {
@@ -18,13 +18,14 @@ export function copyGameEncodings(value: GameEncodings): GameEncodings {
 }
 export type ProjectSelection = ({ mode: 'collection' } |
   { mode: 'auto'; executableDirectory?: string; executable?: string } |
-  { mode: 'root'; directory: string; executableDirectory?: string; executable?: string; distribution?: string }) & GameEncodings
+  { mode: 'root'; directory: string; executableDirectory?: string; executable?: string; distribution?: string; bootDisc?: string }) & GameEncodings
 /** Frozen logical addresses, relative to the imported namespace. */
-export interface GameProject { directory: string; executableDirectory: string; executable?: string; distribution?: string }
+export interface GameProject { directory: string; executableDirectory: string; executable?: string; distribution?: string; bootDisc?: string }
 
 function directory(value: unknown): string {
-  if (typeof value !== 'string' || value.length > 4096 || discAddress(value)) throw new Error('Invalid project directory')
-  return storageDirectoryPath(value === '' ? './' : /[\\/>]$/.test(value) ? value : value + '/')
+  if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid project directory')
+  const path = nativeDiscPath(value) ?? value
+  return storageDirectoryPath(path === '' ? './' : /[\\/>]$/.test(path) ? path : path + '/')
 }
 function distributionPath(value: unknown): string {
   if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid distribution ZIP path')
@@ -34,10 +35,15 @@ function distributionPath(value: unknown): string {
 }
 function executablePath(value: unknown, base: string): string {
   if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid executable selection')
-  const path = storageFilePath(value, base)
+  const path = storageFilePath(nativeDiscPath(value) ?? value, base)
   if (path.includes('>')) throw new Error('Executable cannot be an archive member')
-  if (discAddress(path)) throw new Error('Expected an imported executable')
   return toPublicStoragePath(path)
+}
+function bootDiscPath(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid boot disc')
+  const path = storageFilePath(value)
+  if (discAddress(path) || path.includes('>') || !/\.(?:cue|iso)$/i.test(path)) throw new Error('Expected an imported ISO or CUE')
+  return path
 }
 export function copyGameProject(value?: GameProject): GameProject | undefined {
   if (value === undefined) return undefined
@@ -45,8 +51,13 @@ export function copyGameProject(value?: GameProject): GameProject | undefined {
   const executableDirectory = directory(value.executableDirectory)
   const result = { directory: directory(value.directory), executableDirectory,
     ...(value.executable === undefined ? {} : { executable: executablePath(value.executable, executableDirectory) }),
+    ...(value.bootDisc === undefined ? {} : { bootDisc: bootDiscPath(value.bootDisc) }),
     ...(value.distribution === undefined ? {} : { distribution: distributionPath(value.distribution) }) }
   if (result.executableDirectory.includes('>')) throw new Error('Executable directory cannot be inside an archive')
+  const drive = discAddress(result.executableDirectory)?.drive
+  if (Boolean(drive) !== Boolean(result.bootDisc) || discAddress(result.directory)?.drive !== drive ||
+      (result.executable && discAddress(result.executable)?.drive !== drive) || (drive && result.distribution))
+    throw new Error('Disc project paths must refer to the same boot disc')
   return Object.freeze(result)
 }
 export function copyProjectSelection(value?: ProjectSelection): ProjectSelection {
@@ -57,8 +68,10 @@ export function copyProjectSelection(value?: ProjectSelection): ProjectSelection
   if (value.mode !== 'auto' && value.mode !== 'root') throw new Error('Unknown project selection')
   const executableDirectory = directory(value.executableDirectory ?? '')
   if (executableDirectory.includes('>')) throw new Error('Executable directory cannot be inside an archive')
-  const launcher = value.executable === undefined ? {} : { executable: executablePath(value.executable, executableDirectory) }
+  const launcher = value.executable === undefined ? {} : { executable: executablePath(value.executable,
+    /\.(?:iso|cue)$/i.test(value.executable) ? '' : executableDirectory) }
   if (value.mode === 'root') return { mode: 'root', directory: directory(value.directory), executableDirectory, ...launcher, ...encodings,
+    ...(value.bootDisc === undefined ? {} : { bootDisc: bootDiscPath(value.bootDisc) }),
     ...(value.distribution === undefined ? {} : { distribution: distributionPath(value.distribution) }) }
   return { mode: 'auto', executableDirectory, ...launcher, ...encodings }
 }

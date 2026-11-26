@@ -7,7 +7,8 @@ import { readRemoteManifest } from '../backends/files/remote-manifest.ts'
 import { HttpRangePool } from '../backends/files/http-range.ts'
 import { gameIdentity, projectIdentity } from '../player/game-identity.ts'
 import { copyGameEncodings, copyProjectSelection, type GameEncodings, type GameProject, type ProjectSelection } from '../engine/storage/project.ts'
-import { prepareProject } from '../engine/storage/distribution.ts'
+import { discOnlyInput, prepareProject } from '../engine/storage/distribution.ts'
+import { discAddress, discStoragePath, nativeDiscPath } from '../engine/storage/public-path.ts'
 import { createSessionArchiveReader } from '../backends/files/archive-reader.ts'
 import { prepareDroppedResources } from '../backends/files/drop-resources.ts'
 import type { Resource } from '../engine/ports/storage.ts'
@@ -25,6 +26,7 @@ let preparedEncodings: GameEncodings = {}
 sources.signal.addEventListener('abort', () => distributionReader?.dispose(), { once: true })
 let prepared: SourceFile[] | undefined
 let preparedResources: Resource[] | undefined
+let configFiles: Resource[] | undefined
 let preparedProject: GameProject | undefined
 let gameId: string | undefined
 let preparing = false
@@ -112,7 +114,7 @@ async function completeInput(operation: (target: EngineSession) => Promise<void>
   }
 }
 const api: SessionApi = {
-  async prepare(files, selection, entry) {
+  async prepare(files, selection, entry, discs) {
     sources.signal.throwIfAborted()
     if (session || preparing || prepared) throw new Error('Worker already owns a game source')
     preparing = true
@@ -150,11 +152,12 @@ const api: SessionApi = {
         identity = await gameIdentity(filesReady, checkpoint)
       }
       preparedEncodings = copyGameEncodings(libraryLease?.record ?? requested)
-      if (requested.mode !== 'collection') {
+      if (requested.mode !== 'collection' || (!libraryLease && discOnlyInput(filesReady.map((file) => file.path)))) {
         distributionReader = createSessionArchiveReader(undefined, preparedEncodings.zipEncoding)
         resources = await importSources(filesReady, checkpoint, { lazyArchives: true })
-        const mount = await prepareProject(resources, requested, distributionReader, checkpoint, entry)
+        const mount = await prepareProject(resources, requested, distributionReader, checkpoint, entry, libraryLease?.record.cddaDiscs ?? discs)
         resources = mount.resources
+        configFiles = mount.configFiles
         project = mount.project
         const actual = await projectIdentity(libraryLease?.record.sourceGameId ?? identity, project)
         if (libraryLease && actual !== identity)
@@ -196,7 +199,8 @@ const api: SessionApi = {
       preparedProject, preparedProject?.distribution ? distributionReader : undefined, preparedEncodings)
     generation = request.generation
     session.control.onCancel(() => sources.close())
-    await session.initialize(preparedResources)
+    await session.initialize(configFiles ?? preparedResources)
+    configFiles = undefined
     sources.signal.throwIfAborted()
     syncFrames()
     return session.snapshot()
@@ -229,6 +233,12 @@ const api: SessionApi = {
   },
   async start(entry) {
     if (mounting) throw new Error('Wait for file import to finish')
+    const saved = libraryLease?.record.project
+    if (saved?.bootDisc && preparedProject?.bootDisc === saved.bootDisc) {
+      const path = discAddress(nativeDiscPath(entry) ?? entry)
+      if (path && path.drive === discAddress(saved.executableDirectory)?.drive)
+        entry = discStoragePath(discAddress(preparedProject.executableDirectory)!.drive, path.path)
+    }
     await active().start(entry)
     return active().snapshot()
   },
@@ -359,6 +369,7 @@ const api: SessionApi = {
     prepared = undefined
     preparedResources = undefined
     preparedProject = undefined
+    configFiles = undefined
     if (frameTimer) clearInterval(frameTimer)
     frameTimer = undefined
     frameDelay = 0

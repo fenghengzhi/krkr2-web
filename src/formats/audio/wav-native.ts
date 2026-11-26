@@ -32,8 +32,8 @@ export function* nativeWaveLayout(size: number): Generator<WaveReadRange, Native
         if (!padded && crossedOdd) break
         throw new Error('WAVE metadata chunk budget exceeded')
       }
-      const header = yield* read(offset, 8, !padded && crossedOdd && emptyChunks >= 8),
-        length = audioView(header).getUint32(4, true), start = offset + 8,
+      const header: Uint8Array = yield* read(offset, 8, !padded && crossedOdd && emptyChunks >= 8),
+        length: number = audioView(header).getUint32(4, true), start = offset + 8,
         tag = audioTag(header, 0)
       if (length > size - start) {
         if (!padded && crossedOdd && tag !== 'fmt ' && tag !== 'data') break

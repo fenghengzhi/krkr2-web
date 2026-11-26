@@ -552,7 +552,10 @@ export class EngineSession {
     this.project = copyGameProject(deps.project)
     this.zipEncoding = zipNameEncoding(deps.zipEncoding)
     this.textEncoding = new ScriptTextEncoding(deps.scriptEncoding)
-    const cddaDiscs = copyCddaDiscs(deps.cddaDiscs)
+    const boot = this.project?.bootDisc
+    const cddaDiscs = copyCddaDiscs(deps.cddaDiscs ?? (boot ? [{
+      drive: discAddress(this.project!.executableDirectory)!.drive, cue: toPublicStoragePath(boot),
+    }] : undefined))
     // Reject invalid configuration before clocks or subscribed host resources
     // are consulted. A failed constructor has no disposal owner yet.
     this.systemColors = new SystemColors(deps.systemColors)
@@ -572,7 +575,7 @@ export class EngineSession {
       }
     }
     this.cddaDiscs = new CddaDiscs({
-      currentDirectory: this.project?.directory ?? '',
+      currentDirectory: boot ? '' : this.project?.directory ?? '',
       exists: async (name) => {
         const overlay = (candidate: string) => this.saves.resource(candidate)
         if (this.storage.lookup(name, overlay)) return true

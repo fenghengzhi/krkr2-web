@@ -49,7 +49,10 @@ Debug.message("clock-ready");
       expect(sought.ready).toBeGreaterThanOrEqual(2)
       expect(Math.abs(sought.position - 5 / 6)).toBeLessThanOrEqual(0.000001)
       // Feed the real decoder a sub-millisecond position which the integer TJS
-      // setter cannot express. No clock getter, callback or image is mocked.
+      // setter cannot express. The fragmented fixture's first video PTS is
+      // 1/6 s: Firefox correctly clamps 0.1296 to that first sample. Use 1.1296,
+      // inside both real source timelines, to isolate getter quantization.
+      // No clock getter, callback or image is mocked.
       await video.evaluate((element) => new Promise<void>((resolve, reject) => {
         const video = element as HTMLVideoElement,
           timer = setTimeout(() => done(new Error('Fractional clock fixture seek timed out')), 12000),
@@ -60,12 +63,12 @@ Debug.message("clock-ready");
           error ? reject(error) : resolve()
         }
         video.addEventListener('seeked', seeked); video.addEventListener('error', failed)
-        video.currentTime = 0.1296
+        video.currentTime = 1.1296
       }))
       const fractional = await inspect()
       readings.push({ phase: 'native-decoder-fractional-clock', ...fractional })
-      expect(Math.abs(fractional.position - 0.1296)).toBeLessThanOrEqual(0.000001)
-      await evaluate(page, 'clockMovie.position+","+clockMovie.frame+","+clockMovie.fps', '130,2,12')
+      expect(Math.abs(fractional.position - 1.1296)).toBeLessThanOrEqual(0.000001)
+      await evaluate(page, 'clockMovie.position+","+clockMovie.frame+","+clockMovie.fps', '1130,14,12')
       await evaluate(page, '(function(){clockMovie.frame=6;return clockMovie.frame+","+clockMovie.position;})()', '6,500')
       readings.push({ phase: 'script-frame-6', ...await inspect() })
       await expect(page.locator('#logs .error')).toHaveCount(0)

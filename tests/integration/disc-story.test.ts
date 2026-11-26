@@ -42,7 +42,8 @@ for (const binary of [false, true]) test(`${binary ? 'bytecode' : 'source'}: ISO
 test('a bare ISO is identified as D, and replacing its source invalidates filenames, auto paths and the volume label', async () => {
   const { session } = await headless({ 'startup.tjs': 'System.exitOnNoWindowStartup=false;', 'game.iso': discStoryImage() })
   try {
-    await session.start()
+    // An embedding can replace imported files while the initialized VM is
+    // ready. A live, running game cannot be remounted.
     assert.equal(await session.evaluate('Storages.searchCD("krkr_story")'), 'D')
     assert.equal(await session.evaluate('(Storages.addAutoPath("D:/Routes/"),Scripts.evalStorage("Moon Finale.tjs"))'), 'Moon disc scene')
     const bytes = readFileSync(new URL('../../out/verification/disc-volumes/plain.iso', import.meta.url))

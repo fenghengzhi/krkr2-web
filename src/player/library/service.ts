@@ -146,7 +146,7 @@ export class LibraryService {
           const reader = createSessionArchiveReader(undefined, encodings.zipEncoding)
           try {
             project = (await prepareProject(await importSources(sources, checkpoint, { lazyArchives: true }),
-              { mode: 'root', ...requestedProject }, reader, checkpoint)).project
+              { mode: 'root', ...requestedProject }, reader, checkpoint, settings.entry, settings.cddaDiscs)).project
           } finally { reader.dispose() }
           identity = await projectIdentity(sourceGameId, project)
         }
