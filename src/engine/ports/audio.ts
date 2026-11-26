@@ -1,6 +1,7 @@
 import type { ByteSource } from './storage.ts'
 import type { CddaPcmTrack } from './cdda.ts'
 export type SoundKind = 'wave' | 'midi' | 'cdda'
+export type PcmEncoding = 'u8' | 's16' | 's24' | 's32' | 'f32' | 'f64'
 export interface AudioInfo {
   sampleRate: number
   sampleCount: number
@@ -8,6 +9,8 @@ export interface AudioInfo {
   reportedSampleCount?: number
   channels: number
   bits: number
+  /** Original PCM container, when known. Absent for legacy normalized assets. */
+  pcmEncoding?: PcmEncoding
 }
 export interface LoopLink {
   from: number

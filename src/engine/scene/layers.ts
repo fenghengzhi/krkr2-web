@@ -1,5 +1,6 @@
 import type { Pixels, Rect } from '../ports/graphics.ts'
 import type { InputAttentionFont } from '../ports/input.ts'
+import type { CheckImageShare } from '../graphics/image-plane.ts'
 import { Bitmap, dimension, intersect, textOpacity } from '../graphics/bitmap.ts'
 import { ProvincePlane } from '../graphics/province.ts'
 import { imageTypes, autoFace, neutralColor } from '../graphics/blend.ts'
@@ -74,6 +75,7 @@ export interface LayerImageLoad {
 const MAX_BYTES = 64 * 1024 * 1024
 const noImageTypes = new Set([0, 6, 7])
 export class LayerTree {
+  private initialImage?: Bitmap
   constructor(private readonly systemColors = new SystemColors()) {}
   has(id: number): boolean {
     return this.layers.has(id)
@@ -173,7 +175,8 @@ export class LayerTree {
   create(parent: number, windowId = 0): number {
     if (parent) this.get(parent)
     if (this.layers.size >= 1024) throw new Error('Layer limit exceeded')
-    this.budget(32 * 32 * 4)
+    const initial = this.initialImage ??= new Bitmap(32, 32)
+    if (!this.owners(initial.readPixels.data)) this.budget(initial.bytes)
     const id = this.nextId++,
       layer: LayerState = {
         windowId: parent ? this.get(parent).windowId : windowId,
@@ -191,7 +194,7 @@ export class LayerTree {
         opacity: 255,
         imageLeft: 0,
         imageTop: 0,
-        bitmap: new Bitmap(32, 32),
+        bitmap: initial.share(this.beforeCopy),
         provinceGeneration: 0,
         clipBeforeRelease: { x: 0, y: 0, width: 32, height: 32 },
         revision: 0,
@@ -280,8 +283,34 @@ export class LayerTree {
   private clip(layer: LayerState): Rect {
     return layer.bitmap?.clip ?? layer.clipBeforeRelease
   }
-  private bytes(layer: LayerState): number {
-    return (layer.bitmap?.bytes ?? 0) + (layer.province?.bytes ?? 0)
+  private owners(data: Uint8Array): number {
+    let count = 0
+    for (const layer of this.layers.values()) {
+      if (layer.bitmap?.readPixels.data !== data && layer.province?.readData !== data) continue
+      if (++count === 2) break
+    }
+    return count
+  }
+  private readonly beforeCopy: CheckImageShare = (data, writer) => {
+    let live = false, other = false
+    for (const layer of this.layers.values()) {
+      if (layer.bitmap === writer || layer.province === writer) live = true
+      else if (layer.bitmap?.readPixels.data === data || layer.province?.readData === data) other = true
+      if (live && other) { this.budget(data.length); return true }
+    }
+    // A retained writer may have been replaced since it obtained its view.
+    // The initial transparent-white template also has an engine-owned reader.
+    return other || data === this.initialImage?.readPixels.data
+  }
+  /** Undefined keeps a plane. Replacing its last owner releases its charge. */
+  private budgetReplacement(layer: LayerState, main?: number, province?: number): void {
+    const delta = (size: number | undefined, data?: Uint8Array) =>
+      size === undefined ? 0 : size - (data && this.owners(data) < 2 ? data.length : 0)
+    this.budget(delta(main, layer.bitmap?.readPixels.data) + delta(province, layer.province?.readData))
+  }
+  private provinceResizeBytes(layer: LayerState, width: number, height: number): number | undefined {
+    const plane = layer.province
+    if (plane && (plane.width !== width || plane.height !== height)) return width * height
   }
   private resizedProvince(
     layer: LayerState,
@@ -290,14 +319,12 @@ export class LayerTree {
   ): ProvincePlane | undefined {
     const current = layer.province
     if (!current || (current.width === width && current.height === height)) return current
-    const replacement = current.clone()
-    replacement.resize(width, height)
-    return replacement
+    return current.clone(width, height)
   }
   private allocateImage(layer: LayerState, color = this.neutral(layer)): void {
     const width = layer.bitmap?.width ?? layer.width,
       height = layer.bitmap?.height ?? layer.height
-    this.budget(width * height * (layer.province ? 5 : 4) - this.bytes(layer))
+    this.budgetReplacement(layer, layer.bitmap ? undefined : width * height * 4, this.provinceResizeBytes(layer, width, height))
     // Prepare both planes before publishing either replacement. The existing
     // MainImage object keeps its identity for active compositor operations.
     const province = this.resizedProvince(layer, width, height)
@@ -329,10 +356,11 @@ export class LayerTree {
     layer.imageModified = true
     return layer.province
   }
-  independImage(id: number, _plane: 'main' | 'province'): void {
-    // Every Web image is already exclusively owned. Native IndependNoCopy
-    // also returns immediately for an independent image; false never clears it.
-    this.get(id)
+  independImage(id: number, plane: 'main' | 'province', copy = true): void {
+    const layer = this.get(id)
+    if (plane === 'main') {
+      if (layer.bitmap?.independ(copy) && !copy) layer.bitmap.touch()
+    } else if (layer.province?.independ(copy) && !copy) layer.provinceGeneration++
   }
   /** Script updates mark onPaint even if their display region is empty. The
    * region requests presentation; it does not replace the bitmap drawing clip. */
@@ -362,7 +390,7 @@ export class LayerTree {
     dimension(width)
     dimension(height)
     if (bitmap.width === width && bitmap.height === height) return
-    this.budget(width * height * (layer.province ? 5 : 4) - this.bytes(layer))
+    this.budgetReplacement(layer, width * height * 4, this.provinceResizeBytes(layer, width, height))
     const province = this.resizedProvince(layer, width, height)
     bitmap.resize(width, height, this.neutral(layer))
     layer.province = province
@@ -639,9 +667,9 @@ export class LayerTree {
       throw new Error('Invalid RGBA image')
     if (province && province.length !== pixels.width * pixels.height)
       throw new Error('Invalid province plane')
-    this.budget(pixels.data.length + (province?.length ?? 0) - this.bytes(layer))
+    this.budgetReplacement(layer, pixels.data.length, province?.length ?? 0)
     const bitmap = new Bitmap(pixels.width, pixels.height)
-    bitmap.pixels.data.set(pixels.data)
+    bitmap.writeBytes(pixels.data)
     const plane = province ? new ProvincePlane(pixels.width, pixels.height, province) : undefined
     layer.bitmap = bitmap
     layer.province = plane
@@ -660,7 +688,7 @@ export class LayerTree {
     const layer = this.get(id),
       bitmap = this.bitmap(id)
     if (province.length !== bitmap.width * bitmap.height) throw new Error('Invalid province plane')
-    this.budget(province.length - (layer.province?.bytes ?? 0))
+    this.budgetReplacement(layer, undefined, province.length)
     layer.province = new ProvincePlane(bitmap.width, bitmap.height, province)
     layer.provinceGeneration++
     layer.imageModified = true
@@ -694,7 +722,7 @@ export class LayerTree {
     dimension(width); dimension(height)
     if (!width || !height) throw new Error('Invalid image load dimensions')
     const layer = load.layer
-    this.budget(width * height * 4 - load.bitmap.bytes)
+    this.budgetReplacement(layer, width * height * 4)
     const bitmap = new Bitmap(width, height, 0)
     // Native Recreate changes the pixel allocation only. Layer clip, display
     // rectangle, province, offsets and ImageModified survive a decoder error.
@@ -708,8 +736,7 @@ export class LayerTree {
     if (!this.imageLoadMatches(load)) return false
     if (!Number.isInteger(y) || y < 0 || y >= load.height || rgba.length !== load.width * 4)
       throw new Error('Invalid image load row')
-    load.bitmap.pixels.data.set(rgba, y * load.width * 4)
-    load.bitmap.touch()
+    load.bitmap.writeBytes(rgba, y * load.width * 4)
     this.advanceImageLoad(load)
     return true
   }
@@ -719,10 +746,10 @@ export class LayerTree {
     dimension(pixels.width); dimension(pixels.height)
     if (!pixels.width || !pixels.height || pixels.data.length !== pixels.width * pixels.height * 4)
       throw new Error('Invalid RGBA image')
-    this.budget(pixels.data.length + (layer.province ? pixels.width * pixels.height : 0) - this.bytes(layer))
+    this.budgetReplacement(layer, pixels.data.length, this.provinceResizeBytes(layer, pixels.width, pixels.height))
     const province = this.resizedProvince(layer, pixels.width, pixels.height)
     const bitmap = new Bitmap(pixels.width, pixels.height, 0)
-    bitmap.pixels.data.set(pixels.data)
+    bitmap.writeBytes(pixels.data)
     layer.bitmap = bitmap
     layer.province = province
     layer.provinceGeneration++
@@ -753,7 +780,7 @@ export class LayerTree {
   beginProvinceImage(id: number): ProvinceImageLoad {
     const layer = this.get(id),
       bitmap = this.bitmap(id)
-    this.budget(bitmap.width * bitmap.height - (layer.province?.bytes ?? 0))
+    this.budgetReplacement(layer, undefined, layer.province ? this.provinceResizeBytes(layer, bitmap.width, bitmap.height) : bitmap.width * bitmap.height)
     const province = layer.province
       ? this.resizedProvince(layer, bitmap.width, bitmap.height)!
       : new ProvincePlane(bitmap.width, bitmap.height)
@@ -794,31 +821,29 @@ export class LayerTree {
       sourceLayer = this.get(source),
       bitmap = sourceLayer.bitmap
     if (!bitmap) {
-      // Native first deletes destination MainImage and Province. For self
-      // assignment that also removes the source Province before it is read.
       const province = id === source ? undefined : sourceLayer.province
-      this.budget((province?.bytes ?? 0) - this.bytes(layer))
-      const replacement = province?.clone()
+      if (province?.hasMutableView) this.budgetReplacement(layer, 0, province.bytes)
+      const replacement = province?.share(this.beforeCopy)
       this.releaseImages(id)
       layer.province = replacement
       return true
     }
-    if (id === source) {
-      bitmap.resetClip()
-      layer.imageModified = true
-      // Native bitmap Assign reports no main-image change for self-assignment,
-      // but Layer.AssignImages still resets its clip and modified flag.
-      return false
+    const changed = layer.bitmap?.readPixels !== bitmap.readPixels
+    const sourceProvince = sourceLayer.province
+    const provinceChanged = layer.province?.readData !== sourceProvince?.readData
+    if ((changed && bitmap.hasMutableView) || (provinceChanged && sourceProvince?.hasMutableView)) {
+      const mainBytes = changed ? (bitmap.hasMutableView ? bitmap.bytes : 0) : undefined
+      const provinceBytes = provinceChanged ? (sourceProvince?.hasMutableView ? sourceProvince.bytes : 0) : undefined
+      this.budgetReplacement(layer, mainBytes, provinceBytes)
     }
-    this.budget(this.bytes(sourceLayer) - this.bytes(layer))
-    // AssignImages copies the image directly, even for a binder. AllocateImage
-    // would wrongly reject that type and reset the destination image offset.
-    const dest = new Bitmap(bitmap.width, bitmap.height)
-    dest.pixels.data.set(bitmap.pixels.data)
-    const province = sourceLayer.province?.clone()
+    const dest = changed ? bitmap.share(this.beforeCopy) : layer.bitmap!
+    const province = provinceChanged ? sourceProvince?.share(this.beforeCopy) : layer.province
     layer.bitmap = dest
     layer.province = province
-    layer.provinceGeneration++
+    dest.resetClip()
+    if (changed || provinceChanged) layer.provinceGeneration++
+    layer.imageModified = true
+    if (!changed) return false
     // InternalSetImageSize keeps the destination geometry when it still fits,
     // otherwise shrinking the display and moving its viewport inside the image.
     layer.width = Math.min(layer.width, dest.width)
@@ -826,7 +851,6 @@ export class LayerTree {
     layer.imageLeft = Math.max(layer.imageLeft, layer.width - dest.width)
     layer.imageTop = Math.max(layer.imageTop, layer.height - dest.height)
     layer.revision++
-    layer.imageModified = true
     return true
   }
   face(id: number): number {
@@ -990,7 +1014,11 @@ export class LayerTree {
   }
   flip(id: number, horizontal: boolean): void {
     const layer = this.get(id)
-    this.bitmap(id).flip(horizontal)
+    const bitmap = this.bitmap(id)
+    // Both planes are flipped together. Check the combined cost before changing either.
+    if (layer.province) this.budget((this.owners(bitmap.readPixels.data) > 1 ? bitmap.bytes : 0) +
+      (this.owners(layer.province.readData) > 1 ? layer.province.bytes : 0))
+    bitmap.flip(horizontal)
     layer.province?.flip(horizontal)
     layer.provinceGeneration++
     layer.imageModified = true
@@ -1080,11 +1108,17 @@ export class LayerTree {
     this.get(id).childrenRevision++
   }
   inspect(): { layers: number; bitmapBytes: number } {
+    const seen = new Set<Uint8Array>()
+    for (const layer of this.layers.values()) {
+      if (layer.bitmap) seen.add(layer.bitmap.readPixels.data)
+      if (layer.province) seen.add(layer.province.readData)
+    }
     let bitmapBytes = 0
-    for (const layer of this.layers.values()) bitmapBytes += this.bytes(layer)
+    for (const data of seen) bitmapBytes += data.length
     return { layers: this.layers.size, bitmapBytes }
   }
   clear(): void {
     this.layers.clear()
+    this.initialImage = undefined
   }
 }

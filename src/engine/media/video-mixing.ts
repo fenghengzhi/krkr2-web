@@ -43,7 +43,7 @@ export function captureVideoMixingBitmap(
     top = layer.top + layer.imageTop,
     normalize = (edge: number, size: number) =>
       Math.fround(Math.fround(Math.fround(edge) + 0.5) / Math.fround(size)),
-    data = Uint8Array.from(bitmap.pixels.data)
+    data = Uint8Array.from(bitmap.readPixels.data)
   // VMR9's HDC path ignores the DIB's mask; opacity is a separate scalar.
   for (let index = 3; index < data.length; index += 4) data[index] = 255
   return {

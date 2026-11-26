@@ -8,6 +8,7 @@ import type { LoopLink, PcmAccess, WaveAsset } from '../ports/audio.ts'
 import type { AudioFilterBudget, FilterPcmSource } from './audio-filter-chain.ts'
 import { WaveSegmentQueue } from './audio-segments.ts'
 import { applySliExpression } from '../../formats/audio/sli.ts'
+import { fillWaveCrossfade } from './wave-crossfade.ts'
 
 const lowerBound = <T>(items: T[], position: number, key: (item: T) => number): number => {
   let left = 0,
@@ -122,17 +123,8 @@ export class FilteredWaveSource implements FilterPcmSource {
     const firstReady = this.ready(firstStart, count), secondReady = this.ready(secondStart, count)
     if (!firstReady || !secondReady) return false
     this.reserveRead(count * 2)
-    for (let frame = 0; frame < count; frame++) {
-      this.step()
-      // Original DoCrossFade is two separate 0..50 and 50..100 ramps. These
-      // normalized Float32 assets use a double-precision blend before storage;
-      // native integer Q32 / float32 ramp rounding is not claimed bit-identical.
-      const blend = frame < before ? (frame / before) * 0.5 : 0.5 + ((frame - before) / after) * 0.5
-      for (let channel = 0; channel < this.asset.channels; channel++)
-        this.crossfade[channel]![frame] =
-          this.sample(channel, firstStart + frame) * (1 - blend) +
-          this.sample(channel, secondStart + frame) * blend
-    }
+    fillWaveCrossfade(this.crossfade, firstStart, secondStart, before, after,
+      this.asset.pcmEncoding, this.asset.bits, (channel, position) => this.sample(channel, position), () => this.step())
     // Native preparation leaves the real decoder after the target-side read.
     // A later flag change can cancel the logical jump without undoing this read.
     this.decoderPosition = Math.min(this.asset.sampleCount, secondStart + count)

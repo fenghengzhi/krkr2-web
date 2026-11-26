@@ -56,7 +56,7 @@ test('range PCM reads preserve frame units, original rate, EOF and independent c
   const bytes = wave([0.25, -0.5, 0.75, -1, 0, 0.5], 12000, 2), source = await opened(bytes)
   try {
     assert.deepEqual({ ...source.info, loops: undefined },
-      { sampleRate: 12000, sampleCount: 3, channels: 2, bits: 16, loops: undefined })
+      { sampleRate: 12000, sampleCount: 3, channels: 2, bits: 16, pcmEncoding: 's16', loops: undefined })
     const block = await source.read(1, 10)
     assert.deepEqual(block.map((channel) => [...channel]), [[0.75, 0], [-1, 0.5]])
     assert.equal(block[0]!.byteOffset, 0); assert.equal(block[0]!.buffer.byteLength, 8)

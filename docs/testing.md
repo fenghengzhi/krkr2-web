@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 135 批增加八页高清画廊的颜色与点击区域验收、原 KAG 剧情中对象与绑定方法的传递，以及普通 Wave 的平滑循环接缝。图层与宏参数的同组脚本也交给原版 Windows SDK 比较。[135 实现与验收](decisions/135-shared-game-layers-macro-values-and-wave-loops.md)
+
 第 134 批新增 **11 个 Node 用例、每个浏览器项目 8 个常规用例和 4 个游戏库用例**。ZIP 验收包含首读 CRC、取消、嵌套 XP3、72 MiB 音乐的独立 PCM／频谱和定位，以及原 KAG 从游戏库恢复书签。MIDI 验收比较独立字面 CC7 控制的完整 PCM，并实际点击游戏按钮检查静音级数、淡出、重开和释放。原版 SDK 的 MIDI 新观察只覆盖公有 `volume/volume2` 属性转换与范围，不声称取得原设备 PCM、音色或 CC7 传输记录。图层组另增加一项真实 BMP 保存往返。[134 验收记录](decisions/134-zip-distributions-midi-and-game-playback.md)
 
 134 本身尚无结果。本次固定回收中，131 主构建成功，Node 为 4,014 通过、11 失败、2 超时取消。已取得的常规浏览器报告为 2,382 通过、28 失败、2 跳过，仍缺两个未报告分片和一个下载不可用的已发布分片。介绍游戏六个浏览器与后端组合中五个通过，Firefox Asyncify 在第四页返回菜单时超时。三浏览器兼容清单共 96 项通过。132 与 133 首版、最终版均仍 `pending`，无作业或产物。原始失败与缺失范围分别保留，下批再取回，不实时轮询。

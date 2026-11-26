@@ -104,7 +104,7 @@ export class SceneComposer {
       // The handler asks Src2 to Complete. A full-size leaf supplies its
       // stored main image even while a separate transition is displaying it.
       const after = sourceBitmap && !this.snapshotNeedsCompletion(frame.source)
-        ? { pixels: sourceBitmap.pixels, revision: -sourceBitmap.revision }
+        ? { pixels: sourceBitmap.readPixels, revision: -sourceBitmap.revision }
         : this.blendTree(frame.source, false, new Set(), new Set([...suppressed, id]))
       return this.cached(
         `blend-transition:${id}`,
@@ -115,7 +115,7 @@ export class SceneComposer {
     const trail = new Set(ancestors).add(id)
     const bitmap = displayBitmap(layer)
     let main: Composed | undefined = bitmap
-      ? { pixels: bitmap.pixels, revision: -bitmap.revision }
+      ? { pixels: bitmap.readPixels, revision: -bitmap.revision }
       : undefined
     if (frame && main) main = this.mainImage(id)
     // Binder opacity gates visibility but does not scale children. Preserve
@@ -256,14 +256,14 @@ export class SceneComposer {
     if (!bitmap) throw new Error('Source layer has no image')
     const frame = this.transition(id)
     // Raw bitmap revisions and completed-image revisions have separate counters.
-    if (!frame || frame.children) return { pixels: bitmap.pixels, revision: -bitmap.revision }
+    if (!frame || frame.children) return { pixels: bitmap.readPixels, revision: -bitmap.revision }
     // A main-image transition takes Src2 directly from TransSrc->MainImage,
     // even if the source is displaying a transition of its own.
     const after = this.layers.bitmap(frame.source)
     return this.cached(
       `raw-transition:${id}`,
       `${frame.token}:${frame.pixelPhase ?? frame.phase}:${bitmap.revision}:${after.revision}`,
-      () => transitionPixels(bitmap.pixels, after.pixels, frame),
+      () => transitionPixels(bitmap.readPixels, after.readPixels, frame),
     )
   }
   private displayMain(id: number): Composed {
@@ -400,7 +400,7 @@ export class SceneComposer {
   snapshot(id: number, completing = false, area?: Rect): Pixels {
     const bitmap = this.layers.bitmap(id)
     if (!completing && !this.snapshotNeedsCompletion(id))
-      return { ...bitmap.pixels, data: bitmap.pixels.data.slice() }
+      return { ...bitmap.readPixels, data: bitmap.readPixels.data.slice() }
     // Native Complete copies MainImage into its cache, blends children in the
     // layer's format, and PiledCopy copies those raw channels. Display pixels
     // are premultiplied: converting through them loses low/zero-alpha RGB even
@@ -457,7 +457,7 @@ export class SceneComposer {
       if (bitmap) {
         const image = transition
           ? this.displayMain(layer.id)
-          : { pixels: bitmap.pixels, revision: bitmap.revision }
+          : { pixels: bitmap.readPixels, revision: bitmap.revision }
         result.push({
           ...rect,
           id: transition ? -layer.id : layer.id,

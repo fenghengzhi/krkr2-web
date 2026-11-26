@@ -6,6 +6,7 @@ import { transitionOptionCases, transitionOptionFiles, transitionOptionsSource }
 import { layerGammaCases, layerGammaExpected, layerGammaSource } from '../helpers/layer-gamma.ts'
 import { layerOrderCases, layerOrderSource } from '../helpers/layer-order.ts'
 import { thumbnailStretchCases, thumbnailStretchSource } from '../helpers/thumbnail-stretch.ts'
+import { sharedImageCases, sharedImageSource } from '../helpers/layer-image-sharing.ts'
 import { layerAlphaRows, layerAlphaSource } from '../helpers/layer-alpha-rows.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -14,7 +15,7 @@ assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/transition'), game = resolve(output, 'game')
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const files = transitionOptionFiles()
-const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows]
+const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases]
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 
 if (process.argv[2] === 'prepare') {
@@ -39,7 +40,10 @@ if (process.argv[2] === 'prepare') {
     'thumbnailStretchClose();',
     layerAlphaSource,
     ...layerAlphaRows.map(({ id }) => `try{record("${id}|"+layerAlphaRun("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
-    'layerAlphaClose();record("done");System.exit();',
+    'layerAlphaClose();',
+    sharedImageSource,
+    ...sharedImageCases.map(({ id }) => `try{record("${id}|"+sharedImageRun("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
+    'record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
   save('inputs.json', {
@@ -48,6 +52,7 @@ if (process.argv[2] === 'prepare') {
     gammaHelperSha256: sha(readFileSync('tests/helpers/layer-gamma.ts')),
     orderHelperSha256: sha(readFileSync('tests/helpers/layer-order.ts')),
     thumbnailHelperSha256: sha(readFileSync('tests/helpers/thumbnail-stretch.ts')),
+    sharedImageHelperSha256: sha(readFileSync('tests/helpers/layer-image-sharing.ts')),
     alphaRowHelperSha256: sha(readFileSync('tests/helpers/layer-alpha-rows.ts')),
     cases,
     files: Object.entries(files).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) })),
@@ -73,6 +78,7 @@ if (process.argv[2] === 'prepare') {
     [resolve('tests/helpers/layer-gamma.ts'), manifest?.gammaHelperSha256],
     [resolve('tests/helpers/layer-order.ts'), manifest?.orderHelperSha256],
     [resolve('tests/helpers/thumbnail-stretch.ts'), manifest?.thumbnailHelperSha256],
+    [resolve('tests/helpers/layer-image-sharing.ts'), manifest?.sharedImageHelperSha256],
     [resolve('tests/helpers/layer-alpha-rows.ts'), manifest?.alphaRowHelperSha256],
   ] as const) {
     if (!existsSync(name) || sha(readFileSync(name)) !== expected) evidenceErrors.push(`${name}: source hash differs or is missing`)
@@ -102,6 +108,7 @@ if (process.argv[2] === 'prepare') {
       matched: results.filter((row) => row.id.startsWith('order-') && row.matched).length },
     thumbnail: { planned: thumbnailStretchCases.length,
       matched: results.filter((row) => thumbnailStretchCases.some(({ id }) => id === row.id) && row.matched).length },
+    sharedImages: { planned: sharedImageCases.length, matched: results.filter((row) => row.id.startsWith('shared-') && row.matched).length },
     alphaRows: { planned: layerAlphaRows.length,
       matched: results.filter((row) => row.id.startsWith('alpha-row-') && row.matched).length },
     complete, sequenceMatches, evidenceErrors, sdkState: sdk?.state ?? 'unreported',

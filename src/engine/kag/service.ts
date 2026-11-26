@@ -3,14 +3,14 @@ import { Scenario } from './scenario.ts'
 import { TjsError } from '../system/tjs-error.ts'
 import { TvpError } from '../system/tvp-error.ts'
 import { ExecutionCancelled } from '../scheduler/control.ts'
-import { fromScript, integer, record, string, toScript, type Data } from './data.ts'
+import { fromScript, integer, record, string, tagReferences, toScript, type Data } from './data.ts'
 import { isScriptObject, type HostContext, type ScriptValue } from '../script/runtime.ts'
 
 export class KagService {
   private nextId = 1
   private nextToken = 1
   private parsers = new Map<number, KagParser>()
-  private tasks = new Map<number, { parser: number; task: Task }>()
+  private tasks = new Map<number, { parser: number; task: Task; returnsTag: boolean }>()
   private readonly scenarios = new Map<string, Scenario>()
   private readonly scenarioReads = new Map<string, Promise<Scenario>>()
   constructor(
@@ -56,7 +56,8 @@ export class KagService {
         const step = task.task.next(input)
         if (step.done) {
           this.tasks.delete(token)
-          return toScript({ done: true, value: step.value })
+          return toScript({ done: true, ...(task.returnsTag && step.value !== undefined
+            ? tagReferences(record(step.value)) : { value: step.value }) })
         }
         const { kind, args } = step.value
         if (kind === 'read') {
@@ -98,6 +99,7 @@ export class KagService {
       this.parsers.delete(id)
       for (const [token, entry] of this.tasks) if (entry.parser === id) this.tasks.delete(token)
     } else if (operation === 'KAG.invalidAssign') throw new TvpError('TVPKAGSpecifyKAGParser')
+    else if (operation === 'KAG.malformedSave') parser.restoreMissingArgs()
     else if (operation === 'KAG.cancel') {
       const token = integer(data(1))
       if (this.tasks.get(token)?.parser === id) this.tasks.delete(token)
@@ -163,7 +165,7 @@ export class KagService {
           throw new Error(`Unknown KAG method ${method}`)
       }
       const token = this.nextToken++
-      this.tasks.set(token, { parser: id, task })
+      this.tasks.set(token, { parser: id, task, returnsTag: method === 'getNextTag' })
       return this.advance(id, token)
     } else throw new Error(`Unknown KAG operation ${operation}`)
   }

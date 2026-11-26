@@ -5,6 +5,7 @@ import { blendAlphaRow } from './alpha-row.ts'
 import type { AffineRaster } from './affine.ts'
 import { gammaTable, type GammaChannel } from './gamma.ts'
 import { convertAlpha, grayscale } from './processing.ts'
+import { ImagePlane, type CheckImageShare } from './image-plane.ts'
 import { TvpError } from '../system/tvp-error.ts'
 
 export const intersect = (a: Rect, b: Rect): Rect => {
@@ -35,39 +36,43 @@ export function textOpacity(face: number, value: number): number {
 
 let nextRevision = 1
 
-export class Bitmap {
-  pixels: Pixels
+export class Bitmap extends ImagePlane {
+  /** Borrow for rendering or as a blit source. Mutating callers use pixels. */
+  get readPixels(): Pixels { return this.storage }
+  get pixels(): Pixels { return this.expose() }
+  writeBytes(bytes: Uint8Array, offset = 0): void {
+    this.independ()
+    this.storage.data.set(bytes, offset)
+    this.touch()
+  }
   clip: Rect
   revision = nextRevision++
   constructor(width: number, height: number, color = 0x00ffffff) {
     dimension(width)
     dimension(height)
-    this.pixels = { width, height, data: new Uint8Array(width * height * 4) }
+    super(width, height, new Uint8Array(width * height * 4))
     this.clip = { x: 0, y: 0, width, height }
     this.fill(this.clip, color, 0, false)
   }
   touch(): void {
     this.revision = nextRevision++
   }
-  get bytes(): number {
-    return this.pixels.data.length
-  }
-  get width(): number {
-    return this.pixels.width
-  }
-  get height(): number {
-    return this.pixels.height
+  share(check: CheckImageShare): Bitmap {
+    const other = new Bitmap(0, 0)
+    this.shareWith(other, check)
+    other.resetClip()
+    return other
   }
   resize(width: number, height: number, color = 0x00ffffff): void {
     const replacement = new Bitmap(width, height, color)
     const rows = Math.min(height, this.height),
       columns = Math.min(width, this.width)
     for (let y = 0; y < rows; y++)
-      replacement.pixels.data.set(
-        this.pixels.data.subarray(y * this.width * 4, (y * this.width + columns) * 4),
+      replacement.storage.data.set(
+        this.storage.data.subarray(y * this.width * 4, (y * this.width + columns) * 4),
         y * width * 4,
       )
-    this.pixels = replacement.pixels
+    this.storage = replacement.storage
     this.resetClip()
     this.touch()
   }
@@ -98,15 +103,16 @@ export class Bitmap {
   }
   getPixel(x: number, y: number, plane: 'main' | 'mask'): number {
     const index = this.offset(x, y),
-      data = this.pixels.data
+      data = this.storage.data
     return plane === 'mask'
       ? data[index * 4 + 3]!
       : data[index * 4]! * 65536 + data[index * 4 + 1]! * 256 + data[index * 4 + 2]!
   }
   setPixel(x: number, y: number, value: number, plane: 'main' | 'mask'): boolean {
     if (!this.writable(x, y)) return false
+    this.independ()
     const index = this.offset(x, y),
-      data = this.pixels.data
+      data = this.storage.data
     if (plane === 'mask') data[index * 4 + 3] = value & 255
     else {
       data[index * 4] = (value >>> 16) & 255
@@ -121,7 +127,9 @@ export class Bitmap {
     const tables = channels.map(gammaTable)
     if (channels.every(({ gamma, floor, ceil }) => gamma === 1 && floor === 0 && ceil === 255))
       return
-    const data = this.pixels.data,
+    if (!this.clip.width || !this.clip.height) return
+    this.independ()
+    const data = this.storage.data,
       area = this.clip
     for (let y = area.y; y < area.y + area.height; y++)
       for (let x = area.x; x < area.x + area.width; x++) {
@@ -147,9 +155,10 @@ export class Bitmap {
   }
   fill(rect: Rect, color: number, face: number, holdAlpha: boolean): boolean {
     if (face === 3) throw new Error('Province drawing requires a ProvincePlane')
-    const area = intersect(this.clip, rect),
-      data = this.pixels.data
+    const area = intersect(this.clip, rect)
     if (!area.width || !area.height) return false
+    this.independ()
+    const data = this.storage.data
     for (let y = area.y; y < area.y + area.height; y++)
       for (let x = area.x; x < area.x + area.width; x++) {
         const index = y * this.width + x,
@@ -182,15 +191,16 @@ export class Bitmap {
       height: source.height,
     })
     if (!target.width || !target.height) return false
-    const pixels = source === this ? source.pixels.data.slice() : source.pixels.data
+    this.independ()
+    const pixels = source === this ? source.storage.data.slice() : source.storage.data
     for (let y = target.y; y < target.y + target.height; y++)
       for (let x = target.x; x < target.x + target.width; x++) {
         const src = (y - top + rect.y) * source.width + x - left + rect.x,
           dst = y * this.width + x
-        if (face === 2) this.pixels.data[dst * 4 + 3] = pixels[src * 4 + 3]!
+        if (face === 2) this.storage.data[dst * 4 + 3] = pixels[src * 4 + 3]!
         else
           for (let c = 0; c < (face === 1 && holdAlpha ? 3 : 4); c++)
-            this.pixels.data[dst * 4 + c] = pixels[src * 4 + c]!
+            this.storage.data[dst * 4 + c] = pixels[src * 4 + c]!
       }
     this.touch()
     return true
@@ -213,12 +223,13 @@ export class Bitmap {
       { x: left - rect.x, y: top - rect.y, width: source.width, height: source.height },
     )
     if (!target.width || !target.height) return false
-    const data = source.data === this.pixels.data ? source.data.slice() : source.data
+    this.independ()
+    const data = source.data === this.storage.data ? source.data.slice() : source.data
     for (let y = target.y; y < target.y + target.height; y++)
       for (let x = target.x; x < target.x + target.width; x++) {
         const from = ((y - top + rect.y) * source.width + x - left + rect.x) * 4,
           to = (y * this.width + x) * 4
-        for (let c = 0; c < (holdAlpha ? 3 : 4); c++) this.pixels.data[to + c] = data[from + c]!
+        for (let c = 0; c < (holdAlpha ? 3 : 4); c++) this.storage.data[to + c] = data[from + c]!
       }
     this.touch()
     return true
@@ -230,8 +241,10 @@ export class Bitmap {
       return
     }
     if (opacity < 0 && face !== 0) throw new Error('Negative opacity requires dfAlpha')
-    const area = intersect(this.clip, rect),
-      data = this.pixels.data
+    const area = intersect(this.clip, rect)
+    if (!area.width || !area.height) return
+    this.independ()
+    const data = this.storage.data
     const channels = [(color >>> 16) & 255, (color >>> 8) & 255, color & 255]
     for (let y = area.y; y < area.y + area.height; y++)
       for (let x = area.x; x < area.x + area.width; x++) {
@@ -263,10 +276,11 @@ export class Bitmap {
       const start = Math.max(left + spans[row * 2]!, this.clip.x),
         end = Math.min(left + spans[row * 2 + 1]!, this.clip.x + this.clip.width)
       if (start >= end) continue
+      if (!changed) this.independ()
       changed = true
       if (mode === 'copy' && (face !== 1 || !holdAlpha)) {
         const from = (row * pixels.width + start - left) * 4
-        this.pixels.data.set(
+        this.storage.data.set(
           pixels.data.subarray(from, from + (end - start) * 4),
           (y * this.width + start) * 4,
         )
@@ -275,8 +289,8 @@ export class Bitmap {
           const at = (y * this.width + x) * 4,
             from = (row * pixels.width + x - left) * 4
           if (mode === 'copy')
-            for (let c = 0; c < 3; c++) this.pixels.data[at + c] = pixels.data[from + c]!
-          else blendPixel(this.pixels.data, at, pixels.data, from, mode, face, amount, holdAlpha)
+            for (let c = 0; c < 3; c++) this.storage.data[at + c] = pixels.data[from + c]!
+          else blendPixel(this.storage.data, at, pixels.data, from, mode, face, amount, holdAlpha)
         }
     }
     if (changed) this.touch()
@@ -302,19 +316,20 @@ export class Bitmap {
       { x: left - rect.x, y: top - rect.y, width: source.width, height: source.height },
     )
     if (!target.width || !target.height) return false
+    this.independ()
     // A copy is essential for overlapping self-operations; each source pixel
     // must observe the bitmap before any part of the rectangle was written.
-    const data = source.data === this.pixels.data ? source.data.slice() : source.data
+    const data = source.data === this.storage.data ? source.data.slice() : source.data
     for (let y = target.y; y < target.y + target.height; y++) {
       if (mode === 2 && face === 1 && !holdAlpha && !resampled) {
-        blendAlphaRow(this.pixels.data, (y * this.width + target.x) * 4, data,
+        blendAlphaRow(this.storage.data, (y * this.width + target.x) * 4, data,
           ((y - top + rect.y) * source.width + target.x - left + rect.x) * 4,
           target.x, target.width, amount)
         continue
       }
       for (let x = target.x; x < target.x + target.width; x++)
         blendPixel(
-          this.pixels.data,
+          this.storage.data,
           (y * this.width + x) * 4,
           data,
           ((y - top + rect.y) * source.width + x - left + rect.x) * 4,
@@ -343,7 +358,8 @@ export class Bitmap {
     if (!opacity) return false
     const area = intersect(this.clip, { x: left, y: top, width: image.width, height: image.height })
     if (!area.width || !area.height) return false
-    const data = this.pixels.data
+    this.independ()
+    const data = this.storage.data
     for (let y = area.y; y < area.y + area.height; y++)
       for (let x = area.x; x < area.x + area.width; x++) {
         const src = ((y - top) * image.width + x - left) * 4,
@@ -382,8 +398,9 @@ export class Bitmap {
     return true
   }
   flip(horizontal: boolean): void {
+    this.independ()
     const area = { x: 0, y: 0, width: this.width, height: this.height },
-      data = this.pixels.data
+      data = this.storage.data
     const count = horizontal ? Math.floor(area.width / 2) : Math.floor(area.height / 2)
     const rows = horizontal ? area.height : area.width
     for (let row = 0; row < rows; row++)
@@ -403,11 +420,14 @@ export class Bitmap {
     this.touch()
   }
   convert(additive: boolean): void {
-    convertAlpha(this.pixels, additive)
+    this.independ()
+    convertAlpha(this.storage, additive)
     this.touch()
   }
   grayscale(): void {
-    grayscale(this.pixels, this.clip)
+    if (!this.clip.width || !this.clip.height) return
+    this.independ()
+    grayscale(this.storage, this.clip)
     if (this.clip.width && this.clip.height) this.touch()
   }
 }

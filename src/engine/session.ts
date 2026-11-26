@@ -5205,7 +5205,7 @@ export class EngineSession {
           primary = this.inputControllers.get(window.id)?.root() ?? 0
         if (window.closing || window.finished) throw new Error('Window has been invalidated')
         if (!primary) throw new TvpError('TVPWindowHasNoLayer', [], 'Window has no primary Layer')
-        const pixels = this.layers.bitmap(primary).pixels,
+        const pixels = this.layers.bitmap(primary).readPixels,
           request = this.nextWindowRegionRequest++
         if (!Number.isSafeInteger(this.nextWindowRegionRequest)) throw new Error('Window region request identity exhausted')
         this.windowRegionRequests.set(window.id, request)
@@ -5798,10 +5798,7 @@ export class EngineSession {
       case 'Layer.independImage': {
         const plane = text(1)
         if (plane !== 'main' && plane !== 'province') throw new Error('Invalid image plane')
-        // Both buffers are already exclusively owned. Still validate the live
-        // Layer and accept the TJS-converted copy argument without allocating.
-        number(2)
-        this.layers.independImage(number(0), plane)
+        this.layers.independImage(number(0), plane, !!number(2))
         break
       }
       case 'Layer.copy':
@@ -5884,7 +5881,7 @@ export class EngineSession {
           this.layers
             .bitmap(id)
             .operate(
-              this.layers.sourceBitmap(source).pixels,
+              this.layers.sourceBitmap(source).readPixels,
               number(1),
               number(2),
               { x: number(4), y: number(5), width: number(6), height: number(7) },
@@ -5926,7 +5923,7 @@ export class EngineSession {
           try { validateBlend(mode, face) }
           catch { throw new TvpError('TVPNotDrawableFaceType', ['operateStretch']) }
         }
-        const bitmap = this.layers.bitmap(id), source = this.layers.sourceBitmap(sourceLayer.id).pixels,
+        const bitmap = this.layers.bitmap(id), source = this.layers.sourceBitmap(sourceLayer.id).readPixels,
           bitmapClip = intersect(clip, { x: 0, y: 0, width: bitmap.width, height: bitmap.height }),
           fullCopy = operate ? mode === 1 && face === 1 && !layer.holdAlpha && opacity === 255
             : face !== 1 || !layer.holdAlpha,
@@ -5961,7 +5958,7 @@ export class EngineSession {
           throw new Error('affinePile and affineBlend require dfAlpha or dfOpaque')
         const raster = await this.finishGraphics(
           affinePixels(
-            this.layers.sourceBitmap(source).pixels,
+            this.layers.sourceBitmap(source).readPixels,
             { x: number(2), y: number(3), width: number(4), height: number(5) },
             !!number(6),
             [number(7), number(8), number(9), number(10), number(11), number(12)],
@@ -5988,7 +5985,7 @@ export class EngineSession {
       case 'Layer.saveImage': {
         const id = number(0),
           layer = this.layers.get(id),
-          pixels = this.layers.bitmap(id).pixels,
+          pixels = this.layers.bitmap(id).readPixels,
           type = this.imageWriter.validateType(text(2)),
           path = storageWritePath(text(1), this.project?.directory)
         this.storage.assertWritable(path)
@@ -6028,7 +6025,7 @@ export class EngineSession {
           bitmap = this.layers.bitmap(id),
           clip = { ...bitmap.clip }
         const result = await this.finishGraphics(
-          boxBlur(bitmap.pixels, clip, number(1), number(2), this.layers.face(id) === 0),
+          boxBlur(bitmap.readPixels, clip, number(1), number(2), this.layers.face(id) === 0),
         )
         this.control.check()
         if (result) {

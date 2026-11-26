@@ -120,7 +120,7 @@ export function completeLayer(
     const type = displayType(layer),
       opacity = layer.opacity,
       transition = transitioned.get(layer.id),
-      main = transition && !transition.children ? transition.pixels : layer.bitmap?.pixels,
+      main = transition && !transition.children ? transition.pixels : layer.bitmap?.readPixels,
       children = layer.children
         .map((id) => layers.get(id))
         .filter((child) => child.visible && child.opacity > 0),

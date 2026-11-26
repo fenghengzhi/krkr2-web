@@ -52,11 +52,11 @@ interface Voice {
   linkDirty: boolean
   link?: LoopLink
   synth?: MidiSynth
-  tail?: { source: number; progress: number; total: number }
   filters?: PhaseVocoderFilter[]
   filterChain?: AudioFilterChain
   filterSource?: FilteredWaveSource
   filterBudget?: AudioFilterBudget
+  sourcePipeline?: boolean
   ended?: boolean
   stream?: StreamPcm
   gains?: { volume: number; volume2: number; globalVolume: number; pan: number; muted: boolean; left: number; right: number }
@@ -207,15 +207,17 @@ export class AudioMixer {
       channels: number,
       items: readonly PhaseVocoderFilter[],
       windows: readonly number[],
+      smooth: boolean,
     ) => {
       for (let index = 0; index < items.length; index++) {
         const window = Math.max(items[index]!.window, windows[index] ?? 0)
         bytes += phaseVocoderMemoryBytes(channels, window) + channels * window * 20
       }
-      if (items.length) bytes += audioFilterChainMemoryBytes(channels)
+      if (items.length || smooth) bytes += audioFilterChainMemoryBytes(channels)
     }
-    reserve(asset.channels, next, activeWindows)
-    if (next.length && asset.kind !== 'midi') bytes += filteredWaveSourceMemoryBytes(asset)
+    const smooth = asset.kind !== 'midi' && asset.loops.links.some((link) => link.smooth)
+    reserve(asset.channels, next, activeWindows, smooth)
+    if ((next.length || smooth) && asset.kind !== 'midi') bytes += filteredWaveSourceMemoryBytes(asset)
     for (const voice of this.voices.values()) {
       if (voice.id === id || !voice.asset) continue
       const connected = voice.filters ?? []
@@ -223,8 +225,9 @@ export class AudioMixer {
         if (identities.has(filter.id))
           throw new Error('Audio filter is already connected to a voice')
       count += connected.length
-      reserve(voice.asset.channels, connected, voice.filterChain?.windows() ?? [])
-      if (connected.length && voice.asset.kind !== 'midi')
+      const otherSmooth = voice.asset.kind !== 'midi' && voice.asset.loops.links.some((link) => link.smooth)
+      reserve(voice.asset.channels, connected, voice.filterChain?.windows() ?? [], otherSmooth)
+      if ((connected.length || otherSmooth) && voice.asset.kind !== 'midi')
         bytes += filteredWaveSourceMemoryBytes(voice.asset)
     }
     if (count > 16 || bytes > 64 * 1024 * 1024)
@@ -283,6 +286,10 @@ export class AudioMixer {
           asset.data.some((channel) => channel.length !== asset.sampleCount))
       )
         throw new Error('PCM channel length mismatch')
+      if (asset.pcmEncoding !== undefined && (!['u8', 's16', 's24', 's32', 'f32', 'f64'].includes(asset.pcmEncoding) ||
+          !Number.isInteger(asset.bits) || asset.bits < 8 || asset.bits > Number(asset.pcmEncoding.slice(1)) ||
+          (asset.pcmEncoding.startsWith('f') && asset.bits !== Number(asset.pcmEncoding.slice(1)))))
+        throw new Error('Invalid PCM storage encoding')
       let bytes =
         asset.kind === 'pcm' ? asset.data.reduce((sum, data) => sum + data.byteLength, 0)
           : asset.kind === 'stream' ? streamPcmReservation(asset.channels) : 0
@@ -312,6 +319,7 @@ export class AudioMixer {
       voice.asset = stream ? stream.asset : asset
       voice.stream = stream
       voice.filters = filters
+      voice.sourcePipeline = asset.kind !== 'midi' && (filters.length > 0 || asset.loops.links.some((link) => link.smooth))
       voice.status = 'stop'
       voice.settings.frequency = asset.sampleRate
       voice.settings.position = 0
@@ -432,7 +440,6 @@ export class AudioMixer {
       (label) => label.position,
     )
     voice.linkDirty = true
-    voice.tail = undefined
     voice.synth?.seek(position / (voice.asset?.sampleRate ?? 44100))
     this.resetFilters(voice)
   }
@@ -453,7 +460,7 @@ export class AudioMixer {
       )
       voice.filterChain = new AudioFilterChain(
         voice.asset!.channels,
-        voice.filters!,
+        voice.filters ?? [],
         voice.filterSource,
       )
     }
@@ -514,20 +521,8 @@ export class AudioMixer {
       if (link && settings.position >= link.from) {
         if (visited?.has(settings.position)) break
         ;(visited ??= new Set()).add(settings.position)
-        const overshoot = settings.position - link.from,
-          before = Math.min(Math.floor(asset.sampleRate * 0.025), link.from, link.to),
-          after = Math.min(
-            Math.floor(asset.sampleRate * 0.025),
-            asset.sampleCount - link.from,
-            asset.sampleCount - link.to,
-          )
+        const overshoot = settings.position - link.from
         this.seek(voice, link.to + overshoot)
-        if (link.smooth && after > 0)
-          voice.tail = {
-            source: link.from + overshoot,
-            progress: before + overshoot,
-            total: before + after,
-          }
         continue
       }
       if (settings.position >= asset.sampleCount) {
@@ -583,11 +578,6 @@ export class AudioMixer {
       const step = Math.min(remaining, Math.max(0, boundary - settings.position))
       settings.position += step
       remaining -= step
-      if (voice.tail) {
-        voice.tail.source += step
-        voice.tail.progress += step
-        if (voice.tail.progress >= voice.tail.total) voice.tail = undefined
-      }
       if (remaining <= 1e-9) return !preflight || (this.streamReady(voice) && ready)
       if (!this.prepareSample(voice)) return ready
       // A miss cannot stop control preflight: later jumps may exceed the
@@ -604,51 +594,12 @@ export class AudioMixer {
     }
     return !preflight || ((voice.status !== 'play' || this.streamReady(voice)) && ready)
   }
-  private sample(voice: Voice, channel: number): number {
-    const asset = voice.asset as WaveAsset,
-      position = voice.settings.position
-    if (voice.tail) {
-      const t = voice.tail.progress / voice.tail.total
-      return (
-        this.pcm(voice, channel, voice.tail.source) * (1 - t) +
-        this.pcm(voice, channel, position) * t
-      )
-    }
-    const link = this.link(voice)
-    if (link?.smooth) {
-      const before = Math.min(Math.floor(asset.sampleRate * 0.025), link.from, link.to),
-        after = Math.min(
-          Math.floor(asset.sampleRate * 0.025),
-          asset.sampleCount - link.from,
-          asset.sampleCount - link.to,
-        )
-      if (before && position >= link.from - before) {
-        const t = (position - (link.from - before)) / (before + after)
-        return (
-          this.pcm(voice, channel, position) * (1 - t) +
-          this.pcm(voice, channel, link.to + (position - link.from)) * t
-        )
-      }
-    }
-    return this.pcm(voice, channel, position)
-  }
   private streamRangeReady(stream: StreamPcm, start: number, end: number): boolean {
     return stream.ready(Math.floor(start), Math.floor(end) - Math.floor(start) + 2)
   }
   private streamReady(voice: Voice, advance = 0): boolean {
-    const stream = voice.stream!, asset = voice.asset!, position = voice.settings.position
-    let ready = this.streamRangeReady(stream, position, position + advance)
-    if (voice.tail) ready = this.streamRangeReady(stream, voice.tail.source, voice.tail.source + advance) && ready
-    else {
-      const link = this.link(voice)
-      if (link?.smooth) {
-        const before = Math.min(Math.floor(asset.sampleRate * 0.025), link.from, link.to)
-        if (before && position + advance >= link.from - before)
-          ready = this.streamRangeReady(stream, link.to + Math.max(position, link.from - before) - link.from,
-            link.to + position + advance - link.from) && ready
-      }
-    }
-    return ready
+    const position = voice.settings.position
+    return this.streamRangeReady(voice.stream!, position, position + advance)
   }
   private prepareStreamSample(voice: Voice, step: number): boolean | 'waiting' {
     const position = voice.settings.position, link = this.link(voice),
@@ -661,7 +612,7 @@ export class AudioMixer {
     // SLI jumps at high playback rates. Neither the initial prepare nor advance
     // may publish control changes when any required page is still missing.
     const saved = { position, labelIndex: voice.labelIndex, linkDirty: voice.linkDirty,
-      link: voice.link, tail: voice.tail && { ...voice.tail }, flags: [...voice.flags],
+      link: voice.link, flags: [...voice.flags],
       ended: voice.ended, status: voice.status, fade: voice.fade,
       filterChain: voice.filterChain, filterSource: voice.filterSource }, pending = this.pending.length
     let terminal = false
@@ -678,7 +629,6 @@ export class AudioMixer {
         voice.labelIndex = saved.labelIndex
         voice.linkDirty = saved.linkDirty
         voice.link = saved.link
-        voice.tail = saved.tail
         voice.flags.splice(0, voice.flags.length, ...saved.flags)
         voice.ended = saved.ended
         voice.status = saved.status
@@ -711,7 +661,7 @@ export class AudioMixer {
         this.event(voice, 'label', name)
       }
       const sample = (channel: number) =>
-        chain ? chain.sample(channel) : this.sample(voice, channel)
+        chain ? chain.sample(channel) : this.pcm(voice, channel, settings.position)
       for (let frame = 0; frame < left.length; frame++) {
         voice.clock += dt
         if (voice.fade && voice.clock + 1e-10 >= voice.fade.next) {
@@ -731,7 +681,7 @@ export class AudioMixer {
         try {
           const step = (voice.kind === 'wave' && settings.frequency === 0
             ? asset.sampleRate : settings.frequency) / this.sampleRate
-          chain = voice.filters?.length ? this.filtered(voice, filterBudget) : undefined
+          chain = voice.sourcePipeline ? this.filtered(voice, filterBudget) : undefined
           if (chain) {
             if (!chain.canAdvance(step)) { waiting = true; continue }
             if (!chain.prepare(label)) {

@@ -1,6 +1,6 @@
 import { Scenario } from './scenario.ts'
 import { KagTagSyntaxError, lexTag, type LexedTag } from './lexer.ts'
-import { integer, list, record, string, type Data, type RecordData } from './data.ts'
+import { KagReference, integer, list, record, string, tagReferences, type Data, type RecordData } from './data.ts'
 import { TvpError } from '../system/tvp-error.ts'
 
 export interface Effect {
@@ -76,12 +76,29 @@ export class KagParser {
   private *callback(name: string, ...args: Data[]): Task {
     return yield* this.effect('callback', name, args)
   }
+  private *text(value: Data): Task<string> {
+    return value instanceof KagReference
+      ? string(yield* this.effect('string', value.index)) : string(value)
+  }
   private *evaluate(expression: Data, boolean = false): Task {
-    return yield* this.effect('eval', string(expression), boolean, this.curStorage, this.tagLine)
+    return yield* this.effect('eval', yield* this.text(expression), boolean, this.curStorage, this.tagLine)
   }
   private *controlExpression(expression: Data, boolean = false): Task {
-    if (!string(expression)) throw new TvpError('TVPKAGSyntaxError')
-    return yield* this.evaluate(expression, boolean)
+    const source = yield* this.text(expression)
+    if (!source) throw new TvpError('TVPKAGSyntaxError')
+    return yield* this.evaluate(source, boolean)
+  }
+  private *parameters(): Task<{ values: RecordData; names: Data[] } | null> {
+    const input = yield* this.effect('params')
+    if (input === null) return null
+    const encoded = record(input), values = record(encoded.values)
+    for (const item of list(encoded.references)) {
+      const pair = list(item), name = string(pair[0]), index = integer(pair[1])
+      if (pair.length !== 2 || !Object.hasOwn(values, name) || index < 0 || index >= 100000)
+        throw new Error('Malformed KAG parameter reference')
+      values[name] = new KagReference(index)
+    }
+    return { values, names: list(encoded.names) }
   }
   private *popTo(depth: number): Task {
     if (depth < 0 || depth > this.macroDepth) throw new Error('KAG macro argument stack underflow')
@@ -203,6 +220,12 @@ export class KagParser {
   resetInterrupt(): void {
     this.interrupted = false
   }
+  restoreMissingArgs(): never {
+    // Restore sets the active depth to zero before discovering that omitted
+    // macroArgs cannot replace an existing cached parameter pool.
+    this.macroDepth = 0
+    throw new TvpError('TVPKAGMalformedSaveData')
+  }
   *popMacroArgs(): Task {
     if (this.macroDepth === 0) throw new TvpError('TVPKAGSyntaxError')
     yield* this.popTo(this.macroDepth - 1)
@@ -304,11 +327,11 @@ export class KagParser {
       this.curPos = attribute.end
       if (attribute.forward) {
         if (!this.recording) {
-          const current = yield* this.effect('params')
+          const current = yield* this.parameters()
           if (current !== null) {
-            const params = record(record(current).values)
+            const params = current.values
             values = Object.assign(Object.create(null), params, { tagname: name })
-            const ordered = list(record(current).names).map(string).filter((name) => name !== 'tagname' && Object.hasOwn(params, name))
+            const ordered = current.names.map(string).filter((name) => name !== 'tagname' && Object.hasOwn(params, name))
             const known = new Set(ordered)
             names = ['tagname', ...ordered, ...Object.keys(params).filter((name) => name !== 'tagname' && !known.has(name))]
           }
@@ -322,9 +345,9 @@ export class KagParser {
       ) {
         if (attribute.entity) value = yield* this.evaluate(value)
         else if (attribute.parameter) {
-          const current = yield* this.effect('params')
+          const current = yield* this.parameters()
           if (current !== null) {
-            const params = record(record(current).values),
+            const params = current.values,
               separator = attribute.value.indexOf('|')
             value = params[separator < 0 ? attribute.value : attribute.value.slice(0, separator)]
             if (value === undefined && separator >= 0) value = attribute.value.slice(separator + 1)
@@ -443,23 +466,26 @@ export class KagParser {
         if (macro !== undefined) {
           if (this.macroDepth >= 4096) throw new Error('KAG macro argument stack budget exceeded')
           this.macroDepth++
-          yield* this.effect('pushParams', values)
+          yield* this.effect('pushParams', tagReferences(values))
         }
         continue
       }
       if (kind === 'jump' || kind === 'call' || kind === 'return') {
+        // Native copies/converts these before the callback. Parameter values
+        // can be live objects even though ordinary expression entities are strings.
+        const storage = yield* this.text(values.storage), target = yield* this.text(values.target)
         if (
           yield* this.callback(
             kind === 'jump' ? 'onJump' : kind === 'call' ? 'onCall' : 'onReturn',
-            values,
+            tagReferences(values),
           )
         ) {
-          if (kind === 'return') yield* this.popCall(values.storage, values.target)
+          if (kind === 'return') yield* this.popCall(storage, target)
           else {
             // Jump restarts parsing without consuming the old tag; call
             // first advances the live cursor and captures that return point.
             if (kind === 'call') { this.advance(token); this.pushCall() }
-            yield* this.goTo(values.storage, values.target)
+            yield* this.goTo(storage, target)
           }
           // Native goto parse_start checks EOF/no scenario before interrupt.
           // In particular, onJump may clear the scenario and request a later
@@ -468,12 +494,12 @@ export class KagParser {
           continue
         }
       } else if (kind === 'macro') {
-        const name = string(values.name).toLowerCase()
+        const name = (yield* this.text(values.name)).toLowerCase()
         if (!name) throw new TvpError('TVPKAGSyntaxError')
         this.recording = { name, source: '' }
       } else if (kind === 'macropop') yield* this.popMacroArgs()
       else if (kind === 'erasemacro') {
-        const name = string(values.name)
+        const name = yield* this.text(values.name)
         if (!(yield* this.effect('eraseMacro', name))) throw new TvpError('TVPUnknownMacroName', [name])
       }
       this.advance(token)

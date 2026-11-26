@@ -40,7 +40,7 @@ ${body}
           province && {
             width: province.width,
             height: province.height,
-            data: [...province.data],
+            data: [...province.readData],
           }
         )
       },
@@ -428,7 +428,7 @@ function clearFromMissing(){source.hasImage=false;layer.assignImages(source);}
       assert.equal(await f.session.evaluate('assigned'), `0|1|${expected.join(',')}`)
       assert.equal(await f.session.evaluate('geometry'), '17,19,4,3,-1,-1,1,1,3,2')
       assert.deepEqual(await f.plane(), { width: 4, height: 3, data: expected })
-      assert.equal(f.session.snapshot().bitmapBytes, 24)
+      assert.equal(f.session.snapshot().bitmapBytes, 12, 'Both layers reference the same Province image')
       await f.session.evaluate('selfAssign()')
       assert.equal(await f.plane(), undefined)
       assert.equal(

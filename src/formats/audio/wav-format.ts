@@ -1,4 +1,4 @@
-import type { AudioInfo } from '../../engine/ports/audio.ts'
+import type { AudioInfo, PcmEncoding } from '../../engine/ports/audio.ts'
 
 export interface WaveFormat {
   floating: boolean
@@ -46,7 +46,8 @@ export function waveInfo(format: WaveFormat, size: number): AudioInfo {
   // by physical block alignment. Keep the declared time separate from the
   // PCM available to the mixer so it cannot play a following RIFF chunk.
   const reportedSampleCount = Math.floor(size / Math.floor(channels * bits / 8))
-  return { channels, sampleRate, bits, sampleCount,
+  const pcmEncoding = (format.floating ? `f${format.containerBits}` : format.containerBits === 8 ? 'u8' : `s${format.containerBits}`) as PcmEncoding
+  return { channels, sampleRate, bits, sampleCount, pcmEncoding,
     ...(reportedSampleCount === sampleCount ? {} : { reportedSampleCount }) }
 }
 

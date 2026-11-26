@@ -9,14 +9,45 @@ class KAGParser {
     __kagMacros = %[]; __kagParams = []; __kagParamNames = []; __kagTag = %[]; __kagTagList = [];
   }
   function finalize() { __host("KAG.destroy", __kagId); }
-  function __kagRun(method, argument=void) {
+  function __kagResolveTag(value, references, bindings=void) {
+    if(references===void || !references.count || bindings===void)return value;
+    for(var i=0;i<bindings.count;i++){
+      var binding=bindings[i],index=binding[1];
+      if(index<0 || index>=references.count)throw new Exception("Invalid KAG parameter reference");
+      value[binding[0]]=references[index];
+    }
+    return value;
+  }
+  function __kagEncodeParams(references) {
+    if(!__kagParamDepth)return null;
+    var fields=[],values=%[],bindings=[];fields.assign(__kagParams[__kagParamDepth-1]);
+    for(var i=0;i<fields.count;i+=2){
+      var value=fields[i+1];
+      if(typeof value=="Object" || typeof value=="Octet"){
+        if(references.count>=100000)throw new Exception("KAG parameter reference budget exceeded");
+        values[fields[i]]=void;bindings.add([fields[i],references.count]);references.add(value);
+      }else values[fields[i]]=value;
+    }
+    return %[values:values,names:__kagParamNames[__kagParamDepth-1],references:bindings];
+  }
+  function __kagShape(values) {
+    var result=%[],fields=[];fields.assign(values);
+    for(var i=0;i<fields.count;i+=2)result[fields[i]]=void;
+    return result;
+  }
+  function __kagRun(method, argument=void, restoring=void) {
+    // These are ordinary VM-owned variants scoped to this invocation. Nested
+    // parser calls have separate tables; no reference becomes a host handle.
+    var references=void;
     var operation = __host("KAG.begin", __kagId, method, argument);
     while(!operation.done) {
       var token = operation.token, a = operation.args, result = void;
       try {
         switch(operation.kind) {
           case "callback":
-            if(a[0] == "onJump" || a[0] == "onCall" || a[0] == "onReturn") a[1][0] = __kagAcceptTag(a[1][0]);
+            if(a[0] == "onJump" || a[0] == "onCall" || a[0] == "onReturn") {
+              var packet=a[1][0];a[1][0]=__kagAcceptTag(__kagResolveTag(packet.value,references,packet.references));
+            }
             else if(a[0] == "onLabel" || a[0] == "onScript") { (Dictionary.clear incontextof __kagTag)(); __kagTagList.clear(); }
             result = this[a[0]](a[1]*);
             if(a[0] == "onJump" || a[0] == "onCall" || a[0] == "onReturn") result = !!result;
@@ -27,20 +58,24 @@ class KAGParser {
             if(a[1]) result = !!result;
             else if(result !== void) result = string(result);
             break;
+          case "string": result=string(references[a[0]]);break;
           case "getMacro": result = __kagMacros[a[0]]; if(result !== void) result = string(result); break;
           case "boolean": result = !!a[0]; break;
           case "setMacro": __kagMacros[a[0]] = a[1]; break;
           case "eraseMacro":
             result = delete __kagMacros[a[0]]; break;
-          case "params": result = __kagParamDepth ? %[values:__kagParams[__kagParamDepth-1],names:__kagParamNames[__kagParamDepth-1]] : null; break;
-          case "pushParams": __kagPushParams(a[0]); break;
+          case "params":
+            if(references===void)references=[];
+            result = __kagEncodeParams(references);break;
+          case "pushParams": __kagPushParams(__kagResolveTag(a[0].value,references,a[0].references)); break;
           case "popParams": __kagParamDepth = a[0]; break;
           case "clearParams": __kagClearParams(); break;
-          case "restoreMacros": (Dictionary.assign incontextof __kagMacros)(a[0]); break;
+          case "restoreMacros": (Dictionary.assign incontextof __kagMacros)(restoring.macros); break;
           case "restoreParams":
             __kagClearParams();
             for(var i=0;i<a[0].count;i++) {
-              __kagParams.add(a[0][i].values); __kagParamNames.add(a[0][i].names);
+              var values=%[];(Dictionary.assign incontextof values)(restoring.macroArgs[i]);
+              __kagParams.add(values); __kagParamNames.add(a[0][i].names);
             }
             __kagParamDepth = __kagParams.count;
             break;
@@ -53,7 +88,8 @@ class KAGParser {
         throw error;
       }
     }
-    return operation.value;
+    return method=="getNextTag" && operation.value!==void
+      ? __kagResolveTag(operation.value,references,operation.references) : operation.value;
   }
   function loadScenario(name) { __kagRun("loadScenario", string(name)); }
   function goToLabel(name) { __kagRun("goToLabel", string(name)); }
@@ -82,11 +118,33 @@ class KAGParser {
   function clearCallStack() { __kagRun("clearCallStack"); }
   function popMacroArgs() { __kagRun("popMacroArgs"); }
   function store() {
-    var params=[],names=[];
-    for(var i=0;i<__kagParamDepth;i++){params.add(__kagParams[i]);names.add(__kagParamNames[i]);}
-    return __host("KAG.store", __kagId, __kagMacros, params, names);
+    var params=[],shapes=[],names=[],macros=%[];
+    (Dictionary.assign incontextof macros)(__kagMacros);
+    for(var i=0;i<__kagParamDepth;i++){
+      var values=%[];(Dictionary.assign incontextof values)(__kagParams[i]);
+      params.add(values);shapes.add(__kagShape(values));names.add(__kagParamNames[i]);
+    }
+    var result=__host("KAG.store",__kagId,%[],shapes,names);
+    result.macros=macros;result.macroArgs=params;
+    return result;
   }
-  function restore(data) { __kagRun("restore", data); }
+  function restore(data) {
+    // Native applies optional macros before inspecting macroArgs, including
+    // when a later malformed-save error is raised. Omitted macros keep them.
+    if(data.macros!==void)(Dictionary.assign incontextof __kagMacros)(data.macros);
+    __kagParamDepth=0;
+    var shape=%[],params=[];(Dictionary.assign incontextof shape)(data);
+    shape.macros=void;
+    if(data.macroArgs===void){
+      if(__kagParams.count)__host("KAG.malformedSave",__kagId);
+      shape.macroArgStackDepth=0;
+    }else for(var i=0;i<data.macroArgs.count;i++){
+      var values=%[];(Dictionary.assign incontextof values)(data.macroArgs[i]);
+      params.add(__kagShape(values));
+    }
+    shape.macroArgs=params;
+    __kagRun("restore",shape,data);
+  }
   function assign(parser) {
     if(!(parser instanceof "KAGParser")) {
       if(typeof parser=="Object") __host("KAG.invalidAssign", __kagId);

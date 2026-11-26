@@ -3,6 +3,7 @@ import { kagRoutingFiles, kagRoutingExpected, kagRoutingSource } from './kag-rou
 import { kagMacroSlotFiles, kagMacroSlotExpected, kagMacroSlotSource } from './kag-macro-slots.ts'
 import { kagEmbeddingFiles, kagEmbeddingExpected, kagEmbeddingSource } from './kag-embedding.ts'
 import { kagOptionalMacroFiles, kagOptionalMacroExpected, kagOptionalMacroSource } from './kag-optional-macros.ts'
+import { kagReferenceFiles, kagReferenceExpected, kagReferenceSource } from './kag-reference-values.ts'
 
 /** Shared TJS controls for the 2.32r2 SDK and the Web runtime. The SDK
  * produces its own macro bookmark from a real call into another storage. */
@@ -15,6 +16,7 @@ export const kagFiles = {
   ...kagMacroSlotFiles,
   ...kagEmbeddingFiles,
   ...kagOptionalMacroFiles,
+  ...kagReferenceFiles,
 }
 
 export const kagExpected: Readonly<Record<string, string>> = {
@@ -36,6 +38,7 @@ export const kagExpected: Readonly<Record<string, string>> = {
   ...kagMacroSlotExpected,
   ...kagEmbeddingExpected,
   ...kagOptionalMacroExpected,
+  ...kagReferenceExpected,
 }
 
 export const kagControlSource = String.raw`
@@ -75,6 +78,7 @@ function kagResumePoint(d){
   return restored+"|"+q.getNextTag().tagname+"|"+q.callStackDepth+"|"+int(q.macroParams===null);
 }
 function kagObserve(id){
+  if(id.indexOf("references-")==0){try{return kagReferenceObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("expression-")==0){try{return kagEvaluateObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("routing-")==0){try{return kagRoutingObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("slots-")==0){try{return kagMacroSlotObserve(id);}catch(e){return e.message;}}
@@ -151,4 +155,4 @@ function kagObserve(id){
     return "unexpected success";
   }catch(e){return e.message;}
 }
-` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource
+` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource
