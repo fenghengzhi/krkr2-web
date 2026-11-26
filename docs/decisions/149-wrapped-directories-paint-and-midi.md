@@ -27,3 +27,5 @@
 第 138 批已结束，24 个作业成功、4 个失败、10 个跳过。第 139 批取回时有 23 个作业成功、3 个失败、10 个跳过，Wine 声音参考仍在进行。两批应用构建都在视频命令的 `frame` 类型检查处失败，Node 和常规浏览器均缺少运行结果。第 145 批已修改命令类型，其构建状态在本轮快照中仍待确认。第 140 至 148 批当时均在排队。[第 138 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45768308104) · [第 139 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45769721383)
 
 两批原版 KAG 对照均为 78/78，图形对照均为 62/62。Windows 原版配置对照分别计划 4 项和 5 项，实际均缺少进程输出。输入中同时含有 `Case` 和 `case` 两个参数。第 149 批让 PowerShell 以能保留大小写不同键名的哈希表读取 JSON，两个参数的原断言继续逐项比较。本次取回的 49 份原始归档均已核对字节数和 SHA-256。[Windows 配置夹具](../../tests/probes/original-player-config.ps1)
+
+第 149 批实现提交为 `5013c229d4af1237604c7ed151bab7b5ad0f0bed`。GitHub 已为该提交登记托管验证，登记时状态为 `pending`，结果留到下一批取回。[第 149 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45793541359)
