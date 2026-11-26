@@ -16,6 +16,73 @@ const bytesResource = (name: string, value: Uint8Array = new Uint8Array([1])): R
 const archive = (name: string, entries: Record<string, string> = { 'value.tjs': '42' }) => bytesResource(name, xp3Fixture(entries).bytes)
 const gate = () => { let resolve!: () => void; const promise = new Promise<void>((yes) => { resolve = yes }); return { promise, resolve } }
 
+test('AutoPath case collisions are resolved inside the winning patch, with exact spelling or an ambiguity', async () => {
+  const resolver = new StorageResolver('', false, archiveReader)
+  resolver.mount([bytesResource('Base/route.tjs'), archive('Patch.XP3', {
+    'Scene/ROUTE.TJS': '"upper"', 'Scene/Route.tjs': '"mixed"', 'Scene/de/GROSS.tjs': '"nested"',
+  })])
+  try {
+    resolver.addAutoPath('base/')
+    resolver.addAutoPath('patch.xp3>SCENE/')
+    for (const spelling of ['ROUTE.TJS', 'Route.tjs']) {
+      const placed = await resolver.resolveAsync('missing/' + spelling)
+      assert.equal(placed.name, 'Patch.XP3>Scene/' + spelling)
+      assert.equal(placed, await resolver.findAsync(placed.name))
+    }
+    await assert.rejects(resolver.resolveAsync('route.tjs'), /Ambiguous resource name/)
+    assert.equal(await resolver.lookupAsync('gross.tjs'), undefined)
+    resolver.addAutoPath('BASE/')
+    await assert.rejects(resolver.resolveAsync('route.tjs'), /Ambiguous resource name/)
+    resolver.removeAutoPath('PATCH.XP3>scene/')
+    assert.equal((await resolver.resolveAsync('ROUTE.TJS')).name, 'Base/route.tjs')
+  } finally { resolver.dispose() }
+})
+
+test('a registered virtual directory finds mixed-case archive aliases and still gives loose and saved files priority', async () => {
+  const resolver = new StorageResolver('', true, archiveReader),
+    saved = bytesResource('Voices/title.txt'), lookup = (name: string) => name === saved.name ? saved : undefined
+  resolver.mount([archive('data.xp3', { 'Voices/TITLE.TXT': 'alias', 'Voices/SCENE.TJS': 'chapter' }),
+    bytesResource('Voices/scene.tjs'), bytesResource('Base/title.txt')])
+  try {
+    resolver.addAutoPath('Base/')
+    resolver.addAutoPath('vOiCeS/')
+    assert.equal((await resolver.resolveAsync('title.txt')).name, 'data.xp3>Voices/TITLE.TXT')
+    assert.equal((await resolver.resolveAsync('SCENE.TJS')).name, 'Voices/scene.tjs')
+    resolver.invalidateSearch()
+    assert.equal(await resolver.lookupAsync('TITLE.TXT', lookup, [saved]), saved)
+    resolver.removeAutoPath('VOICES/')
+    assert.equal((await resolver.lookupAsync('title.txt', lookup, [saved]))?.name, 'Base/title.txt')
+  } finally { resolver.dispose() }
+})
+
+test('patch registration folds ASCII letters without merging distinct non-ASCII filenames', async () => {
+  const resolver = new StorageResolver('', false)
+  resolver.mount([bytesResource('original/Épisode.TJS'), bytesResource('update/épisode.tjs')])
+  try {
+    resolver.addAutoPath('original/')
+    resolver.addAutoPath('update/')
+    assert.equal((await resolver.resolveAsync('ÉPISODE.tjs')).name, 'original/Épisode.TJS')
+    assert.equal((await resolver.resolveAsync('épisode.TJS')).name, 'update/épisode.tjs')
+    assert.equal(resolver.resolve('ÉPISODE.tjs').name, 'original/Épisode.TJS')
+    assert.equal(resolver.resolve('épisode.TJS').name, 'update/épisode.tjs')
+    resolver.removeAutoPath('ORIGINAL/')
+    assert.equal((await resolver.resolveAsync('Épisode.TJS')).name, 'update/épisode.tjs')
+    assert.equal(resolver.resolve('Épisode.TJS').name, 'update/épisode.tjs')
+  } finally { resolver.dispose() }
+})
+
+test('a virtual collection directory with competing spellings keeps its exact directory identity', async () => {
+  const resolver = new StorageResolver('', true, archiveReader)
+  resolver.mount([archive('game.xp3', { 'Story/scene.tjs': 'A', 'STORY/scene.tjs': 'B' })])
+  try {
+    resolver.addAutoPath('Story/')
+    assert.equal((await resolver.resolveAsync('sCeNe.TJS')).name, 'game.xp3>Story/scene.tjs')
+    resolver.removeAutoPath('story/')
+    resolver.addAutoPath('story/')
+    await assert.rejects(resolver.resolveAsync('sCeNe.TJS'), /Ambiguous storage directory/)
+  } finally { resolver.dispose() }
+})
+
 test('lazy import/project selection publish raw containers without reading any index or lower-priority malformed package', async () => {
   let reads = 0
   const source = { size: malformedXp3.length, async read(offset: number, length: number) { reads++; return malformedXp3.slice(offset, offset + length) } },

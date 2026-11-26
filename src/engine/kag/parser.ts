@@ -370,6 +370,10 @@ export class KagParser {
   *getNextTag(): Task {
     // EOF takes precedence over interrupt in the native class.
     if (!this.scenario || this.curLine >= this.scenario.lines.length) return
+    // Release the old VM-owned fields before advancing any parser cursor.
+    // A field's finalizer can read/reenter this parser or request interrupt.
+    // Entry EOF above deliberately does not clear the previous result.
+    yield* this.effect('clearTag')
     for (let work = 0; ; work++) {
       // Long skipped text and macro definitions remain cancellable in a Worker.
       if (work % 1024 === 1023) yield* this.effect('yield')

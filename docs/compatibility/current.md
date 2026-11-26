@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 147 批按游戏注册顺序匹配补丁中的大小写文件名，保留 KAG 到达剧情末尾时已有的标签数据，并调整了 MIDI 换曲和音量渐变的时序。新增行为等待托管验证。[147 范围与验收](../decisions/147-game-patches-scenario-end-and-midi.md)
+
 第 146 批为无 BOM 的 TJS 与 KAG 加入游戏级编码选择。普通鼠标单击采用按下位置，无扬声器标记的六声道 WAVE 按原版次序播放。新增行为等待托管验证。[146 范围与验收](../decisions/146-game-text-mouse-clicks-and-wave-speakers.md)
 
 第 145 批为旧 ZIP 发行包和存档接入日文、简体中文和繁体中文文件名编码，游戏库重开时恢复选择。图层影片等待真实准备帧，高上升部字体能保留完整的字幕装饰线。新增实现等待托管验证。[145 范围与验收](../decisions/145-zip-file-names-video-prepare-and-text.md)

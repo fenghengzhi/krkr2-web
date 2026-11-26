@@ -7,6 +7,7 @@ import { decodeMidi } from '../../src/formats/audio/midi.ts'
 import { TvpError } from '../../src/engine/system/tvp-error.ts'
 import { TjsError } from '../../src/engine/system/tjs-error.ts'
 import { midiVolumePublicExpected, midiVolumeSource } from '../helpers/midi-volume.ts'
+import { midiReopenExpected, midiReopenFiles, midiReopenSource } from '../helpers/midi-reopen.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -26,6 +27,7 @@ const rawCalls = [
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
   for (const { id, bytes } of cases) writeFileSync(resolve(game, id + '.mid'), bytes)
+  for (const [name, bytes] of Object.entries(midiReopenFiles())) writeFileSync(resolve(game, name), bytes)
   const startup = [
     'System.exitOnWindowClose=false; System.exitOnNoWindowStartup=false;',
     'var observations=[]; function record(v){observations.add(v);observations.save("native-events.txt");}',
@@ -40,11 +42,15 @@ if (process.argv[2] === 'prepare') {
     'logRaw("output-path",function(){return MIDISoundBuffer.midiOut(<% f2 01 %>);});',
     midiVolumeSource,
     'var volumeRows=[];try{volumeRows.add(midiVolumePublicControls());}catch(e){volumeRows.add("unexpected-error:"+e.message);}volumeRows.save("native-volume.txt");',
+    midiReopenSource,
+    'var reopenRows=[];',
+    ...Object.keys(midiReopenExpected).map((kind) => `try{reopenRows.add("${kind}|"+midiReopenObserve("${kind}"));}catch(e){reopenRows.add("${kind}|unexpected-error:"+e.message);}reopenRows.save("native-reopen.txt");`),
     'record("done"); System.exit();',
   ].join('\n')
   const script = Buffer.from('\ufeff' + startup, 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), script)
   save('inputs.json', { commit: process.env.GITHUB_SHA, startupSha256: sha(script), inputs })
+  save('reopen-inputs.json', Object.entries(midiReopenFiles()).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) })))
 } else if (process.argv[2] === 'compare') {
   const path = resolve(game, 'native-events.txt')
   const raw = existsSync(path) ? readFileSync(path) : Buffer.alloc(0)
@@ -83,7 +89,19 @@ if (process.argv[2] === 'prepare') {
   save('volume-controls.json', { commit: process.env.GITHUB_SHA, complete: volumeComplete, volumeRows,
     expected: midiVolumePublicExpected, sha256: sha(volumeBytes), device,
     scope: 'Original public volume/volume2 signed-int conversion and clamping only. No MIDI endpoint PCM, timbre or CC7 transport capture is claimed.' })
+  for (const [name, expected] of Object.entries(midiReopenFiles())) {
+    const input = readFileSync(resolve(game, name)); assert.equal(input.length, expected.length); assert.equal(sha(input), sha(expected))
+  }
+  const reopenPath = resolve(game, 'native-reopen.txt'), reopenBytes = existsSync(reopenPath) ? readFileSync(reopenPath) : Buffer.alloc(0),
+    reopenRows = reopenBytes.toString(reopenBytes[0] === 255 && reopenBytes[1] === 254 ? 'utf16le' : 'utf8')
+      .replace(/^\ufeff/, '').trimEnd().split(/\r?\n/),
+    expectedReopens = Object.entries(midiReopenExpected).map(([kind, value]) => kind + '|' + value),
+    reopenComplete = sdk?.state === 'observed' && sdk.exitCode === 0 && reopenRows.length === expectedReopens.length &&
+      reopenRows.every((row, index) => row === expectedReopens[index])
+  save('reopen-controls.json', { complete: reopenComplete, reopenRows, expected: expectedReopens, device,
+    sha256: sha(reopenBytes), scope: 'Original ordinary stopped/cold MIDI Open, missing storage, malformed SMF and inherited long-fade state. No playback device or native endpoint PCM is claimed.' })
   assert(complete, 'MIDI open observations differ or are incomplete')
   assert(rawComplete, 'Original MIDI signature or output-path observations differ or are incomplete')
   assert(volumeComplete, 'Original MIDI public volume controls differ or are incomplete')
+  assert(reopenComplete, 'Original MIDI replacement controls differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

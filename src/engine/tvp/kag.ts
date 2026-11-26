@@ -46,6 +46,8 @@ class KAGParser {
       var token = operation.token, a = operation.args, result = void;
       try {
         switch(operation.kind) {
+          case "clearTag":
+            (Dictionary.clear incontextof __kagTag)();__kagTagList.clear();break;
           case "callback":
             if(a[0] == "onJump" || a[0] == "onCall" || a[0] == "onReturn") {
               var packet=a[1][0];a[1][0]=__kagAcceptTag(__kagResolveTag(packet.value,references,packet.references));
@@ -112,7 +114,6 @@ class KAGParser {
     return __kagTag;
   }
   function getNextTag() {
-    (Dictionary.clear incontextof __kagTag)(); __kagTagList.clear();
     var next = __kagRun("getNextTag");
     return next === void ? void : __kagAcceptTag(next);
   }

@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 147 批修正补丁文件名大小写造成的章节和贴图选错、KAG 在剧情末尾清空最后一个选项，以及 MIDI 换曲失败时旧音乐被提前切断。第 135 批已取回八份常规浏览器报告，2,985 项通过、81 项失败、2 项跳过，仍缺一份 WebKit 报告。[147 实现与验证](decisions/147-game-patches-scenario-end-and-midi.md)
+
 第 146 批让旧汉化版在启动时选择脚本与剧情编码，修正普通单击和松开鼠标时的位置，以及六声道 WAVE 的中置对白声道。第 134 批完整常规浏览器结果为 3,220 项通过、87 项失败、2 项跳过。第 135 批 Node 仍有六项失败，本批修订了其中两项 KAG 宏参数用例的夹具。146 的提交 `04ba86c` 已登记排队。[146 实现与验证](decisions/146-game-text-mouse-clicks-and-wave-speakers.md) · [第 146 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45785645939)
 
 第 145 批支持按旧 ZIP 里的日文和中文原名载入剧情与存档，修正字幕装饰线裁剪，以及图层影片的准备帧与回调顺序。第 134 批已经结束。Firefox 与 WebKit 的新增音乐用例 16/16 通过，这两个浏览器的常规报告仍有 72 项失败。介绍游戏的四项失败已定位到状态采集的分隔符。145 的提交 `67fd93e` 已登记排队。[145 实现与验证](decisions/145-zip-file-names-video-prepare-and-text.md) · [第 145 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45783361496)

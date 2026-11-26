@@ -46,6 +46,8 @@ interface Sound {
   filters?: PhaseVocoderConnection
   cdda?: CddaSelection
   preparedCdda?: { token: number; selection: CddaSelection }
+  preparedMidi: Map<number, { read(): Promise<Uint8Array> }>
+  midiWaiters: Set<(error: Error) => void>
 }
 type Callback = { name: string; args: ScriptValue[] }
 export class SoundService {
@@ -55,6 +57,7 @@ export class SoundService {
   private readonly filters: PhaseVocoderService
   private nextId = 1
   private nextCddaToken = 1
+  private nextMidiToken = 1
   private buffers = new Map<number, Sound>()
   private unsubscribe?: () => void
   private globalVolume = 100000
@@ -108,6 +111,9 @@ export class SoundService {
     const sound = this.buffers.get(id)
     if (!sound) return
     this.buffers.delete(id)
+    sound.preparedMidi.clear()
+    for (const cancel of sound.midiWaiters) cancel(new Error('MIDI resource owner has closed'))
+    sound.midiWaiters.clear()
     try {
       this.cancelEvents(sound)
     } finally {
@@ -180,10 +186,25 @@ export class SoundService {
   }
   private async unloadMedia(sound: Sound): Promise<SoundSnapshot | undefined> {
     if (!sound.resourceRequested) return
-    const result = await this.voiceCommand(sound, { op: sound.kind === 'wave' ? 'unload' : 'close', id: sound.id })
-    // An unload result exists only for retained Wave controls; it owns no
+    const result = await this.voiceCommand(sound, { op: sound.kind !== 'cdda' ? 'unload' : 'close', id: sound.id })
+    // An unload result exists only for retained Wave/MIDI controls; it owns no
     // decoder or PCM. Its live volume can have advanced during async cleanup.
     return result.snapshot
+  }
+  private waitMidi<T>(sound: Sound, work: Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const valid = () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound
+      const cancel = (error: Error) => reject(error)
+      if (valid()) sound.midiWaiters.add(cancel)
+      else cancel(new Error('MIDI resource owner has closed'))
+      // Keep both handlers on the actual provider even after Stop has released
+      // its waiter. A late file may not publish a replacement voice.
+      work.then((value) => {
+        sound.midiWaiters.delete(cancel)
+        if (valid()) resolve(value)
+        else cancel(new Error('MIDI resource owner has closed'))
+      }, (error) => { sound.midiWaiters.delete(cancel); reject(error) })
+    })
   }
   private receive(event: AudioEvent): void {
     if (event.type === 'error') {
@@ -192,7 +213,7 @@ export class SoundService {
     }
     const sound = this.buffers.get(event.id)
     if (!sound || event.epoch !== sound.snapshot.epoch) return
-    const inheritedFade = sound.kind === 'wave' && event.type === 'fade'
+    const inheritedFade = sound.kind !== 'cdda' && event.type === 'fade'
     sound.snapshot = event.snapshot
     const version = sound.version,
       name =
@@ -218,7 +239,7 @@ export class SoundService {
     const valid = () =>
       this.buffers.get(sound.id) === sound &&
       sound.version === version &&
-      // Already admitted Wave fade callbacks belong to the SoundBuffer.
+      // Already admitted Wave/MIDI fade callbacks belong to the SoundBuffer.
       // Native status changes still revoke them through version; a stale
       // transport event cannot enter here through a retired media epoch.
       (inheritedFade || sound.snapshot.epoch === event.epoch)
@@ -268,6 +289,8 @@ export class SoundService {
           position: [0, 0, 0],
           canControlPan: false,
           waveOutputRate: 0,
+          preparedMidi: new Map(),
+          midiWaiters: new Set(),
           snapshot: {
             id,
             epoch: 0,
@@ -420,7 +443,65 @@ export class SoundService {
         })
       }
     }
-    if (method === 'prepareOpen') {
+    if (method === 'prepareMidi') {
+      if (sound.kind !== 'midi') throw new Error('Invalid MIDI owner')
+      const name = text(0), resource = this.resourceSource
+        ? await this.waitMidi(sound, Promise.resolve(this.resourceSource.resolve(name))) : undefined,
+        bytes = resource ? undefined : await this.waitMidi(sound, this.read(name))
+      if (this.disposed || this.cancelling || this.buffers.get(sound.id) !== sound)
+        throw new Error('MIDI opening lost its sound owner')
+      if (!Number.isSafeInteger(this.nextMidiToken)) throw new Error('MIDI opening identity exhausted')
+      const token = this.nextMidiToken++
+      // Each reentrant Open owns its own stream selection. A Stop callback can
+      // open another song without replacing this caller's already-opened file.
+      sound.preparedMidi.set(token, { read: resource ? () => resource.read() : async () => bytes! })
+      value = BigInt(token)
+    } else if (method === 'releaseMidi') {
+      sound.preparedMidi.delete(numeric(0))
+    } else if (method === 'midiFailure') {
+      if (sound.kind !== 'midi') throw new Error('Invalid MIDI owner')
+      const previous = sound.snapshot.status
+      sound.snapshot.status = 'unload'
+      if (previous !== 'unload') {
+        this.cancelEvents(sound)
+        callbacks.push({ name: 'onStatusChanged', args: ['unload'] })
+      }
+    } else if (method === 'openMidi') {
+      if (sound.kind !== 'midi') throw new Error('Invalid MIDI owner')
+      const token = numeric(0), selected = sound.preparedMidi.get(token)
+      if (!selected) throw new Error('MIDI opened stream has expired')
+      sound.preparedMidi.delete(token)
+      const previous = sound.snapshot.status
+      const clearMedia = async () => {
+        const retained = await this.unloadMedia(sound)
+        sound.resourceRequested = !!retained; sound.ready = !!retained
+        sound.labels = scriptRecord({})
+        sound.snapshot = { ...(retained ?? sound.snapshot), status: previous,
+          position: 0, paused: false, frequency: 0, sampleRate: 0, sampleCount: 0,
+          reportedSampleCount: undefined, channels: 0, bits: 0, fading: retained?.fading ?? false }
+      }
+      try {
+        await clearMedia()
+        const bytes = await this.waitMidi(sound, selected.read())
+        if (this.disposed || this.cancelling || this.buffers.get(sound.id) !== sound)
+          throw new Error('MIDI opened stream lost its sound owner')
+        // MIDIImpl reads SMF directly. An unrelated .mid.sli is not a Wave
+        // loop-manager input and must not prevent this music from opening.
+        await apply({ op: 'open', id: sound.id, kind: 'midi', bytes,
+          loops: emptyLoops(), settings: sound.snapshot })
+        sound.ready = true
+      } catch (error) {
+        if (this.buffers.get(sound.id) === sound && !this.cancelling) {
+          try { await clearMedia() }
+          catch (cleanup) { throw new AggregateError([error, cleanup], 'MIDI open and retirement failed', { cause: error }) }
+        }
+        throw error
+      }
+      if (previous !== sound.snapshot.status) {
+        this.cancelEvents(sound)
+        callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
+      }
+    } else if (method === 'prepareOpen') {
       if (input.length < 1) throw new TjsError('TJSBadParamCount')
     } else if (method === 'setPos') {
       if (sound.kind !== 'wave') throw new Error('Position requires a WaveSoundBuffer')
@@ -725,6 +806,11 @@ export class SoundService {
     // before retirement later waits for those same inflight calls to finish.
     this.cancelling = Promise.resolve().then(() =>
       this.backend?.cancel ? this.backend.cancel() : this.pause(true))
+    for (const sound of this.buffers.values()) {
+      sound.preparedMidi.clear()
+      for (const cancel of sound.midiWaiters) cancel(new Error('MIDI resource owner has closed'))
+      sound.midiWaiters.clear()
+    }
     void this.cancelling.catch(() => {})
     return this.cancelling
   }

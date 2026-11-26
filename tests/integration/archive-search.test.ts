@@ -4,6 +4,24 @@ import { headless } from '../helpers/headless.ts'
 import { archivePatchFiles, kagAutoPathProgram, patchColors, solidBmp } from '../helpers/archive-patch.ts'
 import { importResources } from '../../src/backends/files/import-resources.ts'
 import { MemorySaveStore } from '../../src/engine/ports/saves.ts'
+import { patchCaseFiles, patchCaseSource, patchCaseExpected } from '../helpers/patch-case.ts'
+
+for (const binary of [false, true]) {
+  test(`${binary ? 'bytecode' : 'source'}: a loose update and an XP3 select the same chapter as the original Windows engine across case changes`, async () => {
+    const { session } = await headless({
+      ...patchCaseFiles(), 'patch-script.tjs': patchCaseSource,
+      'startup.tjs': binary
+        ? 'Scripts.compileStorage("patch-script.tjs",System.dataPath+"case.cjs",false,true,false);Scripts.execStorage(System.dataPath+"case.cjs");'
+        : 'Scripts.execStorage("patch-script.tjs");',
+    }, { project: { directory: '', executableDirectory: '' } })
+    try {
+      await session.start()
+      assert.equal(await session.evaluate('patchCaseTrace()'), patchCaseExpected)
+      await session.evaluate('Storages.addAutoPath("scenepack.XP3>txt/")')
+      assert.equal(await session.evaluate('Storages.getPlacedPath("route.tjs")'), 'game://./ScenePack.xp3>TXT/ROUTE.TJS')
+    } finally { await session.stop() }
+  })
+}
 
 const program = String.raw`
 System.graphicCacheLimit=gcsAuto;

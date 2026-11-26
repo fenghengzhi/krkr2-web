@@ -2,7 +2,7 @@ import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { StorageArchives, type OpenArchive } from './archives.ts'
 import { TvpError } from '../system/tvp-error.ts'
 
-import { normalizeResourcePath, parseStoragePath, storageDirectoryPath } from './public-path.ts'
+import { extractStorageName, normalizeResourcePath, parseStoragePath, storageDirectoryPath } from './public-path.ts'
 
 // Kept as the strict relative import/key boundary for existing callers.
 export const normalizePath = normalizeResourcePath
@@ -19,11 +19,85 @@ export function normalizeStorageName(input: string, directory = false): string {
 
 type AliasSearch = 'all' | 'identified'
 
+// Both the Win32 file medium and the stock archive index fold ASCII A–Z.
+// Keep the imported spelling in addresses handed back to the script.
+const autoPathKey = (name: string) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+function findSpelling<T>(entries: ReadonlyMap<string, T>, name: string): T | undefined {
+  const exact = entries.get(name)
+  if (exact !== undefined) return exact
+  const folded = name.toLowerCase()
+  let match: T | undefined
+  for (const [entry, value] of entries) {
+    if (entry.toLowerCase() !== folded) continue
+    if (match !== undefined) throw new Error(`Ambiguous resource name: ${name}`)
+    match = value
+  }
+  return match
+}
+
+function aliasDirectory(path: string, names: Iterable<string>): string | undefined {
+  if (!path) return ''
+  const key = autoPathKey(path)
+  let match: string | undefined, ambiguous = false
+  for (const name of names) {
+    const prefix = name.slice(0, path.length)
+    if (prefix === path) return path
+    if (autoPathKey(prefix) !== key) continue
+    if (match !== undefined && prefix !== match) ambiguous = true
+    match = prefix
+  }
+  if (ambiguous) throw new Error(`Ambiguous storage directory: ${path}`)
+  return match
+}
+
+class AutoPathTable {
+  private readonly groups = new Map<string, { directory: string; files: string | Map<string, string> }>()
+  private count = 0
+  private units = 0
+
+  add(directory: string, name: string, file: string): void {
+    const key = autoPathKey(name), group = this.groups.get(key)
+    let previous: string | undefined
+    if (!group || group.directory !== directory) {
+      if (group) {
+        for (const old of typeof group.files === 'string' ? [group.files] : group.files.values()) {
+          this.count--
+          this.units -= key.length + old.length
+        }
+      }
+      this.groups.set(key, { directory, files: file })
+    } else if (typeof group.files === 'string') {
+      // Only a case collision within the same winning directory needs a map.
+      const old = group.files, spelling = extractStorageName(old)
+      if (name === spelling) {
+        previous = old
+        group.files = file
+      } else group.files = new Map([[spelling, old], [name, file]])
+    } else {
+      previous = group.files.get(name)
+      group.files.set(name, file)
+    }
+    if (previous === undefined) this.count++
+    this.units += previous === undefined ? key.length + file.length : file.length - previous.length
+    if (this.count > 250000 || this.units > 16 * 1024 * 1024) throw new Error('AutoPath table exceeds metadata budget')
+  }
+
+  find(name: string): string | undefined {
+    const group = findSpelling(this.groups, autoPathKey(name))
+    if (!group) return undefined
+    if (typeof group.files === 'string') return group.files
+    const exact = group.files.get(name)
+    if (exact === undefined) throw new Error(`Ambiguous resource name: ${name}`)
+    return exact
+  }
+}
+
 export class StorageResolver {
   private readonly archives: StorageArchives
   private revision = 0
   private disposed = false
-  private readonly autoTables = new Map<AliasSearch, Map<string, string>>()
+  private readonly autoTables = new Map<AliasSearch, AutoPathTable>()
   private readonly collectionTables = new Map<AliasSearch, Map<string, string>>()
   constructor(readonly currentDirectory = '', private readonly archiveAliases = true,
     private readonly reader?: ArchiveReader, private readonly checkpoint: () => Promise<void> = async () => {}) {
@@ -36,7 +110,7 @@ export class StorageResolver {
   private folded = new Map<string, Set<string>>()
   private aliases = new Map<string, string>()
   private foldedAliases = new Map<string, Set<string>>()
-  private autoPaths: string[] = []
+  private readonly autoPaths = new Map<string, string>()
   private directories = new Set<string>()
   private readonlyRoots = new Set<string>()
   mount(resources: Resource[], options: { directories?: readonly string[]; readonlyRoots?: readonly string[] } = {}): void {
@@ -82,25 +156,21 @@ export class StorageResolver {
   }
   addAutoPath(path: string): void {
     const normalized = storageDirectoryPath(path, this.currentDirectory)
-    if (!this.autoPaths.includes(normalized)) this.autoPaths.push(normalized)
+    const key = autoPathKey(normalized)
+    if (!this.autoPaths.has(key)) this.autoPaths.set(key, normalized)
     this.invalidateSearch()
   }
   removeAutoPath(path: string): void {
     const normalized = storageDirectoryPath(path, this.currentDirectory)
-    this.autoPaths = this.autoPaths.filter((path) => path !== normalized)
+    this.autoPaths.delete(autoPathKey(normalized))
     this.invalidateSearch()
   }
   candidates(path: string): string[] {
     const normalized = parseStoragePath(path, this.currentDirectory)
     if (!normalized || /[/>]$/.test(normalized)) return [normalized]
     const basename = normalized.split(/[/>]/).at(-1)!
-    return [
-      normalized,
-      ...this.autoPaths
-        .slice()
-        .reverse()
-        .map((prefix) => prefix + basename),
-    ]
+    const paths = [...this.autoPaths.values()].reverse()
+    return [normalized, ...paths.map((prefix) => prefix + basename)]
   }
   find(path: string): Resource | undefined {
     const exact = this.files.get(path)
@@ -126,11 +196,18 @@ export class StorageResolver {
     const [direct, ...searched] = this.candidates(path),
       current = overlay?.(direct!) ?? this.find(direct!)
     if (current) return current
+    const requested = autoPathKey(extractStorageName(direct!))
+    let unicodeFallback: Resource | undefined, ambiguous = false
     for (const candidate of searched) {
       const resource = overlay?.(candidate) ?? this.find(candidate) ?? this.fallback(candidate)
-      if (resource) return resource
+      if (!resource) continue
+      const key = autoPathKey(extractStorageName(resource.name))
+      if (key === requested) return resource
+      if (!unicodeFallback) unicodeFallback = resource
+      else if (autoPathKey(extractStorageName(unicodeFallback.name)) !== key) ambiguous = true
     }
-    return this.fallback(direct!)
+    if (ambiguous) throw new Error(`Ambiguous resource name: ${path}`)
+    return unicodeFallback ?? this.fallback(direct!)
   }
   resolve(path: string): Resource {
     const resource = this.lookup(path)
@@ -226,44 +303,32 @@ export class StorageResolver {
       return entries
     }
   }
-  private tableFind(entries: ReadonlyMap<string, string>, name: string): string | undefined {
-    const exact = entries.get(name)
-    if (exact !== undefined) return exact
-    const folded = name.toLowerCase()
-    let match: string | undefined
-    for (const [entry, canonical] of entries) {
-      if (entry.toLowerCase() !== folded) continue
-      if (match !== undefined) throw new Error(`Ambiguous resource name: ${name}`)
-      match = canonical
-    }
-    return match
-  }
   private async buildAutoTable(overlay: ((name: string) => Resource | undefined) | undefined,
-    overlayResources: readonly Resource[], aliasSearch: AliasSearch): Promise<Map<string, string>> {
+    overlayResources: readonly Resource[], aliasSearch: AliasSearch): Promise<AutoPathTable> {
     for (;;) {
       this.check()
       const revision = this.revision
       const cached = this.autoTables.get('all') ?? this.autoTables.get(aliasSearch)
       if (cached) return cached
-      const entries = new Map<string, string>(), paths = [...this.autoPaths]
-      let units = 0
-      const add = (name: string, path: string) => {
-        const previous = entries.get(name)
-        units += name.length + path.length - (previous === undefined ? 0 : name.length + previous.length)
-        if (entries.size + (previous === undefined ? 1 : 0) > 250000 || units > 16 * 1024 * 1024)
-          throw new Error('AutoPath table exceeds metadata budget')
-        entries.set(name, path)
-      }
+      const entries = new AutoPathTable(), paths = [...this.autoPaths.values()]
       for (const path of paths) {
-        const directory = await this.directoryEntries(path, overlay, overlayResources)
+        const directory = await this.directoryEntries(path, overlay, overlayResources),
+          realNames = this.archiveAliases && !path.includes('>') ? new Set<string>() : undefined
         for (const resource of directory) {
           const relative = resource.name.slice(path.length)
-          if (relative && !relative.includes('/')) add(relative, resource.name)
+          if (!relative || relative.includes('/')) continue
+          entries.add(path, relative, resource.name)
+          realNames?.add(autoPathKey(relative))
         }
-        if (this.archiveAliases && !path.includes('>'))
-          for (const [name, canonical] of await this.aliasesAsync(overlay, aliasSearch))
-            if (name.startsWith(path) && !name.slice(path.length).includes('/'))
-              if (!this.find(path + name.slice(path.length))) add(name.slice(path.length), canonical)
+        if (realNames) {
+          const aliases = await this.aliasesAsync(overlay, aliasSearch), prefix = aliasDirectory(path, aliases.keys())
+          if (prefix === undefined) continue
+          for (const [name, canonical] of aliases) {
+            if (!name.startsWith(prefix)) continue
+            const relative = name.slice(path.length)
+            if (relative && !relative.includes('/') && !realNames.has(autoPathKey(relative))) entries.add(path, relative, canonical)
+          }
+        }
       }
       if (revision !== this.revision) continue
       this.check()
@@ -284,10 +349,10 @@ export class StorageResolver {
     this.check()
     if (current) return current
     const basename = direct.split(/[/>]/).at(-1)!, table = await this.buildAutoTable(overlay, overlayResources, aliasSearch),
-      placed = this.tableFind(table, basename)
+      placed = table.find(basename)
     if (placed) return this.findAsync(placed, overlay)
     if (this.archiveAliases) {
-      const canonical = this.tableFind(await this.aliasesAsync(overlay, aliasSearch), direct)
+      const canonical = findSpelling(await this.aliasesAsync(overlay, aliasSearch), direct)
       if (canonical) return this.findAsync(canonical, overlay)
     }
     return undefined
@@ -386,7 +451,7 @@ export class StorageResolver {
     this.folded.clear()
     this.aliases.clear()
     this.foldedAliases.clear()
-    this.autoPaths = []
+    this.autoPaths.clear()
     this.directories.clear()
     this.readonlyRoots.clear()
     this.invalidateSearch()

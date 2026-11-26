@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 147 批用原版 Windows 与 Web 对照补丁选中的实际脚本、剧情末尾的标签和 MIDI 换曲状态。浏览器另从游戏窗口检查补丁章节、图像和声音。[147 验收与历史结果](decisions/147-game-patches-scenario-end-and-midi.md)
+
 第 146 批检查旧编码的启动脚本、KAG 对白、文本读取和字节码，并核对鼠标拖过选项后游戏收到的坐标，以及六声道 WAVE 的解码和立体声播放。[146 验收与历史结果](decisions/146-game-text-mouse-clicks-and-wave-speakers.md)
 
 第 145 批使用逐字节构造的日文、中文 ZIP 验收章节和存档查找。浏览器另核对带装饰线的字幕截图、图层影片的准备帧和回调里重新播放或关闭时的结果。原版介绍游戏路线改用 TJS 支持的分隔符采集状态。[145 验收与历史结果](decisions/145-zip-file-names-video-prepare-and-text.md)

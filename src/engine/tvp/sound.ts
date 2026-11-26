@@ -64,6 +64,23 @@ class WaveSoundBuffer extends __SoundBase {
 __host("PhaseVocoder.bindClass",WaveSoundBuffer);
 class MIDISoundBuffer extends __SoundBase {
   function MIDISoundBuffer(owner){super.__SoundBase("midi",owner);}
+  function open(args*){
+    if(args.count<1){__soundRun("prepareOpen",[]);return;}
+    var storage=string(args[0]),ticket=__soundRun("prepareMidi",[storage]);
+    // MIDIImpl opens its stream before stopping the old song; neither path
+    // cancels the BaseSoundBuffer fade. A bad SMF is a later unload failure.
+    try{__soundRun("stop",[]);}
+    catch(error){
+      try{__soundRun("releaseMidi",[ticket]);}catch(cleanup){global.Debug.message("MIDI stream cleanup: "+cleanup.message);}
+      throw error;
+    }
+    try{__clearSoundLabels();__soundRun("openMidi",[ticket]);}
+    catch(error){
+      try{__soundRun("releaseMidi",[ticket]);}catch(cleanup){global.Debug.message("MIDI stream cleanup: "+cleanup.message);}
+      try{__soundRun("midiFailure",[]);}catch(cleanup){global.Debug.message("MIDI failure callback: "+cleanup.message);}
+      throw error;
+    }
+  }
 }
 MIDISoundBuffer.midiOut=__host("Sound.global","midiOutMethod");
 class CDDASoundBuffer extends __SoundBase {

@@ -47,8 +47,8 @@ const expected = {
     scenario: 'data.xp3>scenario/first.ks', pixel: 0x112233, rgba: [17, 34, 51, 255] },
   patch: { value: 'patch.xp3>patch-value.tjs', image: 'patch.xp3>patch-probe.bmp',
     scenario: 'patch.xp3>first.ks', pixel: 0x445566, rgba: [68, 85, 102, 255] },
-  patch2: { value: 'patch2.xp3>patch-value.tjs', image: 'patch2.xp3>patch-probe.bmp',
-    scenario: 'patch2.xp3>first.ks', pixel: 0x778899, rgba: [119, 136, 153, 255] },
+  patch2: { value: 'patch2.xp3>PATCH-VALUE.TJS', image: 'patch2.xp3>PATCH-PROBE.BMP',
+    scenario: 'patch2.xp3>FIRST.KS', pixel: 0x778899, rgba: [119, 136, 153, 255] },
 } as const
 function state(label: Label, saved = false, pixel: Label = label): string {
   const item = expected[label]
@@ -100,7 +100,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         manifest = JSON.parse(await readFile(new URL('../fixtures/compatibility/kag3_template.zip.json', import.meta.url), 'utf8')) as {
           entries: { name: string; sha256: string }[]
         },
-        archives = archivePatchFiles(),
+        archives = archivePatchFiles({ caseVariantPatch2: true }),
         afterInit = binary
           ? 'Scripts.compileStorage("archive-observer.tjs","savedata/archive-observer.cjs",false,true,false);Scripts.execStorage("savedata/archive-observer.cjs");'
           : 'Scripts.execStorage("archive-observer.tjs");',
@@ -127,6 +127,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           inputOrder: files.map((file) => ({ path: file.name, bytes: file.buffer.length,
             sha256: createHash('sha256').update(file.buffer).digest('hex') })),
           missingPatch3: true, patch4ImportedButNotAutoRegistered: true,
+          caseReference: 'The higher-priority patch2 stores uppercase script, scenario and image names. Lower-priority patch/base retain exact requested spelling. Returned paths must retain stored case. Actual loose-directory import is independently covered through the folder chooser.',
         }), contentType: 'application/json' })
         await info.attach('archive-patch-authored-observer', { body: observer, contentType: 'text/plain' })
         await page.locator('#files').setInputFiles(files)
@@ -137,6 +138,12 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         await expect(page.getByText('patch-first:patch4', { exact: true })).toHaveCount(0)
         await pixels(surface, info, 'initial-patch2', 'patch2')
 
+        // Re-registering a lower-priority path with different ASCII case must
+        // not promote it ahead of patch2. One later removal also must remove
+        // every spelling of the same registered directory.
+        await evaluate(page, '(Storages.addAutoPath("PaTcH.Xp3>"),archivePatchState())', state('patch2'))
+        await evaluate(page, '(Storages.addAutoPath("PATCH2.XP3>"),archivePatchState())', state('patch2'))
+
         // Persist the exact original archives through the library UI. KAG,
         // rather than the importer, will register patch paths again on restart.
         await expect(page.locator('#save-library')).toBeEnabled()
@@ -145,12 +152,12 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         await expect(page.locator('#library-games h3')).toHaveText(title)
         await expect(page.locator('#cancel-library')).toBeHidden()
 
-        await evaluate(page, 'archivePatchSwitch("patch2.xp3>","")', state('patch', false, 'patch2'))
+        await evaluate(page, 'archivePatchSwitch("pAtCh2.Xp3>","")', state('patch', false, 'patch2'))
         await expect(page.getByText('patch-first:patch', { exact: true })).toBeVisible()
         await pixels(surface, info, 'removed-patch2-retained', 'patch2')
         await evaluate(page, '(System.clearGraphicCache(),archivePatchDraw(),archivePatchState())', state('patch'))
         await pixels(surface, info, 'removed-patch2', 'patch')
-        await evaluate(page, 'archivePatchSwitch("patch.xp3>","")', state('base', false, 'patch'))
+        await evaluate(page, 'archivePatchSwitch("PATCH.XP3>","")', state('base', false, 'patch'))
         await expect(page.getByText('patch-first:base', { exact: true })).toBeVisible()
         await pixels(surface, info, 'removed-patch-retained', 'patch')
         await evaluate(page, '(System.clearGraphicCache(),archivePatchDraw(),archivePatchState())', state('base'))

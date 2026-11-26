@@ -8,6 +8,7 @@ declare global {
       pressed: number[]
       reads: number
       inputs: { windowId: number; revision: number; x: number; y: number }[]
+      movement?: { from: { x: number; y: number }; to: { x: number; y: number }; revision: string | undefined }
     }
   }
 }
@@ -84,6 +85,43 @@ async function neutral(page: Page): Promise<void> {
   const before = await page.evaluate(() => { window.mouseKeyEvidence.pressed = []; return window.mouseKeyEvidence.reads })
   await expect.poll(() => page.evaluate(() => window.mouseKeyEvidence.reads)).toBeGreaterThan(before)
 }
+async function moveGamepad(surface: Locator): Promise<{ from: { x: number; y: number }; to: { x: number; y: number } }> {
+  return surface.evaluate((element) => new Promise<{ from: { x: number; y: number }; to: { x: number; y: number } }>((resolve, reject) => {
+    const evidence = window.mouseKeyEvidence, from = evidence.pointer
+    if (!from) { reject(new Error('Gamepad movement has no real pointer origin')); return }
+    let frame = 0, finished = false
+    const finish = (error?: Error) => {
+      if (finished) return
+      finished = true
+      // Release the controlled button in the same page turn as the observed
+      // displacement, before a slow automation round trip can accelerate the
+      // cursor beyond this 200px window. This changes only the authored pad.
+      evidence.pressed = []
+      clearTimeout(deadline); cancelAnimationFrame(frame)
+      if (error) reject(error)
+      else resolve(evidence.movement!)
+    }
+    const deadline = setTimeout(() => finish(new Error('Gamepad cursor did not move inside its surface')), 12000)
+    const observe = () => {
+      const marker = element.querySelector<HTMLElement>('.game-virtual-cursor'),
+        canvas = element.querySelector<HTMLCanvasElement>('canvas[data-window-id]')
+      if (marker?.isConnected && canvas) {
+        const rect = marker.getBoundingClientRect(), bounds = canvas.getBoundingClientRect(),
+          to = { x: rect.left + 12, y: rect.top + 12 }
+        if (rect.width > 0 && rect.height > 0 && to.x - from.x > 5) {
+          if (to.x < bounds.left || to.x >= bounds.right || to.y < bounds.top || to.y >= bounds.bottom) {
+            finish(new Error('Gamepad cursor left its surface before the click')); return
+          }
+          evidence.movement = { from: { ...from }, to, revision: marker.dataset.cursorRevision }
+          finish(); return
+        }
+      }
+      frame = requestAnimationFrame(observe)
+    }
+    evidence.pressed = [15]
+    frame = requestAnimationFrame(observe)
+  }))
+}
 async function animationInterval(page: Page, duration = 175): Promise<void> {
   await page.evaluate((duration) => new Promise<void>((resolve) => {
     const until = performance.now() + duration
@@ -144,11 +182,10 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
     try {
       const canvas = await focusAt(page, surface)
       await neutral(page)
-      const actual = await page.evaluate(() => window.mouseKeyEvidence.pointer!)
-      await page.evaluate(() => { window.mouseKeyEvidence.pressed = [15] })
+      const movement = await moveGamepad(surface)
       const marker = surface.locator('.game-virtual-cursor')
       await expect(marker).toBeVisible()
-      await expect.poll(async () => (await hotspot(surface)).x - actual.x).toBeGreaterThan(5)
+      expect(movement.to.x - movement.from.x).toBeGreaterThan(5)
       await neutral(page)
       await page.evaluate(() => { window.mouseKeyEvidence.pressed = [0] })
       await animationInterval(page, 75)

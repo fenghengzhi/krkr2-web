@@ -308,12 +308,12 @@ export class AudioMixer {
           throw new Error('SLI link is outside the decoded audio')
       const filters = this.filters(id, asset, command.filters ?? [])
       const stream = asset.kind === 'stream' ? new StreamPcm(id, asset) : undefined
-      const previous = this.voices.get(id),
-        retained = previous?.kind === 'wave' && previous.unloaded ? previous : undefined
+      const kind = command.kind ?? (asset.kind === 'midi' ? 'midi' : 'wave'), previous = this.voices.get(id),
+        retained = previous?.kind === kind && (kind === 'wave' || kind === 'midi') && previous.unloaded ? previous : undefined
       const voice = this.create(
         id,
         retained?.settings ?? settings,
-        command.kind ?? (asset.kind === 'midi' ? 'midi' : 'wave'),
+        kind,
       )
       if (retained) { voice.fade = retained.fade; voice.clock = retained.clock }
       voice.asset = stream ? stream.asset : asset
@@ -327,14 +327,14 @@ export class AudioMixer {
       if (asset.kind === 'midi') voice.synth = new MidiSynth(asset)
     } else if (command.op === 'unload') {
       const previous = this.voices.get(id)
-      if (previous && previous.kind !== 'wave') throw new Error('Only Wave media can retain its fade on unload')
+      if (previous && previous.kind !== 'wave' && previous.kind !== 'midi') throw new Error('This media kind cannot retain its fade on unload')
       if (!previous || (!previous.fade && !previous.unloaded)) {
         this.voices.delete(id)
         return { events: [] }
       }
       // Create a control-only replacement: no old PCM, stream pages, filter
       // chain, synth, label cursor or loop state survives this boundary.
-      const voice = this.create(id, { ...previous.settings, frequency: 0, position: 0, paused: false }, 'wave')
+      const voice = this.create(id, { ...previous.settings, frequency: 0, position: 0, paused: false }, previous.kind)
       // There is no replacement media yet. Keep its control-event identity
       // while decoder cleanup awaits; source replies are independently fenced
       // by streamId, and SoundService cancels events on actual status changes.

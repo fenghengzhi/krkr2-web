@@ -8,6 +8,7 @@ import { kagRewindFiles, kagRewindExpected, kagRewindSource } from './kag-rewind
 import { kagModeFiles, kagModeExpected, kagModeSource } from './kag-modes.ts'
 import { kagNameFiles, kagNameExpected, kagNameSource } from './kag-names.ts'
 import { kagRealFiles, kagRealExpected, kagRealSource } from './kag-real-params.ts'
+import { kagEofFiles, kagEofExpected, kagEofSource } from './kag-eof.ts'
 
 /** Shared TJS controls for the 2.32r2 SDK and the Web runtime. The SDK
  * produces its own macro bookmark from a real call into another storage. */
@@ -25,6 +26,7 @@ export const kagFiles = {
   ...kagModeFiles,
   ...kagNameFiles,
   ...kagRealFiles,
+  ...kagEofFiles,
 }
 
 export const kagExpected: Readonly<Record<string, string>> = {
@@ -51,6 +53,7 @@ export const kagExpected: Readonly<Record<string, string>> = {
   ...kagModeExpected,
   ...kagNameExpected,
   ...kagRealExpected,
+  ...kagEofExpected,
 }
 
 export const kagControlSource = String.raw`
@@ -91,6 +94,7 @@ function kagResumePoint(d){
 }
 function kagObserve(id){
   if(id.indexOf("reals-")==0){try{return kagRealObserve(id);}catch(e){return e.message;}}
+  if(id.indexOf("eof-")==0){try{return kagEofObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("names-")==0){try{return kagNameObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("mode-")==0){try{return kagModeObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("rewind-")==0){try{return kagRewindObserve(id);}catch(e){return e.message;}}
@@ -171,4 +175,4 @@ function kagObserve(id){
     return "unexpected success";
   }catch(e){return e.message;}
 }
-` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource + kagRewindSource + kagModeSource + kagNameSource + kagRealSource
+` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource + kagRewindSource + kagModeSource + kagNameSource + kagRealSource + kagEofSource

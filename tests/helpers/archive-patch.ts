@@ -27,15 +27,18 @@ export function solidBmp(color: number): Buffer {
 export function archivePatchFiles(options: {
   override?: (label: PatchLabel) => string
   scenario?: (label: PatchLabel) => string
+  /** Browser-only case reference. Default files retain their original names. */
+  caseVariantPatch2?: boolean
 } = {}): { path: string; bytes: Buffer }[] {
   return (['patch2', 'patch4', 'patch', 'base'] as const).map((label) => {
     const base = label === 'base', system = base ? 'system/' : '', image = base ? 'image/' : '',
-      scenario = base ? 'scenario/' : ''
+      scenario = base ? 'scenario/' : '',
+      name = (value: string) => options.caseVariantPatch2 && label === 'patch2' ? value.toUpperCase() : value
     return { path: base ? 'data.xp3' : label + '.xp3', bytes: xp3Fixture({
-      [system + 'patch-value.tjs']: JSON.stringify(label),
-      [system + 'Override.tjs']: options.override?.(label) ?? `global.patchOverride=${JSON.stringify(label)};`,
-      [image + 'patch-probe.bmp']: solidBmp(patchColors[label]),
-      [scenario + 'first.ks']: options.scenario?.(label) ??
+      [system + name('patch-value.tjs')]: JSON.stringify(label),
+      [system + name('Override.tjs')]: options.override?.(label) ?? `global.patchOverride=${JSON.stringify(label)};`,
+      [image + name('patch-probe.bmp')]: solidBmp(patchColors[label]),
+      [scenario + name('first.ks')]: options.scenario?.(label) ??
         `[iscript]\nDebug.message("patch-first:${label}");\n[endscript]\n[s]\n`,
     }).bytes }
   })
