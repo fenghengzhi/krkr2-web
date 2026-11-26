@@ -75,14 +75,15 @@ function kagOptionalMacroObserve(id){
 }
 `
 
-export const kagOptionalMacroStory = String.raw`[macro name=word]OLD[endmacro]\
+// Original KAG3 ignores physical newlines; backslash suffixes are not needed.
+export const kagOptionalMacroStory = String.raw`[macro name=word]OLD[endmacro]
 *checkpoint|Current macro definitions
-[cm][nowait][word][endnowait]\
+[cm][nowait][word][endnowait]
 [iscript]
 global.optionalVisits++;
 global.optionalRendered=global.kag.historyLayer.currentLine;
 [endscript]
-[r][link target=*save]Save[endlink] / [link target=*load]Load updated[endlink] / [link target=*end]Continue[endlink]\
+[r][link target=*save]Save[endlink] / [link target=*load]Load updated[endlink] / [link target=*end]Continue[endlink]
 [s]
 *save
 [save place=0 ask=false]
@@ -96,7 +97,7 @@ global.kag.conductor.macros.word="NEW[macropop]";
 [endscript]
 [load place=0 ask=false]
 *end
-[cm][nowait]DONE[endnowait]\
+[cm][nowait]DONE[endnowait]
 [iscript]
 global.optionalRendered=global.kag.historyLayer.currentLine;
 global.optionalDone=true;

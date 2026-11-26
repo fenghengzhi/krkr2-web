@@ -15,7 +15,7 @@ class VideoOverlay {
   function setBounds(args*){if(args.count<4)throw new global.Exception("VideoOverlay.setBounds requires four arguments");__host("Video.geometry",__videoId,"setBounds",int(args[0]),int(args[1]),int(args[2]),int(args[3]));}
   function setSegmentLoop(start,end){__videoRun("segment",[int(start),int(end)]);}
   function cancelSegmentLoop(){__videoRun("segment",[-1,-1]);}
-  function setPeriodEvent(frame=-1){periodEventFrame=frame;}
+  function setPeriodEvent(args*){if(args.count==0)periodEventFrame=-1;else if(args.count==1)periodEventFrame=args[0];}
   function cancelPeriodEvent(){periodEventFrame=-1;}
   function selectAudioStream(args*){if(args.count<1)throw new Exception("VideoOverlay.selectAudioStream requires an index");__videoRun("audioStream",[int(args[0])]);}
   property enabledAudioStream{getter(){return __videoRun("get",["enabledAudioStream"]);}setter(value){__videoRun("audioStream",[int(value)]);}}

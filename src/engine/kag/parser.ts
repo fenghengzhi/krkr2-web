@@ -116,17 +116,22 @@ export class KagParser {
   }
   *loadScenario(name: string, force = false): Task {
     yield* this.breakCondition()
-    if (!this.scenario || this.curStorage !== name || force) {
+    const loaded = !this.scenario || this.curStorage !== name || force
+    if (loaded) {
       this.scenario = undefined
       const provided = yield* this.callback('onScenarioLoad', name)
       const scenario = typeof provided === 'string' ? new Scenario(name, provided, true)
         : yield { kind: 'read', args: [name] }
       if (!(scenario instanceof Scenario)) throw new Error('Missing KAG scenario reply')
       this.scenario = scenario
-      if (this.debugLevel >= 1) yield* this.effect('log', `Scenario loaded : ${name}`)
     }
     this.curLine = this.curPos = 0
     this.buffer = undefined
+    // Native Rewind runs after onScenarioLoad and installation of its result.
+    // That callback may reenter this parser while preparing a virtual story;
+    // its temporary conditions/macros must not become the new story's state.
+    yield* this.breakCondition()
+    if (loaded && this.debugLevel >= 1) yield* this.effect('log', `Scenario loaded : ${name}`)
     yield* this.callback('onScenarioLoaded', name)
     return
   }

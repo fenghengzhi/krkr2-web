@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 136 批把同一提交的两个 Web 存档 ZIP 送入 GitHub 托管的 Windows 作业，验证原版 KRKR2 读取缩略图、恢复 KAG 宏参数及剧情位置。另有浏览器真实导入、动态章节、影片提示帧及导入失败时保留旧存档的检查。[136 实现与验收](decisions/136-native-saves-scenario-loading-and-video-cues.md)
+
 第 135 批增加八页高清画廊的颜色与点击区域验收、原 KAG 剧情中对象与绑定方法的传递，以及普通 Wave 的平滑循环接缝。图层与宏参数的同组脚本也交给原版 Windows SDK 比较。[135 实现与验收](decisions/135-shared-game-layers-macro-values-and-wave-loops.md)
 
 第 134 批新增 **11 个 Node 用例、每个浏览器项目 8 个常规用例和 4 个游戏库用例**。ZIP 验收包含首读 CRC、取消、嵌套 XP3、72 MiB 音乐的独立 PCM／频谱和定位，以及原 KAG 从游戏库恢复书签。MIDI 验收比较独立字面 CC7 控制的完整 PCM，并实际点击游戏按钮检查静音级数、淡出、重开和释放。原版 SDK 的 MIDI 新观察只覆盖公有 `volume/volume2` 属性转换与范围，不声称取得原设备 PCM、音色或 CC7 传输记录。图层组另增加一项真实 BMP 保存往返。[134 验收记录](decisions/134-zip-distributions-midi-and-game-playback.md)

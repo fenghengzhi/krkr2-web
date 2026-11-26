@@ -1,4 +1,4 @@
-import type { SaveFile } from '../engine/ports/saves.ts'
+import { MAX_SAVE_FILES, type SaveFile } from '../engine/ports/saves.ts'
 export function encodeBackup(gameId: string, files: SaveFile[]): Blob {
   const data = files.map(({ path, bytes }) => {
     let binary = ''
@@ -19,7 +19,7 @@ export async function decodeBackup(gameId: string, blob: Blob): Promise<SaveFile
   if (object.format !== 'krkr2-web-saves' || object.version !== 1 || !Array.isArray(object.files))
     throw new Error('不支持的存档备份格式')
   if (object.gameId !== gameId) throw new Error('这份存档属于另一组游戏文件，请先载入对应游戏')
-  if (object.files.length > 10000) throw new Error('存档文件数量超过限制')
+  if (object.files.length > MAX_SAVE_FILES) throw new Error('存档文件数量超过限制')
   return object.files.map((file: unknown) => {
     if (!file || typeof file !== 'object') throw new Error('无效的存档条目')
     const entry = file as Record<string, unknown>

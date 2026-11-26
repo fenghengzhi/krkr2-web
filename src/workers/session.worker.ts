@@ -353,11 +353,11 @@ const api: SessionApi = {
     await libraryLease?.close()
     libraryLease = undefined
   },
-  async exportSaves() {
-    return active().exportSaves()
+  async exportSaves(scope) {
+    return active().exportSaves(scope)
   },
-  async importSaves(files) {
-    await active().importSaves(files)
+  async importSaves(files, scope) {
+    await active().importSaves(files, scope)
   },
 }
 exposeRpc(api, self)

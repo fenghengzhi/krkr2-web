@@ -4,6 +4,7 @@ import { kagMacroSlotFiles, kagMacroSlotExpected, kagMacroSlotSource } from './k
 import { kagEmbeddingFiles, kagEmbeddingExpected, kagEmbeddingSource } from './kag-embedding.ts'
 import { kagOptionalMacroFiles, kagOptionalMacroExpected, kagOptionalMacroSource } from './kag-optional-macros.ts'
 import { kagReferenceFiles, kagReferenceExpected, kagReferenceSource } from './kag-reference-values.ts'
+import { kagRewindFiles, kagRewindExpected, kagRewindSource } from './kag-rewind.ts'
 
 /** Shared TJS controls for the 2.32r2 SDK and the Web runtime. The SDK
  * produces its own macro bookmark from a real call into another storage. */
@@ -17,6 +18,7 @@ export const kagFiles = {
   ...kagEmbeddingFiles,
   ...kagOptionalMacroFiles,
   ...kagReferenceFiles,
+  ...kagRewindFiles,
 }
 
 export const kagExpected: Readonly<Record<string, string>> = {
@@ -39,6 +41,7 @@ export const kagExpected: Readonly<Record<string, string>> = {
   ...kagEmbeddingExpected,
   ...kagOptionalMacroExpected,
   ...kagReferenceExpected,
+  ...kagRewindExpected,
 }
 
 export const kagControlSource = String.raw`
@@ -78,6 +81,7 @@ function kagResumePoint(d){
   return restored+"|"+q.getNextTag().tagname+"|"+q.callStackDepth+"|"+int(q.macroParams===null);
 }
 function kagObserve(id){
+  if(id.indexOf("rewind-")==0){try{return kagRewindObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("references-")==0){try{return kagReferenceObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("expression-")==0){try{return kagEvaluateObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("routing-")==0){try{return kagRoutingObserve(id);}catch(e){return e.message;}}
@@ -155,4 +159,4 @@ function kagObserve(id){
     return "unexpected success";
   }catch(e){return e.message;}
 }
-` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource
+` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource + kagRewindSource

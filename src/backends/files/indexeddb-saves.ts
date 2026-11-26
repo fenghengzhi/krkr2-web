@@ -52,13 +52,18 @@ export class IndexedDbSaveStore implements SaveStore {
       transaction.onabort = () => reject(transaction.error ?? new Error('Save transaction aborted'))
       transaction.onerror = () => reject(transaction.error)
       const store = transaction.objectStore('saves')
-      for (const { path, bytes } of files)
-        store.put({
-          gameId: this.gameId,
-          path,
-          bytes: Uint8Array.from(bytes),
-          updatedAt: Date.now(),
-        } satisfies SaveRecord)
+      try {
+        for (const { path, bytes } of files)
+          store.put({
+            gameId: this.gameId,
+            path,
+            bytes: Uint8Array.from(bytes),
+            updatedAt: Date.now(),
+          } satisfies SaveRecord)
+      } catch (error) {
+        transaction.abort()
+        reject(error)
+      }
     })
   }
   close(): void {

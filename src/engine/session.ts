@@ -39,6 +39,7 @@ import {
   extractStorageName,
   extractStoragePath,
   getFullStoragePath,
+  parseStoragePath,
   storageWritePath,
   toPublicStoragePath,
 } from './storage/public-path.ts'
@@ -58,7 +59,7 @@ import { LayerService } from './scene/layer-objects.ts'
 import { captureVideoMixingBitmap } from './media/video-mixing.ts'
 import type { DecodedImage, GraphicsDecoder, Pixels, Renderer, RendererStatus } from './ports/graphics.ts'
 import type { ArchiveReader, Inflater, Resource } from './ports/storage.ts'
-import { MemorySaveStore, type SaveStore, type SaveFile } from './ports/saves.ts'
+import { MemorySaveStore, type SaveStore, type SaveFile, type SaveScope } from './ports/saves.ts'
 import { SaveOverlay } from './storage/save-overlay.ts'
 import { StorageSelector, normalizeSelectorPath } from './storage/selector.ts'
 import type { DropResourceTree } from './ports/storage-drop.ts'
@@ -4127,9 +4128,14 @@ export class EngineSession {
     })()
     return this.disposalPromise
   }
-  exportSaves(): SaveFile[] {
+  private saveDirectory(scope: SaveScope): string | undefined {
+    if (scope === 'all') return undefined
+    if (scope !== 'data-directory') throw new Error('Unknown save scope')
+    return parseStoragePath(this.systemEnvironment.dataPath)
+  }
+  exportSaves(scope: SaveScope = 'all'): SaveFile[] {
     this.materializeLogs()
-    return this.saves.export()
+    return this.saves.export(this.saveDirectory(scope))
   }
   async idle(): Promise<void> {
     await this.queue.drain()
@@ -4137,11 +4143,11 @@ export class EngineSession {
     await this.sounds?.flushCloses()
     await this.queue.drain()
   }
-  async importSaves(files: SaveFile[]): Promise<void> {
+  async importSaves(files: SaveFile[], scope: SaveScope = 'all'): Promise<void> {
     if (this.state !== 'ready' && this.state !== 'paused')
       throw new Error('Pause the game before importing saves')
     this.materializeLogs()
-    await this.saves.import(files)
+    await this.saves.import(files, this.saveDirectory(scope))
     this.notify()
   }
   async commitDroppedResources(tree: DropResourceTree, valid: () => boolean): Promise<string[]> {

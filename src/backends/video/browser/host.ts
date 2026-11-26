@@ -20,6 +20,7 @@ import type { CursorRasterLayer, CursorScene } from '../../input/cursor.ts'
 import { selectVideoTimeline } from '../../../formats/video/mp4.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
 import { VideoSampleHistory, waitForClockPresentation } from './clock-seek.ts'
+import { VideoPeriod } from '../../../engine/media/video-period.ts'
 import {
   createVideoMixingSurface,
   releaseVideoMixingSurface,
@@ -51,7 +52,7 @@ interface Movie {
   inFlight?: number
   blocked: boolean
   disposed: boolean
-  periodArmed: boolean
+  period: VideoPeriod
   seeking: boolean
   abort: AbortController
   audio: ReturnType<WebAudioHost['connectMedia']>
@@ -440,6 +441,8 @@ export class WebVideoHost {
     return {
       ...emptyVideoSnapshot(movie.id, movie.epoch),
       ...movie.settings,
+      periodEventFrame: movie.period.frame,
+      periodEventPast: movie.period.past,
       id: movie.id,
       epoch: movie.epoch,
       status: movie.status,
@@ -538,10 +541,8 @@ export class WebVideoHost {
     })
   }
   private period(movie: Movie, frame: number): void {
-    const s = movie.settings
-    if (!movie.periodArmed || s.periodEventFrame < 0 || frame < s.periodEventFrame) return
-    s.periodEventFrame = -1
-    movie.periodArmed = false
+    if (!movie.period.take(frame)) return
+    movie.settings.periodEventFrame = movie.period.frame
     this.emit({ type: 'period', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie), reason: 1 })
   }
   private advanceClock(movie: Movie, fallbackPeriod = true): boolean {
@@ -553,12 +554,16 @@ export class WebVideoHost {
     const clockTimeline = this.clockTimeline(movie)
     if (s.segmentLoopEndFrame > 0 && clockTimeline) {
       if (videoClockFrameAt(clockTimeline, time) >= s.segmentLoopEndFrame) {
+        const epoch = movie.epoch, targetFrame = Math.max(0, s.segmentLoopStartFrame),
+          active = () => !movie.disposed && this.movies.get(movie.id) === movie &&
+            movie.epoch === epoch && movie.status === 'play'
         void this.seek(
           movie,
-          videoClockFrameTime(clockTimeline, Math.max(0, s.segmentLoopStartFrame), movie.element.duration * 1000),
+          videoClockFrameTime(clockTimeline, targetFrame, movie.element.duration * 1000),
         ).then(
           () => {
-            if (movie.disposed) return
+            if (!active()) return
+            movie.period.seekFrame(targetFrame)
             this.emit({
               type: 'period',
               id: movie.id,
@@ -569,7 +574,7 @@ export class WebVideoHost {
             this.play(movie)
           },
           (error) => {
-            if (!movie.disposed) this.fail(error)
+            if (active()) this.fail(error)
           },
         )
         return true
@@ -675,8 +680,6 @@ export class WebVideoHost {
             movie.element.currentTime = time
           },
         )
-      if (movie.settings.periodEventFrame >= 0)
-        movie.periodArmed = this.snapshot(movie).frame < movie.settings.periodEventFrame
     } finally {
       movie.seeking = false
       this.arm(movie)
@@ -906,8 +909,7 @@ export class WebVideoHost {
         throw new Error('Video segment ends outside its frame clock')
     }
     if (settings.periodEventFrame !== movie.settings.periodEventFrame)
-      movie.periodArmed =
-        settings.periodEventFrame >= 0 && this.snapshot(movie).frame < settings.periodEventFrame
+      movie.period.set(settings.periodEventFrame, this.snapshot(movie).frame)
     movie.settings = { ...settings,
       ...(movie.timeline?.audioStreams === 0 ? { enabledAudioStream: -1 } : {}) }
     movie.element.playbackRate = settings.playRate
@@ -992,7 +994,7 @@ export class WebVideoHost {
         source: stage.source, variant: stage.variant!, url: stage.variant!.url, mime,
         bytes: stage.source.size, lastSelectedIndex: selected, settings: { ...settings }, status: 'stop',
         timeline, mixerMetadata: stage.previous?.mixerMetadata,
-        blocked: false, disposed: false, periodArmed: false, seeking: false,
+        blocked: false, disposed: false, period: new VideoPeriod(settings.periodEventFrame, stage.previous?.period.past), seeking: false,
         seenSamples: new VideoSampleHistory(timeline?.times.length ?? 0),
         abort: stage.abort, audio }
       stage.movie = movie
@@ -1016,13 +1018,17 @@ export class WebVideoHost {
     element.onended = () => {
       if (movie.disposed || movie.status !== 'play' || !element.ended) return
       if (this.advanceClock(movie)) return
-      if (movie.settings.loop)
+      if (movie.settings.loop) {
+        const epoch = movie.epoch,
+          active = () => !movie.disposed && this.movies.get(movie.id) === movie &&
+            movie.epoch === epoch && movie.status === 'play'
         void this.seek(movie, 0).then(() => {
-          if (movie.disposed || this.movies.get(movie.id) !== movie) return
+          if (!active()) return
+          movie.period.rewind()
           this.emit({ type: 'period', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie), reason: 0 })
           this.play(movie)
-        }, (error) => { if (!movie.disposed) this.fail(error) })
-      else {
+        }, (error) => { if (active()) this.fail(error) })
+      } else {
         movie.status = 'stop'
         this.cancelFrame(movie)
         this.emit({ type: 'ended', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie) })
@@ -1078,6 +1084,9 @@ export class WebVideoHost {
       stage.variant = variant
       this.stageCurrent(stage)
       const movie = this.createMovie(stage, command.epoch, command.settings, timeline, mime, selected)
+      // Legacy direct hosts do not supply the object latch. Their initial
+      // setting is equivalent to setting a cue on an unopened frame-zero graph.
+      movie.period.past = command.periodEventPast ?? (command.settings.periodEventFrame <= 0)
       this.movies.set(movie.id, movie)
       const surface = this.windows.get(windowId)?.surface
       if (surface) surface.plane.insertBefore(movie.container, surface.activation)
@@ -1161,7 +1170,7 @@ export class WebVideoHost {
         await this.seekClockPresented(candidate, position, () => this.stageCurrent(stage), clockSeconds)
       }
       this.stageCurrent(stage)
-      candidate.periodArmed = movie.periodArmed
+      candidate.period = new VideoPeriod(movie.period.frame, movie.period.past)
       candidate.blocked = movie.blocked
       this.bindMovie(candidate)
       const surface = this.windows.get(movie.windowId)?.surface
@@ -1256,6 +1265,14 @@ export class WebVideoHost {
       movie = await this.settings(movie, command.settings)
       if (movie !== previous && (movie.settings.mode === 1 || movie.settings.mode === 2)) events.push(this.frame(movie))
     }
+    else if (command.op === 'period') {
+      if (!Number.isInteger(command.frame) || command.frame < -0x80000000 || command.frame > 0x7fffffff)
+        throw new Error('Invalid video period frame')
+      if (command.frame >= 0 && !movie.timeline?.times.length)
+        throw new Error('This video container has no supported frame index')
+      movie.period.set(command.frame, this.snapshot(movie).frame)
+      movie.settings.periodEventFrame = movie.period.frame
+    }
     else if (command.op === 'mixing') this.mixing(movie, command.bitmap)
     else if (command.op === 'seek' || command.op === 'rewind') {
       const time =
@@ -1268,6 +1285,8 @@ export class WebVideoHost {
         await this.seekPresented(movie, time, command.op === 'seek' && command.frame !== undefined)
       else await this.seek(movie, time)
       this.current(movie, command.epoch)
+      if (command.op === 'rewind') movie.period.rewind()
+      else if (command.frame !== undefined) movie.period.seekFrame(command.frame)
       events.push(this.frame(movie))
     } else if (command.op === 'prepare') {
       if (movie.settings.mode === 1) {
@@ -1277,6 +1296,7 @@ export class WebVideoHost {
         if (movie.timeline?.times.length) await this.seekPresented(movie, 0)
         else await this.seek(movie, 0)
         this.current(movie, command.epoch)
+        movie.period.rewind()
         events.push(this.frame(movie), {
           type: 'period',
           id: movie.id,

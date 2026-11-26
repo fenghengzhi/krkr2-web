@@ -11,6 +11,7 @@ import {
 } from '../ports/video.ts'
 import type { Pixels } from '../ports/graphics.ts'
 import { videoBalanceReadback } from './video-audio.ts'
+import { VideoPeriod } from './video-period.ts'
 import { ExecutionCancelled } from '../scheduler/control.ts'
 import {
   isScriptObject,
@@ -142,6 +143,7 @@ export class VideoService {
     video.snapshot = {
       ...emptyVideoSnapshot(video.id, this.epoch++),
       ...videoObjectSettings(video.snapshot),
+      periodEventPast: video.snapshot.periodEventPast ?? false,
     }
     this.queueClose(video)
   }
@@ -432,6 +434,7 @@ export class VideoService {
       video.snapshot = {
         ...emptyVideoSnapshot(video.id, video.snapshot.epoch),
         ...videoObjectSettings(video.snapshot),
+        periodEventPast: video.snapshot.periodEventPast ?? false,
       }
       if (previous !== 'unload') callbacks.push({ name: 'onStatusChanged', args: ['unload'] })
     } else if (method === 'open') {
@@ -448,6 +451,7 @@ export class VideoService {
         // Native graph controls are not preferences carried across files.
         // Only the containing VideoOverlay's object fields survive reopening.
         settings: { ...defaultVideoSettings(), ...videoObjectSettings(video.snapshot) },
+        periodEventPast: video.snapshot.periodEventPast ?? false,
       })
       video.ready = true
       callbacks.push({ name: 'onStatusChanged', args: [video.snapshot.status] })
@@ -491,10 +495,17 @@ export class VideoService {
       // setters return before talking to or validating an absent media graph.
       if (!video.ready && graphSettings.has(property))
         return scriptRecord({ value, callbacks: scriptList([]) })
-      const setting = property === 'audioVolume' || property === 'audioBalance'
+      const setting = property === 'audioVolume' || property === 'audioBalance' || property === 'periodEventFrame'
         ? Number(BigInt.asIntN(32, typeof input[1] === 'bigint' ? input[1] : BigInt(number(1))))
         : number(1)
-      if (property === 'position' || property === 'frame') {
+      if (property === 'periodEventFrame') {
+        if (video.ready) await apply({ op: 'period', ...identity(), frame: setting })
+        else {
+          const period = new VideoPeriod(video.snapshot.periodEventFrame, video.snapshot.periodEventPast)
+          period.set(setting, 0)
+          video.snapshot = { ...video.snapshot, periodEventFrame: period.frame, periodEventPast: period.past }
+        }
+      } else if (property === 'position' || property === 'frame') {
         if (video.ready) {
           this.cancelEvents(video)
           video.snapshot.epoch = this.epoch++
@@ -523,11 +534,7 @@ export class VideoService {
         else if (property === 'mixingMovieAlpha')
           state.mixingMovieAlpha = Math.max(0, Math.min(1, setting))
         else if (property === 'mixingMovieBGColor') state.mixingMovieBGColor = setting >>> 0
-        else if (property === 'periodEventFrame') {
-          if (!Number.isSafeInteger(setting) || setting < -1)
-            throw new Error('Invalid video period frame')
-          state.periodEventFrame = setting
-        } else throw new Error(`Unsupported video setting: ${property}`)
+        else throw new Error(`Unsupported video setting: ${property}`)
         if (video.ready) await apply({ op: 'set', ...identity(), settings: videoSettings(state) })
         else video.snapshot = state
       }

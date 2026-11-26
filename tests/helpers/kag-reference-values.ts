@@ -162,11 +162,11 @@ function referenceTaglistExtension(){
  * parser/handler is replaced. The same actor and bound action survive nested
  * macro forwarding across two genuine player line waits. */
 export const kagReferenceStory = String.raw`*references|An actor across macro calls
-[cm][nowait]\
-[macro name=inner][refstep value=%payload action=%action][endmacro]\
-[macro name=outer][refseed][inner *][emb exp=global.refStoryText][endnowait][l][r][nowait][inner *][emb exp=global.refStoryText][endnowait][l][endmacro]\
-[outer]\
-[eval exp="global.refStoryPhase=3"]\
+[cm][nowait]
+[macro name=inner][refstep value=%payload action=%action][endmacro]
+[macro name=outer][refseed][inner *][emb exp=global.refStoryText][endnowait][l][r][nowait][inner *][emb exp=global.refStoryText][endnowait][l][endmacro]
+[outer]
+[eval exp="global.refStoryPhase=3"]
 [s]
 `
 

@@ -4,7 +4,7 @@ import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
 import { copySystemDisplayUpdate, type SystemDisplayUpdate } from '../engine/system/display.ts'
 import { createRpcClient, type RpcClient } from 'vite-plugin-worker-rpc/runtime'
 import { transfer } from 'vite-plugin-worker-rpc/client'
-import type { SaveFile } from '../engine/ports/saves.ts'
+import type { SaveFile, SaveScope } from '../engine/ports/saves.ts'
 import type { InputPacket, PhysicalPointerScreen } from '../engine/ports/input.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
@@ -258,11 +258,11 @@ export class SessionClient {
   inspect() {
     return this.call('inspect')
   }
-  exportSaves() {
-    return this.call('exportSaves')
+  exportSaves(scope: SaveScope = 'all') {
+    return this.call('exportSaves', scope)
   }
-  importSaves(files: SaveFile[]) {
-    return this.call('importSaves', files)
+  importSaves(files: SaveFile[], scope: SaveScope = 'all') {
+    return this.call('importSaves', files, scope)
   }
   get isDisposed(): boolean {
     return this.disposed

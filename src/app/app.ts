@@ -1,6 +1,7 @@
 import { createGamePads } from './game-pads.ts'
 import { createPlayer } from '../player/create-player.ts'
 import { demoFiles } from './demo.ts'
+import { readNativeSaves, writeNativeSaves } from '../player/native-saves.ts'
 import { encodeBackup, decodeBackup } from '../player/save-backup.ts'
 import type { BackendPreference, GameInput } from '../protocol/session.ts'
 import type { SessionSnapshot } from '../engine/session.ts'
@@ -42,7 +43,7 @@ export function mountApp(root: HTMLDivElement): void {
           <section class="card"><p class="eyebrow">01 / GAME FILES</p><h2>载入你的文件</h2><p>支持裸文件、未加密 XP3、内嵌 XP3 的 EXE 和 ZIP。存档和散装文件优先；补丁包的顺序由游戏脚本决定。</p><button class="file-button" id="choose-files">选择文件 <span>＋</span></button><button class="file-button secondary" id="choose-folder">选择文件夹 <span>↗</span></button><input id="files" type="file" multiple hidden><input id="folder" type="file" webkitdirectory multiple hidden><form id="remote-form"><label for="remote-url">远程文件链接</label><input id="remote-url" type="url" placeholder="https://…/game.xp3" required autocomplete="off" spellcheck="false"><label for="remote-name">文件名（可选）</label><input id="remote-name" placeholder="使用链接中的文件名" spellcheck="false"><button class="file-button secondary" id="load-url" type="submit">载入链接 <span>↗</span></button></form><label for="entry">启动脚本</label><input id="entry" value="startup.tjs" spellcheck="false"><label for="backend">执行后端</label><select id="backend"><option value="auto">自动选择</option><option value="jspi">JSPI</option><option value="asyncify">Asyncify</option></select><label class="background-setting"><input id="script-debug" type="checkbox">脚本调试</label><p class="muted background-note">下次启动时记录调用栈，用于定位脚本错误。</p><label class="background-setting"><input id="pause-background" type="checkbox" checked>切到后台时暂停</label><p class="muted background-note">关闭后可在后台继续运行；浏览器冻结页面时仍会暂停。</p></section>
           <section class="card support"><p class="eyebrow">CURRENT BUILD</p><h2>基础运行时已接通</h2><p>TJS、KAG 解析、菜单、基础图层、计时器与存档文件。</p><p class="muted">完整 KAG 画面与音视频仍在实现中，暂不支持完整商业游戏。</p></section>
           <section class="card"><p class="eyebrow">AUDIO</p><h2>声音</h2><p id="sound-status">载入游戏后开启声音。</p><button class="file-button" id="sound-toggle" disabled>开启声音</button><meter id="sound-level" min="0" max="1" value="0" aria-label="声音电平"></meter></section>
-          <section class="card"><p class="eyebrow">SAVE FILES</p><h2>存档与备份</h2><p id="save-status">游戏存档保存在此浏览器，可导出备份。</p><button class="file-button" id="export-saves" disabled>导出存档 <span>↓</span></button><button class="file-button secondary" id="import-saves" disabled>导入存档 <span>↑</span></button><input id="save-file" type="file" accept="application/json,.json" hidden></section>
+          <section class="card"><p class="eyebrow">SAVE FILES</p><h2>存档与备份</h2><p id="save-status">游戏存档保存在此浏览器，可导出备份。</p><label for="save-format">存档格式</label><select id="save-format"><option value="backup">浏览器备份（JSON）</option><option value="native">原版游戏存档</option></select><p class="muted" id="native-save-hint" hidden>暂停游戏后可选择文件、存档目录或 ZIP。ZIP 内的文件会放入当前游戏的存档目录，同名文件将被覆盖。导出的 ZIP 包含游戏在此浏览器写入或导入的存档。</p><button class="file-button" id="export-saves" disabled>导出存档 <span>↓</span></button><button class="file-button secondary" id="import-saves" disabled>导入存档 <span>↑</span></button><input id="save-file" type="file" accept="application/json,.json" hidden><input id="native-save-files" type="file" multiple hidden><span id="native-folder-control" hidden><button type="button" class="file-button secondary" id="choose-native-save-folder" disabled>导入存档目录</button></span><input id="native-save-folder" type="file" webkitdirectory multiple hidden></section>
         </aside>
       </div>
       <section class="card library-panel" id="library-panel"></section><section class="console-panel" id="debug-console"><div class="console-heading"><h2>运行记录</h2><div><button id="clear-log">清空</button><button id="hide-console" aria-label="隐藏运行记录">隐藏</button></div></div><div class="logs" id="logs" role="log" aria-live="polite"><p class="muted">等待会话启动…</p></div><form id="console"><span>›</span><input id="expression" aria-label="TJS 表达式" placeholder="输入 TJS 表达式，例如 6 * 7" autocomplete="off" spellcheck="false"><button id="evaluate" disabled>执行</button></form></section>
@@ -65,7 +66,10 @@ export function mountApp(root: HTMLDivElement): void {
     el('project-root-field').hidden = mode !== 'root'
   }
   el('project-mode').addEventListener('change', updateProjectControls)
-  let player: ReturnType<typeof createPlayer> | undefined
+  type Player = ReturnType<typeof createPlayer>
+  let player: Player | undefined
+  let saveJob: Player | undefined
+  let savePickerOwner: Player | undefined
   let lastFiles: GameInput | undefined
   let snapshot: SessionSnapshot | undefined
   let debugVisibility: DebugVisibility = { console: true, controller: true }
@@ -211,8 +215,13 @@ export function mountApp(root: HTMLDivElement): void {
     el<HTMLButtonElement>('restart').disabled = busy || !lastFiles
     el<HTMLButtonElement>('evaluate').disabled =
       busy || !snapshot || !['ready', 'running'].includes(snapshot.state)
-    el<HTMLButtonElement>('export-saves').disabled = !player || busy
-    el<HTMLButtonElement>('import-saves').disabled = !player || busy || snapshot?.state !== 'paused'
+    const nativeSaves = el<HTMLSelectElement>('save-format').value === 'native'
+    const savesBusy = !player || busy || saveJob === player
+    el('native-folder-control').hidden = !nativeSaves
+    el('native-save-hint').hidden = !nativeSaves
+    el<HTMLButtonElement>('export-saves').disabled = savesBusy
+    el<HTMLButtonElement>('import-saves').disabled = savesBusy || snapshot?.state !== 'paused'
+    el<HTMLButtonElement>('choose-native-save-folder').disabled = savesBusy || snapshot?.state !== 'paused'
     if (snapshot)
       el('save-status').textContent =
         `${snapshot.saveFiles} 个存档文件${snapshot.pendingSaves ? `，${snapshot.pendingSaves} 个等待保存。可先导出备份。` : '，已保存到此浏览器。导入前请暂停游戏。'}`
@@ -705,34 +714,59 @@ export function mountApp(root: HTMLDivElement): void {
     })
   }
   el('clear-log').addEventListener('click', () => el('logs').replaceChildren())
+  el('save-format').addEventListener('change', update)
+  const saveTransfer = (action: (current: Player, check: () => void) => Promise<void>) => {
+    const current = player, epoch = generation
+    if (!current || busy || saveJob === current) return
+    const valid = () => player === current && generation === epoch && !stopRequested && !current.session.isDisposed
+    const check = () => { if (!valid()) throw new Error('游戏已关闭') }
+    saveJob = current
+    update()
+    void action(current, check).catch((error) => { if (valid()) report(error) }).finally(() => {
+      if (saveJob === current) saveJob = undefined
+      update()
+    })
+  }
   el('export-saves').addEventListener('click', () => {
-    const current = player
-    if (!current) return
-    void current.session
-      .exportSaves()
-      .then((files) => {
-        const url = URL.createObjectURL(encodeBackup(current.gameId, files))
-        const link = document.createElement('a')
-        link.href = url
-        link.download = 'krkr2-saves.json'
-        link.click()
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
-        log(`已导出 ${files.length} 个存档文件`)
+    const native = el<HTMLSelectElement>('save-format').value === 'native'
+    saveTransfer(async (current, check) => {
+      const files = await current.session.exportSaves(native ? 'data-directory' : 'all')
+      check()
+      const blob = native ? await writeNativeSaves(files, check) : encodeBackup(current.gameId, files)
+      check()
+      const url = URL.createObjectURL(blob), link = document.createElement('a')
+      link.href = url
+      link.download = native ? 'savedata.zip' : 'krkr2-saves.json'
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      log(`已导出 ${files.length} 个存档文件`)
+    })
+  })
+  const chooseSave = (id: string) => {
+    savePickerOwner = player
+    el<HTMLInputElement>(id).click()
+  }
+  el('import-saves').addEventListener('click', () =>
+    chooseSave(el<HTMLSelectElement>('save-format').value === 'native' ? 'native-save-files' : 'save-file'))
+  el('choose-native-save-folder').addEventListener('click', () => chooseSave('native-save-folder'))
+  for (const id of ['save-file', 'native-save-files', 'native-save-folder']) {
+    const input = el<HTMLInputElement>(id)
+    input.addEventListener('cancel', () => { savePickerOwner = undefined })
+    input.addEventListener('change', () => {
+      const files = Array.from(input.files ?? []), owner = savePickerOwner
+      input.value = ''
+      savePickerOwner = undefined
+      if (!files.length || (owner && owner !== player)) return
+      saveTransfer(async (current, check) => {
+        const native = id !== 'save-file'
+        const entries = native ? await readNativeSaves(files, id === 'native-save-folder', check) : await decodeBackup(current.gameId, files[0]!)
+        check()
+        await current.session.importSaves(entries, native ? 'data-directory' : 'all')
+        check()
+        log('存档已导入，请通过游戏的读档功能恢复进度')
       })
-      .catch(report)
-  })
-  el('import-saves').addEventListener('click', () => el<HTMLInputElement>('save-file').click())
-  el<HTMLInputElement>('save-file').addEventListener('change', (event) => {
-    const element = event.currentTarget as HTMLInputElement,
-      file = element.files?.[0],
-      current = player
-    element.value = ''
-    if (!file || !current) return
-    void decodeBackup(current.gameId, file)
-      .then((files) => current.session.importSaves(files))
-      .then(() => log('存档已导入，请通过游戏的读档功能恢复进度'))
-      .catch(report)
-  })
+    })
+  }
   el('console').addEventListener('submit', (event) => {
     event.preventDefault()
     const source = el<HTMLInputElement>('expression').value.trim()

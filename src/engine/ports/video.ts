@@ -43,6 +43,9 @@ export interface VideoSettings {
   mixingMovieBGColor: number
 }
 export interface VideoSnapshot extends VideoSettings {
+  /** Private object state, retained across graph close/open. Legacy backends
+   * may omit it; it is never a public VideoOverlay property. */
+  periodEventPast?: boolean
   id: number
   epoch: number
   status: VideoStatus
@@ -73,6 +76,7 @@ export type VideoCommand =
       bytes: Uint8Array
       name: string
       settings: VideoSettings
+      periodEventPast?: boolean
       timeline?: VideoTimeline
     }
   | {
@@ -81,6 +85,8 @@ export type VideoCommand =
       epoch: number
     }
   | { op: 'set'; id: number; epoch: number; settings: VideoSettings }
+  /** An explicit setter matters even when the numeric cue is unchanged. */
+  | { op: 'period'; id: number; epoch: number; frame: number }
   | { op: 'mixing'; id: number; epoch: number; bitmap: VideoMixingBitmap | null }
   | { op: 'seek'; id: number; epoch: number; position?: number; frame?: number }
   | { op: 'pauseAll'; paused: boolean }

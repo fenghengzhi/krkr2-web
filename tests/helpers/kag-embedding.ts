@@ -111,20 +111,21 @@ function kagEmbeddingObserve(id){
 `
 
 /** Game-owned scenario plus observer; the original KAG framework is untouched.
- * A literal player name containing [r] must not execute a return tag. */
+ * A literal player name containing [r] must not execute a return tag. Original
+ * KAG3 Config uses ignoreCR=true, where a trailing backslash is visible text. */
 export const kagEmbeddingStory = String.raw`*emb_start|Embedded player name
-[cm][nowait]\
-[macro name=sayname][emb exp=mp.text escape=&false][endmacro]\
-[sayname text="[A][r]"][endnowait]\
+[cm][nowait]
+[macro name=sayname][emb exp=mp.text escape=&false][endmacro]
+[sayname text="[A][r]"][endnowait]
 [iscript]
 global.embStoryPhase=1;
 [endscript]
-[l]\
-[r][nowait][emb exp="'NEXT [B]'" escape=false][endnowait]\
+[l]
+[r][nowait][emb exp="'NEXT [B]'" escape=false][endnowait]
 [iscript]
 global.embStoryPhase=2;
 [endscript]
-[l]\
+[l]
 [iscript]
 global.embStoryPhase=3;
 Debug.message("emb-story-finished");
