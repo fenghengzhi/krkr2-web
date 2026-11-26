@@ -4,6 +4,8 @@
 
 第 186 批处理有扰码的光盘数据轨、MP3 格式的 CD 配乐、菜单与系统快捷键。第 173 批新取回的 9 份浏览器报告有 2,757 项通过、375 项失败，另有 849 项未报告。[186 实现与托管证据](decisions/186-disc-sectors-and-game-controls.md)
 
+第 186 批实现提交 `295b927` 登记时为 `pending`，下一批取回结果。[第 186 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45892325627)
+
 第 185 批处理只提供修改日期的大型远程游戏包、脚本控制的空间音效和字幕像素验收。取回的第 173 批 Firefox 第 3 分片为 304 项通过、20 项失败。[185 实现与托管证据](decisions/185-dated-game-downloads-and-playback.md)
 
 第 185 批实现提交 `d9cf611` 已推送，登记时尚未查到匹配的运行，下批取回。[第 185 批提交](https://github.com/fenghengzhi/krkr2-web/commit/d9cf611522fb953600f5c36e42511a1cce116ec5)

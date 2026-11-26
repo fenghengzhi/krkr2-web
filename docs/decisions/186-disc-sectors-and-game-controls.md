@@ -12,6 +12,8 @@ CloneCD 的 `DataTracksScrambled=1` 表示 IMG 保留了数据扇区在光盘上
 
 CD 配乐支持普通 CBR、VBR Layer III，以及 ID3 和尾部 APEv2 标签。读取器跳过封面和歌曲资料，带标签的文件与相同音频的无标签版本应有相同的首尾样本。验收用 FFmpeg 独立解出完整录音，记录总帧数和摘要，再选取包含轨道交界及结尾的片段比较波形。[APEv2 布局](https://mutagen-specs.readthedocs.io/en/latest/apev2/apev2.html) · [标签读取](../../src/formats/audio/mp3-tags.ts) · [独立音频素材](../../scripts/generate-cdda-mp3-fixtures.mjs)
 
+本批的样本级时序验收针对 Xing/Info 和编码器延迟信息。VBRI 曲目的专有时序尚待核对，free-format 以及中途改变采样率的串接音频仍超出当前范围。
+
 ## 菜单快捷键与游戏键盘事件
 
 脚本可以用 `MenuItem.shortcut` 绑定快捷键，再将它设为空字符串，把同一个键交还给剧情。菜单标题中制表符后面的提示仍可显示。原版 KAG 的验收先用一个快捷键执行菜单动作，然后解除绑定，再按同一个键进入章节并保存、恢复进度。[MenuItem.shortcut 原版说明](https://krkrz.github.io/krkr2doc/kr2doc/contents/f_MenuItem_shortcut.html) · [原版 KAG 键盘路线](../../tests/browser/kag-menu-access.spec.ts)
@@ -25,3 +27,5 @@ CD 配乐支持普通 CBR、VBR Layer III，以及 ID3 和尾部 APEv2 标签。
 第 185 批已按完整提交号登记。取回时第 174 至 185 批均在排队。[第 185 批验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45889204879)
 
 来自第 173 批的 9 份新增浏览器报告合计已报告 3,134 项，其中 2,757 项通过、375 项失败、2 项跳过，另有 849 项未报告。Firefox 的游戏库作业被取消，但已发布完整的 110 项结果，其中 109 项通过，一项大影片换轨超时。常规浏览器矩阵有多个作业在 45 分钟附近结束，本批给常规和游戏库分片预留 75 分钟以完成执行和上传。单个用例的超时保持原设定。[第 173 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45861660259)
+
+第 186 批实现提交 `295b927` 登记时为 `pending`，下一批取回运行结果。[第 186 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45892325627)
