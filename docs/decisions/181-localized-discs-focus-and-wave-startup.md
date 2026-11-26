@@ -23,3 +23,5 @@ CUE 的 `FILE` 行要按制盘者使用的编码读出，否则即使镜像已�
 第 172 批 Chromium 游戏库完整报告为 **110/110 通过**。按项目、文件和用例名与第 171 批逐项对照，此前 36 项失败全部转为通过，涵盖光盘绑定、光盘启动与分支、运行中换盘、远端游戏库下载恢复和存档迁移。该批独立图片对照也取得了两组 PNG 各 30 项和 JPEG 43 项匹配。以上是各自用例的结果。[第 172 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217)
 
 第 172 批 Node 作业被取消，TAP 只记录了前 14 项通过，没有总数。新批次把区域编码、游戏盘启动、焦点与声音的部分回归放进同一次 GitHub-hosted Actions 运行中的独立作业，单独保留 TAP。完整 Node 与浏览器套件仍分别记录。取回时，GitHub 对后续批次的一次产物列表请求返回 403，公开工作流列表显示第 173 至 180 批仍在排队。[托管工作流](../../.github/workflows/test.yml) · [第 180 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45878405974)
+
+第 181 批实现提交 `bbfd04b` 登记时为 `pending`，下一批取回结果。[第 181 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45880484737)

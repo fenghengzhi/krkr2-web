@@ -4,6 +4,8 @@
 
 第 181 批处理本地化游戏盘、姓名输入以及普通配乐起播。第 172 批 Chromium 游戏库 110/110 通过，第 171 批在该套件中的 36 项失败已逐项转为通过。第 172 批 Node 作业被取消，未报告的用例继续保留。[181 实现与托管证据](decisions/181-localized-discs-focus-and-wave-startup.md)
 
+第 181 批实现提交 `bbfd04b` 登记时为 `pending`，下一批取回结果。[第 181 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45880484737)
+
 第 180 批处理大过场、横向滚动误跳对白和长音轨定位。第 171 批所有常规浏览器报告已取回，Firefox 两个后端均通过原版 Introduction 的两条路线，其中一条包含保存与刷新读档。该批整体失败。[180 实现与托管证据](decisions/180-large-cutscenes-and-story-input.md)
 
 第 180 批实现提交 `b102ad6` 登记时为 `pending`，下一批取回结果。[第 180 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45878405974)
