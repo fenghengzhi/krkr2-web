@@ -27,3 +27,5 @@ Windows Media 的测试素材单独生成并用托管机器上的 FFmpeg 解码�
 第 155、156 批都通过类型检查和生产构建，随后旧 MPEG 测试素材生成失败。第 157 批停在浏览器测试的 TypeScript 检查，测试使用的 `findLastIndex` 超出当前编译目标。本批用反向查找替代这次调用，保留影片必须先报告帧、再触发提示点的断言。这三个批次均未运行依赖应用构建的 Node 和主浏览器验收。[第 155 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45813557063) · [第 156 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45815768302) · [第 157 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45818780023)
 
 第 155、156、157 批的原版图形对照分别为 99/99、102/102、103/107。三批的原版 KAG 均为 117/119，仍有两项隐式终结时机差异。三批的 Wine 声音均为 46/46。此次固定快照核对了 79 份新的原始归档，共 134,129,691 字节。第 157 批取回时还有四个作业在运行，未报告项保留当时状态。
+
+实现提交 `355ed18a0665e064df340a0021732db88ce452a0` 已在 GitHub-hosted Actions 登记，登记时为 `queued`。结果留到下一批取回。[第 158 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45821629019)
