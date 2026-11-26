@@ -4,6 +4,8 @@
 
 第 166 批让光盘发行的游戏从盘内项目启动、在浏览器中保存进度，并修订影片剧情提示的帧顺序。第 161 至 163 批的普通应用构建遇到 WAVE 类型检查或影片转换器补丁错误，修正等待本批托管验证。[166 实现与托管证据](decisions/166-bootable-game-discs-and-movie-cues.md)
 
+第 166 批实现提交 `cb5e267` 登记时为 `queued`。结果留到下一批取回。[第 166 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45843758935)
+
 第 165 批支持按盘符读取光盘内的剧情与立绘，并处理分段 MP4 切换音轨时遇到的时长差异。已取回的第 160 批记录确认，原版 Introduction 样例的第一条路线、书签和刷新恢复在三款浏览器、两个脚本后端的六个组合中通过。新批次等待托管验证。[165 实现与托管证据](decisions/165-disc-files-and-fragmented-movies.md)
 
 第 165 批实现提交 `bb7fcd0` 登记时为 `pending`。结果留到下一批取回。[第 165 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45840946389)

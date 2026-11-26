@@ -37,3 +37,5 @@
 三批普通图层和转场对照均为 124/124 匹配。ERI 作者输入、原编码器输入和 DCT 分别为 49/49、10/10、15/15，PNG stream 与 palette 各 30/30，JPEG 为 43/43。Wine 声音对照均为 54/54。Windows SLI/WAVE 则各有 46 项匹配、8 项因缺少声音驱动未取得预期行为。新增五个 RIFF 开片与头部读取对照均匹配，实际播放仍保留其设备限制。[普通对照工作流](../../.github/workflows/test.yml)
 
 独立 alpha 矩阵仍只有 1 项匹配、80 项未报告，原版配置五组也未完成。逐报告路径、大小、摘要和状态保存在 `out/verification/github-actions/166-reference-summary.json`。这些原版结果有各自的输入与范围，网页游戏兼容仍需后续托管验证。第 166 批当前没有执行结果，整体目标继续进行。
+
+第 166 批实现提交 `cb5e267738c6933bd2169bd00b151a9e2c8c0490` 登记时为 `queued`。结果留到下一批取回。[第 166 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45843758935)
