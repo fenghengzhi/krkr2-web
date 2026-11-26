@@ -60,6 +60,7 @@ export class MidiSynth {
   private noise = 0x12345678
   private exclusive?: number[]
   private bufferVolume = 127
+  private masterGain = 1
   left = 0
   right = 0
   constructor(private readonly asset?: MidiAsset) {}
@@ -83,6 +84,7 @@ export class MidiSynth {
     this.exclusive = undefined
     this.cursor = 0
     this.time = 0
+    if (!keepParameters) this.masterGain = 1
   }
   seek(time: number): void {
     this.position(time, false)
@@ -147,6 +149,7 @@ export class MidiSynth {
         if (value === 0xf0) this.exclusive = []
         else if (value === 0xf7) {
           if (this.exclusive && resetsModule(this.exclusive)) {
+            this.masterGain = 1
             this.channels = this.channels.map((previous) => {
               const next = channel(fromFile ? this.bufferVolume : 127)
               if (!fromFile) next.volume = previous.volume
@@ -154,6 +157,18 @@ export class MidiSynth {
               return next
             })
             this.notes = []
+          } else if (this.exclusive?.length === 6 && this.exclusive[0] === 0x7f &&
+              this.exclusive[2] === 4 && this.exclusive[3] === 1) {
+            // KRKR forwards F0/F7 unchanged. Universal real-time Device
+            // Control: device id is not filtered by the selected Windows GM
+            // behavior; ll/mm form one 14-bit master volume. The DLS concave
+            // law is 40*log10(value/16383) dB, hence squared linear gain.
+            // Microsoft MIDI 4db4520, UmpDispatcher::DispatchSysEx and
+            // SynthEngine::SetMasterVolume / DlsUnits::ConcaveTransformDb.
+            // This procedural bank uses exact silence for master volume zero;
+            // it does not reproduce a physical GS device's noise floor.
+            const value = this.exclusive[4]! + this.exclusive[5]! * 128
+            this.masterGain = (value / 16383) ** 2
           }
           this.exclusive = undefined
         } else if (value < 0x80 && this.exclusive && this.exclusive.length < 10) {
@@ -326,7 +341,7 @@ export class MidiSynth {
       // Original SMF playback rewrites CC7 as integer channelVolume *
       // BufferVolume / 127, including first notes and controller/module resets.
       // The independent raw midiOut synth keeps BufferVolume=127.
-      const value = wave * envelope * note.velocity * c.level * c.expression * 0.15
+      const value = wave * envelope * note.velocity * c.level * c.expression * 0.15 * this.masterGain
       this.left += value * (c.pan > 0 ? 1 - c.pan : 1)
       this.right += value * (c.pan < 0 ? 1 + c.pan : 1)
     }

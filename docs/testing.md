@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 171 批通过 Windows 原版播放器读取独立建立的游戏设置，再核对 Windows 导出文件在 Web 中的结果。浏览器还使用原版 KAG 验证菜单键盘操作、由游戏设置决定的章节和重开后的读档，并检查 MIDI 乐谱的静音与恢复。[171 实现与托管证据](decisions/171-game-registry-menu-keys-and-midi-volume.md)
+
 第 170 批由托管 Linux 分别制作 UDF 1.02 和 2.01 游戏光盘。Linux 内核与 7-Zip 各自读回盘内目录和文件，随后在网页中运行原版 KAG、保存剧情进度并刷新读档。会话验收还在同一个盘符更换两张同卷标的光盘。[170 实现与托管证据](decisions/170-udf-game-dvds-and-offline-release.md)
 
 第 169 批以两张在相同路径上保存不同素材的光盘检查运行中换盘，覆盖脚本、KAG 场景、图片、压缩包、CD 音轨和游戏库重开，并扩展原版 Introduction 的实际路线验收。新增行为等待托管结果。[169 实现与托管证据](decisions/169-live-disc-changes-and-kag-outlines.md)

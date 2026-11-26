@@ -1521,6 +1521,21 @@ jobs:
       - name: Observe stock and configured original engine processes
         shell: pwsh
         run: ./tests/probes/original-player-config.ps1
+      - name: Read game-owned Windows registry settings in the stock player
+        if: ${{ !cancelled() && steps.prepare_config.outcome == 'success' }}
+        id: registry
+        shell: pwsh
+        run: ./tests/probes/game-registry.ps1
+      - name: Read the exact Windows export in the Web registry reader
+        if: ${{ !cancelled() && steps.registry.outcome == 'success' }}
+        run: node --import tsx tests/probes/game-registry-export.ts
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.registry.outcome == 'success' || steps.registry.outcome == 'failure') }}
+        with:
+          name: original-game-registry
+          path: out/verification/native-eri/game-registry/
+          if-no-files-found: error
+          retention-days: 90
       - name: Compare argument precedence and the actual saved data paths
         if: ${{ !cancelled() && steps.prepare_config.outcome == 'success' }}
         run: node --import tsx tests/probes/player-config-sdk.ts compare

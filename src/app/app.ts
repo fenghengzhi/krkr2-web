@@ -76,6 +76,7 @@ export function mountApp(root: HTMLDivElement): void {
   }
   const scriptOptions = scriptEncodings.map((name) => `<option value="${name}">${scriptLabels[name]}</option>`).join('')
   projectControls.insertAdjacentHTML('beforeend', `<label for="script-encoding">无 BOM 的脚本与剧情编码</label><select id="script-encoding">${scriptOptions}</select>`)
+  projectControls.insertAdjacentHTML('beforeend', `<label for="registry-file">游戏注册表文件（可选）</label><input id="registry-file" placeholder="例如 Game/settings.reg 或 data.xp3&gt;settings.reg" spellcheck="false"><p class="muted">填写已导入游戏中的文件路径。留空不读取注册表文件。</p>`)
   const discSettings = createCddaSettings('游戏光盘映射（可选）', 'cdda-discs')
   projectControls.append(discSettings.element)
   const liveDisc = createLiveDiscControls(projectControls)
@@ -85,6 +86,7 @@ export function mountApp(root: HTMLDivElement): void {
       encodings = {
         zipEncoding: zipNameEncoding(el<HTMLSelectElement>('zip-encoding').value),
         scriptEncoding: scriptEncoding(el<HTMLSelectElement>('script-encoding').value),
+        registryFile: el<HTMLInputElement>('registry-file').value.trim() || undefined,
       },
       executableDirectory = el<HTMLInputElement>('project-exe-directory').value.trim(),
       executable = el<HTMLInputElement>('project-executable').value.trim() || undefined
@@ -620,7 +622,8 @@ export function mountApp(root: HTMLDivElement): void {
           (loaded.project?.bootDisc ? ' · 启动光盘：' +
             (loaded.project.distribution ? loaded.project.distribution + '>' : '') + loaded.project.bootDisc : '') +
           (loaded.zipEncoding ? ' · ZIP 文件名：' + zipLabels[loaded.zipEncoding] : '') +
-          (loaded.scriptEncoding ? ' · 脚本与剧情：' + scriptLabels[loaded.scriptEncoding] : '')
+          (loaded.scriptEncoding ? ' · 脚本与剧情：' + scriptLabels[loaded.scriptEncoding] : '') +
+          (loaded.registryFile ? ' · 游戏注册表：' + loaded.registryFile : '')
         log('会话就绪。点击画面继续。')
       }
     } catch (error) {
@@ -688,6 +691,7 @@ export function mountApp(root: HTMLDivElement): void {
             ...(snapshot?.project ? { project: snapshot.project } : {}),
             ...(snapshot?.zipEncoding ? { zipEncoding: snapshot.zipEncoding } : {}),
             ...(snapshot?.scriptEncoding ? { scriptEncoding: snapshot.scriptEncoding } : {}),
+            ...(snapshot?.registryFile ? { registryFile: snapshot.registryFile } : {}),
             ...(currentCddaDiscs === undefined ? {} : { cddaDiscs: currentCddaDiscs }),
           }
         : undefined

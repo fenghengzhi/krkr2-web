@@ -868,14 +868,14 @@ public:
     }
 };
 
-// Win32 getLocalName and searchCD skip conversion and host work when the
-// result is discarded. Both still check that a first argument was supplied.
-class StorageResultMethod final : public tTJSNativeClassMethod {
+// Win32 getLocalName, searchCD and readRegValue check the argument count,
+// then skip conversion and lookup when the caller discards the result.
+class StringLookupMethod final : public tTJSNativeClassMethod {
     Vm* vm;
     const tjs_char* operation;
     static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
 public:
-    StorageResultMethod(Vm* vm, const tjs_char* operation)
+    StringLookupMethod(Vm* vm, const tjs_char* operation)
         : tTJSNativeClassMethod(noOp), vm(vm), operation(operation) {}
     tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
         tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
@@ -889,7 +889,7 @@ public:
         tTJSVariant value(name);
         tTJSVariant* input = &value;
         std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 1, &input));
-        if(!reply) TJS_eTJSError(u"Storages host returned no response");
+        if(!reply) TJS_eTJSError(u"String lookup returned no host response");
         resolveReply(vm, *reply, result);
         return TJS_S_OK;
     }
@@ -2046,6 +2046,7 @@ API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix
         object->RegisterNCM(u"asText", new ClipboardText(vm), u"Clipboard", nitProperty, TJS_STATICMEMBER);
     }
     if(system) {
+        object->RegisterNCM(u"readRegValue", new StringLookupMethod(vm, u"System.readRegValue"), u"System", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"createUUID", new SystemUuid(vm), u"System", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"shellExecute", new SystemShellExecute(vm), u"System", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"doCompact", new SystemCompact(vm), u"System", nitMethod, TJS_STATICMEMBER);
@@ -2056,8 +2057,8 @@ API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix
     if(storages) {
         for(const auto& policy : storageMethodPolicies)
             object->RegisterNCM(policy.name, new StorageMethod(vm, policy), u"Storages", nitMethod, TJS_STATICMEMBER);
-        object->RegisterNCM(u"getLocalName", new StorageResultMethod(vm, u"Storages.getLocalName"), u"Storages", nitMethod, TJS_STATICMEMBER);
-        object->RegisterNCM(u"searchCD", new StorageResultMethod(vm, u"Storages.searchCD"), u"Storages", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"getLocalName", new StringLookupMethod(vm, u"Storages.getLocalName"), u"Storages", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"searchCD", new StringLookupMethod(vm, u"Storages.searchCD"), u"Storages", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"selectFile", new StorageSelectFile(vm), u"Storages", nitMethod, TJS_STATICMEMBER);
     }
     *value = tTJSVariant(object.get(), object.get());

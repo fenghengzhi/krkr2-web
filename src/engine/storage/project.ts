@@ -8,12 +8,24 @@ import { discAddress, extractStoragePath, nativeDiscPath, parseStoragePath, stor
 export interface GameEncodings {
   zipEncoding?: ZipNameEncoding
   scriptEncoding?: ScriptEncoding
+  /** Explicit imported .reg resource; omitted never reads a registry file. */
+  registryFile?: string
+}
+export function registryResourceFile(value: unknown): string | undefined {
+  if (value === undefined) return
+  if (typeof value !== 'string' || !value.length || value.length > 4096 || value.includes('\0'))
+    throw new Error('Invalid game registry resource')
+  const path = toPublicStoragePath(storageFilePath(nativeDiscPath(value) ?? value))
+  if (path.length > 4096) throw new Error('Game registry resource exceeds the path limit')
+  return path
 }
 export function copyGameEncodings(value: GameEncodings): GameEncodings {
-  const zip = zipNameEncoding(value.zipEncoding), script = scriptEncoding(value.scriptEncoding)
+  const zip = zipNameEncoding(value.zipEncoding), script = scriptEncoding(value.scriptEncoding),
+    registryFile = registryResourceFile(value.registryFile)
   return {
     ...(zip === 'cp437' ? {} : { zipEncoding: zip }),
     ...(script === 'auto' ? {} : { scriptEncoding: script }),
+    ...(registryFile === undefined ? {} : { registryFile }),
   }
 }
 export type ProjectSelection = ({ mode: 'collection' } |

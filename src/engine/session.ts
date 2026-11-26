@@ -7,6 +7,7 @@ import { assertClipboardText, unavailableClipboard, type ClipboardPort } from '.
 import { unavailableHelp, type HelpPort } from './ports/help.ts'
 import { getWebLocalName, openHelpDocument } from './system/help.ts'
 import { SystemMaintenance } from './system/maintenance.ts'
+import { readRegistryExport, type GameRegistry } from './system/registry.ts'
 import { TvpError } from './system/tvp-error.ts'
 import { TjsError } from './system/tjs-error.ts'
 import { mapTextStreamError } from './system/text-stream-error.ts'
@@ -30,7 +31,7 @@ import {
 } from './script/runtime.ts'
 import { StorageResolver } from './storage/resolver.ts'
 import { DropStorage } from './storage/drop.ts'
-import { copyGameProject, type GameProject } from './storage/project.ts'
+import { copyGameProject, registryResourceFile, type GameProject } from './storage/project.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../formats/zip/names.ts'
 import { CddaDiscs } from './storage/cdda.ts'
 import { copyCddaDiscs, type CddaDisc, type DiscChange } from './ports/cdda.ts'
@@ -181,6 +182,7 @@ export interface SessionSnapshot {
   project?: GameProject
   zipEncoding?: ZipNameEncoding
   scriptEncoding?: ScriptEncoding
+  registryFile?: string
   windows?: WindowPresentation[]
   activeWindow?: number
   mainWindow?: number
@@ -263,6 +265,7 @@ export interface SessionDependencies {
   project?: GameProject
   zipEncoding?: ZipNameEncoding
   scriptEncoding?: ScriptEncoding
+  registryFile?: string
   archives?: ArchiveReader
   /** The page implements the matching request/reply presentation protocol. */
   windowMoveSupported?: boolean
@@ -346,6 +349,8 @@ export class EngineSession {
   private readonly dropped: DropStorage
   private readonly project?: GameProject
   private readonly zipEncoding: ZipNameEncoding
+  private readonly registryFile?: string
+  private registry?: Promise<GameRegistry>
   private readonly cddaDiscs: CddaDiscs
   private readonly images = new ImageLoader(
     (name, optionalImage) => this.findResource(name, optionalImage),
@@ -552,6 +557,7 @@ export class EngineSession {
     }
     this.project = copyGameProject(deps.project)
     this.zipEncoding = zipNameEncoding(deps.zipEncoding)
+    this.registryFile = registryResourceFile(deps.registryFile)
     this.textEncoding = new ScriptTextEncoding(deps.scriptEncoding)
     const boot = this.project?.bootDisc
     const cddaDiscs = copyCddaDiscs(deps.cddaDiscs ?? (boot ? [{
@@ -1227,6 +1233,7 @@ export class EngineSession {
   mount(resources: Resource[]): void {
     if (this.state !== 'ready') throw new Error('Files can only be mounted before starting a game')
     this.storage.mount(resources)
+    this.registry = undefined
     this.images.clear()
     this.notify()
   }
@@ -4068,6 +4075,7 @@ export class EngineSession {
       ...(this.project ? { project: { ...this.project } } : {}),
       ...(this.zipEncoding === 'cp437' ? {} : { zipEncoding: this.zipEncoding }),
       ...(this.textEncoding.initial === 'auto' ? {} : { scriptEncoding: this.textEncoding.initial }),
+      ...(this.registryFile ? { registryFile: this.registryFile } : {}),
       ...this.layers.inspect(),
       handles: runtime?.handles ?? 0,
       memoryBytes: runtime?.memoryBytes ?? 0,
@@ -4198,6 +4206,7 @@ export class EngineSession {
       await attempt(() => this.closeCursors())
       await attempt(() => this.layerObjects?.dispose())
       await attempt(() => this.kag.clear())
+      this.registry = undefined
       await attempt(() => this.windows?.dispose())
       await attempt(() => this.drawDevices.dispose())
       this.windowPresentedVersions.clear()
@@ -4267,6 +4276,31 @@ export class EngineSession {
   }
   private async readResource(name: string): Promise<Uint8Array> {
     return (await this.resolveResource(name, 'TVPCannotOpenStorage')).read()
+  }
+  private async loadRegistry(name: string): Promise<GameRegistry> {
+    // The player chose one imported file. A script's AutoPath or a save
+    // sharing its basename cannot silently supply a different registry.
+    const file = await this.storage.findAsync(name)
+    if (!file) throw new TvpError('TVPCannotOpenStorage', [name], 'Registry export not found: ' + name)
+    return readRegistryExport(file, (bytes) => {
+      const hasBom = bytes[0] === 0xff && bytes[1] === 0xfe || bytes[0] === 0xfe && bytes[1] === 0xff ||
+        bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+      const initial = this.textEncoding.initial
+      return this.deps.readText(bytes, '', hasBom || initial === 'auto' ? undefined : initial, 'plain')
+    }, this.storageCheckpoint)
+  }
+  private async readRegValue(path: string): Promise<string | bigint | undefined> {
+    if (!path || !this.registryFile) return
+    const pending = this.registry ??= this.loadRegistry(this.registryFile)
+    try {
+      const registry = await pending
+      this.control.check()
+      if (this.registry !== pending) throw new Error('Registry source changed during read')
+      return registry.read(path)
+    } catch (error) {
+      if (this.registry === pending) this.registry = undefined
+      throw error
+    }
   }
   private async withTextError<T>(name: string, operation: () => Promise<T>): Promise<T> {
     try { return await operation() }
@@ -5030,6 +5064,9 @@ export class EngineSession {
           host: this.help,
           control: this.control,
         }))
+        break
+      case 'System.readRegValue':
+        value = await this.readRegValue(text(0))
         break
       case 'Storages.searchCD':
         value = await this.cddaDiscs.searchVolume(text(0))

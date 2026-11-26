@@ -149,10 +149,11 @@ export function summary({
   sourceGameId,
   zipEncoding,
   scriptEncoding,
+  registryFile,
   cddaDiscs,
 }: LibraryGame): LibraryGame {
   return { id, gameId, title, entry, backend, createdAt, size, fileCount,
-    ...copyGameEncodings({ zipEncoding, scriptEncoding }),
+    ...copyGameEncodings({ zipEncoding, scriptEncoding, registryFile }),
     ...(cddaDiscs === undefined ? {} : { cddaDiscs: copyCddaDiscs(cddaDiscs) }),
     ...(project === undefined ? {} : { project: copyGameProject(project), sourceGameId }) }
 }

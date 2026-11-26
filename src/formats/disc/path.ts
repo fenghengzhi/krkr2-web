@@ -1,12 +1,4 @@
-// Compare UTF-16 code units without expanding a single character into several.
-export function foldDiscName(text: string): string {
-  let out = ''
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i]!, upper = char.toUpperCase()
-    out += upper.length === 1 ? upper : char
-  }
-  return out
-}
+export { foldWindowsName as foldDiscName } from '../text/windows-name.ts'
 
 export function discPathParts(path: string): string[] {
   if (path.length > 32768 || /^[\\/]/.test(path) || /[\0:]/.test(path)) throw new Error('Expected a relative disc path')

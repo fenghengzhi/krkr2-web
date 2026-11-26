@@ -1,5 +1,6 @@
 import type { MenuPopupIdentity, MenuSnapshot, MenuView } from '../engine/scene/menus.ts'
 import type { WindowView } from '../engine/scene/window.ts'
+import { menuAccessMatch } from './menu-access.ts'
 
 const caption = (text: string) =>
   text
@@ -44,13 +45,18 @@ export function createGameMenus(
   let modal = false
   let disposed = false
   let menuOpened = false
+  let barFocus: HTMLElement | null | undefined
+  const itemViews = new WeakMap<HTMLElement, MenuView>()
+  const rememberBarFocus = () => {
+    if (!container.contains(document.activeElement)) barFocus = popupFocusOrigin(document.activeElement)
+  }
   const publishOpened = () => {
     const expanded = !container.hidden && [...container.querySelectorAll('details[open]')].some((node) => {
       for (let parent = node.parentElement; parent && parent !== container; parent = parent.parentElement)
         if (parent instanceof HTMLDetailsElement && !parent.open) return false
       return true
     }), next = !disposed && !modal && running && !document.hidden &&
-      (!!overlay || (!eventDisabled && expanded))
+      (!!overlay || (!eventDisabled && (expanded || (barFocus !== undefined && container.contains(document.activeElement)))))
     if (next === menuOpened) return
     menuOpened = next
     options.opened?.(next)
@@ -58,6 +64,14 @@ export function createGameMenus(
   // toggle does not bubble. Capturing it observes native pointer/keyboard
   // details activation as well as nested and programmatic open changes.
   container.addEventListener('toggle', publishOpened, true)
+  container.addEventListener('pointerdown', rememberBarFocus, true)
+  const closeBar = (restore = true) => {
+    const inside = container.contains(document.activeElement), previous = barFocus
+    for (const details of container.querySelectorAll('details')) details.open = false
+    barFocus = undefined
+    publishOpened()
+    if (restore && inside && previous && canRestoreFocus(previous)) previous.focus({ preventScroll: true })
+  }
   const removePopup = (restoreFocus = true) => {
     const previous = overlay && popupFocusOrigins.get(overlay),
       restore = restoreFocus && overlay?.contains(document.activeElement)
@@ -73,8 +87,7 @@ export function createGameMenus(
   const select = (id: number, shortcutEvent?: KeyboardEvent) => {
     if (disposed || modal || !running || document.hidden || (eventDisabled && !current.popup))
       return
-    for (const details of container.querySelectorAll('details')) details.open = false
-    publishOpened()
+    closeBar()
     choose(id, current.popup, shortcutEvent)
   }
   // A snapshot can arrive while a menu is open or a pointer is held down.
@@ -156,6 +169,7 @@ export function createGameMenus(
         hint.hidden = !key
         text(hint, key)
       }
+      itemViews.set(node, item)
       if (group.children[index] !== node) group.insertBefore(node, group.children[index] ?? null)
       index++
     }
@@ -171,6 +185,34 @@ export function createGameMenus(
   const windowId = canvas()?.dataset.windowId
   if (windowId !== undefined) container.dataset.windowId = windowId
   container.replaceChildren(bar)
+  const control = (node: HTMLElement): HTMLElement => node instanceof HTMLDetailsElement
+    ? node.firstElementChild as HTMLElement : node
+  const entries = (group: HTMLElement): HTMLElement[] => [...group.children].filter((node): node is HTMLElement =>
+    node instanceof HTMLElement && (node instanceof HTMLDetailsElement
+      ? node.firstElementChild?.getAttribute('aria-disabled') === 'false'
+      : node instanceof HTMLButtonElement && !node.disabled))
+  const focus = (node: HTMLElement) => control(node).focus({ preventScroll: true })
+  const enter = (node: HTMLElement, last = false) => {
+    if (!(node instanceof HTMLDetailsElement)) { focus(node); return }
+    for (const sibling of node.parentElement?.children ?? [])
+      if (sibling instanceof HTMLDetailsElement && sibling !== node) sibling.open = false
+    node.open = true; publishOpened()
+    const children = entries(node.lastElementChild as HTMLElement)
+    focus((last ? children.at(-1) : children[0]) ?? node)
+  }
+  const activate = (node: HTMLElement, event: KeyboardEvent) => {
+    if (node instanceof HTMLDetailsElement) enter(node)
+    else {
+      const item = itemViews.get(node)
+      if (item) select(item.id, event)
+    }
+  }
+  const focusedItem = (): HTMLElement | undefined => {
+    const active = document.activeElement
+    if (!(active instanceof HTMLElement) || (!container.contains(active) && !popupPanel?.contains(active))) return
+    if (active instanceof HTMLButtonElement) return active
+    if (active.tagName === 'SUMMARY' && active.parentElement instanceof HTMLDetailsElement) return active.parentElement
+  }
   const render = () => {
     if (disposed) return
     const visible = current.root?.visible && current.root.children.some((item) => item.visible)
@@ -237,19 +279,29 @@ export function createGameMenus(
       // in the engine, but must no longer cover or cancel the child in the DOM.
       removePopup(!modal)
     }
+    if (!visible || !running || eventDisabled || modal) closeBar(!modal)
     publishOpened()
   }
   const keydown = (event: KeyboardEvent) => {
     if (disposed || modal) return
     if (event.target instanceof Element && event.target.closest('.game-clipboard, .game-help'))
       return
-    if (event.isComposing || event.keyCode === 229) return
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+    const popupTarget = event.target instanceof Node && !!popupPanel?.contains(event.target),
+      barTarget = event.target instanceof Node && container.contains(event.target),
+      gameTarget = event.target === canvas() || (event.target instanceof HTMLTextAreaElement &&
+        event.target.classList.contains('game-text-input') && event.target.parentElement === canvas()?.parentElement)
     if (event.key === 'Escape') {
       // A script can show a popup on a window which did not own keyboard
       // activation. Its blocking request must still accept cancellation.
-      if (!current.popup && options.active?.() === false) return
-      for (const details of container.querySelectorAll('details')) details.open = false
-      publishOpened()
+      if (!current.popup && (options.active?.() === false || (!gameTarget && !barTarget))) return
+      const node = focusedItem(), parent = node?.parentElement?.parentElement
+      if (parent instanceof HTMLDetailsElement) {
+        event.preventDefault(); parent.open = false; focus(parent); publishOpened(); return
+      }
+      const owned = !!node || [...container.querySelectorAll('details')].some((item) => item.open)
+      closeBar()
+      if (owned) event.preventDefault()
       if (current.popup) {
         event.preventDefault()
         dismiss(current.popup)
@@ -257,10 +309,10 @@ export function createGameMenus(
       return
     }
     if (
-      options.active?.() === false ||
+      (options.active?.() === false && !popupTarget) ||
       !running ||
       document.hidden ||
-      eventDisabled ||
+      (eventDisabled && !popupTarget) ||
       event.target instanceof HTMLInputElement ||
       (event.target instanceof HTMLTextAreaElement &&
         !(
@@ -287,10 +339,76 @@ export function createGameMenus(
       if (!item.children.length && matches(item)) return item
       return item.children.map(visit).find(Boolean)
     }
-    const item = current.root && visit(current.root)
+    const shortcutRoot = current.popup ? find(current.root, current.popup.id) : current.root,
+      item = shortcutRoot && visit(shortcutRoot)
     if (item) {
       event.preventDefault()
       select(item.id, event)
+      return
+    }
+    // Win32/VCL captions declare access keys independently of shortcuts.
+    // Ctrl+Alt (including AltGr), composition and host text fields retain
+    // their ordinary input route; no browser accesskey attribute is installed.
+    if (event.ctrlKey || event.metaKey || event.getModifierState('AltGraph')) return
+    if (!gameTarget && !popupTarget && !barTarget) return
+    if (!current.popup && event.altKey && event.key.length === 1 && current.root?.visible && current.root.enabled) {
+      const top = entries(bar)
+      let currentTop = focusedItem()
+      while (currentTop && currentTop.parentElement !== bar) {
+        const parent = currentTop.parentElement?.parentElement
+        currentTop = parent instanceof HTMLDetailsElement ? parent : undefined
+      }
+      const match = menuAccessMatch(top.map((node) => itemViews.get(node)!.caption), event.key, top.indexOf(currentTop!))
+      if (!match) return
+      event.preventDefault(); rememberBarFocus()
+      const node = top[match.index]!
+      if (match.unique) activate(node, event); else focus(node)
+      publishOpened()
+      return
+    }
+    if (event.altKey || event.shiftKey) return
+    let node = focusedItem()
+    if (!current.popup && event.key === 'F10' && current.root?.visible && current.root.enabled && entries(bar).length) {
+      event.preventDefault()
+      if (node) closeBar()
+      else { rememberBarFocus(); focus(entries(bar)[0]!); publishOpened() }
+      return
+    }
+    if (!node) return
+    const group = node.parentElement!, siblings = entries(group), index = siblings.indexOf(node), topLevel = group === bar
+    if (index < 0) return
+    const move = (step: number) => focus(siblings[(index + step + siblings.length) % siblings.length]!)
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(node, event); return }
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault(); focus((event.key === 'Home' ? siblings[0] : siblings.at(-1))!); return
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault()
+      if (topLevel) enter(node, event.key === 'ArrowUp')
+      else move(event.key === 'ArrowUp' ? -1 : 1)
+      return
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault()
+      if (event.key === 'ArrowRight' && !topLevel && node instanceof HTMLDetailsElement) { enter(node); return }
+      const parent = group.parentElement
+      if (!topLevel && parent instanceof HTMLDetailsElement && parent.parentElement !== bar) {
+        if (event.key === 'ArrowLeft') { parent.open = false; focus(parent); publishOpened() }
+        return
+      }
+      const top = entries(bar), currentTop = topLevel ? node : parent,
+        at = top.findIndex((item) => item === currentTop)
+      if (at >= 0) {
+        const next = top[(at + (event.key === 'ArrowLeft' ? -1 : 1) + top.length) % top.length]!
+        if (topLevel) focus(next); else enter(next)
+      }
+      return
+    }
+    if (event.key.length === 1) {
+      const match = menuAccessMatch(siblings.map((item) => itemViews.get(item)!.caption), event.key, index)
+      if (!match) return
+      event.preventDefault(); node = siblings[match.index]!
+      if (match.unique) activate(node, event); else focus(node)
     }
   }
   window.addEventListener('keydown', keydown, { capture: true })
@@ -300,6 +418,8 @@ export function createGameMenus(
       disposed = true
       window.removeEventListener('keydown', keydown, { capture: true })
       container.removeEventListener('toggle', publishOpened, true)
+      container.removeEventListener('pointerdown', rememberBarFocus, true)
+      closeBar(false)
       container.replaceChildren()
       container.hidden = true
       removePopup()

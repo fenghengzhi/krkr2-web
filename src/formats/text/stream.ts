@@ -14,7 +14,7 @@ const MAX_TEXT_BYTES = 64 * 1024 * 1024
 export function modeOffset(mode: string): number {
   return parseStreamMode(mode).offset
 }
-function decodeUtf16(bytes: Uint8Array, littleEndian = true): string {
+export function decodeUtf16(bytes: Uint8Array, littleEndian = true): string {
   if (bytes.length % 2) throw new Error('Truncated UTF-16 text stream')
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const chunk: number[] = []

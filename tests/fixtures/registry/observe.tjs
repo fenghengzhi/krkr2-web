@@ -1,0 +1,13 @@
+function observeRegistry(key) {
+  var lookup=System.readRegValue incontextof System, root="HKEY_CURRENT_USER\\"+key+"\\";
+  var count=0, conversion=0, extra=0;
+  try{lookup();}catch(e){count++;}
+  try{var badCount=lookup();}catch(e){count++;}
+  lookup(<% 41 %>,extra++);
+  try{var bad=lookup(<% 41 %>,extra++);}catch(e){conversion++;}
+  var score=lookup(root+"Score"), caption=lookup(root+"Caption");
+  return [lookup(root),caption,typeof score,score,lookup(root+"Target"),lookup(root+"Big"),
+    lookup(key+"\\sCoRe"),lookup("\\"+key+"\\caption"),int(lookup(root+"Missing")===void),
+    int(lookup(root+"Binary")===void),int(lookup(root+"List")===void),int(lookup("")===void),
+    count,conversion,extra].join("|");
+}

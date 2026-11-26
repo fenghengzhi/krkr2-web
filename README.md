@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 171 批为原版游戏增加注册表设置读取、KAG 菜单键盘操作，以及 MIDI 乐谱主音量。游戏库可记住玩家选定的游戏设置文件，新增行为等待托管验收。[171 实现与托管证据](docs/decisions/171-game-registry-menu-keys-and-midi-volume.md)
+
 第 170 批为使用 UDF 物理分区的游戏 DVD 接入启动、查盘和文件读取，并修复离线发布清单遗漏补丁文件 MIME 类型的问题。新验收覆盖从 DVD 打开原版 KAG、进入章节、存档及刷新后的读档。[170 实现与托管证据](docs/decisions/170-udf-game-dvds-and-offline-release.md)
 
 第 169 批支持在游戏运行中弹出或更换 ISO、CUE 光盘，包括游戏要求插入下一张盘时从设备选取文件。另修正了原版 Introduction 第二条路线在显示描边对白时会中断的问题。新增行为等待托管验收。[169 实现与托管证据](docs/decisions/169-live-disc-changes-and-kag-outlines.md)
