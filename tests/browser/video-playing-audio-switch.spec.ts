@@ -7,7 +7,8 @@ import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia } from '../helpers/video-audio-probe.ts'
 
 interface ClockObservation { element: number; position: number; paused: boolean; committed: boolean }
-interface SwitchProbe { freezes: ClockObservation[]; resumes: ClockObservation[]; seeks: (ClockObservation & { requested: number })[] }
+interface SwitchProbe { pauseReturns: ClockObservation[]; freezes: ClockObservation[];
+  resumes: ClockObservation[]; seeks: (ClockObservation & { requested: number })[] }
 interface PresentationReference {
   commit: string
   fixtures: { file: string; bytes: number; sha256: string;
@@ -38,7 +39,7 @@ for (const container of ['numbered-fragmented', 'numbered-interleaved']) {
     expect(Number.isFinite(firstSeconds)).toBe(true); expect(firstSeconds).toBeGreaterThanOrEqual(0)
     await installVideoAudioProbe(page)
     await page.addInitScript(() => {
-      const probe: SwitchProbe = { freezes: [], resumes: [], seeks: [] }, ids = new WeakMap<HTMLMediaElement, number>(),
+      const probe: SwitchProbe = { pauseReturns: [], freezes: [], resumes: [], seeks: [] }, ids = new WeakMap<HTMLMediaElement, number>(),
         pause = HTMLMediaElement.prototype.pause, play = HTMLMediaElement.prototype.play
       let serial = 0
       window.playingAudioSwitch = probe
@@ -56,8 +57,15 @@ for (const container of ['numbered-fragmented', 'numbered-interleaved']) {
       })
       HTMLMediaElement.prototype.pause = function () {
         const moving = this instanceof HTMLVideoElement && !!this.dataset.videoId && !this.paused
-        pause.call(this)
-        if (moving) probe.freezes.push(observation(this))
+        const element = this, stopped = () => probe.freezes.push(observation(element))
+        if (moving) element.addEventListener('pause', stopped, { once: true })
+        try {
+          pause.call(element)
+          if (moving) probe.pauseReturns.push(observation(element))
+        } catch (error) {
+          element.removeEventListener('pause', stopped)
+          throw error
+        }
       }
       HTMLMediaElement.prototype.play = function () {
         if (this instanceof HTMLVideoElement && this.dataset.videoId) probe.resumes.push(observation(this))
@@ -86,11 +94,14 @@ movie.open("numbered.mp4");movie.pause();movie.frame=12;
           expect(await page.locator('video[data-video-id]').evaluate((node) => (node as HTMLVideoElement).currentTime))
             .toBeGreaterThan(previous + 0.02)
         }).toPass({ timeout: 12000 })
-        await page.evaluate(() => { window.playingAudioSwitch.freezes = []; window.playingAudioSwitch.resumes = []; window.playingAudioSwitch.seeks = [] })
+        await page.evaluate(() => { window.playingAudioSwitch.pauseReturns = []; window.playingAudioSwitch.freezes = []; window.playingAudioSwitch.resumes = []; window.playingAudioSwitch.seeks = [] })
         await evaluate(page, `(movie.enabledAudioStream=${stream},movie.enabledAudioStream+"|"+movie.status)`, `${stream}|play`)
         const proof = await page.evaluate(() => window.playingAudioSwitch)
+        expect(proof.pauseReturns).toHaveLength(1)
         expect(proof.freezes).toHaveLength(1)
         const frozen = proof.freezes[0]!, resumed = proof.resumes.find((value) => value.element !== frozen.element)
+        expect(proof.pauseReturns[0]!.element).toBe(frozen.element)
+        expect(proof.pauseReturns[0]!.paused).toBe(true)
         expect(frozen.paused).toBe(true)
         expect(frozen.position).toBeGreaterThan(1)
         expect(resumed).toBeDefined()
@@ -124,7 +135,7 @@ movie.open("numbered.mp4");movie.pause();movie.frame=12;
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
     try { await info.attach('playing-audio-switch-clocks', { contentType: 'application/json', body: JSON.stringify({
-      scope: 'Passive actual pause/play and forwarded currentTime setters. Bounded private first-picture preparation is checked against independent source PTS/zero; the final frozen seconds must reach the new element unchanged before its committed play.',
+      scope: 'Passive pause() returns and actual pause events are recorded separately. The actual stopped-event seconds must reach the selected graph unchanged before its committed play. Bounded private first-picture preparation is checked against independent source PTS/zero; all original frequency, resource and precise clock gates remain.',
       reference: { file: reference.file, sha256: reference.sha256, firstPts, timeBase: video.time_base, firstSeconds },
       backend, binary, container, readings, latest: await page.evaluate(() => window.playingAudioSwitch),
       media: await observeVideoMedia(page), logs: await page.locator('#logs').innerText(),

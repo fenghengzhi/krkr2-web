@@ -1,5 +1,6 @@
-/** WindowFormUnit.cpp 1779–1786/1824–1860 and LayerManager.cpp 337–345:
- * Click gets LastMouseDownX/Y, then MouseUp gets the release coordinates. */
+/** WindowFormUnit.cpp 1779–1798/1824–1860 and LayerManager.cpp 337–355:
+ * Click/DblClick get LastMouseDownX/Y; MouseUp gets the release coordinates.
+ * Double controls use equal press positions without claiming VCL event order. */
 export const mouseClickOriginSource = String.raw`
 var clickWindow=new Window();clickWindow.caption="Drag choice";
 clickWindow.setInnerSize(320,180);clickWindow.visible=true;
@@ -18,6 +19,10 @@ class DragChoice extends Layer {
   global.clickRecord(label+"-click",x,y);global.clickChoice=label;
   global.clickRoot.fillRect(0,140,320,40,label=="left"?0xff207040:0xff704020);
  }
+ function onDoubleClick(x,y){
+  global.clickRecord(label+"-double",x,y);global.clickChoice=label;
+  global.clickRoot.fillRect(0,140,320,40,label=="left"?0xff207040:0xff704020);
+ }
  function onMouseUp(x,y,button,shift){
   global.clickRecord(label+"-up",x,y);global.clickRound++;
   global.clickWindow.update();
@@ -28,6 +33,7 @@ var clickLeft=new DragChoice(clickWindow,clickRoot,"left",0,0xff204060),
     clickRight=new DragChoice(clickWindow,clickRoot,"right",160,0xff604020);
 clickWindow.onMouseDown=function(x,y,button,shift){global.clickTrace.clear();global.clickRecord("window-down",x,y);};
 clickWindow.onClick=function(x,y){global.clickRecord("window-click",x,y);};
+clickWindow.onDoubleClick=function(x,y){global.clickRecord("window-double",x,y);};
 clickWindow.onMouseUp=function(x,y,button,shift){global.clickRecord("window-up",x,y);};
 clickWindow.update();Debug.message("drag-choice-ready");
 `
@@ -35,4 +41,9 @@ clickWindow.update();Debug.message("drag-choice-ready");
 export const mouseClickOriginExpected = [
   'window-down:40,30|left-down:40,30|window-click:40,30|left-click:40,30|window-up:240,90|left-up:240,90',
   'window-down:240,30|right-down:80,30|window-click:240,30|right-click:80,30|window-up:40,90|right-up:-120,90',
+] as const
+
+export const mouseDoubleOriginExpected = [
+  'window-down:40,30|left-down:40,30|window-double:40,30|left-double:40,30|window-up:240,90|left-up:240,90',
+  'window-down:240,30|right-down:80,30|window-double:240,30|right-double:80,30|window-up:40,90|right-up:-120,90',
 ] as const

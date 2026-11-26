@@ -24,7 +24,7 @@ import { legacyVideoFormat } from '../legacy/format.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
 import { VideoSampleHistory, videoSeekTime, waitForClockPresentation, type ClockPresentationTarget } from './clock-seek.ts'
 import { VideoPeriod } from '../../../engine/media/video-period.ts'
-import { pauseRecoveredVideo, recoverVideoFirstFrame } from './first-frame-recovery.ts'
+import { pauseVideoForClock, recoverVideoFirstFrame } from './first-frame-recovery.ts'
 import {
   createVideoMixingSurface,
   releaseVideoMixingSurface,
@@ -882,7 +882,7 @@ export class WebVideoHost {
               const recovery = movie.firstFrameRecovery
               movie.firstFrameRecovery = undefined
               if (recovery?.started && !failures.length) {
-                pause = pauseRecoveredVideo(element, movie.abort.signal, {
+                pause = pauseVideoForClock(element, movie.abort.signal, {
                   schedule: (callback, delay) => this.timeouts.start(delay, callback),
                   stop: () => recovery.close(),
                 })
@@ -1272,8 +1272,16 @@ export class WebVideoHost {
       // clock before preparing the candidate, so no period/loop/ended boundary
       // or old-epoch layer frame is consumed during the asynchronous handoff.
       const progressing = movie.status === 'play' && !movie.element.paused
-      movie.element.pause()
       this.cancelFrame(movie)
+      // A synchronous paused flag need not contain the final media clock yet.
+      // The archived WebKit warmup publishes its stopped position at the real
+      // pause event. Track replacement must freeze that same settled clock;
+      // it cannot seek the new language to an earlier cached getter value.
+      await pauseVideoForClock(movie.element, stage.abort.signal, {
+        schedule: (callback, delay) => this.timeouts.start(delay, callback),
+        stop: () => movie.element.pause(),
+      })
+      this.stageCurrent(stage)
       // Keep the original DOM seconds for the new element's setter. A
       // seconds -> milliseconds -> seconds roundtrip can lose one ULP and
       // move a quantized paused clock to the preceding microsecond.
@@ -1350,7 +1358,8 @@ export class WebVideoHost {
           try { movie.container.append(movie.mixing.canvas) } catch {}
         }
         try { this.retireStage(stage) } catch {}
-        if (!this.closed && !movie.disposed && this.movies.get(movie.id) === movie && !movie.switching) {
+        if (!this.closed && !movie.disposed && this.movies.get(movie.id) === movie &&
+            movie.epoch === stage.epoch && !movie.switching) {
           try { this.layout(movie.windowId) } catch {}
           if (movie.status === 'play') this.play(movie)
         }

@@ -1,4 +1,5 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
+import { isDiscMedium } from '../ports/cdda.ts'
 import { StorageResolver } from './resolver.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../../formats/zip/names.ts'
 import { scriptEncoding, type ScriptEncoding } from '../script/text-encoding.ts'
@@ -60,13 +61,13 @@ export function packagedDiscPath(path: string): { distribution: string; disc: st
   const separator = path.indexOf('>')
   if (separator < 0 || discAddress(path)) return
   const distribution = path.slice(0, separator), disc = path.slice(separator + 1)
-  if (/\.(?:zip|exe)$/i.test(distribution) && /\.(?:cue|iso)$/i.test(disc))
+  if (/\.(?:zip|exe)$/i.test(distribution) && isDiscMedium(disc))
     return { distribution, disc }
 }
 function bootDiscPath(value: unknown): string {
   if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid boot disc')
   const path = storageFilePath(value)
-  if (discAddress(path) || path.includes('>') || !/\.(?:cue|iso)$/i.test(path)) throw new Error('Expected an imported ISO or CUE')
+  if (discAddress(path) || path.includes('>') || !isDiscMedium(path)) throw new Error('Expected an imported ISO, CUE or CCD')
   return path
 }
 export function copyGameProject(value?: GameProject): GameProject | undefined {
@@ -94,10 +95,10 @@ export function copyProjectSelection(value?: ProjectSelection): ProjectSelection
   if (executableDirectory.includes('>')) throw new Error('Executable directory cannot be inside an archive')
   let launcher: { executable?: string } = {}
   if (value.executable !== undefined) {
-    const optical = typeof value.executable === 'string' && /\.(?:iso|cue)$/i.test(value.executable)
+    const optical = typeof value.executable === 'string' && isDiscMedium(value.executable)
     if (optical && value.executable.includes('>') && value.executable.length <= 4096) {
       const path = storageFilePath(value.executable)
-      if (!packagedDiscPath(path)) throw new Error('Expected an ISO or CUE inside a distribution ZIP')
+      if (!packagedDiscPath(path)) throw new Error('Expected an ISO, CUE or CCD inside a distribution ZIP')
       launcher = { executable: toPublicStoragePath(path) }
     } else launcher = { executable: executablePath(value.executable, optical ? '' : executableDirectory) }
   }

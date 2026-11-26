@@ -634,6 +634,13 @@ jobs:
         if: steps.disc-volumes.outcome == 'success'
         continue-on-error: true
         run: node --import tsx scripts/generate-boot-disc.mjs
+      - name: Master a mixed-mode CloneCD game disc and check the IMG against its original tracks
+        id: clone-cd-game
+        if: steps.boot-discs.outcome == 'success'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y build-essential cmake flex bison bchunk
+          python3 scripts/generate-ccd-game.py
       - name: Package original KAG discs in single and numbered ZIP releases
         if: steps.boot-discs.outcome == 'success'
         continue-on-error: true
@@ -698,6 +705,7 @@ jobs:
             },
           }, null, 2) + '\n')
           JS
+          mkdir -p out/verification/clone-cd-game
           tar -czf "$RUNNER_TEMP/test-build.tar.gz" \
             .generated dist out/ci/build-info.json \
             public/licenses/image-zlib public/licenses/image-jpeg public/licenses/legacy-media \
@@ -705,7 +713,7 @@ jobs:
             out/verification/pwa/fixture-artifacts.json out/verification/video-tracks \
             out/verification/deflate64-games \
             out/verification/long-vorbis out/verification/vorbis-speakers \
-            out/verification/cdda-aiff out/verification/disc-volumes \
+            out/verification/cdda-aiff out/verification/disc-volumes out/verification/clone-cd-game \
             out/verification/jpeg-fixtures/inputs \
             out/verification/jpeg-fixtures/case-manifest.json out/verification/jpeg-fixtures/codes.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -809,6 +817,13 @@ jobs:
           path: |
             out/verification/vorbis-speakers/
             out/ci/vorbis-speakers.log
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.clone-cd-game.outcome == 'success' || steps.clone-cd-game.outcome == 'failure') }}
+        with:
+          name: clone-cd-game-reference
+          path: out/verification/clone-cd-game/
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -1038,6 +1053,16 @@ jobs:
         run: |
           node --import tsx --test --test-reporter=tap --test-name-pattern=device-picked \
             tests/integration/storage-selector.test.ts | tee out/ci/game-device-files.tap
+      - name: Check CloneCD game tracks, playback and disc changes
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-concurrency=2 --test-reporter=tap \
+            tests/conformance/clone-cd.test.ts tests/integration/clone-cd.test.ts | tee out/ci/game-clone-cd.tap
+      - name: Check click coordinates and movie pause events
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node --import tsx --test --test-concurrency=2 --test-reporter=tap \
+            tests/integration/mouse-click-origin.test.ts tests/conformance/video-first-frame-recovery.test.ts | tee out/ci/game-mouse-and-movie.tap
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ always() }}
         with:
@@ -1761,6 +1786,16 @@ jobs:
       - name: Compare the SLI and WAVE format observations
         if: ${{ !cancelled() && steps.prepare_sli.outcome == 'success' }}
         run: node --import tsx tests/probes/sli-sdk.ts compare
+      - name: Prepare a game window that records ordinary mouse clicks
+        if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
+        id: prepare_mouse_click
+        run: node --import tsx tests/probes/mouse-click-sdk.ts prepare
+      - name: Double-click the original game window and release the button at a different point
+        if: ${{ !cancelled() && steps.prepare_mouse_click.outcome == 'success' }}
+        run: ./tests/probes/original-eri.ps1 -Project mouse-click
+      - name: Preserve the observed window and layer coordinates
+        if: ${{ !cancelled() && steps.prepare_mouse_click.outcome == 'success' }}
+        run: node --import tsx tests/probes/mouse-click-sdk.ts compare
       - name: Prepare safe original transition option controls
         if: ${{ !cancelled() && matrix.corpus == 'authored' && steps.install_eri_reference.outcome == 'success' }}
         id: prepare_transition

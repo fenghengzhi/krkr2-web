@@ -1,4 +1,4 @@
-param([ValidateSet('eri', 'midi', 'kag', 'sli', 'kag-intro', 'transition', 'transition-alpha', 'decimal', 'window-input', 'player-saves', 'disc-volume', 'disc-boot', 'game-registry')][string]$Project = 'eri')
+param([ValidateSet('eri', 'midi', 'kag', 'sli', 'kag-intro', 'transition', 'transition-alpha', 'decimal', 'window-input', 'mouse-click', 'player-saves', 'disc-volume', 'disc-boot', 'game-registry')][string]$Project = 'eri')
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
   throw 'The original SDK reference requires a GitHub-hosted Windows runner.'
@@ -65,6 +65,9 @@ public static class KrkrDefaultFontPlatform {
     -RedirectStandardOutput (Join-Path $output 'stdout.log') -RedirectStandardError (Join-Path $output 'stderr.log')
   $state.pid = $process.Id
   $null = $process.Handle
+  if ($Project -eq 'mouse-click') {
+    & (Join-Path $PSScriptRoot 'original-mouse-click.ps1') -Process $process -Output $output
+  }
   if (!$process.WaitForExit(30000)) {
     $state.timedOut = $true
     throw "Original process timed out before completing the $Project controls."

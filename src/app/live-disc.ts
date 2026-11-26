@@ -1,4 +1,4 @@
-import type { DiscChange } from '../engine/ports/cdda.ts'
+import { isDiscMedium, isDiscSheet, type DiscChange } from '../engine/ports/cdda.ts'
 import type { SessionClient } from '../player/session-client.ts'
 import type { LocalGameFile } from '../protocol/session.ts'
 
@@ -14,7 +14,7 @@ export function createLiveDiscControls(parent: HTMLElement) {
     <button type="button" id="choose-live-disc-folder">选择光盘文件夹</button>
     <input type="file" id="live-disc-files" multiple hidden><input type="file" id="live-disc-folder" webkitdirectory multiple hidden>
     <button type="button" id="eject-disc">弹出</button><button type="button" id="reset-disc">恢复启动时的光盘</button></div>
-    <p class="muted">可一起选择 CUE 和轨道文件。轨道分布在子目录时请选择文件夹。换盘只对本次游玩生效。</p>
+    <p class="muted">可一起选择 CUE 和轨道文件，或 CCD 和同名 IMG。轨道分布在子目录时请选择文件夹。换盘只对本次游玩生效。</p>
     <p id="live-disc-status" role="status"></p>`
   parent.append(panel)
   const drive = panel.querySelector<HTMLInputElement>('#live-disc-drive')!,
@@ -29,11 +29,11 @@ export function createLiveDiscControls(parent: HTMLElement) {
       if (!/^[A-Z]$/.test(letter)) throw new Error('请输入一个盘符，例如 D。')
       let cue = path.value.trim()
       if (files) {
-        const media = files.map((file) => file.path).filter((name) => /\.(cue|iso)$/i.test(name))
-        const sheets = media.filter((name) => /\.cue$/i.test(name))
+        const media = files.map((file) => file.path).filter(isDiscMedium)
+        const sheets = media.filter(isDiscSheet)
         const choices = sheets.length ? sheets : media
         if (!media.includes(cue)) {
-          if (choices.length !== 1) throw new Error(choices.length ? '请填写要换入的光盘路径，再次选择这些文件。' : '请选择 ISO 或 CUE 及其轨道文件。')
+          if (choices.length !== 1) throw new Error(choices.length ? '请填写要换入的光盘路径，再次选择这些文件。' : '请选择 ISO，或一起选择 CUE／CCD 与配套轨道文件。')
           cue = choices[0]!
         }
       }

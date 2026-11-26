@@ -23,7 +23,7 @@ export function discVolumeTrack(sheet: CueSheet): DiscVolumeTrack | 'audio' | un
   }
   const next = sheet.tracks[index + 1]
   return { file: file.name, layout, first: track.indices.get(1)!,
-    end: next?.file === track.file ? next.indices.get(0) ?? next.indices.get(1) : undefined }
+    end: next?.file === track.file ? next.indices.get(0) ?? next.indices.get(1) : !next ? sheet.leadOut : undefined }
 }
 
 /** ECMA-119 volume descriptors start at logical sector 16. Windows CDFS

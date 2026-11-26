@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { pauseRecoveredVideo, recoverVideoFirstFrame } from '../../src/backends/video/browser/first-frame-recovery.ts'
+import { pauseVideoForClock, recoverVideoFirstFrame } from '../../src/backends/video/browser/first-frame-recovery.ts'
 
 function fixture() {
   let expire!: () => void, cancelled = false, allowed = true, starts = 0, plays = 0,
@@ -82,7 +82,7 @@ test('warmup restoration waits for the stopped clock event, including synchronou
     const video = new Video(), controller = new AbortController()
     let scheduled = 0, cancelled = 0, stops = 0, complete = false
     video.paused = mode === 'already-paused'
-    const work = pauseRecoveredVideo(video, controller.signal, {
+    const work = pauseVideoForClock(video, controller.signal, {
       schedule(_callback, delay) { assert.equal(delay, 15000); scheduled++; return () => { cancelled++ } },
       stop() {
         stops++; video.paused = true
@@ -113,7 +113,7 @@ test('warmup pause cancellation, missing events and synchronous cleanup errors r
     const video = new Video(), controller = new AbortController(), original = new Error('Pause cleanup failed')
     let expire!: () => void, cancelled = 0, stops = 0
     if (mode === 'cancelled-before') controller.abort()
-    const work = pauseRecoveredVideo(video, controller.signal, {
+    const work = pauseVideoForClock(video, controller.signal, {
       schedule(callback, delay) { assert.equal(delay, 15000); expire = callback; return () => { cancelled++ } },
       stop() {
         stops++; video.paused = true
@@ -123,7 +123,7 @@ test('warmup pause cancellation, missing events and synchronous cleanup errors r
     if (mode === 'cancelled-after') controller.abort()
     if (mode === 'no-event') expire()
     await assert.rejects(work, (error) => mode === 'stop-error' ? error === original
-      : error instanceof Error && error.message === (mode === 'no-event' ? 'Video recovery pause timed out' : 'Video recovery pause cancelled'))
+      : error instanceof Error && error.message === (mode === 'no-event' ? 'Video pause timed out' : 'Video pause cancelled'))
     assert.equal(stops, 1)
     assert.equal(cancelled, mode === 'cancelled-before' ? 0 : 1)
     video.dispatchEvent(new Event('pause'))

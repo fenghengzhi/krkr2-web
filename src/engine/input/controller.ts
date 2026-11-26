@@ -946,7 +946,7 @@ export class InputController {
       return
     }
     if (packet.clicks > 0) {
-      const clickPoint = packet.type === 'up' && packet.clicks === 1 && packet.clickPaintBoxPoint
+      const clickPoint = packet.type === 'up' && packet.clickPaintBoxPoint
         ? { ...packet.clickPaintBoxPoint } : mousePoint!
       const method = packet.clicks === 2 ? 'onDoubleClick' : 'onClick'
       yield { target: 0, method, args: [clickPoint.x, clickPoint.y] }

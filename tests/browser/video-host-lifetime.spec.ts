@@ -39,6 +39,7 @@ for (const name of [
   'cancel-failure',
   'hidden-first-frames',
   'cue-callback-barrier',
+  'switch-pause-clock',
 ] as const satisfies readonly WebVideoLifetimeCase[])
   test(`browser video resources: ${name}`, async ({ page }) => {
     const errors: string[] = []
@@ -58,7 +59,9 @@ for (const name of [
     await page.route('**/video-host-lifetime.mp4', (route) =>
       route.fulfill({
         contentType: 'video/mp4',
-        body: readFileSync(new URL('../fixtures/video/colors.mp4', import.meta.url)),
+        body: readFileSync(name === 'switch-pause-clock'
+          ? resolve('out/verification/video-tracks/numbered-multitrack.mp4')
+          : new URL('../fixtures/video/colors.mp4', import.meta.url)),
       }),
     )
     await page.goto('/video-host-lifetime.html')
@@ -77,7 +80,7 @@ for (const name of [
     expect(result.revokedUrls).toBe(result.createdUrls)
     expect(result.connected).toBe(
       name === 'cue-callback-barrier' ? 5 :
-        ['shutdown-failure', 'supersede-first-frame', 'cancel-failure', 'hidden-first-frames'].includes(name) ? 2 : 1,
+        ['shutdown-failure', 'supersede-first-frame', 'cancel-failure', 'hidden-first-frames', 'switch-pause-clock'].includes(name) ? 2 : 1,
     )
     expect(result.observerCloses).toBe(1)
     expect([
@@ -89,6 +92,7 @@ for (const name of [
     ]).toEqual([0, 0, 0, 0, 0])
     expect(result.messages).toEqual([])
     if (name === 'cue-callback-barrier') expect(result.cueEvidence).toHaveLength(6)
+    if (name === 'switch-pause-clock') expect(result.switchEvidence).toHaveLength(4)
     if (name === 'cancel-failure') {
       expect(result.cancelledResources).toMatchObject({ audio: 0, urls: 0, frames: 0, videos: 0 })
       expect(result.cancelledResources?.error).toContain('video-audio-close')

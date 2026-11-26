@@ -18,6 +18,7 @@ export type WebVideoLifetimeCase =
   | 'cancel-failure'
   | 'hidden-first-frames'
   | 'cue-callback-barrier'
+  | 'switch-pause-clock'
 const check = (value: unknown, message: string) => {
   if (!value) throw new Error(message)
 }
@@ -48,6 +49,7 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
     revokedUrls = 0,
     cancelledFrames = 0,
     failAudioClose = false,
+    failAudioConnect = false,
     failContainer = false,
     holdFrames = name === 'close-first-frame' || name === 'supersede-first-frame'
   const urls = new Set<string>(),
@@ -62,12 +64,16 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
       visibility: string; opacity: string; width: number; height: number }> = [],
     cueEvidence: unknown[] = [], cueEvents: VideoEvent[] = [],
     heldReceipts: Array<{ serial: number; event: VideoEvent & { type: 'frame' } }> = []
+  const switchEvidence: unknown[] = [],
+    playClocks: Array<{ element: HTMLMediaElement; position: number }> = []
   let holdReceipt = false
   const originalCreate = document.createElement,
     originalUrl = URL.createObjectURL,
     originalRevoke = URL.revokeObjectURL,
     originalRequest = HTMLVideoElement.prototype.requestVideoFrameCallback,
     originalCancel = HTMLVideoElement.prototype.cancelVideoFrameCallback,
+    originalPlay = HTMLMediaElement.prototype.play,
+    originalPause = HTMLMediaElement.prototype.pause,
     originalDisconnect = ResizeObserver.prototype.disconnect
   const node = document.createElement('div'),
     canvas = document.createElement('canvas')
@@ -110,9 +116,15 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
     held.delete(id)
     originalCancel.call(this, id)
   }
+  if (name === 'switch-pause-clock') HTMLMediaElement.prototype.play = function () {
+    if (this.dataset.videoId) playClocks.push({ element: this, position: this.currentTime })
+    return originalPlay.call(this)
+  }
   const output = {
     activate() {},
     connectMedia(element: HTMLMediaElement) {
+      if (failAudioConnect) { failAudioConnect = false; throw new Error('selected-audio-connect') }
+      if (name === 'switch-pause-clock') element.muted = true
       audio.add(element)
       connected++
       return {
@@ -195,6 +207,95 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
         (await rejected(open())).includes('video-insert-primary'),
         'Cleanup replaced insertion error',
       )
+    } else if (name === 'switch-pause-clock') {
+      const timeline = await readVideoTimeline(bytes)
+      check(timeline?.audioStreams === 2, 'Track switch fixture requires two real audio streams')
+      const settings = { ...defaultVideoSettings(), visible: true },
+        opened = await send({ op: 'open', id: 7, epoch: 1, name: 'numbered.mp4', bytes, timeline, settings })
+      check(opened.snapshot?.enabledAudioStream === 0, 'Initial track was not selected')
+      await send({ op: 'seek', id: 7, epoch: 1, position: 1000 })
+      await send({ op: 'play', id: 7, epoch: 1 })
+      const first = node.querySelector('video')!
+      await until(() => !first.paused && first.currentTime > 1.02)
+      // Delay the actual pause operation, never a clock or frame observation.
+      // The original decoder keeps progressing until this gate calls the real
+      // DOM method and its real pause event publishes the stopped position.
+      const gate: { requested?: number; release?: () => void } = {}
+      Object.defineProperty(first, 'pause', { configurable: true, value() {
+        delete (first as unknown as { pause?: unknown }).pause
+        gate.requested = first.currentTime
+        gate.release = () => originalPause.call(first)
+      } })
+      let frozen = -1, completed = false
+      first.addEventListener('pause', () => { frozen = first.currentTime }, { once: true })
+      const switching = send({ op: 'set', id: 7, epoch: 2,
+        settings: { ...settings, enabledAudioStream: 1 } })
+      void switching.then(() => { completed = true }, () => { completed = true })
+      await until(() => gate.release !== undefined)
+      await until(() => first.currentTime > gate.requested! + .12)
+      check(!completed && connected === 1 && !first.paused,
+        'Replacement started before the original graph actually paused')
+      gate.release!()
+      const selected = await switching, second = node.querySelector('video')!,
+        resumed = playClocks.find((entry) => entry.element === second)
+      check(second !== first && selected.snapshot?.enabledAudioStream === 1 && selected.snapshot.status === 'play',
+        'Selected track was not committed as playing')
+      check(frozen > gate.requested! + .12 && resumed?.position === frozen,
+        'The selected graph used the pre-pause clock instead of the actual stopped position')
+      await until(() => !second.paused && second.currentTime > frozen + .02)
+      switchEvidence.push({ phase: 'actual-pause-before-handoff', requested: gate.requested, frozen,
+        resumed: resumed?.position, selected: selected.snapshot, connected })
+
+      // A later explicit pause owns this same decoder. The cancelled handoff
+      // cannot restart it when its older pause completion is finally released.
+      const cancelled: { release?: () => void } = {}
+      Object.defineProperty(second, 'pause', { configurable: true, value() {
+        delete (second as unknown as { pause?: unknown }).pause
+        cancelled.release = () => originalPause.call(second)
+      } })
+      const older = rejected(send({ op: 'set', id: 7, epoch: 3, settings }))
+      await until(() => cancelled.release !== undefined)
+      const playsBefore = playClocks.length
+      await send({ op: 'pause', id: 7, epoch: 4 })
+      check((await older).includes('cancelled'), 'A newer pause did not cancel the old handoff')
+      cancelled.release!()
+      const stopped = await send({ op: 'inspect', id: 7, epoch: 4 })
+      check(stopped.snapshot?.status === 'pause' && second.paused && playClocks.length === playsBefore && connected === 2,
+        'A stale handoff resumed playback or allocated a replacement after the newer pause')
+      switchEvidence.push({ phase: 'newer-pause-wins', snapshot: stopped.snapshot, connected })
+
+      // Failure after the stopped clock was acquired restores the original
+      // selected track at that clock, without seeking it to the request time.
+      await send({ op: 'play', id: 7, epoch: 5 })
+      await until(() => !second.paused && second.currentTime > stopped.snapshot!.position / 1000 + .02)
+      let rollbackClock = -1
+      second.addEventListener('pause', () => { rollbackClock = second.currentTime }, { once: true })
+      const rollbackStart = playClocks.length
+      failAudioConnect = true
+      check((await rejected(send({ op: 'set', id: 7, epoch: 6, settings }))).includes('selected-audio-connect'),
+        'The controlled replacement failure was lost')
+      const rollback = playClocks.slice(rollbackStart)
+      check(rollback.length === 1 && rollback[0]!.element === second && rollback[0]!.position === rollbackClock,
+        'Rollback restarted the old graph from a different clock')
+      await until(() => !second.paused && second.currentTime > rollbackClock + .02)
+      const restored = await send({ op: 'inspect', id: 7, epoch: 6 })
+      check(restored.snapshot?.enabledAudioStream === 1 && restored.snapshot.status === 'play' && connected === 2,
+        'Rollback lost the original selected stream')
+      switchEvidence.push({ phase: 'rollback-from-stopped-clock', clock: rollbackClock, snapshot: restored.snapshot })
+      const movingClock = second.currentTime, movingPlays = playClocks.length
+      Object.defineProperty(second, 'pause', { configurable: true, value() {
+        delete (second as unknown as { pause?: unknown }).pause
+        throw new Error('selected-pause-not-completed')
+      } })
+      check((await rejected(send({ op: 'set', id: 7, epoch: 7, settings }))).includes('selected-pause-not-completed'),
+        'An unsuccessful pause was treated as a frozen clock')
+      const movingRollback = playClocks.slice(movingPlays)
+      check(movingRollback.length === 1 && movingRollback[0]!.element === second &&
+        movingRollback[0]!.position >= movingClock && !second.paused && connected === 2,
+      'Rollback rewound or replaced an old graph that never stopped')
+      await until(() => second.currentTime > movingRollback[0]!.position + .02)
+      switchEvidence.push({ phase: 'rollback-still-moving', before: movingClock,
+        resumed: movingRollback[0]!.position, after: second.currentTime })
     } else if (name === 'cue-callback-barrier') {
       const timeline = await readVideoTimeline(bytes)
       check(timeline?.times.length === 18, 'Cue probe requires the actual 18-frame MP4 timeline')
@@ -421,16 +522,19 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
       cancelledResources,
       firstFrames,
       cueEvidence,
+      switchEvidence,
     }
   } finally {
     failContainer = false
     failAudioClose = false
+    failAudioConnect = false
     await host?.close().catch(() => {})
     document.createElement = originalCreate
     URL.createObjectURL = originalUrl
     URL.revokeObjectURL = originalRevoke
     HTMLVideoElement.prototype.requestVideoFrameCallback = originalRequest
     HTMLVideoElement.prototype.cancelVideoFrameCallback = originalCancel
+    HTMLMediaElement.prototype.play = originalPlay
     ResizeObserver.prototype.disconnect = originalDisconnect
     channel.port1.close()
     channel.port2.close()

@@ -1,4 +1,7 @@
-/** The persisted cue field accepts an imported CUE sheet or a standalone data ISO. */
+export const isDiscSheet = (name: string): boolean => /\.(?:cue|ccd)$/i.test(name)
+export const isDiscMedium = (name: string): boolean => isDiscSheet(name) || /\.iso$/i.test(name)
+
+/** The persisted cue field accepts a CUE/CCD track list or a standalone ISO. */
 export interface CddaDisc { readonly drive: string; readonly cue: string; readonly volumeLabel?: string }
 export type DiscChange = ({ kind: 'insert' } & CddaDisc) | { kind: 'eject' | 'reset'; drive: string }
 export function copyCddaDiscs(value?: readonly CddaDisc[]): readonly CddaDisc[] | undefined {

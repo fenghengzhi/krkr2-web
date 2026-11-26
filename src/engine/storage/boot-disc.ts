@@ -1,5 +1,5 @@
 import type { DiscFilesystem } from '../../formats/disc/filesystem.ts'
-import { copyCddaDiscs, type CddaDisc } from '../ports/cdda.ts'
+import { copyCddaDiscs, isDiscMedium, isDiscSheet, type CddaDisc } from '../ports/cdda.ts'
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { CddaDiscs } from './cdda.ts'
 import { copyGameProject, type GameProject, type ProjectSelection } from './project.ts'
@@ -48,8 +48,8 @@ export async function selectBootDisc(resources: Resource[], selection: Location,
     ?? discAddress(selection.executable ?? '')
   const expectedDrive = at?.drive ?? entryDrive
   const launcher = selection.executable && parseStoragePath(selection.executable)
-  const named = frozen || (launcher && !discAddress(launcher) && /\.(?:iso|cue)$/i.test(launcher) ? launcher : undefined)
-  const originals = resources.filter((file) => !file.aliasOf && !file.name.includes('>') && /\.(?:iso|cue)$/i.test(file.name))
+  const named = frozen || (launcher && !discAddress(launcher) && isDiscMedium(launcher) ? launcher : undefined)
+  const originals = resources.filter((file) => !file.aliasOf && !file.name.includes('>') && isDiscMedium(file.name))
   if (!originals.length && !named && !at) return
   const storage = new StorageResolver('', false, reader, checkpoint)
   try {
@@ -89,7 +89,7 @@ export async function selectBootDisc(resources: Resource[], selection: Location,
         return undefined
       })
       if (!mounted) return
-      if (/\.cue$/i.test(file.name)) sheetImages.add(mounted.image)
+      if (isDiscSheet(file.name)) sheetImages.add(mounted.image)
       const relative = (value: string) => discAddress(value)?.path ?? value
       const exeDir = relative(selection.executableDirectory ?? '')
       const exe = launcher && launcher !== named ? toPublicStoragePath(relative(launcher)) : undefined
@@ -121,8 +121,8 @@ export async function selectBootDisc(resources: Resource[], selection: Location,
     // A sheet and its referenced ISO describe one disc. A different ISO
     // alongside that sheet may contain a second game requiring a choice.
     let found: Awaited<ReturnType<typeof open>>
-    for (const suffix of [/\.cue$/i, /\.iso$/i]) {
-      for (const item of choices.filter(({ file }) => suffix.test(file.name))) {
+    for (const matches of [isDiscSheet, (name: string) => /\.iso$/i.test(name)]) {
+      for (const item of choices.filter(({ file }) => matches(file.name))) {
         if (sheetImages.has(item.file.name)) continue
         const result = await open(item)
         if (!result) continue

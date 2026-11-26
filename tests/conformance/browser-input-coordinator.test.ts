@@ -142,9 +142,9 @@ test('only the primary mouse button synthesizes VCL Click and DblClick while all
   const env = dom(), canvas = env.canvas(), packets: InputPacket[] = [], errors: unknown[] = [],
     coordinator = new BrowserInputCoordinator(async (packet) => { packets.push(packet) }, async () => {},
       () => {}, (error) => errors.push(error), { gamepad: false })
-  const mouse = (type: 'mousedown' | 'mouseup', button: number, buttons: number, detail: number) => {
+  const mouse = (type: 'mousedown' | 'mouseup', button: number, buttons: number, detail: number, x = 80) => {
     const event = new Event(type, { cancelable: true })
-    Object.assign(event, { button, buttons, detail, clientX: 80, clientY: 40,
+    Object.assign(event, { button, buttons, detail, clientX: x, clientY: 40,
       shiftKey: false, ctrlKey: false, altKey: false })
     Object.defineProperty(event, 'target', { value: canvas })
     env.page.dispatchEvent(event)
@@ -166,7 +166,7 @@ test('only the primary mouse button synthesizes VCL Click and DblClick while all
         const clicks = domButton === 0 ? detail || 1 : 0
         assert.deepEqual(observed, [
           ['down', tvpButton, shift, 0, undefined],
-          ['up', tvpButton, 0, clicks, clicks === 1 ? { x: 80, y: 40 } : undefined],
+          ['up', tvpButton, 0, clicks, clicks ? { x: 80, y: 40 } : undefined],
         ])
       }
     }
@@ -179,6 +179,17 @@ test('only the primary mouse button synthesizes VCL Click and DblClick while all
     mouse('mouseup', 0, 0, 1)
     await settle()
     assert.deepEqual(packets.flatMap((packet) => packet.type === 'up' ? [packet.clicks] : []), [0, 1])
+    // Equal press points have a definite Form DblClick origin. Different
+    // press points retain the old unannotated path pending the VCL oracle.
+    for (const [x, point] of [[80, { x: 80, y: 40 }], [120, undefined]] as const) {
+      mouse('mousedown', 0, 1, 1, 80); mouse('mouseup', 0, 0, 1, 80)
+      await settle(); packets.length = 0
+      mouse('mousedown', 0, 1, 2, x); mouse('mouseup', 0, 0, 2, 240)
+      await settle()
+      const up = packets.find(packet => packet.type === 'up')!
+      assert.equal(up.clicks, 2); assert.equal(up.x, 240)
+      assert.deepEqual(up.clickPaintBoxPoint, point)
+    }
     assert.deepEqual(errors, [])
   } finally { coordinator.close(); env.restore() }
 })

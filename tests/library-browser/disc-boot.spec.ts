@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { test, expect } from '../helpers/library-browser.ts'
 import { discBootInput, discReleaseInput, localizedDiscRelease } from '../helpers/disc-boot.ts'
 import { udfGameDisc, udfMetadataGameDisc, udfSparableGameDisc } from '../helpers/udf-game-discs.ts'
+import { cloneCdDiscInput } from '../helpers/clone-cd-game.ts'
 import { kagGameControls } from '../helpers/kag-game-controls.ts'
 
 const editions = [
@@ -23,6 +24,8 @@ const editions = [
     names: ['boot-udf250-metadata-source.iso'], open: () => udfMetadataGameDisc(false) },
   { kind: 'udf-bridge', binary: false, label: 'UDF 2.50 bridge source', suffix: ' UDF bridge',
     names: ['boot-udf250-bridge-source.iso'], open: () => udfMetadataGameDisc(true) },
+  { kind: 'ccd', binary: false, label: 'CloneCD mixed-mode source', suffix: ' CCD',
+    names: ['boot-clonecd-source.ccd', 'boot-clonecd-source.img'], open: cloneCdDiscInput },
 ]
 
 for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
@@ -84,8 +87,8 @@ for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
       return { bytes, gameId: saved.gameId, slot: Buffer.from(slot.base64, 'base64') }
     }
     try {
-      if (binary || packaged || udf) await page.locator('#project-mode').selectOption('auto')
-      await expect(page.locator('#project-mode')).toHaveValue(binary || packaged || udf ? 'auto' : 'collection')
+      if (binary || packaged || udf || kind === 'ccd') await page.locator('#project-mode').selectOption('auto')
+      await expect(page.locator('#project-mode')).toHaveValue(binary || packaged || udf || kind === 'ccd' ? 'auto' : 'collection')
       await page.locator('#cdda-discs').fill(mapping)
       if (localized) {
         await page.locator('#zip-encoding').selectOption(binary ? 'windows-1251' : 'euc-kr')

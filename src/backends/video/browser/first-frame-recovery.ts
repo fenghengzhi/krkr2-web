@@ -1,10 +1,10 @@
 type StartupVideo = Pick<HTMLVideoElement, 'paused' | 'muted' | 'readyState' | 'play' | 'pause' |
   'getVideoPlaybackQuality'>
 
-/** A warmup can report paused=true before the platform has published its
- * stopped clock. Subscribe before closing recovery and wait for the actual
- * pause event, so a cached zero cannot bypass the required restoration seek. */
-export function pauseRecoveredVideo(video: EventTarget & { readonly paused: boolean },
+/** A pause can report paused=true before the platform has published its
+ * stopped clock. Subscribe before stopping it and wait for the actual pause
+ * event, so recovery and track handoff never reuse an earlier cached clock. */
+export function pauseVideoForClock(video: EventTarget & { readonly paused: boolean },
   signal: AbortSignal, options: { stop(): void; schedule(callback: () => void, delay: number): () => void }): Promise<void> {
   return new Promise((resolve, reject) => {
     const alreadyPaused = video.paused
@@ -20,16 +20,16 @@ export function pauseRecoveredVideo(video: EventTarget & { readonly paused: bool
       if (!stopped || settled) return
       if (signal.aborted) cancel()
       else if (alreadyPaused || observed) {
-        if (!video.paused) done(new Error('Video recovery pause did not stop playback'))
+        if (!video.paused) done(new Error('Video pause did not stop playback'))
         else done()
       }
     }, paused = () => { observed = true; complete() },
-      cancel = () => done(new Error('Video recovery pause cancelled'))
+      cancel = () => done(new Error('Video pause cancelled'))
     try {
       if (!alreadyPaused && !signal.aborted) {
         video.addEventListener('pause', paused)
         signal.addEventListener('abort', cancel, { once: true })
-        cancelTimeout = options.schedule(() => done(new Error('Video recovery pause timed out')), 15000)
+        cancelTimeout = options.schedule(() => done(new Error('Video pause timed out')), 15000)
         if (settled) cancelTimeout()
       }
       // Cleanup is still required for an already cancelled or paused warmup.

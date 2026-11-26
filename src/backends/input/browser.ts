@@ -165,6 +165,7 @@ export class BrowserInput {
   private primaryClickCount = 0
   private readonly wheel = new VerticalWheel()
   private lastMouseDownPoint?: { x: number; y: number }
+  private doubleClickPoint?: { x: number; y: number }
   private lastMouseMovePoint?: { x: number; y: number }
   private view?: WindowView
   private input?: InputView
@@ -389,6 +390,7 @@ export class BrowserInput {
       this.mouseTouch = undefined
       this.primaryClickCount = 0
       this.lastMouseDownPoint = undefined
+      this.doubleClickPoint = undefined
       this.lastMouseMovePoint = undefined
       this.touches.clear()
       this.pressed.clear()
@@ -409,6 +411,7 @@ export class BrowserInput {
       this.touches.clear()
       this.primaryClickCount = 0
       this.lastMouseDownPoint = undefined
+      this.doubleClickPoint = undefined
       this.lastMouseMovePoint = undefined
       this.pressed.clear()
       this.cancelComposition()
@@ -693,7 +696,7 @@ export class BrowserInput {
     })
     if (type === 'up') {
       this.mouseButtons = event.buttons
-      if (event.button === 0) this.primaryClickCount = 0
+      if (event.button === 0) { this.primaryClickCount = 0; this.doubleClickPoint = undefined }
     }
   }
   private leave(event: MouseEvent): void {
@@ -881,6 +884,7 @@ export class BrowserInput {
     this.mouseButtons = 0
     this.primaryClickCount = 0
     this.lastMouseDownPoint = undefined
+    this.doubleClickPoint = undefined
     this.lastMouseMovePoint = undefined
     this.touches.clear()
     this.releasePointerCaptures()
@@ -943,7 +947,19 @@ export class BrowserInput {
       this.lastMouseMovePoint = packet.type === 'move' ? { x: packet.x, y: packet.y } : undefined
       // WindowForm's Click later uses exactly the point posted for MouseDown,
       // not another projection sampled around focus/hook callbacks.
-      if (packet.type === 'down') this.lastMouseDownPoint = capturedPoint && { ...capturedPoint }
+      if (packet.type === 'down') {
+        // The stock Form's DblClick also uses LastMouseDownX/Y. With equal
+        // press samples that point is unambiguous regardless of the VCL
+        // DblClick/second-MouseDown ordering. Different press positions keep
+        // the existing Web path until the original UI order is observed.
+        this.doubleClickPoint = this.primaryClickCount === 2 && capturedPoint &&
+          capturedPoint.x === this.lastMouseDownPoint?.x && capturedPoint.y === this.lastMouseDownPoint?.y
+          ? { ...capturedPoint } : undefined
+        this.lastMouseDownPoint = capturedPoint && { ...capturedPoint }
+      }
+      const clickPoint = packet.type === 'up'
+        ? packet.clicks === 1 ? this.lastMouseDownPoint : packet.clicks === 2 ? this.doubleClickPoint : undefined
+        : undefined
       // VCL captures PaintBox-relative integers before the Window callback.
       // Preserve this origin snapshot while the packet waits behind earlier
       // input; raw coordinates still feed physical observation and takeover.
@@ -951,8 +967,7 @@ export class BrowserInput {
         ...packet,
         pointerSequence: sequence,
         ...(capturedPoint ? { paintBoxPoint: capturedPoint } : {}),
-        ...(packet.type === 'up' && packet.clicks === 1 && this.lastMouseDownPoint
-          ? { clickPaintBoxPoint: { ...this.lastMouseDownPoint } } : {}),
+        ...(clickPoint ? { clickPaintBoxPoint: { ...clickPoint } } : {}),
       }
     }
     if (packet.type === 'leave' || packet.type === 'cancel') {

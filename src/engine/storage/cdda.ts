@@ -1,12 +1,13 @@
 import { cueLimits, cueTrackParts, parseCue, type CueSheet } from '../../formats/audio/cue.ts'
-import { copyCddaDiscs, type CddaDisc, type CddaPcmPart, type CddaPcmTrack, type DiscChange } from '../ports/cdda.ts'
+import { copyCddaDiscs, isDiscMedium, isDiscSheet, type CddaDisc, type CddaPcmPart, type CddaPcmTrack, type DiscChange } from '../ports/cdda.ts'
+import { parseCloneCd } from '../../formats/disc/ccd.ts'
 import { discVolumeTrack, readDiscVolumeLabel, type DiscVolumeTrack } from '../../formats/disc/volume-label.ts'
 import { openDiscFilesystem, type DiscFilesystem } from '../../formats/disc/filesystem.ts'
 import { openResourceSource } from './resource-source.ts'
 import { ExecutionCancelled } from '../scheduler/control.ts'
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { TvpError } from '../system/tvp-error.ts'
-import { discAddress, storageFilePath, toPublicStoragePath } from './public-path.ts'
+import { discAddress, extractStorageName, storageFilePath, toPublicStoragePath } from './public-path.ts'
 import type { AudioResourceSources, AudioSourceLease } from './audio-sources.ts'
 import { StorageResolver } from './resolver.ts'
 
@@ -40,7 +41,7 @@ async function opticalFiles(files: Iterable<Resource>, checkpoint: () => Promise
   let scanned = 0
   for (const file of files) {
     if (++scanned % 4096 === 0) await checkpoint()
-    if (/\.cue$/i.test(file.name)) sheets.push(file.name)
+    if (isDiscSheet(file.name)) sheets.push(file.name)
     else if (/\.iso$/i.test(file.name) && images.length < 2) images.push(file.name)
     if (sheets.length === 2) break
   }
@@ -70,7 +71,7 @@ export class CddaDiscs {
   private readonly supplied?: readonly CddaDisc[]
   constructor(private readonly storage: CddaStorage, discs?: readonly CddaDisc[],
     private readonly distribution?: string, private readonly imports?: DiscImports) { this.supplied = copyCddaDiscs(discs) }
-  private readonly sheets = new WeakMap<object, CueSheet>()
+  private readonly sheets = new WeakMap<object, { sheet: CueSheet; image?: object; imageName?: string }>()
   private readonly labels = new WeakMap<object, { geometry: string; value: string }>()
   private readonly filesystems = new WeakMap<object, { geometry: string; fs: DiscFilesystem }>()
   private importedCues?: string[]
@@ -111,7 +112,7 @@ export class CddaDiscs {
     let cues = [...new Set(await this.storage.cues())]
     const imported = !cues.length && !!this.imports
     if (imported) cues = await this.discoverImports(this.imports!)
-    if (cues.length > 1 && requireUnique && !this.overrides.size) throw new Error('Multiple imported CUE sheets or ISO images require explicit cddaDiscs bindings')
+    if (cues.length > 1 && requireUnique && !this.overrides.size) throw new Error('Multiple imported CUE/CCD sheets or ISO images require explicit cddaDiscs bindings')
     return cues.length === 1 ? [{ drive: 'D', cue: toPublicStoragePath(cues[0]!), imported }] : []
   }
   private async bindings(requireUnique: boolean): Promise<readonly BoundDisc[]> {
@@ -123,13 +124,27 @@ export class CddaDiscs {
     }
     return [...available.values()].map((disc) => ({ ...disc, revision: this.revisions.get(disc.drive) ?? 0 }))
   }
-  private async readSheet(resource: Resource): Promise<CueSheet> {
+  private async readSheet(resource: Resource, binding: DiscFile, cached: boolean): Promise<CueSheet> {
+    const key = resource.cacheToken ?? resource, old = cached ? this.sheets.get(key) : undefined
+    const name = /\.ccd$/i.test(resource.name) ? extractStorageName(resource.name).slice(0, -4) + '.img' : undefined
+    const image = name ? await this.cueFile(binding, name) : undefined, imageKey = image?.cacheToken ?? image
+    if (old && old.image === imageKey && old.imageName === name) return old.sheet
     if (!Number.isSafeInteger(resource.size) || resource.size < 0 || resource.size > cueLimits.bytes)
-      throw new Error('CUE metadata exceeds the 1 MiB budget')
+      throw new Error(name ? 'CCD metadata exceeds the 1 MiB budget' : 'CUE metadata exceeds the 1 MiB budget')
     const bytes = await this.storage.read(resource)
     await this.storage.checkpoint()
-    if (bytes.length !== resource.size) throw new Error('Truncated CUE metadata')
-    return parseCue(await this.storage.decodeText(bytes))
+    if (bytes.length !== resource.size) throw new Error(name ? 'Truncated CCD metadata' : 'Truncated CUE metadata')
+    const text = await this.storage.decodeText(bytes)
+    let sheet: CueSheet
+    if (image && name) {
+      let opened: Awaited<ReturnType<typeof openResourceSource>> | undefined
+      sheet = await parseCloneCd(text, name, { size: image.size, read: async (offset, length) => {
+        opened ??= await openResourceSource(image, { checkpoint: () => this.storage.checkpoint() })
+        return opened.source.read(offset, length)
+      } })
+    } else sheet = parseCue(text)
+    if (cached) this.sheets.set(key, { sheet, image: imageKey, imageName: name })
+    return sheet
   }
   private async bindingFile(disc: BoundDisc): Promise<DiscFile> {
     if (disc.picked) {
@@ -185,9 +200,7 @@ export class CddaDiscs {
     if (/\.iso$/i.test(cue.name)) return {
       file: cue, track: { file: cue.name, first: 0, layout: { bytes: 2048, payload: 0 } },
     }
-    const key = cue.cacheToken ?? cue
-    const sheet = this.sheets.get(key) ?? await this.readSheet(cue)
-    this.sheets.set(key, sheet)
+    const sheet = await this.readSheet(cue, binding, true)
     if (checkReplacement) for (const file of sheet.files) {
       checkReplacement()
       await this.cueFile(binding, file.name)
@@ -235,7 +248,7 @@ export class CddaDiscs {
       throw new Error('请选择有效的光驱和换盘操作。')
     const drive = change.drive.toUpperCase(), token = {}
     const candidate: BoundDisc | undefined = change.kind === 'insert' ? copyCddaDiscs([change])![0] : undefined
-    if (candidate && !/\.(?:cue|iso)$/i.test(candidate.cue)) throw new Error('请选择 ISO 镜像或 CUE 文件。')
+    if (candidate && !isDiscMedium(candidate.cue)) throw new Error('请选择 ISO 镜像、CUE 或 CCD 文件。')
     this.pending.set(drive, token)
     const check = () => {
       if (this.pending.get(drive) !== token) throw new Error('这次换盘已由更新的操作取代。')
@@ -332,7 +345,7 @@ export class CddaDiscs {
     const resource = binding.resource
     if (!resource) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(binding.name)])
     if (/\.iso$/i.test(resource.name)) return finish({ drive: disc.drive, cue: resource.name, track: parsed })
-    const sheet = await this.readSheet(resource), parts = cueTrackParts(sheet, parsed), selected: SelectedPart[] = [],
+    const sheet = await this.readSheet(resource, binding, false), parts = cueTrackParts(sheet, parsed), selected: SelectedPart[] = [],
       files = new Map<number, Resource>()
     if (parts) for (const part of parts) {
       if (part.kind === 'silence') { selected.push(part); continue }

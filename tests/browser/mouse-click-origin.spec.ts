@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test'
-import { mouseClickOriginExpected, mouseClickOriginSource } from '../helpers/mouse-click-origin.ts'
+import { mouseClickOriginExpected, mouseDoubleOriginExpected, mouseClickOriginSource } from '../helpers/mouse-click-origin.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 import { pointerPixel } from '../helpers/pointer-pixel.ts'
 import { canvasPixels } from '../helpers/canvas-pixels.ts'
 
-interface ClickOriginEvent { type: string; x: number; y: number; button: number; trusted: boolean }
+interface ClickOriginEvent { type: string; x: number; y: number; button: number; detail: number; trusted: boolean }
 declare global { interface Window { clickOriginEvents: ClickOriginEvent[] } }
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
@@ -28,15 +28,25 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
             if (window.clickOriginEvents.length < 16) window.clickOriginEvents.push({ type,
               x: (event.clientX - rect.left) * 320 / rect.width,
               y: (event.clientY - rect.top) * 180 / rect.height,
-              button: event.button, trusted: event.isTrusted })
+              button: event.button, detail: event.detail, trusted: event.isTrusted })
           })
       })
-      for (const [index, downX, upX, selected] of [[0, 40, 240, 'left'], [1, 240, 40, 'right']] as const) {
+      let round = 0
+      for (const [index, downX, upX, selected, double] of [
+        [0, 40, 240, 'left', false], [1, 240, 40, 'right', false],
+        [0, 40, 240, 'left', true], [1, 240, 40, 'right', true],
+      ] as const) {
         const down = await pointerPixel(canvas, downX, 30)
-        await page.mouse.move(down.x, down.y); await page.mouse.down(); pressed = true
+        if (double) {
+          // Both press samples are identical. This isolates the fixed Form's
+          // saved point from the unproven order of VCL's second down event.
+          await page.mouse.click(down.x, down.y, { clickCount: 1 }); round++
+        }
+        const count = double ? 2 : 1, trace = (double ? mouseDoubleOriginExpected : mouseClickOriginExpected)[index]
+        await page.mouse.move(down.x, down.y); await page.mouse.down({ clickCount: count }); pressed = true
         const up = await pointerPixel(canvas, upX, 90)
-        await page.mouse.move(up.x, up.y); await page.mouse.up(); pressed = false
-        await expect(page.getByText(`drag-choice:${index + 1}:${selected}:${mouseClickOriginExpected[index]}`, { exact: true }))
+        await page.mouse.move(up.x, up.y); await page.mouse.up({ clickCount: count }); pressed = false
+        await expect(page.getByText(`drag-choice:${++round}:${selected}:${trace}`, { exact: true }))
           .toBeVisible({ timeout: 20000 })
         await expect.poll(async () => {
           const image = captured = await canvasPixels(canvas)
@@ -50,16 +60,21 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           }
           return null
         }).toBeNull()
-        observations.push({ selected, down: [downX, 30], up: [upX, 90], trace: mouseClickOriginExpected[index],
+        observations.push({ selected, double, down: [downX, 30], up: [upX, 90], trace,
           width: captured!.width, height: captured!.height, bounds: captured!.bounds, devicePixelRatio: captured!.devicePixelRatio })
-        await info.attach(`drag-selected-${selected}`, { body: await canvas.screenshot({ scale: 'css', timeout: 5000 }), contentType: 'image/png' })
-        await info.attach(`drag-selected-${selected}-rgba`, { body: Buffer.from(captured!.rgba), contentType: 'application/octet-stream' })
+        const label = `drag-selected-${double ? 'double-' : ''}${selected}`
+        await info.attach(label, { body: await canvas.screenshot({ scale: 'css', timeout: 5000 }), contentType: 'image/png' })
+        await info.attach(label + '-rgba', { body: Buffer.from(captured!.rgba), contentType: 'application/octet-stream' })
       }
       const events = await page.evaluate(() => window.clickOriginEvents)
-      expect(events.map((event) => [event.type, Math.trunc(event.x), Math.trunc(event.y), event.button, event.trusted]))
+      expect(events.map((event) => [event.type, Math.trunc(event.x), Math.trunc(event.y), event.button, event.detail, event.trusted]))
         .toEqual([
-          ['mousedown', 40, 30, 0, true], ['mouseup', 240, 90, 0, true],
-          ['mousedown', 240, 30, 0, true], ['mouseup', 40, 90, 0, true],
+          ['mousedown', 40, 30, 0, 1, true], ['mouseup', 240, 90, 0, 1, true],
+          ['mousedown', 240, 30, 0, 1, true], ['mouseup', 40, 90, 0, 1, true],
+          ['mousedown', 40, 30, 0, 1, true], ['mouseup', 40, 30, 0, 1, true],
+          ['mousedown', 40, 30, 0, 2, true], ['mouseup', 240, 90, 0, 2, true],
+          ['mousedown', 240, 30, 0, 1, true], ['mouseup', 240, 30, 0, 1, true],
+          ['mousedown', 240, 30, 0, 2, true], ['mouseup', 40, 90, 0, 2, true],
         ])
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
@@ -72,7 +87,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         observations, events: await page.evaluate(() => window.clickOriginEvents),
         source: mouseClickOriginSource, logs: await page.locator('#logs').innerText(),
         lastCanvas: captured && { width: captured.width, height: captured.height, bounds: captured.bounds, devicePixelRatio: captured.devicePixelRatio },
-        scope: 'Trusted left-button down/move/up inside the same game canvas. Original Form Click uses the down point while MouseUp uses release; both actions and every backing-canvas pixel are checked. Unmodified screen PNGs retain fractional CSS placement separately. Double-click timing and outside-client click cancellation are unchanged.' }, null, 2) })
+        scope: 'Trusted left-button down/move/up, with explicit browser click counts, inside the same game canvas. Click and equal-press DoubleClick use the saved point while MouseUp keeps release; both actions and every backing pixel stay strict. Screen PNGs retain fractional CSS placement. VCL double-event timing and different-press positions remain unverified and retain the previous Web behavior.' }, null, 2) })
     } catch (error) { failures.push(error) }
     try { if (pressed) await page.mouse.up() } catch (error) { failures.push(error) }
     try { await game.stop() } catch (error) { failures.push(error) }

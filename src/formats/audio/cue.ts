@@ -5,7 +5,7 @@ export interface CueTrack {
   number: number; file: number; mode: string; indices: Map<number, number>
   pregap: number; postgap: number; flags: string[]
 }
-export interface CueSheet { files: CueFile[]; tracks: CueTrack[] }
+export interface CueSheet { files: CueFile[]; tracks: CueTrack[]; leadOut?: number }
 export type CuePart = ({ kind: 'file'; file: number; startFrame: number; endFrame?: number } |
   { kind: 'silence'; frames: number }) & { preEmphasis?: true }
 export const cueLimits = { bytes: 1024 * 1024, lines: 32768, files: 99, tracks: 99 } as const
@@ -95,7 +95,7 @@ export function cueTrackParts(sheet: CueSheet, number: number): CuePart[] | unde
   }
   const next = sheet.tracks[at + 1], parts: CuePart[] = [], currentFlags = flags(track),
     nextStart = next?.indices.get(1), nextPregap = next?.indices.get(0) ?? nextStart
-  const endFrame = next?.file === track.file ? nextPregap : undefined
+  const endFrame = next?.file === track.file ? nextPregap : !next ? sheet.leadOut : undefined
   parts.push({ kind: 'file', file: track.file, startFrame: track.indices.get(1)!, ...(endFrame === undefined ? {} : { endFrame }), ...currentFlags })
   if (track.postgap) parts.push({ kind: 'silence', frames: track.postgap, ...currentFlags })
   if (next) {

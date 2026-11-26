@@ -35,7 +35,7 @@ import { DropStorage } from './storage/drop.ts'
 import { copyGameProject, registryResourceFile, type GameProject } from './storage/project.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../formats/zip/names.ts'
 import { CddaDiscs } from './storage/cdda.ts'
-import { copyCddaDiscs, type CddaDisc, type DiscChange } from './ports/cdda.ts'
+import { copyCddaDiscs, isDiscMedium, isDiscSheet, type CddaDisc, type DiscChange } from './ports/cdda.ts'
 import {
   chopStorageExt,
   discAddress,
@@ -2904,7 +2904,7 @@ export class EngineSession {
     }
     if (packet.clickPaintBoxPoint !== undefined) {
       const point = packet.clickPaintBoxPoint
-      if (packet.type !== 'up' || packet.clicks !== 1 || !point || typeof point !== 'object' ||
+      if (packet.type !== 'up' || packet.clicks !== 1 && packet.clicks !== 2 || !point || typeof point !== 'object' ||
           ![point.x, point.y].every((value) =>
             Number.isInteger(value) && value >= -2147483648 && value <= 2147483647))
         throw new Error('Invalid PaintBox click coordinates')
@@ -4353,8 +4353,8 @@ export class EngineSession {
     let count = 0
     for (const resource of [...this.storage.knownResources(), ...overlays]) {
       const name = resource.name
-      if (!resource.aliasOf && /\.(?:cue|iso)$/i.test(name) && !discAddress(name) && !name.startsWith('.krkr-drop-') && roots.some((root) => name.startsWith(root))) {
-        if (/\.cue$/i.test(name)) sheets.add(name)
+      if (!resource.aliasOf && isDiscMedium(name) && !discAddress(name) && !name.startsWith('.krkr-drop-') && roots.some((root) => name.startsWith(root))) {
+        if (isDiscSheet(name)) sheets.add(name)
         else if (images.size < 2) images.add(name)
       }
       if (sheets.size > 1) return [...sheets]

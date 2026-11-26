@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { headless } from '../helpers/headless.ts'
-import { mouseClickOriginExpected, mouseClickOriginSource } from '../helpers/mouse-click-origin.ts'
+import { mouseClickOriginExpected, mouseDoubleOriginExpected, mouseClickOriginSource } from '../helpers/mouse-click-origin.ts'
 import type { InputPacket } from '../../src/engine/ports/input.ts'
 
 for (const binary of [false, true])
@@ -19,6 +19,13 @@ for (const binary of [false, true])
         await f.session.input({ type: 'up', windowId, x: upX, y: 90, button: 0, clicks: 1, shift: 0,
           clickPaintBoxPoint: { x: downX, y: 30 } })
         assert.equal(await f.session.evaluate('clickTrace.join("|")'), mouseClickOriginExpected[index])
+        assert.equal(await f.session.evaluate('clickChoice'), selected)
+        assert.equal(await f.session.evaluate('clickRoot.cursorX+","+clickRoot.cursorY'), `${upX},90`)
+        await f.session.input({ type: 'down', windowId, x: downX, y: 30, button: 0, clicks: 0, shift: 8 })
+        await f.session.input({ type: 'move', windowId, x: upX, y: 90, button: 0, clicks: 0, shift: 8 })
+        await f.session.input({ type: 'up', windowId, x: upX, y: 90, button: 0, clicks: 2, shift: 0,
+          clickPaintBoxPoint: { x: downX, y: 30 } })
+        assert.equal(await f.session.evaluate('clickTrace.join("|")'), mouseDoubleOriginExpected[index])
         assert.equal(await f.session.evaluate('clickChoice'), selected)
         assert.equal(await f.session.evaluate('clickRoot.cursorX+","+clickRoot.cursorY'), `${upX},90`)
       }
@@ -39,7 +46,7 @@ for (const binary of [false, true])
         assert.throws(() => f.session.acceptInput({ type: 'up', windowId, x: 0, y: 0, button: 0,
           shift: 0, clicks: 1, clickPaintBoxPoint: { x: invalid, y: 0 } }), /Invalid PaintBox click coordinates/)
       for (const packet of [
-        { type: 'down', clicks: 1 }, { type: 'up', clicks: 2 },
+        { type: 'down', clicks: 1 }, { type: 'up', clicks: 3 },
       ]) assert.throws(() => f.session.acceptInput({ ...packet, windowId, x: 0, y: 0, button: 0,
         shift: 0, clickPaintBoxPoint: { x: 0, y: 0 } } as InputPacket), /Invalid PaintBox click coordinates/)
       assert.equal(await f.session.evaluate('clickTrace.join("|")'), before)
@@ -49,6 +56,10 @@ for (const binary of [false, true])
       await f.session.input({ type: 'up', windowId, x: 80, y: 90, button: 0, clicks: 1, shift: 0 })
       assert.equal(await f.session.evaluate('clickTrace.join("|")'),
         'window-down:40,30|left-down:40,30|window-click:80,90|left-click:80,90|window-up:80,90|left-up:80,90')
+      await f.session.input({ type: 'down', windowId, x: 240, y: 30, button: 0, clicks: 0, shift: 8 })
+      await f.session.input({ type: 'up', windowId, x: 40, y: 90, button: 0, clicks: 2, shift: 0 })
+      assert.equal(await f.session.evaluate('clickTrace.join("|")'),
+        'window-down:240,30|right-down:80,30|window-double:40,90|left-double:40,90|window-up:40,90|right-up:-120,90')
     } catch (error) { failures.push(error) }
     try {
       await f.session.stop()

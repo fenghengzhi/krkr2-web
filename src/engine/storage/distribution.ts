@@ -1,5 +1,5 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
-import type { CddaDisc } from '../ports/cdda.ts'
+import { isDiscMedium, type CddaDisc } from '../ports/cdda.ts'
 import { selectBootDisc } from './boot-disc.ts'
 import { distributionDiscBindings } from './cdda.ts'
 import { copyGameProject, copyProjectSelection, findProjectExecutable, packagedDiscPath, selectProjectLazy, type GameProject, type ProjectSelection } from './project.ts'
@@ -100,8 +100,9 @@ async function locateGame(entries: readonly Resource[], selection: ProjectLocati
 /** Collection mode can try optical boot when no loose game script or
  * container was supplied. An existing loose game's selection is unchanged. */
 export function discOnlyInput(names: readonly string[]): boolean {
-  return names.some((name) => /\.(?:iso|cue)$/i.test(name)) &&
-    names.every((name) => /\.(?:iso|cue|bin|img|wav|mp3|aiff?|txt|md|reg)$/i.test(name))
+  const cloneCd = names.some((name) => /\.ccd$/i.test(name))
+  return names.some(isDiscMedium) &&
+    names.every((name) => /\.(?:iso|cue|ccd|bin|img|wav|mp3|aiff?|txt|md|reg)$/i.test(name) || (cloneCd && /\.sub$/i.test(name)))
 }
 export async function prepareProject(resources: Resource[], requested: ProjectSelection, reader: ArchiveReader,
   checkpoint: () => Promise<void>, entry = 'startup.tjs', discs?: readonly CddaDisc[],
@@ -152,7 +153,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
   const entryDisc = discAddress(nativeDiscPath(entry) ?? entry)
   const wantsDisc = (choice: ProjectLocation) => Boolean(
     choice.mode === 'root' && (choice.bootDisc || discAddress(choice.directory)) ||
-    choice.executable && (/\.(?:iso|cue)$/i.test(choice.executable) || discAddress(choice.executable)) ||
+    choice.executable && (isDiscMedium(choice.executable) || discAddress(choice.executable)) ||
     discAddress(choice.executableDirectory ?? ''))
   const boot = (sources: Resource[], location: ProjectLocation, distribution?: string, optionalMedia = false) =>
     selectBootDisc(sources, location, distributionDiscBindings(discs, distribution), reader, checkpoint, readCue, async (files, choice) => {
@@ -205,7 +206,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
       return
     }
     const explicitDisc = frozen ? choice.mode === 'root' && !!choice.bootDisc : wantsDisc(choice) || !!entryDisc
-    const containsDisc = members.some((file) => /\.(?:iso|cue)$/i.test(file.name))
+    const containsDisc = members.some((file) => isDiscMedium(file.name))
     // A loose installed game wins over its bundled data disc. A lone setup
     // utility is only a fallback after looking for a game on the media.
     let inner = explicitDisc ? undefined : await locateGame(members, choice, checkpoint, candidateProbe, 'zip',
@@ -225,7 +226,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     // Disc and explicitly selected registry sources beside the release stay
     // isolated. They must not become installed scripts or AutoPath assets.
     const discImports = resources.filter((file) => file !== archive && !file.aliasOf && !file.name.includes('>'))
-    const hasDiscImports = discImports.length > 0 && (setting.registryFile !== undefined || discImports.some((file) => /\.(?:cue|iso|zip)$/i.test(file.name)) ||
+    const hasDiscImports = discImports.length > 0 && (setting.registryFile !== undefined || discImports.some((file) => isDiscMedium(file.name) || /\.zip$/i.test(file.name)) ||
       discs?.some((disc) => disc.cue.includes('>')))
     return { resources: members, project: copyGameProject({ ...project, distribution: archive.name })!,
       ...(hasDiscImports && { discImports }),

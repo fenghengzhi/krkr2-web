@@ -52,7 +52,7 @@ export function createCddaSettings(labelText: string, id?: string) {
   input.spellcheck = false
   input.placeholder = 'D=music.cue\nE=story.iso'
   hint.className = 'muted'
-  hint.textContent = '每行填写盘符和光盘路径，例如 D=music.cue 或 E=story.iso。路径可以相对游戏工作目录。光盘与游戏 ZIP 分开发行时，请一起导入，可填写 E=Extras/story.iso 或 G=Voices.zip>Media/story.cue。可另写一行 D.label=GAME_DISC 指定卷标。留空优先识别唯一的 CUE，没有 CUE 时识别唯一的 ISO。填“无”则不绑定光盘。此处的映射在下次启动时生效。'
+  hint.textContent = '每行填写盘符和光盘路径，例如 D=music.cue 或 E=story.iso。路径可以相对游戏工作目录。光盘与游戏 ZIP 分开发行时，请一起导入，可填写 E=Extras/story.iso 或 G=Voices.zip>Media/story.cue。可另写一行 D.label=GAME_DISC 指定卷标。留空时优先识别唯一的 CUE 或 CCD，其次识别唯一的 ISO。CCD 需要同名 IMG。填“无”则不绑定光盘。此处的映射在下次启动时生效。'
   element.append(label)
   if (id) element.append(input)
   element.append(hint)

@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 183 批处理 CloneCD 游戏盘启动与配乐、播放中更换影片轨道和游戏图层双击。第 172 批最终失败，第 173 批的构建、类型检查和三种浏览器的离线用例已通过。[183 实现与托管证据](decisions/183-clonecd-disc-playback-and-input.md)
+
 第 182 批处理设备书签读档与另存、模态阅读区初始焦点和多声道 Vorbis 配乐。新取得的第 172 批 Firefox 游戏库报告为 109/110 通过，尚有一个大影片换轨用例超时。[182 实现与托管证据](decisions/182-device-bookmarks-modal-focus-and-vorbis.md)
 
 第 182 批实现提交 `76a8f35` 登记时为 `pending`，下一批取回结果。[第 182 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45883191112)
