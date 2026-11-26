@@ -4,6 +4,8 @@
 
 第 176 批继续处理从设备导入游戏、从可擦写光盘启动、读取分段过场及游戏内释放音频。第 170 批已以失败结束，第 171 批已取得生产构建、类型检查和 Chromium 离线验收的通过记录。[176 实现与托管证据](decisions/176-rewritable-discs-and-game-imports.md)
 
+第 176 批实现提交 `94758df` 登记时为 `pending`，下一批取回结果。[第 176 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45867808463)
+
 第 175 批接入 Microsoft Video 1 和 DivX 3 过场与相应 ADPCM 声音，修订触屏选择和游戏库重试。此次取回的第 170 批六份报告中，1580 项通过、295 项失败、1 项跳过，三个取消作业另有 1002 项未报告。[175 实现与托管证据](decisions/175-avi-touch-and-library.md)
 
 第 175 批实现提交 `aed119f` 登记时为 `pending`，下一批取回结果。[第 175 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45865578673)
