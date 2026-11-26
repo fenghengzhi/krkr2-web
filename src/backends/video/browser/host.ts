@@ -18,6 +18,7 @@ import type { VideoMessage, VideoRequest } from '../../../protocol/video.ts'
 import type { WebAudioHost } from '../../audio/web/host.ts'
 import type { CursorRasterLayer, CursorScene } from '../../input/cursor.ts'
 import { selectVideoTimeline } from '../../../formats/video/mp4.ts'
+import { legacyVideoFormat } from '../legacy/format.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
 import { VideoSampleHistory, waitForClockPresentation, type ClockPresentationTarget } from './clock-seek.ts'
 import { VideoPeriod } from '../../../engine/media/video-period.ts'
@@ -1079,8 +1080,9 @@ export class WebVideoHost {
     if (new Set([...this.movies.keys(), ...this.stages.keys()]).size >= 16)
       throw new Error('Video resource budget exceeded')
     const extension = command.name.split('?')[0]!.split('.').pop()?.toLowerCase(),
-      mime =
-        extension === 'webm'
+      blob = command.bytes instanceof Uint8Array ? undefined : command.bytes.blob,
+      mime = legacyVideoFormat(command.name) && blob instanceof Blob && (blob.type === 'video/mp4' || blob.type === 'video/webm')
+        ? blob.type : extension === 'webm'
           ? 'video/webm'
           : extension === 'mp4' || extension === 'm4v' || extension === 'mov'
             ? 'video/mp4'

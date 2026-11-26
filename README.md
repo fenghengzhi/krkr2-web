@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 152 批接入部分旧 MPEG／AVI 过场影片的浏览器内转换，并修正 ZIP 发行包按自定义入口启动及从游戏库重开的路径。这些新增行为尚待 GitHub-hosted 验证；已取回的 143–145 批原版对照不代表本批应用已通过。[152 功能、限制与验收](docs/decisions/152-legacy-movies-and-zip-entry.md)
+
 [完整回归 35001345784](https://github.com/fenghengzhi/krkr2-web/actions/runs/35001345784)在精确提交 `34367abda6a4519d54fa1ff8daae3b7776b20cb8` 通过 **1,756 项 Node、1,146 项浏览器和 6 组直接运行时**，14 个作业全部成功，零失败、取消、跳过或重试。浏览器包含 1,023 项常规、57 项游戏库、59 项 PWA 和 7 项可信生命周期。 [兼容检查 34997605307](https://github.com/fenghengzhi/krkr2-web/actions/runs/34997605307)在 `6678d6e` 使用构建 `34997020864` 通过 **78 项原 KAG／旧 ABI 检查**。从该提交到 `34367ab` 只修改测试与文档，应用及内核源码相同；这是同源码的另一构建证据，不冒充最终回归的同次构建。
 
 ## 运行
@@ -75,6 +77,8 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 打开含 XP3、补丁和散装资源的 ZIP 发行包时，先在“游戏位置”选择“自动识别游戏目录或 ZIP 发行包”，再选择单个 ZIP 或填写远程链接。游戏库会记住包内的游戏目录。[ZIP 发行包的使用范围与验收](docs/decisions/134-zip-distributions-midi-and-game-playback.md)
 
+游戏使用 `boot.tjs` 等自定义入口时，在导入前填写“入口脚本”。ZIP 自动识别会使用该入口定位游戏，避免选中发行包附带工具的 `startup.tjs`。也可以显式填写 `release.zip>目录/boot.tjs`，继续按原归档地址读取。已经存入游戏库的目录和入口优先于下次导入时的界面设置。[自定义 ZIP 入口](docs/decisions/152-legacy-movies-and-zip-entry.md)
+
 选择本地文件夹或远程游戏清单时，即使游戏装在 `合集/Novel/` 这样的子目录，也可以将“程序所在目录”留空。若同一批文件包含两款并列的游戏，填写其中一款的程序目录，或输入能唯一识别它的程序名。自动识别与手动选择同一目录可继续使用原来的存档。[发行目录与存档](docs/decisions/149-wrapped-directories-paint-and-midi.md)
 
 旧日文 ZIP 若显示乱码或找不到章节，在导入前将“未标记的 ZIP 文件名编码”选为“日文（Shift_JIS）”。中文发行包也可选择 GBK 或 Big5。游戏库会记住这次选择。另行导入原版存档 ZIP 时，如果来源不同，可在“存档 ZIP 文件名编码”单独选择。[旧 ZIP 文件名与存档](docs/decisions/145-zip-file-names-video-prepare-and-text.md)
@@ -106,7 +110,7 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 构建脚本在本机还会尝试探测 `../toolchains/krkr2/` 下的工具链。其他机器应显式配置上述环境变量。TJS2、fmt、Oniguruma 与必要的 Boost 头文件已随项目固定保存；构建不依赖相邻的 kirikiroid2-web 仓库，也不要求安装 vcpkg。
 
-完整构建为 TJS、FreeType、PNG/zlib 和 JPEG 分别生成带哈希的资源和清单，位于 `.generated/wasm/`、`.generated/fonts/`、`.generated/image-zlib/` 和 `.generated/image-jpeg/`。首次构建从固定来源获取依赖，许可证随应用发布。托管工作流让图像差分和播放器使用同一组编译产物。[构建与验证](docs/testing.md)
+完整构建为 TJS、FreeType、PNG/zlib、JPEG 和旧影片转换器分别生成带哈希的资源和清单，位于 `.generated/wasm/`、`.generated/fonts/`、`.generated/image-zlib/`、`.generated/image-jpeg/` 和 `.generated/legacy-media/`。首次构建从固定来源获取依赖，许可证随应用发布。托管工作流让专项验收和播放器使用同一组编译产物。[构建与验证](docs/testing.md)
 
 ```sh
 npm run build:wasm -- asyncify  # 仅构建一种变体
@@ -142,6 +146,8 @@ docs/             架构、已验证决策与兼容范围
 [音频时钟与解码边界](docs/decisions/004-audio-clock.md)说明 TypeScript 混音、声音回调、按需 Vorbis WASM 及浏览器解码差异。
 
 影片可以使用 MP4 帧索引、双图层输出、遮盖模式和媒体声音。第 142 批接入大体积本地影片的文件切片和多轨播放，游戏库文件在播放前会校验相应数据块。新增路径等待托管验证。[视频呈现与生命周期](docs/decisions/005-video-presentation.md) · [大过场影片的来源和大小限制](docs/decisions/142-large-game-movies.md)
+
+第 152 批为 `.mpg/.mpeg`、`.mpv/.m1v` 和部分 `.avi` 增加兼容转换：支持 MPEG-1、MJPEG、Cinepak 画面及所列 MP2／PCM 音轨，在打开时转换为浏览器可播放的 H.264/AAC MP4。转换完成前需要等待，输入和输出各限 128 MiB，单次最多五分钟，可以停止。转换采用有损编码；MPEG-2、WMV 和其他 AVI 编码尚未接入。普通 MP4/WebM 沿用现有路径；新增转换与离线验收尚待托管运行。[旧影片范围](docs/decisions/152-legacy-movies-and-zip-entry.md)
 
 [输入与焦点](docs/decisions/006-input-routing.md)说明浏览器事件、TJS 回调、图层命中/捕获、模态状态与文字输入之间的边界。
 

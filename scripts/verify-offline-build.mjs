@@ -134,6 +134,21 @@ export async function verifyOfflineBuild(directory, base = '/') {
   }
   for (const name of ['LICENSE.txt', 'CREDITS.txt'])
     assert(listed.includes('licenses/image-jpeg/' + name))
+  const legacyBytes = await read('legacy-media/manifest.json'),
+    legacyPath = `legacy-media/manifest-${hash(legacyBytes).slice(0, 16)}.json`,
+    legacy = JSON.parse(legacyBytes)
+  assert.deepEqual(await read(legacyPath), legacyBytes)
+  assert.equal(legacy.abi, 1)
+  assert.equal(legacy.library, 'FFmpeg')
+  for (const kind of ['mjs', 'wasm']) {
+    const asset = legacy.assets[kind], data = await read('legacy-media/' + asset.file)
+    assert.equal(data.length, asset.bytes)
+    assert.equal(hash(data), asset.sha256)
+    assert.equal(asset.file, `legacy-media-${asset.sha256.slice(0, 16)}.${kind}`)
+  }
+  for (const name of ['FFmpeg-LICENSE.txt', 'OpenH264-LICENSE.txt', 'CREDITS.txt'])
+    assert(listed.includes('licenses/legacy-media/' + name))
+  assert(listed.some((path) => /transcode\.worker.*\.js$/.test(path)))
   assert(listed.some((path) => /session\.worker.*\.js$/.test(path)))
   assert(listed.some((path) => /library\.worker.*\.js$/.test(path)))
   assert(listed.some((path) => /mixer\.worklet.*\.js$/.test(path)))
@@ -147,6 +162,7 @@ export async function verifyOfflineBuild(directory, base = '/') {
     fontManifest: fontPath,
     imageZlibManifest: imageZlibPath,
     imageJpegManifest: imageJpegPath,
+    legacyMediaManifest: legacyPath,
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)

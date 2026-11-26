@@ -46,10 +46,12 @@ type ProjectLocation = Exclude<ProjectSelection, { mode: 'collection' }>
 async function locateGame(entries: readonly Resource[], selection: ProjectLocation,
   checkpoint: () => Promise<void>, probe: (file: Resource) => Promise<boolean>, source: 'zip' | 'files', entryName = ''): Promise<ProjectLocation | undefined> {
   if (selection.mode === 'root' || selection.executableDirectory) return selection
-  // Loose imports already support custom entry scripts inside data/ and
-  // content-data/. Keep these established roots even if a sample is bundled.
-  if (source === 'files' && !selection.executable && entries.some((file) =>
-    /^(?:data\/|content-data\/|startup\.tjs$|data\.(?:xp3|exe)$)/i.test(file.name) || file.name.toLowerCase() === entryName)) return selection
+  // An entry addressed from the import root has the same meaning in a ZIP.
+  // Loose imports also keep their established data/content-data roots even
+  // if a sample is bundled alongside them.
+  if (!selection.executable && entries.some((file) =>
+    file.name.toLowerCase() === entryName || source === 'files' &&
+    /^(?:data\/|content-data\/|startup\.tjs$|data\.(?:xp3|exe)$)/i.test(file.name))) return selection
   const executables = entries.filter((file) => /\.exe$/i.test(file.name))
   let selectedExe = selection.executable && parseStoragePath(selection.executable)
   if (selectedExe && !selectedExe.includes('/')) {
@@ -71,6 +73,17 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
   checkpoint: () => Promise<void>, entry = 'startup.tjs'): Promise<{ resources: Resource[]; project?: GameProject }> {
   const selection = copyProjectSelection(requested)
   if (selection.mode === 'collection') return { resources }
+  // Use the same optional entry hint for ZIP members and loose imports. The
+  // original address is still resolved from the selected project by start().
+  let entryName = '', entryInArchive = false
+  try {
+    const path = parseStoragePath(entry)
+    entryName = path.split('>', 1)[0]!.toLowerCase()
+    entryInArchive = path.includes('>')
+  }
+  catch {
+    // Parent-relative entries can be valid only after project selection.
+  }
   // The ZIP wrapper and the selected program directory can inspect the same
   // immutable member. Keep successful lookups only for this one launch.
   const marks = new Map<Resource, boolean>()
@@ -95,15 +108,18 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     return copyGameProject({ ...project, executable: chosen ? toPublicStoragePath(chosen) : choice.executable })!
   }
   const savedZip = selection.mode === 'root' ? selection.distribution : undefined
+  // An explicit outer.zip>entry keeps that archive address resolvable. A
+  // frozen library distribution is authoritative even if its entry changes.
   const archive = savedZip !== undefined ? resources.find((file) => file.name === savedZip)
-    : selection.mode === 'auto' && resources.length === 1 && /\.zip$/i.test(resources[0]!.name) ? resources[0] : undefined
+    : selection.mode === 'auto' && resources.length === 1 && /\.zip$/i.test(resources[0]!.name) &&
+      !(entryInArchive && entryName === resources[0]!.name.toLowerCase()) ? resources[0] : undefined
   if (savedZip !== undefined && !archive) throw new Error('Saved game distribution ZIP is missing: ' + savedZip)
   if (archive) {
     const index = await reader.open(archive, checkpoint)
     await checkpoint()
     if (savedZip !== undefined && index?.kind !== 'zip') throw new Error('Saved game distribution is not a ZIP')
     if (index?.kind === 'zip') {
-      const inner = await locateGame(index.entries, selection, checkpoint, probe, 'zip')
+      const inner = await locateGame(index.entries, selection, checkpoint, probe, 'zip', entryName)
       if (inner) {
         const members = [...index.entries], names = new Set<string>()
         for (const entry of members) {
@@ -120,12 +136,6 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
   const originals = resources.filter((file) => !file.aliasOf && !file.name.includes('>'))
   // The player's explicit entry can be a loose script or an archive address.
   // Its physical file at the import root must take precedence over bundled demos.
-  let entryName = ''
-  try { entryName = parseStoragePath(entry).split('>', 1)[0]!.toLowerCase() }
-  catch {
-    // A parent-relative entry may be valid from the eventual game directory.
-    // Session.start resolves the original address once that directory is known.
-  }
   const location = await locateGame(originals, selection, checkpoint, probe, 'files', entryName)
   return { resources, project: await select(resources, location ?? selection) }
 }

@@ -15,6 +15,23 @@ import { prepareVideoBlob } from '../files/video-source.ts'
 import type { VideoMessage, VideoRequest } from '../../protocol/video.ts'
 import { readVideoTimeline, readVideoTimelineBlob } from '../../formats/video/mp4.ts'
 import { mp4MetadataByteLimit } from '../../formats/video/mp4-source.ts'
+import { legacyVideoFormat, nativeMovieMime, type LegacyVideoFormat } from './legacy/format.ts'
+import { transcodeLegacyMovie } from './legacy/transcode.ts'
+
+type LegacyConverter = (input: Blob | Uint8Array, format: LegacyVideoFormat, signal: AbortSignal) => Promise<Blob>
+type MoviePayload = { blob: Blob; buffered: boolean }
+
+function waitForVideo<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  let off = () => {}
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    if (signal.aborted) abort()
+    else signal.addEventListener('abort', abort, { once: true })
+    off = () => signal.removeEventListener('abort', abort)
+  })
+  return Promise.race([work, cancelled]).finally(() => off())
+}
+
 export class PortVideoBackend implements VideoBackend {
   setRequestTimeoutsPaused(paused: boolean): void {
     this.timeouts.setPaused(paused)
@@ -22,7 +39,9 @@ export class PortVideoBackend implements VideoBackend {
   private next = 1
   private closed = false
   private closing?: Promise<void>
-  private readonly openings = new Map<number, object>()
+  private readonly openings = new Map<number, AbortController>()
+  private conversionSlot: Promise<void> = Promise.resolve()
+  private convertedBytes = 0
   private readonly sourceCancels = new Set<() => void>()
   private readonly sources = new Map<object, number>()
   private sourceBytes = 0
@@ -94,6 +113,7 @@ export class PortVideoBackend implements VideoBackend {
     private readonly readTimeline: typeof readVideoTimeline = readVideoTimeline,
     private readonly readBlobTimeline: typeof readVideoTimelineBlob = readVideoTimelineBlob,
     private readonly timeouts = new PausableTimeouts(),
+    private readonly transcode: LegacyConverter = transcodeLegacyMovie,
   ) {
     port.onmessage = (event: MessageEvent<VideoMessage>) => {
       const message = event.data
@@ -115,25 +135,73 @@ export class PortVideoBackend implements VideoBackend {
       }
     }
   }
+  private retireOpening(id: number): void {
+    const opening = this.openings.get(id)
+    this.openings.delete(id)
+    opening?.abort(new Error('Video open was closed or superseded'))
+  }
+  private async prepareLegacy(bytes: MoviePayload | Uint8Array, format: LegacyVideoFormat, signal: AbortSignal) {
+    const input = bytes instanceof Uint8Array ? bytes : bytes.blob
+    const header = input instanceof Uint8Array ? input.subarray(0, 12)
+      : new Uint8Array(await input.slice(0, 12).arrayBuffer())
+    signal.throwIfAborted()
+    const mime = nativeMovieMime(header)
+    if (mime) {
+      const media: MoviePayload = bytes instanceof Uint8Array
+        ? { blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime }), buffered: true }
+        : { blob: bytes.blob.slice(0, bytes.blob.size, mime), buffered: bytes.buffered }
+      return { media, charge: 0 }
+    }
+    const size = input instanceof Uint8Array ? input.byteLength : input.size
+    if (size > videoSourceLimits.bufferedBytes) throw new Error('Legacy movie input exceeds 128 MiB budget')
+    // Reserve the next worker slot in order. A cancelled waiter releases
+    // its source now, even when the preceding movie takes minutes to convert.
+    const previous = this.conversionSlot
+    let releaseSlot!: () => void
+    const slot = new Promise<void>((resolve) => { releaseSlot = resolve })
+    this.conversionSlot = previous.then(() => slot)
+    try {
+      await waitForVideo(previous, signal)
+      signal.throwIfAborted()
+      const result = await this.transcode(input, format, signal)
+      signal.throwIfAborted()
+      if (!(result instanceof Blob) || !result.size) throw new Error('Legacy movie conversion returned no MP4')
+      if (result.size > videoSourceLimits.bufferedBytes - this.convertedBytes)
+        throw new Error('Converted movie data exceeds 128 MiB budget')
+      const media = { blob: result.slice(0, result.size, 'video/mp4'), buffered: true }
+      this.convertedBytes += result.size
+      return { media, charge: result.size }
+    } finally { releaseSlot() }
+  }
   async command(command: VideoCommand): Promise<VideoResult> {
     if (command.op === 'shutdown') {
       await this.close()
       return { events: [] }
     }
     if (this.closed) throw new Error('Video backend is closed')
-    if (command.op === 'close') this.openings.delete(command.id)
+    if (command.op === 'close') this.retireOpening(command.id)
     if (command.op === 'cancel') {
-      this.openings.clear()
+      for (const id of this.openings.keys()) this.retireOpening(id)
       for (const cancel of this.sourceCancels) cancel()
     }
     if (command.op === 'open') {
       const { id } = command,
-        ticket = {},
+        ticket = new AbortController(),
         prepared = command.bytes instanceof Uint8Array ? undefined : this.preparedLeases.get(command.bytes),
-        sourceControl = prepared?.control
-      let bytes: Uint8Array | VideoBlobPayload
-      if (command.bytes instanceof Uint8Array) bytes = Uint8Array.from(command.bytes)
-      else {
+        sourceControl = prepared?.control,
+        legacy = legacyVideoFormat(command.name)
+      // Prepared buffered blobs already paid for their bytes. Direct callers
+      // also need a bounded queue of private inputs while another movie runs.
+      const directCharge = legacy && !prepared
+        ? command.bytes instanceof Uint8Array ? command.bytes.byteLength : command.bytes.buffered ? command.bytes.blob.size : 0
+        : 0
+      if (directCharge > videoSourceLimits.bufferedBytes - this.sourceBytes)
+        throw new Error('Legacy movie input exceeds 128 MiB budget')
+      let bytes: Uint8Array | MoviePayload
+      if (command.bytes instanceof Uint8Array) {
+        if (command.bytes.byteLength > videoSourceLimits.bufferedBytes) throw new Error('Buffered video source exceeds 128 MiB budget')
+        bytes = Uint8Array.from(command.bytes)
+      } else {
         const { blob, buffered } = command.bytes
         if (!(blob instanceof Blob) || typeof buffered !== 'boolean' ||
             blob.size > (buffered ? videoSourceLimits.bufferedBytes : videoSourceLimits.borrowedBytes))
@@ -141,11 +209,17 @@ export class PortVideoBackend implements VideoBackend {
         bytes = { blob: blob.slice(), buffered }
       }
       const outgoing = { ...command, bytes, settings: { ...command.settings } }, releaseSource = prepared?.retain()
+      this.sourceBytes += directCharge
       let metadata: Promise<Awaited<ReturnType<typeof readVideoTimeline>>> | undefined
+      let convertedCharge = 0
+      this.retireOpening(id)
       this.openings.set(id, ticket)
+      let offSource: (() => void) | undefined
       try {
+        offSource = sourceControl?.onCancel(() => ticket.abort(new ExecutionCancelled()))
         const checkpoint = () => {
           sourceControl?.check()
+          ticket.signal.throwIfAborted()
           if (this.closed) throw new Error('Video backend closed while reading metadata')
           if (this.openings.get(id) !== ticket)
             throw new Error('Video open was closed or superseded while reading metadata')
@@ -164,29 +238,41 @@ export class PortVideoBackend implements VideoBackend {
         }
         metadata = (async () => {
           try {
-            if (bytes instanceof Uint8Array) return await this.readTimeline(bytes)
-            return await this.readBlobTimeline(bytes.blob, options)
+            if (legacy) {
+              const { media, charge } = await this.prepareLegacy(bytes, legacy, ticket.signal)
+              outgoing.bytes = media
+              convertedCharge = charge
+              checkpoint()
+            }
+            const media = outgoing.bytes
+            if (media instanceof Uint8Array) return await this.readTimeline(media)
+            const timeline = await this.readBlobTimeline(media.blob, options)
+            if (convertedCharge && !timeline) throw new Error('Converted movie has no MP4 video timeline')
+            return timeline
           } finally {
             this.metadataBytes -= metadataBytes
           }
         })()
-        let off = () => {}
-        const timeline = await (sourceControl ? Promise.race([metadata, new Promise<never>((_resolve, reject) => {
-          off = sourceControl.onCancel(() => reject(new ExecutionCancelled()))
-        })]) : metadata).finally(() => off())
+        const timeline = await waitForVideo(metadata, ticket.signal)
         checkpoint()
-        return await this.send({ ...outgoing, timeline }, bytes instanceof Uint8Array ? undefined : () => {
+        return await this.send({ ...outgoing, timeline }, outgoing.bytes instanceof Uint8Array ? undefined : () => {
           if (this.closed || this.openings.get(id) !== ticket) return
           // Same epoch retirement cannot close a later graph. Do not wait for
           // the lost open reply; the host processes close while open awaits IO.
           void this.send({ op: 'close', id, epoch: outgoing.epoch }).catch(() => {})
         })
       } finally {
+        offSource?.()
         if (this.openings.get(id) === ticket) this.openings.delete(id)
         // Cancelled metadata may still own a provider read and its Blob. Do
         // not advertise those held bytes as free until that operation settles.
-        if (metadata) void metadata.then(() => releaseSource?.(), () => releaseSource?.())
-        else releaseSource?.()
+        const release = () => {
+          this.sourceBytes -= directCharge
+          this.convertedBytes -= convertedCharge
+          releaseSource?.()
+        }
+        if (metadata) void metadata.then(release, release)
+        else release()
       }
     }
     if (command.op === 'mixing' && command.bitmap) {
@@ -238,7 +324,7 @@ export class PortVideoBackend implements VideoBackend {
     if (this.closing) return this.closing
     this.closed = true
     for (const cancel of this.sourceCancels) cancel()
-    this.openings.clear()
+    for (const id of this.openings.keys()) this.retireOpening(id)
     this.timeouts.setPaused(false)
     this.closing = (async () => {
       try {

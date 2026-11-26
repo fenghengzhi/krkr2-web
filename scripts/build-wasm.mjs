@@ -36,7 +36,7 @@ function hashSources(directory) {
   )) {
     const path = `${directory}/${entry.name}`
     // Fonts and image codecs have their own source manifests and WASM assets.
-    if (['native/fonts', 'native/image-zlib', 'native/image-jpeg', 'third_party/unicode'].includes(path)) continue
+    if (['native/fonts', 'native/image-zlib', 'native/image-jpeg', 'native/legacy-media', 'third_party/unicode'].includes(path)) continue
     if (entry.isDirectory()) hashSources(path)
     else if (/\.(c|cc|cpp|h|hpp|inc|y|py|in|txt)$/.test(entry.name)) {
       sourceHasher.update(path + '\0').update(readFileSync(resolve(root, path)))
@@ -138,4 +138,6 @@ if (!allocatorDiagnostic) {
   // default entry point still builds all required production assets.
   if (process.env.KRKR_SEPARATE_JPEG_BUILD !== '1')
     run(process.execPath, ['scripts/build-image-jpeg.mjs'])
+  if (process.env.KRKR_SEPARATE_LEGACY_MEDIA_BUILD !== '1')
+    run(process.execPath, ['scripts/build-legacy-media.mjs'])
 }

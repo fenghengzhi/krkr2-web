@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "toolchain": "6.0.9",
+  "ffmpeg": {
+    "version": "5.1.9",
+    "url": "https://ffmpeg.org/releases/ffmpeg-5.1.9.tar.xz",
+    "bytes": 10034840,
+    "sha256": "d9b593bb2ba93d4b50f74177e0cdcd41747e708596367deed0c30348a71dd176",
+    "directory": "ffmpeg-5.1.9"
+  },
+  "openh264": {
+    "version": "2.6.0",
+    "url": "https://codeload.github.com/cisco/openh264/tar.gz/refs/tags/v2.6.0",
+    "bytes": 60302243,
+    "sha256": "558544ad358283a7ab2930d69a9ceddf913f4a51ee9bf1bfb9e377322af81a69",
+    "directory": "openh264-2.6.0"
+  }
+}

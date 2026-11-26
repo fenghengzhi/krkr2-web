@@ -61,6 +61,42 @@ test('a named ZIP launcher resolves beside its game, and duplicate filenames req
   } finally { reader.dispose() }
 })
 
+test('a ZIP honors the same custom startup hint as its loose tree without selecting a bundled tools sample', async () => {
+  const reader = createSessionArchiveReader(), base = 'game-' + 'b'.repeat(64)
+  try {
+    for (const [path, entry, directory, executableDirectory] of [
+      ['boot.tjs', 'boot.tjs', '', ''],
+      ['Release/boot.tjs', 'boot.tjs', 'Release/', 'Release/'],
+      ['Release/DATA/Boot.TJS', 'boot.tjs', 'Release/DATA/', 'Release/'],
+      ['Release/boot.tjs', 'game://./Release/boot.tjs', '', ''],
+      ['Release/engine.xp3', 'engine.xp3>boot.tjs', 'Release/', 'Release/'],
+    ] as const) {
+      const inputs = [member(path, 'selected entry'), member('Release/Tools/startup.tjs', 'wrong sample')],
+        zip = packed(distributionZip(inputs)), selected = await prepareProject([zip], { mode: 'auto' }, reader, checkpoint, entry),
+        loose = inputs.map((file) => ({ name: file.name, size: 1, read: async () => new Uint8Array([0]) })),
+        unpacked = await prepareProject(loose, { mode: 'auto' }, reader, checkpoint, entry)
+      assert.deepEqual(selected.project, { directory, executableDirectory, distribution: zip.name })
+      assert.deepEqual(unpacked.project, { directory, executableDirectory })
+      assert.deepEqual(selected.resources.map((file) => file.name), inputs.map((file) => file.name))
+      const replay = await prepareProject([zip], { mode: 'root', ...selected.project! }, reader, checkpoint, 'unrelated.tjs')
+      assert.deepEqual(replay.project, selected.project)
+      assert.equal(await projectIdentity(base, replay.project), await projectIdentity(base, selected.project))
+    }
+    const zip = packed(distributionZip([member('Release/boot.tjs', 'game'), member('Release/Tools/startup.tjs', 'sample')]))
+    assert.equal((await prepareProject([zip], { mode: 'auto' }, reader, checkpoint)).project!.directory, 'Release/Tools/')
+    assert.equal((await prepareProject([zip], { mode: 'auto', executableDirectory: 'Release/Tools/' }, reader, checkpoint, 'boot.tjs')).project!.directory, 'Release/Tools/')
+    assert.deepEqual(await prepareProject([zip], { mode: 'collection' }, reader, checkpoint, 'boot.tjs'), { resources: [zip] })
+    const outer = await prepareProject([zip], { mode: 'auto' }, reader, checkpoint, 'release.ZIP>Release/boot.tjs')
+    assert.deepEqual(outer, { resources: [zip], project: { directory: '', executableDirectory: '' } })
+    const frozen = await prepareProject([zip], { mode: 'root', directory: 'Release/', executableDirectory: 'Release/', distribution: zip.name },
+      reader, checkpoint, 'release.ZIP>Release/boot.tjs')
+    assert.equal(frozen.project!.distribution, zip.name, 'an existing frozen distribution takes precedence over new import hints')
+    assert.equal(frozen.resources.some((file) => file.name === 'Release/boot.tjs'), true)
+    const two = packed(distributionZip([member('One/boot.tjs', 'one'), member('Two/boot.tjs', 'two')]))
+    await assert.rejects(prepareProject([two], { mode: 'auto' }, reader, checkpoint, 'boot.tjs'), /多个游戏/)
+  } finally { reader.dispose() }
+})
+
 test('ZIP method 8 checks every byte before exposing a requested prefix and supports independent caller ranges', async () => {
   const reader = createSessionArchiveReader()
   try {

@@ -145,11 +145,64 @@ jobs:
             out/native/image-jpeg/compile-command.json
           retention-days: 90
 
+  legacy-media-kernel:
+    name: Production legacy movie WebAssembly converter
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.19.0'
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        id: legacy-cache
+        with:
+          path: |
+            .generated/legacy-media
+            public/licenses/legacy-media
+          key: legacy-media-v1-${{ runner.os }}-${{ runner.arch }}-emsdk-6.0.9-${{ hashFiles('native/legacy-media/**', 'scripts/build-legacy-media.mjs') }}
+      - uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984
+        if: steps.legacy-cache.outputs.cache-hit != 'true'
+        with:
+          version: '6.0.9'
+      - name: Build only pinned legacy decoders and H264 AAC output
+        if: steps.legacy-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out/ci
+          node scripts/build-legacy-media.mjs 2>&1 | tee out/ci/legacy-media.log
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        if: steps.legacy-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .generated/legacy-media
+            public/licenses/legacy-media
+          key: ${{ steps.legacy-cache.outputs.cache-primary-key }}
+      - name: Package the exact converter for application and hosted tests
+        run: tar -czf "$RUNNER_TEMP/legacy-media-kernel.tar.gz" .generated/legacy-media public/licenses/legacy-media
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: legacy-media-kernel
+          path: ${{ runner.temp }}/legacy-media-kernel.tar.gz
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: legacy-media-build-logs
+          path: |
+            out/ci/legacy-media.log
+            out/native/legacy-media/commands.json
+            out/native/legacy-media/source/ffmpeg-5.1.9/ffbuild/config.log
+            .generated/legacy-media/manifest.json
+          retention-days: 90
+
   build:
     name: WASM, types and production build
     # Still compile the main VM when an independent image build fails.
     if: ${{ !cancelled() }}
-    needs: [jpeg-fixtures, jpeg-kernel, png-kernel]
+    needs: [jpeg-fixtures, jpeg-kernel, png-kernel, legacy-media-kernel]
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -197,6 +250,7 @@ jobs:
         env:
           KRKR_SEPARATE_JPEG_BUILD: '1'
           KRKR_SEPARATE_PNG_BUILD: '1'
+          KRKR_SEPARATE_LEGACY_MEDIA_BUILD: '1'
         run: |
           mkdir -p out/ci
           # The font port still needs its own zlib; its source preparation is
@@ -218,6 +272,12 @@ jobs:
       - uses: ./.github/actions/restore-image-kernel
         with:
           kernel: jpeg
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: legacy-media-kernel
+          path: ${{ runner.temp }}/krkr-legacy-media
+      - name: Restore this run's exact legacy movie converter
+        run: tar -xzf "$RUNNER_TEMP/krkr-legacy-media/legacy-media-kernel.tar.gz"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: jpeg-fixtures
@@ -264,7 +324,7 @@ jobs:
           JS
           tar -czf "$RUNNER_TEMP/test-build.tar.gz" \
             .generated dist out/ci/build-info.json \
-            public/licenses/image-zlib public/licenses/image-jpeg \
+            public/licenses/image-zlib public/licenses/image-jpeg public/licenses/legacy-media \
             out/verification/pwa/site-a out/verification/pwa/site-b \
             out/verification/pwa/fixture-artifacts.json out/verification/video-tracks \
             out/verification/jpeg-fixtures/inputs \
@@ -718,7 +778,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
+    needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

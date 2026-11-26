@@ -19,6 +19,7 @@ import { copySystemColorPalette } from '../engine/graphics/system-colors.ts'
 import { copySystemDisplayMetrics } from '../engine/system/display.ts'
 import { PortAudioBackend } from '../backends/audio/port-backend.ts'
 import { PortVideoBackend } from '../backends/video/port-backend.ts'
+import { configureLegacyMedia, legacyMediaManifestFile } from '../backends/video/legacy/transcode.ts'
 import { PortClipboardBackend } from '../backends/clipboard/port-backend.ts'
 import { PortHelpBackend } from '../backends/help/port-backend.ts'
 import { PortWindowGeometry } from '../backends/window/port-geometry.ts'
@@ -44,6 +45,7 @@ export function createSession(request: InitializeRequest, project?: GameProject,
   normalizeSystemDataPath(dataPath, storageProject?.executableDirectory)
   const systemColors = copySystemColorPalette(request.systemColors)
   const systemDisplay = copySystemDisplayMetrics(request.systemDisplay)
+  configureLegacyMedia(new URL('../' + legacyMediaManifestFile, request.manifestUrl).href)
   const arguments_ = new Map<string, string>(request.debugMode ? [['-debug', 'yes']] : [])
   if (dataPath !== undefined) arguments_.set('-datapath', dataPath)
   if (jpegPrecision !== undefined) arguments_.set('-jpegdec', jpegPrecision)

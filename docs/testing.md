@@ -2,6 +2,10 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 152 批用独立原生 FFmpeg 生成带逐帧标记、颜色区间和已知声音的 MPEG／AVI 输入，再交给发布所用的固定 WASM 转换器。浏览器从真实游戏按钮检查定位、prepare、双图层画面、音画偏移和停止；PWA 在断网后首次转换游戏库里的 AVI。ZIP 验收用未经修改的原 KAG 模板，从自定义入口启动、点击保存并从游戏库刷新读档。新增实现和全部新增定义均尚待托管执行。[152 验收、限制与库存](decisions/152-legacy-movies-and-zip-entry.md)
+
+152 本次只取回 143–145 的固定历史快照：143、144 的应用构建失败并跳过下游，145 尚未完成类型检查，146–151 仍排队。原版 KAG 及 Wine 声音的通过、Windows 缺设备的失败、透明转场的未报告项分别记账；不把它们合并成应用通过结果。[152 历史证据](decisions/152-legacy-movies-and-zip-entry.md)
+
 第 151 批用原版 Windows SDK、Web 源码和字节码会话核对读档时的剧情分支与立绘像素。浏览器还从游戏画面和实际混音输出验收字体选择与 MIDI 音高。第 143 批已公布的五项图形差异及当时的构建失败均保留在原始运行中。[151 验收与历史结果](decisions/151-bookmark-restore-and-game-rendering.md)
 
 第 150 批的 KAG 对照检查只指定章节标签的书签、缺省调用栈、宏参数以及载入回调修改条件分支的顺序。游戏输入和声音另从浏览器玩家操作及实际输出验收。[150 验收与历史结果](decisions/150-kag-bookmarks-mouse-and-wave.md)

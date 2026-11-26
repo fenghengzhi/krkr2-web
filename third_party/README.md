@@ -63,6 +63,20 @@ Its notice is included in `public/licenses/mp4box-2.4.1.txt`. The library parses
 container metadata in the session Worker; browser media APIs perform decoding.
 The H.264/AAC video fixtures are generated test patterns, not game media.
 
+Legacy movie compatibility uses [FFmpeg 5.1.9](https://ffmpeg.org/releases/ffmpeg-5.1.9.tar.xz)
+(LGPL-2.1-or-later) and [OpenH264 2.6.0](https://github.com/cisco/openh264/tree/v2.6.0)
+(BSD-2-Clause). Archive sizes and SHA-256 hashes are fixed in
+`native/legacy-media/source.json`; `scripts/build-legacy-media.mjs` is the
+reproducible build and relinking recipe. No codec source is modified and no
+GPL/nonfree components are enabled. The independent single-thread WebAssembly
+module runs in a disposable movie Worker, decoding MPEG-1/MP2 or supported AVI
+streams and converting them to H.264/AAC MP4 for the existing browser player.
+This lossy compatibility conversion does not claim DirectShow pixel or audio
+identity. Its distributed notices are
+`public/licenses/legacy-media/FFmpeg-LICENSE.txt`,
+`public/licenses/legacy-media/OpenH264-LICENSE.txt`, and
+`public/licenses/legacy-media/CREDITS.txt`, generated from the pinned sources.
+
 TVP pixel blend arithmetic is adapted in TypeScript from the reference's
 `tvpgl.cpp/.h` and `gl/blend_*` sources. W.Dee/contributor and Kenjo notices
 are retained in `public/licenses/graphics-notices.txt`. The opt-in native

@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 152 批为 MPEG-1 节目流／基本流和部分 AVI 接入独立 WebAssembly 转换，输出 H.264/AAC MP4 后进入现有影片控制与图层呈现。仅支持列出的编解码器，输入和输出各限 128 MiB，单次转换最多五分钟。转换采用有损编码，原版 DirectShow 的像素与音频等价尚未验证。同批修正 ZIP 自定义入口识别，游戏库仍以已保存的目录和入口为准。新增行为等待托管验证。[152 范围与验收](../decisions/152-legacy-movies-and-zip-entry.md)
+
 第 151 批调整 KAG 书签属性的读取与应用顺序、Windows 立绘的变换采样、对白字体的候选顺序和 MIDI 配乐的通道音高。TJS 脚本现在按原版数值 `0x10` 解释 `stRefNoClip`。曾写死 Web 扩展滤镜数值的脚本可以改用具名常量。本批行为等待托管验证。[151 范围与数字兼容说明](../decisions/151-bookmark-restore-and-game-rendering.md)
 
 第 150 批支持在已载入的 KAG 剧情中恢复只指定章节标签的书签，并校正游戏选择项的鼠标点击和 WAVE 的循环范围。这些行为等待托管验证。[150 范围与验收](../decisions/150-kag-bookmarks-mouse-and-wave.md)
@@ -315,7 +317,7 @@ Debug 已支持历史与重要消息、文件开关和目录、日志观察回�
 | 输入         | 鼠标/触摸、捕获、键盘/提交文字、物理按键状态、focus chain、模态栈、onHitTest、异步 postInputEvent、光标与 hint                                                                                                                                     |
 | 字体         | 独立 FreeType 文件字体、Canvas 系统字体/缺字回退、预渲染版本 0/1 与共享映射、getGlyphDrawRect/Rect、样式与阴影；getList/doUserSelect；逻辑纵排家族、vert/vrt2、Unicode 朝向/呈现形式、按索引变换与竖向装饰线；普通文件路径保留原 FreeType 角度语义 |
 | 声音         | Wave/MIDI 宿主、AudioWorklet 混音、WAV/Vorbis/MP3、SLI 循环/标志/标签、定位、音量/声像、淡入淡出、完成事件及静音                                                                                                                                   |
-| 视频         | VideoOverlay 的 MP4 播放、首帧就绪、显示时间帧索引、遮盖/双图层输出、seek/prepare、区间/周期事件、透明度、媒体声音及释放；媒体时钟补充延迟/遗漏的呈现通知                                                                                          |
+| 视频         | VideoOverlay 的 MP4 播放、首帧就绪、显示时间帧索引、遮盖/双图层输出、seek/prepare、区间/周期事件、透明度、媒体声音及释放；152 增加部分 MPEG-1／AVI 转换，新增路径待托管验证                                                                            |
 | 文本与文件流 | TJS Array.load/save、Array/Dictionary 的结构化读写流；UTF-8、UTF-16、UTF-32 读取、c0/c1 简单编码、zlib 压缩文本                                                                                                                                    |
 | 存档文件     | 写覆盖层、IndexedDB 事务、失败保留脏数据、备份导出/导入；已验证 KAG 变量/场景恢复、BMP 缩略图和刷新读档                                                                                                                                            |
 | 页面         | 示例、本地文件/目录导入、后端选择、TJS 表达式、日志、暂停/停止/重新开始                                                                                                                                                                            |
@@ -416,7 +418,9 @@ WAV PCM 与 MIDI 由 TypeScript 解析，Vorbis 在会话 Worker 中使用独立
 
 视频声音连接现有 Web Audio 输出，页面静音会同时作用于视频和声音缓冲。自动播放被拒绝时显示“播放视频”，脚本加载可继续；会话暂停保持逻辑 play 状态并暂停媒体元素。图层模式传入真实 RGBA，并随视频调整目标图层尺寸；每个视频最多一帧在途。停止/失败取消待加载媒体、撤销 Blob URL 并断开声音连接。
 
-当前验证使用自行生成并明确标注 BT.709 的 H.264/AAC MP4。绝对帧索引仅覆盖 MP4 路径，其他容器的帧操作明确拒绝；没有证明全部 MP4 edit/fragment 情况。完整 `setMixingLayer`、原生颜色控制、备用音视频流、MFEVR、旧 MPEG-I/WMV 解码及 WebCodecs 后端未实现。prepare/暂停时 seek 的事件顺序、区间循环边界与原生实现仍需差分；媒体元素不能保证无缝循环。视频文件目前整段读取，受单资源 64 MiB、视频合计 128 MiB 预算限制；长视频流式读取、HDR/未标记色彩与 GPU 回读性能尚待验证。详见 [视频呈现与生命周期](../decisions/005-video-presentation.md)。
+早期已验证影片使用自行生成并明确标注 BT.709 的 H.264/AAC MP4。第 142 批增加本地文件切片及 MP4 元数据选轨，本地借用文件视图总计最多 2 GiB，需完整缓冲的来源总计最多 128 MiB；该新增路径的托管结果仍待取回。第 152 批把支持的 MPEG-1、MJPEG 或 Cinepak 输入先完整转换为 MP4，再沿用帧索引与播放控制。MP2 和所列 PCM 音轨转为 AAC。转换输入、输出各限 128 MiB，WASM 线性内存上限 512 MiB；转换完成后开始播放，停止会终止对应转换 Worker。浏览器其他内存另计。[大影片来源](../decisions/142-large-game-movies.md) · [旧影片转换范围](../decisions/152-legacy-movies-and-zip-entry.md)
+
+新增转换尚无托管通过结果，不代表所有 AVI、MPEG-2、WMV、系统安装的 DirectShow 滤镜或原设备音画输出已兼容。多轨转换保留共同时间原点，不保证无缝循环或无损像素。完整原生颜色控制、MFEVR、WebCodecs 后端、HDR／未标记色彩及所有 MP4 edit/fragment 组合仍未完成。历史首帧、prepare 和 seek 的失败与后续修订分别保留。[视频呈现与生命周期](../decisions/005-video-presentation.md)
 
 **KAG 与菜单的边界**
 
