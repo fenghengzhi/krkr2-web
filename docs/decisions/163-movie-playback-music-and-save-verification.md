@@ -23,3 +23,5 @@ ZIP 的读取检查现在按实际返回的文件名选取非空数据，保留 
 ## 已取回的结果
 
 第 160 批 Node 作业被取消，TAP 没有完整结尾。逐项记录中，4,409 个已登记定义有 4,368 个通过、37 个失败、4 个未报告完成。4 个未完成项涉及分卷 ZIP 和 KAG。文件级结果另行保存。相同提交的 WMV1 和 WMV2 转换均已通过独立时间轴比较。第 160 批主浏览器分片取回时仍无新报告。第 161、162 批取回时均为 `pending`，尚无作业结果。此批新取得 1 份普通 Node 原件，复用 43 份，其大小和 SHA-256 均已核对。[第 160 批 Node](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404/job/139938355839) · [第 161 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45831107660) · [第 162 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45832905859)
+
+第 163 批实现提交 `7f7ab580fdb0ea698f5562240f5d11e2f43a0892` 登记时为 `pending`。运行结果在下一批取回。[第 163 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45834683767)

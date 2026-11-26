@@ -4,6 +4,8 @@
 
 第 163 批补齐两种旧过场的播放路径，修正配乐跨页跳转和影片帧回调。第 160 批 Node 作业取消前，逐项记录已有 4,368 项通过与 37 项失败。本批结果待托管验证。[163 实现与托管证据](decisions/163-movie-playback-music-and-save-verification.md)
 
+第 163 批实现提交 `7f7ab58` 已登记为 `pending`。下一批取回运行结果。[第 163 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45834683767)
+
 第 162 批处理 KAG 条件与跳转中的属性读取，并修正裸 MPEG-1 过场的逐帧定位。第 160 批 Chromium 游戏库为 25/74，原始失败已按首次触发的位置归档。[162 实现与托管证据](decisions/162-game-routes-and-movie-timing.md)
 
 第 162 批实现提交 `3a58beb` 已登记，状态为 `pending`。下一批取回运行结果。[第 162 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45832905859)
