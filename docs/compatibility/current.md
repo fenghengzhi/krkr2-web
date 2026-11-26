@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 155 批接入游戏 TTC／OTC 合集中的字体家族、字重和纵排成员，修正 KAG 嵌套条件书签读回后的路线，并按旧 Windows GS 行为处理 MIDI 复位与重播时的左右声像。新增实现等待托管验证。[兼容范围与历史结果](../decisions/155-font-collections-conditional-saves-and-midi.md)
+
 第 154 批为远程游戏入库提供经过校验的分块续传，支持刷新或换标签页继续。KAG 属性表达式可以在读取当前标签时读取下一条记录。后台 WAVE 播放支持发行配置中的失焦条件及音量百分比。以上新增行为仍待托管验收。[实现与限制](../decisions/154-remote-downloads-script-cursor-and-background-audio.md)
 
 第 153 批接入混合模式影片的四项调色、范围和步长，普通模式与未打开的影片按原版返回 −1。剧情脚本可在同一标签的后续表达式中读写前面已解析的字段。图层的图像持有与修改标记接受原版布尔值，WAVE 声音可按游戏选项转为 16 位，并保留原声道或合成单声道。以上行为等待托管验收。[实现范围与原版依据](../decisions/153-live-tag-attributes-and-media-controls.md)

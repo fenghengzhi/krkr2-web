@@ -78,6 +78,8 @@ export interface GraphicsDecoder {
    * than the width reported to the script, particularly for synthetic bold. */
   measure?(text: string, font: FontSpec): { width: number; height: number; ascent?: number; drawAdvance?: number }
   loadFont?(bytes: Uint8Array): Promise<LoadedFont>
+  /** Backends with indexed collection support can use the original bytes. */
+  loadFontFace?(bytes: Uint8Array, faceIndex: number): Promise<LoadedFont>
   /** Confirm an actual system family, not a fallback used to render a missing
    * name. Omitted by embeddings that cannot determine system availability. */
   hasFont?(face: string): boolean | Promise<boolean>

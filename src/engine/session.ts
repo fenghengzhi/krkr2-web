@@ -120,6 +120,7 @@ import { fontClass } from './tvp/font.ts'
 import { transitionBridge } from './tvp/transitions.ts'
 import { rectClass } from './tvp/rect.ts'
 import { fontSpec } from './graphics/font.ts'
+import { standaloneFontBytes } from '../formats/font/collection.ts'
 import { FontService, type NamedFontFace } from './graphics/fonts.ts'
 import { FontCatalog } from './graphics/font-catalog.ts'
 import { FontSelection } from './graphics/font-selection.ts'
@@ -3895,7 +3896,10 @@ export class EngineSession {
     if (bytes.length !== face.resource.size) throw new Error('Pad font resource length changed')
     const latest = this.pads?.fontRequest(id, epoch)
     if (!latest || JSON.stringify(latest) !== JSON.stringify(request)) return null
-    return { family: request.fontFace, bold: face.bold, italic: face.italic, bytes }
+    // Pad installs a binary FontFace on the document, which needs a standalone
+    // font with the selected member's tables even when the member is index 0.
+    return { family: request.fontFace, bold: face.bold, italic: face.italic,
+      bytes: new Uint8Array(standaloneFontBytes(bytes, face.faceIndex ?? 0)) }
   }
   pad(message: PadMessage): PadAck {
     if (

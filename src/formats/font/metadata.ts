@@ -1,5 +1,6 @@
 import type { ByteSource } from '../../engine/ports/storage.ts'
 import type { FontCharset } from '../../engine/ports/fonts.ts'
+import { collectionHeader } from './collection.ts'
 
 export interface FontMetadata {
   family: string
@@ -65,7 +66,18 @@ export async function readFontMetadata(
   source: ByteSource,
   check: () => void = () => {},
 ): Promise<FontMetadata> {
+  for await (const first of readFontFaces(source, check)) return first
+  throw new Error('Font has no faces')
+}
+
+/** Read face directories in order without reading glyph data. Shared ranges
+ * count only once against the file's metadata budget. */
+export async function* readFontFaces(
+  source: ByteSource,
+  check: () => void = () => {},
+): AsyncGenerator<FontMetadata> {
   let readBytes = 0
+  let shared: Map<string, Uint8Array> | undefined
   const read = async (offset: number, length: number) => {
     check()
     if (
@@ -77,32 +89,40 @@ export async function readFontMetadata(
       offset < 0 ||
       length < 0 ||
       offset > source.size ||
-      length > source.size - offset ||
-      (readBytes += length) > 1024 * 1024
+      length > source.size - offset
     )
       throw new Error('Font metadata exceeds bounds or budget')
+    const key = offset + ':' + length
+    const cached = shared?.get(key)
+    if (cached) return cached
+    if ((readBytes += length) > 1024 * 1024) throw new Error('Font metadata exceeds bounds or budget')
     const bytes = await source.read(offset, length)
     check()
     if (bytes.length !== length) throw new Error('Truncated font metadata')
+    shared?.set(key, bytes)
     return bytes
   }
-  let offset = 0,
-    header = await read(0, 12)
-  if (text(header.subarray(0, 4)) === 'ttcf') {
-    const h = view(header),
-      version = h.getUint32(4),
-      count = h.getUint32(8)
-    if (
-      ![0x10000, 0x20000].includes(version) ||
-      count < 1 ||
-      count > 256 ||
-      12 + count * 4 > source.size
-    )
-      throw new Error('Invalid font collection header')
-    offset = view(await read(12, 4)).getUint32(0)
-    if (offset < 12 + count * 4) throw new Error('Font collection face overlaps header')
-    header = await read(offset, 12)
+  const header = await read(0, 12)
+  const collection = collectionHeader(view(header), source.size)
+  if (!collection) {
+    yield await readFaceMetadata(source.size, read, 0, header)
+    return
   }
+  shared = new Map()
+  const offsets = view(await read(12, collection.count * 4))
+  for (let i = 0; i < collection.count; i++) {
+    const offset = offsets.getUint32(i * 4)
+    if (offset < collection.end) throw new Error('Font collection face overlaps header')
+    yield await readFaceMetadata(source.size, read, offset, await read(offset, 12))
+  }
+}
+
+async function readFaceMetadata(
+  fileSize: number,
+  read: (offset: number, length: number) => Promise<Uint8Array>,
+  offset: number,
+  header: Uint8Array,
+): Promise<FontMetadata> {
   const h = view(header),
     signature = h.getUint32(0),
     count = h.getUint16(4)
@@ -117,8 +137,8 @@ export async function readFontMetadata(
       length = d.getUint32(i * 16 + 12)
     if (
       tables.has(name) ||
-      at > source.size ||
-      length > source.size - at ||
+      at > fileSize ||
+      length > fileSize - at ||
       (length && at < offset + 12 + count * 16 && at + length > offset)
     )
       throw new Error('Invalid font table directory')

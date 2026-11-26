@@ -2,7 +2,7 @@ import type { FontCharset, FontDescriptor } from '../ports/fonts.ts'
 import type { FontSpec } from '../ports/graphics.ts'
 import type { Resource } from '../ports/storage.ts'
 import type { NamedFontFace } from './fonts.ts'
-import { readFontMetadata, validFontName } from '../../formats/font/metadata.ts'
+import { readFontFaces, validFontName, type FontMetadata } from '../../formats/font/metadata.ts'
 
 // Generic CSS families are virtual Unicode fonts. Their physical outline format
 // is unknown, so they do not satisfy TrueType-only enumeration.
@@ -81,8 +81,7 @@ interface CatalogDependencies {
 export class FontCatalog {
   private system: FontDescriptor[] = []
   private game: FontDescriptor[] = []
-  private metadata = new WeakMap<object, FontDescriptor[]>()
-  private styles = new WeakMap<object, { bold: boolean; italic: boolean }>()
+  private metadata = new WeakMap<object, FontMetadata[]>()
   private loading?: Promise<void>
   private loadingFile?: string
   private initialized = false
@@ -132,7 +131,7 @@ export class FontCatalog {
   private async discover(font?: FontSpec) {
     const seen = new Set<object>()
     const files = (await this.deps.files())
-      .filter((file) => /\.(ttf|otf|ttc)$/i.test(file.name))
+      .filter((file) => /\.(ttf|otf|ttc|otc)$/i.test(file.name))
       .sort((a, b) => Number(a.name.includes('>')) - Number(b.name.includes('>')))
       .filter((file) => {
         const token = file.cacheToken ?? file
@@ -156,6 +155,7 @@ export class FontCatalog {
       const token = resource.cacheToken ?? resource
       let entries = this.metadata.get(token)
       if (!entries) {
+        entries = []
         try {
           if (resource.size > 16 * 1024 * 1024) throw new Error('Font file exceeds 16 MiB')
           const source = resource.source
@@ -163,7 +163,7 @@ export class FontCatalog {
           const bytes = source ? undefined : await this.deps.wait(resource.read())
           this.deps.check()
           if (bytes && bytes.length !== resource.size) throw new Error('Font resource length changed')
-          const m = await readFontMetadata(
+          const faces = readFontFaces(
             {
               size: resource.size,
               read: async (offset, length) => {
@@ -177,37 +177,31 @@ export class FontCatalog {
             },
             () => this.deps.check(),
           )
-          this.styles.set(token, { bold: m.bold, italic: m.italic })
-          entries = [
-            {
-              name: m.family,
-              source: 'game',
-              fixedPitch: m.fixedPitch,
-              outline: m.outline,
-              charsets: m.charsets,
-              vertical: false,
-            },
-          ]
-          if (m.vertical) entries.push({ ...entries[0]!, name: '@' + m.family, vertical: true })
+          for await (const face of faces) entries.push(face)
         } catch (error) {
           this.deps.check()
           this.deps.warn(
-            `Font catalog ignored ${resource.name}: ${error instanceof Error ? error.message : String(error)}`,
+            `Font catalog ignored ${entries.length ? 'remaining faces in ' : ''}${resource.name}: ${error instanceof Error ? error.message : String(error)}`,
           )
-          entries = []
         }
         this.metadata.set(token, entries)
       }
-      for (const entry of entries) {
-        game.push(entry)
-        const name = entry.name.toLowerCase(),
-          faces = bindings.get(name) ?? [],
-          style = this.styles.get(token)!
-        // One face per style. Unqualified names take precedence over archived
-        // aliases, so a mounted patch remains the active source.
-        if (!faces.some((face) => face.bold === style.bold && face.italic === style.italic))
-          faces.push({ resource, ...style })
-        bindings.set(name, faces)
+      for (const [faceIndex, m] of entries.entries()) {
+        const descriptor: FontDescriptor = {
+          name: m.family, source: 'game', fixedPitch: m.fixedPitch,
+          outline: m.outline, charsets: m.charsets, vertical: false,
+        }
+        const descriptors = [descriptor]
+        if (m.vertical) descriptors.push({ ...descriptor, name: '@' + m.family, vertical: true })
+        for (const entry of descriptors) {
+          game.push(entry)
+          const name = entry.name.toLowerCase(), faces = bindings.get(name) ?? []
+          // Keep resource/patch order for ties, and retain the physical face
+          // for both horizontal and vertical views of each style.
+          if (!faces.some((face) => face.bold === m.bold && face.italic === m.italic))
+            faces.push({ resource, faceIndex, bold: m.bold, italic: m.italic })
+          bindings.set(name, faces)
+        }
       }
       await this.deps.yield()
     }
@@ -220,11 +214,11 @@ export class FontCatalog {
     return [...this.game, ...this.system, ...genericFonts]
   }
   charset(font: FontSpec): FontCharset | undefined {
-    let name = font.face.toLowerCase()
+    const name = font.face.toLowerCase()
     if (font.faceIsFileName) {
       const token = this.fileFaces.get(font.face),
         entries = token && this.metadata.get(token)
-      if (entries?.[0]) name = entries[0].name.toLowerCase()
+      if (entries?.[0]) return entries[0].charsets[0]
     }
     return this.entries().find((entry) => entry.name.toLowerCase() === name)?.charsets?.[0]
   }
@@ -237,7 +231,6 @@ export class FontCatalog {
     this.initialized = false
     this.deps.bindSystem?.([])
     this.metadata = new WeakMap()
-    this.styles = new WeakMap()
     this.fileFaces.clear()
   }
 }

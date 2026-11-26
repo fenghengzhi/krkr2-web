@@ -28,7 +28,7 @@ const channel = (bufferVolume = 127, previous?: Channel): Channel => ({
   level: Math.trunc(100 * bufferVolume / 127) / 127,
   used: false,
   expression: 1,
-  pan: 0,
+  pan: previous?.pan ?? 0,
   program: previous?.program ?? 0,
   bend: 0,
   pitch: new MidiPitch(previous?.pitch),
@@ -88,7 +88,7 @@ export class MidiSynth {
   /** MIDIImpl StopPlay/StartPlay rewinds tracks, silences notes and resets
    * controllers, but sends no ProgramChange. An instrument selected later in
    * the same song therefore remains selected on its next loop or replay;
-   * the old GS device also retains its registered tuning parameters. */
+   * the old GS device also retains pan and its registered tuning parameters. */
   rewind(time: number): void {
     this.position(time, true)
   }
@@ -213,9 +213,18 @@ export class MidiSynth {
             if (!c.sustain) note.released = this.time
           }
       } else if (a === 121) {
-        this.channels[id] = channel(fromFile ? this.bufferVolume : 127, c)
-        if (!fromFile) this.channels[id]!.volume = c.volume
-        this.channels[id]!.used = fromFile || c.used
+        // Older Windows GS preserves CC7/pan for CC121=0; nonzero also
+        // resets them. KRKR2's SMF ProcessEvent separately sends CC7=100
+        // scaled by BufferVolume after either value, unlike raw midiOut.
+        // https://microsoft.github.io/MIDI/kb/in-box-general-midi-synth/#compatible-mode
+        const reset = channel(fromFile ? this.bufferVolume : 127, c)
+        reset.pan = b === 0 ? c.pan : 0
+        if (!fromFile) {
+          reset.volume = c.volume // remembered SMF volume is not a device CC
+          if (b === 0) reset.level = c.level
+        }
+        reset.used = fromFile || c.used
+        this.channels[id] = reset
         for (const note of this.notes)
           if (note.channel === id && !note.held) note.released = this.time
       }

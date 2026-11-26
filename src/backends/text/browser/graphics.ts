@@ -6,6 +6,7 @@ import type {
   TextPixels,
 } from '../../../engine/ports/graphics.ts'
 import { decodeBmp } from '../../../formats/image/bmp.ts'
+import { standaloneFontBytes } from '../../../formats/font/collection.ts'
 import type { ImageDecodeSelection } from '../../../formats/image/selection.ts'
 import type { FontKernel, NativeFileFont } from '../freetype/face.ts'
 import { fontGeometry } from '../../../engine/graphics/font.ts'
@@ -53,7 +54,10 @@ export class BrowserGraphics implements GraphicsDecoder {
     // asynchronous text operation retains a completed glyph image.
     this.raster.width = this.raster.height = 1
   }
-  async loadFont(bytes: Uint8Array) {
+  loadFont(bytes: Uint8Array) {
+    return this.loadFontFace(bytes, 0)
+  }
+  async loadFontFace(bytes: Uint8Array, faceIndex: number) {
     if (this.disposed) throw new Error('Font backend is disposed')
     this.systemFaces.clear()
     if (this.nativeLoader) {
@@ -66,7 +70,7 @@ export class BrowserGraphics implements GraphicsDecoder {
         throw error
       }
       if (this.disposed) throw new Error('Font backend is disposed')
-      const face = kernel.open(bytes),
+      const face = kernel.open(bytes, faceIndex),
         family = `krkr-file-font-${++this.fontSequence}`
       this.nativeFaces.set(family, face)
       return {
@@ -81,7 +85,7 @@ export class BrowserGraphics implements GraphicsDecoder {
     if (!fonts || typeof FontFace === 'undefined')
       throw new Error('This browser cannot load fonts in the game Worker')
     const family = `krkr-file-font-${++this.fontSequence}`,
-      face = new FontFace(family, Uint8Array.from(bytes).buffer)
+      face = new FontFace(family, standaloneFontBytes(bytes, faceIndex))
     await face.load()
     if (this.disposed) throw new Error('Font backend is disposed')
     fonts.add(face)

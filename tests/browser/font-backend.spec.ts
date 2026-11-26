@@ -14,6 +14,7 @@ async function runWorker<T = unknown>(page: Page, testInfo: TestInfo, body: stri
     'src/engine/graphics/font.ts',
     'src/engine/graphics/vertical.ts',
     'src/formats/font/vertical-data.ts',
+    'src/formats/font/collection.ts',
     'src/formats/font/vertical-substitutions.ts',
     'src/engine/scheduler/control.ts',
     'src/formats/image/bmp.ts',
@@ -46,6 +47,23 @@ self.onmessage=async({data})=>{const observations={phase:'start'};try{${body}}ca
     throw new Error(result.error, { cause: result })
   return result as T
 }
+
+test('the Canvas font loader selects each collection member and releases its FontFace', async ({ page }, info) => {
+  const bytes = await readFile('tests/fixtures/font-selection/collection.ttc')
+  const widths = await runWorker<number[]>(page, info, `
+const backend = new BrowserGraphics(), start = fonts.size, widths = [];
+try {
+  const collection = new Uint8Array(data);
+  for (const i of [0, 1, 0]) {
+    const loaded = i === 0 ? await backend.loadFont(collection) : await backend.loadFontFace(collection, i);
+    try { widths.push(backend.measure('AA', { ...font, face: loaded.face }).width); }
+    finally { loaded.dispose(); }
+  }
+  check(fonts.size === start, 'collection FontFace registration leaked');
+} finally { backend.dispose(); }
+postMessage(widths);`, [...bytes])
+  expect(widths).toEqual([20, 28, 20])
+})
 
 test('missing proportional Mincho uses an available named serif while requested faces keep priority', async ({ page }, info) => {
   const result = await runWorker<{

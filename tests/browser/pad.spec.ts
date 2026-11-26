@@ -180,6 +180,28 @@ for (const backend of ['asyncify', 'jspi']) {
       }
     })
 
+    test(`${variant}: switching a Pad between families in one game font collection updates its character widths`, async ({ page }) => {
+      const collection = await readFile('tests/fixtures/font-selection/collection.ttc')
+      const game = await launchPads(page, backend, binary,
+        padSource + '\nfirst.fontFace="Selection Mono";first.fontHeight=20;',
+        [{ name: 'game.ttc', mimeType: 'font/collection', buffer: collection }])
+      const pad = padSurface(page, 'First pad')
+      const advance = () => pad.locator('textarea').evaluate((text) => {
+        const style = getComputedStyle(text), ctx = document.createElement('canvas').getContext('2d')!
+        ctx.font = style.fontSize + ' ' + style.fontFamily
+        return ctx.measureText('A').width
+      })
+      try {
+        for (const [name, width] of [['Selection Mono', 14], ['Selection Latin', 10], ['Selection Mono', 14]] as const) {
+          await evaluate(page, 'first.fontFace="' + name + '"', name)
+          await expect(pad).toHaveAttribute('data-font-state', 'ready')
+          await expect.poll(advance).toBeCloseTo(width, 1)
+        }
+      } finally {
+        await game.stop()
+      }
+    })
+
     test(`${variant}: Pad geometry, close and restore preserve each native instance`, async ({
       page,
     }) => {

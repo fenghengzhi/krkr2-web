@@ -56,6 +56,7 @@ test('a vertical browser face keeps ideographs upright and rotates Latin glyphs'
     'src/engine/graphics/font.ts',
     'src/engine/graphics/vertical.ts',
     'src/formats/font/vertical-data.ts',
+    'src/formats/font/collection.ts',
     'src/formats/image/bmp.ts',
     'src/formats/image/selection.ts',
     'src/formats/image/read-error.ts',

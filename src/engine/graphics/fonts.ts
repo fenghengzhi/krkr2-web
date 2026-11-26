@@ -12,6 +12,7 @@ import { colorGlyph, shadowGlyph, type GlyphMask } from './glyph.ts'
 import { fontGeometry } from './font.ts'
 import { isVerticalFace } from './vertical.ts'
 import { fontCandidates } from './font-candidates.ts'
+import { standaloneFontBytes } from '../../formats/font/collection.ts'
 
 type Finish = <T>(work: Generator<void, T>) => Promise<T>
 interface MappedFont {
@@ -20,11 +21,14 @@ interface MappedFont {
   refs: number
 }
 interface FileFont {
+  token: object
+  faceIndex: number
   loaded: LoadedFont
   bytes: number
 }
 export interface NamedFontFace {
   resource: Resource
+  faceIndex?: number
   bold: boolean
   italic: boolean
 }
@@ -49,7 +53,7 @@ export const fontKey = (font: FontSpec): string =>
 export class FontService {
   private mappings = new Map<string, MappedFont>()
   private sources = new Map<object, MappedFont>()
-  private files = new Map<object, FileFont>()
+  private readonly files = new Set<FileFont>()
   private readonly activeFiles = new Set<FileFont>()
   private readonly retiredFiles = new Set<FileFont>()
   private readonly compactRetiredFiles = new Set<FileFont>()
@@ -222,8 +226,8 @@ export class FontService {
     const resource = spec.faceIsFileName ? await this.wait(Promise.resolve(this.resolve(spec.face))) : named?.resource
     if (!resource) return spec
     if (!this.graphics.loadFont) throw new Error('Font file loading requires a font backend')
-    const token = resource.cacheToken ?? resource
-    let entry = this.files.get(token)
+    const token = resource.cacheToken ?? resource, faceIndex = named?.faceIndex ?? 0
+    let entry = [...this.files].find((file) => file.token === token && file.faceIndex === faceIndex)
     if (!entry) {
       if (resource.size > 16 * 1024 * 1024) throw new Error('Font file exceeds 16 MiB')
       const bytes = await this.wait(resource.read())
@@ -237,7 +241,11 @@ export class FontService {
           owned.dispose()
         }
       }
-      const pending = this.graphics.loadFont(bytes).then((loaded) => {
+      let loading: Promise<LoadedFont>
+      if (!faceIndex) loading = this.graphics.loadFont(bytes)
+      else if (this.graphics.loadFontFace) loading = this.graphics.loadFontFace(bytes, faceIndex)
+      else loading = this.graphics.loadFont(new Uint8Array(standaloneFontBytes(bytes, faceIndex)))
+      const pending = loading.then((loaded) => {
         owned = loaded
         if (this.disposed) release()
         return { face: loaded.face, dispose: release }
@@ -253,17 +261,22 @@ export class FontService {
       this.check()
       let total = [...this.files.values()].reduce((sum, item) => sum + item.bytes, 0)
       while (this.files.size >= 32 || total + bytes.length > 32 * 1024 * 1024) {
-        const oldest = this.files.entries().next().value!
-        total -= oldest[1].bytes
-        oldest[1].loaded.dispose()
-        this.files.delete(oldest[0])
+        const oldest = this.files.values().next().value!
+        total -= oldest.bytes
+        this.files.delete(oldest)
+        try {
+          oldest.loaded.dispose()
+        } catch (error) {
+          loaded.dispose()
+          throw error
+        }
       }
-      entry = { loaded, bytes: bytes.length }
+      entry = { token, faceIndex, loaded, bytes: bytes.length }
     }
     this.activeFiles.add(entry)
     if (epoch === this.cacheEpoch) {
-      this.files.delete(token)
-      this.files.set(token, entry)
+      this.files.delete(entry)
+      this.files.add(entry)
     } else {
       this.retiredFiles.add(entry)
       this.compactRetiredFiles.add(entry)

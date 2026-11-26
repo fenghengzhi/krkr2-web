@@ -12,6 +12,7 @@ import { kagEofFiles, kagEofExpected, kagEofSource } from './kag-eof.ts'
 import { kagPartialFiles, kagPartialExpected, kagPartialSource } from './kag-partial-state.ts'
 import { kagLiveFiles, kagLiveExpected, kagLiveSource } from './kag-live-tags.ts'
 import { kagEntityFiles, kagEntityExpected, kagEntitySource } from './kag-entity-cursor.ts'
+import { kagConditionFiles, kagConditionExpected, kagConditionSource } from './kag-condition-stack.ts'
 
 /** Shared TJS controls for the 2.32r2 SDK and the Web runtime. The SDK
  * produces its own macro bookmark from a real call into another storage. */
@@ -33,6 +34,7 @@ export const kagFiles = {
   ...kagPartialFiles,
   ...kagLiveFiles,
   ...kagEntityFiles,
+  ...kagConditionFiles,
 }
 
 export const kagExpected: Readonly<Record<string, string>> = {
@@ -63,6 +65,7 @@ export const kagExpected: Readonly<Record<string, string>> = {
   ...kagPartialExpected,
   ...kagLiveExpected,
   ...kagEntityExpected,
+  ...kagConditionExpected,
 }
 
 export const kagControlSource = String.raw`
@@ -102,6 +105,7 @@ function kagResumePoint(d){
   return restored+"|"+q.getNextTag().tagname+"|"+q.callStackDepth+"|"+int(q.macroParams===null);
 }
 function kagObserve(id){
+  if(id.indexOf("condition-")==0){try{return kagConditionObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("entity-")==0){try{return kagEntityObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("live-")==0){try{return kagLiveObserve(id);}catch(e){return e.message;}}
   if(id.indexOf("partial-")==0){try{return kagPartialObserve(id);}catch(e){return e.message;}}
@@ -187,4 +191,4 @@ function kagObserve(id){
     return "unexpected success";
   }catch(e){return e.message;}
 }
-` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource + kagRewindSource + kagModeSource + kagNameSource + kagRealSource + kagEofSource + kagPartialSource + kagLiveSource + kagEntitySource
+` + kagEvaluationSource + kagRoutingSource + kagMacroSlotSource + kagEmbeddingSource + kagOptionalMacroSource + kagReferenceSource + kagRewindSource + kagModeSource + kagNameSource + kagRealSource + kagEofSource + kagPartialSource + kagLiveSource + kagEntitySource + kagConditionSource

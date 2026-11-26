@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 155 批让游戏能选用字体合集中的不同家族和字重，并修复嵌套剧情读档和 MIDI 配乐复位后的声像。新增行为等待托管验证。[155 实现与验证](docs/decisions/155-font-collections-conditional-saves-and-midi.md)
+
 第 154 批补上远程游戏保存到库时的断点续传，并修复动态剧情选项、后台音乐音量与原版的差异。新增功能等待 GitHub-hosted 验证。[154 实现与验证](docs/decisions/154-remote-downloads-script-cursor-and-background-audio.md)
 
 第 153 批修复依赖标签属性生成选项的剧情，补上游戏控制过场画面颜色和 WAVE 单声道输出的路径，并修正会意外删除菜单位图的赋值行为。新增功能等待托管验证。[153 游戏兼容与验证](docs/decisions/153-live-tag-attributes-and-media-controls.md)

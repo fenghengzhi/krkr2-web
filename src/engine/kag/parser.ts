@@ -33,10 +33,18 @@ const tag = (tagname: string, attributes: RecordData = {}): RecordData => ({
 })
 const hexStack = (values: number[]) =>
   values.map((value) => (value >>> 0).toString(16).padStart(8, '0')).join('')
-function parseHex(value: Data): number[] {
+function parseHex(value: Data, restoring = false): number[] {
   const encoded = string(value)
   if (!/^(?:[0-9a-fA-F]{8})*$/.test(encoded)) throw new Error('Malformed KAG condition stack')
-  return encoded.match(/.{8}/g)?.map((word) => parseInt(word, 16) | 0) ?? []
+  // The stock RestoreIntStackFromStr reads str[i..i+7], advancing one
+  // character for each stored integer. Preserve this observable behavior
+  // for valid bookmarks; nested excluded branches can resume differently.
+  const result: number[] = []
+  for (let i = 0; i < encoded.length / 8; i++) {
+    const start = restoring ? i : i * 8
+    result.push(parseInt(encoded.slice(start, start + 8), 16) | 0)
+  }
+  return result
 }
 
 /** State machine for the native KAGParser contract. Effects are resumed by a
@@ -599,8 +607,8 @@ export class KagParser {
     if (!/^[01]*$/.test(bits)) throw new Error('Malformed KAG condition nesting')
     this.executed = [...bits].map((bit) => bit === '1')
   }
-  private restoreConditions(data: RecordData): void {
-    this.excludes = parseHex(data.ExcludeLevelStack)
+  private restoreConditions(data: RecordData, restoring = false): void {
+    this.excludes = parseHex(data.ExcludeLevelStack, restoring)
     this.setExecutedStack(data.IfLevelExecutedStack)
     this.excludeLevel = integer(data.ExcludeLevel, -1)
     this.ifLevel = integer(data.IfLevel)
@@ -662,12 +670,14 @@ export class KagParser {
       const validator = new KagParser()
       for (let index = 0; index < count; index++) {
         const frame = record(yield* this.effect('restoreCallFrame', index))
-        validator.restoreConditions(frame)
+        validator.restoreConditions(frame, true)
         const frameDepth = integer(frame.macroArgStackDepth), frameBase = integer(frame.macroArgStackBase)
         if (integer(frame.offset) < 0 || integer(frame.pos) < 0 || frameBase < 0 ||
           frameDepth < frameBase || frameDepth > this.macroDepth || this.calls.length >= 4096)
           throw new Error('Malformed KAG call frame')
-        this.calls.push(frame)
+        // Native Restore decodes each saved frame now; ordinary return then
+        // copies its vectors without decoding that serialized string again.
+        this.calls.push({ ...frame, ...validator.conditions() })
       }
     }
     // A bookmark can implement each field as a getter on the running game.
@@ -699,7 +709,7 @@ export class KagParser {
     value = yield* this.effect('restoreField', 'IfLevel')
     if (value !== undefined) this.ifLevel = integer(value)
     value = yield* this.effect('restoreField', 'ExcludeLevelStack')
-    if (value !== undefined) this.excludes = parseHex(value)
+    if (value !== undefined) this.excludes = parseHex(value, true)
     value = yield* this.effect('restoreField', 'IfLevelExecutedStack')
     if (value !== undefined) this.setExecutedStack(value)
     value = yield* this.effect('restoreField', 'macroArgStackBase')

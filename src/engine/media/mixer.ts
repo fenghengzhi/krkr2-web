@@ -803,7 +803,7 @@ export class AudioMixer {
   private deliverMidi(message: MidiOutputMessage): void {
     const event = message.kind === 'short' ? { status: message.status, data: message.data }
       : { status: 0xf7, data: Array.from(message.data) }
-    this.liveMidi.message(event)
+    this.liveMidi.rawMessage(event)
     // Raw note-on belongs to the shared output, not one new note per loaded
     // MIDI file. Global note-off/controllers/resets still affect those voices.
     if ((event.status & 0xf0) !== 0x90 || (event.data[1] ?? 0) === 0)
