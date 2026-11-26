@@ -101,7 +101,7 @@ var raw=target.getMainPixel(0,0)==0x123456 && target.getMaskPixel(0,0)==0 && tar
     }
   })
 
-  test(`${mode}: an image-less opaque group blends once while alpha and binder overrides remain transparent`, async () => {
+  test(`${mode}: an image-less opaque group forwards an exposed child while its own fill fades`, async () => {
     const { session, frame, stop } = await fixture(
       binary,
       String.raw`
@@ -120,14 +120,14 @@ var colors=[];for(var x=0;x<6;x++)colors.add(target.getMainPixel(x,0));
 `,
     )
     try {
-      assert.equal(await session.evaluate('colors.join(",")'), '4194304,16384,0,0,0,0')
+      assert.equal(await session.evaluate('colors.join(",")'), '4194304,32768,0,0,0,0')
       assert.equal(
         await session.evaluate('!group.hasImage && !alpha.hasImage && !binder.hasImage'),
         '1',
       )
       assert.deepEqual(
         [...frame(6, 1).pixels.data],
-        [64, 0, 0, 255, 0, 64, 0, 255, ...Array(4).fill([0, 0, 0, 255]).flat()],
+        [64, 0, 0, 255, 0, 128, 0, 255, ...Array(4).fill([0, 0, 0, 255]).flat()],
       )
     } finally {
       await stop()

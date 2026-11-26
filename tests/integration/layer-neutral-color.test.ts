@@ -200,10 +200,9 @@ var snapshot=new Layer(win,root);snapshot.setImageSize(2,1);snapshot.piledCopy(0
       const pixels = await session.evaluate(
         '[snapshot.getMainPixel(0,0),snapshot.getMaskPixel(0,0),snapshot.getMainPixel(1,0),snapshot.getMaskPixel(1,0)].join(",")',
       )
-      // Native alpha-on-opaque with partial opacity writes RGB only, even when
-      // source alpha is zero. The opaque display conversion to alpha 255 is
-      // separate from the raw image planes returned by piledCopy.
-      assert.equal(pixels, '1056816,0,1056816,0', `raw snapshot RGB/mask: ${pixels}`)
+      // The transparent source has zero blend weight on the stock alpha-row
+      // path. Both the original RGB and the underlying mask survive the copy.
+      assert.equal(pixels, '1056816,255,1056816,255', `raw snapshot RGB/mask: ${pixels}`)
     } finally {
       await stop()
     }

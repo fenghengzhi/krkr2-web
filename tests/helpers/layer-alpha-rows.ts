@@ -18,6 +18,8 @@ export const layerAlphaRows = [
   // A half-opacity alpha subtree is blended into an opaque screenshot with
   // the native /256 kernel, then its exact RGB and mask survive BMP storage.
   { id: 'alpha-row-scene-bitmap', expected: '126/255,8257536/255|126/255,8257536/255|73' },
+  { id: 'alpha-row-transparent-group', expected: '1056816/255,1056816/73' },
+  { id: 'alpha-row-exposed-group', expected: '4194304,32768,32768|4194304,32768,16384|4194304,16384,16384' },
 ] as const
 
 export const layerAlphaSource = String.raw`
@@ -26,6 +28,34 @@ var rowWin=new Window(),rowRoot=new Layer(rowWin,null);
 rowWin.add(rowRoot);rowRoot.setSize(16,1);rowRoot.setImageSize(16,1);
 var rowDest=new Layer(rowWin,rowRoot);rowWin.add(rowDest);rowDest.setImageSize(16,1);
 function firstRowPixel(){return ((rowDest.getMainPixel(0,0)>>16)&255)+"/"+rowDest.getMaskPixel(0,0);}
+function groupColors(){
+ rowDest.piledCopy(0,0,rowRoot,0,0,3,1);
+ return rowDest.getMainPixel(0,0)+","+rowDest.getMainPixel(1,0)+","+rowDest.getMainPixel(2,0);
+}
+function layerAlphaGroup(id){
+ var group=new Layer(rowWin,rowRoot),tile=new Layer(rowWin,group),other=new Layer(rowWin,group);
+ var result,failure;
+ try{
+  rowRoot.face=dfAlpha;group.setSize(3,1);group.opacity=128;group.visible=true;
+  tile.setSize(2,1);tile.visible=true;
+  if(id=="alpha-row-transparent-group"){
+   rowRoot.fillRect(0,0,3,1,0xff102030);rowRoot.setMaskPixel(1,0,73);
+   group.hasImage=false;group.neutralColor=0xff00ff00;
+   tile.type=ltPsNormal;tile.fillRect(0,0,2,1,0);
+   groupColors();
+   result=rowDest.getMainPixel(0,0)+"/"+rowDest.getMaskPixel(0,0)+","+rowDest.getMainPixel(1,0)+"/"+rowDest.getMaskPixel(1,0);
+  }else{
+   rowRoot.fillRect(0,0,3,1,0xff000000);
+   group.type=ltOpaque;group.hasImage=false;group.neutralColor=0x00800000;
+   tile.type=ltOpaque;tile.left=1;tile.fillRect(0,0,2,1,0xff008000);
+   result=groupColors();
+   other.type=ltOpaque;other.setSize(1,1);other.left=2;other.fillRect(0,0,1,1,0xff008000);other.visible=true;
+   result+="|"+groupColors();group.cached=true;group.update();result+="|"+groupColors();
+  }
+ }catch(e){failure=e;}
+ invalidate other;invalidate tile;invalidate group;
+ if(failure!==void)throw failure;return result;
+}
 function layerAlphaSceneBitmap(){
  var win=new Window(),root=new Layer(win,null),fore=new Layer(win,root),child=new Layer(win,fore);
  var saved=new Layer(win,root),result,failure;
@@ -45,6 +75,7 @@ function layerAlphaSceneBitmap(){
 }
 function layerAlphaRun(id){
  if(id=="alpha-row-scene-bitmap")return layerAlphaSceneBitmap();
+ if(id=="alpha-row-transparent-group" || id=="alpha-row-exposed-group")return layerAlphaGroup(id);
  var binder=id=="alpha-row-binder",single=binder || id=="alpha-row-opaque";
  var cached=id=="alpha-row-cached-crop";
  var faded=cached || id=="alpha-row-opacity" || id=="alpha-row-opacity-offset" || id=="alpha-row-operate";

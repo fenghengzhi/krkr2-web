@@ -210,6 +210,9 @@ function changeNeutral(){
   snapshot.piledCopy(0,0,scene,0,0,20,4);
   return int(!solid.hasImage && !group.hasImage && !alpha.hasImage && !binder.hasImage);
 }
+function cacheGroup(value){
+  group.cached=value;group.update();snapshot.piledCopy(0,0,scene,0,0,20,4);return int(group.cached);
+}
 Debug.message("neutral-color-ready:"+int(rejected==1 && !solid.hasImage && !group.hasImage && !alpha.hasImage && !binder.hasImage));
 `,
       )
@@ -217,12 +220,13 @@ Debug.message("neutral-color-ready:"+int(rejected==1 && !solid.hasImage && !grou
         // The upper row is the live tree; the lower row is piledCopy through
         // its drawable ancestor. The snapshot is opaque like that ancestor:
         // piledCopy preserves masks, including the opaque child's zero alpha.
-        // Opaque 128-valued colors give an exact half-opacity result of 64.
+        // The group fill fades to 64. Its sole exposed opaque child draws
+        // directly into the ancestor at its own opacity.
         const samples = [1, 5].flatMap((y) => [1, 6, 10, 14, 18].map((x) => [x, y]))
         const red = [
           [128, 0, 0, 255],
           [64, 0, 0, 255],
-          [0, 64, 0, 255],
+          [0, 128, 0, 255],
           [0, 0, 0, 255],
           [0, 0, 0, 255],
         ]
@@ -234,13 +238,20 @@ Debug.message("neutral-color-ready:"+int(rejected==1 && !solid.hasImage && !grou
         const blue = [
           [0, 0, 128, 255],
           [0, 0, 64, 255],
-          [0, 64, 0, 255],
+          [0, 128, 0, 255],
           [0, 0, 0, 255],
           [0, 0, 0, 255],
         ]
         expect(await pixels(page, testInfo, 'neutral-color-no-image-blue', 20, samples, 8)).toEqual(
           [...blue, ...blue],
         )
+        const childSamples = [[10, 1], [10, 5]]
+        await evaluate(page, 'cacheGroup(true)', '1')
+        expect(await pixels(page, testInfo, 'neutral-color-cached-child', 20, childSamples, 8))
+          .toEqual([[0, 64, 0, 255], [0, 64, 0, 255]])
+        await evaluate(page, 'cacheGroup(false)', '0')
+        expect(await pixels(page, testInfo, 'neutral-color-exposed-child', 20, childSamples, 8))
+          .toEqual([[0, 128, 0, 255], [0, 128, 0, 255]])
       } finally {
         await stop()
       }

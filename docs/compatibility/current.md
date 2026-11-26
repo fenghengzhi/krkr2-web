@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 137 批修正淡化图层组中独占区域的亮度，支持游戏用非零小数开启 KAG 剧情标签和忽略换行，并保留因文件名参数错误而未能切换的旧影片。新增行为待托管验证。[137 实现与验收](../decisions/137-layer-groups-parser-flags-and-movie-open.md)
+
 第 136 批可以在相同游戏的桌面版与浏览器之间转移原版存档，并按原版语义处理动态生成的章节和影片提示点。第 132 批的原版介绍游戏已完成六条浏览器路线。新增存档迁移与原版 Windows 读回仍待托管验证。[136 实现与验收](../decisions/136-native-saves-scenario-loading-and-video-cues.md)
 
 第 135 批让画廊和菜单可以重复使用大型图片，改动其中一页时才复制对应的颜色与遮罩或点击区域。KAG 宏开始保留对象和绑定方法的身份，普通 Wave 平滑跳转在前后两段分别混音。本批实现待托管验证。[135 实现与验收](../decisions/135-shared-game-layers-macro-values-and-wave-loops.md)

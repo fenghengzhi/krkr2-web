@@ -189,7 +189,7 @@ class KAGParser {
     .map(
       (name) => `property ${name} {
     getter() { return __host("KAG.get", __kagId, "${name}"); }
-    setter(value) { __host("KAG.set", __kagId, "${name}", int(value)); }
+    setter(value) { __host("KAG.set", __kagId, "${name}", ${name === 'debugLevel' ? 'int(value)' : '!!value'}); }
   }`,
     )
     .join('\n')}

@@ -12,6 +12,7 @@ import {
 import type { Pixels } from '../ports/graphics.ts'
 import { videoBalanceReadback } from './video-audio.ts'
 import { VideoPeriod } from './video-period.ts'
+import { TjsError } from '../system/tjs-error.ts'
 import { ExecutionCancelled } from '../scheduler/control.ts'
 import {
   isScriptObject,
@@ -421,7 +422,9 @@ export class VideoService {
     }
     const identity = () => ({ id: video.id, epoch: video.snapshot.epoch })
     let value: ScriptValue
-    if (method === 'close') {
+    if (method === 'prepareOpen') {
+      if (input.length < 1) throw new TjsError('TJSBadParamCount')
+    } else if (method === 'close') {
       const previous = video.snapshot.status
       this.cancelEvents(video)
       video.snapshot.epoch = this.epoch++

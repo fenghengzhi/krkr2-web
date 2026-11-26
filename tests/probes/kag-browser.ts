@@ -159,7 +159,7 @@ async function prepareConsole(): Promise<void> {
   if (await exit.isVisible()) await exit.click()
   await expect(page.locator('#stage')).not.toHaveClass(/window-fullscreen/)
 }
-async function evaluate(source: string, result: string | RegExp): Promise<string> {
+async function evaluate(source: string, result: string | RegExp, timeout = 5000): Promise<string> {
   const prefix = `kag-probe-result-${++evaluation}:`
   await page.locator('#expression').fill(`${JSON.stringify(prefix)}+string(${source})`)
   await page.locator('#evaluate').click()
@@ -167,7 +167,7 @@ async function evaluate(source: string, result: string | RegExp): Promise<string
     .locator('#logs p span')
     .filter({ hasText: new RegExp('^' + prefix) })
     .last()
-  await expect(output).toBeVisible({ timeout: 5000 })
+  await expect(output).toBeVisible({ timeout })
   const value = ((await output.textContent()) ?? '').slice(prefix.length)
   if (typeof result === 'string') expect(value).toBe(result)
   else expect(value).toMatch(result)
@@ -229,10 +229,17 @@ try {
         'flow-started',
       )
       await marker('line')
-      await evaluate(
-        '(function(){kag.showHistory();return "history="+kag.historyShowing+","+(kag.currentModalLayer===kag.historyLayer);})()',
-        'history=1,1',
-      )
+      // The first opening loads ButtonLayer.tjs from the original package.
+      // Submit the action once and measure when its modal layer is installed.
+      const historyStart = performance.now()
+      try {
+        await evaluate(
+          '(function(){kag.showHistory();return "history="+kag.historyShowing+","+(kag.currentModalLayer===kag.historyLayer);})()',
+          'history=1,1', 20000,
+        )
+      } finally {
+        report.historyOpenMs = Math.round(performance.now() - historyStart)
+      }
       await page.locator('canvas').focus()
       await page.keyboard.press('Escape')
       // DOM key dispatch can finish before the queued TJS input handler runs.

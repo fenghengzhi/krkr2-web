@@ -91,16 +91,15 @@ function fill(surface: Surface, rect: Rect, color: number, drawn?: Uint8Array): 
     }
 }
 
-/** The Complete drawable copies completed rectangles without blending. Binder
- * receivers forward messages to that drawable; ordinary receivers blend into
- * their own image first. This is intentionally separate from screen rendering.
- * Explicit cache enablement affects message order; incremental native cache
- * regions and transition pipelines remain the composer's existing boundaries. */
+/** Binder receivers forward completed rectangles. Ordinary receivers blend
+ * into their own target first. A snapshot temporarily enables the root cache,
+ * whereas a window draw uses the root's actual cache setting. */
 export function completeLayer(
   layers: LayerTree,
   id: number,
   transitioned: ReadonlyMap<number, CompletedTransition>,
   requested?: Rect,
+  targetKind: 'snapshot' | 'window' = 'snapshot',
 ): Pixels {
   const root = layers.get(id),
     bounds = { x: 0, y: 0, width: root.width, height: root.height },
@@ -295,7 +294,7 @@ export function completeLayer(
       complete: (source) => copy(result, bounds, source),
       borrow: () => ({ pixels: result, bounds }),
     },
-    { pixels: result, bounds },
+    targetKind === 'snapshot' ? { pixels: result, bounds } : undefined,
   )
   return result
 }

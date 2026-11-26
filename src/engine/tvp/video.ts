@@ -8,7 +8,13 @@ class VideoOverlay {
   function finalize(){}
   function __videoDispatch(events,immediate=false){for(var i=0;i<events.count;i++){var event=events[i];if(!immediate || !System.eventDisabled)this[event[0]](event[1]*);}}
   function __videoRun(method,args){var result=__host("Video.call",__videoId,method,args);__videoDispatch(result.callbacks,true);return result.value;}
-  function open(name){__videoRun("close",[]);__videoRun("open",[string(name)]);}
+  function open(args*){
+    if(args.count<1){__videoRun("prepareOpen",[]);return;}
+    // Native checks arity and converts ttstr before Open enters its Close.
+    // A conversion failure must leave the playing graph and its events live.
+    var name=string(args[0]);
+    __videoRun("close",[]);__videoRun("open",[name]);
+  }
   ${['play', 'stop', 'pause', 'rewind', 'prepare', 'close'].map((name) => `function ${name}(){__videoRun("${name}",[]);}`).join('\n')}
   function setPos(args*){if(args.count<2)throw new global.Exception("VideoOverlay.setPos requires two arguments");__host("Video.geometry",__videoId,"setPos",int(args[0]),int(args[1]));}
   function setSize(args*){if(args.count<2)throw new global.Exception("VideoOverlay.setSize requires two arguments");__host("Video.geometry",__videoId,"setSize",int(args[0]),int(args[1]));}

@@ -271,10 +271,22 @@ export class SceneComposer {
     return this.cached(`display-main:${id}`, `${main.revision}:${layer.type}`,
       () => forDisplay(main.pixels, layer.type))
   }
+  private hasDirectTransferGroup(layer: LayerState): boolean {
+    return layer.children.some((id) => {
+      const child = this.layers.get(id)
+      if (!child.visible || !child.opacity) return false
+      // An uncached image-less parent can pass an exposed opaque child to
+      // its own parent at full strength, even when the group itself is faded.
+      return (!layer.bitmap && layer.type === 1 && !layer.cached && layer.opacity < 255 &&
+        child.type === 1 && child.opacity === 255) || this.hasDirectTransferGroup(child)
+    })
+  }
   private compose(id: number, software = false, ancestors = new Set<number>()): Composed {
     const layer = this.layers.get(id)
     if ((software && !binder(layer)) || this.needsRawComposition(id, true)) {
-      const source = this.blendTree(id, false, ancestors)
+      const source = layer.primary && layer.type === 1 && this.hasDirectTransferGroup(layer)
+        ? this.copyTree(id, undefined, 'window')
+        : this.blendTree(id, false, ancestors)
       return this.cached(`blend-display:${id}`, `${source.revision}:${layer.type}`, () =>
         forDisplay(source.pixels, compositionType(layer)),
       )
@@ -341,7 +353,7 @@ export class SceneComposer {
   }
   /** Complete populates the requested rectangle of a layer-sized bitmap.
    * The rectangle's left edge and width affect the native scanline kernels. */
-  private copyTree(id: number, area?: Rect): Composed {
+  private copyTree(id: number, area?: Rect, targetKind: 'snapshot' | 'window' = 'snapshot'): Composed {
     const transitioned = new Map<number, CompletedTransition>()
     const signature = (id: number, ancestors = new Set<number>()): unknown[] => {
       if (ancestors.has(id)) throw new Error('Cyclic scene composition')
@@ -372,8 +384,8 @@ export class SceneComposer {
           .map((id) => signature(id, trail)),
       ]
     }
-    return this.cached(`copy-tree:${id}`, JSON.stringify([area, signature(id)]), () =>
-      completeLayer(this.layers, id, transitioned, area),
+    return this.cached(`${targetKind}-tree:${id}`, JSON.stringify([area, signature(id)]), () =>
+      completeLayer(this.layers, id, transitioned, area, targetKind),
     )
   }
   /** Native Complete returns MainImage before BeforeCompletion in this case,
