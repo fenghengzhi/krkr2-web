@@ -1,5 +1,6 @@
-import { basename } from 'node:path'
-import { expect, type Page, type TestInfo } from '@playwright/test'
+import { readdir, stat } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+import { expect, test, type Page, type TestInfo } from '@playwright/test'
 
 interface DirectoryEvent {
   type: string
@@ -38,14 +39,74 @@ export async function observeGameDirectoryInput(page: Page) {
 }
 
 export async function chooseGameDirectory(page: Page, directory: string) {
-  const before = await page.evaluate(() => window.gameDirectoryInput.events.length),
+  const info = test.info(), topDirectory = basename(directory)
+  const initial = await page.evaluate(() => ({ before: window.gameDirectoryInput.events.length,
+      mode: document.querySelector<HTMLSelectElement>('#project-mode')?.value,
+      executableDirectory: document.querySelector<HTMLInputElement>('#project-exe-directory')?.value,
+      root: document.querySelector<HTMLInputElement>('#project-root')?.value })), before = initial.before,
     choosing = page.waitForEvent('filechooser', { timeout: 5000 })
   const [chooser] = await Promise.all([choosing, page.locator('#choose-folder').click({ timeout: 5000 })])
   expect(await chooser.element().getAttribute('id')).toBe('folder')
   expect(await chooser.element().getAttribute('webkitdirectory')).not.toBeNull()
   expect(chooser.isMultiple()).toBe(true)
-  await chooser.setFiles(directory, { timeout: 15000 })
-  return { before, topDirectory: basename(directory) }
+  try { await chooser.setFiles(directory, { timeout: 15000 }) }
+  catch (error) {
+    if (info.project.name !== 'webkit' || !(error instanceof Error) || error.name !== 'TimeoutError') throw error
+    // Frozen WebKit traces show native input/change and a running game while
+    // Playwright's directory completion promise times out. Admit only that
+    // already-completed real selection, independently of the transport wait.
+    // Never repeat the selection, inject files/events, or suppress another error.
+    try {
+      // Callers retain this unchanged fixture directory until selection and
+      // game assertions finish. Inspect it only for this exceptional proof;
+      // ordinary successful selections do not gain a file-count restriction.
+      const expected: DirectoryEvent['files'] = []
+      const collect = async (relative = ''): Promise<void> => {
+        for (const item of await readdir(join(directory, relative), { withFileTypes: true })) {
+          const path = relative ? relative + '/' + item.name : item.name
+          if (item.isDirectory()) await collect(path)
+          else {
+            if (!item.isFile()) throw new Error('Directory fixture must contain only regular files and directories')
+            if (expected.length >= 128) throw new Error('Directory fixture exceeds the complete FileList observation bound')
+            expected.push({ name: item.name, path: topDirectory + '/' + path, bytes: (await stat(join(directory, path))).size })
+          }
+        }
+      }
+      await collect()
+      const state = await attachGameDirectoryInput(page, info, 'chooser-timeout-' + before),
+        events = state.observation.events.slice(before), sorted = (files: DirectoryEvent['files']) =>
+          [...files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+      expect(expected.length).toBeGreaterThan(0)
+      expect(state.observation.dropped).toBe(0)
+      expect(events.map((event) => event.type)).toEqual(['input', 'change'])
+      for (const event of events) {
+        expect(event.trusted).toBe(true)
+        expect(event.count).toBe(expected.length)
+        expect(sorted(event.files)).toEqual(sorted(expected))
+        expect(event.mode).toBe(initial.mode)
+        expect(event.executableDirectory).toBe(initial.executableDirectory)
+        expect(event.root).toBe(initial.root)
+      }
+      expect(state.mode).toBe(initial.mode === 'collection' ? 'auto' : initial.mode)
+      expect(state.executableDirectory).toBe(initial.executableDirectory)
+      expect(state.root).toBe(initial.root)
+      expect(state.currentFileCount).toBe(0)
+      expect(state.status).toBe('运行中')
+      expect(state.evaluateEnabled).toBe(true)
+      expect(state.gameCanvases).toBeGreaterThan(0)
+      expect(page.workers().filter((worker) => worker.url().includes('session.worker'))).toHaveLength(1)
+      await info.attach('directory-upload-completed-after-transport-timeout-' + before, {
+        contentType: 'application/json', body: JSON.stringify({
+          transportError: { name: error.name, message: error.message, stack: error.stack }, initial,
+          expected: sorted(expected), acknowledgement: 'Complete trusted FileList and change, consumed input, live game and Worker',
+          scope: 'The original Playwright timeout is retained. Existing game-ready, pixels, root selection and save assertions still follow.',
+        }, null, 2),
+      })
+    } catch (evidenceError) {
+      throw new AggregateError([error, evidenceError], 'Directory selection completion was not independently established', { cause: error })
+    }
+  }
+  return { before, topDirectory }
 }
 
 export async function attachGameDirectoryInput(page: Page, info: TestInfo, phase: string) {
@@ -58,6 +119,9 @@ export async function attachGameDirectoryInput(page: Page, info: TestInfo, phase
       executableDirectory: document.querySelector<HTMLInputElement>('#project-exe-directory')?.value,
       root: document.querySelector<HTMLInputElement>('#project-root')?.value,
       currentFileCount: document.querySelector<HTMLInputElement>('#folder')?.files?.length,
+      status: document.querySelector('#status')?.textContent,
+      evaluateEnabled: document.querySelector<HTMLButtonElement>('#evaluate')?.disabled === false,
+      gameCanvases: document.querySelectorAll('.game-window canvas[data-window-id]').length,
     })), new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('Directory input evidence read timed out')), 3000)
     })])

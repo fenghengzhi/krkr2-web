@@ -61,7 +61,7 @@ export function mountApp(root: HTMLDivElement): void {
     </main>`
   const el = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!
   const projectControls = document.createElement('div')
-  projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">自动识别游戏目录、ZIP 或光盘</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><label for="project-executable">游戏程序名或发行包（可选）</label><input id="project-executable" placeholder="例如 Story.exe、Game.zip 或 Disc1.iso" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">可从游戏目录、ZIP、自解压 ZIP 或 ISO 光盘启动。CUE 光盘请同时导入数据轨文件。</p>`
+  projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">自动识别游戏目录、ZIP 或光盘</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><label for="project-executable">游戏程序名或发行包（可选）</label><input id="project-executable" placeholder="例如 Story.exe 或 Release.zip&gt;Media/Disc1.cue" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">可从游戏目录、ZIP、自解压 ZIP 或 ISO 光盘启动。ZIP 内含光盘时请选择自动识别。CUE 需要配套的数据轨文件。</p>`
   root.querySelector('label[for="entry"]')!.before(projectControls)
   const zipLabels: Record<ZipNameEncoding, string> = {
     cp437: 'ZIP 默认（CP437）', shift_jis: '日文（Shift_JIS）', gbk: '简体中文（GBK）',
@@ -613,7 +613,8 @@ export function mountApp(root: HTMLDivElement): void {
           ? `当前游戏：${loaded.project.directory || './'} · 程序目录：${loaded.project.executableDirectory || './'}`
           : '当前游戏：文件集合（兼容已有导入）'
         el('project-status').textContent = projectLocation +
-          (loaded.project?.bootDisc ? ' · 启动光盘：' + loaded.project.bootDisc : '') +
+          (loaded.project?.bootDisc ? ' · 启动光盘：' +
+            (loaded.project.distribution ? loaded.project.distribution + '>' : '') + loaded.project.bootDisc : '') +
           (loaded.zipEncoding ? ' · ZIP 文件名：' + zipLabels[loaded.zipEncoding] : '') +
           (loaded.scriptEncoding ? ' · 脚本与剧情：' + scriptLabels[loaded.scriptEncoding] : '')
         log('会话就绪。点击画面继续。')

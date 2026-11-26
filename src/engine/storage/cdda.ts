@@ -9,6 +9,27 @@ import { TvpError } from '../system/tvp-error.ts'
 import { discAddress, storageFilePath, toPublicStoragePath } from './public-path.ts'
 import type { AudioResourceSources, AudioSourceLease } from './audio-sources.ts'
 
+/** A ZIP distribution mounts its members at the import root. A binding may
+ * use that root directly or spell out the selected outer ZIP's address. */
+export function distributionDiscBindings(discs: readonly CddaDisc[] | undefined, distribution: string | undefined) {
+  const copied = copyCddaDiscs(discs)
+  if (!copied || distribution === undefined) return copied
+  const outer = toPublicStoragePath(distribution).toLowerCase()
+  return copied.map((disc) => {
+    const split = disc.cue.indexOf('>')
+    if (split < 0) return disc
+    const prefix = disc.cue.slice(0, split)
+    if (!/\.(?:exe|zip)$/i.test(prefix)) return disc
+    // Parent-relative bindings can refer to a different package inside the
+    // installed game's directory. Leave those for its own storage resolver.
+    let name: string
+    try { name = toPublicStoragePath(prefix) } catch { return disc }
+    if (name.toLowerCase() !== outer) return disc
+    const path = storageFilePath(disc.cue)
+    return { ...disc, cue: toPublicStoragePath(path.slice(path.indexOf('>') + 1)) }
+  })
+}
+
 type SelectedPart = { kind: 'silence'; frames: number } | {
   kind: 'file'; resource: Resource; encoding: 'encoded' | 's16le' | 's16be'; startFrame: number; endFrame?: number
 }

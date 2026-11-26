@@ -197,6 +197,7 @@ export class PcmStreamPool {
         record.asset = { kind: 'stream', streamId: record.streamId, sampleRate: info.sampleRate,
           sampleCount: info.sampleCount, channels: info.channels, bits: info.bits,
           ...(info.pcmEncoding === undefined ? {} : { pcmEncoding: info.pcmEncoding }),
+          ...(info.speakerMask === undefined ? {} : { speakerMask: info.speakerMask }),
           ...(info.reportedSampleCount === undefined ? {} : { reportedSampleCount: info.reportedSampleCount }),
           loops: { links: loops.links.map((link) => ({ ...link })), labels: loops.labels.map((label) => ({ ...label })) },
           initial: [] }

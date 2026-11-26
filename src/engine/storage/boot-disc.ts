@@ -42,7 +42,8 @@ async function projectFiles(fs: DiscFilesystem, directories: string[], recursive
 }
 
 export async function selectBootDisc(resources: Resource[], selection: Location, supplied: readonly CddaDisc[] | undefined,
-  reader: ArchiveReader, checkpoint: () => Promise<void>, select: Select, entryDrive?: string) {
+  reader: ArchiveReader, checkpoint: () => Promise<void>, select: Select, entryDrive?: string,
+  distribution?: string, optionalMedia = false) {
   const frozen = selection.mode === 'root' && selection.bootDisc
   const at = discAddress(selection.executableDirectory ?? '') ?? (selection.mode === 'root' ? discAddress(selection.directory) : undefined)
     ?? discAddress(selection.executable ?? '')
@@ -99,8 +100,12 @@ export async function selectBootDisc(resources: Resource[], selection: Location,
         ? extractStoragePath(choice.directory.split('>', 1)[0]!) : choice.directory)
       // Keep recorded filenames for XP3/ZIP resolution. Canonical file-medium
       // paths below follow the original Win32 ASCII case folding.
-      const files = await projectFiles(mounted.filesystem, roots, choice.mode !== 'root', checkpoint)
-      if (!files.length) return
+      const files = await projectFiles(mounted.filesystem, roots, choice.mode !== 'root', checkpoint).catch(async (error: unknown) => {
+        if (!optionalMedia || named || expectedDrive || error instanceof Error && error.name === 'AbortError') throw error
+        await checkpoint()
+        return undefined
+      })
+      if (!files?.length) return
       const inner = await select(files, choice)
       if (!inner) return
       const qualify = (path: string) => discStoragePath(drive, parseStoragePath(path))
@@ -118,12 +123,16 @@ export async function selectBootDisc(resources: Resource[], selection: Location,
         if (sheetImages.has(item.file.name)) continue
         const result = await open(item)
         if (!result) continue
-        if (found) throw new Error('找到多张可启动的光盘，请在“游戏程序名或发行包”指定 ISO 或 CUE。')
+        if (found) {
+          const prefix = distribution ? distribution + '>' : ''
+          throw new Error('找到多张可启动的光盘，请在“游戏程序名或发行包”指定“' +
+            prefix + found.project.bootDisc + '”或“' + prefix + result.project.bootDisc + '”。')
+        }
         found = result
       }
     }
     if (found) return found
-    if (unreadable) throw unreadable
+    if (unreadable && !optionalMedia) throw unreadable
     if (named || expectedDrive) throw new Error('选定的光盘里没有找到 KRKR2 游戏入口。')
   } finally { storage.dispose() }
 }

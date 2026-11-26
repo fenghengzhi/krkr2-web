@@ -12,6 +12,7 @@ async function runWorker<T = unknown>(page: Page, testInfo: TestInfo, body: stri
     'src/backends/text/freetype/face.ts',
     'src/backends/text/freetype/module.ts',
     'src/engine/graphics/font.ts',
+    'src/engine/graphics/font-family.ts',
     'src/engine/graphics/vertical.ts',
     'src/formats/font/vertical-data.ts',
     'src/formats/font/collection.ts',
@@ -81,7 +82,7 @@ try {
  observations.phase='resolve-local-faces';
  // local() actually resolves a font; FontFaceSet.check alone can return true
  // when a missing family merely falls back. Keep all availability outcomes.
- for(const name of ['MS PMincho','Times New Roman','Liberation Serif','Times']){
+ for(const name of ['MS PMincho','ＭＳ Ｐ明朝','Times New Roman','Liberation Serif','Times']){
   const alias='krkr-serifs-'+localFaces.length, face=new FontFace(alias,'local('+JSON.stringify(name)+')');
   try {await face.load();self.fonts.add(face);owned.push(face);candidates.push({name,alias});localFaces.push({name,available:true});}
   catch(error){localFaces.push({name,available:false,error:String(error)});}
@@ -130,7 +131,7 @@ try {
    return {canvas:[w,h],origin:[ox,oy],ink:x1<0?null:{left:x0-ox,top:y0-oy,width:x1-x0+1,height:y1-y0+1},
     rgbaSha256:[...hash].map(v=>v.toString(16).padStart(2,'0')).join('')};
   };
-  const families=[...['MS PMincho','Times New Roman','Liberation Serif','Times','serif'].map(name=>({kind:'ordinary-family',name})),
+  const families=[...['MS PMincho','ＭＳ Ｐ明朝','Times New Roman','Liberation Serif','Times','serif'].map(name=>({kind:'ordinary-family',name})),
    ...candidates.map(face=>({kind:'loaded-local-alias',name:face.alias,localName:face.name}))];
   for(const text of ['A','W','AVATAR WAVE']){
    const a=text==='AVATAR WAVE'?actual:backend.text(text,24,0xffffff,{...font,face:'MS PMincho',height:24}),
@@ -171,12 +172,62 @@ try {
 } finally {for(const face of owned)self.fonts.delete(face);backend.dispose();}
 `, { narrow: [...await readFile('tests/fixtures/font/narrow.ttf')], wide: [...await readFile('tests/fixtures/font/wide.ttf')] })
   await info.attach('system-serif-selection', { body: JSON.stringify(result, null, 2), contentType: 'application/json' })
-  expect(result.localFaces).toHaveLength(4)
+  expect(result.localFaces).toHaveLength(5)
   expect(result.localFaces.some((face) => face.available && face.name === result.selected)).toBe(true)
   expect(result.measurements).toHaveLength(12)
   expect(result.measurements.every((row) => row.actual === row.expected)).toBe(true)
   expect(result.rasterCompared).toBe(true)
   expect(result.requestedWidths).toEqual([10, 10, 18])
+})
+
+test('localized Mincho names use the available family and keep an exact requested face ahead of its counterpart', async ({ page }, info) => {
+  const result = await runWorker<{ availability: unknown[]; measurements: unknown[]; rasters: unknown[]; requestedWidths: number[] }>(page, info, `
+const backend=new BrowserGraphics(), owned=[], availability=[], measurements=[], rasters=[];
+observations.availability=availability;observations.measurements=measurements;observations.rasters=rasters;
+try {
+ const pairs=[['MS PMincho','ＭＳ Ｐ明朝'],['MS Mincho','ＭＳ 明朝']];
+ for(const pair of pairs){
+  const outcomes=[];
+  for(const name of pair){
+   try {await new FontFace('mincho-availability','local('+JSON.stringify(name)+')').load();outcomes.push({name,available:true});}
+   catch(error){outcomes.push({name,available:false,error:String(error)});}
+  }
+  const available=outcomes.some(row=>row.available), actual=[];
+  for(const name of pair)actual.push(await backend.hasFont(name));
+  availability.push({names:pair,outcomes,available,actual});
+  check(actual.every(value=>value===available),'A localized name must not claim a missing local font: '+JSON.stringify(availability));
+  // Both ordinary CSS names must refer to the same available family or Web
+  // substitute. No local() alias raster is used as the pixel oracle here.
+  for(const height of [24,40])for(const text of ['AVATAR WAVE','明朝の物語']){
+   const a=backend.measure(text,{...font,height,face:pair[0]}),b=backend.measure(text,{...font,height,face:pair[1]});
+   measurements.push({names:pair,height,text,english:a,localized:b});
+   check(a.width===b.width&&a.ascent===b.ascent,'Localized Mincho metrics '+JSON.stringify(measurements.at(-1)));
+   const x=backend.text(text,height,0xffffff,{...font,height,face:pair[0]}),y=backend.text(text,height,0xffffff,{...font,height,face:pair[1]}),
+    bounds=image=>[image.width,image.height,image.left,image.top],
+    digest=async bytes=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(v=>v.toString(16).padStart(2,'0')).join('');
+   rasters.push({names:pair,height,text,english:{bounds:bounds(x),sha256:await digest(x.data)},localized:{bounds:bounds(y),sha256:await digest(y.data)}});
+   check(JSON.stringify(bounds(x))===JSON.stringify(bounds(y))&&x.data.length===y.data.length&&x.data.every((v,i)=>v===y.data[i]),'Localized Mincho raster '+JSON.stringify(rasters.at(-1)));
+  }
+ }
+ check(await backend.hasFont('krkr-no-such-local-mincho-167')===false,'Unknown font must remain unavailable');
+ const install=async(name,bytes)=>{const face=new FontFace(name,new Uint8Array(bytes));await face.load();fonts.add(face);owned.push(face);};
+ // Install distinct English/Japanese author faces together, so a real local
+ // Japanese face cannot be mistaken for a missing one on this host. Exact
+ // requested names win over their counterparts and later list candidates.
+ // These controlled faces are not evidence of installed Microsoft fonts.
+ await install('MS PMincho',data.narrow);await install('MS Mincho',data.narrow);await install('Game Face',data.wide);
+ await install('ＭＳ Ｐ明朝',data.wide);await install('ＭＳ 明朝',data.wide);
+ const width=face=>backend.measure('AA',{...font,face}).width,
+  requestedWidths=['MS PMincho','MS Mincho','ＭＳ Ｐ明朝','ＭＳ 明朝','Game Face,ＭＳ Ｐ明朝','MS PMincho,Game Face','ＭＳ Ｐ明朝,Game Face'].map(width);
+ observations.requestedWidths=requestedWidths;
+ check(JSON.stringify(requestedWidths)==='[20,20,36,36,36,20,36]','Exact requested font priority '+JSON.stringify(requestedWidths));
+ postMessage({availability,measurements,rasters,requestedWidths});
+}finally{for(const face of owned)fonts.delete(face);backend.dispose();}
+`, { narrow: [...await readFile('tests/fixtures/font/narrow.ttf')], wide: [...await readFile('tests/fixtures/font/wide.ttf')] })
+  expect(result.availability).toHaveLength(2)
+  expect(result.measurements).toHaveLength(8)
+  expect(result.rasters).toHaveLength(8)
+  expect(result.requestedWidths).toEqual([20, 20, 36, 36, 36, 20, 36])
 })
 
 test('system glyph decorations retain every pixel beyond the em box, including rotation and shadows', async ({ page }, info) => {

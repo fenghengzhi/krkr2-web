@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 167 批把 ZIP 内的 ISO 或 CUE 数据轨接入游戏启动与游戏库。明朝字体可用日文或英文名匹配同一字族。多声道 WAVE 混音开始按文件声明的扬声器位置分配对白和环绕声。新增行为等待托管验收。[167 实现与托管证据](../decisions/167-packaged-game-discs-fonts-and-speakers.md)
+
 第 166 批支持从含 KRKR2 项目的 ISO 或 CUE 数据轨直接启动，包括盘中子目录的 XP3 与补丁。光盘路径只读，默认存档目录位于浏览器内。图层影片在交付目标帧后触发剧情提示，新增行为等待托管验收。[166 实现与托管证据](../decisions/166-bootable-game-discs-and-movie-cues.md)
 
 第 165 批接入 ISO 9660 和 Joliet 文件目录。游戏能从已绑定盘符或注册的自动搜索目录读取光盘内的文件，包括打包素材。游戏库保留单个 ISO 或 CUE 的绑定。分段 MP4 更换音轨时的时长修订同批待验。[165 范围与证据](../decisions/165-disc-files-and-fragmented-movies.md)

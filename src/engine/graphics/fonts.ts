@@ -12,6 +12,7 @@ import { colorGlyph, shadowGlyph, type GlyphMask } from './glyph.ts'
 import { fontGeometry } from './font.ts'
 import { isVerticalFace } from './vertical.ts'
 import { fontCandidates } from './font-candidates.ts'
+import { fontFamilyNames } from './font-family.ts'
 import { standaloneFontBytes } from '../../formats/font/collection.ts'
 
 type Finish = <T>(work: Generator<void, T>) => Promise<T>
@@ -213,10 +214,14 @@ export class FontService {
     }
     let variants: NamedFontFace[] | undefined
     if (!spec.faceIsFileName) for (const candidate of fontCandidates(spec.face)) {
-      const family = candidate.name.toLowerCase()
-      variants = this.namedFiles.get(family) ??
-        (family.startsWith('@') ? this.namedFiles.get(family.slice(1)) : undefined)
-      if (!variants && !candidate.forced && !this.systemNames.has(family)) {
+      const families = fontFamilyNames(candidate.name).map((name) => name.toLowerCase())
+      variants = undefined
+      for (const family of families) {
+        variants = this.namedFiles.get(family) ??
+          (family.startsWith('@') ? this.namedFiles.get(family.slice(1)) : undefined)
+        if (variants) break
+      }
+      if (!variants && !candidate.forced && !families.some((family) => this.systemNames.has(family))) {
         // An older embedding cannot distinguish a missing system name from
         // an available one. Preserve its original list instead of silently
         // promoting a later game font over a real system face.

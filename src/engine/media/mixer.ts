@@ -30,6 +30,7 @@ import { StreamPcm, streamPageFrames, streamPcmReservation } from './stream-pcm.
 import { applySliExpression } from '../../formats/audio/sli.ts'
 import { waveAudioGains } from './wave-audio.ts'
 import { convertWaveOutput } from './wave-output.ts'
+import { waveSpeakerMix, type StereoSpeakerMix } from './wave-speaker-mask.ts'
 interface Fade {
   target: number
   delta: number
@@ -58,6 +59,7 @@ interface Voice {
   filterSource?: FilteredWaveSource
   filterBudget?: AudioFilterBudget
   sourcePipeline?: boolean
+  speakerMix?: StereoSpeakerMix
   ended?: boolean
   stream?: StreamPcm
   gains?: { volume: number; volume2: number; globalVolume: number; pan: number; focusVolume: number; left: number; right: number }
@@ -301,6 +303,7 @@ export class AudioMixer {
           !Number.isInteger(asset.bits) || asset.bits < 8 || asset.bits > Number(asset.pcmEncoding.slice(1)) ||
           (asset.pcmEncoding.startsWith('f') && asset.bits !== Number(asset.pcmEncoding.slice(1)))))
         throw new Error('Invalid PCM storage encoding')
+      const speakerMix = asset.kind === 'midi' ? undefined : waveSpeakerMix(asset.channels, asset.speakerMask)
       let bytes =
         asset.kind === 'pcm' ? asset.data.reduce((sum, data) => sum + data.byteLength, 0)
           : asset.kind === 'stream' ? streamPcmReservation(asset.channels) : 0
@@ -328,6 +331,7 @@ export class AudioMixer {
       )
       if (retained) { voice.fade = retained.fade; voice.clock = retained.clock }
       voice.asset = stream ? stream.asset : asset
+      voice.speakerMix = speakerMix
       voice.stream = stream
       voice.filters = filters
       voice.sourcePipeline = asset.kind !== 'midi' && (filters.length > 0 || asset.loops.links.some((link) => link.smooth) || !!voice.settings.waveConversion)
@@ -768,6 +772,13 @@ export class AudioMixer {
             voice.synth!.render(settings.position / asset.sampleRate, step / asset.sampleRate)
             l = voice.synth!.left
             r = voice.synth!.right
+          } else if (voice.speakerMix && settings.waveConversion !== 'i16m') {
+            l = r = 0
+            for (let channel = 0; channel < voice.speakerMix.length; channel++) {
+              const gains = voice.speakerMix[channel]!, value = sample(channel)
+              l += value * gains[0]
+              r += value * gains[1]
+            }
           } else {
             l = sample(0)
             const channels = settings.waveConversion === 'i16m' ? 1 : asset.channels

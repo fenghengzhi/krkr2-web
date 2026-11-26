@@ -9,9 +9,9 @@ export const fontCandidateCases = [
 /** The two authored TTFs draw the same rectangular A but advance 500/900
  * units per 1000 em. "AA" visibly distinguishes the selected family. The
  * reference panels use direct file names and never pass through a face list. */
-export const fontCandidateGameSource = String.raw`
+export function fontCandidateSource(cases: readonly { face: string }[]): string { return String.raw`
 System.exitOnWindowClose=false;
-var candidatePhase=0,candidateWidths=[],candidateFaces=${JSON.stringify(fontCandidateCases.map((row) => row.face))};
+var candidatePhase=0,candidateWidths=[],candidateFaces=${JSON.stringify(cases.map((row) => row.face))};
 var candidateWindow=new Window();candidateWindow.caption="Dialogue font choices";candidateWindow.setInnerSize(360,100);
 var candidateRoot=new Layer(candidateWindow,null);candidateRoot.setSize(360,100);candidateRoot.cached=true;
 candidateRoot.fillRect(0,0,360,100,0xff000000);
@@ -39,11 +39,13 @@ candidateRoot.onClick=function(){
 };
 // Deliberately no getList or font dialog: ordinary text is the first family lookup.
 candidateDraw();candidateWindow.visible=true;candidateWindow.update();
-`
+` }
+export const fontCandidateGameSource = fontCandidateSource(fontCandidateCases)
 
-export function fontCandidateFrameMismatch(data: Uint8Array, width: number, height: number, phase: number): unknown | null {
+export function fontCandidateFrameMismatch(data: Uint8Array, width: number, height: number, phase: number,
+  cases: readonly { wide: boolean }[] = fontCandidateCases): unknown | null {
   if (width !== 360 || height !== 100 || data.length !== width * height * 4) return { width, height, bytes: data.length }
-  const expected = fontCandidateCases[phase]!, offset = expected.wide ? 240 : 120
+  const expected = cases[phase]!, offset = expected.wide ? 240 : 120
   let different = false, ink = 0
   for (let y = 0; y < 60; y++) for (let x = 0; x < 120; x++) for (let c = 0; c < 4; c++) {
     const at = (y * width + x) * 4 + c, wanted = data[at + offset * 4]!

@@ -15,6 +15,7 @@ import { waveBooleanExpected, waveBooleanSource } from '../helpers/wave-booleans
 import { waveTailFiles, waveTailSdkExpected, waveTailSource } from '../helpers/wave-tail.ts'
 import { waveResetFiles, waveResetExpected, waveResetSource } from '../helpers/wave-flags-reset.ts'
 import { waveRiffFiles, waveRiffNames, waveRiffSdkExpected, waveRiffSource } from '../helpers/wave-riff-layout.ts'
+import { waveMaskFiles, waveMaskSdkExpected, waveMaskSdkNames, waveMaskSdkSource } from '../helpers/wave-speaker-mask.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -38,11 +39,12 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   ...waveTailSdkExpected,
   ...waveResetExpected,
   ...waveRiffSdkExpected,
+  ...waveMaskSdkExpected,
   ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
   'xp3-decoder': [xp3SegmentScript, xp3SegmentText, 'stop', '48000', '0', '12000', '36320736', '1452000'].join('~'),
   'xp3-compressed': [xp3SegmentScript, xp3SegmentText, xp3CompressedAudioHeader, 'closed'].join('~') }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles(), ...waveResetFiles(), ...waveRiffFiles() }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles(), ...waveResetFiles(), ...waveRiffFiles(), ...waveMaskFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -58,6 +60,9 @@ if (process.argv[2] === 'prepare') {
     waveBooleanSource,
     waveResetSource,
     waveRiffSource,
+    waveMaskSdkSource,
+    ...waveMaskSdkNames.map((name) =>
+      `try{record("wave-mask-${name}|"+maskSdk("mask-${name}.wav"));}catch(e){record("wave-mask-${name}|unexpected-error:"+e.message);}`),
     ...waveRiffNames.filter((name) => name !== 'riff-padded.wav').map((name) =>
       `try{record("wave-${name}|"+riffSdk("${name}"));}catch(e){record("wave-${name}|unexpected-error:"+e.message);}`),
     'try{record("wave-riff-play|"+riffSdk("riff-first.wav",true));}catch(e){record("wave-riff-play|unexpected-error:"+e.message);}',
@@ -139,6 +144,9 @@ if (process.argv[2] === 'prepare') {
   const complete = sdk.commit === manifest.commit && sdk.state === 'observed' && sdk.exitCode === 0 &&
     lines.length === results.length + 2 && lines[0] === 'start' && lines.at(-1) === 'done' && results.every((r) => r.matched)
   save('comparison.json', { commit: manifest.commit, complete, observationSha256: digest(raw), results,
+    waveSpeakerMasks: { planned: waveMaskSdkNames.length,
+      matched: results.filter((row) => row.id.startsWith('wave-mask-') && row.matched).length,
+      scope: 'Ordinary built-in Wave open/status/input frequency for declared surround/2.1/5.0/7.1-wide PCM without creating a sound device. Output-format properties and physical-device downmix equivalence are not inferred.' },
     waveReopen: { planned: Object.keys(waveReopenExpected).length,
       matched: results.filter((row) => row.id.startsWith('wave-reopen-') && row.matched).length },
     waveBoolean: { planned: Object.keys(waveBooleanExpected).length,

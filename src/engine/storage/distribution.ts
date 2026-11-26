@@ -1,7 +1,8 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import type { CddaDisc } from '../ports/cdda.ts'
 import { selectBootDisc } from './boot-disc.ts'
-import { copyGameProject, copyProjectSelection, findProjectExecutable, selectProjectLazy, type GameProject, type ProjectSelection } from './project.ts'
+import { distributionDiscBindings } from './cdda.ts'
+import { copyGameProject, copyProjectSelection, findProjectExecutable, packagedDiscPath, selectProjectLazy, type GameProject, type ProjectSelection } from './project.ts'
 import { discAddress, extractStorageName, extractStoragePath, nativeDiscPath, parseStoragePath, toPublicStoragePath } from './public-path.ts'
 
 // Identify the launcher directory in an imported tree before applying KRKR's
@@ -144,6 +145,17 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     // launcher shares the project. Existing project/save IDs stay stable.
     return copyGameProject({ ...project, executable: chosen ? toPublicStoragePath(chosen) : choice.executable })!
   }
+  const entryDisc = discAddress(nativeDiscPath(entry) ?? entry)
+  const wantsDisc = (choice: ProjectLocation) => Boolean(
+    choice.mode === 'root' && (choice.bootDisc || discAddress(choice.directory)) ||
+    choice.executable && (/\.(?:iso|cue)$/i.test(choice.executable) || discAddress(choice.executable)) ||
+    discAddress(choice.executableDirectory ?? ''))
+  const boot = (sources: Resource[], location: ProjectLocation, distribution?: string, optionalMedia = false) =>
+    selectBootDisc(sources, location, distributionDiscBindings(discs, distribution), reader, checkpoint, async (files, choice) => {
+      const hint = entryDisc ? entryDisc.path.split('>', 1)[0]!.toLowerCase() : entryName
+      const game = await locateGame(files, choice, checkpoint, probe, 'files', hint, relativeEntry || !!entryDisc, false)
+      return game && select(files, game)
+    }, entryDisc?.drive, distribution, optionalMedia)
   const mountDistribution = async (archive: Resource, choice: ProjectLocation,
     mode: 'selected' | 'frozen' | 'candidate' = 'selected') => {
     const frozen = mode === 'frozen', optionalZip = mode === 'candidate'
@@ -188,48 +200,64 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
       if (game) throw error
       return
     }
-    const inner = await locateGame(members, choice, checkpoint, candidateProbe, 'zip', entryName, relativeEntry, !optionalZip)
-    if (!inner) return
+    const explicitDisc = frozen ? choice.mode === 'root' && !!choice.bootDisc : wantsDisc(choice) || !!entryDisc
+    const containsDisc = members.some((file) => /\.(?:iso|cue)$/i.test(file.name))
+    // A loose installed game wins over its bundled data disc. A lone setup
+    // utility is only a fallback after looking for a game on the media.
+    let inner = explicitDisc ? undefined : await locateGame(members, choice, checkpoint, candidateProbe, 'zip',
+      entryName, relativeEntry, !optionalZip && !containsDisc)
+    const disc = !inner && (explicitDisc || containsDisc && !frozen)
+      ? await boot(members, choice, archive.name, optionalZip) : undefined
+    if (!inner && !disc && containsDisc && !optionalZip && !explicitDisc)
+      inner = await locateGame(members, choice, checkpoint, candidateProbe, 'zip', entryName, relativeEntry)
+    if (!inner && !disc) return
     const names = new Set<string>()
     for (const entry of members) {
       if (names.has(entry.name)) throw new Error('Duplicate ZIP distribution member: ' + entry.name)
       names.add(entry.name)
       if (names.size % 256 === 0) await checkpoint()
     }
-    const project = await select(members, inner)
-    return { resources: members, project: copyGameProject({ ...project, distribution: archive.name })! }
+    const project = disc?.project ?? await select(members, inner!)
+    return { resources: members, project: copyGameProject({ ...project, distribution: archive.name })!,
+      ...(disc && { configFiles: disc.configFiles }) }
   }
-  const entryDisc = discAddress(nativeDiscPath(entry) ?? entry)
-  const boot = () => selectBootDisc(resources, selection, discs, reader, checkpoint, async (files, choice) => {
-    const hint = entryDisc ? entryDisc.path.split('>', 1)[0]!.toLowerCase() : entryName
-    const location = await locateGame(files, choice, checkpoint, probe, 'files', hint, relativeEntry || !!entryDisc, false)
-    return location && select(files, location)
-  }, entryDisc?.drive)
-  if (collection) return await boot() ?? { resources }
-  if ((selection.mode === 'root' && (selection.bootDisc || discAddress(selection.directory))) ||
-      discAddress(selection.executableDirectory ?? '') || discAddress(selection.executable ?? '') ||
-      (selection.executable && /\.(?:cue|iso)$/i.test(selection.executable)) ||
+  if (collection) return await boot(resources, selection) ?? { resources }
+  if (selection.mode === 'root' && selection.distribution !== undefined) {
+    const archive = resources.find((file) => file.name === selection.distribution)
+    if (!archive) throw new Error('Saved game distribution ZIP is missing: ' + selection.distribution)
+    const mounted = await mountDistribution(archive, selection, 'frozen')
+    if (!mounted) throw new Error('Saved game project is missing from ' + archive.name)
+    return mounted
+  }
+  const originals = resources.filter((file) => !file.aliasOf && !file.name.includes('>'))
+  const selectedExe = selection.executable && parseStoragePath(selection.executable)
+  const optical = selectedExe ? packagedDiscPath(selectedExe) : undefined
+  const requestedFile = optical?.distribution ?? selectedExe
+  const matches = requestedFile ? originals.filter((file) => file.name.toLowerCase() === requestedFile.toLowerCase()) : []
+  const exact = matches.find((file) => file.name === requestedFile)
+  if (!exact && matches.length > 1) throw new Error('Ambiguous executable: ' + requestedFile)
+  const named = exact ?? matches[0]
+  if (optical) {
+    if (!named) throw new Error('找不到所选光盘的发行包：' + optical.distribution)
+    const mounted = await mountDistribution(named, { ...selection, executable: toPublicStoragePath(optical.disc) })
+    if (!mounted) throw new Error('未能从所选发行包读取光盘：' + selectedExe)
+    return mounted
+  }
+  // A disc-qualified project or entry can select media from the only
+  // imported release, even when no physical ISO appears beside that ZIP.
+  const outer = named || (originals.length === 1 ? originals[0] : undefined)
+  if (outer && /\.(?:zip|exe)$/i.test(outer.name) && (wantsDisc(selection) || entryDisc)) {
+    const mounted = await mountDistribution(outer, named ? { ...selection, executable: undefined } : selection)
+    if (mounted) return mounted
+  }
+  if (wantsDisc(selection) ||
       (onlyDiscs && (entryDisc || selection.executableDirectory || selection.executable || selection.mode === 'root' && !selection.distribution))) {
-    const mounted = await boot()
+    const mounted = await boot(resources, selection)
     if (!mounted) throw new Error('找不到指定的启动光盘。')
     return mounted
   }
-  if (selection.mode === 'root') {
-    if (selection.distribution !== undefined) {
-      const archive = resources.find((file) => file.name === selection.distribution)
-      if (!archive) throw new Error('Saved game distribution ZIP is missing: ' + selection.distribution)
-      return (await mountDistribution(archive, selection, 'frozen'))!
-    }
-    return { resources, project: await select(resources, selection) }
-  }
+  if (selection.mode === 'root') return { resources, project: await select(resources, selection) }
   // An explicit outer.zip>entry keeps that archive address resolvable.
-  const originals = resources.filter((file) => !file.aliasOf && !file.name.includes('>'))
-  const selectedExe = selection.executable && parseStoragePath(selection.executable)
-  const matches = selectedExe ? originals.filter((file) => file.name.toLowerCase() === selectedExe.toLowerCase()) : []
-  const exact = matches.find((file) => file.name === selectedExe)
-  if (!exact && matches.length > 1) throw new Error('Ambiguous executable: ' + selectedExe)
-  const named = exact ?? matches[0]
-  const outer = named || (originals.length === 1 ? originals[0] : undefined)
   if (outer && /\.(?:zip|exe)$/i.test(outer.name) && !(entryInArchive && entryName === outer.name.toLowerCase())) {
     // Naming the installer selects the package. Its game has its own program
     // directory and optional engine executable inside.
@@ -268,7 +296,7 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     }
   }
   if (!location && !entryInArchive && !selection.executable) {
-    const mounted = await boot()
+    const mounted = await boot(resources, selection)
     if (mounted) return mounted
   }
   return { resources, project: await select(resources, location ?? selection) }

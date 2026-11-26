@@ -57,6 +57,30 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  wave-speaker-reference:
+    name: Verify WAVE speaker positions against FFmpeg
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: node --import tsx tests/probes/wave-speaker-mask-reference.ts
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() }}
+        with:
+          name: wave-speaker-mask-reference
+          path: out/ci/wave-speaker-mask-reference/
+          if-no-files-found: error
+          retention-days: 90
+
   png-kernel:
     name: Production PNG inflater WebAssembly kernel
     runs-on: ubuntu-24.04
@@ -394,9 +418,14 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/generate-story-disc.py"
           sha256sum plain.iso joliet.iso story.iso > SHA256SUMS
       - name: Author bootable KAG discs and extract the original project files independently
+        id: boot-discs
         if: steps.disc-volumes.outcome == 'success'
         continue-on-error: true
         run: node --import tsx scripts/generate-boot-disc.mjs
+      - name: Package original KAG discs in single and numbered ZIP releases
+        if: steps.boot-discs.outcome == 'success'
+        continue-on-error: true
+        run: python3 scripts/generate-disc-releases.py
       - name: Encode and independently decode AIFF disc tracks
         id: cdda-aiff-fixtures
         continue-on-error: true
@@ -1009,7 +1038,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, tools-types, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config, original-disc-search]
+    needs: [build, tools-types, wave-speaker-reference, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config, original-disc-search]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

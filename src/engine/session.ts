@@ -32,8 +32,8 @@ import { StorageResolver } from './storage/resolver.ts'
 import { DropStorage } from './storage/drop.ts'
 import { copyGameProject, type GameProject } from './storage/project.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../formats/zip/names.ts'
-import { CddaDiscs } from './storage/cdda.ts'
-import { copyCddaDiscs, type CddaDisc } from './ports/cdda.ts'
+import { CddaDiscs, distributionDiscBindings } from './storage/cdda.ts'
+import type { CddaDisc } from './ports/cdda.ts'
 import {
   chopStorageExt,
   discAddress,
@@ -553,9 +553,9 @@ export class EngineSession {
     this.zipEncoding = zipNameEncoding(deps.zipEncoding)
     this.textEncoding = new ScriptTextEncoding(deps.scriptEncoding)
     const boot = this.project?.bootDisc
-    const cddaDiscs = copyCddaDiscs(deps.cddaDiscs ?? (boot ? [{
+    const cddaDiscs = distributionDiscBindings(deps.cddaDiscs ?? (boot ? [{
       drive: discAddress(this.project!.executableDirectory)!.drive, cue: toPublicStoragePath(boot),
-    }] : undefined))
+    }] : undefined), this.project?.distribution)
     // Reject invalid configuration before clocks or subscribed host resources
     // are consulted. A failed constructor has no disposal owner yet.
     this.systemColors = new SystemColors(deps.systemColors)

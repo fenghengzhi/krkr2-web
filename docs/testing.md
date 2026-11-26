@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 167 批为光盘版 KAG 增加单个 ZIP 和三片 ZIP 的验收。托管 Linux 独立解压核对盘片字节，浏览器从导入一路验证到刷新后读取原书签。WAVE 声道另设独立 FFmpeg 对照。[167 实现与托管证据](decisions/167-packaged-game-discs-fonts-and-speakers.md)
+
 第 166 批的游戏库验收从新制 ISO 或 CUE 光盘组启动固定原版 KAG，重开书签后核对实际章节、像素和存档字节。第 160 批最后公布的 WebKit 分片为 304 项通过、20 项失败。[166 实现与托管证据](decisions/166-bootable-game-discs-and-movie-cues.md)
 
 第 165 批用同一张独立制作的剧情 ISO 检查 Windows 原版查盘读脚本、网页原版 KAG 启动章节以及刷新读档。影片验收覆盖分段 MP4 切换音轨。第 160 批新增三份浏览器报告，两个取消作业保留逐项结果及未报告数量。[165 验收与历史结果](decisions/165-disc-files-and-fragmented-movies.md)

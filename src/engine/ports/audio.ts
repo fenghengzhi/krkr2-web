@@ -12,6 +12,8 @@ export interface AudioInfo {
   bits: number
   /** Original PCM container, when known. Absent for legacy normalized assets. */
   pcmEncoding?: PcmEncoding
+  /** Nonzero WAVEFORMATEXTENSIBLE channel identity; absent keeps legacy order. */
+  speakerMask?: number
 }
 export interface LoopLink {
   from: number

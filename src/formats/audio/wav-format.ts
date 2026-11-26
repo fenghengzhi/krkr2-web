@@ -9,6 +9,7 @@ export interface WaveFormat {
   align: number
   /** Input plane for each canonical output plane; absent means intact copy. */
   channelOrder?: readonly number[]
+  speakerMask?: number
 }
 
 // Fixed WaveImpl::TVPWaveFormatToBuffer: an unspecified six-channel source is
@@ -45,6 +46,7 @@ export function readWaveFormat(bytes: Uint8Array): WaveFormat | undefined {
     throw new WaveFormatError('Unsupported WAVE PCM format')
   if (align !== channels * containerBits / 8) throw new Error('Invalid WAVE block alignment')
   return { channels, sampleRate, align, containerBits, bits, floating,
+    ...(speakerMask ? { speakerMask } : {}),
     ...(channels === 6 && speakerMask === 0 ? { channelOrder: unmaskedSixChannelOrder } : {}) }
 }
 
@@ -57,6 +59,7 @@ export function waveInfo(format: WaveFormat, size: number): AudioInfo {
   const reportedSampleCount = Math.floor(size / Math.floor(channels * bits / 8))
   const pcmEncoding = (format.floating ? `f${format.containerBits}` : format.containerBits === 8 ? 'u8' : `s${format.containerBits}`) as PcmEncoding
   return { channels, sampleRate, bits, sampleCount, pcmEncoding,
+    ...(format.speakerMask === undefined ? {} : { speakerMask: format.speakerMask }),
     ...(reportedSampleCount === sampleCount ? {} : { reportedSampleCount }) }
 }
 

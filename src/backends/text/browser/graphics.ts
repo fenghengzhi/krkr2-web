@@ -11,6 +11,7 @@ import type { ImageDecodeSelection } from '../../../formats/image/selection.ts'
 import type { FontKernel, NativeFileFont } from '../freetype/face.ts'
 import { fontGeometry } from '../../../engine/graphics/font.ts'
 import { cssFontStack, isGenericFontFamily } from './families.ts'
+import { fontFamilyNames } from '../../../engine/graphics/font-family.ts'
 import { browserVerticalGlyph, isVerticalFace } from '../../../engine/graphics/vertical.ts'
 
 export class BrowserGraphics implements GraphicsDecoder {
@@ -31,14 +32,17 @@ export class BrowserGraphics implements GraphicsDecoder {
     if (!pending) {
       pending = (async () => {
         if (typeof FontFace === 'undefined') return false
-        try {
+        for (const family of fontFamilyNames(plain)) try {
           // FontFaceSet.check can succeed via a fallback. local() must resolve
           // this particular family. The probe is never installed in fonts and
           // cannot replace a game's face or alter Canvas font selection.
-          await new FontFace('krkr-system-presence', `local(${JSON.stringify(plain)})`).load()
-        } catch { return false }
-        if (this.disposed) throw new Error('Font backend is disposed')
-        return true
+          await new FontFace('krkr-system-presence', `local(${JSON.stringify(family)})`).load()
+          if (this.disposed) throw new Error('Font backend is disposed')
+          return true
+        } catch (error) {
+          if (this.disposed) throw error
+        }
+        return false
       })()
       this.systemFaces.set(plain, pending)
       if (this.systemFaces.size > 128) this.systemFaces.delete(this.systemFaces.keys().next().value!)

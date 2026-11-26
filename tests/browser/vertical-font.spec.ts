@@ -53,6 +53,7 @@ test('a vertical browser face keeps ideographs upright and rotates Latin glyphs'
   const modules = new Set([
     'src/backends/text/browser/graphics.ts',
     'src/backends/text/browser/families.ts',
+    'src/engine/graphics/font-family.ts',
     'src/engine/graphics/font.ts',
     'src/engine/graphics/vertical.ts',
     'src/formats/font/vertical-data.ts',

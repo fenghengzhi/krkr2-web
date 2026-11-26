@@ -39,6 +39,15 @@ function executablePath(value: unknown, base: string): string {
   if (path.includes('>')) throw new Error('Executable cannot be an archive member')
   return toPublicStoragePath(path)
 }
+/** A player can choose a particular disc in a ZIP release, including a
+ * self-extracting ZIP. This address only selects media during preparation. */
+export function packagedDiscPath(path: string): { distribution: string; disc: string } | undefined {
+  const separator = path.indexOf('>')
+  if (separator < 0 || discAddress(path)) return
+  const distribution = path.slice(0, separator), disc = path.slice(separator + 1)
+  if (/\.(?:zip|exe)$/i.test(distribution) && /\.(?:cue|iso)$/i.test(disc))
+    return { distribution, disc }
+}
 function bootDiscPath(value: unknown): string {
   if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid boot disc')
   const path = storageFilePath(value)
@@ -56,7 +65,7 @@ export function copyGameProject(value?: GameProject): GameProject | undefined {
   if (result.executableDirectory.includes('>')) throw new Error('Executable directory cannot be inside an archive')
   const drive = discAddress(result.executableDirectory)?.drive
   if (Boolean(drive) !== Boolean(result.bootDisc) || discAddress(result.directory)?.drive !== drive ||
-      (result.executable && discAddress(result.executable)?.drive !== drive) || (drive && result.distribution))
+      (result.executable && discAddress(result.executable)?.drive !== drive))
     throw new Error('Disc project paths must refer to the same boot disc')
   return Object.freeze(result)
 }
@@ -68,8 +77,15 @@ export function copyProjectSelection(value?: ProjectSelection): ProjectSelection
   if (value.mode !== 'auto' && value.mode !== 'root') throw new Error('Unknown project selection')
   const executableDirectory = directory(value.executableDirectory ?? '')
   if (executableDirectory.includes('>')) throw new Error('Executable directory cannot be inside an archive')
-  const launcher = value.executable === undefined ? {} : { executable: executablePath(value.executable,
-    /\.(?:iso|cue)$/i.test(value.executable) ? '' : executableDirectory) }
+  let launcher: { executable?: string } = {}
+  if (value.executable !== undefined) {
+    const optical = typeof value.executable === 'string' && /\.(?:iso|cue)$/i.test(value.executable)
+    if (optical && value.executable.includes('>') && value.executable.length <= 4096) {
+      const path = storageFilePath(value.executable)
+      if (!packagedDiscPath(path)) throw new Error('Expected an ISO or CUE inside a distribution ZIP')
+      launcher = { executable: toPublicStoragePath(path) }
+    } else launcher = { executable: executablePath(value.executable, optical ? '' : executableDirectory) }
+  }
   if (value.mode === 'root') return { mode: 'root', directory: directory(value.directory), executableDirectory, ...launcher, ...encodings,
     ...(value.bootDisc === undefined ? {} : { bootDisc: bootDiscPath(value.bootDisc) }),
     ...(value.distribution === undefined ? {} : { distribution: distributionPath(value.distribution) }) }

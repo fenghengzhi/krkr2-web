@@ -47,3 +47,30 @@ export function discBootInput(binary: boolean) {
     buffer: Buffer.from(`FILE "${name}" BINARY\n TRACK 01 MODE1/2048\n INDEX 01 00:00:00\n`) })
   return { files, manifest, image: row }
 }
+
+interface DiscRelease {
+  outer: string
+  mode: 'source' | 'bytecode'
+  volumes: Array<{ name: string; bytes: number; sha256: string }>
+  image: string
+  imageSha256: string
+  zipSha256: string
+}
+export function discReleaseInput(binary: boolean) {
+  const directory = new URL('../../out/verification/disc-volumes/', import.meta.url)
+  const manifest = JSON.parse(readFileSync(new URL('release-manifest.json', directory), 'utf8')) as {
+    schema: number; commit: string; releases: DiscRelease[]
+  }
+  const row = manifest.releases.find((release) => release.mode === (binary ? 'bytecode' : 'source'))
+  if (manifest.schema !== 1 || !row || row.volumes.length !== (binary ? 3 : 1) ||
+      (process.env.GITHUB_SHA && manifest.commit !== process.env.GITHUB_SHA)) throw new Error('Incomplete disc release')
+  const files = row.volumes.map(({ name, bytes, sha256 }) => {
+    const buffer = readFileSync(new URL(name, directory))
+    if (buffer.length !== bytes || createHash('sha256').update(buffer).digest('hex') !== sha256)
+      throw new Error('Mismatched disc release volume: ' + name)
+    return { name, buffer, mimeType: 'application/octet-stream' }
+  })
+  if (createHash('sha256').update(Buffer.concat(files.map((file) => file.buffer))).digest('hex') !== row.zipSha256)
+    throw new Error('Mismatched joined disc release')
+  return { files: files.reverse(), manifest, release: row }
+}
