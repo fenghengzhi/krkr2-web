@@ -1,5 +1,6 @@
 import type { Pixels, Rect } from '../ports/graphics.ts'
 import { filter } from './filters.ts'
+import { stockAffinePixels, type StockSampling } from './stock-affine.ts'
 
 export type AffineParameters = readonly [number, number, number, number, number, number]
 export interface AffineRaster {
@@ -9,6 +10,10 @@ export interface AffineRaster {
   /** Two local x coordinates per row: inclusive start, exclusive end. Pixels
    * outside that span are not part of the transformed image, even if alpha=0. */
   spans: Int32Array
+  /** Stock bilinear loops blend their clipped border with the original
+   * opacity, but adjust opacity in the horizontal/arbitrary-angle interior.
+   * The interior has the same two local x coordinates per row as spans. */
+  stockBilinear?: { horizontal: boolean; interior: Int32Array }
 }
 type Point = { x: number; y: number }
 type Weight = { index: number; weight: number }
@@ -90,6 +95,7 @@ export function* affinePixels(
   parameters: AffineParameters,
   clip: Rect,
   mode = 0,
+  sampling?: StockSampling,
 ): Generator<void, AffineRaster | undefined> {
   if (
     !Object.values(rect).every(Number.isSafeInteger) ||
@@ -145,6 +151,12 @@ export function* affinePixels(
   ]
   if (corners.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y)))
     throw new Error('Affine bounds exceed numeric range')
+  if (sampling) {
+    const points = matrix ? [corners[0]!, corners[1]!, corners[3]!] :
+      [{ x: parameters[0], y: parameters[1] }, { x: parameters[2], y: parameters[3] }, { x: parameters[4], y: parameters[5] }]
+    const raster = yield* stockAffinePixels(source, rect, points, clip, sampling, !!(mode & 0x10000))
+    if (raster) return raster
+  }
   const left = Math.max(clip.x, Math.ceil(nearInteger(Math.min(...corners.map((p) => p.x))))),
     top = Math.max(clip.y, Math.ceil(nearInteger(Math.min(...corners.map((p) => p.y))))),
     right = Math.min(

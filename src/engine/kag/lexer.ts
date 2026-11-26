@@ -15,6 +15,10 @@ export interface LexedTag {
   lineCommand: boolean
 }
 const space = (ch: string | undefined) => ch === ' ' || ch === '\t'
+/** KAG's ttstr::ToLowerCase folds ASCII letters only. Unicode names remain
+ * distinct dictionary keys, including fullwidth and non-Latin capitals. */
+export const lowerKagName = (name: string): string =>
+  name.replace(/[A-Z]/g, (letter) => String.fromCharCode(letter.charCodeAt(0) + 32))
 export class KagTagSyntaxError extends TvpError {
   constructor(readonly position: number) { super('TVPKAGSyntaxError') }
 }
@@ -31,7 +35,7 @@ export function lexTag(line: string, start: number, lineCommand: boolean) {
   const nameStart = pos
   while (pos < line.length && !space(line[pos]) && !ended()) pos++
   if (nameStart === pos) fail()
-  const name = line.slice(nameStart, pos).toLowerCase()
+  const name = lowerKagName(line.slice(nameStart, pos))
   function* fields(): Generator<Attribute, LexedTag> {
     while (true) {
       skip()
@@ -53,7 +57,7 @@ export function lexTag(line: string, start: number, lineCommand: boolean) {
       const attributeStart = pos
       while (pos < line.length && !space(line[pos]) && line[pos] !== '=' && !ended()) pos++
       if (pos === attributeStart) fail()
-      const attribute = line.slice(attributeStart, pos).toLowerCase()
+      const attribute = lowerKagName(line.slice(attributeStart, pos))
       skip()
       let value = 'true',
         entity = false,

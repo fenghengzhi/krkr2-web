@@ -1,5 +1,5 @@
 import { Scenario } from './scenario.ts'
-import { KagTagSyntaxError, lexTag, type LexedTag } from './lexer.ts'
+import { KagTagSyntaxError, lexTag, lowerKagName, type LexedTag } from './lexer.ts'
 import { KagReference, integer, list, record, string, tagReferences, type Data, type RecordData } from './data.ts'
 import { TvpError } from '../system/tvp-error.ts'
 
@@ -499,7 +499,7 @@ export class KagParser {
           continue
         }
       } else if (kind === 'macro') {
-        const name = (yield* this.text(values.name)).toLowerCase()
+        const name = lowerKagName(yield* this.text(values.name))
         if (!name) throw new TvpError('TVPKAGSyntaxError')
         this.recording = { name, source: '' }
       } else if (kind === 'macropop') yield* this.popMacroArgs()

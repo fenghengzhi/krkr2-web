@@ -11,6 +11,7 @@ import { waveReopenExpected, waveReopenFiles, waveReopenSource } from '../helper
 import { waveGainSource, waveGainPublicExpected } from '../helpers/wave-gain.ts'
 import { waveSeekFiles, waveSeekSource, waveSeekSdkExpected } from '../helpers/wave-seek.ts'
 import { soundOpenExpected, soundOpenFiles, soundOpenSource } from '../helpers/sound-open.ts'
+import { waveBooleanExpected, waveBooleanSource } from '../helpers/wave-booleans.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -30,6 +31,7 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   'fade-delayed': waveFadeDelayedExpected, 'frequency-original': waveFrequencyExpected,
   'wave-gain-controls': waveGainPublicExpected,
   'wave-seek-labels': waveSeekSdkExpected,
+  ...waveBooleanExpected,
   ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
   'xp3-decoder': [xp3SegmentScript, xp3SegmentText, 'stop', '48000', '0', '12000', '36320736', '1452000'].join('~'),
@@ -47,6 +49,9 @@ if (process.argv[2] === 'prepare') {
     'record("start");System.exceptionHandler=function(e){record("fatal|"+e.message);System.exit();return true;};',
     sliNativeSource,
     wavePositionSource,
+    waveBooleanSource,
+    ...Object.keys(waveBooleanExpected).map((name) =>
+      `try{record("${name}|"+waveBooleanObserve("${name}"));}catch(e){record("${name}|unexpected-error:"+e.message);}`),
     ...Object.keys(wavePositionExpected).map((name) =>
       `try{record("${name}|"+wavePositionObserve("${name}"));}catch(e){record("${name}|unexpected-error:"+e.message);}`),
     'System.assignMessage("TVPInvalidLoopInformation","sli:<%1>");record("open|"+sliTryOpen("native.wav"));',
@@ -121,6 +126,9 @@ if (process.argv[2] === 'prepare') {
   save('comparison.json', { commit: manifest.commit, complete, observationSha256: digest(raw), results,
     waveReopen: { planned: Object.keys(waveReopenExpected).length,
       matched: results.filter((row) => row.id.startsWith('wave-reopen-') && row.matched).length },
+    waveBoolean: { planned: Object.keys(waveBooleanExpected).length,
+      matched: results.filter((row) => row.id.startsWith('wave-bool-') && row.matched).length,
+      scope: 'Unopened ordinary Wave boolean setters: real/object/octet/null versus numeric string conversion, single evaluation and independent owners. These controls do not require a DirectSound device and do not claim hardware PCM equivalence.' },
     waveSeekScope: 'Seven actual-play SLI first-label observations: initial zero output rate, integer millisecond conversion, rejected endpoint/negative/out-of-range requests, exact sample seek, uint64 multiplication wrap, and retained/recreated output rates across reopen. Hardware PCM and elapsed getter positions are not inferred; an unavailable DirectSound device remains a failed observation.',
     xp3Archive: manifest.xp3Archive,
     host: wine ? 'Ubuntu / Wine 32-bit / PulseAudio' : 'Windows / DirectSound',

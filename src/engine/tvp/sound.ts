@@ -41,7 +41,11 @@ class __SoundBase {
   property flags{getter(){if(__soundFlags===void)__soundFlags=__host("Sound.flags",__soundId,this);return __soundFlags;}}
   property filters{getter(){return __filters;}}
   property labels{getter(){if(__soundLabels===void){var labels=__soundRun("get",["labels"]);__host("Sound.bindLabels",__soundId,this,labels);__soundLabels=labels;}return __soundLabels;}}
-  ${['position', 'samplePosition', 'paused', 'looping', 'volume', 'volume2', 'pan', 'frequency'].map((name) => `property ${name}{getter(){return __soundRun("get",["${name}"]);}setter(value){__soundRun("set",["${name}",int(value)]);}}`).join('\n')}
+  ${['position', 'samplePosition', 'volume', 'volume2', 'pan', 'frequency'].map((name) => `property ${name}{getter(){return __soundRun("get",["${name}"]);}setter(value){__soundRun("set",["${name}",int(value)]);}}`).join('\n')}
+  // WaveIntf passes the original variant to bool, not through an integer.
+  // In particular a nonzero fractional real pauses/loops, while a numeric
+  // string still follows TJS's string-to-integer boolean rule.
+  ${['paused', 'looping'].map((name) => `property ${name}{getter(){return __soundRun("get",["${name}"]);}setter(value){__soundRun("set",["${name}",__soundKind=="wave"?!!value:int(value)]);}}`).join('\n')}
   ${['status', 'totalTime', 'bits', 'channels'].map((name) => `property ${name}{getter(){return __soundRun("get",["${name}"]);}}`).join('\n')}
 }
 class WaveSoundBuffer extends __SoundBase {

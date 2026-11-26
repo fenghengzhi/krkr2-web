@@ -151,6 +151,7 @@ import { filteredCopy } from './graphics/copy-resampler.ts'
 import { validateBlend } from './graphics/blend.ts'
 import { affinePixels } from './graphics/affine.ts'
 import { boxBlur } from './graphics/processing.ts'
+import { stockAffinePixels, stockSampling } from './graphics/stock-affine.ts'
 import type { InputOperation } from './input/controller.ts'
 import {
   activityPaused,
@@ -5982,10 +5983,33 @@ export class EngineSession {
           simpleBlt = destination.width > 0 && destination.height > 0 &&
             destination.width === sourceRect.width && destination.height === sourceRect.height &&
             covered.width === destination.width && covered.height === destination.height,
-          work = fullCopy && filteredCopy(source, sourceRect, destination, bitmapClip, number(10), number(11), id === sourceLayer.id)
+          filter = number(10), coefficient = number(11),
+          work = fullCopy && filteredCopy(source, sourceRect, destination, bitmapClip, filter, coefficient, id === sourceLayer.id),
+          blend = operate ? mode : 'copy',
+          sampling = stockSampling(filter, blend, face, layer.holdAlpha)
+        // Stock StretchBlt's identity and full-copy shortcuts take precedence.
+        // The other native combinations go through the same scanlines as an
+        // affine transform. Keep the embedding's extended filter/rectangle
+        // handling when there is no corresponding stock sampler.
+        if (!simpleBlt && !work && sampling && Number.isFinite(coefficient) && ((filter & 0xffff) !== 3 || coefficient === -1) &&
+            sourceRect.width > 0 && sourceRect.height > 0 && sourceRect.x >= 0 && sourceRect.y >= 0 &&
+            sourceRect.x + sourceRect.width <= source.width && sourceRect.y + sourceRect.height <= source.height) {
+          const x = destination.x - 0.5, y = destination.y - 0.5
+          const raster = await this.finishGraphics(stockAffinePixels(source, sourceRect, [
+            { x, y }, { x: x + destination.width, y }, { x, y: y + destination.height },
+          ], bitmapClip, sampling, !!(filter & 0x10000)))
+          this.control.check()
+          if (raster) {
+            if (bitmap.affine(raster, blend, face, opacity, layer.holdAlpha)) {
+              layer.imageModified = true
+              this.invalidateLayer(id)
+            }
+            break
+          }
+        }
         const output = simpleBlt ? { pixels: source, left: destination.x, top: destination.y } : work
           ? { pixels: await this.finishGraphics(work), left: destination.x, top: destination.y }
-          : stretchPixels(source, destination, sourceRect, bitmapClip, number(10), number(11))
+          : stretchPixels(source, destination, sourceRect, bitmapClip, filter, coefficient)
         const inputRect = simpleBlt ? sourceRect : { x: 0, y: 0, width: output.pixels.width, height: output.pixels.height }
         const changed = operate
           ? bitmap.operate(output.pixels, output.left, output.top, inputRect, mode, face, opacity, layer.holdAlpha, !simpleBlt)
@@ -6016,6 +6040,7 @@ export class EngineSession {
             [number(7), number(8), number(9), number(10), number(11), number(12)],
             bitmap.clip,
             number(13),
+            stockSampling(number(13), mode, face, layer.holdAlpha),
           ),
         )
         this.control.check()

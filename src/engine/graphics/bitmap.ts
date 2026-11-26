@@ -269,7 +269,8 @@ export class Bitmap extends ImagePlane {
       this.fill(this.clip, clearColor, face, holdAlpha)
       changed = true
     }
-    const { pixels, left, top, spans } = raster
+    const { pixels, left, top, spans, stockBilinear } = raster,
+      stockCopyBlend = mode === 1 && face === 1 && !holdAlpha && amount < 255 ? stockBilinear : undefined
     for (let row = 0; row < pixels.height; row++) {
       const y = row + top
       if (y < this.clip.y || y >= this.clip.y + this.clip.height) continue
@@ -290,6 +291,17 @@ export class Bitmap extends ImagePlane {
             from = (row * pixels.width + x - left) * 4
           if (mode === 'copy')
             for (let c = 0; c < 3; c++) this.storage.data[at + c] = pixels.data[from + c]!
+          else if (stockCopyBlend) {
+            const inside = x - left >= stockCopyBlend.interior[row * 2]! &&
+              x - left < stockCopyBlend.interior[row * 2 + 1]!,
+              // These are deliberately different stock scalar expressions:
+              // horizontal opa += opa > 7; arbitrary-angle opa += opa >> 7.
+              weight = amount + (inside ? stockCopyBlend.horizontal ? Number(amount > 7) : amount >> 7 : 0)
+            for (let c = 0; c < 4; c++) {
+              const dest = this.storage.data[at + c]!
+              this.storage.data[at + c] = dest + (((pixels.data[from + c]! - dest) * weight) >> 8)
+            }
+          }
           else blendPixel(this.storage.data, at, pixels.data, from, mode, face, amount, holdAlpha)
         }
     }
