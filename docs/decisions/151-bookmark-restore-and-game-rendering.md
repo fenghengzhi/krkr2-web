@@ -37,3 +37,5 @@ TJS 的 `Layer` 绘图入口现在识别原版标志。旧 Web 脚本若将 `16`
 第 140 至 142 批已结束，各有 24 个作业成功、4 个失败、10 个跳过。第 143 批取回时有 19 个成功、3 个失败、10 个跳过、4 个仍在运行。这些提交的应用构建均在视频命令读取 `frame` 时出现 TypeScript 错误，依赖构建的 Node、浏览器和实际游戏测试均跳过。第 145 批包含相应的类型修改。本次快照中，第 144 至 150 批都仍在排队。[第 142 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45775883723) · [第 143 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45777718215)
 
 第 143 批的原版图形对照实报 80 项，其中 75 项与当时的预期相符。原版 KAG 对照 82/82 匹配，Windows 声音对照 40/44 匹配，其余四项报告 DirectSound 不可用。第 140 至 142 批的 Wine 声音对照均为 41/41。此次取回的 71 份新归档已核对大小与 SHA-256，之前的 24 份原件继续保留。[第 143 批托管归档](https://github.com/fenghengzhi/krkr2-web/actions/runs/45777718215)
+
+第 151 批实现提交为 `2d1d56f42192a78276b8ec06025a2418d3ab96f1`。GitHub 已登记托管运行，登记时状态为 `pending`，结果留到下一批取回。[第 151 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45800870443)
