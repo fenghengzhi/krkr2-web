@@ -46,7 +46,7 @@ interface Voice {
   status: SoundSnapshot['status']
   clock: number
   fade?: Fade
-  /** Media is retired, but its inherited Wave controls survive the next open. */
+  /** Media is retired, but its inherited sound controls survive the next open. */
   unloaded?: boolean
   flags: number[]
   labelIndex: number
@@ -318,7 +318,7 @@ export class AudioMixer {
         )
           throw new Error('SLI link is outside the decoded audio')
       const kind = command.kind ?? (asset.kind === 'midi' ? 'midi' : 'wave'), previous = this.voices.get(id),
-        retained = previous?.kind === kind && (kind === 'wave' || kind === 'midi') && previous.unloaded ? previous : undefined
+        retained = previous?.kind === kind && previous.unloaded ? previous : undefined
       const filters = this.filters(id, asset, command.filters ?? [], [], kind === 'wave' && !!(retained?.settings ?? settings).waveConversion)
       const stream = asset.kind === 'stream' ? new StreamPcm(id, asset) : undefined
       const voice = this.create(
@@ -338,8 +338,9 @@ export class AudioMixer {
       if (asset.kind === 'midi') voice.synth = new MidiSynth(asset)
     } else if (command.op === 'unload') {
       const previous = this.voices.get(id)
-      if (previous && previous.kind !== 'wave' && previous.kind !== 'midi') throw new Error('This media kind cannot retain its fade on unload')
-      if (!previous || (!previous.fade && !previous.unloaded)) {
+      if (command.status !== undefined && command.status !== 'unload' && command.status !== 'stop')
+        throw new Error('Invalid unloaded sound status')
+      if (!previous || (!previous.fade && !previous.unloaded && command.status !== 'stop')) {
         this.voices.delete(id)
         return { events: [] }
       }
@@ -353,6 +354,7 @@ export class AudioMixer {
       voice.clock = previous.clock
       voice.fade = previous.fade
       voice.unloaded = true
+      voice.status = command.status ?? 'unload'
     } else if (command.op === 'close') {
       this.voices.delete(id)
       return { events: [] }

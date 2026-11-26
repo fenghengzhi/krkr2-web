@@ -130,7 +130,7 @@ export function createSession(request: InitializeRequest, project?: GameProject,
           throw new Error('WASM manifest is missing native TVP message support')
         if (manifest.capabilities?.nativeMidi !== 1)
           throw new Error('WASM manifest is missing native MIDI output support')
-        if (manifest.capabilities?.nativeStorages !== 2)
+        if (manifest.capabilities?.nativeStorages !== 3)
           throw new Error('WASM manifest is missing native Storages support')
         if (manifest.capabilities?.nativeTextStreams !== 2)
           throw new Error('WASM manifest is missing native text stream support')

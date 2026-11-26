@@ -1,5 +1,8 @@
-import { cueLimits, cueTrackParts, parseCue } from '../../formats/audio/cue.ts'
+import { cueLimits, cueTrackParts, parseCue, type CueSheet } from '../../formats/audio/cue.ts'
 import { copyCddaDiscs, type CddaDisc, type CddaPcmPart, type CddaPcmTrack } from '../ports/cdda.ts'
+import { discVolumeTrack, readDiscVolumeLabel } from '../../formats/disc/volume-label.ts'
+import { openResourceSource } from './resource-source.ts'
+import { ExecutionCancelled } from '../scheduler/control.ts'
 import type { Resource } from '../ports/storage.ts'
 import { TvpError } from '../system/tvp-error.ts'
 import { storageFilePath, toPublicStoragePath } from './public-path.ts'
@@ -26,6 +29,69 @@ export interface CddaStorage {
 export class CddaDiscs {
   private readonly supplied?: readonly CddaDisc[]
   constructor(private readonly storage: CddaStorage, discs?: readonly CddaDisc[]) { this.supplied = copyCddaDiscs(discs) }
+  private readonly sheets = new WeakMap<object, CueSheet>()
+  private readonly labels = new WeakMap<object, { geometry: string; value: string }>()
+  private async bindings(requireUnique: boolean): Promise<readonly CddaDisc[]> {
+    if (this.supplied !== undefined) return this.supplied
+    const cues = [...new Set(await this.storage.cues())]
+    if (cues.length > 1 && requireUnique) throw new Error('Multiple imported CUE sheets require explicit cddaDiscs bindings')
+    return cues.length === 1 ? [{ drive: 'D', cue: toPublicStoragePath(cues[0]!) }] : []
+  }
+  private async readSheet(resource: Resource): Promise<CueSheet> {
+    if (!Number.isSafeInteger(resource.size) || resource.size < 0 || resource.size > cueLimits.bytes)
+      throw new Error('CUE metadata exceeds the 1 MiB budget')
+    const bytes = await this.storage.read(resource)
+    await this.storage.checkpoint()
+    if (bytes.length !== resource.size) throw new Error('Truncated CUE metadata')
+    return parseCue(await this.storage.decodeText(bytes))
+  }
+  private async cueFile(cue: string, name: string): Promise<Resource> {
+    if (/^[\\/]|^[a-z][a-z0-9+.-]*:/i.test(name) || name.includes('>'))
+      throw new Error('CUE FILE must be relative to its imported sheet directory')
+    const directory = cue.slice(0, Math.max(cue.lastIndexOf('/'), cue.lastIndexOf('>')) + 1)
+    const logical = storageFilePath(name, directory), file = await this.storage.exact(logical)
+    if (!file) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(logical)])
+    return file
+  }
+  private async volumeLabel(disc: CddaDisc): Promise<string | undefined> {
+    const cue = await this.storage.exact(storageFilePath(disc.cue, this.storage.currentDirectory))
+    if (!cue) return
+    const key = cue.cacheToken ?? cue
+    const sheet = this.sheets.get(key) ?? await this.readSheet(cue)
+    this.sheets.set(key, sheet)
+    const track = discVolumeTrack(sheet)
+    if (disc.volumeLabel !== undefined || track === 'audio') {
+      // A sheet without its media represents an empty drive. For an explicit
+      // label or an audio disc, checking placement needs no payload read.
+      await this.cueFile(cue.name, sheet.files[sheet.tracks[0]!.file]!.name)
+      return disc.volumeLabel ?? 'Audio CD'
+    }
+    if (!track) return
+    const file = await this.cueFile(cue.name, track.file)
+    const image = file.cacheToken ?? file, geometry = [track.first, track.end, track.layout.bytes, track.layout.payload].join('/'),
+      cached = this.labels.get(image)
+    if (cached?.geometry === geometry) return cached.value
+    const { source } = await openResourceSource(file, { checkpoint: () => this.storage.checkpoint() }),
+      value = await readDiscVolumeLabel(source, track)
+    if (value !== undefined) this.labels.set(image, { geometry, value })
+    return value
+  }
+  async searchVolume(label: string): Promise<string> {
+    const folded = label.toUpperCase(), discs = [...await this.bindings(false)].sort((a, b) => a.drive.charCodeAt(0) - b.drive.charCodeAt(0))
+    for (const disc of discs) {
+      await this.storage.checkpoint()
+      try {
+        const volume = await this.volumeLabel(disc)
+        if (volume !== undefined && volume.toUpperCase() === folded) return disc.drive
+      } catch (error) {
+        if (error instanceof ExecutionCancelled) throw error
+        // Unreadable/missing media do not hide a later matching drive. A
+        // cancelled session still exits before searching another resource.
+        await this.storage.checkpoint()
+      }
+    }
+    return ''
+  }
   async prepare(name: string): Promise<CddaSelection | undefined> {
     if (name.length > 4096 || name.includes('\0')) throw new Error('Invalid CDDA open name')
     const specified = name.length >= 2 && name[1] === ':'
@@ -37,12 +103,7 @@ export class CddaDiscs {
       if (!code || code > 26) throw new InvalidCddaDrive()
       drive = String.fromCharCode(code + 64)
     }
-    let discs = this.supplied
-    if (discs === undefined) {
-      const candidates = [...new Set(await this.storage.cues())]
-      if (candidates.length > 1) throw new Error('Multiple imported CUE sheets require explicit cddaDiscs bindings')
-      discs = candidates.length ? [{ drive: 'D', cue: toPublicStoragePath(candidates[0]!) }] : []
-    }
+    const discs = await this.bindings(true)
     const disc = drive ? discs.find((disc) => disc.drive === drive) : discs[0]
     if (!disc) { if (specified) throw new InvalidCddaDrive(); throw new TvpError('TVPCDDADriveNotFound') }
     const match = /^\s*([+-]?\d+)/.exec(specified ? name.slice(2) : name), parsed = Number(match?.[1] ?? 0)
@@ -50,24 +111,14 @@ export class CddaDiscs {
       throw new Error('CDDA track number exceeds the safe native integer range')
     const path = storageFilePath(disc.cue, this.storage.currentDirectory), resource = await this.storage.exact(path)
     if (!resource) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(path)])
-    if (!Number.isSafeInteger(resource.size) || resource.size < 0 || resource.size > cueLimits.bytes)
-      throw new Error('CUE metadata exceeds the 1 MiB budget')
-    const bytes = await this.storage.read(resource)
-    await this.storage.checkpoint()
-    if (bytes.length !== resource.size) throw new Error('Truncated CUE metadata')
-    const sheet = parseCue(await this.storage.decodeText(bytes)), parts = cueTrackParts(sheet, parsed), selected: SelectedPart[] = [],
-      directory = resource.name.slice(0, Math.max(resource.name.lastIndexOf('/'), resource.name.lastIndexOf('>')) + 1),
+    const sheet = await this.readSheet(resource), parts = cueTrackParts(sheet, parsed), selected: SelectedPart[] = [],
       files = new Map<number, Resource>()
     if (parts) for (const part of parts) {
       if (part.kind === 'silence') { selected.push(part); continue }
       const file = sheet.files[part.file]!
-      if (/^[\\/]|^[a-z][a-z0-9+.-]*:/i.test(file.name) || file.name.includes('>'))
-        throw new Error('CUE FILE must be relative to its imported sheet directory')
       let audio = files.get(part.file)
       if (!audio) {
-        const logical = storageFilePath(file.name, directory)
-        audio = await this.storage.exact(logical)
-        if (!audio) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(logical)])
+        audio = await this.cueFile(resource.name, file.name)
         files.set(part.file, audio)
       }
       selected.push({ kind: 'file', resource: audio,

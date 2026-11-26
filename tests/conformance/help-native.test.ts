@@ -78,7 +78,7 @@ test('native Help is independently advertised without changing System or Storage
   assert.equal(manifest.abi, 5)
   assert.equal(manifest.capabilities?.nativeHelp, 1)
   assert.equal(manifest.capabilities?.nativeSystem, 6)
-  assert.equal(manifest.capabilities?.nativeStorages, 2)
+  assert.equal(manifest.capabilities?.nativeStorages, 3)
 })
 
 for (const binary of [false, true]) {

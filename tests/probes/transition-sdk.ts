@@ -15,15 +15,16 @@ import { closedVideoColorCases, closedVideoColorSource } from '../helpers/video-
 import { layerDefaultFontCases, layerDefaultFontSource } from '../helpers/layer-default-font.ts'
 import { textMetricCases, textMetricFiles, textMetricSource } from '../helpers/text-metric-cache.ts'
 import { mappedTextCases, mappedTextExpected, mappedTextFiles, mappedTextSource } from '../helpers/mapped-text.ts'
+import { fontMappingHeightCases, fontMappingHeightFiles, fontMappingHeightSource } from '../helpers/font-mapping-height.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
 assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/transition'), game = resolve(output, 'game')
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
-const files = { ...transitionOptionFiles(), ...textMetricFiles(), ...mappedTextFiles() }
+const files = { ...transitionOptionFiles(), ...textMetricFiles(), ...mappedTextFiles(), ...fontMappingHeightFiles() }
 const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases, ...spriteSamplingCases, ...layerInputBooleanCases, ...layerPaintCases, ...closedVideoColorCases, ...layerDefaultFontCases, ...textMetricCases,
-  ...mappedTextCases.map((row) => ({ id: row.id, expected: mappedTextExpected(row) }))]
+  ...mappedTextCases.map((row) => ({ id: row.id, expected: mappedTextExpected(row) })), ...fontMappingHeightCases]
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 
 if (process.argv[2] === 'prepare') {
@@ -70,6 +71,8 @@ if (process.argv[2] === 'prepare') {
     ...textMetricCases.map(({ id }) => `try{record("${id}|"+textMetricObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
     mappedTextSource,
     ...mappedTextCases.map((row) => `try{record("${row.id}|"+mappedTextObserve("${row.id}",${row.face},${row.opacity},${row.hold},${'shadow' in row ? row.shadow : 'void'}));}catch(e){record("${row.id}|error:"+e.message);}`),
+    fontMappingHeightSource,
+    ...fontMappingHeightCases.map(({ id }) => `try{record("${id}|"+fontMappingHeightObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
     'record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
@@ -88,9 +91,10 @@ if (process.argv[2] === 'prepare') {
     defaultFontHelperSha256: sha(readFileSync('tests/helpers/layer-default-font.ts')),
     textMetricHelperSha256: sha(readFileSync('tests/helpers/text-metric-cache.ts')),
     mappedTextHelperSha256: sha(readFileSync('tests/helpers/mapped-text.ts')),
+    fontMappingHeightHelperSha256: sha(readFileSync('tests/helpers/font-mapping-height.ts')),
     cases,
     files: Object.entries(files).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) })),
-    scope: 'Original transitions, gamma, layer order, hit targets, thumbnail resampling, alpha rows, shared images, transformed sprites, Layer booleans, closed video color controls, default Layer font and bitmap-owned text metric state.',
+    scope: 'Original transitions, gamma, layer order, hit targets, thumbnail resampling, alpha rows, shared images, transformed sprites, Layer booleans, closed video color controls, default Layer font, bitmap-owned text metrics and signed font mapping identity.',
   })
 } else if (process.argv[2] === 'compare') {
   mkdirSync(output, { recursive: true })
@@ -121,6 +125,7 @@ if (process.argv[2] === 'prepare') {
     [resolve('tests/helpers/layer-default-font.ts'), manifest?.defaultFontHelperSha256],
     [resolve('tests/helpers/text-metric-cache.ts'), manifest?.textMetricHelperSha256],
     [resolve('tests/helpers/mapped-text.ts'), manifest?.mappedTextHelperSha256],
+    [resolve('tests/helpers/font-mapping-height.ts'), manifest?.fontMappingHeightHelperSha256],
   ] as const) {
     if (!existsSync(name) || sha(readFileSync(name)) !== expected) evidenceErrors.push(`${name}: source hash differs or is missing`)
   }
@@ -182,6 +187,8 @@ if (process.argv[2] === 'prepare') {
     mappedText: { planned: mappedTextCases.length,
       matched: results.filter((row) => row.id.startsWith('mapped-') && row.matched).length,
       scope: 'Authored 65-level TFT ink, stock Win32 full-opacity MMX colormap and scalar opacity/shadow controls; logical RGBA is compared independently of installed font outlines.' },
+    fontMappingHeight: { planned: fontMappingHeightCases.length,
+      matched: results.filter((row) => fontMappingHeightCases.some(({ id }) => id === row.id) && row.matched).length },
     complete, sequenceMatches, evidenceErrors, sdkState: sdk?.state ?? 'unreported',
     sdkExitCode: sdk?.exitCode ?? null, sdkTimedOut: sdk?.timedOut ?? null, results, lines,
     observationSha256: sha(raw),

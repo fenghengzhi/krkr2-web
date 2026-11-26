@@ -111,6 +111,8 @@ export interface LoadedFont {
 }
 export interface FontSpec {
   height: number
+  /** Original signed Font.height for pre-rendered mapping identity; raster height stays positive. */
+  mappingHeight?: number
   face: string
   bold: boolean
   italic: boolean

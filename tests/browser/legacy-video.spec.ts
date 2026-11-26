@@ -162,7 +162,9 @@ for (const group of [
             for (const [at, time] of source.normalizedVideoTimes.entries()) if (time <= seconds + 1e-6) frame = at
             return frame
           }
+        expect(await read('legacyOpenClock')).toBe('0|0')
         expect(source.normalizedVideoTimes).toHaveLength(100)
+        if (item.file === 'legacy-wmv1.wmv') expect(source.normalizedVideoTimes[0]).toBeGreaterThan(0)
         expect(meta.slice(0, 3)).toEqual([96, 64, 25]); expect(meta[3]).toBe(Math.floor(duration * 25 + .5))
         expect(meta[4]).toBe(Math.floor(duration * 1000)); expect(meta[4]).toBeGreaterThanOrEqual(3950); expect(meta[4]).toBeLessThanOrEqual(4150)
         expect(meta.slice(5)).toEqual([item.audio ? 1 : 0, 1])

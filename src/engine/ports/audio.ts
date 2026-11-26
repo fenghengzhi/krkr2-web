@@ -124,8 +124,9 @@ export type MixerCommand =
       filters?: readonly PhaseVocoderFilter[]
     }
   | { op: 'filters'; id: number; filters: readonly PhaseVocoderFilter[] }
-  /** Wave Clear / MIDI replacement retire media while the inherited fade stays alive. */
-  | { op: 'unload'; id: number }
+  /** Retire media while the inherited fade stays alive. A same-drive CDDA
+   * replacement keeps its original stopped device status during decoding. */
+  | { op: 'unload'; id: number; status?: 'unload' | 'stop' }
   | { op: 'play' | 'stop' | 'close' | 'inspect'; id: number }
   | { op: 'set'; id: number; property: Exclude<keyof SoundSettings, 'waveConversion'>; value: number | boolean }
   | { op: 'flag'; id: number; index: number; value: number }

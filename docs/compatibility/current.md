@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 164 批的 `Storages.searchCD` 按卷标返回导入光盘的盘符，支持 CUE 数据轨的 ISO 9660、Joliet 卷标，也可为导入的盘手动指定卷标。按盘符直接读取镜像内的游戏文件仍待实现。换轨淡出、按有符号字号选择预渲染字体和过场第一帧定位同批等待托管验收。[164 兼容范围与证据](../decisions/164-disc-volumes-fades-and-game-rendering.md)
+
 第 163 批接入 MPEG-2/MP2 节目流和 XVID 标记的 MPEG-4 Part 2/MP3 AVI，修订长 Ogg 配乐跳转时的预读与图层影片的帧回调。本批结果待托管验证。[163 实现与托管证据](../decisions/163-movie-playback-music-and-save-verification.md)
 
 第 162 批修正了 KAG 转发属性后的选章顺序，并按裸 MPEG-1 视频的实际帧率生成过场时钟。[162 实现与托管证据](../decisions/162-game-routes-and-movie-timing.md)

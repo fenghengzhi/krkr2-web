@@ -823,11 +823,12 @@ export class WebVideoHost {
       } catch (error) { done(error) }
     })
   }
-  private loadFirstFrame(movie: Movie, load: () => Promise<void>): Promise<void> {
+  private async loadFirstFrame(movie: Movie): Promise<void> {
     // loadeddata may precede the first decoded/presented image. In particular,
     // an immediate paused seek can otherwise be overwritten by that initial
     // image, and layer readback can copy transparent pixels instead of a frame.
-    return new Promise((resolve, reject) => {
+    let restoreTime: number | undefined
+    await new Promise<void>((resolve, reject) => {
       let loaded = false,
         presented = false,
         settled = false
@@ -893,8 +894,8 @@ export class WebVideoHost {
         // Loading a second hidden/layer movie must not depend on its game's
         // visibility, clipping or a surface that has not yet been presented.
         // Give the actual decoder a connected, nonzero presentation surface;
-        // opacity keeps it out of the game image. This never plays or seeks the
-        // movie, and loadeddata alone still cannot release the first-frame gate.
+        // opacity keeps it out of the game image until the actual first frame
+        // is presented. The staging element never starts playback here.
         const rect = movie.element.getBoundingClientRect(), style = getComputedStyle(movie.element)
         if (!movie.element.isConnected || style.visibility !== 'visible' || style.display === 'none' ||
             rect.width <= 0 || rect.height <= 0) {
@@ -919,14 +920,28 @@ export class WebVideoHost {
             complete()
           } catch (error) { done(error) }
         })
-        void load().then(() => {
+        const element = movie.element
+        void this.wait(movie, 'loadeddata', () => element.readyState >= 2, () => {
+          element.src = movie.url
+          element.load()
+        }).then(async () => {
+          if (settled) return
+          const first = movie.timeline?.times[0], start = element.currentTime
+          if (!presented && first !== undefined && first > start * 1000 && element.paused) {
+            // An MP4 edit may start the video after its audio. At the original
+            // clock there is no picture to submit. Seek the private staged
+            // element to the first sample while its real callback is armed.
+            restoreTime = start
+            await this.seek(movie, first)
+          }
           loaded = true
           complete()
-        }, done)
+        }).catch(done)
       } catch (error) {
         done(error)
       }
     })
+    if (restoreTime !== undefined) await this.seekSeconds(movie, restoreTime)
   }
   private applySettings(movie: Movie, settings: VideoSettings): void {
     if (settings.periodEventFrame >= 0 && !movie.timeline?.times.length)
@@ -1082,10 +1097,7 @@ export class WebVideoHost {
     }
   }
   private async loadMovie(movie: Movie): Promise<void> {
-    await this.loadFirstFrame(movie, () => this.wait(movie, 'loadeddata', () => movie.element.readyState >= 2, () => {
-      movie.element.src = movie.url
-      movie.element.load()
-    }))
+    await this.loadFirstFrame(movie)
     if (!movie.element.videoWidth || movie.element.videoWidth > 4096 || movie.element.videoHeight > 4096 ||
         !Number.isFinite(movie.element.duration)) throw new Error('Invalid video dimensions or duration')
     if (movie.settings.mode === 2 && !movie.mixerMetadata)

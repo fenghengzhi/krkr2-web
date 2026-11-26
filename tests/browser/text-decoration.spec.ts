@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { textDecorationGameSource } from '../helpers/text-decoration.ts'
-import { readScreenshotPng } from '../helpers/screenshot-png.ts'
+import { canvasPixels } from '../helpers/canvas-pixels.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: player clicks change complete underlined and struck-through subtitles`, async ({ page }, info) => {
@@ -49,17 +49,18 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           }
           return { pixels: [...pixels], metrics }
         }, style)
-        let captured: Buffer | undefined
+        let captured: Awaited<ReturnType<typeof canvasPixels>> | undefined
         await expect.poll(async () => {
-          captured = await canvas.screenshot({ scale: 'css' })
-          const actual = readScreenshotPng(captured)
+          const actual = captured = await canvasPixels(canvas)
           if (actual.width !== 384 || actual.height !== 224) return { dimensions: [actual.width, actual.height] }
           for (let at = 0; at < actual.rgba.length; at++)
             if (actual.rgba[at] !== reference.pixels[at]) return { at, actual: actual.rgba[at], expected: reference.pixels[at] }
           return null
         }, { timeout: 12000 }).toBeNull()
-        observations.push({ style, metrics: reference.metrics })
-        await info.attach('subtitle-style-' + style, { body: captured!, contentType: 'image/png' })
+        observations.push({ style, metrics: reference.metrics, width: captured!.width, height: captured!.height,
+          bounds: captured!.bounds, devicePixelRatio: captured!.devicePixelRatio })
+        await info.attach('subtitle-style-' + style, { body: await canvas.screenshot({ scale: 'css' }), contentType: 'image/png' })
+        await info.attach(`subtitle-style-${style}-rgba`, { body: Buffer.from(captured!.rgba), contentType: 'application/octet-stream' })
         await expect(page.locator('#logs .error')).toHaveCount(0)
         if (style < 4) {
           const box = await canvas.boundingBox()
@@ -72,7 +73,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     try {
       await info.attach('subtitle-decoration-observations', { body: JSON.stringify({ observations, pageErrors,
         logs: await page.locator('#logs').innerText(), source: textDecorationGameSource,
-        scope: 'Actual source/bytecode Layer.drawText, five complete screenshot RGBA comparisons, real player clicks. System font pixels are compared to the same browser Canvas font; this is not a claim of Win32 raster equality.' }, null, 2), contentType: 'application/json' })
+        scope: 'Actual source/bytecode Layer.drawText, five complete backing-canvas RGBA comparisons and real player clicks. Unmodified screen PNGs retain fractional CSS placement separately. System font pixels are compared to the same browser Canvas font; this is not a claim of Win32 raster equality.' }, null, 2), contentType: 'application/json' })
     } catch (error) { failures.push(error) }
     try {
       if (await page.locator('#stop').isEnabled()) await page.locator('#stop').press('Enter', { timeout: 5000 })

@@ -50,9 +50,9 @@ interface Sound {
   waveOutputChannels: number
   filters?: PhaseVocoderConnection
   cdda?: CddaSelection
-  preparedCdda?: { token: number; selection: CddaSelection }
+  preparedCdda: Map<number, CddaSelection>
   preparedMidi: Map<number, { read(): Promise<Uint8Array> }>
-  midiWaiters: Set<(error: Error) => void>
+  resourceWaiters: Set<(error: Error) => void>
 }
 type Callback = { name: string; args: ScriptValue[] }
 export class SoundService {
@@ -120,9 +120,10 @@ export class SoundService {
     const sound = this.buffers.get(id)
     if (!sound) return
     this.buffers.delete(id)
+    sound.preparedCdda.clear()
     sound.preparedMidi.clear()
-    for (const cancel of sound.midiWaiters) cancel(new Error('MIDI resource owner has closed'))
-    sound.midiWaiters.clear()
+    for (const cancel of sound.resourceWaiters) cancel(new Error('Sound resource owner has closed'))
+    sound.resourceWaiters.clear()
     try {
       this.cancelEvents(sound)
     } finally {
@@ -193,26 +194,26 @@ export class SoundService {
     sound.ready = true
     if (result.snapshot) sound.snapshot = result.snapshot
   }
-  private async unloadMedia(sound: Sound): Promise<SoundSnapshot | undefined> {
+  private async unloadMedia(sound: Sound, status?: 'unload' | 'stop'): Promise<SoundSnapshot | undefined> {
     if (!sound.resourceRequested) return
-    const result = await this.voiceCommand(sound, { op: sound.kind !== 'cdda' ? 'unload' : 'close', id: sound.id })
-    // An unload result exists only for retained Wave/MIDI controls; it owns no
+    const result = await this.voiceCommand(sound, { op: 'unload', id: sound.id, ...(status ? { status } : {}) })
+    // An unload result exists only for retained sound controls; it owns no
     // decoder or PCM. Its live volume can have advanced during async cleanup.
     return result.snapshot
   }
-  private waitMidi<T>(sound: Sound, work: Promise<T>): Promise<T> {
+  private waitResource<T>(sound: Sound, work: Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const valid = () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound
       const cancel = (error: Error) => reject(error)
-      if (valid()) sound.midiWaiters.add(cancel)
-      else cancel(new Error('MIDI resource owner has closed'))
+      if (valid()) sound.resourceWaiters.add(cancel)
+      else cancel(new Error('Sound resource owner has closed'))
       // Keep both handlers on the actual provider even after Stop has released
       // its waiter. A late file may not publish a replacement voice.
       work.then((value) => {
-        sound.midiWaiters.delete(cancel)
+        sound.resourceWaiters.delete(cancel)
         if (valid()) resolve(value)
-        else cancel(new Error('MIDI resource owner has closed'))
-      }, (error) => { sound.midiWaiters.delete(cancel); reject(error) })
+        else cancel(new Error('Sound resource owner has closed'))
+      }, (error) => { sound.resourceWaiters.delete(cancel); reject(error) })
     })
   }
   private receive(event: AudioEvent): void {
@@ -222,7 +223,7 @@ export class SoundService {
     }
     const sound = this.buffers.get(event.id)
     if (!sound || event.epoch !== sound.snapshot.epoch) return
-    const inheritedFade = sound.kind !== 'cdda' && event.type === 'fade'
+    const inheritedFade = event.type === 'fade'
     sound.snapshot = event.snapshot
     const version = sound.version,
       name =
@@ -248,7 +249,7 @@ export class SoundService {
     const valid = () =>
       this.buffers.get(sound.id) === sound &&
       sound.version === version &&
-      // Already admitted Wave/MIDI fade callbacks belong to the SoundBuffer.
+      // Already admitted fade callbacks belong to the SoundBuffer.
       // Native status changes still revoke them through version; a stale
       // transport event cannot enter here through a retired media epoch.
       (inheritedFade || sound.snapshot.epoch === event.epoch)
@@ -323,8 +324,9 @@ export class SoundService {
           waveOutputRate: 0,
           waveOutputBits: 0,
           waveOutputChannels: 0,
+          preparedCdda: new Map(),
           preparedMidi: new Map(),
-          midiWaiters: new Set(),
+          resourceWaiters: new Set(),
           snapshot: {
             id,
             epoch: 0,
@@ -482,8 +484,8 @@ export class SoundService {
     if (method === 'prepareMidi') {
       if (sound.kind !== 'midi') throw new Error('Invalid MIDI owner')
       const name = text(0), resource = this.resourceSource
-        ? await this.waitMidi(sound, Promise.resolve(this.resourceSource.resolve(name))) : undefined,
-        bytes = resource ? undefined : await this.waitMidi(sound, this.read(name))
+        ? await this.waitResource(sound, Promise.resolve(this.resourceSource.resolve(name))) : undefined,
+        bytes = resource ? undefined : await this.waitResource(sound, this.read(name))
       if (this.disposed || this.cancelling || this.buffers.get(sound.id) !== sound)
         throw new Error('MIDI opening lost its sound owner')
       if (!Number.isSafeInteger(this.nextMidiToken)) throw new Error('MIDI opening identity exhausted')
@@ -518,7 +520,7 @@ export class SoundService {
       }
       try {
         await clearMedia()
-        const bytes = await this.waitMidi(sound, selected.read())
+        const bytes = await this.waitResource(sound, selected.read())
         if (this.disposed || this.cancelling || this.buffers.get(sound.id) !== sound)
           throw new Error('MIDI opened stream lost its sound owner')
         // MIDIImpl reads SMF directly. An unrelated .mid.sli is not a Wave
@@ -546,10 +548,9 @@ export class SoundService {
       sound.position[0] = x; sound.position[1] = y; sound.position[2] = z
     } else if (method === 'prepareCdda') {
       if (sound.kind !== 'cdda') throw new Error('Invalid CDDA owner')
-      sound.preparedCdda = undefined
       const version = sound.version
       let selection: CddaSelection | undefined
-      try { selection = await this.cddaDiscs.prepare(text(0)) }
+      try { selection = await this.waitResource(sound, this.cddaDiscs.prepare(text(0))) }
       catch (error) {
         if (error instanceof InvalidCddaDrive) return this.result(-1n, [])
         throw error
@@ -559,20 +560,25 @@ export class SoundService {
       if (selection) {
         if (!Number.isSafeInteger(this.nextCddaToken)) throw new Error('CDDA preparation identity exhausted')
         const token = this.nextCddaToken++
-        sound.preparedCdda = { token, selection }; value = BigInt(token)
+        // The original Open keeps its drive/track in local variables while
+        // Stop/Close callbacks may reenter and select another track.
+        sound.preparedCdda.set(token, selection); value = BigInt(token)
       }
+    } else if (method === 'releaseCdda') {
+      sound.preparedCdda.delete(numeric(0))
     } else if (method === 'invalidCddaDrive') {
       if (sound.kind !== 'cdda') throw new Error('Invalid CDDA owner')
       throw new TvpError('TVPInvalidCDDADrive')
     } else if (method === 'unload' || method === 'unloadCdda') {
       let keepStopped = false
       if (method === 'unloadCdda') {
-        if (sound.kind !== 'cdda' || !sound.preparedCdda || sound.preparedCdda.token !== numeric(0))
+        const selected = sound.preparedCdda.get(numeric(0))
+        if (sound.kind !== 'cdda' || !selected)
           throw new Error('CDDA prepared track is stale')
-        keepStopped = sound.cdda?.drive === sound.preparedCdda.selection.drive
+        keepStopped = sound.cdda?.drive === selected.drive
       }
       const previous = sound.snapshot.status
-      const retained = await this.unloadMedia(sound)
+      const retained = await this.unloadMedia(sound, keepStopped ? 'stop' : 'unload')
       sound.filters?.release()
       sound.filters = undefined
       sound.resourceRequested = !!retained
@@ -594,25 +600,35 @@ export class SoundService {
         fading: retained?.fading ?? false,
         flags: Array(16).fill(0),
       }
-      if (sound.kind !== 'wave' || previous !== sound.snapshot.status) this.cancelEvents(sound)
+      if (sound.kind === 'midi' || previous !== sound.snapshot.status) this.cancelEvents(sound)
       if (previous !== sound.snapshot.status) callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
     } else if (method === 'open' || method === 'openCdda') {
       let selected: CddaSelection | undefined
       if (method === 'openCdda') {
-        if (sound.kind !== 'cdda' || !sound.preparedCdda || sound.preparedCdda.token !== numeric(0))
+        const token = numeric(0)
+        selected = sound.preparedCdda.get(token)
+        if (sound.kind !== 'cdda' || !selected)
           throw new Error('CDDA prepared track is stale')
-        selected = sound.preparedCdda.selection
+        sound.preparedCdda.delete(token)
       }
-      sound.preparedCdda = undefined
       sound.cdda = selected
-      if (sound.kind !== 'wave') this.cancelEvents(sound)
+      if (sound.kind === 'midi') this.cancelEvents(sound)
       const name = selected?.cue ?? text(0),
         previous = sound.snapshot.status
       if (selected && !selected.parts) {
         // Native open records even an absent track; the device rejects play.
         // Do not invent a platform-specific MCI error string for a Web disc.
-        sound.snapshot.status = 'stop'; sound.ready = false
-        if (previous !== 'stop') callbacks.push({ name: 'onStatusChanged', args: ['stop'] })
+        // Retain its stopped device controls even if a fade starts only after
+        // this Open; there is deliberately no playable PCM attached to them.
+        await this.prepare(sound)
+        const retained = await this.unloadMedia(sound, 'stop')
+        sound.ready = !!retained; sound.resourceRequested = !!retained
+        if (retained) sound.snapshot = retained
+        sound.snapshot.status = 'stop'
+        if (previous !== 'stop') {
+          this.cancelEvents(sound)
+          callbacks.push({ name: 'onStatusChanged', args: ['stop'] })
+        }
         return this.result(undefined, callbacks)
       }
       if (sound.filters) throw new Error('Sound must unload before opening a new stream')
@@ -712,7 +728,7 @@ export class SoundService {
         ),
       )
       if (sound.snapshot.status !== previous) {
-        if (sound.kind === 'wave') this.cancelEvents(sound)
+        this.cancelEvents(sound)
         callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
       }
     } else if (method === 'play' || method === 'stop') {
@@ -847,9 +863,10 @@ export class SoundService {
     this.cancelling = Promise.resolve().then(() =>
       this.backend?.cancel ? this.backend.cancel() : this.pause(true))
     for (const sound of this.buffers.values()) {
+      sound.preparedCdda.clear()
       sound.preparedMidi.clear()
-      for (const cancel of sound.midiWaiters) cancel(new Error('MIDI resource owner has closed'))
-      sound.midiWaiters.clear()
+      for (const cancel of sound.resourceWaiters) cancel(new Error('Sound resource owner has closed'))
+      sound.resourceWaiters.clear()
     }
     void this.cancelling.catch(() => {})
     return this.cancelling

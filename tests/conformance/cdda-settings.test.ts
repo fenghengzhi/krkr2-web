@@ -11,9 +11,13 @@ test('player CUE settings preserve default-disc order, exact storage paths and e
   assert.deepEqual(bindings, expected)
   assert.deepEqual(parseCddaSettings(formatCddaSettings(bindings)), expected)
   assert(Object.isFrozen(bindings)); assert(Object.isFrozen(bindings![0]))
+  const labeled = parseCddaSettings('D.label=Garden=Spring\nE=disc2.cue\nE.label=\nD=disc1.cue')
+  assert.deepEqual(labeled, [{ drive: 'E', cue: 'disc2.cue', volumeLabel: '' },
+    { drive: 'D', cue: 'disc1.cue', volumeLabel: 'Garden=Spring' }])
+  assert.deepEqual(parseCddaSettings(formatCddaSettings(labeled)), labeled)
   assert.deepEqual(parseCddaSettings('无'), [])
   assert.equal(formatCddaSettings([]), '无')
-  for (const input of ['D=a.cue\nd=b.cue', 'DD=a.cue', 'D=', 'D=  ', '1=a.cue', 'D=bad\0.cue', 'D=' + 'x'.repeat(4097)])
+  for (const input of ['D=a.cue\nd=b.cue', 'DD=a.cue', 'D=', 'D=  ', '1=a.cue', 'E.label=orphan', 'D=a.cue\nD.label=A\nd.label=B', 'D=a.cue\nD.label=' + 'x'.repeat(256), 'D=bad\0.cue', 'D=' + 'x'.repeat(4097)])
     assert.throws(() => parseCddaSettings(input))
 })
 

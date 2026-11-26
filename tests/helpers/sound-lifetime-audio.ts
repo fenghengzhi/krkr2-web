@@ -107,10 +107,10 @@ export class LifetimeAudioBackend implements AudioBackend {
       this.nextClose = undefined
       await gate?.wait()
       const previous = this.voices.get(command.id), keep = command.op === 'unload' &&
-        !!previous && (previous.fading || this.retainedControls.has(command.id))
+        !!previous && (previous.fading || this.retainedControls.has(command.id) || command.status === 'stop')
       if (keep) {
         this.retainedControls.add(command.id)
-        Object.assign(previous, { status: 'unload', position: 0,
+        Object.assign(previous, { status: command.op === 'unload' ? command.status ?? 'unload' : 'unload', position: 0,
           sampleRate: 0, sampleCount: 0, frequency: 0, channels: 0, bits: 0, paused: false, flags: Array(16).fill(0) })
       } else { this.voices.delete(command.id); this.retainedControls.delete(command.id) }
       this.closedIds.push(command.id)

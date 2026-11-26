@@ -114,7 +114,7 @@ manifest.capabilities = {
   nativeMidi: 1,
   nativeWindowInput: 1,
   nativeFontMetrics: 1,
-  nativeStorages: 2,
+  nativeStorages: 3,
   nativeTextStreams: 2,
   nativeHelp: 1,
   nativePad: 1,

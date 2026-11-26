@@ -369,6 +369,29 @@ jobs:
         run: |
           mkdir -p out/verification/long-vorbis
           node scripts/generate-long-vorbis-fixture.mjs 2>&1 | tee out/ci/long-vorbis-fixture.log
+      - name: Author ISO and Joliet data tracks and read back their contents
+        id: disc-volumes
+        continue-on-error: true
+        run: |
+          dir=out/verification/disc-volumes
+          mkdir -p "$dir/files"
+          sudo apt-get install -y genisoimage
+          cd "$dir"
+          echo 'Disc identification scene' > files/SCENE.TXT
+          genisoimage -quiet -V KRKR_PLAIN -o plain.iso files
+          genisoimage -quiet -J -V KIRIKIRI_DISC -o joliet.iso files
+          isoinfo -i plain.iso -d > plain.txt
+          isoinfo -i joliet.iso -d > joliet.txt
+          grep -Eq '^Volume id: KRKR_PLAIN[[:space:]]*$' plain.txt
+          grep -Eq '^Volume id: KIRIKIRI_DISC[[:space:]]*$' joliet.txt
+          isoinfo -i plain.iso -x '/SCENE.TXT;1' > plain-scene.txt
+          isoinfo -i joliet.iso -J -f > joliet-files.txt
+          mapfile -t joliet_files < joliet-files.txt
+          [[ ${#joliet_files[@]} = 1 && ( ${joliet_files[0]} = '/SCENE.TXT' || ${joliet_files[0]} = '/SCENE.TXT;1' ) ]]
+          isoinfo -i joliet.iso -J -x "${joliet_files[0]}" > joliet-scene.txt
+          cmp files/SCENE.TXT plain-scene.txt
+          cmp files/SCENE.TXT joliet-scene.txt
+          sha256sum plain.iso joliet.iso > SHA256SUMS
       - name: Encode and independently decode AIFF disc tracks
         id: cdda-aiff-fixtures
         continue-on-error: true
@@ -418,7 +441,7 @@ jobs:
             out/verification/pwa/fixture-artifacts.json out/verification/video-tracks \
             out/verification/deflate64-games \
             out/verification/long-vorbis \
-            out/verification/cdda-aiff \
+            out/verification/cdda-aiff out/verification/disc-volumes \
             out/verification/jpeg-fixtures/inputs \
             out/verification/jpeg-fixtures/case-manifest.json out/verification/jpeg-fixtures/codes.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -490,6 +513,14 @@ jobs:
           path: |
             out/verification/cdda-aiff/
             out/ci/cdda-aiff.log
+          if-no-files-found: error
+          retention-days: 90
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.disc-volumes.outcome == 'success' || steps.disc-volumes.outcome == 'failure') }}
+        with:
+          name: disc-volume-fixtures
+          path: out/verification/disc-volumes/
           if-no-files-found: error
           retention-days: 90
 
@@ -973,7 +1004,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, tools-types, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
+    needs: [build, tools-types, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config, original-disc-search]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -1445,6 +1476,31 @@ jobs:
           path: out/verification/native-player-config/
           if-no-files-found: error
           retention-days: 90
+
+  original-disc-search:
+    name: Original Windows game finds imported volume labels
+    needs: build
+    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: disc-volume-fixtures
+          path: out/verification/disc-volumes
+      - name: Compare original TJS drive lookup and argument handling with Windows
+        shell: pwsh
+        run: ./tests/probes/disc-volume.ps1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-disc-volume-search
+          path: out/verification/native-eri/disc-volume/
+          retention-days: 90
+          if-no-files-found: error
 
   native-save-transfer:
     name: Original Windows player reads Web save ZIPs

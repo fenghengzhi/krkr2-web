@@ -40,7 +40,7 @@ export interface TextDraw {
 }
 export const fontKey = (font: FontSpec): string =>
   JSON.stringify([
-    Math.abs(font.height),
+    font.mappingHeight ?? font.height,
     font.angle,
     font.face,
     !!font.bold,

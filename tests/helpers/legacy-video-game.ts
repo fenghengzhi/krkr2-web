@@ -40,7 +40,7 @@ legacyRoot.fillRect(0,0,200,128,0xff102030);
 var legacyLeft=new Layer(legacyWindow,legacyRoot),legacyRight=new Layer(legacyWindow,legacyRoot);
 legacyLeft.setSize(96,64);legacyRight.setPos(104,0,96,64);legacyLeft.visible=legacyRight.visible=true;
 var legacyFiles=${JSON.stringify(cases.map((item) => item.file))},legacyIndex=0;
-var legacyEvents=[],legacyDropped=0,legacyPrepareCount=0;
+var legacyEvents=[],legacyDropped=0,legacyPrepareCount=0,legacyOpenClock="";
 function legacyRecord(value){if(legacyEvents.count<384)legacyEvents.add(value);else legacyDropped++;}
 function legacyWord(layer){
  var code=0;for(var bit=0;bit<7;bit++)if((layer.getMainPixel(12+bit*12,52)&255)>180)code|=1<<bit;return code;
@@ -58,7 +58,8 @@ var legacyMovie=new LegacyMovie(legacyWindow);legacyMovie.mode=vomLayer;
 legacyMovie.layer1=legacyLeft;legacyMovie.layer2=legacyRight;
 function legacyOpen(){
  legacyEvents.clear();global.legacyDropped=0;global.legacyPrepareCount=0;
- legacyMovie.open(legacyFiles[legacyIndex]);legacyMovie.loop=true;legacyMovie.pause();legacyMovie.frame=0;
+ legacyMovie.open(legacyFiles[legacyIndex]);global.legacyOpenClock=legacyMovie.frame+"|"+legacyMovie.position;
+ legacyMovie.loop=true;legacyMovie.pause();legacyMovie.frame=0;
  Debug.message("legacy-ready:"+legacyIndex+":"+legacyFiles[legacyIndex]);
 }
 function legacyAction(action){

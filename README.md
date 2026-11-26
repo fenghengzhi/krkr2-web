@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 164 批让多盘游戏按卷标找到配乐光盘，切轨时继续当前淡出，并处理预渲染字幕选错字体、WebKit 在过场首帧前停住的问题。新增行为等待托管验收。[164 实现与托管证据](docs/decisions/164-disc-volumes-fades-and-game-rendering.md)
+
 第 163 批接入 MPEG-2 和 Xvid AVI 过场，修正长 Ogg 配乐跳转后的一段静音，并使原版存档读回能独立完成验收。本批结果待托管验证。[163 实现与托管证据](docs/decisions/163-movie-playback-music-and-save-verification.md)
 
 第 162 批修正了剧情宏选章时的属性读取与裸 MPEG-1 过场的帧时序，并按第 160 批的游戏库失败记录修订了启动和读档验收。[162 实现与托管证据](docs/decisions/162-game-routes-and-movie-timing.md)

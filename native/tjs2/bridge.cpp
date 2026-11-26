@@ -868,13 +868,15 @@ public:
     }
 };
 
-// getLocalName differs from the older lexical methods: an unused result skips
-// both conversion and host work, after the native argument-count check.
-class StorageLocalName final : public tTJSNativeClassMethod {
+// Win32 getLocalName and searchCD skip conversion and host work when the
+// result is discarded. Both still check that a first argument was supplied.
+class StorageResultMethod final : public tTJSNativeClassMethod {
     Vm* vm;
+    const tjs_char* operation;
     static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
 public:
-    explicit StorageLocalName(Vm* vm) : tTJSNativeClassMethod(noOp), vm(vm) {}
+    StorageResultMethod(Vm* vm, const tjs_char* operation)
+        : tTJSNativeClassMethod(noOp), vm(vm), operation(operation) {}
     tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
         tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
         if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
@@ -886,9 +888,8 @@ public:
         const ttstr name = *args[0];
         tTJSVariant value(name);
         tTJSVariant* input = &value;
-        constexpr auto operation = u"Storages.getLocalName";
         std::unique_ptr<Reply> reply(dispatch_host(vm, operation, TJS_strlen(operation), 1, &input));
-        if(!reply) TJS_eTJSError(u"Storages.getLocalName returned no response");
+        if(!reply) TJS_eTJSError(u"Storages host returned no response");
         resolveReply(vm, *reply, result);
         return TJS_S_OK;
     }
@@ -2055,7 +2056,8 @@ API void krkr_value_set_class(Vm* vm, tTJSVariant* value, const tjs_char* prefix
     if(storages) {
         for(const auto& policy : storageMethodPolicies)
             object->RegisterNCM(policy.name, new StorageMethod(vm, policy), u"Storages", nitMethod, TJS_STATICMEMBER);
-        object->RegisterNCM(u"getLocalName", new StorageLocalName(vm), u"Storages", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"getLocalName", new StorageResultMethod(vm, u"Storages.getLocalName"), u"Storages", nitMethod, TJS_STATICMEMBER);
+        object->RegisterNCM(u"searchCD", new StorageResultMethod(vm, u"Storages.searchCD"), u"Storages", nitMethod, TJS_STATICMEMBER);
         object->RegisterNCM(u"selectFile", new StorageSelectFile(vm), u"Storages", nitMethod, TJS_STATICMEMBER);
     }
     *value = tTJSVariant(object.get(), object.get());

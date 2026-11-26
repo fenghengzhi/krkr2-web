@@ -41,6 +41,7 @@ export function fontSpec(data: ScriptRecord): FontSpec {
     throw new Error('Invalid font description')
   return {
     height: Math.abs(height),
+    mappingHeight: height,
     angle: ((angle % 3600) + 3600) % 3600,
     face: value.face,
     bold: !!value.bold,

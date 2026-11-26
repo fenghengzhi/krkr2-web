@@ -1,4 +1,4 @@
-param([ValidateSet('eri', 'midi', 'kag', 'sli', 'kag-intro', 'transition', 'transition-alpha', 'decimal', 'window-input', 'player-saves')][string]$Project = 'eri')
+param([ValidateSet('eri', 'midi', 'kag', 'sli', 'kag-intro', 'transition', 'transition-alpha', 'decimal', 'window-input', 'player-saves', 'disc-volume')][string]$Project = 'eri')
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') {
   throw 'The original SDK reference requires a GitHub-hosted Windows runner.'

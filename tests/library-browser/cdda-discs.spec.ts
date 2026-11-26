@@ -8,7 +8,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: player disc bindings survive library refresh and editable mappings select the actual CUE audio`, async ({ page }, info) => {
     test.setTimeout(150000)
     const failures: unknown[] = [], errors: string[] = [], observations: unknown[] = [],
-      original = 'E=Second/disc.cue\nD=First/disc.cue', swapped = 'D=Second/disc.cue\nE=First/disc.cue',
+      original = 'E=Second/disc.cue\nD=First/disc.cue\nD.label=Game Music', swapped = 'D=Second/disc.cue\nE=First/disc.cue\nE.label=Game Music',
       title = `Two discs ${backend} ${binary ? 'compiled' : 'source'}`,
       item = page.locator('.library-game').filter({ has: page.getByRole('heading', { name: title, exact: true }) }),
       canvas = page.locator('.game-window[data-window-id]').filter({
@@ -20,7 +20,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !await page.evaluate(() => 'Suspending' in WebAssembly), 'JSPI unavailable')
     const record = () => page.evaluate(() => new Promise<{
-      gameId: string; cddaDiscs?: { drive: string; cue: string }[]; files: { path: string; hashes: string[] }[]
+      gameId: string; cddaDiscs?: { drive: string; cue: string; volumeLabel?: string }[]; files: { path: string; hashes: string[] }[]
     }>((resolve, reject) => {
       const opening = indexedDB.open('krkr2-library')
       opening.onerror = () => reject(opening.error)
@@ -40,7 +40,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       const message = page.getByText(`disc-choice:${name}:${duration}`, { exact: true }), before = await message.count(),
         box = await canvas.boundingBox()
       expect(box).not.toBeNull()
-      await canvas.click({ position: { x: box!.width * (48 + index * 100) / 300, y: box!.height * 28 / 80 } })
+      await canvas.click({ position: { x: box!.width * (48 + index * 100) / 400, y: box!.height * 28 / 80 } })
       await expect(message).toHaveCount(before + 1)
       const picture = await canvas.screenshot({ timeout: 5000 }), image = readScreenshotPng(picture),
         at = (Math.floor(image.height * 70 / 80) * image.width + Math.floor(image.width / 2)) * 4
@@ -87,13 +87,15 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect(page.getByText('two-disc-ready:none', { exact: true })).toBeVisible()
       await choose(0, 'D:1', 2000); await tone('import-disc-d', 440)
       await choose(1, 'E:1', 3000); await tone('import-disc-e', 880)
+      await choose(3, 'E:1', 3000)
+      await expect(page.getByText('disc-labels:E|D', { exact: true }).last()).toBeVisible()
       await choose(2, '1', 3000)
       // Future import controls cannot replace this live session's frozen bindings.
       await page.locator('#cdda-discs').fill(swapped)
       await page.locator('#library-title').fill(title); await page.locator('#save-library').click()
       await expect(item).toBeVisible(); await expect(page.locator('#cancel-library')).toBeHidden()
       const before = await record()
-      expect(before.cddaDiscs).toEqual([{ drive: 'E', cue: 'Second/disc.cue' }, { drive: 'D', cue: 'First/disc.cue' }])
+      expect(before.cddaDiscs).toEqual([{ drive: 'E', cue: 'Second/disc.cue' }, { drive: 'D', cue: 'First/disc.cue', volumeLabel: 'Game Music' }])
       observations.push({ saved: before })
       await stop(); await page.reload()
       // Even a malformed temporary-import editor is irrelevant to a saved game.
@@ -102,6 +104,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect(page.getByText('two-disc-ready:1', { exact: true })).toBeVisible()
       await choose(0, 'D:1', 2000); await tone('library-disc-d', 440)
       await choose(1, 'E:1', 3000); await tone('library-disc-e', 880)
+      await choose(3, 'E:1', 3000)
+      await expect(page.getByText('disc-labels:E|D', { exact: true }).last()).toBeVisible()
       await choose(2, '1', 3000)
       expect(await record()).toEqual(before)
       await item.locator('summary').click()
@@ -116,7 +120,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await editor.fill(swapped)
       await item.getByRole('button', { name: '保存设置', exact: true }).click()
       await expect.poll(async () => (await record()).cddaDiscs).toEqual([
-        { drive: 'D', cue: 'Second/disc.cue' }, { drive: 'E', cue: 'First/disc.cue' },
+        { drive: 'D', cue: 'Second/disc.cue' }, { drive: 'E', cue: 'First/disc.cue', volumeLabel: 'Game Music' },
       ])
       // Editing next-start settings leaves the currently playing disc set intact.
       await choose(0, 'D:1', 2000)
@@ -125,6 +129,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect(page.getByText('two-disc-ready:D:1', { exact: true })).toBeVisible()
       await choose(0, 'D:1', 3000); await tone('edited-disc-d', 880)
       await choose(1, 'E:1', 2000); await tone('edited-disc-e', 440)
+      await choose(3, 'D:1', 3000); await tone('label-found-on-remapped-drive', 880)
+      await expect(page.getByText('disc-labels:D|E', { exact: true }).last()).toBeVisible()
       await choose(2, '1', 3000)
       const after = await record()
       expect(after.gameId).toBe(before.gameId); expect(after.files).toEqual(before.files)

@@ -50,7 +50,7 @@ async function fixture(binary: boolean, source: string) {
           },
         }
       assert(
-        methods.some((method) => operation(method) === name),
+        methods.some((method) => operation(method) === name) || name === 'Storages.searchCD',
         name,
       )
       assert.equal(args.length, 1, 'Native methods forward exactly the converted first argument')
@@ -80,7 +80,7 @@ async function fixture(binary: boolean, source: string) {
 
 test('native Storages capability coexists with native System version 4 and Clipboard support', async () => {
   assert.equal(manifest.abi, 5)
-  assert.equal(manifest.capabilities?.nativeStorages, 2)
+  assert.equal(manifest.capabilities?.nativeStorages, 3)
   assert.equal(manifest.capabilities?.nativeSystem, 6)
   assert.equal(manifest.capabilities?.nativeClipboard, 1)
 })
@@ -88,6 +88,22 @@ test('native Storages capability coexists with native System version 4 and Clipb
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
 
+  test(`searchCD converts only a consumed volume label and enforces its required argument (${mode})`, async () => {
+    const { vm, calls } = await fixture(binary, `
+var missing=0,converted=0,extras=0;
+function extra(){extras++;return <% 01 %>;}
+var lookup=Storages.searchCD incontextof %[];
+try{lookup();}catch(e){missing++;}
+try{var missingValue=lookup();}catch(e){missing++;}
+lookup(<% 01 %>,extra());
+try{var used=lookup(<% 01 %>,extra());}catch(e){converted++;}
+var found=lookup("Game Disc",extra());
+`)
+    try {
+      assert.equal(await vm.execute('[missing,converted,extras,found].join("|")', '', true), '2|1|3|Game Disc')
+      assert.deepEqual(calls, [{ operation: 'Storages.searchCD', path: 'Game Disc' }])
+    } finally { vm.dispose() }
+  })
   test(`Storages has nine native static path methods and no constructor or public directory property (${mode})`, async () => {
     const { vm, calls } = await fixture(
       binary,

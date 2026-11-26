@@ -5005,6 +5005,9 @@ export class EngineSession {
           control: this.control,
         }))
         break
+      case 'Storages.searchCD':
+        value = await this.cddaDiscs.searchVolume(text(0))
+        break
       case 'Storages.getLocalName':
         value = getWebLocalName(text(0), this.project?.directory)
         break

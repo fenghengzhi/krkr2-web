@@ -25,8 +25,9 @@ class __SoundBase {
     // A failed conversion must leave the current decoder, labels and fade live.
     var storage=string(args[0]);
     // WaveImpl::Clear stops/rewinds media without ending BaseSoundBuffer's
-    // fade. MIDI/CDDA keep their separate original open policies.
-    if(__soundKind=="wave")__soundRun("stop",[]);else __soundRun("stopFade",[false]);
+    // fade. CDDA's existing direct-file extension uses the same inherited
+    // fade lifetime; its virtual-disc selection has a separate open policy.
+    if(__soundKind=="wave")__soundRun("stop",[]);
     __clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[storage],__soundKind=="wave"?global.WaveSoundBuffer.__snapshotPhaseVocoderFilters(__filters):void);
   }
   function play(){__soundRun("play",[]);}
@@ -95,8 +96,15 @@ class CDDASoundBuffer extends __SoundBase {
     var storage=string(args[0]),ticket=__soundRun("prepareCdda",[storage]);
     if(ticket===void){super.open(storage);return;}
     if(ticket==-1){__soundRun("unload",[]);__soundRun("invalidCddaDrive",[]);return;}
-    __soundRun("stop",[]);__soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unloadCdda",[ticket]);__clearSoundLabels();
-    __soundRun("openCdda",[ticket]);
+    // CDDAImpl::Open stops the old track, then optionally reopens the drive.
+    // Neither that path nor Close cancels BaseSoundBuffer's current fade.
+    try{
+      __soundRun("stop",[]);__clearSoundLabels();__soundRun("unloadCdda",[ticket]);__clearSoundLabels();
+      __soundRun("openCdda",[ticket]);
+    }catch(error){
+      try{__soundRun("releaseCdda",[ticket]);}catch(cleanup){global.Debug.message("CDDA selection cleanup: "+cleanup.message);}
+      throw error;
+    }
   }
 }
 `

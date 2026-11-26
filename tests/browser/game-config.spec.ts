@@ -27,7 +27,8 @@ var configSave=new Layer(configWindow,configRoot);configSave.holdAlpha=false;con
 var configWrite=new Layer(configWindow,configRoot);configWrite.holdAlpha=false;configWrite.setPos(0,40,80,32);configWrite.fillRect(0,0,80,32,0xff604080);configWrite.visible=true;
 var configAlpha=new Layer(configWindow,configRoot);configAlpha.setSize(1,1);configAlpha.face=dfOpaque;
 var configHold=int(configAlpha.holdAlpha);configAlpha.setMaskPixel(0,0,73);var configBeforeMask=configAlpha.getMaskPixel(0,0);
-configAlpha.fillRect(0,0,1,1,0xff445566);
+// Opaque holdAlpha uses a 24-bit color identifier; the other branch accepts ARGB.
+configAlpha.fillRect(0,0,1,1,configHold?0x445566:0xff445566);
 function configStored(){return Storages.isExistentStorage(System.dataPath+"slot.txt")?[].load(System.dataPath+"slot.txt","utf-8")[0]:"none";}
 function configState(){return [configRoute,System.getArgument("-route"),System.getArgument("-shared"),System.getArgument("-onlydefault"),
  System.getArgument("-onlyembedded"),System.getArgument("-sectiononly")===void?"absent":"present",

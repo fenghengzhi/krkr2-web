@@ -84,7 +84,7 @@ async function execute(vm: TjsWasmRuntime, binary: boolean, source: string) {
 test('native write target binding capability retains ABI 5, Storages 2 and PhaseVocoder 1', async () => {
   assert.equal(manifest.abi, 5)
   assert.equal(manifest.capabilities?.nativeTextStreams, 2)
-  assert.equal(manifest.capabilities?.nativeStorages, 2)
+  assert.equal(manifest.capabilities?.nativeStorages, 3)
   assert.equal(manifest.capabilities?.nativePhaseVocoder, 1)
 })
 

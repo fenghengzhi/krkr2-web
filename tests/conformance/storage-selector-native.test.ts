@@ -221,7 +221,7 @@ for (const binary of [false, true]) {
     const fixture = await boundary('0\ngame://./chosen.sav')
     const { vm, calls } = fixture
     try {
-      assert.equal(manifest.capabilities?.nativeStorages, 2)
+      assert.equal(manifest.capabilities?.nativeStorages, 3)
       await execute(
         vm,
         binary,
