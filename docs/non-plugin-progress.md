@@ -4,6 +4,8 @@
 
 第 155 批修复了游戏选不到字体合集中的后续成员、读回嵌套条件书签后走错分支，以及配乐复位或重播时声像移到中央的问题。上一次取回时，第 150 批原版 KAG 为 95/99 匹配，第 151 至 154 批仍在队列中。[155 实现与托管证据](decisions/155-font-collections-conditional-saves-and-midi.md)
 
+实现提交 `c6e23ad` 登记时为 `pending`，下一批取回验证结果。[第 155 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45813557063)
+
 第 154 批让中断的远程游戏入库下载可以在刷新后继续，校验已存块并重取损坏的内容。剧情表达式重入同一个 KAG 解析器后继续使用当前行，WAVE 声音在窗口失焦时采用发行包指定的音量。第 147、148 批的原版 KAG 对照均为 89/92 匹配，三项 EOF 差异和跳过的 Web 验收已保留。[154 实现、范围与托管证据](decisions/154-remote-downloads-script-cursor-and-background-audio.md)
 
 实现提交 `8b28dac` 已进入 GitHub-hosted Actions 队列，登记时为 `pending`。下批取回结果。[第 154 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45811619796)
