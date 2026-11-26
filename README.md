@@ -62,6 +62,17 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 
 页面现在也支持“远程文件链接”。支持 Range 和强 ETag 的 XP3/ZIP 服务器可按需读取；小文件可在预算内完整下载。跨域配置、版本与存档身份见 [HTTP 来源](docs/decisions/016-http-sources.md)。
 
+远程游戏分成主包、补丁和散装文件时，在“远程来源”选择“游戏目录清单（JSON）”，输入发布者提供的清单链接。下面这份 UTF-8 清单列出三个文件。
+
+```json
+{
+  "version": 1,
+  "files": ["data.xp3", { "path": "patch.xp3", "url": "packages/update.bin" }, "声音/主题曲.ogg"]
+}
+```
+
+这里游戏看到的补丁文件名是 `patch.xp3`，服务器实际提供 `packages/update.bin`。相对链接从清单最终所在的目录解析。点击“保存当前游戏”后，游戏库会复制列出的文件，之后可从库中离线启动。[远程目录格式与验收](docs/decisions/148-remote-games-layer-options-and-midi-reset.md)
+
 打开含 XP3、补丁和散装资源的 ZIP 发行包时，先在“游戏位置”选择“自动识别游戏目录或 ZIP 发行包”，再选择单个 ZIP 或填写远程链接。游戏库会记住包内的游戏目录。[ZIP 发行包的使用范围与验收](docs/decisions/134-zip-distributions-midi-and-game-playback.md)
 
 旧日文 ZIP 若显示乱码或找不到章节，在导入前将“未标记的 ZIP 文件名编码”选为“日文（Shift_JIS）”。中文发行包也可选择 GBK 或 Big5。游戏库会记住这次选择。另行导入原版存档 ZIP 时，如果来源不同，可在“存档 ZIP 文件名编码”单独选择。[旧 ZIP 文件名与存档](docs/decisions/145-zip-file-names-video-prepare-and-text.md)

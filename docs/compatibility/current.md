@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 148 批加入远程多文件游戏目录，支持保存至浏览器游戏库。图层可见性、可点击性和键盘焦点按原版解释脚本值，MIDI 播放加入了模块复位后的等待。新增行为等待托管验证。[148 范围与验收](../decisions/148-remote-games-layer-options-and-midi-reset.md)
+
 第 147 批按游戏注册顺序匹配补丁中的大小写文件名，保留 KAG 到达剧情末尾时已有的标签数据，并调整了 MIDI 换曲和音量渐变的时序。新增行为等待托管验证。[147 范围与验收](../decisions/147-game-patches-scenario-end-and-midi.md)
 
 第 146 批为无 BOM 的 TJS 与 KAG 加入游戏级编码选择。普通鼠标单击采用按下位置，无扬声器标记的六声道 WAVE 按原版次序播放。新增行为等待托管验证。[146 范围与验收](../decisions/146-game-text-mouse-clicks-and-wave-speakers.md)
@@ -422,7 +424,7 @@ KAG 表达式在原 TJS2 中以 parser 实例为上下文执行；标签字典�
 
 页面可载入单个远程文件链接，XP3/ZIP 按签名识别。HTTP Range 使用强 ETag 与 If-Match 固定版本、256 KiB 块/32 MiB 会话缓存、最多 4 个并发请求；完整下载快照合计不超过 64 MiB。请求错误、版本变化、CORS 和停止有明确处理。已测来源偏移超过 4 GiB，但单个展开资源仍受 64 MiB 限制；这不代表音视频已经实现流式解码。
 
-远程游戏 ID 使用逻辑路径、大小、URL/最终 URL 和固定版本，刷新同版本保留存档；URL、文件名或版本变化可能创建新命名空间。本地文件沿用此前的采样哈希，以保留旧存档。当前可以主动完整保存到 OPFS 游戏库；身份迁移、按块持久 HTTP 缓存、远程目录清单和登录资源配置仍未实现。服务器要求、网络/内存预算、测试范围见 [HTTP 来源决策](../decisions/016-http-sources.md)。
+远程游戏 ID 使用逻辑路径、大小、URL/最终 URL 和固定版本，刷新同版本保留存档。URL、文件名或版本变化可能创建新命名空间。本地文件沿用此前的采样哈希，以保留旧存档。单文件及远程游戏目录都可以完整保存到 OPFS 游戏库。身份迁移、按块持久 HTTP 缓存和登录资源配置仍未实现。[HTTP 来源决策](../decisions/016-http-sources.md) · [远程游戏目录](../decisions/148-remote-games-layer-options-and-midi-reset.md)
 
 HTTP 阶段的完整检查通过 193 项行为/集成和 243 项浏览器测试，无跳过。最新构建与测试哈希见 `out/verification/http-matrix.json`，完整日志见 `out/verification/http/check.log`；原有 KAG 的 36 个独立场景仍引用此前 ZIP 阶段矩阵。
 

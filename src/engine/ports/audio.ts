@@ -59,7 +59,10 @@ export interface PcmAccess {
   sample(channel: number, position: number): number
 }
 export interface MidiEvent {
+  /** Nominal score time, in seconds. */
   time: number
+  /** Earliest physical output after the native SMF module-reset wait. */
+  outputTime?: number
   status: number
   data: number[]
 }

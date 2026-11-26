@@ -14,7 +14,7 @@ import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
 import type { CddaDisc } from '../engine/ports/cdda.ts'
-export const PROTOCOL_VERSION = 53
+export const PROTOCOL_VERSION = 54
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
   readonly tree: DroppedTree<Blob>
@@ -28,7 +28,8 @@ export interface RemoteGameFile {
   url: string
 }
 export type GameFile = LocalGameFile | RemoteGameFile
-export type GameInput = GameFile[] | { libraryId: string }
+/** manifestUrl here identifies a published game directory listing. */
+export type GameInput = GameFile[] | { libraryId: string } | { manifestUrl: string }
 export type BackendPreference = 'auto' | 'asyncify' | 'jspi'
 export interface InitializeRequest {
   systemFonts: FontDescriptor[]
@@ -70,7 +71,7 @@ export interface InputAdmissionAck {
   status: 'accepted' | 'ignored'
 }
 export interface SessionApi {
-  prepare(files: GameInput, project?: import('../engine/storage/project.ts').ProjectSelection): Promise<string>
+  prepare(files: GameInput, project?: import('../engine/storage/project.ts').ProjectSelection): Promise<string | { gameId: string; files: RemoteGameFile[] }>
   initialize(request: InitializeRequest): Promise<SessionSnapshot>
   mount(): Promise<SessionSnapshot>
   start(entry: string): Promise<SessionSnapshot>

@@ -42,7 +42,11 @@ export function mountApp(root: HTMLDivElement): void {
           <div class="transport" id="debug-controller"><span id="runtime-info">准备好后，点击画面与脚本交互</span><div><button id="retry-graphics" hidden>重试显示</button><button id="pause" disabled>暂停</button><button id="restart" disabled>重新开始</button><button id="stop" disabled>停止</button></div></div>
         </section>
         <aside>
-          <section class="card"><p class="eyebrow">01 / GAME FILES</p><h2>载入你的文件</h2><p>支持裸文件、未加密 XP3、内嵌 XP3 的 EXE 和 ZIP。存档和散装文件优先；补丁包的顺序由游戏脚本决定。</p><button class="file-button" id="choose-files">选择文件 <span>＋</span></button><button class="file-button secondary" id="choose-folder">选择文件夹 <span>↗</span></button><input id="files" type="file" multiple hidden><input id="folder" type="file" webkitdirectory multiple hidden><form id="remote-form"><label for="remote-url">远程文件链接</label><input id="remote-url" type="url" placeholder="https://…/game.xp3" required autocomplete="off" spellcheck="false"><label for="remote-name">文件名（可选）</label><input id="remote-name" placeholder="使用链接中的文件名" spellcheck="false"><button class="file-button secondary" id="load-url" type="submit">载入链接 <span>↗</span></button></form><label for="entry">启动脚本</label><input id="entry" value="startup.tjs" spellcheck="false"><label for="backend">执行后端</label><select id="backend"><option value="auto">自动选择</option><option value="jspi">JSPI</option><option value="asyncify">Asyncify</option></select><label class="background-setting"><input id="script-debug" type="checkbox">脚本调试</label><p class="muted background-note">下次启动时记录调用栈，用于定位脚本错误。</p><label class="background-setting"><input id="pause-background" type="checkbox" checked>切到后台时暂停</label><p class="muted background-note">关闭后可在后台继续运行；浏览器冻结页面时仍会暂停。</p></section>
+          <section class="card"><p class="eyebrow">01 / GAME FILES</p><h2>载入你的文件</h2><p>支持裸文件、未加密 XP3、内嵌 XP3 的 EXE 和 ZIP。存档和散装文件优先；补丁包的顺序由游戏脚本决定。</p><button class="file-button" id="choose-files">选择文件 <span>＋</span></button><button class="file-button secondary" id="choose-folder">选择文件夹 <span>↗</span></button><input id="files" type="file" multiple hidden><input id="folder" type="file" webkitdirectory multiple hidden><form id="remote-form">
+            <label for="remote-kind">远程来源</label><select id="remote-kind"><option value="file">单个游戏文件</option><option value="manifest">游戏目录清单（JSON）</option></select>
+            <label for="remote-url">远程文件链接</label><input id="remote-url" type="url" placeholder="https://…/game.xp3" required autocomplete="off" spellcheck="false">
+            <div id="remote-name-fields"><label for="remote-name">文件名（可选）</label><input id="remote-name" placeholder="使用链接中的文件名" spellcheck="false"></div>
+            <button class="file-button secondary" id="load-url" type="submit">载入链接 <span>↗</span></button></form><label for="entry">启动脚本</label><input id="entry" value="startup.tjs" spellcheck="false"><label for="backend">执行后端</label><select id="backend"><option value="auto">自动选择</option><option value="jspi">JSPI</option><option value="asyncify">Asyncify</option></select><label class="background-setting"><input id="script-debug" type="checkbox">脚本调试</label><p class="muted background-note">下次启动时记录调用栈，用于定位脚本错误。</p><label class="background-setting"><input id="pause-background" type="checkbox" checked>切到后台时暂停</label><p class="muted background-note">关闭后可在后台继续运行；浏览器冻结页面时仍会暂停。</p></section>
           <section class="card support"><p class="eyebrow">CURRENT BUILD</p><h2>基础运行时已接通</h2><p>TJS、KAG 解析、菜单、基础图层、计时器与存档文件。</p><p class="muted">完整 KAG 画面与音视频仍在实现中，暂不支持完整商业游戏。</p></section>
           <section class="card"><p class="eyebrow">AUDIO</p><h2>声音</h2><p id="sound-status">载入游戏后开启声音。</p><button class="file-button" id="sound-toggle" disabled>开启声音</button><meter id="sound-level" min="0" max="1" value="0" aria-label="声音电平"></meter></section>
           <section class="card"><p class="eyebrow">SAVE FILES</p><h2>存档与备份</h2><p id="save-status">游戏存档保存在此浏览器，可导出备份。</p><label for="save-format">存档格式</label><select id="save-format"><option value="backup">浏览器备份（JSON）</option><option value="native">原版游戏存档</option></select><p class="muted" id="native-save-hint" hidden>暂停游戏后可选择文件、存档目录或 ZIP。ZIP 内的文件会放入当前游戏的存档目录，同名文件将被覆盖。导出的 ZIP 包含游戏在此浏览器写入或导入的存档。</p><button class="file-button" id="export-saves" disabled>导出存档 <span>↓</span></button><button class="file-button secondary" id="import-saves" disabled>导入存档 <span>↑</span></button><input id="save-file" type="file" accept="application/json,.json" hidden><input id="native-save-files" type="file" multiple hidden><span id="native-folder-control" hidden><button type="button" class="file-button secondary" id="choose-native-save-folder" disabled>导入存档目录</button></span><input id="native-save-folder" type="file" webkitdirectory multiple hidden></section>
@@ -86,6 +90,16 @@ export function mountApp(root: HTMLDivElement): void {
     el('project-root-field').hidden = mode !== 'root'
   }
   el('project-mode').addEventListener('change', updateProjectControls)
+  el('remote-kind').addEventListener('change', () => {
+    const manifest = el<HTMLSelectElement>('remote-kind').value === 'manifest'
+    root.querySelector('label[for="remote-url"]')!.textContent = manifest ? '游戏目录清单链接' : '远程文件链接'
+    el<HTMLInputElement>('remote-url').placeholder = manifest ? 'https://…/game.json' : 'https://…/game.xp3'
+    el('remote-name-fields').hidden = manifest
+    if (manifest && el<HTMLSelectElement>('project-mode').value === 'collection') {
+      el<HTMLSelectElement>('project-mode').value = 'auto'
+      updateProjectControls()
+    }
+  })
   type Player = ReturnType<typeof createPlayer>
   let player: Player | undefined
   let saveJob: Player | undefined
@@ -246,7 +260,7 @@ export function mountApp(root: HTMLDivElement): void {
     if (snapshot)
       el('save-status').textContent =
         `${snapshot.saveFiles} 个存档文件${snapshot.pendingSaves ? `，${snapshot.pendingSaves} 个等待保存。可先导出备份。` : '，已保存到此浏览器。导入前请暂停游戏。'}`
-    for (const id of ['choose-files', 'choose-folder', 'load-url', 'remote-url', 'remote-name'])
+    for (const id of ['choose-files', 'choose-folder', 'load-url', 'remote-kind', 'remote-url', 'remote-name'])
       el<HTMLInputElement>(id).disabled = busy
     if (snapshot) {
       el('game-title').textContent = snapshot.title
@@ -337,7 +351,7 @@ export function mountApp(root: HTMLDivElement): void {
     return stopping
   }
   const launch = async (files: GameInput, selection?: ProjectSelection) => {
-    const selected = Array.isArray(files) ? selection ?? projectSelection() : undefined
+    const selected = 'libraryId' in files ? undefined : selection ?? projectSelection()
     await stop()
     const current = ++generation
     busy = true
@@ -637,22 +651,24 @@ export function mountApp(root: HTMLDivElement): void {
   }
   library = createGameLibrary(el('library-panel'), {
     changed: () => offline?.update(),
-    current: () =>
-      !busy && player && snapshot?.state !== 'failed' && Array.isArray(lastFiles)
+    current: () => {
+      const files = player?.session.importFiles
+      return !busy && player && snapshot?.state !== 'failed' && files
         ? {
-            files: lastFiles,
+            files,
             expectedGameId: player.gameId,
             title:
               snapshot?.title && snapshot.title !== 'krkr2-web'
                 ? snapshot.title
-                : lastFiles[0]?.path.replace(/\.[^/.]+$/, '') || 'Game',
+                : files[0]?.path.replace(/\.[^/.]+$/, '') || 'Game',
             entry: el<HTMLInputElement>('entry').value.trim() || 'startup.tjs',
             backend: el<HTMLSelectElement>('backend').value as BackendPreference,
             ...(snapshot?.project ? { project: snapshot.project } : {}),
             ...(snapshot?.zipEncoding ? { zipEncoding: snapshot.zipEncoding } : {}),
             ...(snapshot?.scriptEncoding ? { scriptEncoding: snapshot.scriptEncoding } : {}),
           }
-        : undefined,
+        : undefined
+    },
     canPlay: () => !busy,
     play: async (game) => {
       el<HTMLInputElement>('entry').value = game.entry
@@ -660,7 +676,7 @@ export function mountApp(root: HTMLDivElement): void {
       await launch({ libraryId: game.id })
     },
     beforeRemove: async (game) => {
-      if (lastFiles && !Array.isArray(lastFiles) && lastFiles.libraryId === game.id) {
+      if (lastFiles && 'libraryId' in lastFiles && lastFiles.libraryId === game.id) {
         await stop()
         lastFiles = undefined
         update()
@@ -684,6 +700,10 @@ export function mountApp(root: HTMLDivElement): void {
     if (busy) return
     try {
       const url = remoteUrl(el<HTMLInputElement>('remote-url').value.trim())
+      if (el<HTMLSelectElement>('remote-kind').value === 'manifest') {
+        void launch({ manifestUrl: url }).catch(report)
+        return
+      }
       const basename = new URL(url).pathname.split('/').pop() || 'game.archive'
       let inferred = basename
       try {

@@ -8,6 +8,18 @@ interface Timed {
   data: number[]
   tempo?: number
 }
+// MIDIImpl::tTVPSMFTrack::ProcessEvent recognizes these prefixes only in a
+// complete F0 event. It sends the reset, waits 50 ms before its CC7 resend,
+// then continues the same-tick events. F7 continuation/escape is a separate
+// original branch and must not accidentally acquire this sequencer delay.
+const resetPrefixes = [
+  [0x41, 0x10, 0x42, 0x12, 0x40, 0, 0x7f, 0, 0x41, 0xf7],
+  [0x41, 0x10, 0x42, 0x12, 0, 0, 0x7f],
+  [0x7e, 0x7f, 9, 1, 0xf7],
+  [0x43, 0x10, 0x4c, 0, 0, 0x7e, 0, 0xf7],
+] as const
+const resetsNativeSmfModule = (event: Timed) => event.status === 0xf0 &&
+  resetPrefixes.some((prefix) => prefix.length <= event.data.length && prefix.every((value, index) => event.data[index] === value))
 export function decodeMidi(input: Uint8Array): MidiAsset {
   let bytes = input
   const ascii = (data: Uint8Array, at: number, n: number) =>
@@ -149,15 +161,24 @@ export function decodeMidi(input: Uint8Array): MidiAsset {
     events: [],
     loops: emptyLoops(),
   }
+  let waitBase = 0, waits = 0
   for (const event of events) {
     time += seconds(event.tick - tick)
     tick = event.tick
     if (event.tempo) tempo = event.tempo
-    else result.events.push({ time, status: event.status, data: event.data })
+    else {
+      const barrier = waitBase + waits / 20, outputTime = Math.max(time, barrier)
+      result.events.push({ time, ...(outputTime === time ? {} : { outputTime }), status: event.status, data: event.data })
+      if (resetsNativeSmfModule(event)) {
+        if (time > barrier) { waitBase = time; waits = 1 }
+        else waits++
+      }
+    }
   }
   time += seconds(endTick - tick)
-  if (!Number.isFinite(time) || time > 86400)
+  const outputEnd = Math.max(time, waitBase + waits / 20)
+  if (!Number.isFinite(outputEnd) || outputEnd > 86400)
     throw new Error('MIDI duration exceeds 24-hour budget')
-  result.sampleCount = Math.max(1, Math.ceil(time * result.sampleRate))
+  result.sampleCount = Math.max(1, Math.ceil(outputEnd * result.sampleRate))
   return result
 }

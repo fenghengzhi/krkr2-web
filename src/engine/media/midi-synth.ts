@@ -84,10 +84,10 @@ export class MidiSynth {
     if (this.asset)
       while (
         this.cursor < this.asset.events.length &&
-        this.asset.events[this.cursor]!.time < time
+        (this.asset.events[this.cursor]!.outputTime ?? this.asset.events[this.cursor]!.time) < time
       ) {
         const event = this.asset.events[this.cursor++]!
-        this.time = event.time
+        this.time = event.outputTime ?? event.time
         this.message(event)
       }
     this.time = time
@@ -197,7 +197,8 @@ export class MidiSynth {
     if (time + 1e-8 < this.time) this.seek(time)
     this.time = time
     if (this.asset)
-      while (this.cursor < this.asset.events.length && this.asset.events[this.cursor]!.time <= time)
+      while (this.cursor < this.asset.events.length &&
+          (this.asset.events[this.cursor]!.outputTime ?? this.asset.events[this.cursor]!.time) <= time)
         this.message(this.asset.events[this.cursor++]!)
     this.left = this.right = 0
     for (let i = this.notes.length - 1; i >= 0; i--) {

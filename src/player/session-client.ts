@@ -18,6 +18,7 @@ import { initialApplicationActivation, type ApplicationActivation } from '../eng
 import {
   PROTOCOL_VERSION,
   type BackendPreference,
+  type GameFile,
   type GameInput,
   type SessionApi,
   type SessionEvent,
@@ -31,6 +32,8 @@ export class SessionClient {
   private lastSequence = 0
   private disposed = false
   private initialized = false
+  private preparedFiles?: GameFile[]
+  get importFiles(): GameFile[] | undefined { return this.preparedFiles }
   private activity = initialActivity()
   private application = initialApplicationActivation()
   private systemFonts: FontDescriptor[] = []
@@ -155,8 +158,13 @@ export class SessionClient {
       return Promise.resolve({ status: 'ignored' as const })
     return this.call('pad', message)
   }
-  prepare(files: GameInput, project?: ProjectSelection) {
-    return this.call('prepare', files, project)
+  async prepare(files: GameInput, project?: ProjectSelection): Promise<string> {
+    const result = await this.call('prepare', files, project)
+    if (this.disposed) throw new Error('Session client is disposed')
+    // The library copies exactly the sources that established this game's
+    // identity, even if the remote directory listing is edited after launch.
+    this.preparedFiles = typeof result === 'string' ? (Array.isArray(files) ? files : undefined) : result.files
+    return typeof result === 'string' ? result : result.gameId
   }
   mount() {
     return this.call('mount')
@@ -300,6 +308,7 @@ export class SessionClient {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.preparedFiles = undefined
     this.rpc.dispose()
     this.channel.port1.close()
     this.channel.port2.close()

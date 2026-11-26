@@ -9,6 +9,7 @@ import { thumbnailStretchCases, thumbnailStretchSource } from '../helpers/thumbn
 import { sharedImageCases, sharedImageSource } from '../helpers/layer-image-sharing.ts'
 import { layerAlphaRows, layerAlphaSource } from '../helpers/layer-alpha-rows.ts'
 import { spriteSamplingCases, spriteSamplingSource } from '../helpers/sprite-sampling.ts'
+import { layerInputBooleanCases, layerInputBooleanSource } from '../helpers/layer-input-booleans.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -16,7 +17,7 @@ assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/transition'), game = resolve(output, 'game')
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const files = transitionOptionFiles()
-const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases, ...spriteSamplingCases]
+const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases, ...thumbnailStretchCases, ...layerAlphaRows, ...sharedImageCases, ...spriteSamplingCases, ...layerInputBooleanCases]
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 
 if (process.argv[2] === 'prepare') {
@@ -47,6 +48,8 @@ if (process.argv[2] === 'prepare') {
     spriteSamplingSource,
     ...spriteSamplingCases.map(({ id }) => `try{record("${id}|"+spriteSamplingRun("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
     'spriteSamplingClose();',
+    layerInputBooleanSource,
+    ...layerInputBooleanCases.map(({ id }) => `try{record("${id}|"+layerInputBooleanObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
     'record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
@@ -59,9 +62,10 @@ if (process.argv[2] === 'prepare') {
     sharedImageHelperSha256: sha(readFileSync('tests/helpers/layer-image-sharing.ts')),
     alphaRowHelperSha256: sha(readFileSync('tests/helpers/layer-alpha-rows.ts')),
     spriteHelperSha256: sha(readFileSync('tests/helpers/sprite-sampling.ts')),
+    layerInputBooleanHelperSha256: sha(readFileSync('tests/helpers/layer-input-booleans.ts')),
     cases,
     files: Object.entries(files).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) })),
-    scope: 'Original transition options, gamma contrast, layer order, hit targets, thumbnail resampling, alpha rows, shared images and transformed sprite pixels.',
+    scope: 'Original transition options, gamma contrast, layer order, hit targets, thumbnail resampling, alpha rows, shared images, transformed sprite pixels and Layer input boolean conversion.',
   })
 } else if (process.argv[2] === 'compare') {
   mkdirSync(output, { recursive: true })
@@ -86,6 +90,7 @@ if (process.argv[2] === 'prepare') {
     [resolve('tests/helpers/layer-image-sharing.ts'), manifest?.sharedImageHelperSha256],
     [resolve('tests/helpers/layer-alpha-rows.ts'), manifest?.alphaRowHelperSha256],
     [resolve('tests/helpers/sprite-sampling.ts'), manifest?.spriteHelperSha256],
+    [resolve('tests/helpers/layer-input-booleans.ts'), manifest?.layerInputBooleanHelperSha256],
   ] as const) {
     if (!existsSync(name) || sha(readFileSync(name)) !== expected) evidenceErrors.push(`${name}: source hash differs or is missing`)
   }
@@ -119,10 +124,12 @@ if (process.argv[2] === 'prepare') {
       matched: results.filter((row) => row.id.startsWith('alpha-row-') && row.matched).length },
     sprites: { planned: spriteSamplingCases.length,
       matched: results.filter((row) => row.id.startsWith('sprite-') && row.matched).length },
+    inputBooleans: { planned: layerInputBooleanCases.length,
+      matched: results.filter((row) => row.id.startsWith('layer-bool-') && row.matched).length },
     complete, sequenceMatches, evidenceErrors, sdkState: sdk?.state ?? 'unreported',
     sdkExitCode: sdk?.exitCode ?? null, sdkTimedOut: sdk?.timedOut ?? null, results, lines,
     observationSha256: sha(raw),
-    scope: 'Stock SDK option reads, gamma, hit targets, resampling, alpha rows, shared images and transformed sprite pixels. Web and on-screen results are recorded by their respective jobs.',
+    scope: 'Stock SDK option reads, gamma, hit targets, resampling, alpha rows, shared images, transformed sprite pixels and Layer input boolean conversion. Web and on-screen results are recorded by their respective jobs.',
   })
   assert(complete, 'Original transition option observations differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

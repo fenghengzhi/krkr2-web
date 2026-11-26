@@ -2,6 +2,7 @@ import { exposeRpc } from 'vite-plugin-worker-rpc/runtime'
 import { createSession } from '../player/create-session.ts'
 import { importSources } from '../backends/files/import-resources.ts'
 import { resolveFiles, type SourceFile } from '../backends/files/source-files.ts'
+import { readRemoteManifest } from '../backends/files/remote-manifest.ts'
 import { HttpRangePool } from '../backends/files/http-range.ts'
 import { gameIdentity, projectIdentity } from '../player/game-identity.ts'
 import { copyGameEncodings, copyProjectSelection, type GameEncodings, type GameProject, type ProjectSelection } from '../engine/storage/project.ts'
@@ -9,7 +10,7 @@ import { prepareProject } from '../engine/storage/distribution.ts'
 import { createSessionArchiveReader } from '../backends/files/archive-reader.ts'
 import { prepareDroppedResources } from '../backends/files/drop-resources.ts'
 import type { Resource } from '../engine/ports/storage.ts'
-import { PROTOCOL_VERSION, type InputAdmissionAck, type SessionApi } from '../protocol/session.ts'
+import { PROTOCOL_VERSION, type InputAdmissionAck, type RemoteGameFile, type SessionApi } from '../protocol/session.ts'
 import type { EngineSession, SessionAdmission } from '../engine/session.ts'
 import { LibraryService, type LibraryLease } from '../player/library/service.ts'
 
@@ -128,16 +129,20 @@ const api: SessionApi = {
     }
     try {
       let filesReady: SourceFile[], identity: string, requested: ProjectSelection,
-        project: GameProject | undefined, resources: Resource[] | undefined
-      if (!Array.isArray(files)) {
+        project: GameProject | undefined, resources: Resource[] | undefined, manifestFiles: RemoteGameFile[] | undefined
+      if ('libraryId' in files) {
         libraryLease = await (await LibraryService.open()).acquire(files.libraryId, sources.signal)
         filesReady = libraryLease.files
         identity = libraryLease.record.gameId
         requested = libraryLease.record.project ? { mode: 'root', ...libraryLease.record.project } : { mode: 'collection' }
       } else {
+        requested = copyProjectSelection(selection ?? ('manifestUrl' in files ? { mode: 'auto' } : undefined))
+        if ('manifestUrl' in files) {
+          manifestFiles = await readRemoteManifest(files.manifestUrl, sources)
+          files = manifestFiles
+        }
         filesReady = await resolveFiles(files, checkpoint, sources)
         identity = await gameIdentity(filesReady, checkpoint)
-        requested = copyProjectSelection(selection)
       }
       preparedEncodings = copyGameEncodings(libraryLease?.record ?? requested)
       if (requested.mode !== 'collection') {
@@ -156,7 +161,7 @@ const api: SessionApi = {
       preparedResources = resources
       preparedProject = project
       gameId = identity
-      return identity
+      return manifestFiles ? { gameId: identity, files: manifestFiles } : identity
     } catch (error) {
       sources.close()
       await libraryLease?.close()
