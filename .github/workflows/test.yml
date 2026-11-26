@@ -455,6 +455,7 @@ jobs:
             out/verification/video-tracks/legacy-video-reference.json
             out/verification/video-tracks/legacy*.mpg
             out/verification/video-tracks/legacy*.avi
+            out/verification/video-tracks/legacy*.mpv
             out/verification/video-tracks/legacy*.m1v
             out/verification/video-tracks/legacy-authored.*
           if-no-files-found: error

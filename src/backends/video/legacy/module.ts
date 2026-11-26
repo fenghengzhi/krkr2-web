@@ -11,7 +11,7 @@ export interface LegacyMediaManifest {
   version: '5.1.9'
   openh264: '2.6.0'
   toolchain: '6.0.9'
-  source: { manifestSha256: string; ffmpegSha256: string; openh264Sha256: string; buildSha256: string; postSha256: string }
+  source: { manifestSha256: string; ffmpegSha256: string; openh264Sha256: string; buildSha256: string; postSha256: string; elementaryClockSha256: string }
   assets: Record<'mjs' | 'wasm', { file: string; bytes: number; sha256: string }>
 }
 export function validateLegacyMediaManifest(value: LegacyMediaManifest): void {

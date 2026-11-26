@@ -105,6 +105,13 @@ export class KagParser {
     }
     return { values, names: list(encoded.names) }
   }
+  private decodeValue(input: Data): Data {
+    const result = record(input)
+    if (!Object.hasOwn(result, 'reference')) return result.value
+    const index = integer(result.reference, -1)
+    if (index < 0 || index >= 100000) throw new Error('Malformed KAG parameter reference')
+    return new KagReference(index)
+  }
   private *tagEffect(state: TagState, kind: string, ...args: Data[]): Task {
     state.published = true
     const reply = record(yield* this.effect('tag', kind, args,
@@ -124,10 +131,10 @@ export class KagParser {
     if (state) return yield* this.tagEffect(state, 'eval', source, boolean, this.curStorage, this.tagLine)
     return yield* this.effect('eval', source, boolean, this.curStorage, this.tagLine)
   }
-  private *controlExpression(expression: Data, boolean = false, state?: TagState): Task {
-    const source = yield* this.text(expression)
+  private *controlExpression(state: TagState, boolean = false): Task {
+    const source = yield* this.text(yield* this.readTagValue(state, 'exp'))
     if (!source) {
-      if (state) yield* this.effect('publishTag', tagReferences({ ...state.values, taglist: state.names }))
+      yield* this.effect('publishTag', tagReferences({ ...state.values, taglist: state.names }))
       throw new TvpError('TVPKAGSyntaxError')
     }
     return yield* this.evaluate(source, boolean, state)
@@ -136,6 +143,12 @@ export class KagParser {
     const input = yield* this.tagEffect(state, 'params')
     if (input === null) return null
     return this.decodeFields(input)
+  }
+  private *readTagValue(state: TagState, name: string): Task {
+    // Control tags perform PropGet on their current Dictionary. A property
+    // forwarded by * (or installed by script) is evaluated at this point.
+    return state.values[name] instanceof KagReference
+      ? this.decodeValue(yield* this.tagEffect(state, 'get', name)) : state.values[name]
   }
   private *writeTag(state: TagState, name: string, value: Data): Task {
     // PropSet invokes an existing property's setter. Raw Dictionary.assign
@@ -432,12 +445,7 @@ export class KagParser {
             // A native macro parameter is a real Dictionary property read,
             // not the raw value copied by Dictionary.assign for the * form.
             // Its getter can change the game, this parser or the live tag.
-            const result = record(current)
-            if (Object.hasOwn(result, 'reference')) {
-              const index = integer(result.reference, -1)
-              if (index < 0 || index >= 100000) throw new Error('Malformed KAG parameter reference')
-              value = new KagReference(index)
-            } else value = result.value
+            value = this.decodeValue(current)
             if (value === undefined && separator >= 0) value = attribute.value.slice(separator + 1)
           }
         }
@@ -524,7 +532,7 @@ export class KagParser {
         this.excludes.push(this.excludeLevel)
         this.executed.push(false)
         if (this.excludeLevel === -1) {
-          let included = !!(yield* this.controlExpression(values.exp, true, state))
+          let included = !!(yield* this.controlExpression(state, true))
           clearPublishedTag = true
           if (kind === 'ignore') included = !included
           this.executed[this.executed.length - 1] = included
@@ -535,7 +543,7 @@ export class KagParser {
           if (this.executed.at(-1)) this.excludeLevel = this.ifLevel
           else if (
             this.ifLevel === this.excludeLevel &&
-            (kind === 'else' || !!(yield* this.controlExpression(values.exp, true, state)))
+            (kind === 'else' || !!(yield* this.controlExpression(state, true)))
           ) {
             this.executed[this.executed.length - 1] = true
             this.excludeLevel = -1
@@ -559,7 +567,7 @@ export class KagParser {
         // The closing delimiter is consumed before evaluating emb. A
         // callback observing/reentering this parser must see the suffix.
         if (!token.lineCommand) this.curPos++
-        let content = macro === undefined ? string(yield* this.controlExpression(values.exp, false, state)) : string(macro)
+        let content = macro === undefined ? string(yield* this.controlExpression(state)) : string(macro)
         // Original emb always produces text, regardless of an escape field.
         // A real macro (including a macro named emb) still inserts tag source.
         if (macro === undefined) content = content.replace(/\[/g, '[[')
@@ -575,7 +583,8 @@ export class KagParser {
         clearPublishedTag = true
         // Native copies/converts these before the callback. Parameter values
         // can be live objects even though ordinary expression entities are strings.
-        const storage = yield* this.text(values.storage), target = yield* this.text(values.target)
+        const storage = yield* this.text(yield* this.readTagValue(state, 'storage')),
+          target = yield* this.text(yield* this.readTagValue(state, 'target'))
         if (
           yield* this.callback(
             kind === 'jump' ? 'onJump' : kind === 'call' ? 'onCall' : 'onReturn',
@@ -596,12 +605,12 @@ export class KagParser {
           continue
         }
       } else if (kind === 'macro') {
-        const name = lowerKagName(yield* this.text(values.name))
+        const name = lowerKagName(yield* this.text(yield* this.readTagValue(state, 'name')))
         if (!name) throw new TvpError('TVPKAGSyntaxError')
         this.recording = { name, source: '' }
       } else if (kind === 'macropop') yield* this.popMacroArgs()
       else if (kind === 'erasemacro') {
-        const name = yield* this.text(values.name)
+        const name = yield* this.text(yield* this.readTagValue(state, 'name'))
         if (!(yield* this.effect('eraseMacro', name))) throw new TvpError('TVPUnknownMacroName', [name])
       }
       this.advance(token)

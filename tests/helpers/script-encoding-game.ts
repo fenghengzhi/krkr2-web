@@ -23,7 +23,7 @@ Scripts.textEncoding="GBK";
 `
 export const encodingFirst = String.raw`[eval exp="f.encodedProgress=0"]
 *choice|GBK opening
-[cm][nowait]OPENING [emb exp="global.encodedBoot"][endnowait]
+[cm][hr][nowait]OPENING [emb exp="global.encodedBoot"][endnowait]
 [iscript]
 global.encodedRendered=global.kag.historyLayer.currentLine;global.encodedVisits++;
 [endscript]
@@ -38,7 +38,7 @@ global.encodedRendered=global.kag.historyLayer.currentLine;global.encodedVisits+
 [load place=0 ask=false]
 `
 export const encodingChapter = String.raw`*checkpoint|GBK chapter
-[cm][nowait]CHAPTER 中文 [emb exp="f.encodedProgress"][endnowait]
+[cm][hr][nowait]CHAPTER 中文 [emb exp="f.encodedProgress"][endnowait]
 [iscript]
 global.encodedRendered=global.kag.historyLayer.currentLine;global.encodedVisits++;
 [endscript]
@@ -84,9 +84,9 @@ export async function scriptEncodingFiles(binary: boolean) {
   const files = [
     { name: 'kag3_template.xp3', bytes: original },
     // Decode this opening before game code can change the converter. The
-    // unchanged original KAG system uses UTF-8; the game selects that codec
+    // original KAG system contains CP932 scripts; the game selects that codec
     // explicitly while loading it, then its BOM-marked hook selects GBK.
-    { name: 'startup.tjs', bytes: gbk('var encodedBoot="中文";Scripts.textEncoding="UTF-8";Scripts.execStorage("kag3_template.xp3>startup.tjs");') },
+    { name: 'startup.tjs', bytes: gbk('var encodedBoot="中文";Scripts.textEncoding="Shift_JIS";Scripts.execStorage("kag3_template.xp3>startup.tjs");') },
     { name: 'AfterInit2.tjs', bytes: Buffer.from('\ufeffScripts.textEncoding="GBK";' + (binary
       ? 'Scripts.compileStorage("encoded-observer.tjs",System.dataPath+"encoded-observer.cjs",false,true,false);Scripts.execStorage(System.dataPath+"encoded-observer.cjs");'
       : 'Scripts.execStorage("encoded-observer.tjs");'), 'utf16le') },

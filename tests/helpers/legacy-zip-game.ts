@@ -10,7 +10,7 @@ export const legacyGamePaths = [
 
 export const legacyGameFirst = String.raw`[eval exp="f.legacyProgress=0"]
 *choice|Japanese ZIP release
-[cm][nowait]ARCHIVE READY[endnowait]
+[cm][hr][nowait]ARCHIVE READY[endnowait]
 [iscript]
 global.legacyRendered=global.kag.historyLayer.currentLine;global.legacyVisits++;
 [endscript]
@@ -24,7 +24,7 @@ global.legacyRendered=global.kag.historyLayer.currentLine;global.legacyVisits++;
 `
 
 export const legacyGameChapter = String.raw`*checkpoint|Japanese chapter
-[cm][nowait]CHAPTER 表 [emb exp="f.legacyProgress"][endnowait]
+[cm][hr][nowait]CHAPTER 表 [emb exp="f.legacyProgress"][endnowait]
 [iscript]
 global.legacyRendered=global.kag.historyLayer.currentLine;global.legacyVisits++;
 [endscript]

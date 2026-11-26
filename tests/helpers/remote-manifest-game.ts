@@ -7,7 +7,7 @@ import { xp3Fixture } from './xp3-fixtures.ts'
 
 const story = String.raw`[eval exp="f.remoteProgress=0"]
 *choice|Remote opening
-[cm][nowait]REMOTE PATCH [emb exp="f.remoteProgress"][endnowait]
+[cm][hr][nowait]REMOTE PATCH [emb exp="f.remoteProgress"][endnowait]
 [iscript]
 global.remoteRendered=global.kag.historyLayer.currentLine;global.remoteVisits++;
 [endscript]
@@ -17,7 +17,7 @@ global.remoteRendered=global.kag.historyLayer.currentLine;global.remoteVisits++;
 [eval exp="f.remoteProgress=7"]
 [jump target=*checkpoint]
 *checkpoint|Remote chapter
-[cm][nowait]REMOTE CHAPTER [emb exp="f.remoteProgress"][endnowait]
+[cm][hr][nowait]REMOTE CHAPTER [emb exp="f.remoteProgress"][endnowait]
 [iscript]
 global.remoteRendered=global.kag.historyLayer.currentLine;global.remoteVisits++;
 [endscript]

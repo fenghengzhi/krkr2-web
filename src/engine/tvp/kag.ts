@@ -14,7 +14,7 @@ class KAGParser {
     for(var i=0;i<bindings.count;i++){
       var binding=bindings[i],index=binding[1];
       if(index<0 || index>=references.count)throw new Exception("Invalid KAG parameter reference");
-      value[binding[0]]=references[index];
+      value[binding[0]]=&references[index];
     }
     return value;
   }
@@ -22,7 +22,9 @@ class KAGParser {
     var fields=[],values=%[],bindings=[];fields.assign(dictionary);
     for(var i=0;i<fields.count;i+=2){
       if(tag && fields[i]=="taglist")continue;
-      var value=fields[i+1],kind=typeof value;
+      // Array.assign copies properties raw, but an ordinary array index
+      // read would execute them. Keep the descriptor until actual PropGet.
+      var value=&fields[i+1],kind=typeof value;
       // Keep native Real variants as well: the host's parser-state numbers
       // represent integers, which must not erase a real's type or signed zero.
       if(kind=="Object" || kind=="Octet" || kind=="Real"){
@@ -36,14 +38,17 @@ class KAGParser {
     if(!__kagParamDepth)return null;
     return __kagEncodeFields(references,__kagParams[__kagParamDepth-1],__kagParamNames[__kagParamDepth-1]);
   }
-  function __kagReadParam(references,name) {
-    if(!__kagParamDepth)return null;
-    var value=__kagParams[__kagParamDepth-1][name],kind=typeof value;
+  function __kagEncodeValue(references,value) {
+    var kind=typeof value;
     if(kind=="Object" || kind=="Octet" || kind=="Real"){
       if(references.count>=100000)throw new Exception("KAG parameter reference budget exceeded");
       var index=references.count;references.add(value);return %[reference:index];
     }
     return %[value:value];
+  }
+  function __kagReadParam(references,name) {
+    if(!__kagParamDepth)return null;
+    return __kagEncodeValue(references,__kagParams[__kagParamDepth-1][name]);
   }
   function __kagShape(values) {
     var result=%[],fields=[];fields.assign(values);
@@ -75,6 +80,7 @@ class KAGParser {
               if(tagArgs[1])result=!!result;else if(result!==void)result=string(result);
             }else if(tagOperation=="params")result=__kagEncodeParams(references);
             else if(tagOperation=="param")result=__kagReadParam(references,tagArgs[0]);
+            else if(tagOperation=="get")result=__kagEncodeValue(references,__kagTag[tagArgs[0]]);
             else if(tagOperation=="set"){
               var field=__kagResolveTag(tagArgs[1].value,references,tagArgs[1].references);
               __kagTag[tagArgs[0]]=&field.value;
@@ -100,7 +106,7 @@ class KAGParser {
             if(a[1]) result = !!result;
             else if(result !== void) result = string(result);
             break;
-          case "string": result=string(references[a[0]]);break;
+          case "string": result=string(&references[a[0]]);break;
           case "boolean": result = !!a[0]; break;
           case "setMacro": __kagMacros[a[0]] = a[1]; break;
           case "eraseMacro":

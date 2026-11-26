@@ -5,10 +5,23 @@ import { distributionZip, member } from './deflated-distribution.ts'
 export const customEntryPaths = [
   'game://./Release/', 'game://./Release/savedata/',
   'game://./Release/data/boot.tjs', 'game://./Release/data/first.ks',
+  'game://./Release/data/engine.xp3>system/Initialize.tjs',
+  'game://./Release/data/engine.xp3>system/Config.tjs',
 ].join('|')
+// Stock AutoPath indexes only immediate children, then looks up the basename.
+// Our boot lives beside the independently named original archive. Register its
+// actual directories before stock startup requests system/Initialize.tjs. The
+// original Initialize continues to add the ordinary loose/patch paths itself.
+export const customEntryBootstrap = String.raw`
+var customBootstrapArchive=System.exePath+"data/engine.xp3>";
+Storages.addAutoPath(customBootstrapArchive);
+Storages.addAutoPath(customBootstrapArchive+"scenario/");
+Storages.addAutoPath(customBootstrapArchive+"system/");
+Scripts.execStorage(customBootstrapArchive+"startup.tjs");
+`
 export const customEntryStory = String.raw`[eval exp="f.customProgress=0"]
 *choice|Custom entry opening
-[cm][nowait]CUSTOM ENTRY[endnowait]
+[cm][hr][nowait]CUSTOM ENTRY[endnowait]
 [iscript]
 global.customRendered=global.kag.historyLayer.currentLine;global.customVisits++;
 [endscript]
@@ -18,7 +31,7 @@ global.customRendered=global.kag.historyLayer.currentLine;global.customVisits++;
 [eval exp="f.customProgress=7"]
 [jump target=*checkpoint]
 *checkpoint|Custom entry chapter
-[cm][nowait]CHAPTER [emb exp=f.customProgress][endnowait]
+[cm][hr][nowait]CHAPTER [emb exp=f.customProgress][endnowait]
 [iscript]
 global.customRendered=global.kag.historyLayer.currentLine;global.customVisits++;
 [endscript]
@@ -36,7 +49,7 @@ global.customRendered=global.kag.historyLayer.currentLine;global.customVisits++;
 export const customEntryObserver = String.raw`
 kag.saveThumbnail=false;kag.saveDataMode="";kag.dataName="custom";kag.saveDataLocation=System.dataPath;
 var customVisits=0,customRendered="";
-function customPaths(){return [System.exePath,System.dataPath,Storages.getPlacedPath("boot.tjs"),Storages.getPlacedPath("first.ks")].join("|");}
+function customPaths(){return [System.exePath,System.dataPath,Storages.getPlacedPath("boot.tjs"),Storages.getPlacedPath("first.ks"),Storages.getPlacedPath("system/Initialize.tjs"),Storages.getPlacedPath("Config.tjs")].join("|");}
 function customState(){return [f.customProgress,global.customRendered,global.customVisits,kag.currentLabel,kag.current.numLinks,kag.conductor.status].join("|");}
 function customStored(){var saved=Scripts.evalStorage(kag.getBookMarkFileNameAtNum(0));return [saved.user.customProgress,saved.core.mainConductor.curLabel].join("|");}
 Debug.message("custom-entry-game-ready");
@@ -49,7 +62,7 @@ export async function customEntryDistribution(binary: boolean, container: 'zip' 
     throw new Error('The fixed original KAG template changed')
   const files = [
     { name: 'Release/data/engine.xp3', bytes: original },
-    { name: 'Release/data/boot.tjs', bytes: wide('Storages.addAutoPath(System.exePath+"data/engine.xp3>");Scripts.execStorage("engine.xp3>startup.tjs");') },
+    { name: 'Release/data/boot.tjs', bytes: wide(customEntryBootstrap) },
     { name: 'Release/data/first.ks', bytes: wide(customEntryStory) },
     { name: 'Release/observer.tjs', bytes: wide(customEntryObserver) },
     { name: 'Release/AfterInit2.tjs', bytes: wide(binary
@@ -88,6 +101,9 @@ export async function customEntryDistribution(binary: boolean, container: 'zip' 
   return { bytes, name, mimeType, evidence: { originalSha256, originalBytes: original.length,
     container, prefixBytes: prefix.length, prefixSha256: hash(prefix), inputSha256: hash(bytes), inputBytes: bytes.length,
     zipSha256: hash(zip), zipBytes: zip.length, ...(reference ? { deflate64Reference: reference } : {}),
+    bootstrap: { file: 'Release/data/boot.tjs', source: customEntryBootstrap,
+      expectedPaths: customEntryPaths.split('|'),
+      scope: 'Explicit root/system/scenario AutoPaths in the independently named original archive; current loose first.ks wins before basename search. Stock startup and Initialize bytes are unchanged.' },
     files: inputs,
     scope: 'Unmodified original KAG template in an independently named archive, started by an authored boot.tjs and public auto-path/exec APIs. An unrelated tools startup is retained as a negative control. Only the observer is compiled in the bytecode arm. The optional MZ prefix is inert input and is never executed.' } }
 }

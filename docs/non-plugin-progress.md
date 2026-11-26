@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 162 批处理 KAG 条件与跳转中的属性读取，并修正裸 MPEG-1 过场的逐帧定位。第 160 批 Chromium 游戏库为 25/74，原始失败已按首次触发的位置归档。[162 实现与托管证据](decisions/162-game-routes-and-movie-timing.md)
+
 第 161 批接入多盘游戏的 CUE 配置、AIFF 配乐与旧 WAVE 读取，并修正 KAG 转发属性的赋值。第 160 批已通过应用生产构建，五项新增宏参数原版对照全部匹配，主浏览器结果在此次快照中尚未报告。[161 实现与托管证据](decisions/161-disc-music-wave-and-kag-setters.md)
 
 提交 `9506f2e` 的托管验证登记时为 `pending`。下一批取回运行结果。[第 161 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45831107660)

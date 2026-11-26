@@ -12,6 +12,7 @@ export function legacyMediaAssets(root: string): Plugin {
   validateLegacyMediaManifest(manifest)
   for (const [file, expected] of [
     ['native/legacy-media/source.json', manifest.source.manifestSha256],
+    ['native/legacy-media/elementary-mpeg1-clock.patch', manifest.source.elementaryClockSha256],
     ['native/legacy-media/post.js', manifest.source.postSha256],
     ['scripts/build-legacy-media.mjs', manifest.source.buildSha256],
   ]) if (hash(readFileSync(resolve(root, file!))) !== expected) throw new Error('Legacy media build sources changed; rebuild its assets')

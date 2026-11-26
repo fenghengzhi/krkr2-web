@@ -78,7 +78,8 @@ try {
       playedMethod9 = encoded.entries.filter((row) => row.method === 9 &&
         ['Release/data/engine.xp3', 'Release/data/first.ks', 'Release/observer.tjs'].includes(row.name)).map((row) => row.name)
     if (!playedMethod9.length) throw new Error('No actual KAG story/system/observer member uses Deflate64: ' + id)
-    manifest.games.push({ ...encoded, playedMethod9, baseZipSha256: sha(fixture.bytes), originalSha256: fixture.evidence.originalSha256 })
+    manifest.games.push({ ...encoded, playedMethod9, baseZipSha256: sha(fixture.bytes),
+      originalSha256: fixture.evidence.originalSha256, bootstrap: fixture.evidence.bootstrap })
     save()
   }
   // A repeated 48 KiB block exceeds Deflate's 32 KiB history while leaving

@@ -11,12 +11,12 @@ import { legacyVideoFormat } from '../../src/backends/video/legacy/format.ts'
 
 interface InputReference {
   file: string; bytes: number; sha256: string; audioCodec: string | null; videoCodec: string
-  normalizedVideoTimes: number[]
+  fps: number; normalizedVideoTimes: number[]
 }
 
 for (const group of [
   { label: 'MPEG and AVI', reference: 'legacy-video-reference.json', output: 'legacy-media',
-    required: ['legacy-program.mpg', 'legacy-mjpeg.avi', 'legacy-elementary.m1v'] },
+    required: ['legacy-program.mpg', 'legacy-mjpeg.avi', 'legacy-elementary.m1v', 'legacy-ntsc.mpv'] },
   { label: 'ASF with WMV1/WMA1 and WMV2/WMA2', reference: 'windows-media-reference.json', output: 'windows-media',
     required: ['legacy-wmv1.wmv', 'legacy-wmv2.wmv'] },
 ]) test(`the actual single-thread legacy WASM decodes authored ${group.label} into complete selectable MP4 timelines`, { timeout: 600000 }, async () => {
@@ -58,7 +58,9 @@ for (const group of [
       assert.equal(timeline.times.length, reference.frames)
       assert.equal(timeline.videoTracks![0]!.width, reference.width)
       assert.equal(timeline.videoTracks![0]!.height, reference.height)
-      assert(Math.abs(timeline.frameDuration - 1000 / reference.fps) < .001)
+      const fps = entry.file === 'legacy-ntsc.mpv' ? 30000 / 1001 : reference.fps
+      assert.equal(entry.fps, fps)
+      assert(Math.abs(timeline.frameDuration - 1000 / fps) < .001)
       const expected = entry.normalizedVideoTimes.map((time) => time * 1000)
       assert.equal(expected.length, reference.frames)
       assert(expected.every(Number.isFinite))

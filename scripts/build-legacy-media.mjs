@@ -47,6 +47,8 @@ with tarfile.open(archive) as bundle:
 const h264 = resolve(sources, source.openh264.directory), ffmpeg = resolve(sources, source.ffmpeg.directory),
   makeH264 = ['-j2', 'OS=linux', 'ARCH=wasm', 'USE_ASM=No', 'USE_STACK_PROTECTOR=No', 'CC=emcc', 'CXX=em++', 'AR=emar',
     'CFLAGS_OPT=-O2', 'STATIC_LDFLAGS=-lc++ -lm', `PREFIX=${prefix}`]
+const clockPatch = resolve(root, 'native/legacy-media/elementary-mpeg1-clock.patch')
+run('patch', ['--batch', '--fuzz=0', '-p1', '-i', clockPatch], ffmpeg)
 run('make', [...makeH264, 'install-static'], h264)
 const link = ['-O2', '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sEXPORT_NAME=createLegacyMedia',
   '-sENVIRONMENT=worker,node', '-sFORCE_FILESYSTEM=1', '-lworkerfs.js',
@@ -82,12 +84,13 @@ for (const kind of ['mjs', 'wasm']) {
 }
 const licenses = resolve(root, 'public/licenses/legacy-media')
 mkdirSync(licenses, { recursive: true })
+copyFileSync(clockPatch, resolve(licenses, 'elementary-mpeg1-clock.patch'))
 copyFileSync(resolve(ffmpeg, 'COPYING.LGPLv2.1'), resolve(licenses, 'FFmpeg-LICENSE.txt'))
 copyFileSync(resolve(h264, 'LICENSE'), resolve(licenses, 'OpenH264-LICENSE.txt'))
-writeFileSync(resolve(licenses, 'CREDITS.txt'), `Legacy movie compatibility transcoding.\nFFmpeg ${source.ffmpeg.version}, LGPL-2.1-or-later; OpenH264 ${source.openh264.version}, BSD-2-Clause.\nNo GPL or nonfree components are enabled. No codec source is modified.\nSource/relink recipe: native/legacy-media/source.json and scripts/build-legacy-media.mjs in this application's source repository.\n${source.ffmpeg.url}\nSHA-256 ${source.ffmpeg.sha256}\n${source.openh264.url}\nSHA-256 ${source.openh264.sha256}\nThe reproducible build accepts replacement source libraries by changing the manifest; the independent module's JavaScript ABI is public in src/backends/video/legacy/module.ts.\nH.264/AAC output is a lossy compatibility conversion, not a DirectShow pixel/audio identity claim.\n`)
+writeFileSync(resolve(licenses, 'CREDITS.txt'), `Legacy movie compatibility transcoding.\nFFmpeg ${source.ffmpeg.version}, LGPL-2.1-or-later; OpenH264 ${source.openh264.version}, BSD-2-Clause.\nNo GPL or nonfree components are enabled. This build modifies the FFmpeg CLI clock for raw MPEG-1 video. The source change is included in elementary-mpeg1-clock.patch.\nSource/relink recipe: native/legacy-media/source.json and scripts/build-legacy-media.mjs in this application's source repository.\n${source.ffmpeg.url}\nSHA-256 ${source.ffmpeg.sha256}\n${source.openh264.url}\nSHA-256 ${source.openh264.sha256}\nThe reproducible build accepts replacement source libraries by changing the manifest; the independent module's JavaScript ABI is public in src/backends/video/legacy/module.ts.\nH.264/AAC output is a lossy compatibility conversion, not a DirectShow pixel/audio identity claim.\n`)
 const manifest = { abi: 1, library: 'FFmpeg', version: source.ffmpeg.version, openh264: source.openh264.version, toolchain,
   source: { manifestSha256: hash(sourceBytes), ffmpegSha256: source.ffmpeg.sha256, openh264Sha256: source.openh264.sha256,
-    buildSha256: hash(readFileSync(fileURLToPath(import.meta.url))),
+    buildSha256: hash(readFileSync(fileURLToPath(import.meta.url))), elementaryClockSha256: hash(readFileSync(clockPatch)),
     postSha256: hash(readFileSync(resolve(root, 'native/legacy-media/post.js'))) }, assets }
 writeFileSync(resolve(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 console.log(JSON.stringify(manifest, null, 2))

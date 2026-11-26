@@ -1,0 +1,20 @@
+--- a/fftools/ffmpeg.c
++++ b/fftools/ffmpeg.c
+@@ -2238,4 +2238,16 @@
+     if (ist->framerate.num)
+         best_effort_timestamp = ist->cfr_next_pts++;
+-
++    else if (ist->dec_ctx->codec_id == AV_CODEC_ID_MPEG1VIDEO &&
++             !strcmp(input_files[ist->file_index]->ctx->iformat->name, "mpegvideo") &&
++             ist->dec_ctx->framerate.num > 0 && ist->dec_ctx->framerate.den > 0) {
++        // Raw MPEG-1 pictures have a sequence rate but no container PTS.
++        // Advance in presentation order, including frames flushed at EOF.
++        AVRational rate = ist->dec_ctx->framerate;
++        best_effort_timestamp = ist->cfr_next_pts;
++        ist->cfr_next_pts = av_add_stable(ist->st->time_base, best_effort_timestamp,
++                                          av_inv_q(rate), 1);
++        *duration_pts = decoded_frame->pkt_duration = ist->cfr_next_pts - best_effort_timestamp;
++        ist->st->r_frame_rate = ist->st->avg_frame_rate = rate;
++    }
++
+     if (eof && best_effort_timestamp == AV_NOPTS_VALUE && ist->nb_dts_buffer > 0) {

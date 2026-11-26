@@ -11,7 +11,7 @@ export const combinedLauncherPaths = [
 
 export const combinedLauncherStory = String.raw`[eval exp="f.combinedProgress=0"]
 *choice|Combined launcher
-[cm][nowait]LAUNCHER READY[endnowait]
+[cm][hr][nowait]LAUNCHER READY[endnowait]
 [iscript]
 global.combinedRendered=global.kag.historyLayer.currentLine;
 global.combinedVisits++;
@@ -22,7 +22,7 @@ global.combinedVisits++;
 [eval exp="f.combinedProgress=7"]
 [jump target=*checkpoint]
 *checkpoint|Combined route
-[cm][nowait]PATCH ROUTE [emb exp="f.combinedProgress"][endnowait]
+[cm][hr][nowait]PATCH ROUTE [emb exp="f.combinedProgress"][endnowait]
 [iscript]
 global.combinedRendered=global.kag.historyLayer.currentLine;
 global.combinedVisits++;

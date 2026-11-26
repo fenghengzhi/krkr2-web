@@ -146,7 +146,7 @@ global.setterGameRendered=global.kag.historyLayer.currentLine;global.setterGameV
 [eval exp="f.setterProgress=int(global.setterGameChoice.score)"]
 [jump target=*checkpoint]
 *checkpoint|Setter choice chapter
-[cm][nowait]CHAPTER [emb exp=f.setterProgress][endnowait]
+[hr][cm][nowait]CHAPTER [emb exp=f.setterProgress][endnowait]
 [iscript]
 global.setterGameRendered=global.kag.historyLayer.currentLine;global.setterGameVisits++;
 [endscript]

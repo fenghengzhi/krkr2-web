@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { test, expect } from '../helpers/library-browser.ts'
-import { customEntryDistribution, customEntryObserver, customEntryPaths, customEntryStory } from '../helpers/custom-entry-distribution.ts'
+import { customEntryBootstrap, customEntryDistribution, customEntryObserver, customEntryPaths, customEntryStory } from '../helpers/custom-entry-distribution.ts'
 import { distributionZip, member } from '../helpers/deflated-distribution.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) for (const container of ['zip', 'sfx', 'deflate64', 'siblings'] as const)
@@ -143,7 +143,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       () => info.attach('custom-entry-observations', { body: JSON.stringify({ input: fixture.evidence, observations, errors,
         scope: 'Player-selected ZIP startup, including sibling packages and notes, inert MZ-prefixed EXE and shared 7-Zip Deflate64 input, unmodified original KAG system, real route/save/load links, frozen library project/entry and unchanged native bookmark bytes after a full refresh. The host never executes the input stub.' }, null, 2), contentType: 'application/json' }),
       () => info.attach('custom-entry-input', { body: fixture.bytes, contentType: fixture.mimeType }),
-      () => info.attach('custom-entry-source', { body: customEntryStory + '\n' + customEntryObserver, contentType: 'text/plain' }),
+      () => info.attach('custom-entry-source', { body: customEntryBootstrap + '\n' + customEntryStory + '\n' + customEntryObserver, contentType: 'text/plain' }),
       async () => info.attach('custom-entry-logs', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }),
     ]) try { await report() } catch (error) { failures.push(error) }
     try { await stop() } catch (error) { failures.push(error) }

@@ -5,7 +5,7 @@ import { embedXp3, xp3Fixture } from './xp3-fixtures.ts'
 
 export const saveTransferStory = String.raw`[eval exp="f.transferValue=0"]
 *choice|Edition opening
-[cm][nowait]EDITION [emb exp=global.transferEdition][endnowait]
+[cm][hr][nowait]EDITION [emb exp=global.transferEdition][endnowait]
 [iscript]
 global.transferRendered=kag.historyLayer.currentLine;global.transferVisits++;
 [endscript]
@@ -18,7 +18,7 @@ global.transferRendered=kag.historyLayer.currentLine;global.transferVisits++;
 [eval exp="f.transferValue=99"]
 [jump target=*checkpoint]
 *checkpoint|Portable chapter
-[cm][nowait]VALUE [emb exp=f.transferValue][endnowait]
+[cm][hr][nowait]VALUE [emb exp=f.transferValue][endnowait]
 [iscript]
 global.transferRendered=kag.historyLayer.currentLine;global.transferVisits++;
 [endscript]

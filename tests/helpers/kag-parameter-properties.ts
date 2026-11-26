@@ -142,7 +142,7 @@ global.parameterGameRendered=global.kag.historyLayer.currentLine;global.paramete
 [eval exp="f.parameterProgress=int(global.parameterGameChoice.score)"]
 [jump target=*checkpoint]
 *checkpoint|Property choice chapter
-[cm][nowait]CHAPTER [emb exp=f.parameterProgress][endnowait]
+[hr][cm][nowait]CHAPTER [emb exp=f.parameterProgress][endnowait]
 [iscript]
 global.parameterGameRendered=global.kag.historyLayer.currentLine;global.parameterGameVisits++;
 [endscript]

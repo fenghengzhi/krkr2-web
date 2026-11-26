@@ -9,7 +9,7 @@ const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('he
 const wide = (text: string) => Buffer.from('\ufeff' + text, 'utf16le')
 const story = String.raw`[eval exp="f.resumeValue=0"]
 *choice|Download opening
-[cm][nowait]RESUME READY[endnowait]
+[cm][hr][nowait]RESUME READY[endnowait]
 [iscript]
 global.resumeRendered=kag.historyLayer.currentLine;global.resumeVisits++;
 [endscript]
@@ -20,7 +20,7 @@ global.resumeRendered=kag.historyLayer.currentLine;global.resumeVisits++;
 [eval exp="f.resumeValue=7"]
 [jump target=*checkpoint]
 *checkpoint|Downloaded scene
-[cm][nowait]SCENE [emb exp=f.resumeValue][endnowait]
+[cm][hr][nowait]SCENE [emb exp=f.resumeValue][endnowait]
 [iscript]
 global.resumeRendered=kag.historyLayer.currentLine;global.resumeVisits++;
 [endscript]
