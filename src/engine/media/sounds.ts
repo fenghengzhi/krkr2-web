@@ -388,6 +388,22 @@ export class SoundService {
     }
     if (operation === 'Sound.global') {
       const property = args[0]
+      if (property === 'waveAfter') {
+        const after = number(1)
+        for (const sound of this.buffers.values())
+          if (sound.kind === 'wave' && sound.id > after)
+            return scriptList([BigInt(sound.id), sound.owner])
+        return
+      }
+      if (property === 'releaseWaveBuffer') {
+        const sound = this.buffers.get(number(1))
+        // The preceding synchronous Stop callback may invalidate this owner.
+        if (!sound || sound.kind !== 'wave' || !sound.ready) return
+        const result = await this.voiceCommand(sound, { op: 'releaseWaveBuffer', id: sound.id })
+        if (result.snapshot) sound.snapshot = result.snapshot
+        for (const event of result.events) if (event.type === 'error') throw new Error(event.message)
+        return
+      }
       if (property === 'volume') {
         if (args[1] !== undefined) {
           const volume = typeof args[1] === 'bigint' ? Number(BigInt.asIntN(32, args[1])) : number(1) | 0

@@ -56,6 +56,19 @@ class __SoundBase {
 }
 class WaveSoundBuffer extends __SoundBase {
   function WaveSoundBuffer(owner){super.__SoundBase("wave",owner);}
+  function freeDirectSound(){
+    // TVPReleaseSoundBuffers(false): Stop delivers its callback before the
+    // secondary buffer is destroyed. Enumerate native owners, not a script
+    // registry which would keep otherwise unreachable sounds alive.
+    var after=0,next;
+    while((next=__host("Sound.global","waveAfter",after))!==void){
+      after=next[0];var buffer=next[1];
+      if(buffer!==null && isvalid buffer){
+        buffer.__soundRun("stop",[]);
+        __host("Sound.global","releaseWaveBuffer",after);
+      }
+    }
+  }
   function setPos(args*) {
     // Native checks the argument count before converting any component and
     // commits all three D3DVALUE coordinates only after those conversions.

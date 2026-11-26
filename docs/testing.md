@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 176 批在独立制作的 DVD-RW 镜像上迁移包含文件集描述符的扇区，再由 Linux 和 Web 游戏分别读取。另一段双音轨影片跨两个不相邻的光盘区段，用实际画面与声音核对定位和换轨。[176 实现与托管证据](decisions/176-rewritable-discs-and-game-imports.md)
+
 第 175 批使用独立制作的两段旧 AVI 核对游戏里的画面、定位和声音，并以原版 Introduction 验证键盘选章、长历史翻页和返回原句。WMV 额外逐帧对照转档后的画面编号与显示时间。[175 实现与托管证据](decisions/175-avi-touch-and-library.md)
 
 第 174 批从播放器采录带预加重标记的 CD 音轨，并用独立解码器核对旧过场的静音区间。章节验收同时检查新对白和前一条历史，画面比较按绘图缓冲区的实际尺寸逐像素核对。[174 实现与托管证据](decisions/174-story-history-and-disc-audio.md)

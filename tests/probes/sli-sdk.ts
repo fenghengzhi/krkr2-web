@@ -16,6 +16,7 @@ import { waveTailFiles, waveTailSdkExpected, waveTailSource } from '../helpers/w
 import { waveResetFiles, waveResetExpected, waveResetSource } from '../helpers/wave-flags-reset.ts'
 import { waveRiffFiles, waveRiffNames, waveRiffSdkExpected, waveRiffSource } from '../helpers/wave-riff-layout.ts'
 import { waveMaskFiles, waveMaskSdkExpected, waveMaskSdkNames, waveMaskSdkSource } from '../helpers/wave-speaker-mask.ts'
+import { waveFreeExpected, waveFreeFiles, waveFreeSource } from '../helpers/wave-free.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -40,11 +41,12 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   ...waveResetExpected,
   ...waveRiffSdkExpected,
   ...waveMaskSdkExpected,
+  ...waveFreeExpected,
   ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
   'xp3-decoder': [xp3SegmentScript, xp3SegmentText, 'stop', '48000', '0', '12000', '36320736', '1452000'].join('~'),
   'xp3-compressed': [xp3SegmentScript, xp3SegmentText, xp3CompressedAudioHeader, 'closed'].join('~') }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles(), ...waveResetFiles(), ...waveRiffFiles(), ...waveMaskFiles() }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles(), ...waveResetFiles(), ...waveRiffFiles(), ...waveMaskFiles(), ...waveFreeFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -90,6 +92,9 @@ if (process.argv[2] === 'prepare') {
     waveReopenSource,
     ...Object.keys(waveReopenExpected).map((kind) =>
       `try{record("wave-reopen-${kind}|"+waveReopenObserve("${kind}"));}catch(e){record("wave-reopen-${kind}|unexpected-error:"+e.message);}`),
+    waveFreeSource,
+    ...Object.keys(waveFreeExpected).map((kind) =>
+      `try{record("${kind}|"+waveFreeObserve("${kind}"));}catch(e){record("${kind}|unexpected-error:"+e.message);}`),
     waveGainSource,
     'try{record("wave-gain-controls|"+waveGainPublicControls());}catch(e){record("wave-gain-controls|unexpected-error:"+e.message);}',
     // The 2.32r2 bits/channels/totalTime getters use the DirectSound output
@@ -144,6 +149,9 @@ if (process.argv[2] === 'prepare') {
   const complete = sdk.commit === manifest.commit && sdk.state === 'observed' && sdk.exitCode === 0 &&
     lines.length === results.length + 2 && lines[0] === 'start' && lines.at(-1) === 'done' && results.every((r) => r.matched)
   save('comparison.json', { commit: manifest.commit, complete, observationSha256: digest(raw), results,
+    waveRelease: { planned: Object.keys(waveFreeExpected).length,
+      matched: results.filter((row) => row.id.startsWith('wave-free-') && row.matched).length,
+      scope: 'Public static/instance freeDirectSound: unloaded controls retain fade, two paused playing Wave buffers stop in creation order, retain labels/flags/looping and can play again. Missing DirectSound remains a failed device observation; hardware PCM equivalence is not claimed.' },
     waveNaturalCompletion: { planned: 2,
       matched: results.filter((row) => row.id.startsWith('wave-stop-') && row.matched).length,
       scope: 'Actual normal/Smooth Wave completion: endpoint label precedes stop, both public cursors are zero inside the stop callback, which starts a different file once. Missing sound devices remain failed observations.' },

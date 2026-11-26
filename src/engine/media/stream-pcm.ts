@@ -12,6 +12,7 @@ export class StreamPcm implements PcmAccess {
   private readonly pages = new Map<number, Float32Array[]>()
   private readonly pending = new Map<number, PcmReadRequest>()
   private readonly requests: PcmReadRequest[] = []
+  private readonly released = new Set<number>()
   private serial = 1
   private failure?: Error
   private preflightPages?: Set<number>
@@ -40,6 +41,7 @@ export class StreamPcm implements PcmAccess {
     if (request.id !== this.id || request.streamId !== this.asset.streamId ||
         !pending || pending.serial !== request.serial || pending.frames !== request.frames) return
     this.pending.delete(request.position)
+    if (this.released.delete(request.serial)) return
     if (error !== undefined) { this.failure = new Error(error); return }
     try {
       if (!data) throw new Error('PCM stream reply has no samples')
@@ -96,6 +98,19 @@ export class StreamPcm implements PcmAccess {
     return fraction ? first * (1 - fraction) + at(next) * fraction : first
   }
   takeRequests(): PcmReadRequest[] { return this.requests.splice(0) }
+  releaseBuffer(): void {
+    this.pages.clear()
+    // Locally queued requests have not acquired a decoder permit yet.
+    for (const request of this.requests) this.pending.delete(request.position)
+    this.requests.length = 0
+    // Keep outstanding reads in the same four-slot budget until their actual
+    // replies arrive. A rapid replay must not create another four requests
+    // while the decoder is still completing the previous buffer's work.
+    for (const request of this.pending.values()) this.released.add(request.serial)
+    this.failure = undefined
+    // Keep serial monotonic: a decoder reply issued before release must not
+    // satisfy a newly requested page after the same sound starts again.
+  }
   prefetch(position: number): void {
     const first = Math.floor(Math.max(0, position) / streamPageFrames) * streamPageFrames
     this.ready(first, streamPageFrames * 3)

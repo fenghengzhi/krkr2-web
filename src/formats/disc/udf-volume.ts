@@ -8,16 +8,35 @@ export class UdfFormatError extends Error {}
 export function udfError(reason: string): never { throw new UdfFormatError('UDF: ' + reason) }
 export const viewOf = (bytes: Uint8Array) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 export interface IcbAddress { block: number; partition: number }
-export interface UdfPartition { start: number; blocks: number }
+interface SparedPacket { original: number; physical: number }
+export interface UdfPartition {
+  start: number
+  blocks: number
+  sparing?: { packetSize: number; packets: SparedPacket[] }
+}
 export interface UdfVolume { label: string; partitions: UdfPartition[]; root: IcbAddress }
 export function longAddress(view: DataView, at: number): IcbAddress {
   return { block: view.getUint32(at + 4, true), partition: view.getUint16(at + 8, true) }
 }
-export function physicalBlock(partitions: UdfPartition[], address: IcbAddress, bytes: number): number {
+/** Return the first physically contiguous portion of a logical extent. Most
+ * DVD files span thousands of unchanged packets and need only one run. */
+export function mappedExtent(partitions: UdfPartition[], address: IcbAddress, bytes: number) {
   const part = partitions[address.partition]
   if (!part || address.block >= part.blocks || Math.ceil(bytes / udfBlock) > part.blocks - address.block)
     return udfError('extent outside its physical partition')
-  return part.start + address.block
+  const block = address.block, sparing = part.sparing
+  if (!sparing?.packets.length) return { physical: part.start + block, bytes }
+  const { packets, packetSize } = sparing, within = block % packetSize, packet = block - within
+  let low = 0, high = packets.length
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (packets[middle]!.original < packet) low = middle + 1
+    else high = middle
+  }
+  const next = packets[low]
+  if (next?.original === packet)
+    return { physical: next.physical + within, bytes: Math.min(bytes, (packetSize - within) * udfBlock) }
+  return { physical: part.start + block, bytes: next ? Math.min(bytes, (next.original - block) * udfBlock) : bytes }
 }
 
 /** ECMA-167 descriptor tag and CRC-ITU-T, initial value zero. The tag's
@@ -57,6 +76,51 @@ function extent(view: DataView, at: number): Extent {
   return { length: view.getUint32(at, true), start: view.getUint32(at + 4, true) }
 }
 
+// UDF 2.01 §§2.2.9, 2.2.11. Original packet addresses are partition-relative;
+// replacement packets and sparing tables have absolute addresses on this track.
+async function readSparing(reader: TrackReader, part: UdfPartition, map: DataView): Promise<UdfPartition> {
+  const packetSize = map.getUint16(40, true), copies = map.getUint8(42), size = map.getUint32(44, true),
+    blocks = reader.size / udfBlock
+  if (!packetSize || !copies || copies > 4 || size < 56)
+    return udfError('invalid sparable partition map')
+  let newest: { sequence: number; packets: SparedPacket[] } | undefined, failure: UdfFormatError | undefined
+  for (let i = 0; i < copies; i++) {
+    try {
+      const start = map.getUint32(48 + i * 4, true)
+      if (start + Math.ceil(size / udfBlock) > blocks) udfError('sparing table outside disc')
+      // A table can span several sectors. Read its declared entries without
+      // loading arbitrary padding reserved for future format updates.
+      const header = await reader.read(start * udfBlock, 56), count = viewOf(header).getUint16(48, true)
+      const length = 56 + 8 * count
+      if (length > size) udfError('incomplete sparing table')
+      const crcBytes = viewOf(header).getUint16(10, true) + 16
+      if (crcBytes > size) udfError('invalid sparing table CRC length')
+      const table = await reader.read(start * udfBlock, Math.max(length, crcBytes)), view = descriptor(table, start)
+      if (view.getUint16(0, true) !== 0 || identifier(table, 17, 23) !== '*UDF Sparing Table')
+        udfError('invalid sparing table identifier')
+      const sequence = view.getUint32(52, true), packets: SparedPacket[] = []
+      let previous = -1
+      for (let index = 0; index < count; index++) {
+        const original = view.getUint32(56 + index * 8, true), physical = view.getUint32(60 + index * 8, true)
+        if (original < previous || physical + packetSize > blocks || physical % packetSize)
+          udfError('invalid sparing table entry')
+        if (original < 0xfffffff0) {
+          if (original === previous || original % packetSize || original + packetSize > part.blocks)
+            udfError('invalid original packet location')
+          packets.push({ original, physical })
+        }
+        previous = original
+      }
+      if (!newest || sequence > newest.sequence) newest = { sequence, packets }
+    } catch (error) {
+      if (!(error instanceof UdfFormatError)) throw error
+      failure ??= error
+    }
+  }
+  if (!newest) throw failure ?? new UdfFormatError('UDF: no readable sparing table')
+  return { start: part.start, blocks: part.blocks, sparing: { packetSize, packets: newest.packets } }
+}
+
 async function readSequence(reader: TrackReader, sequence: Extent): Promise<UdfVolume> {
   const blocks = reader.size / udfBlock, recorded = new Map<number, UdfPartition & { sequence: number }>()
   const visited = new Set<number>()
@@ -90,12 +154,18 @@ async function readSequence(reader: TrackReader, sequence: Extent): Promise<UdfV
   const maps = lvd.getUint32(268, true), mapBytes = lvd.getUint32(264, true), partitions: UdfPartition[] = []
   if (!maps || maps > 256 || mapBytes > logical.length - 440) return udfError('invalid partition maps')
   let at = 440
-  for (let i = 0; i < maps; i++, at += 6) {
-    if (at + 6 > 440 + mapBytes || logical[at] !== 1 || logical[at + 1] !== 6 || lvd.getUint16(at + 2, true) !== 1)
-      return udfError('only Type 1 physical partition maps on a single volume are supported')
-    const part = recorded.get(lvd.getUint16(at + 4, true))
+  for (let i = 0; i < maps; i++) {
+    const type = logical[at], length = logical[at + 1]
+    if (!length || at + length > 440 + mapBytes) return udfError('incomplete partition map')
+    const physical = type === 1 && length === 6
+    if (!physical && !(type === 2 && length === 64 && identifier(logical, at + 5, 23) === '*UDF Sparable Partition'))
+      return udfError('unsupported partition map')
+    const vol = at + (physical ? 2 : 36)
+    if (lvd.getUint16(vol, true) !== 1) return udfError('multiple UDF volumes are not supported')
+    const part = recorded.get(lvd.getUint16(vol + 2, true))
     if (!part) return udfError('unmapped physical partition')
-    partitions.push(part)
+    partitions.push(physical ? part : await readSparing(reader, part, viewOf(logical.subarray(at, at + length))))
+    at += length
   }
   if (at !== 440 + mapBytes) return udfError('unexpected partition map length')
   const labelSize = logical[211]!
@@ -103,12 +173,12 @@ async function readSequence(reader: TrackReader, sequence: Extent): Promise<UdfV
   const label = udfText(logical.subarray(84, 84 + labelSize))
   const address = longAddress(lvd, 248), fileSetBytes = lvd.getUint32(248, true)
   if (!fileSetBytes || fileSetBytes > 64 * udfBlock) return udfError('unsupported file set sequence')
-  const start = physicalBlock(partitions, address, fileSetBytes)
   for (let i = 0; i < Math.ceil(fileSetBytes / udfBlock); i++) {
-    const bytes = await reader.read((start + i) * udfBlock, udfBlock), fsd = descriptor(bytes, address.block + i)
+    const block = address.block + i, { physical } = mappedExtent(partitions, { ...address, block }, fileSetBytes - i * udfBlock)
+    const bytes = await reader.read(physical * udfBlock, udfBlock), fsd = descriptor(bytes, block)
     if (fsd.getUint16(0, true) === 256) {
       const root = longAddress(fsd, 400)
-      physicalBlock(partitions, root, udfBlock)
+      mappedExtent(partitions, root, udfBlock)
       return { label, partitions, root }
     }
     if (fsd.getUint16(0, true) === 8) break

@@ -264,6 +264,7 @@ jobs:
       avi-adpcm-fixtures: ${{ steps.avi-adpcm-fixtures.outcome }}
       deflate64-fixtures: ${{ steps.deflate64-fixtures.outcome }}
       udf-discs: ${{ steps.udf-discs.outcome }}
+      udf-sparable-disc: ${{ steps.udf-sparable-disc.outcome }}
       long-vorbis-fixture: ${{ steps.long-vorbis-fixture.outcome }}
       cdda-aiff-fixtures: ${{ steps.cdda-aiff-fixtures.outcome }}
     steps:
@@ -450,6 +451,13 @@ jobs:
         run: |
           sudo apt-get install -y udftools 7zip
           python3 scripts/generate-udf-game-discs.py 2>&1 | tee out/ci/udf-discs.log
+      - name: Author a sparable UDF 2.01 DVD-RW and independently read its relocated game
+        id: udf-sparable-disc
+        if: steps.boot-discs.outcome == 'success'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y udftools
+          python3 scripts/generate-udf-game-discs.py --sparable 2>&1 | tee out/ci/udf-sparable-disc.log
       - name: Create interchangeable game discs and independently read their shared paths
         if: steps.disc-volumes.outcome == 'success'
         continue-on-error: true
@@ -593,7 +601,23 @@ jobs:
         if: ${{ !cancelled() && (steps.disc-volumes.outcome == 'success' || steps.disc-volumes.outcome == 'failure') }}
         with:
           name: disc-volume-fixtures
-          path: out/verification/disc-volumes/
+          path: |
+            out/verification/disc-volumes/
+            !out/verification/disc-volumes/boot-udf201-sparable-source.iso
+            !out/verification/disc-volumes/udf-sparable-manifest.json
+            !out/verification/disc-volumes/udf-sparable-logs/
+          if-no-files-found: error
+          retention-days: 90
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.udf-sparable-disc.outcome == 'success' || steps.udf-sparable-disc.outcome == 'failure') }}
+        with:
+          name: udf-sparable-disc
+          path: |
+            out/verification/disc-volumes/boot-udf201-sparable-source.iso
+            out/verification/disc-volumes/udf-sparable-manifest.json
+            out/verification/disc-volumes/udf-sparable-logs/
+            out/ci/udf-sparable-disc.log
           if-no-files-found: error
           retention-days: 90
 
@@ -632,6 +656,11 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.udf-discs }}
+        run: test "$FIXTURE_OUTCOME" = success
+      - name: Require the relocated sparable DVD-RW and its independent kernel readback
+        if: ${{ !cancelled() }}
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.udf-sparable-disc }}
         run: test "$FIXTURE_OUTCOME" = success
 
   legacy-fixture-result:

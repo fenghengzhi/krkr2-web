@@ -2,7 +2,7 @@ import type { ByteSource } from '../../engine/ports/storage.ts'
 import type { DiscEntry, DiscFilesystem } from './filesystem.ts'
 import { discPathParts, foldDiscName } from './path.ts'
 import type { TrackReader } from './track.ts'
-import { descriptor, longAddress, physicalBlock, readUdfVolume, udfBlock, udfError, udfText, viewOf,
+import { descriptor, longAddress, mappedExtent, readUdfVolume, udfBlock, udfError, udfText, viewOf,
   type IcbAddress, type UdfVolume } from './udf-volume.ts'
 
 interface Run { offset: number; length: number; block: number; physical?: number }
@@ -68,9 +68,8 @@ function extentSource(reader: TrackReader, size: number, runs: Run[], inline?: U
     }
     return out
   } }
-  const start = runs[0]?.physical
-  if (!inline && reader.canBorrow && start !== undefined && runs.every((run) => run.physical === start + run.offset))
-    source.borrowBlob = (at, n, check) => { readBounds(size, at, n); return reader.borrowBlob(start + at, n, check) }
+  if (!inline && reader.canBorrow && runs.every((run) => run.physical !== undefined))
+    source.borrowBlob = reader.fileBorrower(runs.map((run) => ({ start: run.physical!, size: run.length })))
   return source
 }
 
@@ -78,6 +77,15 @@ class UdfFilesystem implements DiscFilesystem {
   private readonly nodes = new MetadataCache<Node>()
   private readonly dirs = new MetadataCache<Map<string, Child>>()
   constructor(private readonly reader: TrackReader, private readonly volume: UdfVolume) {}
+
+  private *mappedRuns(address: IcbAddress, length: number) {
+    for (let offset = 0; offset < length;) {
+      const block = address.block + offset / udfBlock
+      const span = mappedExtent(this.volume.partitions, { partition: address.partition, block }, length - offset)
+      yield { ...span, block, offset }
+      offset += span.bytes
+    }
+  }
 
   private async allocated(start: Uint8Array, mode: number, partition: number, size: number): Promise<Run[]> {
     if (mode !== 0 && mode !== 1) return udfError('unsupported allocation descriptor type')
@@ -92,20 +100,36 @@ class UdfFilesystem implements DiscFilesystem {
         const raw = view.getUint32(at, true), length = raw & 0x3fffffff, kind = raw >>> 30
         if (!length) break
         const address = { block: view.getUint32(at + 4, true), partition: mode === 0 ? partition : view.getUint16(at + 8, true) }
-        // A sparse unallocated region has no usable block address.
-        const physical = kind === 2 ? undefined : physicalBlock(this.volume.partitions, address, length)
         if (kind === 3) {
-          if (at + width !== table.length || length < 24 || length > 1024 * 1024 || seen.has(physical!) || seen.size >= 1024)
+          if (at + width !== table.length || length < 24 || length > 1024 * 1024 || seen.size >= 1024)
             return udfError('invalid allocation extent continuation')
-          seen.add(physical!)
-          const bytes = await this.reader.read(physical! * udfBlock, length), next = descriptor(bytes, address.block)
-          const fields = next.getUint32(20, true)
+          const bytes = new Uint8Array(length)
+          for (const run of this.mappedRuns(address, length)) {
+            if (run.offset === 0) {
+              if (seen.has(run.physical)) return udfError('repeated allocation extent continuation')
+              seen.add(run.physical)
+            }
+            bytes.set(await this.reader.read(run.physical * udfBlock, run.bytes), run.offset)
+          }
+          const next = descriptor(bytes, address.block), fields = next.getUint32(20, true)
           if (next.getUint16(0, true) !== 258 || fields > bytes.length - 24) return udfError('bad allocation extent descriptor')
           continuation = bytes.subarray(24, 24 + fields)
         } else {
           if (!Number.isSafeInteger(written + length)) return udfError('file length exceeds exact byte offsets')
-          if (written < size) runs.push({ offset: written, length: Math.min(length, size - written), block: address.block,
-            physical: kind === 0 ? physical! * udfBlock : undefined })
+          const visible = Math.min(length, size - written)
+          if (kind === 0) {
+            for (const run of this.mappedRuns(address, length)) {
+              if (run.offset >= visible) break
+              runs.push({ offset: written + run.offset, length: Math.min(run.bytes, visible - run.offset),
+                block: run.block, physical: run.physical * udfBlock })
+              if (runs.length > 131072) return udfError('too many recorded file extents')
+            }
+          } else {
+            // An allocated but unrecorded extent has an address. A sparse
+            // unallocated extent has none. Both return zero bytes to the game.
+            if (kind === 1) mappedExtent(this.volume.partitions, address, length)
+            if (visible > 0) runs.push({ offset: written, length: visible, block: address.block })
+          }
           written += length
         }
       }
@@ -117,7 +141,7 @@ class UdfFilesystem implements DiscFilesystem {
   }
 
   private async node(icb: IcbAddress): Promise<Node> {
-    const block = physicalBlock(this.volume.partitions, icb, udfBlock), cached = this.nodes.get(block)
+    const block = mappedExtent(this.volume.partitions, icb, udfBlock).physical, cached = this.nodes.get(block)
     if (cached) return cached
     const bytes = await this.reader.read(block * udfBlock, udfBlock), view = descriptor(bytes, icb.block)
     const id = view.getUint16(0, true), type = bytes[27]!, mode = view.getUint16(34, true) & 7
@@ -135,7 +159,7 @@ class UdfFilesystem implements DiscFilesystem {
   }
 
   private async directory(node: Node): Promise<Map<string, Child>> {
-    const block = physicalBlock(this.volume.partitions, node.icb, udfBlock), cached = this.dirs.get(block)
+    const block = mappedExtent(this.volume.partitions, node.icb, udfBlock).physical, cached = this.dirs.get(block)
     if (cached) return cached
     if (node.source.size > 8 * 1024 * 1024) return udfError('directory exceeds 8 MiB')
     const bytes = await node.source.read(0, node.source.size), view = viewOf(bytes), entries = new Map<string, Child>()

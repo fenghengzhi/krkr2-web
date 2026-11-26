@@ -1,4 +1,4 @@
-import type { ByteSource } from '../../engine/ports/storage.ts'
+import type { ArchiveReader, ByteSource } from '../../engine/ports/storage.ts'
 import { TrackReader, type DiscVolumeTrack } from './track.ts'
 import { foldDiscName as fold, discPathParts as pathParts } from './path.ts'
 import { openUdfVolume } from './udf.ts'
@@ -195,13 +195,8 @@ class Filesystem implements DiscFilesystem {
       }
       return out
     } }
-    if (entry.sections.length === 1 && !entry.sections[0]!.unit && this.reader.canBorrow) {
-      const section = entry.sections[0]!
-      source.borrowBlob = (offset, length, checkpoint) => {
-        range(offset, length, entry.size)
-        return this.reader.borrowBlob(section.start + offset, length, checkpoint)
-      }
-    }
+    if (this.reader.canBorrow && entry.sections.every((section) => !section.gap))
+      source.borrowBlob = this.reader.fileBorrower(entry.sections)
     const charge = 160 + entry.identifier.length * 4 + entry.name.length * 4 + entry.version.length * 4 + entry.sections.length * 32
     while (this.files.size && (this.files.size >= maxFiles || this.fileBytes + charge > cacheBudget)) {
       const oldest = this.files.keys().next().value!
@@ -214,8 +209,8 @@ class Filesystem implements DiscFilesystem {
 
 /** Preserve ISO/Joliet selection on bridged discs. A UDF recognition area
  * in place of an ISO descriptor selects the UDF volume on the same track. */
-export async function openDiscFilesystem(source: ByteSource, track: DiscVolumeTrack): Promise<DiscFilesystem | undefined> {
-  const reader = new TrackReader(source, track)
+export async function openDiscFilesystem(source: ByteSource, track: DiscVolumeTrack, joinBlobs?: ArchiveReader['joinBlobs']): Promise<DiscFilesystem | undefined> {
+  const reader = new TrackReader(source, track, joinBlobs)
   let primary: Volume | undefined
   for (let sector = 16; sector < 80 && (sector + 1) * sectorSize <= reader.size; sector++) {
     const bytes = await reader.read(sector * sectorSize, sectorSize)

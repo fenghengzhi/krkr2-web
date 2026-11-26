@@ -11,6 +11,12 @@ import { zipNameCodecs } from './zip-names.ts'
 import { joinArchiveVolumes } from './archive-volumes.ts'
 
 export const archiveReader: ArchiveReader = {
+  joinBlobs(parts) {
+    return new Blob(parts.map((part) => {
+      if (!(part instanceof Blob)) throw new Error('Expected immutable game file backing')
+      return part
+    }))
+  },
   joinVolumes: joinArchiveVolumes,
   decodeText: decodePlainText,
   async probeArchive(resource, checkpoint) {

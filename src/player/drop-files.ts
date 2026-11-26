@@ -27,11 +27,13 @@ export interface CapturedDrop { readonly items: readonly CapturedItem[] }
 /** This function must run synchronously inside the drop event. Capability
  * acquisition is never deferred until the coordinator eventually dispatches
  * the item. Every started handle promise has a rejection observer immediately. */
-export function captureDrop(transfer: DataTransfer): CapturedDrop {
+export function captureDrop(transfer: DataTransfer, rootLimit: number = dropLimits.roots): CapturedDrop {
+  if (!Number.isInteger(rootLimit) || rootLimit < 1 || rootLimit > dropLimits.entries)
+    throw new Error('Invalid drop root budget')
   if ((transfer.items?.length ?? 0) > dropLimits.entries)
     throw new Error('Drop exceeds item metadata budget')
   const items: CapturedItem[] = [], offered = Array.from(transfer.items ?? []).filter((item) => item.kind === 'file')
-  if (offered.length > dropLimits.roots) throw new Error('Drop exceeds top-level item budget')
+  if (offered.length > rootLimit) throw new Error('Drop exceeds top-level item budget')
   for (const item of offered) {
     let file: File | undefined, entry: EntryCapability | undefined, error: unknown,
       handle: Promise<HandleOutcome> | undefined
@@ -53,9 +55,9 @@ export function captureDrop(transfer: DataTransfer): CapturedDrop {
     items.push(Object.freeze({ file, entry, handle, error }))
   }
   if (!offered.length) {
-    if ((transfer.files?.length ?? 0) > dropLimits.roots) throw new Error('Drop exceeds top-level item budget')
+    if ((transfer.files?.length ?? 0) > rootLimit) throw new Error('Drop exceeds top-level item budget')
     const files = Array.from(transfer.files ?? [])
-    if (files.length > dropLimits.roots) throw new Error('Drop exceeds top-level item budget')
+    if (files.length > rootLimit) throw new Error('Drop exceeds top-level item budget')
     for (const file of files) items.push(Object.freeze({ file }))
     if (!files.length && Array.from(transfer.types ?? []).includes('Files'))
       throw new Error('Browser cannot expose this dropped file or directory')
@@ -67,8 +69,10 @@ export function captureDrop(transfer: DataTransfer): CapturedDrop {
  * These API reads are cancelable waits, not a claim that the browser's pending
  * directory/getFile operation itself can be forcibly canceled. */
 export async function enumerateDrop(captured: CapturedDrop,
-  options: { signal: AbortSignal; checkpoint?: () => void | Promise<void> }): Promise<BrowserDropTree> {
-  const { signal } = options
+  options: { signal: AbortSignal; checkpoint?: () => void | Promise<void>; rootLimit?: number }): Promise<BrowserDropTree> {
+  const { signal, rootLimit = dropLimits.roots } = options
+  if (!Number.isInteger(rootLimit) || rootLimit < 1 || rootLimit > dropLimits.entries)
+    throw new Error('Invalid drop root budget')
   const check = () => { signal.throwIfAborted() }
   const wait = <T>(work: PromiseLike<T>): Promise<T> => {
     return new Promise((resolve, reject) => {
@@ -161,7 +165,7 @@ export async function enumerateDrop(captured: CapturedDrop,
     await step()
   }
   check()
-  if (!captured || !Array.isArray(captured.items) || captured.items.length > dropLimits.roots)
+  if (!captured || !Array.isArray(captured.items) || captured.items.length > rootLimit)
     throw new Error('Invalid captured drop')
   for (const [root, item] of captured.items.entries()) {
     check()

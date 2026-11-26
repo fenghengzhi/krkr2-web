@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 176 批接入可擦写 UDF 游戏盘和分段存放的大过场，新增从文件夹拖入游戏及游戏脚本释放 Wave 播放缓冲的支持。新增行为等待托管验证。[176 实现与托管证据](docs/decisions/176-rewritable-discs-and-game-imports.md)
+
 第 175 批为两种旧 AVI 过场接入解码，修订触屏跨控件拖动的点击坐标，并让游戏库在连接失败后可重试导入。新增行为等待托管验证。[175 实现与托管证据](docs/decisions/175-avi-touch-and-library.md)
 
 第 174 批为带预加重标记的 CD 配乐加入播放支持，并修订旧过场转换时的声音起点。新增行为等待托管验证。[174 实现与托管证据](docs/decisions/174-story-history-and-disc-audio.md)

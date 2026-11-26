@@ -588,6 +588,7 @@ export class EngineSession {
     if (imports && deps.discImports) imports.mount(deps.discImports.resources)
     this.registryImports = imports
     this.cddaDiscs = new CddaDiscs({
+      joinBlobs: deps.archives?.joinBlobs,
       currentDirectory: boot ? '' : this.project?.directory ?? '',
       exists: async (name) => {
         const overlay = (candidate: string) => this.saves.resource(candidate)

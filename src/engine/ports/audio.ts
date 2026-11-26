@@ -130,6 +130,9 @@ export type MixerCommand =
    * replacement keeps its original stopped device status during decoding. */
   | { op: 'unload'; id: number; status?: 'unload' | 'stop' }
   | { op: 'play' | 'stop' | 'close' | 'inspect'; id: number }
+  /** Wave freeDirectSound destroys rendering buffers after Stop callbacks,
+   * retaining the open decoder, loop manager and inherited fade controls. */
+  | { op: 'releaseWaveBuffer'; id: number }
   | { op: 'set'; id: number; property: Exclude<keyof SoundSettings, 'waveConversion'>; value: number | boolean }
   | { op: 'flag'; id: number; index: number; value: number }
   /** Native WaveFlags.reset clears all flags under one loop-manager lock. */

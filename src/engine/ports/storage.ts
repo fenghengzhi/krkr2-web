@@ -45,6 +45,8 @@ export interface ArchiveIndex {
 /** Opening is explicit and asynchronous. A raw file can exist without being
  * a valid archive; undefined means unrecognized format, never corrupt index. */
 export interface ArchiveReader {
+  /** Join slices of existing immutable storage without reading their payloads. */
+  joinBlobs?(parts: ImmutableBlob[]): ImmutableBlob
   joinVolumes?(files: readonly Resource[], checkpoint: () => Promise<void>): Promise<Resource[]>
   /** Host text codec for imported metadata (for example CUE sheets), including
    * UTF-16 BOM and UTF-8/Shift-JIS fallback. The engine has no DOM decoder. */

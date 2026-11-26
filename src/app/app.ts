@@ -1,11 +1,12 @@
 import { createGamePads } from './game-pads.ts'
+import { attachGameFileDrop } from './game-file-drop.ts'
 import { createPlayer } from '../player/create-player.ts'
 import { demoFiles } from './demo.ts'
 import { readNativeSaves, writeNativeSaves } from '../player/native-saves.ts'
 import { zipNameEncoding, zipNameEncodings, type ZipNameEncoding } from '../formats/zip/names.ts'
 import { scriptEncoding, scriptEncodings, type ScriptEncoding } from '../engine/script/text-encoding.ts'
 import { encodeBackup, decodeBackup } from '../player/save-backup.ts'
-import type { BackendPreference, GameInput } from '../protocol/session.ts'
+import type { BackendPreference, GameInput, LocalGameFile } from '../protocol/session.ts'
 import type { SessionSnapshot } from '../engine/session.ts'
 import type { DebugPanel, DebugVisibility } from '../engine/diagnostics/panels.ts'
 import { createGameMenus } from './game-menus.ts'
@@ -47,7 +48,7 @@ export function mountApp(root: HTMLDivElement): void {
           <div class="transport" id="debug-controller"><span id="runtime-info">准备好后，点击画面与脚本交互</span><div><button id="retry-graphics" hidden>重试显示</button><button id="pause" disabled>暂停</button><button id="restart" disabled>重新开始</button><button id="stop" disabled>停止</button></div></div>
         </section>
         <aside>
-          <section class="card"><p class="eyebrow">01 / GAME FILES</p><h2>载入你的文件</h2><p>支持裸文件、未加密 XP3、内嵌 XP3 的 EXE 和 ZIP。存档和散装文件优先；补丁包的顺序由游戏脚本决定。</p><button class="file-button" id="choose-files">选择文件 <span>＋</span></button><button class="file-button secondary" id="choose-folder">选择文件夹 <span>↗</span></button><input id="files" type="file" multiple hidden><input id="folder" type="file" webkitdirectory multiple hidden><form id="remote-form">
+          <section class="card" id="game-file-import"><p class="eyebrow">01 / GAME FILES</p><h2>载入你的文件</h2><p>可把游戏文件或文件夹拖到这里，也可用下方按钮选择。支持裸文件、未加密 XP3、内嵌 XP3 的 EXE 和 ZIP。存档和散装文件优先；补丁包的顺序由游戏脚本决定。</p><p id="game-drop-status" class="muted" role="status"></p><button class="file-button" id="choose-files">选择文件 <span>＋</span></button><button class="file-button secondary" id="choose-folder">选择文件夹 <span>↗</span></button><input id="files" type="file" multiple hidden><input id="folder" type="file" webkitdirectory multiple hidden><form id="remote-form">
             <label for="remote-kind">远程来源</label><select id="remote-kind"><option value="file">单个游戏文件</option><option value="manifest">游戏目录清单（JSON）</option></select>
             <label for="remote-url">远程文件链接</label><input id="remote-url" type="url" placeholder="https://…/game.xp3" required autocomplete="off" spellcheck="false">
             <div id="remote-name-fields"><label for="remote-name">文件名（可选）</label><input id="remote-name" placeholder="使用链接中的文件名" spellcheck="false"></div>
@@ -130,6 +131,7 @@ export function mountApp(root: HTMLDivElement): void {
   let versionSaves: ReturnType<typeof createSaveTransfer> | undefined
   let zipSaves: ReturnType<typeof createNativeSaveZipPicker> | undefined
   let offline: ReturnType<typeof createOfflinePanel> | undefined
+  let gameFileDrop: ReturnType<typeof attachGameFileDrop> | undefined
   const log = (text: string, error = false) => {
     const line = document.createElement('p')
     line.className = error ? 'error' : ''
@@ -307,6 +309,7 @@ export function mountApp(root: HTMLDivElement): void {
     void setDebugVisibility('console', false).catch(report)
   })
   const stop = (): Promise<void> => {
+    gameFileDrop?.cancel()
     if (stopping) return stopping
     const previous = player,
       previousClipboard = gameClipboard,
@@ -764,6 +767,23 @@ export function mountApp(root: HTMLDivElement): void {
       })
       .catch(report)
   })
+  const launchLocal = (files: LocalGameFile[], directory: boolean) => {
+    if (directory && el<HTMLSelectElement>('project-mode').value === 'collection') {
+      el<HTMLSelectElement>('project-mode').value = 'auto'
+      updateProjectControls()
+    }
+    return launch(files)
+  }
+  gameFileDrop = attachGameFileDrop(el('game-file-import'), {
+    available: () => !busy && !library?.busy && !stopRequested,
+    load: launchLocal,
+    status: (message) => setText(el('game-drop-status'), message),
+    error: report,
+  })
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) gameFileDrop?.cancel()
+    else gameFileDrop?.dispose()
+  })
   for (const [button, input] of [
     ['choose-files', 'files'],
     ['choose-folder', 'folder'],
@@ -779,11 +799,7 @@ export function mountApp(root: HTMLDivElement): void {
         blob: file,
       }))
       element.value = ''
-      if (input === 'folder' && el<HTMLSelectElement>('project-mode').value === 'collection') {
-        el<HTMLSelectElement>('project-mode').value = 'auto'
-        updateProjectControls()
-      }
-      void launch(files).catch(report)
+      void launchLocal(files, input === 'folder').catch(report)
     })
   }
   el('clear-log').addEventListener('click', () => el('logs').replaceChildren())

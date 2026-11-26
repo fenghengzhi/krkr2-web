@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 176 批加入 UDF 可替换分区读取，浏览器可拼接分散在镜像中的已记录文件段来播放大过场，并支持拖入游戏和脚本释放 Wave 播放缓冲。新增行为等待验证。[176 实现与托管证据](../decisions/176-rewritable-discs-and-game-imports.md)
+
 第 175 批为 AVI 增加 Microsoft Video 1、DivX 3、IMA ADPCM 和 Microsoft ADPCM 解码。触屏跨控件拖动时，原版游戏的单击使用按下位置，抬起使用释放位置。这些行为等待托管验证。[175 实现与托管证据](../decisions/175-avi-touch-and-library.md)
 
 第 174 批支持 CUE 音轨的 FLAGS PRE 标记，旧过场转换会将音轨起点前的延迟写为静音采样。新增行为等待托管验证。[174 实现与托管证据](../decisions/174-story-history-and-disc-audio.md)

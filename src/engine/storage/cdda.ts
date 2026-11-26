@@ -4,7 +4,7 @@ import { discVolumeTrack, readDiscVolumeLabel, type DiscVolumeTrack } from '../.
 import { openDiscFilesystem, type DiscFilesystem } from '../../formats/disc/filesystem.ts'
 import { openResourceSource } from './resource-source.ts'
 import { ExecutionCancelled } from '../scheduler/control.ts'
-import type { Resource } from '../ports/storage.ts'
+import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { TvpError } from '../system/tvp-error.ts'
 import { discAddress, storageFilePath, toPublicStoragePath } from './public-path.ts'
 import type { AudioResourceSources, AudioSourceLease } from './audio-sources.ts'
@@ -56,6 +56,7 @@ export class InvalidCddaDrive extends TvpError {
   constructor() { super('TVPInvalidCDDADrive') }
 }
 export interface CddaStorage {
+  joinBlobs?: ArchiveReader['joinBlobs']
   /** Ordinary existing files retain the historical direct-file open path. */
   exists(name: string): Promise<boolean>
   exact(logical: string): Promise<Resource | undefined>
@@ -217,7 +218,7 @@ export class CddaDiscs {
     const cached = this.filesystems.get(image)
     if (cached?.geometry === geometry) return { filesystem: cached.fs, image: file.name }
     const { source } = await openResourceSource(file, { checkpoint: () => this.storage.checkpoint() })
-    const fs = await openDiscFilesystem(source, track)
+    const fs = await openDiscFilesystem(source, track, this.storage.joinBlobs)
     if (fs) {
       this.filesystems.set(image, { geometry, fs })
       return { filesystem: fs, image: file.name }

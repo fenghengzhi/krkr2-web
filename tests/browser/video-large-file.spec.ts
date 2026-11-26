@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { test, expect, observeVideoFrames } from '../helpers/video-presentation-browser.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia } from '../helpers/video-audio-probe.ts'
 import { largeVideoGame } from '../helpers/large-video-game.ts'
+import { largeVideoDisc } from '../helpers/large-video-disc.ts'
 import { installVideoSourceObservation, observeVideoSources } from '../helpers/video-source-observation.ts'
 
 const game = String.raw`
@@ -22,7 +23,7 @@ button.onClick=function(){
 report();
 `
 
-for (const mode of ['loose', 'xp3']) for (const backend of ['asyncify', 'jspi'])
+for (const mode of ['loose', 'xp3', 'disc']) for (const backend of ['asyncify', 'jspi'])
   test(`${backend}/${mode}: play a two-track movie whose packets and index are past 144 MiB`, async ({ page }, info) => {
     test.setTimeout(120000)
     await installVideoAudioProbe(page)
@@ -34,15 +35,19 @@ for (const mode of ['loose', 'xp3']) for (const backend of ['asyncify', 'jspi'])
     page.on('pageerror', (error) => errors.push(error.message))
     const canvas = page.locator('canvas[data-window-id]').first()
     try {
-      const asset = await largeVideoGame(directory, mode === 'xp3', game)
+      const asset = mode === 'disc'
+        ? await largeVideoDisc(directory, game.replace('film.open("cutscene.mp4")', 'film.open("D:/MOVIE.MP4")'))
+        : await largeVideoGame(directory, mode === 'xp3', game)
+      if (mode === 'disc') await page.locator('#cdda-discs').fill('D=Game.iso')
       observations.push({ size: asset.size, firstPacketRegion: asset.mediaStart })
       await page.locator('#files').setInputFiles(asset.paths)
-      await expect(page.getByText('cutscene:0|2|2|0|0|64|48|1000|pause', { exact: true })).toBeVisible({ timeout: 30000 })
+      await expect.poll(async () => (await observeVideoSources(page)).opens.length, { timeout: 30000 }).toBe(1)
       const sources = await observeVideoSources(page)
       observations.push(sources)
       expect(sources.dropped).toBe(0)
       expect(sources.opens).toHaveLength(1)
       expect(sources.opens[0]).toMatchObject({ kind: 'blob', buffered: false, bytes: asset.size })
+      await expect(page.getByText('cutscene:0|2|2|0|0|64|48|1000|pause', { exact: true })).toBeVisible({ timeout: 30000 })
       const picture = async (alternate: boolean) => {
         const video = page.locator('video[data-video-id]')
         // The game log and its canvas update arrive on separate worker messages.

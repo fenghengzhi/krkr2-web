@@ -75,6 +75,7 @@ export async function selectBootDisc(resources: Resource[], selection: Location,
     let unreadable: unknown
     const open = async ({ file, drive }: typeof choices[number]) => {
       const discs = new CddaDiscs({ currentDirectory: '', exists: async (name) => !!storage.find(name),
+        joinBlobs: reader.joinBlobs,
         exact: (name) => storage.findAsync(name), cues: async () => [], read: (resource) => resource.read(),
         decodeText: (bytes) => {
           if (!decodeText) throw new Error('A host text decoder is required to open a CUE sheet')

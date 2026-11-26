@@ -49,6 +49,8 @@ interface Voice {
   fade?: Fade
   /** Media is retired, but its inherited sound controls survive the next open. */
   unloaded?: boolean
+  /** The decoder survives freeDirectSound, but its rendering buffer does not. */
+  bufferReleased?: boolean
   flags: number[]
   labelIndex: number
   linkDirty: boolean
@@ -105,7 +107,7 @@ export class AudioMixer {
     if (this.paused) return false
     if (this.liveMidi.activeNotes || this.midiPending.length) return true
     for (const voice of this.voices.values())
-      if (voice.fade || (voice.asset && voice.status === 'play' && !voice.settings.paused))
+      if (voice.fade || (voice.asset && voice.status === 'play' && (!voice.settings.paused || voice.bufferReleased)))
         return true
     return false
   }
@@ -149,7 +151,7 @@ export class AudioMixer {
       ...voice.settings,
       id,
       epoch: voice.epoch,
-      position: Math.floor(voice.settings.position),
+      position: voice.bufferReleased ? 0 : Math.floor(voice.settings.position),
       status: voice.status,
       fading: !!voice.fade,
       flags: [...voice.flags],
@@ -370,7 +372,8 @@ export class AudioMixer {
     } else {
       const voice = this.get(id),
         settings = voice.settings
-      if (command.op === 'play' && voice.asset && voice.status !== 'play') {
+      if (command.op === 'play' && voice.asset && (voice.status !== 'play' || voice.bufferReleased)) {
+        voice.bufferReleased = false
         if (voice.ended || settings.position >= voice.asset.sampleCount) this.seek(voice, 0, true)
         else this.resetFilters(voice)
         this.prefetchStream(voice, true)
@@ -380,6 +383,12 @@ export class AudioMixer {
         if (voice.asset) voice.status = 'stop'
         voice.epoch = this.nextEpoch++
         this.seek(voice, 0, true)
+      } else if (command.op === 'releaseWaveBuffer') {
+        if (voice.kind !== 'wave') throw new Error('Only Wave voices have secondary sound buffers')
+        // Stop's native rewind occurs after its synchronous status callback.
+        this.seek(voice, 0, true)
+        voice.bufferReleased = true
+        voice.stream?.releaseBuffer()
       } else if (command.op === 'filters') {
         if (!voice.asset) throw new Error('Audio filters require an open voice')
         const previous = voice.filters ?? []
@@ -413,7 +422,7 @@ export class AudioMixer {
             // Request a public seek's destination before the next output
             // block, including while paused/stopped. Internal SLI traversal
             // keeps its own atomic range preflight instead of prefetching.
-            this.prefetchStream(voice, true)
+            if (!voice.bufferReleased) this.prefetchStream(voice, true)
             voice.epoch = this.nextEpoch++
           } else if (property === 'frequency') {
             // WaveImpl forwards zero as DirectSound's DSBFREQUENCY_ORIGINAL.
@@ -783,6 +792,13 @@ export class AudioMixer {
     for (const voice of this.voices.values()) {
       const settings = voice.settings,
         asset = voice.asset
+      if (voice.bufferReleased && voice.status === 'play') {
+        // A Stop callback may itself have called play. Native subsequently
+        // destroys that buffer; its next TimerBeat observes !BufferPlaying.
+        // Do not publish an extra synchronous status callback from release.
+        voice.status = 'stop'
+        this.event(voice, 'ended')
+      }
       let gains = voice.kind === 'wave' ? this.waveGains(voice) : undefined
       if (voice.synth) voice.synth.setBufferVolume(midiBufferVolume(settings.volume, settings.volume2))
       let chain: AudioFilterChain | undefined, neighbor: number | undefined, waiting = false

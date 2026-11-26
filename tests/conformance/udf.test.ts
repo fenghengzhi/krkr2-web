@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { ByteSource, ImmutableBlob } from '../../src/engine/ports/storage.ts'
 import { openDiscFilesystem } from '../../src/formats/disc/filesystem.ts'
+import { archiveReader } from '../../src/backends/files/archive-reader.ts'
 import { readDiscVolumeLabel, type DiscVolumeTrack } from '../../src/formats/disc/volume-label.ts'
 
 // Independent author bytes: ECMA-167 3/7.2, 3/10, 4/12, 4/14; OSTA UDF
@@ -327,4 +328,63 @@ test('UDF borrows a single cooked movie extent without copying its media or losi
   const cancelled = new Error('Movie request cancelled')
   await assert.rejects(file.borrowBlob(0, 1, () => { throw cancelled }), (error) => error === cancelled)
   assert.equal(borrowed.length, 1)
+})
+
+test('a rewritable game disc follows its newest sparing table for the root, scene data and borrowed movie', async () => {
+  const disc = image(1644), packet = 16, rootSpare = 1456, sceneSpare = 1472
+  for (const base of [257, 270]) {
+    const logical = new Uint8Array(504), view = dataView(logical)
+    logical.set(disc.regions.get((base + 2) * blockSize)!.subarray(0, 440))
+    view.setUint16(240, 0x201, true); view.setUint32(264, 64, true)
+    logical[440] = 2; logical[441] = 64; entity(logical, 444, '*UDF Sparable Partition')
+    view.setUint16(476, 1, true); view.setUint16(478, 7, true)
+    view.setUint16(480, packet, true); logical[482] = 2
+    view.setUint32(484, 80, true); view.setUint32(488, 288, true); view.setUint32(492, 304, true)
+    disc.put(base + 2, descriptor(6, base + 2, logical))
+  }
+  for (const [block, sequence, active] of [[288, 3, false], [304, 4, true]] as const) {
+    const data = new Uint8Array(80), view = dataView(data)
+    entity(data, 16, '*UDF Sparing Table'); view.setUint16(48, 3, true); view.setUint32(52, sequence, true)
+    for (const [index, [logical, physical]] of [[0, rootSpare], [80, sceneSpare], [0xffffffff, 1488]].entries()) {
+      view.setUint32(56 + index * 8, active ? logical! : 0xffffffff, true)
+      view.setUint32(60 + index * 8, physical!, true)
+    }
+    disc.put(block, descriptor(0, block, data))
+  }
+
+  const scene = Uint8Array.from({ length: 18 * blockSize + 3 }, (_, i) => (i + Math.floor(i / blockSize) * 7) % 251)
+  disc.root([{ name: 'Scene.dat', icb: 2 }, { name: 'Movie.mpg', icb: 3 }])
+  disc.putFile(2, fileEntry(2, scene.length, shortAd(scene.length, 79), 0))
+  disc.putFile(3, fileEntry(3, 3 * blockSize, longAd(3 * blockSize, 82), 1))
+  for (let i = 0; i < packet; i++) {
+    const old = (partitionStart + i) * blockSize, bytes = disc.regions.get(old)
+    if (bytes) { disc.put(rootSpare + i, bytes); disc.regions.delete(old) }
+  }
+  for (let i = 0; i * blockSize < scene.length; i++) {
+    const logical = 79 + i, physical = logical >= 80 && logical < 96 ? sceneSpare + logical - 80 : partitionStart + logical
+    disc.put(physical, scene.subarray(i * blockSize, (i + 1) * blockSize))
+  }
+  const source: ByteSource = { ...disc.source, borrowBlob: async (at, n) =>
+    new Blob([Uint8Array.from(await disc.source.read(at, n))]) }
+  assert.equal(await readDiscVolumeLabel(source, track()), 'STORY_DISC')
+  const fs = await openDiscFilesystem(source, track()); assert(fs)
+  const file = await fs.file('scene.dat'); assert(file)
+  assert.deepEqual(await contents(file), scene)
+  for (const boundary of [blockSize, 17 * blockSize])
+    assert.deepEqual(await file.read(boundary - 3, 9), scene.slice(boundary - 3, boundary + 6))
+  assert.equal(file.borrowBlob, undefined)
+  const movie = await fs.file('movie.mpg'); assert(movie?.borrowBlob)
+  const clip = await movie.borrowBlob(7, 2 * blockSize)
+  assert.deepEqual(new Uint8Array(await clip.arrayBuffer()), scene.slice(3 * blockSize + 7, 5 * blockSize + 7))
+  const joinedFs = await openDiscFilesystem(source, track(), archiveReader.joinBlobs)
+  const joined = await joinedFs?.file('scene.dat'); assert(joined?.borrowBlob)
+  const crossing = await joined.borrowBlob(8, scene.length - 16)
+  assert(crossing instanceof Blob)
+  assert.deepEqual(new Uint8Array(await crossing.arrayBuffer()), scene.slice(8, -8))
+  assert.equal((await joined.borrowBlob(joined.size, 0)).size, 0)
+  let checks = 0
+  await assert.rejects(joined.borrowBlob(0, scene.length, () => {
+    if (++checks === 4) throw new Error('Game stopped during disc read')
+  }), /Game stopped during disc read/)
+  assert(!disc.reads.some(([at]) => at >= (partitionStart + 80) * blockSize && at < (partitionStart + 96) * blockSize))
 })
