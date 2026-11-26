@@ -23,3 +23,5 @@
 第 134 批已报告全部 4,070 个 Node 用例，4,066 个通过，4 个既有图层用例失败。该批新增的 11 个 ZIP、音乐和 MIDI 用例全部通过。三浏览器游戏库共 69/69 通过，其中 12 项从原版 KAG 分发包启动，选择补丁、存档并从游戏库重新打开。原版 SDK 图形对照为 57/57。取回时还有常规浏览器分片待报告。[第 134 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45761489263)
 
 第 133 批最终版的常规浏览器分片已齐，共 3,186 项通过、97 项失败、2 项跳过。原版介绍游戏的 6 项交互和 12 项缩略图验收均通过。第 135 至 142 批在此次取回时仍在队列。83 份常规结果归档已核对 GitHub 登记的字节数和 SHA-256。[第 133 批最终版](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759226490)
+
+第 143 批实现提交为 `50edb25340b9b778eb69ede3d60961c3d3c1445c`。GitHub 首次登记状态为 `pending`，结果留到下一批取回。[第 143 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45777718215)
