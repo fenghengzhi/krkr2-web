@@ -21,3 +21,5 @@ Chromium 游戏库共执行 74 项，25 项通过，49 项失败。16 项在自�
 上一批的 25 fps 裸视频里，独立解码器报告 100 个时长 40 毫秒的画面。探测工具生成的时间戳却从 40 毫秒跳到 120 毫秒。对于这种没有容器时间戳的 MPEG-1 基本流，播放器的转换器现在按解码器从序列头取得的帧率，依显示顺序计算每幅画面的起始时间。带音轨的 MPEG 节目流、AVI 与 ASF 继续使用容器时间戳，从同一原点计算音画偏移。[旧素材失败记录](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404/job/139938355906) · [上游 MPEG 解码器](https://github.com/FFmpeg/FFmpeg/blob/n5.1.9/libavcodec/mpeg12dec.c) · [转换器修改](../../native/legacy-media/elementary-mpeg1-clock.patch)
 
 托管机器独立生成两种裸流，一种为 25 fps，另一种为 30000/1001 fps 并包含 B 帧。原生 FFmpeg 检查每一帧的时长、颜色和画面编号，另保存探测工具生成的时间戳。发布使用的 WASM 转换器输出 MP4 后，其全部 100 个呈现时间要与独立参考相符。[素材与时间基准](../../scripts/generate-legacy-video-fixtures.mjs) · [WASM 输出对照](../../tests/conformance/legacy-media.test.ts)
+
+第 162 批实现提交 `3a58beb5ad283ea14a7c701c0c758dbac0061e03` 登记时为 `pending`。下一批取回实际结果。[第 162 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45832905859)

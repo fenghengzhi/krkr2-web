@@ -4,6 +4,8 @@
 
 第 162 批处理 KAG 条件与跳转中的属性读取，并修正裸 MPEG-1 过场的逐帧定位。第 160 批 Chromium 游戏库为 25/74，原始失败已按首次触发的位置归档。[162 实现与托管证据](decisions/162-game-routes-and-movie-timing.md)
 
+第 162 批实现提交 `3a58beb` 已登记，状态为 `pending`。下一批取回运行结果。[第 162 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45832905859)
+
 第 161 批接入多盘游戏的 CUE 配置、AIFF 配乐与旧 WAVE 读取，并修正 KAG 转发属性的赋值。第 160 批已通过应用生产构建，五项新增宏参数原版对照全部匹配，主浏览器结果在此次快照中尚未报告。[161 实现与托管证据](decisions/161-disc-music-wave-and-kag-setters.md)
 
 提交 `9506f2e` 的托管验证登记时为 `pending`。下一批取回运行结果。[第 161 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45831107660)
