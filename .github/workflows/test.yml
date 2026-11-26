@@ -430,6 +430,10 @@ jobs:
         if: steps.boot-discs.outcome == 'success'
         continue-on-error: true
         run: python3 scripts/generate-disc-releases.py
+      - name: Create interchangeable game discs and independently read their shared paths
+        if: steps.disc-volumes.outcome == 'success'
+        continue-on-error: true
+        run: python3 scripts/generate-disc-swap.py
       - name: Encode and independently decode AIFF disc tracks
         id: cdda-aiff-fixtures
         continue-on-error: true

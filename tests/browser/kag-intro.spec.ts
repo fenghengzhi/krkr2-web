@@ -2,23 +2,10 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 import { observeStartup, attachStartup } from '../helpers/startup-observation.ts'
+import { originalIntroduction } from '../helpers/kag-intro-package.ts'
 import { kagIntroSource as source, kagIntroStateExpression as stateExpression,
   kagIntroLayoutExpression, kagIntroLayoutFields,
   kagIntroFontMetricExpression, kagIntroFontMetricFields } from '../helpers/kag-intro-observation.ts'
-
-let packageRequest: Promise<Buffer> | undefined
-function originalPackage(): Promise<Buffer> {
-  if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted')
-    throw new Error('Original KAG introduction acquisition and verification require a GitHub-hosted runner')
-  return packageRequest ??= (async () => {
-    const response = await fetch(source.url, { signal: AbortSignal.timeout(30000) })
-    if (!response.ok) throw new Error('Original introduction download returned HTTP ' + response.status)
-    const bytes = Buffer.from(await response.arrayBuffer())
-    expect(bytes.length).toBe(source.bytes)
-    expect(createHash('sha256').update(bytes).digest('hex')).toBe(source.sha256)
-    return bytes
-  })()
-}
 
 interface State {
   label: string; waiting: boolean; line: boolean; page: boolean
@@ -294,7 +281,7 @@ for (const backend of ['asyncify', 'jspi'])
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)), 'JSPI unavailable')
     try {
-      const bytes = await originalPackage(), file = { name: 'kag3_intro.xp3', mimeType: 'application/octet-stream', buffer: bytes }
+      const bytes = await originalIntroduction(), file = { name: 'kag3_intro.xp3', mimeType: 'application/octet-stream', buffer: bytes }
       await info.attach('original-kag-intro.xp3', { body: bytes, contentType: 'application/octet-stream' })
       await page.locator('#files').setInputFiles(file)
       loaded = true

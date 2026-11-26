@@ -3,6 +3,7 @@ import type { StorageSelectorDirectory } from '../engine/ports/storage-selector.
 import { createStorageSelectorView } from './storage-selector-view.ts'
 
 interface DialogActions {
+  discPanel?(dialog?: HTMLElement): void
   browse?(id: number, directory: string): Promise<StorageSelectorDirectory | null>
   choose(id: number, value: string | null): Promise<unknown> | undefined
   stop(): Promise<void>
@@ -143,6 +144,7 @@ export function createGameDialogs(actions: DialogActions) {
     // Removal clears the native modal/top-layer state. Calling close first
     // would restore the browser's saved focus even after blur, briefly focusing
     // an external Window while its child modal is being installed.
+    actions.discPanel?.()
     view.dialog.remove()
     view.dialog.close()
     view.composing = false
@@ -327,6 +329,7 @@ export function createGameDialogs(actions: DialogActions) {
       current = view
       hiddenFocusVersion = undefined
       document.body.append(view.dialog)
+      if (view.request.kind === 'inform' || view.request.kind === 'input-string') actions.discPanel?.(view.dialog)
       controls(view)
       view.dialog.showModal()
       const focus = view.focus && canFocus(view.focus) ? view.focus : (view.input ?? view.confirm)

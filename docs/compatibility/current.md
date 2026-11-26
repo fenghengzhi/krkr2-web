@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 169 批允许在同一盘符更换剧情盘，或弹出后恢复启动时的光盘。已经启动的游戏与存档保持在当前会话。字体阴影和描边支持原版 KAG 使用的强度 512。新增行为等待托管验证。[169 实现与托管证据](../decisions/169-live-disc-changes-and-kag-outlines.md)
+
 第 168 批让 ZIP 发行的游戏读取同次导入的外置 ISO、CUE 或另一份 ZIP 中指定的盘片。KAG 宏属性现在可在内置控制标签执行前更新剧情状态。普通 WAVE 自然播放结束后，停止回调可读取归零的位置。这些行为待托管验证。[168 实现与托管证据](../decisions/168-companion-game-discs-and-story-callbacks.md)
 
 第 167 批把 ZIP 内的 ISO 或 CUE 数据轨接入游戏启动与游戏库。明朝字体可用日文或英文名匹配同一字族。多声道 WAVE 混音开始按文件声明的扬声器位置分配对白和环绕声。新增行为等待托管验收。[167 实现与托管证据](../decisions/167-packaged-game-discs-fonts-and-speakers.md)

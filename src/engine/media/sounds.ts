@@ -51,6 +51,11 @@ interface Sound {
   filters?: PhaseVocoderConnection
   cdda?: CddaSelection
   preparedCdda: Map<number, CddaSelection>
+  cddaWaiters: Map<(error: Error) => void, { drive?: string }>
+  discRetiring?: Promise<void>
+  retiringDrive?: string
+  discFade?: SoundSnapshot
+  discGeneration: number
   preparedMidi: Map<number, { read(): Promise<Uint8Array> }>
   resourceWaiters: Set<(error: Error) => void>
 }
@@ -201,19 +206,42 @@ export class SoundService {
     // decoder or PCM. Its live volume can have advanced during async cleanup.
     return result.snapshot
   }
-  private waitResource<T>(sound: Sound, work: Promise<T>): Promise<T> {
+  private resetMedia(sound: Sound, retained: SoundSnapshot | undefined, status: 'unload' | 'stop'): void {
+    sound.filters?.release()
+    sound.filters = undefined
+    sound.resourceRequested = !!retained
+    sound.ready = !!retained
+    sound.cdda = undefined
+    sound.labels = scriptRecord({})
+    sound.snapshot = { ...(retained ?? sound.snapshot), status, epoch: retained?.epoch ?? 0,
+      position: 0, paused: false, frequency: 0, sampleRate: 0, sampleCount: 0,
+      reportedSampleCount: undefined, channels: 0, bits: 0,
+      fading: retained?.fading ?? false, flags: Array(16).fill(0) }
+  }
+  private waitResource<T>(sound: Sound, work: Promise<T>, disc?: {
+    drive?: string; current?(): boolean; releaseLate?(value: T): void
+  }): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const valid = () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound
-      const cancel = (error: Error) => reject(error)
-      if (valid()) sound.resourceWaiters.add(cancel)
+      let settled = false
+      const valid = () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound && (disc?.current?.() ?? true),
+        clear = () => { sound.resourceWaiters.delete(cancel); sound.cddaWaiters.delete(cancel) },
+        cancel = (error: Error) => { settled = true; clear(); reject(error) }
+      if (valid()) {
+        sound.resourceWaiters.add(cancel)
+        if (disc) sound.cddaWaiters.set(cancel, disc)
+      }
       else cancel(new Error('Sound resource owner has closed'))
       // Keep both handlers on the actual provider even after Stop has released
       // its waiter. A late file may not publish a replacement voice.
       work.then((value) => {
-        sound.resourceWaiters.delete(cancel)
-        if (valid()) resolve(value)
-        else cancel(new Error('Sound resource owner has closed'))
-      }, (error) => { sound.resourceWaiters.delete(cancel); reject(error) })
+        clear()
+        if (!settled && valid()) { settled = true; resolve(value) }
+        else {
+          try { disc?.releaseLate?.(value) }
+          catch (error) { this.error(error) }
+          cancel(new Error('Sound resource owner has closed or its disc changed'))
+        }
+      }, (error) => { settled = true; clear(); reject(error) })
     })
   }
   private receive(event: AudioEvent): void {
@@ -223,6 +251,13 @@ export class SoundService {
     }
     const sound = this.buffers.get(event.id)
     if (!sound || event.epoch !== sound.snapshot.epoch) return
+    if (sound.discRetiring) {
+      // Unload drops PCM immediately, but decoder cleanup may still be
+      // awaiting I/O. Preserve the inherited fade's one completion without
+      // admitting an old transport snapshot or label during that interval.
+      if (event.type === 'fade') sound.discFade = event.snapshot
+      return
+    }
     const inheritedFade = event.type === 'fade'
     sound.snapshot = event.snapshot
     const version = sound.version,
@@ -234,6 +269,14 @@ export class SoundService {
             : 'onLabel'
     const args: ScriptValue[] =
       event.type === 'ended' ? ['stop'] : event.type === 'label' ? [event.label ?? ''] : []
+    this.postCallback(sound, name, args, () =>
+      sound.version === version &&
+      // Already admitted fade callbacks belong to the SoundBuffer.
+      // Native status changes still revoke them through version; a stale
+      // transport event cannot enter here through a retired media epoch.
+      (inheritedFade || sound.snapshot.epoch === event.epoch))
+  }
+  private postCallback(sound: Sound, name: string, args: ScriptValue[], current: () => boolean): void {
     let lease: ScriptObject | undefined
     try {
       lease = this.objects.upgrade(sound.owner)
@@ -246,13 +289,7 @@ export class SoundService {
       return
     }
     const held = lease
-    const valid = () =>
-      this.buffers.get(sound.id) === sound &&
-      sound.version === version &&
-      // Already admitted fade callbacks belong to the SoundBuffer.
-      // Native status changes still revoke them through version; a stale
-      // transport event cannot enter here through a retired media epoch.
-      (inheritedFade || sound.snapshot.epoch === event.epoch)
+    const valid = () => this.buffers.get(sound.id) === sound && current()
     try {
       void this.dispatch(held, name, args, valid, sound)
         .finally(() => this.objects.release(held))
@@ -325,6 +362,8 @@ export class SoundService {
           waveOutputBits: 0,
           waveOutputChannels: 0,
           preparedCdda: new Map(),
+          cddaWaiters: new Map(),
+          discGeneration: 0,
           preparedMidi: new Map(),
           resourceWaiters: new Set(),
           snapshot: {
@@ -375,6 +414,12 @@ export class SoundService {
       throw new Error('Unsupported sound global property')
     }
     const sound = this.get(number(0))
+    // A new script operation may reuse this buffer only after the old disc's
+    // decoder has actually retired. Invalidation itself must remain immediate.
+    if (operation !== 'Sound.destroy') {
+      while (sound.discRetiring) await sound.discRetiring
+      if (this.buffers.get(sound.id) !== sound) throw new Error('SoundBuffer has been invalidated')
+    }
     if (operation === 'Sound.bindLabels') {
       if (!isScriptObject(args[1]) || !isScriptObject(args[2]))
         throw new Error('Sound labels require their sound owner and Dictionary')
@@ -463,9 +508,14 @@ export class SoundService {
       return { target, time, delay }
     }
     const callbacks: Callback[] = []
+    const discGeneration = sound.discGeneration, checkDiscOperation = () => {
+      if (sound.discGeneration !== discGeneration) throw new Error('Sound operation was interrupted by a disc change')
+    }
     let value: ScriptValue
     const apply = async (command: AudioCommand) => {
+      checkDiscOperation()
       const result = await this.voiceCommand(sound, command)
+      checkDiscOperation()
       if (result.snapshot) sound.snapshot = result.snapshot
       for (const event of result.events) {
         if (event.type === 'error') throw new Error(event.message)
@@ -548,14 +598,17 @@ export class SoundService {
       sound.position[0] = x; sound.position[1] = y; sound.position[2] = z
     } else if (method === 'prepareCdda') {
       if (sound.kind !== 'cdda') throw new Error('Invalid CDDA owner')
-      const version = sound.version
+      const version = sound.version, preparing: { drive?: string } = {}
       let selection: CddaSelection | undefined
-      try { selection = await this.waitResource(sound, this.cddaDiscs.prepare(text(0))) }
+      try { selection = await this.waitResource(sound, this.cddaDiscs.prepare(text(0),
+        (drive) => { preparing.drive = drive }), preparing) }
       catch (error) {
         if (error instanceof InvalidCddaDrive) return this.result(-1n, [])
         throw error
       }
-      if (this.disposed || this.cancelling || this.buffers.get(sound.id) !== sound || sound.version !== version)
+      if (this.disposed || this.cancelling || this.buffers.get(sound.id) !== sound ||
+          (sound.version !== version && sound.discGeneration === discGeneration) ||
+          (selection && !this.cddaDiscs.current(selection)))
         throw new Error('CDDA preparation lost its sound owner')
       if (selection) {
         if (!Number.isSafeInteger(this.nextCddaToken)) throw new Error('CDDA preparation identity exhausted')
@@ -573,33 +626,14 @@ export class SoundService {
       let keepStopped = false
       if (method === 'unloadCdda') {
         const selected = sound.preparedCdda.get(numeric(0))
-        if (sound.kind !== 'cdda' || !selected)
+        if (sound.kind !== 'cdda' || !selected || !this.cddaDiscs.current(selected))
           throw new Error('CDDA prepared track is stale')
         keepStopped = sound.cdda?.drive === selected.drive
       }
       const previous = sound.snapshot.status
       const retained = await this.unloadMedia(sound, keepStopped ? 'stop' : 'unload')
-      sound.filters?.release()
-      sound.filters = undefined
-      sound.resourceRequested = !!retained
-      sound.ready = !!retained
-      sound.cdda = undefined
-      sound.labels = scriptRecord({})
-      sound.snapshot = {
-        ...(retained ?? sound.snapshot),
-        status: keepStopped ? 'stop' : 'unload',
-        epoch: retained?.epoch ?? 0,
-        position: 0,
-        paused: false,
-        frequency: 0,
-        sampleRate: 0,
-        sampleCount: 0,
-        reportedSampleCount: undefined,
-        channels: 0,
-        bits: 0,
-        fading: retained?.fading ?? false,
-        flags: Array(16).fill(0),
-      }
+      checkDiscOperation()
+      this.resetMedia(sound, retained, keepStopped ? 'stop' : 'unload')
       if (sound.kind === 'midi' || previous !== sound.snapshot.status) this.cancelEvents(sound)
       if (previous !== sound.snapshot.status) callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
     } else if (method === 'open' || method === 'openCdda') {
@@ -607,7 +641,7 @@ export class SoundService {
       if (method === 'openCdda') {
         const token = numeric(0)
         selected = sound.preparedCdda.get(token)
-        if (sound.kind !== 'cdda' || !selected)
+        if (sound.kind !== 'cdda' || !selected || !this.cddaDiscs.current(selected))
           throw new Error('CDDA prepared track is stale')
         sound.preparedCdda.delete(token)
       }
@@ -621,7 +655,9 @@ export class SoundService {
         // Retain its stopped device controls even if a fade starts only after
         // this Open; there is deliberately no playable PCM attached to them.
         await this.prepare(sound)
+        checkDiscOperation()
         const retained = await this.unloadMedia(sound, 'stop')
+        checkDiscOperation()
         sound.ready = !!retained; sound.resourceRequested = !!retained
         if (retained) sound.snapshot = retained
         sound.snapshot.status = 'stop'
@@ -655,9 +691,12 @@ export class SoundService {
         }
         if (selected) {
           if (!this.backend?.streaming || !this.sources) throw new Error('Virtual CDDA requires a streaming audio backend')
-          const track = await openCddaSelection(selected, this.sources,
-              () => !this.disposed && !this.cancelling && this.buffers.get(sound.id) === sound && sound.cdda === selected)
+          const selection = selected, current = () => !this.disposed && !this.cancelling &&
+            this.buffers.get(sound.id) === sound && sound.cdda === selection && this.cddaDiscs.current(selection),
+            track = await this.waitResource(sound, openCddaSelection(selection, this.sources, current),
+              { drive: selection.drive, current, releaseLate: (late) => late.release() })
           sourceLease = track
+          if (!current()) throw new Error('CDDA disc changed while opening its audio')
           await apply({ op: 'openSource', id: sound.id, kind: sound.kind,
             source: track.source, cdda: track.cdda, bufferedBytes: track.bufferedBytes,
             releaseSource: track.release, loops, settings: sound.snapshot })
@@ -677,6 +716,9 @@ export class SoundService {
         // Backends release after actual decoder cleanup. Idempotence also
         // covers failures before the backend acquired this resource lease.
         sourceLease?.release()
+        // A changed drive already owns retirement. This earlier caller may
+        // finish after a newer Open; it must never unload that newer media.
+        if (sound.discGeneration !== discGeneration || (selected && !this.cddaDiscs.current(selected))) throw error
         // open may already have allocated a backend voice before returning an
         // error. Its serialized close completes before releasing native leases.
         // An expired owner already scheduled close after all inflight work;
@@ -712,6 +754,7 @@ export class SoundService {
           throw new TvpError('TVPUnknownWaveFormat', [name], error.message, { cause: error })
         throw error
       }
+      checkDiscOperation()
       sound.ready = true
       sound.labels = scriptRecord(
         Object.fromEntries(
@@ -731,11 +774,16 @@ export class SoundService {
         this.cancelEvents(sound)
         callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
       }
-    } else if (method === 'play' || method === 'stop') {
+    } else if (method === 'play' || method === 'stop' || method === 'stopCdda') {
+      if (method === 'stopCdda') {
+        const selected = sound.preparedCdda.get(numeric(0))
+        if (sound.kind !== 'cdda' || !selected || !this.cddaDiscs.current(selected))
+          throw new Error('CDDA prepared track is stale')
+      }
       if (method === 'play' && sound.cdda && !sound.cdda.parts)
         throw new Error(`Imported CDDA track ${sound.cdda.track} is absent or is a data track`)
       const previous = sound.snapshot.status
-      if (sound.ready) await apply({ op: method, id: sound.id })
+      if (sound.ready) await apply({ op: method === 'play' ? 'play' : 'stop', id: sound.id })
       // Native creates the secondary buffer at StartPlay, not open. Our
       // ordinary software output supports pan, and has no DirectSound3D
       // interface. Stop/unload retain this capability just as native Clear.
@@ -853,6 +901,55 @@ export class SoundService {
   }
   async pause(paused: boolean): Promise<void> {
     if (this.backend) await this.command({ op: 'pauseAll', paused })
+  }
+  /** Called at a committed virtual-drive change. Decoder cancellation starts
+   * independently of the VM operation which may still be reading that disc. */
+  async discChanged(drive: string): Promise<void> {
+    const changed = drive.toUpperCase(), pending: Promise<void>[] = []
+    for (const sound of this.buffers.values()) {
+      if (sound.kind !== 'cdda') continue
+      for (const [token, selection] of sound.preparedCdda)
+        if (selection.drive === changed) sound.preparedCdda.delete(token)
+      for (const [cancel, read] of sound.cddaWaiters)
+        if (read.drive === changed) cancel(new Error('CDDA disc changed during resource selection'))
+      if (sound.cdda?.drive !== changed) {
+        if (sound.retiringDrive === changed && sound.discRetiring) pending.push(sound.discRetiring)
+        continue
+      }
+      const previous = sound.snapshot.status
+      sound.cdda = undefined
+      sound.ready = false
+      sound.discGeneration++
+      this.cancelEvents(sound)
+      const version = sound.version
+      const retirement: Promise<void> = Promise.resolve().then(async () => {
+        if (this.buffers.get(sound.id) !== sound) return
+        let retained = await this.unloadMedia(sound)
+        if (this.buffers.get(sound.id) !== sound) return
+        const completedFade = sound.discFade
+        sound.discFade = undefined
+        if (completedFade) {
+          const controls = { volume: completedFade.volume, fading: completedFade.fading }
+          if (retained) retained = { ...retained, ...controls }
+          else sound.snapshot = { ...sound.snapshot, ...controls }
+        }
+        this.resetMedia(sound, retained, 'unload')
+        if (previous !== 'unload')
+          this.postCallback(sound, 'onStatusChanged', ['unload'], () => sound.version === version)
+        if (completedFade)
+          this.postCallback(sound, 'onFadeCompleted', [], () => sound.version === version)
+      }).finally(() => {
+        if (sound.discRetiring === retirement) {
+          sound.discRetiring = undefined; sound.retiringDrive = undefined; sound.discFade = undefined
+        }
+      })
+      sound.discRetiring = retirement
+      sound.retiringDrive = changed
+      pending.push(retirement)
+    }
+    const results = await Promise.allSettled(pending), failures = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'Changed CDDA sources could not all retire', { cause: failures[0] })
   }
   cancel(): Promise<void> {
     if (this.cancelling) return this.cancelling

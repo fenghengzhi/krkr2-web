@@ -1,5 +1,6 @@
 /** The persisted cue field accepts an imported CUE sheet or a standalone data ISO. */
 export interface CddaDisc { readonly drive: string; readonly cue: string; readonly volumeLabel?: string }
+export type DiscChange = ({ kind: 'insert' } & CddaDisc) | { kind: 'eject' | 'reset'; drive: string }
 export function copyCddaDiscs(value?: readonly CddaDisc[]): readonly CddaDisc[] | undefined {
   if (value === undefined) return undefined
   if (!Array.isArray(value) || value.length > 26) throw new Error('Invalid virtual CDDA disc bindings')

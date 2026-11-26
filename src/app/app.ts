@@ -19,6 +19,7 @@ import { createGameHelp } from './game-help.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import { createGameLibrary } from './game-library.ts'
 import { createCddaSettings, parseCddaSettings } from './cdda-settings.ts'
+import { createLiveDiscControls } from './live-disc.ts'
 import type { CddaDisc } from '../engine/ports/cdda.ts'
 import { createSaveTransfer } from './save-transfer.ts'
 import { createNativeSaveZipPicker } from './native-save-zip.ts'
@@ -77,6 +78,7 @@ export function mountApp(root: HTMLDivElement): void {
   projectControls.insertAdjacentHTML('beforeend', `<label for="script-encoding">无 BOM 的脚本与剧情编码</label><select id="script-encoding">${scriptOptions}</select>`)
   const discSettings = createCddaSettings('游戏光盘映射（可选）', 'cdda-discs')
   projectControls.append(discSettings.element)
+  const liveDisc = createLiveDiscControls(projectControls)
   el('native-save-hint').insertAdjacentHTML('afterend', `<div id="native-zip-options" hidden><label for="native-zip-encoding">存档 ZIP 文件名编码</label><select id="native-zip-encoding"><option value="">沿用当前游戏</option>${zipOptions}</select></div>`)
   const projectSelection = (): ProjectSelection => {
     const mode = el<HTMLSelectElement>('project-mode').value,
@@ -196,6 +198,7 @@ export function mountApp(root: HTMLDivElement): void {
     },
   })
   const update = () => {
+    liveDisc.state(player?.session, snapshot?.state === 'running' && !stopRequested && !stopping)
     gameDialogs?.state(
       snapshot?.state === 'running' &&
         snapshot.activity.state === 'visible' &&
@@ -552,6 +555,7 @@ export function mountApp(root: HTMLDivElement): void {
       player = instance
       gameHelp = createGameHelp(el('stage').parentElement!)
       gameDialogs = createGameDialogs({
+        discPanel: (dialog) => liveDisc.place(dialog),
         browse: (id, directory) => {
           if (current !== generation || instance.session.isDisposed || clipboardSelecting || stopRequested)
             return Promise.resolve(null)

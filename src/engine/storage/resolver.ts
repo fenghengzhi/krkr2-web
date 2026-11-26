@@ -236,6 +236,10 @@ export class StorageResolver {
     }
   }
   invalidateSearch(): void { this.revision++; this.autoTables.clear(); this.collectionTables.clear() }
+  discChanged(drive: string): void {
+    this.archives.forgetDrive(drive)
+    this.invalidateSearch()
+  }
   /** Reserve against real/alias files, directories, and case-folded spelling;
    * callers include save-overlay names in the same final synchronous check. */
   hasTree(prefix: string, extraPaths: readonly string[] = []): boolean {
@@ -272,12 +276,13 @@ export class StorageResolver {
     this.check()
     const logical = parseStoragePath(path), direct = overlay?.(logical) ?? this.find(logical)
     if (direct) return direct
-    const delimiter = logical.indexOf('>')
+    const delimiter = logical.indexOf('>'), revision = this.archives.discRevision(logical)
     if (delimiter < 0) {
       const disc = discAddress(logical)
       if (!disc || !disc.path || disc.path.endsWith('/')) return undefined
       const fs = await this.discs?.filesystem(disc.drive), source = await fs?.file(disc.path)
       this.check()
+      if (revision !== this.archives.discRevision(logical)) return this.findAsync(path, overlay)
       if (!source) return undefined
       return { name: logical, size: source.size, cacheToken: source, source, read: () => {
         resourceReadBounds(source.size, 0, source.size)
@@ -286,6 +291,7 @@ export class StorageResolver {
     }
     const name = logical.slice(0, delimiter), member = logical.slice(delimiter + 1),
       raw = await this.findAsync(name, overlay)
+    if (revision !== this.archives.discRevision(logical)) return this.findAsync(path, overlay)
     if (!raw) throw new TvpError('TVPCannotOpenStorage', [name], `Archive resource not found: ${name}`)
     const index = await this.archives.open(raw)
     this.check()
@@ -348,7 +354,7 @@ export class StorageResolver {
           }
           continue
         }
-        const directory = await this.directoryEntries(path, overlay, overlayResources),
+        const directory = await this.directoryEntries(path, overlay, overlayResources, true),
           realNames = this.archiveAliases && !path.includes('>') ? new Set<string>() : undefined
         for (const resource of directory) {
           const relative = resource.name.slice(path.length)
@@ -399,7 +405,7 @@ export class StorageResolver {
     return found
   }
   private async directoryEntries(path: string, overlay?: (name: string) => Resource | undefined,
-    overlayResources: readonly Resource[] = []): Promise<Resource[]> {
+    overlayResources: readonly Resource[] = [], autoPath = false): Promise<Resource[]> {
     const matches = (values: readonly Resource[]) => {
       const found = values.filter((resource) => resource.name.toLowerCase().startsWith(path.toLowerCase())),
         prefixes = new Set([...found.map((resource) => resource.name.slice(0, path.length)),
@@ -410,9 +416,11 @@ export class StorageResolver {
     }, direct = matches([...new Map([...this.files.values(), ...overlayResources].map((resource) => [resource.name, resource])).values()])
     const delimiter = path.indexOf('>')
     if (delimiter < 0) return direct.filter((resource) => !resource.name.includes('>'))
-    const name = path.slice(0, delimiter), raw = await this.findAsync(name, overlay)
+    const name = path.slice(0, delimiter), revision = this.archives.discRevision(name), raw = await this.findAsync(name, overlay)
+    if (revision !== this.archives.discRevision(name)) return this.directoryEntries(path, overlay, overlayResources, autoPath)
     // Explicit pre-mounted member fixtures remain usable without a container.
     if (!raw && direct.length) return direct
+    if (!raw && autoPath && discAddress(name)) return []
     if (!raw) throw new TvpError('TVPCannotOpenStorage', [name], `Archive resource not found: ${name}`)
     const index = await this.archives.open(raw)
     if (!index) throw new Error(`Unsupported archive: ${name}`)

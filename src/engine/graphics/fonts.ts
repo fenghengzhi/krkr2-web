@@ -358,7 +358,10 @@ export class FontService {
     if (
       !Number.isInteger(options.shadowLevel) ||
       options.shadowLevel < 0 ||
-      options.shadowLevel > 255 ||
+      // KAG uses 512 for outlined dialogue. Strength is not an alpha byte:
+      // the stock 65-level blur saturates each accumulated coverage sample.
+      // 32767 keeps even the zero-radius (level<<10)*64 signed product safe.
+      options.shadowLevel > 32767 ||
       Math.abs(options.shadowWidth) > 64 ||
       Math.abs(options.shadowX) > 4096 ||
       Math.abs(options.shadowY) > 4096

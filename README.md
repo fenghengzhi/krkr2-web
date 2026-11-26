@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 169 批支持在游戏运行中弹出或更换 ISO、CUE 光盘，包括游戏要求插入下一张盘时从设备选取文件。另修正了原版 Introduction 第二条路线在显示描边对白时会中断的问题。新增行为等待托管验收。[169 实现与托管证据](docs/decisions/169-live-disc-changes-and-kag-outlines.md)
+
 第 168 批支持游戏 ZIP 与单独发行的剧情光盘一起导入。游戏可从配套光盘加载章节和播放 CD 音轨，本批也修订了 KAG 控制标签读取宏属性的顺序，以及普通 WAVE 播放完毕时回调可见的位置。新增行为等待托管结果。[168 实现与托管证据](docs/decisions/168-companion-game-discs-and-story-callbacks.md)
 
 第 167 批让自动识别可以直接启动 ZIP 内的游戏光盘，并保存到游戏库。日文明朝字体的选择和多声道 WAVE 对白的左右声像也在本批修订。新增行为待托管验证。[167 实现与托管证据](docs/decisions/167-packaged-game-discs-fonts-and-speakers.md)

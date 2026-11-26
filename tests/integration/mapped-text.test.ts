@@ -24,8 +24,8 @@ for (const binary of [false, true])
     try {
       await session.start()
       for (const row of mappedTextCases) {
-        const shadow = 'shadow' in row ? row.shadow : 'void'
-        assert.equal(await session.evaluate(`mappedTextObserve(${JSON.stringify(row.id)},${row.face},${row.opacity},${row.hold},${shadow})`), mappedTextExpected(row), row.id)
+        const shadow = 'shadow' in row ? row.shadow : 'void', level = 'level' in row ? row.level : 'void'
+        assert.equal(await session.evaluate(`mappedTextObserve(${JSON.stringify(row.id)},${row.face},${row.opacity},${row.hold},${shadow},${level})`), mappedTextExpected(row), row.id)
       }
       await session.evaluate('mappedTextMenu()')
       await selectSoftwareFrame(session, 'mappedWindow')

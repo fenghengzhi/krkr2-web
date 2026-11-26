@@ -32,7 +32,7 @@ export function* shadowGlyph(
   if (!radius) {
     const coverage = Uint8Array.from(mask.coverage, (value) => mask.native65
       ? encode65((decode65(value) * level) >> 8)
-      : (value * level) >> 8)
+      : Math.min(255, (value * level) >> 8))
     return { ...mask, coverage }
   }
   const width = mask.width + radius * 2,

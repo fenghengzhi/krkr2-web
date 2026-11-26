@@ -234,6 +234,15 @@ const api: SessionApi = {
       mounting = false
     }
   },
+  async changeDisc(change, files) {
+    const target = active()
+    if (files && (!Array.isArray(files) || !files.length || files.length > 10000 ||
+        files.some((file) => !file || !(file.blob instanceof Blob) || typeof file.path !== 'string' || 'url' in file)))
+      throw new Error('请选择有效的本地光盘文件。')
+    const check = async () => { target.control.check(); sources.signal.throwIfAborted() }
+    await target.changeDisc(change, files ? async () =>
+      importSources(await resolveFiles(files, check), check, { lazyArchives: true }) : undefined)
+  },
   async start(entry) {
     if (mounting) throw new Error('Wait for file import to finish')
     const saved = libraryLease?.record.project

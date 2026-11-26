@@ -52,3 +52,15 @@ test('mapped TFT shadows retain their native 65-level rounding before expansion 
   assert.deepEqual([blurred.width, blurred.height, blurred.left, blurred.top], [10,5,-1,-1])
   assert.deepEqual([...blurred.coverage.slice(20, 30)], [0,12,56,108,176,192,152,68,12,0])
 })
+
+test('KAG outline emphasis 512 saturates coverage instead of rejecting it or wrapping an alpha byte', () => {
+  const values = [0,16,64,128,200,255], plain = { width: 6, height: 1, left: 0, top: 0, coverage: Uint8Array.from(values) }
+  assert.deepEqual([...finish(shadowGlyph(plain, 512, 0)).coverage], [0,32,128,255,255,255])
+  assert.deepEqual([...finish(shadowGlyph(plain, 256, 0)).coverage], values)
+  const row = [0,64,128,192,255,192,64,0], mapped = { width: 8, height: 3, left: 0, top: 0,
+    native65: true, coverage: Uint8Array.from([...row, ...row, ...row]) }
+  assert.deepEqual([...finish(shadowGlyph(mapped, 512, 0)).coverage.slice(0,8)], [0,128,255,255,255,255,128,0])
+  const blurred = finish(shadowGlyph(mapped, 512, 1))
+  assert.deepEqual([blurred.width,blurred.height,blurred.left,blurred.top], [10,5,-1,-1])
+  assert.deepEqual([...blurred.coverage.slice(21,29)], [36,120,240,255,255,255,156,36])
+})

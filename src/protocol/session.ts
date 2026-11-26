@@ -13,8 +13,8 @@ import type { WindowPopupMessage } from '../engine/ports/window-popup.ts'
 import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
-import type { CddaDisc } from '../engine/ports/cdda.ts'
-export const PROTOCOL_VERSION = 63
+import type { CddaDisc, DiscChange } from '../engine/ports/cdda.ts'
+export const PROTOCOL_VERSION = 64
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
   readonly tree: DroppedTree<Blob>
@@ -74,6 +74,7 @@ export interface SessionApi {
   prepare(files: GameInput, project?: import('../engine/storage/project.ts').ProjectSelection, entry?: string, discs?: readonly CddaDisc[]): Promise<string | { gameId: string; files: RemoteGameFile[] }>
   initialize(request: InitializeRequest): Promise<SessionSnapshot>
   mount(): Promise<SessionSnapshot>
+  changeDisc(change: DiscChange, files?: LocalGameFile[]): Promise<void>
   start(entry: string): Promise<SessionSnapshot>
   evaluate(source: string): Promise<string>
   pause(): Promise<SessionSnapshot>

@@ -63,7 +63,7 @@ test('automatic companion ZIP selection counts separate pressings and skips a no
     member('CD/Play.cue', cue), member('CD/theme.wav', 'first recording'),
   ]))])
   const discs = makeDiscs()
-  assert.deepEqual(opens, [])
+  assert.equal(opens.length, 0)
   const chosen = await discs.prepare('1')
   assert.equal(chosen?.cue, 'Disc1.zip>CD/Play.cue'); assert.equal(chosen?.drive, 'D')
   const first = [...opens]

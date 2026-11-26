@@ -70,7 +70,7 @@ if (process.argv[2] === 'prepare') {
     textMetricSource,
     ...textMetricCases.map(({ id }) => `try{record("${id}|"+textMetricObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
     mappedTextSource,
-    ...mappedTextCases.map((row) => `try{record("${row.id}|"+mappedTextObserve("${row.id}",${row.face},${row.opacity},${row.hold},${'shadow' in row ? row.shadow : 'void'}));}catch(e){record("${row.id}|error:"+e.message);}`),
+    ...mappedTextCases.map((row) => `try{record("${row.id}|"+mappedTextObserve("${row.id}",${row.face},${row.opacity},${row.hold},${'shadow' in row ? row.shadow : 'void'},${'level' in row ? row.level : 'void'}));}catch(e){record("${row.id}|error:"+e.message);}`),
     fontMappingHeightSource,
     ...fontMappingHeightCases.map(({ id }) => `try{record("${id}|"+fontMappingHeightObserve("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
     'record("done");System.exit();',

@@ -8,7 +8,7 @@ import type { SaveFile, SaveScope } from '../engine/ports/saves.ts'
 import type { InputPacket, PhysicalPointerScreen } from '../engine/ports/input.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
-import type { CddaDisc } from '../engine/ports/cdda.ts'
+import type { CddaDisc, DiscChange } from '../engine/ports/cdda.ts'
 import type { ProjectSelection } from '../engine/storage/project.ts'
 import type { DebugPanel } from '../engine/diagnostics/panels.ts'
 import type { MenuPopupIdentity } from '../engine/scene/menus.ts'
@@ -20,6 +20,7 @@ import {
   type BackendPreference,
   type GameFile,
   type GameInput,
+  type LocalGameFile,
   type SessionApi,
   type SessionEvent,
 } from '../protocol/session.ts'
@@ -180,6 +181,9 @@ export class SessionClient {
   }
   resume() {
     return this.call('resume')
+  }
+  changeDisc(change: DiscChange, files?: LocalGameFile[]) {
+    return this.call('changeDisc', change, files)
   }
   retryGraphics() {
     return this.call('retryGraphics')

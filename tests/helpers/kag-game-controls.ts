@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test'
 
 /** Inspect the active KAG game and click its actual rendered link rectangles. */
-export function kagGameControls(page: Page, observations: unknown[]) {
+export function kagGameControls(page: Page, observations: unknown[], options: { firstReadTimeout?: number } = {}) {
   let sequence = 0
   const canvas = page.locator('#stage canvas[data-window-id]')
   const read = async (expression: string) => {
@@ -13,7 +13,7 @@ export function kagGameControls(page: Page, observations: unknown[]) {
       input.focus({ preventScroll: true }); input.value = source; button.click()
     }, `${JSON.stringify(prefix)}+string(Scripts.eval(${JSON.stringify(expression)}))`)
     const line = page.locator('#logs p span').filter({ hasText: new RegExp('^' + prefix) }).last()
-    await expect(line).toBeVisible({ timeout: 5000 })
+    await expect(line).toBeVisible({ timeout: sequence === 1 ? options.firstReadTimeout ?? 5000 : 5000 })
     const value = ((await line.textContent()) ?? '').slice(prefix.length)
     if (observations.length < 160) observations.push({ expression, value })
     return value

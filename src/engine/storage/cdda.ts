@@ -1,5 +1,5 @@
 import { cueLimits, cueTrackParts, parseCue, type CueSheet } from '../../formats/audio/cue.ts'
-import { copyCddaDiscs, type CddaDisc, type CddaPcmPart, type CddaPcmTrack } from '../ports/cdda.ts'
+import { copyCddaDiscs, type CddaDisc, type CddaPcmPart, type CddaPcmTrack, type DiscChange } from '../ports/cdda.ts'
 import { discVolumeTrack, readDiscVolumeLabel, type DiscVolumeTrack } from '../../formats/disc/volume-label.ts'
 import { openDiscFilesystem, type DiscFilesystem } from '../../formats/disc/filesystem.ts'
 import { openResourceSource } from './resource-source.ts'
@@ -8,7 +8,7 @@ import type { Resource } from '../ports/storage.ts'
 import { TvpError } from '../system/tvp-error.ts'
 import { discAddress, storageFilePath, toPublicStoragePath } from './public-path.ts'
 import type { AudioResourceSources, AudioSourceLease } from './audio-sources.ts'
-import type { StorageResolver } from './resolver.ts'
+import { StorageResolver } from './resolver.ts'
 
 /** A ZIP distribution mounts its members at the import root. A binding may
  * use that root directly or spell out the selected outer ZIP's address. */
@@ -31,7 +31,7 @@ function distributionMember(cue: string, distribution?: string): string | undefi
   return path.slice(path.indexOf('>') + 1)
 }
 
-type BoundDisc = CddaDisc & { imported?: boolean }
+type BoundDisc = CddaDisc & { imported?: boolean; picked?: StorageResolver; revision?: number }
 interface DiscFile { name: string; resource?: Resource; exact(name: string): Promise<Resource | undefined> }
 type DiscImports = Pick<StorageResolver, 'find' | 'findAsync' | 'knownResources' | 'archiveEntries'>
 
@@ -50,7 +50,7 @@ async function opticalFiles(files: Iterable<Resource>, checkpoint: () => Promise
 type SelectedPart = { kind: 'silence'; frames: number } | {
   kind: 'file'; resource: Resource; encoding: 'encoded' | 's16le' | 's16be'; startFrame: number; endFrame?: number
 }
-export interface CddaSelection { readonly drive: string; readonly cue: string; readonly track: number; readonly parts?: readonly SelectedPart[] }
+export interface CddaSelection { readonly drive: string; readonly cue: string; readonly track: number; readonly parts?: readonly SelectedPart[]; readonly revision?: number }
 /** Marks only this resolver's explicit-drive rejection, not provider errors. */
 export class InvalidCddaDrive extends TvpError {
   constructor() { super('TVPInvalidCDDADrive') }
@@ -73,6 +73,19 @@ export class CddaDiscs {
   private readonly labels = new WeakMap<object, { geometry: string; value: string }>()
   private readonly filesystems = new WeakMap<object, { geometry: string; fs: DiscFilesystem }>()
   private importedCues?: string[]
+  private readonly overrides = new Map<string, BoundDisc | null>()
+  private readonly revisions = new Map<string, number>()
+  private readonly pending = new Map<string, object>()
+  private disposed = false
+  current(selection: { drive: string; revision?: number }): boolean {
+    return !this.disposed && (selection.revision ?? 0) === (this.revisions.get(selection.drive) ?? 0)
+  }
+  dispose(): void {
+    this.disposed = true
+    this.pending.clear()
+    for (const disc of this.overrides.values()) disc?.picked?.dispose()
+    this.overrides.clear()
+  }
   private async discoverImports(imports: DiscImports): Promise<string[]> {
     if (this.importedCues) return this.importedCues
     const files = imports.knownResources().filter((file) => !file.aliasOf && !file.name.includes('>'))
@@ -92,13 +105,22 @@ export class CddaDiscs {
     if (!failed || candidates.length) this.importedCues = candidates
     return candidates
   }
-  private async bindings(requireUnique: boolean): Promise<readonly BoundDisc[]> {
+  private async initialBindings(requireUnique: boolean): Promise<readonly BoundDisc[]> {
     if (this.supplied !== undefined) return this.supplied
     let cues = [...new Set(await this.storage.cues())]
     const imported = !cues.length && !!this.imports
     if (imported) cues = await this.discoverImports(this.imports!)
-    if (cues.length > 1 && requireUnique) throw new Error('Multiple imported CUE sheets or ISO images require explicit cddaDiscs bindings')
+    if (cues.length > 1 && requireUnique && !this.overrides.size) throw new Error('Multiple imported CUE sheets or ISO images require explicit cddaDiscs bindings')
     return cues.length === 1 ? [{ drive: 'D', cue: toPublicStoragePath(cues[0]!), imported }] : []
+  }
+  private async bindings(requireUnique: boolean): Promise<readonly BoundDisc[]> {
+    const initial = await this.initialBindings(requireUnique)
+    const available = new Map(initial.map((disc) => [disc.drive, disc]))
+    for (const [drive, disc] of this.overrides) {
+      if (disc) available.set(drive, disc)
+      else available.delete(drive)
+    }
+    return [...available.values()].map((disc) => ({ ...disc, revision: this.revisions.get(disc.drive) ?? 0 }))
   }
   private async readSheet(resource: Resource): Promise<CueSheet> {
     if (!Number.isSafeInteger(resource.size) || resource.size < 0 || resource.size > cueLimits.bytes)
@@ -109,6 +131,10 @@ export class CddaDiscs {
     return parseCue(await this.storage.decodeText(bytes))
   }
   private async bindingFile(disc: BoundDisc): Promise<DiscFile> {
+    if (disc.picked) {
+      const name = storageFilePath(disc.cue), resource = disc.picked.find(name)
+      return { name: resource?.name ?? name, resource, exact: async (path) => disc.picked!.find(path) }
+    }
     const member = distributionMember(disc.cue, this.distribution)
     let importedPath: string | undefined
     if (this.imports && !member) {
@@ -150,7 +176,8 @@ export class CddaDiscs {
   }
   /** A standalone ISO supplies a single cooked data track. A CUE supplies
    * actual sector geometry and resolves FILE relative to the sheet. */
-  private async mountedVolume(disc: BoundDisc, labelOnly = false): Promise<{ file: Resource; track?: DiscVolumeTrack } | undefined> {
+  private async mountedVolume(disc: BoundDisc, labelOnly = false,
+    checkReplacement?: () => void): Promise<{ file: Resource; track?: DiscVolumeTrack } | undefined> {
     const binding = await this.bindingFile(disc)
     const cue = binding.resource
     if (!cue) return
@@ -160,15 +187,20 @@ export class CddaDiscs {
     const key = cue.cacheToken ?? cue
     const sheet = this.sheets.get(key) ?? await this.readSheet(cue)
     this.sheets.set(key, sheet)
+    if (checkReplacement) for (const file of sheet.files) {
+      checkReplacement()
+      await this.cueFile(binding, file.name)
+    }
     const track = discVolumeTrack(sheet)
     if (track === 'audio' || (disc.volumeLabel !== undefined && labelOnly))
       return { file: await this.cueFile(binding, sheet.files[sheet.tracks[0]!.file]!.name) }
     if (track) return { file: await this.cueFile(binding, track.file), track }
   }
   async drives(): Promise<string[]> {
-    return (await this.bindings(false)).map((disc) => disc.drive)
+    return [...new Set([...(await this.bindings(false)).map((disc) => disc.drive), ...this.overrides.keys()])]
   }
   async openDataDisc(drive: string): Promise<{ filesystem: DiscFilesystem; image: string } | undefined> {
+    if (this.disposed) return
     const disc = (await this.bindings(false)).find((disc) => disc.drive === drive)
     if (!disc) return
     const mounted = await this.mountedVolume(disc).catch((error: unknown) => {
@@ -176,7 +208,11 @@ export class CddaDiscs {
       throw error
     })
     if (!mounted?.track) return
-    const { file, track } = mounted, image = file.cacheToken ?? file
+    const result = await this.dataFilesystem(mounted.file, mounted.track)
+    return this.current(disc) ? result : this.openDataDisc(drive)
+  }
+  private async dataFilesystem(file: Resource, track: DiscVolumeTrack) {
+    const image = file.cacheToken ?? file
     const geometry = [track.first, track.end, track.layout.bytes, track.layout.payload].join('/')
     const cached = this.filesystems.get(image)
     if (cached?.geometry === geometry) return { filesystem: cached.fs, image: file.name }
@@ -189,6 +225,52 @@ export class CddaDiscs {
   }
   async filesystem(drive: string): Promise<DiscFilesystem | undefined> {
     return (await this.openDataDisc(drive))?.filesystem
+  }
+  async change(change: DiscChange, load: (() => Promise<Resource[]>) | undefined,
+    committed: (drive: string) => void | Promise<void>): Promise<void> {
+    if (this.disposed) throw new Error('光驱已关闭。')
+    if (!change || !['insert', 'eject', 'reset'].includes(change.kind) ||
+        typeof change.drive !== 'string' || !/^[a-z]$/i.test(change.drive) || (load && change.kind !== 'insert'))
+      throw new Error('请选择有效的光驱和换盘操作。')
+    const drive = change.drive.toUpperCase(), token = {}
+    const candidate: BoundDisc | undefined = change.kind === 'insert' ? copyCddaDiscs([change])![0] : undefined
+    if (candidate && !/\.(?:cue|iso)$/i.test(candidate.cue)) throw new Error('请选择 ISO 镜像或 CUE 文件。')
+    this.pending.set(drive, token)
+    const check = () => {
+      if (this.pending.get(drive) !== token) throw new Error('这次换盘已由更新的操作取代。')
+    }
+    let picked: StorageResolver | undefined
+    try {
+      if (change.kind === 'reset' && !this.overrides.has(drive) ||
+          change.kind === 'eject' && this.overrides.get(drive) === null) return
+      let replacement: BoundDisc | null = null
+      if (candidate) {
+        if (load) {
+          const resources = await load()
+          check()
+          if (new Set(resources.map((file) => file.name)).size !== resources.length) throw new Error('所选光盘文件中有重名路径。')
+          picked = new StorageResolver('', false)
+          picked.mount(resources)
+        }
+        replacement = { ...candidate, picked }
+        const mounted = await this.mountedVolume(replacement, false, check)
+        check()
+        if (!mounted || (mounted.track && !await this.dataFilesystem(mounted.file, mounted.track)))
+          throw new Error('找不到光盘或无法读取光盘内容：' + candidate.cue)
+      }
+      await this.storage.checkpoint()
+      check()
+      const old = this.overrides.get(drive)
+      if (change.kind === 'reset') this.overrides.delete(drive)
+      else this.overrides.set(drive, replacement)
+      picked = undefined
+      old?.picked?.dispose()
+      this.revisions.set(drive, (this.revisions.get(drive) ?? 0) + 1)
+      await committed(drive)
+    } finally {
+      picked?.dispose()
+      if (this.pending.get(drive) === token) this.pending.delete(drive)
+    }
   }
   private async volumeLabel(disc: BoundDisc): Promise<string | undefined> {
     const mounted = await this.mountedVolume(disc, true)
@@ -211,7 +293,7 @@ export class CddaDiscs {
       await this.storage.checkpoint()
       try {
         const volume = await this.volumeLabel(disc)
-        if (volume !== undefined && volume.toUpperCase() === folded) return disc.drive
+        if (this.current(disc) && volume !== undefined && volume.toUpperCase() === folded) return disc.drive
       } catch (error) {
         if (error instanceof ExecutionCancelled) throw error
         // Unreadable/missing media do not hide a later matching drive. A
@@ -221,7 +303,7 @@ export class CddaDiscs {
     }
     return ''
   }
-  async prepare(name: string): Promise<CddaSelection | undefined> {
+  async prepare(name: string, selectedDrive?: (drive: string) => void): Promise<CddaSelection | undefined> {
     if (name.length > 4096 || name.includes('\0')) throw new Error('Invalid CDDA open name')
     const specified = name.length >= 2 && name[1] === ':'
     if (!specified && name !== '' && !/^\s*[+-]?\d/.test(name)) return undefined
@@ -235,13 +317,20 @@ export class CddaDiscs {
     const discs = await this.bindings(true)
     const disc = drive ? discs.find((disc) => disc.drive === drive) : discs[0]
     if (!disc) { if (specified) throw new InvalidCddaDrive(); throw new TvpError('TVPCDDADriveNotFound') }
+    if (!this.current(disc)) throw new Error('CD medium changed while selecting a track')
+    const revision = disc.revision ?? 0
+    const finish = (selection: CddaSelection): CddaSelection => {
+      if (!this.current(disc)) throw new Error('CD medium changed while opening a track')
+      return revision ? { ...selection, revision } : selection
+    }
+    selectedDrive?.(disc.drive)
     const match = /^\s*([+-]?\d+)/.exec(specified ? name.slice(2) : name), parsed = Number(match?.[1] ?? 0)
     if (!Number.isSafeInteger(parsed) || parsed < -0x80000000 || parsed > 0x7fffffff)
       throw new Error('CDDA track number exceeds the safe native integer range')
     const binding = await this.bindingFile(disc)
     const resource = binding.resource
     if (!resource) throw new TvpError('TVPCannotOpenStorage', [toPublicStoragePath(binding.name)])
-    if (/\.iso$/i.test(resource.name)) return { drive: disc.drive, cue: resource.name, track: parsed }
+    if (/\.iso$/i.test(resource.name)) return finish({ drive: disc.drive, cue: resource.name, track: parsed })
     const sheet = await this.readSheet(resource), parts = cueTrackParts(sheet, parsed), selected: SelectedPart[] = [],
       files = new Map<number, Resource>()
     if (parts) for (const part of parts) {
@@ -257,7 +346,7 @@ export class CddaDiscs {
         startFrame: part.startFrame, ...(part.endFrame === undefined ? {} : { endFrame: part.endFrame }) })
       await this.storage.checkpoint()
     }
-    return { drive: disc.drive, cue: resource.name, track: parsed, ...(parts ? { parts: selected } : {}) }
+    return finish({ drive: disc.drive, cue: resource.name, track: parsed, ...(parts ? { parts: selected } : {}) })
   }
 }
 

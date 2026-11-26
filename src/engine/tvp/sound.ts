@@ -99,7 +99,7 @@ class CDDASoundBuffer extends __SoundBase {
     // CDDAImpl::Open stops the old track, then optionally reopens the drive.
     // Neither that path nor Close cancels BaseSoundBuffer's current fade.
     try{
-      __soundRun("stop",[]);__clearSoundLabels();__soundRun("unloadCdda",[ticket]);__clearSoundLabels();
+      __soundRun("stopCdda",[ticket]);__clearSoundLabels();__soundRun("unloadCdda",[ticket]);__clearSoundLabels();
       __soundRun("openCdda",[ticket]);
     }catch(error){
       try{__soundRun("releaseCdda",[ticket]);}catch(cleanup){global.Debug.message("CDDA selection cleanup: "+cleanup.message);}

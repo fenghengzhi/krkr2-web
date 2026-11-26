@@ -33,7 +33,7 @@ import { DropStorage } from './storage/drop.ts'
 import { copyGameProject, type GameProject } from './storage/project.ts'
 import { zipNameEncoding, type ZipNameEncoding } from '../formats/zip/names.ts'
 import { CddaDiscs } from './storage/cdda.ts'
-import { copyCddaDiscs, type CddaDisc } from './ports/cdda.ts'
+import { copyCddaDiscs, type CddaDisc, type DiscChange } from './ports/cdda.ts'
 import {
   chopStorageExt,
   discAddress,
@@ -696,6 +696,7 @@ export class EngineSession {
         () => deps.imageJpeg?.dispose(),
         () => this.dropped.dispose(),
         () => this.storage.dispose(),
+        () => this.cddaDiscs.dispose(),
         () => imports?.dispose(),
         () => this.closeCursors(),
         () => this.closeWindowRegions(),
@@ -1228,6 +1229,16 @@ export class EngineSession {
     this.storage.mount(resources)
     this.images.clear()
     this.notify()
+  }
+  async changeDisc(change: DiscChange, load?: () => Promise<Resource[]>): Promise<void> {
+    if (this.state !== 'ready' && this.state !== 'running') throw new Error('请在游戏运行时换盘。')
+    this.control.check()
+    await this.cddaDiscs.change(change, load, (drive) => {
+      this.storage.discChanged(drive)
+      this.kag.compact()
+      this.images.clear()
+      return this.sounds?.discChanged(drive)
+    })
   }
   start(entry = 'startup.tjs'): Promise<void> {
     if (this.state !== 'ready') return Promise.reject(new Error('Session is not ready'))

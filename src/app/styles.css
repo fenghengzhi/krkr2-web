@@ -695,6 +695,27 @@ footer {
   outline: 2px solid #76dfc1;
   outline-offset: 3px;
 }
+#live-disc {
+  border-top: 1px solid #2a3544;
+  padding-top: 12px;
+  margin-top: 12px;
+}
+#live-disc summary {
+  cursor: pointer;
+}
+#live-disc-drive {
+  width: 4em;
+  text-transform: uppercase;
+}
+.live-disc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+#live-disc-status:empty {
+  display: none;
+}
 .library-foot {
   margin-top: 16px;
   font-size: 12px;

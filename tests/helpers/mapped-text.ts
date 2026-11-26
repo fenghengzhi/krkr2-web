@@ -29,18 +29,23 @@ export const mappedTextCases = [
   { id: 'mapped-remove-half', face: 0, opacity: -128, hold: true, rgba: [16,32,64,64, 16,32,64,55, 16,32,64,47, 16,32,64,39, 16,32,64,31, 16,32,64,39, 16,32,64,55, 16,32,64,64] },
   { id: 'mapped-shadow-level', face: 1, opacity: 255, hold: true, shadow: 0, rgba: [16,32,64,64, 38,44,64,64, 60,56,64,64, 82,68,64,64, 104,80,64,64, 82,68,64,64, 38,44,64,64, 16,32,64,64] },
   { id: 'mapped-shadow-blur', face: 1, opacity: 255, hold: true, shadow: 1, rgba: [24,36,64,64, 54,53,64,64, 90,72,64,64, 137,98,64,64, 148,104,64,64, 120,89,64,64, 62,57,64,64, 24,36,64,64] },
+  // KAG MessageLayer edgeEmphasis=512. Native blur level 512 produces the
+  // interior 65-level rows [0,32,64,64,64,64,32,0] and
+  // [9,30,60,64,64,64,39,9] (radius 1 has eight weights 1, center 2).
+  { id: 'mapped-shadow-emphasis', face: 1, opacity: 255, hold: true, shadow: 0, level: 512, rgba: [16,32,64,64, 104,80,64,64, 192,128,64,64, 192,128,64,64, 192,128,64,64, 192,128,64,64, 104,80,64,64, 16,32,64,64] },
+  { id: 'mapped-shadow-emphasis-blur', face: 1, opacity: 255, hold: true, shadow: 1, level: 512, rgba: [40,45,64,64, 98,77,64,64, 181,122,64,64, 192,128,64,64, 192,128,64,64, 192,128,64,64, 123,90,64,64, 40,45,64,64] },
   { id: 'mapped-transparent-tail', face: 0, opacity: 255, hold: false, rgba: [1,2,3,0, 1,2,3,0, 191,127,63,0, 1,2,3,0, 1,2,3,0, 1,2,3,0, 1,2,3,0, 1,2,3,0] },
 ] as const
 export const mappedTextExpected = (row: typeof mappedTextCases[number]) => [...row.rgba, ...row.rgba].join(',')
 
 export const mappedTextSource = String.raw`
-function mappedTextObserve(id,face,opacity,hold,shadow=void){
+function mappedTextObserve(id,face,opacity,hold,shadow=void,level=void){
  var w=void,a=void,result,failed=false,primary,cleanup=[];
  try{
   w=new Window();a=new Layer(w,null);a.setImageSize(8,2);a.font.height=12;
   a.font.mapPrerenderedFont("mapped-subtitle.tft");a.face=dfAlpha;a.holdAlpha=false;
   a.fillRect(0,0,8,2,id=="mapped-transparent-tail"?0x00010203:0x40102040);a.face=face;a.holdAlpha=hold;
-  if(shadow!==void)a.drawText(100,0,"I",0xffffff,opacity,true,shadow?255:128,0xc08040,shadow,-100,0);
+  if(shadow!==void)a.drawText(100,0,"I",0xffffff,opacity,true,level===void?(shadow?255:128):level,0xc08040,shadow,-100,0);
   else a.drawText(0,0,id=="mapped-transparent-tail"?"J":"I",0xc08040,opacity);
   var values=[];
   for(var y=0;y<2;y++)for(var x=0;x<8;x++){

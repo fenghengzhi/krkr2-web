@@ -1,5 +1,5 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
-import { normalizeResourcePath } from './public-path.ts'
+import { discAddress, normalizeResourcePath } from './public-path.ts'
 
 export interface OpenArchive {
   readonly name: string
@@ -30,6 +30,10 @@ export class StorageArchives {
   private active?: Job
   private disposed = false
   private epoch = 0
+  private readonly discRevisions = new Map<string, number>()
+  discRevision(path: string): number {
+    return this.discRevisions.size ? this.discRevisions.get(discAddress(path)?.drive ?? '') ?? 0 : 0
+  }
   private unrecognized = new WeakSet<object>()
   private recognizedPackages = new WeakSet<object>()
   private signatures = new WeakMap<object, boolean>()
@@ -56,7 +60,7 @@ export class StorageArchives {
   }
   async open(resource: Resource): Promise<OpenArchive | undefined> {
     if (this.disposed) throw new Error('Archive storage is disposed')
-    const key = resource.name, token = resource.cacheToken ?? resource, cached = this.cache.get(key)
+    const key = resource.name, revision = this.discRevision(key), token = resource.cacheToken ?? resource, cached = this.cache.get(key)
     if (this.unrecognized.has(token)) return undefined
     if (cached?.source === token) {
       this.cache.delete(key); this.cache.set(key, cached)
@@ -67,6 +71,7 @@ export class StorageArchives {
     if (existing && (existing.resource.cacheToken ?? existing.resource) === token)
       return this.wait(existing.promise).then((value) => typeof value === 'boolean' ? undefined : value)
     await this.check()
+    if (this.discRevision(key) !== revision) throw new Error('Disc changed while opening archive: ' + key)
     const raced = this.flights.get(key), completed = this.cache.get(key)
     if (raced && (raced.resource.cacheToken ?? raced.resource) === token)
       return this.wait(raced.promise).then((value) => typeof value === 'boolean' ? undefined : value)
@@ -166,6 +171,14 @@ export class StorageArchives {
     }
   }
   known(): readonly OpenArchive[] { return [...this.cache.values()].map((entry) => entry.value) }
+  forgetDrive(drive: string): void {
+    this.discRevisions.set(drive, (this.discRevisions.get(drive) ?? 0) + 1)
+    const prefix = 'file://./' + drive.toLowerCase() + '/'
+    for (const name of this.cache.keys()) if (name.startsWith(prefix)) this.cache.delete(name)
+    // Existing reads keep their immutable source. A replaced flight cannot
+    // publish its old directory into the new medium's cache.
+    for (const [key, job] of this.flights) if (job.resource.name.startsWith(prefix)) this.flights.delete(key)
+  }
   async candidate(resource: Resource): Promise<boolean> {
     if (this.disposed) throw new Error('Archive storage is disposed')
     if (resource.archiveKind || /\.(xp3|zip|exe)$/i.test(resource.name)) return true
