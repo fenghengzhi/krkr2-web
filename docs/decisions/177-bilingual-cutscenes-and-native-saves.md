@@ -29,3 +29,5 @@
 第 171 批新取得的 Chromium 游戏库报告中有 70 项通过、36 项失败。新增的四组注册表剧情全部通过，覆盖源码、字节码、XP3 内注册表和游戏库重开后的书签。36 个失败属于第 170 批已记录的 CD 音轨、光盘选择和存档剧情用例。Firefox 和 WebKit 离线验收分别通过 22、21 项。三个浏览器的原版 KAG 与发行版兼容验收均为 32/32。取回时第 171 批仍在运行，第 172 至 176 批尚无作业结果。[游戏库](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320/job/140066632622) · [Firefox 离线](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320/job/140066632589) · [WebKit 离线](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320/job/140066632565) · [第 171 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320)
 
 第 177 批实现提交 `74d2e5d` 登记时为 `pending`，下一批取回结果。[第 177 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45870448777)
+
+登记后收紧了首帧对照附件的两个条件，仅当原播放断言已经失败时才启用对照，异步取得文件后再次确认视频还未提交。这两处测试改动随下一批验证。

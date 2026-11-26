@@ -96,14 +96,15 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     // Only after the original assertion has failed, reserve foreground time
     // for its attachments, the two bounded controls and independent cleanup.
     // Product rVFC/seek waits and every original assertion keep their limits.
-    if (failures.length && backend === 'asyncify' && !binary) test.setTimeout(info.timeout + 60000)
+    const compareParents = failures.length > 0 && backend === 'asyncify' && !binary
+    if (compareParents) test.setTimeout(info.timeout + 60000)
     try { await info.attach('first-frame-recovery-pixels.json.gz', {
       contentType: 'application/gzip', body: gzipSync(JSON.stringify(pixels)) }) } catch (error) { failures.push(error) }
     try { await info.attach('first-frame-recovery-observations', { contentType: 'application/json',
       body: JSON.stringify({ observations, gate: await gate(), media: await observeVideoMedia(page),
         audio: await observeVideoAudioChannels(page), logs: await page.locator('#logs').innerText() }) }) }
     catch (error) { failures.push(error) }
-    if (failures.length && backend === 'asyncify' && !binary) try {
+    if (compareParents) try {
       await info.attach('independent-first-frame-parent-controls', { contentType: 'application/json',
         body: JSON.stringify(await compareFirstFrameParents(page)) })
     } catch (error) { failures.push(error) }

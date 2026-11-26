@@ -33,6 +33,7 @@ export async function compareFirstFrameParents(page: Page) {
       if (!response.ok) throw new Error('Actual staged Blob is no longer readable')
       blob = await bounded(response.blob(), 'Read actual staged Blob')
       if (!blob.size || blob.size > 8 * 1024 ** 2) throw new Error('Unexpected first-frame control source size')
+      if (candidate.hasAttribute('data-video-id')) throw new Error('Decoder was committed before retaining the control source')
       result.source = { uncommitted: true, bytes: blob.size, sha256: await hash(await blob.arrayBuffer()), type: blob.type,
         width, height, mediaWidth: candidate.videoWidth, mediaHeight: candidate.videoHeight,
         position: candidate.currentTime, paused: candidate.paused, readyState: candidate.readyState,
