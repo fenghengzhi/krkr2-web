@@ -75,6 +75,10 @@ class KAGParser {
               if(tagArgs[1])result=!!result;else if(result!==void)result=string(result);
             }else if(tagOperation=="params")result=__kagEncodeParams(references);
             else if(tagOperation=="param")result=__kagReadParam(references,tagArgs[0]);
+            else if(tagOperation=="set"){
+              var field=__kagResolveTag(tagArgs[1].value,references,tagArgs[1].references);
+              __kagTag[tagArgs[0]]=&field.value;
+            }
             else if(tagOperation=="getMacro"){
               result=__kagMacros[tagArgs[0]];if(result!==void)result=string(result);
             }else throw new Exception("Unknown KAG tag operation");

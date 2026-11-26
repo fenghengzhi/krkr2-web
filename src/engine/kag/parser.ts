@@ -137,6 +137,15 @@ export class KagParser {
     if (input === null) return null
     return this.decodeFields(input)
   }
+  private *writeTag(state: TagState, name: string, value: Data): Task {
+    // PropSet invokes an existing property's setter. Raw Dictionary.assign
+    // (used by * forwarding) must not turn this into property replacement.
+    // Plain attributes remain entirely in the parser until publication.
+    if (state.values[name] instanceof KagReference)
+      yield* this.tagEffect(state, 'set', name, tagReferences({ value }))
+    else state.values[name] = value
+    return
+  }
   private *popTo(depth: number): Task {
     if (depth < 0 || depth > this.macroDepth) throw new Error('KAG macro argument stack underflow')
     this.macroDepth = depth
@@ -395,7 +404,7 @@ export class KagParser {
           if (current !== null) {
             const params = current.values
             for (const key of Object.keys(values)) delete values[key]
-            Object.assign(values, params, { tagname: name })
+            Object.assign(values, params)
             const ordered = current.names.map(string).filter((name) => name !== 'tagname' && Object.hasOwn(params, name))
             const known = new Set(ordered)
             names.length = 0
@@ -404,6 +413,8 @@ export class KagParser {
             for (const field of Object.keys(params))
               if (field !== 'tagname' && !known.has(field)) names.push(field)
           }
+          // Native resets the tag name even when there is no active macro.
+          yield* this.writeTag(state, 'tagname', name)
         }
         continue
       }
@@ -435,7 +446,7 @@ export class KagParser {
           continue
         }
       }
-      values[attribute.name] = value
+      yield* this.writeTag(state, attribute.name, value)
       names.push(attribute.name)
     }
   }

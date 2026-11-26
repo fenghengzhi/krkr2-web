@@ -234,6 +234,7 @@ jobs:
       windows-media-fixtures: ${{ steps.windows-media-fixtures.outcome }}
       deflate64-fixtures: ${{ steps.deflate64-fixtures.outcome }}
       long-vorbis-fixture: ${{ steps.long-vorbis-fixture.outcome }}
+      cdda-aiff-fixtures: ${{ steps.cdda-aiff-fixtures.outcome }}
     steps:
       - name: Reject conflicting diagnostic selections
         if: ${{ inputs.node-only && inputs.runtime-only }}
@@ -356,6 +357,12 @@ jobs:
         run: |
           mkdir -p out/verification/long-vorbis
           node scripts/generate-long-vorbis-fixture.mjs 2>&1 | tee out/ci/long-vorbis-fixture.log
+      - name: Encode and independently decode AIFF disc tracks
+        id: cdda-aiff-fixtures
+        continue-on-error: true
+        run: |
+          mkdir -p out/verification/cdda-aiff
+          node scripts/generate-cdda-aiff.mjs 2>&1 | tee out/ci/cdda-aiff.log
       - name: Generate shared project-owned video track fixtures
         run: |
           node scripts/generate-video-track-fixtures.mjs 2>&1 | tee out/ci/video-track-fixtures.log
@@ -399,6 +406,7 @@ jobs:
             out/verification/pwa/fixture-artifacts.json out/verification/video-tracks \
             out/verification/deflate64-games \
             out/verification/long-vorbis \
+            out/verification/cdda-aiff \
             out/verification/jpeg-fixtures/inputs \
             out/verification/jpeg-fixtures/case-manifest.json out/verification/jpeg-fixtures/codes.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -451,6 +459,15 @@ jobs:
             out/verification/video-tracks/legacy-authored.*
           if-no-files-found: error
           retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.cdda-aiff-fixtures.outcome == 'success' || steps.cdda-aiff-fixtures.outcome == 'failure') }}
+        with:
+          name: cdda-aiff-fixture-evidence
+          path: |
+            out/verification/cdda-aiff/
+            out/ci/cdda-aiff.log
+          if-no-files-found: error
+          retention-days: 90
 
   deflate64-fixture-result:
     name: Independent Deflate64 fixture verification
@@ -471,6 +488,17 @@ jobs:
       - name: Require the full long music reference
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.long-vorbis-fixture }}
+        run: test "$FIXTURE_OUTCOME" = success
+
+  cdda-aiff-fixture-result:
+    name: Independent AIFF disc fixture verification
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require independently decoded AIFF disc tracks
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.cdda-aiff-fixtures }}
         run: test "$FIXTURE_OUTCOME" = success
 
   legacy-fixture-result:
@@ -924,7 +952,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, tools-types, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
+    needs: [build, tools-types, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

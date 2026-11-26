@@ -92,7 +92,7 @@ export async function openCddaPcmSource(source: ByteSource, track: CddaPcmTrack,
           return source.read(part.offset + offset, length)
         } }
         let decoder: PcmSource | undefined
-        if (part.encoding === 'encoded') decoder = await openEncoded(slice, options)
+        if (part.encoding === 'encoded') decoder = await openEncoded(slice, { ...options, cddaFile: true })
         else {
           const rawContext = new PcmSourceContext(slice, options)
           try { decoder = new RawCddaSource(rawContext, part.encoding === 's16le') }

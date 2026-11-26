@@ -1,6 +1,7 @@
 import type { ByteSource } from '../../engine/ports/storage.ts'
 import { audioTag, PcmSourceContext, type PcmSource, type PcmSourceOptions } from '../../formats/audio/pcm-source.ts'
 import { openWavePcmSource } from '../../formats/audio/wav-source.ts'
+import { openAiffPcmSource } from '../../formats/audio/aiff-source.ts'
 import { openVorbisPcmSource } from '../../formats/audio/vorbis-source.ts'
 
 export type { PcmSource, PcmSourceOptions, PcmCancellationSignal } from '../../formats/audio/pcm-source.ts'
@@ -14,8 +15,11 @@ export async function openPortablePcmSource(source: ByteSource, options: PcmSour
   })
   try {
     const prefix = await context.read(0, Math.min(12, source.size))
-    const result = audioTag(prefix, 0) === 'OggS' ? await openVorbisPcmSource(context)
-      : await openWavePcmSource(context, prefix, { samplerLoops: options.waveSamplerLoops, narrowS32: options.waveNarrowS32 })
+    const signature = audioTag(prefix, 0)
+    const result = options.cddaFile && signature === 'FORM' ? await openAiffPcmSource(context, prefix)
+      : signature === 'OggS' ? await openVorbisPcmSource(context)
+      : await openWavePcmSource(context, prefix, { samplerLoops: options.waveSamplerLoops, narrowS32: options.waveNarrowS32,
+        nativeRiff: options.waveNativeRiff })
     if (!result) context.close()
     else context.assertOpen()
     return result

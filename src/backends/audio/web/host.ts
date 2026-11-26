@@ -401,7 +401,7 @@ export class WebAudioHost {
       if (command.op !== 'open') return await this.send(node, command)
       let asset: AudioAsset | undefined =
         command.kind === 'midi' ? decodeMidi(command.bytes) : decodeWav(command.bytes,
-          { samplerLoops: command.kind !== 'wave', narrowS32: waveNarrowS32(command) })
+          { samplerLoops: command.kind !== 'wave', narrowS32: waveNarrowS32(command), nativeRiff: command.kind === 'wave' })
       if (!asset) {
         const rate = encodedSampleRate(command.bytes)
         if (rate === undefined && (command.loops.links.length || command.loops.labels.length))

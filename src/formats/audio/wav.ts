@@ -1,21 +1,30 @@
 import { readWaveFormat, waveInfo, copyWaveSamples, type WaveFormat } from './wav-format.ts'
 import type { PcmAsset } from '../../engine/ports/audio.ts'
 import { emptyLoops } from '../../engine/ports/audio.ts'
+import { nativeWaveLayout } from './wav-native.ts'
 const MAX_PCM_BYTES = 128 * 1024 * 1024
 
 /** RIFF/WAVE integer/float PCM, including WAVE_FORMAT_EXTENSIBLE containers.
  * Keep original sample rate and frame numbers; Web Audio's decoder resamples.
  * Generic callers keep sampler loops; stock WaveSoundBuffer opts out. */
-export function decodeWav(bytes: Uint8Array, options: { samplerLoops?: boolean; narrowS32?: boolean } = {}): PcmAsset | undefined {
+export function decodeWav(bytes: Uint8Array, options: { samplerLoops?: boolean; narrowS32?: boolean; nativeRiff?: boolean } = {}): PcmAsset | undefined {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const text = (at: number, count: number) => String.fromCharCode(...bytes.subarray(at, at + count))
   if (bytes.length < 12 || text(0, 4) !== 'RIFF' || text(8, 4) !== 'WAVE') return
-  const end = view.getUint32(4, true) + 8
+  const end = options.nativeRiff ? bytes.length : view.getUint32(4, true) + 8
   if (end > bytes.length) throw new Error('Truncated WAVE file')
   let format: WaveFormat | undefined,
     data: Uint8Array | undefined
   const loops = emptyLoops()
-  for (let at = 12; at + 8 <= end;) {
+  if (options.nativeRiff) {
+    const task = nativeWaveLayout(bytes.length)
+    let next = task.next()
+    while (!next.done) next = task.next(bytes.subarray(next.value.offset, next.value.offset + next.value.length))
+    if (!next.value) return
+    format = next.value.format
+    data = bytes.subarray(next.value.data.offset, next.value.data.offset + next.value.data.length)
+  }
+  for (let at = 12; !options.nativeRiff && at + 8 <= end;) {
     const tag = text(at, 4),
       length = view.getUint32(at + 4, true),
       start = at + 8,

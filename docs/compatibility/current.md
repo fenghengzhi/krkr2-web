@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 161 批增加可保存到游戏库的 CD 盘符映射与 AIFF 整数、浮点音轨播放，修订普通 WAVE 音频块选择和 KAG 宏字段的写入行为。新增实现等待托管验证。[161 兼容范围与证据](../decisions/161-disc-music-wave-and-kag-setters.md)
+
 第 160 批可从带说明文件的 ZIP 发行包启动，也可将桌面备份 ZIP 中指定目录的内容导入当前游戏的存档位置，并修订 KAG 宏参数与交互配乐的行为。新增行为等待托管验收。[160 兼容范围与证据](../decisions/160-save-folders-kag-parameters-and-wave-flags.md)
 
 第 159 批加入 ZIP 方法 9，支持从此类发行包读取游戏，以及导入用该方法压缩的原版存档。Ogg 配乐可借助页索引跳转，预渲染 TFT 字体采用 65 级覆盖度混合。新增行为等待托管验收。[159 范围与验证](../decisions/159-deflate64-games-vorbis-seek-and-text.md)

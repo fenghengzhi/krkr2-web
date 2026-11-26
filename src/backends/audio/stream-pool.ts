@@ -177,8 +177,8 @@ export class PcmStreamPool {
     this.preparing.set(record.id, record)
     try {
       await this.schedule(record, async () => {
-        const options = { checkpoint: () => this.assertCurrent(record), signal: record.abort.signal,
-          waveSamplerLoops: command.kind !== 'wave', waveNarrowS32: waveNarrowS32(command) },
+        const options = { checkpoint: () => this.assertCurrent(record), signal: record.abort.signal, cddaFile: command.kind === 'cdda',
+          waveSamplerLoops: command.kind !== 'wave', waveNarrowS32: waveNarrowS32(command), waveNativeRiff: command.kind === 'wave' },
           decoder = command.cdda ? await openCddaPcmSource(command.source, command.cdda, options, this.openSource)
             : command.kind === 'midi' ? undefined : await this.openSource(command.source, options)
         // Register even a late decoder so retirement closes its actual state.

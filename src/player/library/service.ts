@@ -301,7 +301,7 @@ export class LibraryService {
   }
   async update(
     id: string,
-    settings: Pick<LibraryGame, 'title' | 'entry' | 'backend'>,
+    settings: Pick<LibraryGame, 'title' | 'entry' | 'backend' | 'cddaDiscs'>,
   ): Promise<void> {
     libraryId(id)
     await this.locks.request(LIBRARY_WRITE_LOCK, async () => {

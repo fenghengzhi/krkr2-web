@@ -2,6 +2,7 @@ import type { LibraryDownload, LibraryGame } from '../../protocol/library.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import { copyGameEncodings, copyGameProject, type GameProject } from '../../engine/storage/project.ts'
 import { storageFilePath, toPublicStoragePath } from '../../engine/storage/public-path.ts'
+import { copyCddaDiscs } from '../../engine/ports/cdda.ts'
 
 export const LIBRARY_DIRECTORY = 'krkr2-library-v1'
 export const LIBRARY_DATABASE = 'krkr2-library'
@@ -42,9 +43,9 @@ export function libraryReadLock(id: string): string {
   return 'krkr2-library:v1:' + libraryId(id)
 }
 export function gameSettings(
-  value: Pick<LibraryGame, 'title' | 'entry' | 'backend'>,
+  value: Pick<LibraryGame, 'title' | 'entry' | 'backend' | 'cddaDiscs'>,
   project?: GameProject,
-): Pick<LibraryGame, 'title' | 'entry' | 'backend'> {
+): Pick<LibraryGame, 'title' | 'entry' | 'backend' | 'cddaDiscs'> {
   if (typeof value.title !== 'string' || !value.title.trim() || value.title.length > 200)
     throw new Error('Game name must contain 1–200 characters')
   if (typeof value.entry !== 'string' || value.entry.length > 1024)
@@ -58,7 +59,11 @@ export function gameSettings(
   }
   if (!['auto', 'asyncify', 'jspi'].includes(value.backend))
     throw new Error('Invalid game startup settings')
-  return { title: value.title.trim(), entry, backend: value.backend }
+  const cddaDiscs = copyCddaDiscs(value.cddaDiscs)
+  // An older settings client omits this field. Preserve an existing binding;
+  // an explicit undefined from the editor restores automatic discovery.
+  return { title: value.title.trim(), entry, backend: value.backend,
+    ...(Object.hasOwn(value, 'cddaDiscs') ? { cddaDiscs } : {}) }
 }
 export function validateRecord(value: unknown): LibraryRecord {
   if (!value || typeof value !== 'object') throw new Error('Invalid library record')
@@ -143,9 +148,11 @@ export function summary({
   sourceGameId,
   zipEncoding,
   scriptEncoding,
+  cddaDiscs,
 }: LibraryGame): LibraryGame {
   return { id, gameId, title, entry, backend, createdAt, size, fileCount,
     ...copyGameEncodings({ zipEncoding, scriptEncoding }),
+    ...(cddaDiscs === undefined ? {} : { cddaDiscs: copyCddaDiscs(cddaDiscs) }),
     ...(project === undefined ? {} : { project: copyGameProject(project), sourceGameId }) }
 }
 function projectMetadata(game: LibraryGame): void {

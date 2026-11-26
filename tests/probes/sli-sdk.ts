@@ -14,6 +14,7 @@ import { soundOpenExpected, soundOpenFiles, soundOpenSource } from '../helpers/s
 import { waveBooleanExpected, waveBooleanSource } from '../helpers/wave-booleans.ts'
 import { waveTailFiles, waveTailSdkExpected, waveTailSource } from '../helpers/wave-tail.ts'
 import { waveResetFiles, waveResetExpected, waveResetSource } from '../helpers/wave-flags-reset.ts'
+import { waveRiffFiles, waveRiffNames, waveRiffSdkExpected, waveRiffSource } from '../helpers/wave-riff-layout.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -36,11 +37,12 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   ...waveBooleanExpected,
   ...waveTailSdkExpected,
   ...waveResetExpected,
+  ...waveRiffSdkExpected,
   ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
   'xp3-decoder': [xp3SegmentScript, xp3SegmentText, 'stop', '48000', '0', '12000', '36320736', '1452000'].join('~'),
   'xp3-compressed': [xp3SegmentScript, xp3SegmentText, xp3CompressedAudioHeader, 'closed'].join('~') }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles(), ...waveResetFiles() }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles(), ...waveResetFiles(), ...waveRiffFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -55,6 +57,10 @@ if (process.argv[2] === 'prepare') {
     wavePositionSource,
     waveBooleanSource,
     waveResetSource,
+    waveRiffSource,
+    ...waveRiffNames.filter((name) => name !== 'riff-padded.wav').map((name) =>
+      `try{record("wave-${name}|"+riffSdk("${name}"));}catch(e){record("wave-${name}|unexpected-error:"+e.message);}`),
+    'try{record("wave-riff-play|"+riffSdk("riff-first.wav",true));}catch(e){record("wave-riff-play|unexpected-error:"+e.message);}',
     ...Object.keys(waveResetExpected).map((name) =>
       `try{record("${name}|"+resetSdk(${name === 'wave-flags-paused'}));}catch(e){record("${name}|unexpected-error:"+e.message);}`),
     ...Object.keys(waveBooleanExpected).map((name) =>

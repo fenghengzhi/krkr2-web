@@ -2,13 +2,21 @@ import { emptyLoops } from '../../engine/ports/audio.ts'
 import { audioTag, audioView, OwnedPcmSource, PcmSourceContext, pcmSourceLimits, type PcmSource } from './pcm-source.ts'
 
 import { readWaveFormat, waveInfo, copyWaveSamples, type WaveFormat } from './wav-format.ts'
+import { nativeWaveLayout } from './wav-native.ts'
 
 /** Range-based counterpart of decodeWav, retaining its existing PCM, float,
  * extensible subtype and optional smpl-loop interpretation. Unknown chunks/data bodies
  * are skipped while scanning metadata; no full data allocation is performed. */
 export async function openWavePcmSource(context: PcmSourceContext, initial: Uint8Array,
-  options: { samplerLoops?: boolean; narrowS32?: boolean } = {}): Promise<PcmSource | undefined> {
+  options: { samplerLoops?: boolean; narrowS32?: boolean; nativeRiff?: boolean } = {}): Promise<PcmSource | undefined> {
   if (initial.length < 12 || audioTag(initial, 0) !== 'RIFF' || audioTag(initial, 8) !== 'WAVE') return
+  if (options.nativeRiff) {
+    const task = nativeWaveLayout(context.source.size)
+    let next = task.next()
+    while (!next.done) next = task.next(await context.read(next.value.offset, next.value.length))
+    const layout = next.value
+    return layout && new WavePcmSource(context, layout.format, layout.data.offset, layout.data.length, emptyLoops(), options.narrowS32)
+  }
   const end = audioView(initial).getUint32(4, true) + 8
   if (end < 12 || end > context.source.size) throw new Error('Truncated WAVE file')
   let format: WaveFormat | undefined, data: { offset: number; length: number } | undefined, chunks = 0, loopRecords = 0

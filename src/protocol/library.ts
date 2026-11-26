@@ -1,5 +1,6 @@
 import type { BackendPreference, GameFile } from './session.ts'
 import type { GameEncodings, GameProject } from '../engine/storage/project.ts'
+import type { CddaDisc } from '../engine/ports/cdda.ts'
 
 export interface LibraryGame extends GameEncodings {
   id: string
@@ -13,6 +14,8 @@ export interface LibraryGame extends GameEncodings {
   /** Absent in legacy collection records. */
   project?: GameProject
   sourceGameId?: string
+  /** Absent retains automatic single-disc discovery. Order selects the default disc. */
+  cddaDiscs?: readonly CddaDisc[]
 }
 export interface LibraryStatus {
   available: boolean
@@ -38,6 +41,7 @@ export interface LibraryImport extends GameEncodings {
   backend: BackendPreference
   expectedGameId: string
   project?: GameProject
+  cddaDiscs?: readonly CddaDisc[]
 }
 export type LibraryImportRequest = LibraryImport | { download: string; operation: string }
 export interface LibraryProgress {
@@ -54,5 +58,5 @@ export interface LibraryApi {
   importGame(request: LibraryImportRequest): Promise<LibraryGame>
   cancel(operation: string): Promise<void>
   remove(id: string, unfinishedOnly?: boolean): Promise<void>
-  update(id: string, settings: Pick<LibraryGame, 'title' | 'entry' | 'backend'>): Promise<void>
+  update(id: string, settings: Pick<LibraryGame, 'title' | 'entry' | 'backend' | 'cddaDiscs'>): Promise<void>
 }

@@ -18,6 +18,8 @@ import { createGameClipboard } from './game-clipboard.ts'
 import { createGameHelp } from './game-help.ts'
 import type { FontDescriptor } from '../engine/ports/fonts.ts'
 import { createGameLibrary } from './game-library.ts'
+import { createCddaSettings, parseCddaSettings } from './cdda-settings.ts'
+import type { CddaDisc } from '../engine/ports/cdda.ts'
 import { createSaveTransfer } from './save-transfer.ts'
 import { createNativeSaveZipPicker } from './native-save-zip.ts'
 import { createOfflinePanel } from './offline.ts'
@@ -73,6 +75,8 @@ export function mountApp(root: HTMLDivElement): void {
   }
   const scriptOptions = scriptEncodings.map((name) => `<option value="${name}">${scriptLabels[name]}</option>`).join('')
   projectControls.insertAdjacentHTML('beforeend', `<label for="script-encoding">无 BOM 的脚本与剧情编码</label><select id="script-encoding">${scriptOptions}</select>`)
+  const discSettings = createCddaSettings('CD 音轨映射（可选）', 'cdda-discs')
+  projectControls.append(discSettings.element)
   el('native-save-hint').insertAdjacentHTML('afterend', `<div id="native-zip-options" hidden><label for="native-zip-encoding">存档 ZIP 文件名编码</label><select id="native-zip-encoding"><option value="">沿用当前游戏</option>${zipOptions}</select></div>`)
   const projectSelection = (): ProjectSelection => {
     const mode = el<HTMLSelectElement>('project-mode').value,
@@ -109,6 +113,7 @@ export function mountApp(root: HTMLDivElement): void {
   let savePickerOwner: Player | undefined
   let lastFiles: GameInput | undefined
   let snapshot: SessionSnapshot | undefined
+  let currentCddaDiscs: readonly CddaDisc[] | undefined
   let debugVisibility: DebugVisibility = { console: true, controller: true }
   const acceptSnapshot = (next: SessionSnapshot) => {
     if (!snapshot || next.revision >= snapshot.revision) snapshot = next
@@ -360,6 +365,7 @@ export function mountApp(root: HTMLDivElement): void {
   }
   const launch = async (files: GameInput, selection?: ProjectSelection) => {
     const selected = 'libraryId' in files ? undefined : selection ?? projectSelection()
+    const cddaDiscs = 'libraryId' in files ? undefined : parseCddaSettings(discSettings.input.value)
     await stop()
     const current = ++generation
     busy = true
@@ -481,6 +487,7 @@ export function mountApp(root: HTMLDivElement): void {
         {
           windows,
           pads,
+          cddaDiscs,
           jpegPrecision: requestedJpeg === null ? undefined
             : requestedJpeg === 'low' || requestedJpeg === 'high' ? requestedJpeg : 'normal',
           desktopElement: el('stage'),
@@ -541,6 +548,7 @@ export function mountApp(root: HTMLDivElement): void {
         },
       )
       launchPlayer = instance
+      currentCddaDiscs = cddaDiscs
       player = instance
       gameHelp = createGameHelp(el('stage').parentElement!)
       gameDialogs = createGameDialogs({
@@ -674,6 +682,7 @@ export function mountApp(root: HTMLDivElement): void {
             ...(snapshot?.project ? { project: snapshot.project } : {}),
             ...(snapshot?.zipEncoding ? { zipEncoding: snapshot.zipEncoding } : {}),
             ...(snapshot?.scriptEncoding ? { scriptEncoding: snapshot.scriptEncoding } : {}),
+            ...(currentCddaDiscs === undefined ? {} : { cddaDiscs: currentCddaDiscs }),
           }
         : undefined
     },

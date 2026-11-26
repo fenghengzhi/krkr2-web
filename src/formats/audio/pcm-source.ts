@@ -13,6 +13,8 @@ export interface PcmCancellationSignal {
   removeEventListener(type: 'abort', listener: () => void): void
 }
 export interface PcmSourceOptions {
+  /** Accept encoded CD media, including AIFF sound files named by a CUE. */
+  cddaFile?: boolean
   checkpoint?(): void | Promise<void>
   /** Cancels opening/read waiters. A returned reader still needs close() to
    * join and release actual decoder work; the borrowed source is never closed. */
@@ -25,6 +27,8 @@ export interface PcmSourceOptions {
   /** Safe direct Wave output path: retain original s32 high bits before
    * normalization. Filters/Smooth leave this off and consume full precision. */
   waveNarrowS32?: boolean
+  /** Stock Wave RIFF discovery; generic imported audio keeps standard RIFF bounds. */
+  waveNativeRiff?: boolean
 }
 export const pcmSourceLimits = Object.freeze({
   readFrames: 65536,

@@ -1,4 +1,5 @@
 import { LibraryClient } from '../player/library-client.ts'
+import { createCddaSettings, formatCddaSettings, parseCddaSettings } from './cdda-settings.ts'
 import type {
   LibraryGame,
   LibraryImport,
@@ -76,7 +77,7 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
       return
     }
     shownGames = signature
-    const drafts = new Map<string, { title: string; entry: string; backend: string }>()
+    const drafts = new Map<string, { title: string; entry: string; backend: string; discs: string }>()
     for (const row of games.querySelectorAll<HTMLElement>('[data-library-id]')) {
       if (!row.querySelector('details')?.open) continue
       const inputs = row.querySelectorAll('input')
@@ -84,6 +85,7 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
         title: inputs[0]!.value,
         entry: inputs[1]!.value,
         backend: row.querySelector('select')!.value,
+        discs: row.querySelector('textarea')!.value,
       })
     }
     games.replaceChildren()
@@ -154,13 +156,22 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
         backend.append(option)
       }
       backend.value = draft?.backend ?? game.backend
+      const discs = createCddaSettings('库中 CD 音轨映射')
+      discs.input.value = formatCddaSettings(game.cddaDiscs)
+      const savedDiscText = discs.input.value
+      if (draft) discs.input.value = draft.discs
       const submit = document.createElement('button')
       submit.textContent = '保存设置'
       submit.dataset.libraryAction = 'settings'
-      form.append(name, entry, backend, submit)
+      form.append(name, entry, backend, discs.element, submit)
       details.append(form)
       form.addEventListener('submit', (event) => {
         event.preventDefault()
+        let discChanges: Pick<LibraryGame, 'cddaDiscs'> = {}
+        try {
+          if (discs.input.value !== savedDiscText) discChanges = { cddaDiscs: parseCddaSettings(discs.input.value) }
+        }
+        catch (error) { options.report(error); return }
         changing = true
         update()
         void client
@@ -168,6 +179,7 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
             title: name.value,
             entry: entry.value,
             backend: backend.value as LibraryGame['backend'],
+            ...discChanges,
           })
           .then(async () => {
             updates?.postMessage('changed')

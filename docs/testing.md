@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 161 批增加四种 AIFF／AIFF-C 文件的 FFmpeg 独立回读、CUE 选轨的左右声道采样对照、双盘游戏库重开及剧情宏属性赋值的托管验收。[161 验收与取回结果](decisions/161-disc-music-wave-and-kag-setters.md)
+
 第 160 批把测试工具类型检查设为独立必过作业。实际 KAG 读档验收从带外层目录和其他游戏素材的 ZIP 选择旧槽位，在刷新重开后恢复进度。[160 验收与取回结果](decisions/160-save-folders-kag-parameters-and-wave-flags.md)
 
 第 159 批由托管 7-Zip 写入和独立解包 ZIP 方法 9 的游戏，浏览器从同一包启动、保存并重开读档。配乐跳转与字幕覆盖度分别通过音频样本和像素对照验收。[159 验收与取回结果](decisions/159-deflate64-games-vorbis-seek-and-text.md)

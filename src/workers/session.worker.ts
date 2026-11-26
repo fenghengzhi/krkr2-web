@@ -189,7 +189,11 @@ const api: SessionApi = {
       throw new Error('Invalid Window move capability')
     if (!prepared || request.gameId !== gameId)
       throw new Error('Prepare the game sources before initializing')
-    session = createSession(request, preparedProject, preparedProject?.distribution ? distributionReader : undefined, preparedEncodings)
+    // Saved bindings belong to this game, independently of the importing form
+    // or embedding host. Legacy records still accept the host's existing option.
+    const savedDiscs = libraryLease?.record.cddaDiscs
+    session = createSession(savedDiscs === undefined ? request : { ...request, cddaDiscs: savedDiscs },
+      preparedProject, preparedProject?.distribution ? distributionReader : undefined, preparedEncodings)
     generation = request.generation
     session.control.onCancel(() => sources.close())
     await session.initialize(preparedResources)
