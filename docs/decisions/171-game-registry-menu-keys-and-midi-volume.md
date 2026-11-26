@@ -19,3 +19,5 @@ MIDI 配乐可以用通用实时主音量消息改变所有通道的音量。Web
 ## 已取回的结果
 
 第 169 批最终有 26 个作业通过、5 个失败、15 个跳过。生产构建记录的是修正前的离线清单错误，缺少 FFmpeg 源码补丁的 MIME 类型。第 170 批的测试工具与纯引擎类型检查均已通过。取回时其应用构建正在准备 runner，尚无发布、UDF 制盘或游戏验收结果。第 171 批新增行为等待托管验证。[第 169 批运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45852398659) · [第 170 批类型检查](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668/job/140030537055) · [第 170 批应用构建](https://github.com/fenghengzhi/krkr2-web/actions/runs/45854886668/job/140031065325)
+
+第 171 批实现提交 `1e20b9f` 登记时为 `pending`，下一批取回运行结果。[第 171 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320)
