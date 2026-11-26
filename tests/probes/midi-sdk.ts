@@ -6,6 +6,7 @@ import { midiOpenCases, midiOpenSource } from '../helpers/midi-contract.ts'
 import { decodeMidi } from '../../src/formats/audio/midi.ts'
 import { TvpError } from '../../src/engine/system/tvp-error.ts'
 import { TjsError } from '../../src/engine/system/tjs-error.ts'
+import { midiVolumePublicExpected, midiVolumeSource } from '../helpers/midi-volume.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -37,6 +38,8 @@ if (process.argv[2] === 'prepare') {
     // The original returns before parsing when MIDI_MAPPER cannot be opened.
     // This bounded truncated F2 distinguishes that path from active output.
     'logRaw("output-path",function(){return MIDISoundBuffer.midiOut(<% f2 01 %>);});',
+    midiVolumeSource,
+    'var volumeRows=[];try{volumeRows.add(midiVolumePublicControls());}catch(e){volumeRows.add("unexpected-error:"+e.message);}volumeRows.save("native-volume.txt");',
     'record("done"); System.exit();',
   ].join('\n')
   const script = Buffer.from('\ufeff' + startup, 'utf16le')
@@ -73,6 +76,14 @@ if (process.argv[2] === 'prepare') {
   const rawComplete = sdk?.state === 'observed' && sdk.exitCode === 0 && argumentsMatch &&
     outputRows.length === rawCalls.length + 1 && device !== 'unreported'
   save('raw-output.json', { commit: process.env.GITHUB_SHA, complete: rawComplete, outputRows, device, sha256: sha(outputBytes) })
+  const volumePath = resolve(game, 'native-volume.txt'), volumeBytes = existsSync(volumePath) ? readFileSync(volumePath) : Buffer.alloc(0),
+    volumeRows = volumeBytes.toString(volumeBytes[0] === 255 && volumeBytes[1] === 254 ? 'utf16le' : 'utf8')
+      .replace(/^\ufeff/, '').trimEnd().split(/\r?\n/),
+    volumeComplete = sdk?.state === 'observed' && sdk.exitCode === 0 && volumeRows.length === 1 && volumeRows[0] === midiVolumePublicExpected
+  save('volume-controls.json', { commit: process.env.GITHUB_SHA, complete: volumeComplete, volumeRows,
+    expected: midiVolumePublicExpected, sha256: sha(volumeBytes), device,
+    scope: 'Original public volume/volume2 signed-int conversion and clamping only. No MIDI endpoint PCM, timbre or CC7 transport capture is claimed.' })
   assert(complete, 'MIDI open observations differ or are incomplete')
   assert(rawComplete, 'Original MIDI signature or output-path observations differ or are incomplete')
+  assert(volumeComplete, 'Original MIDI public volume controls differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

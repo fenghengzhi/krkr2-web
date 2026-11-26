@@ -38,6 +38,7 @@ for (const backend of ['asyncify', 'jspi'])
       layoutFields: kagIntroLayoutFields,
       fontMetricFields: kagIntroFontMetricFields,
       fontMetricScope: 'One separate never-shown Layer/Font is created after the original wait and layout are recorded, then destroyed. It measures normal/bold at 24/40 without changing the game message Font. Whole-string and per-code-unit widths are separate observations.',
+      queryScope: 'Read-only state and changed-wait diagnostics share one console transaction. Programmatic activation of the actual console button leaves the physical pointer in place; it is never counted as game input. All route links, reading clicks, menu slots and Confirm Yes remain actual pointer actions.',
       waitEvidence: 'lastTagName is the original Conductor field also consulted by MainWindow.showPageBreakAndClear; automatic pagination is recorded but never accepted as an explicit [p] reading checkpoint.',
     }
     page.on('pageerror', (error) => errors.push(error.message))
@@ -49,8 +50,18 @@ for (const backend of ['asyncify', 'jspi'])
       startupRead = false
       if (consoleReads.length < 256) consoleReads.push(observation)
       try {
-        await page.locator('#expression').fill(`${JSON.stringify(prefix)}+string(${expression})`)
-        await page.locator('#evaluate').click()
+        await expect(page.locator('#evaluate')).toBeEnabled()
+        // A query should not move the physical pointer out of the game or
+        // scroll the canvas. Keep the actual console handler and its RPC;
+        // only its UI-only button activation is programmatic.
+        await page.evaluate((source) => {
+          const input = document.querySelector<HTMLInputElement>('#expression')!,
+            button = document.querySelector<HTMLButtonElement>('#evaluate')!
+          if (button.disabled) throw new Error('Introduction observation console is not ready')
+          input.focus({ preventScroll: true })
+          input.value = source
+          button.click()
+        }, `${JSON.stringify(prefix)}+string(Scripts.eval(${JSON.stringify(expression)}))`)
         const output = page.locator('#logs p span').filter({ hasText: new RegExp('^' + prefix) }).last()
         // The first read can queue behind the original startup's background
         // decode. It uses the existing startup budget; every subsequent read
@@ -62,7 +73,20 @@ for (const backend of ['asyncify', 'jspi'])
       } finally { observation.elapsedMs = Date.now() - began }
     }
     const state = async (): Promise<State | undefined> => {
-      const value = await read(stateExpression)
+      const separator = '\u001e'
+      // Preserve every changed wait, including automatic pagination. Compute
+      // its layout only when needed, in the same VM call as the state, then
+      // take the separate hidden Font sample after those strings are saved.
+      // Each diagnostic catches its own error so it cannot hide game state.
+      const parts = (await read(`(function(){
+        var observedState=(${stateExpression});
+        if(observedState=="pending" || observedState==${JSON.stringify(previousState)} ||
+          ${waitObservations >= 96 ? 'true' : 'false'} || !(kag.clickWaiting || kag.conductor.status==0))return observedState;
+        var layout="",metrics="";
+        try{layout="ok:"+(${kagIntroLayoutExpression});}catch(e){layout="error:"+e.message;}
+        ${fontMetricsObserved ? '' : `try{metrics="ok:"+(${kagIntroFontMetricExpression});}catch(e){metrics="error:"+e.message;}`}
+        return observedState+${JSON.stringify(separator)}+layout+${JSON.stringify(separator)}+metrics;
+      })()`)).split(separator), value = parts[0]!
       if (value === 'pending') return undefined
       const [label, waiting, line, pageWait, curLine, curPos, conductor, links, background, storage, lastTag] = value.split('|')
       expect(value.split('|')).toHaveLength(11)
@@ -78,16 +102,23 @@ for (const backend of ['asyncify', 'jspi'])
           waitKind: result.page ? result.lastTag === 'p' ? 'explicit-p' : 'automatic-page'
             : result.line ? result.lastTag === 'l' ? 'explicit-l' : 'other-line' : 'choice' }
         observations.push(observation)
+        const diagnostic = (index: number, name: string) => {
+          const field = parts[index]
+          if (!field?.startsWith('ok:'))
+            throw new Error(field?.startsWith('error:') ? field.slice(6) : `Missing ${name} observation`)
+          return field.slice(3)
+        }
         // A diagnostic read must not replace the route's primary assertion.
         try {
-          const layout = (await read(kagIntroLayoutExpression)).split('|')
+          expect(parts).toHaveLength(3)
+          const layout = diagnostic(1, 'layout').split('|')
           expect(layout).toHaveLength(kagIntroLayoutFields.length)
           observation.layout = Object.fromEntries(kagIntroLayoutFields.map((key, index) => [key, layout[index]]))
         } catch (error) { observation.layoutError = String(error) }
         if (!fontMetricsObserved) {
           fontMetricsObserved = true
           try {
-            const raw = await read(kagIntroFontMetricExpression), rows = raw.split(';').map((row) => row.split(','))
+            const raw = diagnostic(2, 'font metrics'), rows = raw.split(';').map((row) => row.split(','))
             observation.fontMetricsRaw = raw
             expect(rows).toHaveLength(4)
             for (const row of rows) {

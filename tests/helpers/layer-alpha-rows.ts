@@ -15,6 +15,9 @@ export const layerAlphaRows = [
   { id: 'alpha-row-pile', expected: mixed },
   { id: 'alpha-row-operate', expected: partial },
   { id: 'alpha-row-unit-stretch', expected: mixed },
+  // A half-opacity alpha subtree is blended into an opaque screenshot with
+  // the native /256 kernel, then its exact RGB and mask survive BMP storage.
+  { id: 'alpha-row-scene-bitmap', expected: '126/255,8257536/255|126/255,8257536/255|73' },
 ] as const
 
 export const layerAlphaSource = String.raw`
@@ -23,7 +26,25 @@ var rowWin=new Window(),rowRoot=new Layer(rowWin,null);
 rowWin.add(rowRoot);rowRoot.setSize(16,1);rowRoot.setImageSize(16,1);
 var rowDest=new Layer(rowWin,rowRoot);rowWin.add(rowDest);rowDest.setImageSize(16,1);
 function firstRowPixel(){return ((rowDest.getMainPixel(0,0)>>16)&255)+"/"+rowDest.getMaskPixel(0,0);}
+function layerAlphaSceneBitmap(){
+ var win=new Window(),root=new Layer(win,null),fore=new Layer(win,root),child=new Layer(win,fore);
+ var saved=new Layer(win,root),result,failure;
+ win.add(root);win.add(fore);win.add(child);win.add(saved);
+ try{
+  root.setSize(8,4);root.fillRect(0,0,8,4,0xff000000);
+  fore.setSize(8,4);fore.visible=true;fore.opacity=128;fore.fillRect(0,0,8,4,0xffff0000);
+  child.setSize(4,4);child.visible=true;child.fillRect(0,0,4,4,0xff0000ff);
+  saved.setImageSize(8,4);saved.piledCopy(0,0,root,0,0,8,4);
+  result=saved.getMainPixel(2,2)+"/"+saved.getMaskPixel(2,2)+","+saved.getMainPixel(6,2)+"/"+saved.getMaskPixel(6,2);
+  saved.saveLayerImage("savedata/alpha-scene.bmp","bmp24");saved.loadImages("savedata/alpha-scene.bmp");
+  result+="|"+saved.getMainPixel(2,2)+"/"+saved.getMaskPixel(2,2)+","+saved.getMainPixel(6,2)+"/"+saved.getMaskPixel(6,2);
+  saved.setMaskPixel(0,0,73);saved.saveLayerImage("savedata/alpha-scene-mask.bmp");saved.loadImages("savedata/alpha-scene-mask.bmp");
+  result+="|"+saved.getMaskPixel(0,0);
+ }catch(e){failure=e;}
+ invalidate win;if(failure!==void)throw failure;return result;
+}
 function layerAlphaRun(id){
+ if(id=="alpha-row-scene-bitmap")return layerAlphaSceneBitmap();
  var binder=id=="alpha-row-binder",single=binder || id=="alpha-row-opaque";
  var cached=id=="alpha-row-cached-crop";
  var faded=cached || id=="alpha-row-opacity" || id=="alpha-row-opacity-offset" || id=="alpha-row-operate";

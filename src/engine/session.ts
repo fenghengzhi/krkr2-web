@@ -4680,7 +4680,7 @@ export class EngineSession {
         if (level >= 10) listeners.push(
           ['Layer composition', () => this.composer.clear()],
           ['Storage auto paths', () => this.storage.invalidateSearch()],
-          ['XP3 segments', () => this.deps.archives?.compact?.()],
+          ['Archive data', () => this.deps.archives?.compact?.()],
           ['KAG scenarios', () => this.kag.compact()],
         )
         if (level >= 15) listeners.push(

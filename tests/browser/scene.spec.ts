@@ -21,8 +21,8 @@ async function sample(page: Page, x: number, y: number) {
 for (const backend of ['asyncify', 'jspi'])
   test(`${backend}: subtree opacity, transition pixels and saved bitmap masks agree in the browser`, async ({
     page,
-  }) => {
-    const errors: string[] = []
+  }, info) => {
+    const errors: string[] = [], failures: unknown[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     await page.goto(`/?backend=${backend}`)
     test.skip(
@@ -36,39 +36,54 @@ root.setSize(8,4);root.fillRect(0,0,8,4,0xff000000);
 fore.setSize(8,4);fore.visible=true;fore.opacity=128;fore.fillRect(0,0,8,4,0xffff0000);
 child.setSize(4,4);child.visible=true;child.fillRect(0,0,4,4,0xff0000ff);
 back.setSize(8,4);back.fillRect(0,0,8,4,0xff0000ff);
-saved.setImageSize(8,4);saved.piledCopy(0,0,root,0,0,8,4);saved.saveLayerImage("savedata/screen.bmp","bmp24");
-saved.loadImages("savedata/screen.bmp");
+function sceneSavedPixels(){return saved.getMainPixel(2,2)+"/"+saved.getMaskPixel(2,2)+","+saved.getMainPixel(6,2)+"/"+saved.getMaskPixel(6,2);}
+saved.setImageSize(8,4);saved.piledCopy(0,0,root,0,0,8,4);var sceneBefore=sceneSavedPixels();
+saved.saveLayerImage("savedata/screen.bmp","bmp24");saved.loadImages("savedata/screen.bmp");var sceneAfter=sceneSavedPixels();
 var tick=0,completed=0;fore.onTransitionCompleted=function(dest,src){completed++;};Debug.message("scene-ready");
 `
-    await page
-      .locator('#files')
-      .setInputFiles({ name: 'startup.tjs', mimeType: 'text/plain', buffer: Buffer.from(source) })
-    await expect(page.locator('#logs')).toContainText('scene-ready')
-    await expect(page.locator('#evaluate')).toBeEnabled()
-    await expect(page.locator('canvas')).toHaveJSProperty('width', 8)
-    await expect(page.locator('canvas')).toHaveJSProperty('height', 4)
-    expect(await sample(page, 0.25, 0.5)).toEqual([0, 0, 128, 255])
-    expect(await sample(page, 0.75, 0.5)).toEqual([128, 0, 0, 255])
-    await evaluate(
-      page,
-      'saved.getMainPixel(2,2)==0x000080 && saved.getMainPixel(6,2)==0x800000',
-      '1',
-    )
-    await evaluate(
-      page,
-      '(function(){saved.setMaskPixel(0,0,73);saved.saveLayerImage("savedata/mask.bmp");saved.loadImages("savedata/mask.bmp");return saved.getMaskPixel(0,0);})()',
-      '73',
-    )
-    await evaluate(
-      page,
-      '(function(){fore.opacity=255;child.visible=false;fore.beginTransition("crossfade",true,back,%[time:1000,selfupdate:true,callback:function(){return tick;}]);return 0;})()',
-      '0',
-    )
-    await evaluate(page, '(function(){tick=500;fore.update();return 0;})()', '0')
-    expect(await sample(page, 0.25, 0.5)).toEqual([87, 0, 167, 255])
-    await evaluate(page, '(function(){tick=1000;fore.update();return 0;})()', '0')
-    await evaluate(page, 'completed==1 && root.children[0]===back && !fore.visible', '1')
-    expect(await sample(page, 0.25, 0.5)).toEqual([0, 0, 255, 255])
-    await page.locator('#stop').click()
-    expect(errors).toEqual([])
+    await info.attach('scene-source', { body: source, contentType: 'text/plain' })
+    try {
+      await page
+        .locator('#files')
+        .setInputFiles({ name: 'startup.tjs', mimeType: 'text/plain', buffer: Buffer.from(source) })
+      await expect(page.locator('#logs')).toContainText('scene-ready')
+      await expect(page.locator('#evaluate')).toBeEnabled()
+      await expect(page.locator('canvas')).toHaveJSProperty('width', 8)
+      await expect(page.locator('canvas')).toHaveJSProperty('height', 4)
+      expect(await sample(page, 0.25, 0.5)).toEqual([0, 0, 128, 255])
+      expect(await sample(page, 0.75, 0.5)).toEqual([128, 0, 0, 255])
+      await evaluate(
+        page,
+        // Raw Complete uses TVPAlphaBlend_o: (255 * 128) >> 8 = 127,
+        // then (255 * 127) >> 8 = 126. GPU presentation above has its own
+        // normalized opacity. The SDK alpha-row-scene-bitmap checks storage.
+        'sceneBefore+"|"+sceneAfter',
+        '126/255,8257536/255|126/255,8257536/255',
+      )
+      await evaluate(
+        page,
+        '(function(){saved.setMaskPixel(0,0,73);saved.saveLayerImage("savedata/mask.bmp");saved.loadImages("savedata/mask.bmp");return saved.getMaskPixel(0,0);})()',
+        '73',
+      )
+      await evaluate(
+        page,
+        '(function(){fore.opacity=255;child.visible=false;fore.beginTransition("crossfade",true,back,%[time:1000,selfupdate:true,callback:function(){return tick;}]);return 0;})()',
+        '0',
+      )
+      await evaluate(page, '(function(){tick=500;fore.update();return 0;})()', '0')
+      expect(await sample(page, 0.25, 0.5)).toEqual([87, 0, 167, 255])
+      await evaluate(page, '(function(){tick=1000;fore.update();return 0;})()', '0')
+      await evaluate(page, 'completed==1 && root.children[0]===back && !fore.visible', '1')
+      expect(await sample(page, 0.25, 0.5)).toEqual([0, 0, 255, 255])
+      await page.locator('#stop').click()
+      expect(errors).toEqual([])
+    } catch (error) { failures.push(error) }
+    try {
+      await info.attach('scene-observations', {
+        body: JSON.stringify({ errors, logs: await page.locator('#logs').innerText().catch(() => 'Logs unavailable') }, null, 2),
+        contentType: 'application/json',
+      })
+    } catch (error) { failures.push(error) }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'Scene comparison and evidence capture failed', { cause: failures[0] })
   })

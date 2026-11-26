@@ -27,7 +27,7 @@ async function runWorker<T = unknown>(page: Page, testInfo: TestInfo, body: stri
   })
   await page.goto('/')
   const origin = new URL(page.url()).origin
-  return await runFontWorker<T>(page, testInfo, {
+  const result = await runFontWorker<T | { error: string; stack?: string; observations?: unknown }>(page, testInfo, {
     name: 'font-backend', modulePrefix: '/__font-test/', data,
     source: `
 import {BrowserGraphics} from '${origin}/__font-test/src/backends/text/browser/graphics.ts';
@@ -36,8 +36,14 @@ import {ExecutionControl} from '${origin}/__font-test/src/engine/scheduler/contr
 const font={height:20,face:'',angle:0,bold:false,italic:false,underline:false,strikeout:false};
 const load=()=>loadFontKernel('${origin}/fonts/manifest.json',new ExecutionControl());
 const check=(condition,message)=>{if(!condition)throw new Error(message)};
-self.onmessage=async({data})=>{try{${body}}catch(e){postMessage({error:String(e),stack:e.stack})}};`,
+self.onmessage=async({data})=>{const observations={phase:'start'};try{${body}}catch(e){postMessage({error:String(e),stack:e.stack,observations})}};`,
   })
+  // A caught script assertion is a successful Worker message, not a successful
+  // scenario. Preserve its partial observations before reporting its real error.
+  await testInfo.attach('font-backend-result', { body: JSON.stringify(result, null, 2), contentType: 'application/json' })
+  if (result !== null && typeof result === 'object' && 'error' in result && typeof result.error === 'string')
+    throw new Error(result.error, { cause: result })
+  return result as T
 }
 
 test('missing proportional Mincho uses an available named serif while requested faces keep priority', async ({ page }, info) => {
@@ -50,7 +56,9 @@ test('missing proportional Mincho uses an available named serif while requested 
   }>(page, info, `
 const backend=new BrowserGraphics(), owned=[], localFaces=[], candidates=[];
 const ref=new OffscreenCanvas(1,1).getContext('2d');
+observations.localFaces=localFaces;observations.measurements=[];
 try {
+ observations.phase='resolve-local-faces';
  // local() actually resolves a font; FontFaceSet.check alone can return true
  // when a missing family merely falls back. Keep all availability outcomes.
  for(const name of ['MS PMincho','Times New Roman','Liberation Serif','Times']){
@@ -59,7 +67,8 @@ try {
   catch(error){localFaces.push({name,available:false,error:String(error)});}
  }
  check(candidates.length>0,'No requested or named serif font resolved: '+JSON.stringify(localFaces));
- const chosen=candidates[0], measurements=[];
+ const chosen=candidates[0], measurements=observations.measurements;
+ observations.selected=chosen;observations.phase='measure-named-serif';
  for(const height of [24,40])for(const bold of [false,true])for(const text of ['AVATAR WAVE','ii WW 0123456789','Cafe Omega']){
   ref.font=height+'px '+JSON.stringify(chosen.alias);
   let expected=0;
@@ -74,16 +83,23 @@ try {
  // Rasterization must use the same selected family as measurement. The
  // independent local face alias refers to the actual host font, not a bitmap
  // made by the application or a game-specific width table.
- const actual=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:'MS PMincho',height:24}),
-  expected=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:chosen.alias,height:24});
+ observations.phase='raster-named-serif';
+ const actual=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:'MS PMincho',height:24});
+ observations.raster={actual:{...actual,data:[...actual.data]}};
+ observations.phase='raster-local-reference';
+ const expected=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:chosen.alias,height:24});
+ observations.raster.expected={...expected,data:[...expected.data]};
+ observations.phase='compare-named-serif-raster';
  check(JSON.stringify([actual.width,actual.height,actual.left,actual.top])===JSON.stringify([expected.width,expected.height,expected.left,expected.top]),'Named serif raster bounds');
  check(actual.data.length===expected.data.length&&actual.data.every((v,i)=>v===expected.data[i]),'Named serif raster bytes');
  // Authored font fixtures have 500/900-unit A advances, at 1000 units/em.
  // Loading an actual requested face must take precedence over every fallback.
+ observations.phase='requested-face-priority';
  for(const [name,bytes] of [['MS PMincho',data.narrow],['Game Face',data.wide]]){
   const face=new FontFace(name,new Uint8Array(bytes));await face.load();self.fonts.add(face);owned.push(face);
  }
  const requestedWidths=['MS PMincho','MS PMincho,Game Face','Game Face,MS PMincho'].map(face=>backend.measure('A',{...font,face}).width);
+ observations.requestedWidths=requestedWidths;
  check(JSON.stringify(requestedWidths)==='[10,10,18]','Requested face priority '+JSON.stringify(requestedWidths));
  postMessage({localFaces,selected:chosen.name,measurements,rasterCompared:true,requestedWidths});
 } finally {for(const face of owned)self.fonts.delete(face);backend.dispose();}

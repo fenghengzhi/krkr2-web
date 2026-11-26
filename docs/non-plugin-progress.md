@@ -2,6 +2,10 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 134 批接入 ZIP 发行包自动识别、压缩大音乐的范围读取和游戏库恢复，校准 MIDI 音量与淡出，并修订游戏路线的只读观察、KAG 图层保存调用和截图像素验收。新增 11 个 Node 用例、每浏览器 8 个常规用例及 4 个游戏库用例，尚无本批托管结果。[134 实现与验收](decisions/134-zip-distributions-midi-and-game-playback.md)
+
+本次取回的 131 主构建成功，Node 为 4,014 通过、11 失败、2 超时取消。原始介绍游戏六个浏览器与后端组合中五个通过。Firefox Asyncify 在完成菜单存读档和刷新恢复后，第四页返回菜单超时。132、133 首版和最终版在同次固定查询时均仍 `pending`。后续继续取回缺失结果并修复实际游戏失败，不能把修订候选或未启动作业计为通过。[131 运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45755797755)
+
 第 133 批修复原 KAG 关闭宏定义存档后的读档、透明图层写入截图时的颜色和遮罩，以及 Wave 的播放定位。带 8 位缩略图的书签新增实际写入、逐像素读取与刷新恢复验收。131 的主构建已通过，Node 有 11 个失败、2 个超时取消。132 取回时仍在等待运行。133 最终实现提交 `88601e3` 的验证登记为 `pending`。[133 实现与验收](decisions/133-game-bookmarks-captured-alpha-and-sound-seeks.md) · [133 托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759226490)
 
 第 132 批修正 KAG 存档缩略图的缩放、剧情中含方括号的名字，以及背景音乐和音效的音量与声像。131 的原版已经匹配全部 49 个 KAG 场景和 5 个新增换轨场景。取回时该提交的主构建仍在排队，浏览器验收尚无结果。132 实现提交 `653ca3b` 的验证首次登记为 `pending`。[132 实现与验收](decisions/132-game-thumbnails-embedded-text-and-wave-volume.md) · [132 托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45757288264)

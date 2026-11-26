@@ -5,18 +5,25 @@ import { parseStoragePath, storageDirectoryPath, storageFilePath, toPublicStorag
 /** Host startup configuration; these are not TJS Storages properties. */
 export type ProjectSelection = { mode: 'collection' } |
   { mode: 'auto'; executableDirectory?: string; executable?: string } |
-  { mode: 'root'; directory: string; executableDirectory?: string }
+  { mode: 'root'; directory: string; executableDirectory?: string; distribution?: string }
 /** Frozen logical addresses, relative to the imported namespace. */
-export interface GameProject { directory: string; executableDirectory: string }
+export interface GameProject { directory: string; executableDirectory: string; distribution?: string }
 
 function directory(value: unknown): string {
   if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid project directory')
   return storageDirectoryPath(value === '' ? './' : /[\\/>]$/.test(value) ? value : value + '/')
 }
+function distributionPath(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid distribution ZIP path')
+  const name = storageFilePath(value)
+  if (name.includes('>')) throw new Error('Expected an imported distribution ZIP')
+  return name
+}
 export function copyGameProject(value?: GameProject): GameProject | undefined {
   if (value === undefined) return undefined
   if (!value || typeof value !== 'object') throw new Error('Invalid game project')
-  const result = { directory: directory(value.directory), executableDirectory: directory(value.executableDirectory) }
+  const result = { directory: directory(value.directory), executableDirectory: directory(value.executableDirectory),
+    ...(value.distribution === undefined ? {} : { distribution: distributionPath(value.distribution) }) }
   if (result.executableDirectory.includes('>')) throw new Error('Executable directory cannot be inside an archive')
   return Object.freeze(result)
 }
@@ -27,7 +34,8 @@ export function copyProjectSelection(value?: ProjectSelection): ProjectSelection
   if (value.mode !== 'auto' && value.mode !== 'root') throw new Error('Unknown project selection')
   const executableDirectory = directory(value.executableDirectory ?? '')
   if (executableDirectory.includes('>')) throw new Error('Executable directory cannot be inside an archive')
-  if (value.mode === 'root') return { mode: 'root', directory: directory(value.directory), executableDirectory }
+  if (value.mode === 'root') return { mode: 'root', directory: directory(value.directory), executableDirectory,
+    ...(value.distribution === undefined ? {} : { distribution: distributionPath(value.distribution) }) }
   let executable: string | undefined
   if (value.executable !== undefined) {
     if (typeof value.executable !== 'string' || value.executable.length > 4096) throw new Error('Invalid executable selection')

@@ -10,6 +10,7 @@ import { BrowserGraphics } from '../backends/text/browser/graphics.ts'
 import { readScript, readText, writeText } from '../backends/files/text-codecs.ts'
 import { inflateImage, deflateImage } from '../backends/files/blob-source.ts'
 import { createSessionArchiveReader } from '../backends/files/archive-reader.ts'
+import type { ArchiveReader } from '../engine/ports/storage.ts'
 import { IndexedDbSaveStore } from '../backends/files/indexeddb-saves.ts'
 import { WebAppLocks } from '../backends/files/web-app-locks.ts'
 import { fillWebRandomBytes } from '../backends/system/web-crypto.ts'
@@ -32,7 +33,7 @@ import { copyGameProject, type GameProject } from '../engine/storage/project.ts'
 import { copyCddaDiscs } from '../engine/ports/cdda.ts'
 import { copyJpegPrecision } from './jpeg-precision.ts'
 
-export function createSession(request: InitializeRequest, project?: GameProject): EngineSession {
+export function createSession(request: InitializeRequest, project?: GameProject, distribution?: ArchiveReader): EngineSession {
   // Reject invalid configuration before any port backend or surface owns the
   // transferred channels. Player validates template syntax before preparation;
   // only here is the frozen executable directory available for path bounds.
@@ -47,7 +48,7 @@ export function createSession(request: InitializeRequest, project?: GameProject)
   if (dataPath !== undefined) arguments_.set('-datapath', dataPath)
   if (jpegPrecision !== undefined) arguments_.set('-jpegdec', jpegPrecision)
   let sequence = 0
-  const archives = createSessionArchiveReader()
+  const archives = createSessionArchiveReader(distribution)
   const session: EngineSession = new EngineSession({
     archives,
     project: storageProject,

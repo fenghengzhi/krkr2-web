@@ -1,5 +1,9 @@
 # 当前实现范围
 
+第 134 批可在自动识别模式下把单个 ZIP 当作游戏发行目录，保留包内 XP3、补丁、散装音乐与存档位置。压缩成员支持经过完整首读 CRC 校验的范围读取。游戏库保存原 ZIP 和所选目录，刷新后沿用同一游戏身份。MIDI 音量与淡出改用原版的整数级数，独立原始 MIDI 输出不受某个音乐对象的音量影响。仅支持已有的 ZIP 存储／deflate 与未加密 XP3 范围，不表示任意多层归档、加密包或原版 MIDI 音色已兼容。新增行为尚待托管验证。[134 兼容范围](../decisions/134-zip-distributions-midi-and-game-playback.md)
+
+最新取回的 131 版介绍游戏路线为 **5/6 通过**。Firefox Asyncify 已完成存读档和刷新恢复，但等待第四页返回主菜单时超时。Chromium、WebKit 的两个后端及 Firefox JSPI 通过。132 和 133 两版仍在等待运行，134 尚无结果。原有通过、失败、跳过及未报告记录均按各自提交保留。
+
 第 133 批让使用 `saveMacros=false` 的游戏读回书签时保留当前宏定义。截取画面和软件绘图设备现在按原版的整行运算合成透明层，BMP 编码期间可以暂停或停止。Wave 毫秒定位和超出声音长度的位置赋值也纳入原版对照。[133 兼容范围](../decisions/133-game-bookmarks-captured-alpha-and-sound-seeks.md)
 
 第 132 批按原版滤镜生成 KAG 存档缩略图，修正 `[emb]` 显示方括号和表达式切换剧情后的续读位置。Wave 音量与左右声像接入原版的分贝换算。两种已测头版本的有损 ERI 现在均按原版拒绝 Gamma 编码。缩略图 BMP、实际剧情点击和浏览器混音输出等待同一提交的托管验收。[132 兼容范围](../decisions/132-game-thumbnails-embedded-text-and-wave-volume.md)

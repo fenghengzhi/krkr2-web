@@ -666,12 +666,14 @@ export class SoundService {
       // WaveImpl takes a tjs_int, after the public setter's TJS integer
       // conversion. Preserve its low 32 bits before the gain/pan clamp or frequency
       // sentinel dispatch (in particular 2^32 becomes original-frequency zero).
+      // MIDIImpl's two volume controls use the same signed tjs_int narrowing.
       const wavePosition = sound.kind === 'wave' && (property === 'position' || property === 'samplePosition') &&
         sound.snapshot.sampleRate > 0 && sound.snapshot.sampleCount > 0
       // Keep the original int64 until native uint64 arithmetic/range rejection
       // is complete; numeric() deliberately rejects unsafe Number conversion.
       let setting = wavePosition && typeof input[1] === 'bigint' ? 0
-        : sound.kind === 'wave' && ['pan', 'frequency', 'volume', 'volume2'].includes(property) && typeof input[1] === 'bigint'
+        : ((sound.kind === 'wave' && ['pan', 'frequency', 'volume', 'volume2'].includes(property)) ||
+          (sound.kind === 'midi' && (property === 'volume' || property === 'volume2'))) && typeof input[1] === 'bigint'
           ? Number(BigInt.asIntN(32, input[1])) : numeric(1)
       if (property === 'volume' || property === 'volume2')
         setting = Math.max(0, Math.min(100000, setting))

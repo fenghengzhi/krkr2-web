@@ -6,7 +6,9 @@ export async function projectIdentity(base: string, project?: GameProject): Prom
   if (!/^game-[a-f0-9]{64}$/.test(base)) throw new Error('Invalid source game identity')
   const clean = copyGameProject(project)
   if (!clean) return base
-  const data = new TextEncoder().encode(JSON.stringify(['krkr2-project-v1', base, clean.directory, clean.executableDirectory])),
+  const key = ['krkr2-project-v1', base, clean.directory, clean.executableDirectory]
+  if (clean.distribution !== undefined) key.push(clean.distribution)
+  const data = new TextEncoder().encode(JSON.stringify(key)),
     hash = new Uint8Array(await crypto.subtle.digest('SHA-256', data))
   return 'game-' + [...hash].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }

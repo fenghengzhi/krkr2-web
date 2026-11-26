@@ -2,6 +2,10 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 134 批新增 **11 个 Node 用例、每个浏览器项目 8 个常规用例和 4 个游戏库用例**。ZIP 验收包含首读 CRC、取消、嵌套 XP3、72 MiB 音乐的独立 PCM／频谱和定位，以及原 KAG 从游戏库恢复书签。MIDI 验收比较独立字面 CC7 控制的完整 PCM，并实际点击游戏按钮检查静音级数、淡出、重开和释放。原版 SDK 的 MIDI 新观察只覆盖公有 `volume/volume2` 属性转换与范围，不声称取得原设备 PCM、音色或 CC7 传输记录。图层组另增加一项真实 BMP 保存往返。[134 验收记录](decisions/134-zip-distributions-midi-and-game-playback.md)
+
+134 本身尚无结果。本次固定回收中，131 主构建成功，Node 为 4,014 通过、11 失败、2 超时取消。已取得的常规浏览器报告为 2,382 通过、28 失败、2 跳过，仍缺两个未报告分片和一个下载不可用的已发布分片。介绍游戏六个浏览器与后端组合中五个通过，Firefox Asyncify 在第四页返回菜单时超时。三浏览器兼容清单共 96 项通过。132 与 133 首版、最终版均仍 `pending`，无作业或产物。原始失败与缺失范围分别保留，下批再取回，不实时轮询。
+
 第 133 批原版 KAG 解析器对照扩至 61 项，Windows 图层组增加 11 项截图及矩形混合的颜色和遮罩观察。浏览器另以模板默认的 133 × 99、8 位缩略图验证书签读写，实际点击测试覆盖关闭宏存档后的继续剧情。原版书签和有损 ERI 的 Chromium 比较将保留 Playwright JSON 报告，便于检查逐用例结果及附件。[133 验收记录](decisions/133-game-bookmarks-captured-alpha-and-sound-seeks.md)
 
 第 132 批新增 9 个 Node 用例，每个浏览器项目新增 12 个用例。三条浏览器路线分别核对 KAG 存档缩略图的每个像素及刷新读档、实际点击推进带方括号的剧情、AudioWorklet 左右声道的采样。原版 SDK 共用 11 个新增图层缩放场景及 8 个新增 KAG 场景。声音对照现有 40 个场景，分别记录脚本和解码器观察及需要音频设备的结果。[132 验收记录](decisions/132-game-thumbnails-embedded-text-and-wave-volume.md)

@@ -1,5 +1,6 @@
 import { BinaryReader } from '../binary/reader.ts'
-import { crc32 } from '../binary/crc32.ts'
+import { checkedCrc32 } from '../binary/crc32.ts'
+import type { DeflateRange, DeflateRangePool } from '../binary/deflate-ranges.ts'
 import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import type { ByteSource, Inflater, Resource } from '../../engine/ports/storage.ts'
@@ -12,6 +13,7 @@ export interface ZipCodecs {
   utf8(bytes: Uint8Array): string
   /** Checks cancellation and cooperatively yields to the host while doing index/CRC work. */
   checkpoint(): Promise<void>
+  compressedRanges?: DeflateRangePool
   legacyName?(bytes: Uint8Array): string
 }
 export interface ZipResource extends Resource {
@@ -42,18 +44,6 @@ function fields(bytes: Uint8Array): Map<number, Uint8Array> {
   }
   return result
 }
-async function checksum(bytes: Uint8Array, codecs: ZipCodecs, previous = 0): Promise<number> {
-  const work = crc32(bytes, previous)
-  try {
-    while (true) {
-      const next = work.next()
-      if (next.done) return next.value
-      await codecs.checkpoint()
-    }
-  } finally {
-    work.return(0)
-  }
-}
 function requiredZip64(extra: Map<number, Uint8Array>): BinaryReader {
   const data = extra.get(1)
   if (!data) throw new Error('Missing ZIP64 extra field')
@@ -83,7 +73,7 @@ async function filename(
     if (unicode && unicode.length >= 5 && unicode[0] === 1) {
       const data = new BinaryReader(unicode)
       data.u8()
-      if (data.u32() === (await checksum(raw, codecs)))
+      if (data.u32() === (await checkedCrc32(raw, () => codecs.checkpoint())))
         name = codecs.utf8(data.slice(data.remaining))
     }
     name ??= (codecs.legacyName ?? cp437)(raw)
@@ -95,6 +85,7 @@ async function filename(
 
 /** Index central records without decompressing entries. Member payloads are read and checked on demand. */
 export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<ZipResource[]> {
+  const check = () => codecs.checkpoint()
   if (!Number.isSafeInteger(source.size) || source.size < 22)
     throw new Error('Truncated ZIP archive')
   const read = async (offset: number, length: number) => {
@@ -338,39 +329,48 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs): Promise<Zi
         // claim that first playback can begin without reading the whole item.
         for (let offset = 0; offset < entry.size; offset += 1024 * 1024) {
           const bytes = await read(start + offset, Math.min(1024 * 1024, entry.size - offset))
-          crc = await checksum(bytes, codecs, crc)
+          crc = await checkedCrc32(bytes, check, crc)
         }
         if (crc !== entry.checksum) throw new Error(`ZIP CRC32 mismatch: ${entry.name}`)
         await codecs.checkpoint()
         return start
       })
-      const ranged: ByteSource | undefined = entry.method === 0 && !entry.symlink &&
-          !(entry.flags & ~0x80e) && !(entry.flags & 0x2041) && entry.size === entry.stored
-        ? {
-            size: entry.size,
-            async read(offset, length) {
-              resourceReadBounds(entry.size, offset, length)
-              await codecs.checkpoint()
-              const start = await verifyStored()
-              return read(start + offset, length)
-            },
+      const readable = !entry.symlink && !(entry.flags & ~0x80e) && !(entry.flags & 0x2041)
+      const pool = readable && entry.method === 8 ? codecs.compressedRanges : undefined
+      let position: Promise<number> | undefined, compressed: DeflateRange | undefined
+      const range: ByteSource | undefined = readable && ((entry.method === 0 && entry.size === entry.stored) || pool) ? {
+        size: entry.size,
+        async read(offset, length) {
+          resourceReadBounds(entry.size, offset, length)
+          await codecs.checkpoint()
+          if (!pool) return read((await verifyStored()) + offset, length)
+          // Resolve the local header once. The stable object also identifies
+          // this member across all reads in the session-wide decompressor.
+          compressed ??= {
+            offset: () => position ??= locate().catch((error: unknown) => { position = undefined; throw error }),
+            size: entry.size, stored: entry.stored, zip: { name: entry.name, crc32: entry.checksum },
           }
-        : undefined
+          const output = new Uint8Array(length)
+          await pool.read(source, compressed, offset, output, check)
+          return output
+        },
+      } : undefined
       return {
         name: entry.name,
         size: entry.size,
         zip: { method: entry.method, encrypted: !!(entry.flags & 0x2041), crc32: entry.checksum },
-        ...(ranged ? { source: ranged } : {}),
+        ...(range ? { source: range } : {}),
         async read() {
           const { name, size, stored, method } = entry
           supported()
           if (size > MAX_RESOURCE_BYTES || stored > MAX_RESOURCE_BYTES)
             throw new Error(`ZIP member exceeds 64 MiB decode budget: ${name}`)
+          if (pool && range) return range.read(0, size)
           const start = await locate(), encoded = await read(start, stored),
             output = method === 8 ? await codecs.inflate(encoded, size) : encoded
           await codecs.checkpoint()
           if (output.length !== size) throw new Error(`ZIP decompressed size mismatch: ${name}`)
-          if ((await checksum(output, codecs)) !== entry.checksum)
+          if ((await checkedCrc32(output, check)) !== entry.checksum)
             throw new Error(`ZIP CRC32 mismatch: ${name}`)
           await codecs.checkpoint()
           return method === 0 ? Uint8Array.from(output) : output

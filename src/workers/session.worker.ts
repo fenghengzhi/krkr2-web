@@ -4,8 +4,9 @@ import { importSources } from '../backends/files/import-resources.ts'
 import { resolveFiles, type SourceFile } from '../backends/files/source-files.ts'
 import { HttpRangePool } from '../backends/files/http-range.ts'
 import { gameIdentity, projectIdentity } from '../player/game-identity.ts'
-import { copyProjectSelection, selectProjectLazy, type GameProject } from '../engine/storage/project.ts'
-import { archiveReader } from '../backends/files/archive-reader.ts'
+import { copyProjectSelection, type GameProject } from '../engine/storage/project.ts'
+import { prepareProject } from '../engine/storage/distribution.ts'
+import { createSessionArchiveReader } from '../backends/files/archive-reader.ts'
 import { prepareDroppedResources } from '../backends/files/drop-resources.ts'
 import type { Resource } from '../engine/ports/storage.ts'
 import { PROTOCOL_VERSION, type InputAdmissionAck, type SessionApi } from '../protocol/session.ts'
@@ -15,6 +16,10 @@ import { LibraryService, type LibraryLease } from '../player/library/service.ts'
 let generation = 0
 let session: EngineSession | undefined
 const sources = new HttpRangePool()
+// The outer ZIP feeds the game's own archive decoder. Separate their cursors
+// so an inner read can request more outer bytes while its decoder is active.
+const distributionReader = createSessionArchiveReader()
+sources.signal.addEventListener('abort', () => distributionReader.dispose(), { once: true })
 let prepared: SourceFile[] | undefined
 let preparedResources: Resource[] | undefined
 let preparedProject: GameProject | undefined
@@ -129,7 +134,9 @@ const api: SessionApi = {
         identity = libraryLease.record.gameId
         if (libraryLease.record.project) {
           resources = await importSources(filesReady, checkpoint, { lazyArchives: true })
-          project = await selectProjectLazy(resources, { mode: 'root', ...libraryLease.record.project }, archiveReader, checkpoint)
+          const mount = await prepareProject(resources, { mode: 'root', ...libraryLease.record.project }, distributionReader, checkpoint)
+          resources = mount.resources
+          project = mount.project
           if (await projectIdentity(libraryLease.record.sourceGameId!, project) !== identity)
             throw new Error('Library project identity mismatch; import the game again')
         }
@@ -139,7 +146,9 @@ const api: SessionApi = {
         const requested = copyProjectSelection(selection)
         if (requested.mode !== 'collection') {
           resources = await importSources(filesReady, checkpoint, { lazyArchives: true })
-          project = await selectProjectLazy(resources, requested, archiveReader, checkpoint)
+          const mount = await prepareProject(resources, requested, distributionReader, checkpoint)
+          resources = mount.resources
+          project = mount.project
           identity = await projectIdentity(identity, project)
         }
       }
@@ -171,7 +180,7 @@ const api: SessionApi = {
       throw new Error('Invalid Window move capability')
     if (!prepared || request.gameId !== gameId)
       throw new Error('Prepare the game sources before initializing')
-    session = createSession(request, preparedProject)
+    session = createSession(request, preparedProject, preparedProject?.distribution ? distributionReader : undefined)
     generation = request.generation
     session.control.onCancel(() => sources.close())
     await session.initialize()

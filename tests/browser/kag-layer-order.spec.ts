@@ -18,7 +18,8 @@ function orderKagSetup(){
  orderGroup.setPos(24,24,32,24);orderGroup.absolute=2100000;orderGroup.visible=true;
  orderHistory=orderKagLayer("history",0xff204080);orderHistory.absolute=2000000;
  orderButton=orderKagLayer("button",0xffc83c14);
- orderButton.store().saveStruct(System.dataPath+"menu-layer.tjs");
+ var saved=orderButton.store();
+ (Dictionary.saveStruct incontextof saved)(System.dataPath+"menu-layer.tjs");
  return orderKagState();
 }
 function orderKagState(){

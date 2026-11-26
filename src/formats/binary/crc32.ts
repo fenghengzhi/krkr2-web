@@ -11,3 +11,14 @@ export function* crc32(bytes: Uint8Array, previous = 0): Generator<void, number>
   }
   return (crc ^ 0xffffffff) >>> 0
 }
+
+export async function checkedCrc32(bytes: Uint8Array, checkpoint: () => void | Promise<void>, previous = 0): Promise<number> {
+  const work = crc32(bytes, previous)
+  try {
+    for (;;) {
+      const next = work.next()
+      if (next.done) return next.value
+      await checkpoint()
+    }
+  } finally { work.return(0) }
+}

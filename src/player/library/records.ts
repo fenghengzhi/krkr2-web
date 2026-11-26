@@ -139,6 +139,6 @@ function projectMetadata(game: LibraryGame): void {
   }
   if (!/^game-[a-f0-9]{64}$/.test(game.sourceGameId ?? '') ||
       project.directory !== game.project!.directory ||
-      project.executableDirectory !== game.project!.executableDirectory)
+      project.executableDirectory !== game.project!.executableDirectory || project.distribution !== game.project!.distribution)
     throw new Error('Invalid library project metadata')
 }

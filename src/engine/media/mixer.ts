@@ -16,6 +16,7 @@ import {
   type MidiOutputMessage,
 } from '../ports/audio.ts'
 import { MidiSynth } from './midi-synth.ts'
+import { midiBufferVolume } from './midi-volume.ts'
 import { midiOutputSteps } from './midi-output.ts'
 import {
   AudioFilterChain,
@@ -703,6 +704,7 @@ export class AudioMixer {
       const settings = voice.settings,
         asset = voice.asset
       let gains = voice.kind === 'wave' ? this.waveGains(voice) : undefined
+      if (voice.synth) voice.synth.setBufferVolume(midiBufferVolume(settings.volume, settings.volume2))
       let chain: AudioFilterChain | undefined, waiting = false
       const label = (name: string, position: number) => {
         settings.position = position
@@ -722,6 +724,8 @@ export class AudioMixer {
             settings.volume = clamp(settings.volume + voice.fade.delta, 0, 100000)
           }
           if (gains && settings.volume !== previousVolume) gains = this.waveGains(voice)
+          if (voice.synth && settings.volume !== previousVolume)
+            voice.synth.setBufferVolume(midiBufferVolume(settings.volume, settings.volume2))
         }
         if (!asset || settings.paused || voice.status !== 'play' || waiting) continue
         try {
@@ -767,7 +771,7 @@ export class AudioMixer {
               if (asset.channels >= 8) r += sample(7) * 0.5
             }
           }
-          const gain = ((settings.volume / 100000) * settings.volume2) / 100000,
+          const gain = asset.kind === 'midi' ? 1 : ((settings.volume / 100000) * settings.volume2) / 100000,
             pan = settings.pan / 100000
           left[frame] += l * (gains?.left ?? gain * (pan > 0 ? 1 - pan : 1))
           right[frame] += r * (gains?.right ?? gain * (pan < 0 ? 1 + pan : 1))
@@ -826,7 +830,7 @@ export class AudioMixer {
     // Raw note-on belongs to the shared output, not one new note per loaded
     // MIDI file. Global note-off/controllers/resets still affect those voices.
     if ((event.status & 0xf0) !== 0x90 || (event.data[1] ?? 0) === 0)
-      for (const voice of this.voices.values()) voice.synth?.message(event)
+      for (const voice of this.voices.values()) voice.synth?.rawMessage(event)
   }
 }
 

@@ -50,7 +50,7 @@ export function mountApp(root: HTMLDivElement): void {
     </main>`
   const el = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!
   const projectControls = document.createElement('div')
-  projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">按游戏目录自动识别</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">文件集合沿用已有导入方式；文件夹会按游戏目录自动识别。</p>`
+  projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">自动识别游戏目录或 ZIP 发行包</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">可选择自动识别来启动含 data.xp3 的 ZIP 发行包。</p>`
   root.querySelector('label[for="entry"]')!.before(projectControls)
   const projectSelection = (): ProjectSelection => {
     const mode = el<HTMLSelectElement>('project-mode').value,

@@ -1,6 +1,8 @@
 import type { MidiAsset, MidiEvent } from '../ports/audio.ts'
 interface Channel {
   volume: number
+  level: number
+  used: boolean
   expression: number
   pan: number
   program: number
@@ -20,8 +22,10 @@ interface Note {
   phase: number
   family: number
 }
-const channel = (): Channel => ({
-  volume: 100 / 127,
+const channel = (bufferVolume = 127): Channel => ({
+  volume: 100,
+  level: Math.trunc(100 * bufferVolume / 127) / 127,
+  used: false,
   expression: 1,
   pan: 0,
   program: 0,
@@ -47,20 +51,29 @@ function resetsModule(payload: number[]): boolean {
 /** Browser-resident procedural instrument bank. MIDI sequencing and controller
  * behavior are separate from timbre; a sample-bank backend can replace this. */
 export class MidiSynth {
-  private channels = Array.from({ length: 16 }, channel)
+  private channels = Array.from({ length: 16 }, () => channel())
   private notes: Note[] = []
   private cursor = 0
   private time = 0
   private noise = 0x12345678
   private exclusive?: number[]
+  private bufferVolume = 127
   left = 0
   right = 0
   constructor(private readonly asset?: MidiAsset) {}
   get activeNotes(): number {
     return this.notes.length
   }
+  setBufferVolume(value: number): void {
+    if (!Number.isInteger(value) || value < 0 || value > 127)
+      throw new Error('Invalid MIDI buffer volume')
+    if (this.bufferVolume === value) return
+    this.bufferVolume = value
+    for (const c of this.channels)
+      if (c.used) c.level = Math.trunc(c.volume * value / 127) / 127
+  }
   reset(): void {
-    this.channels = Array.from({ length: 16 }, channel)
+    this.channels = Array.from({ length: 16 }, () => channel(this.bufferVolume))
     this.notes = []
     this.exclusive = undefined
     this.cursor = 0
@@ -82,6 +95,14 @@ export class MidiSynth {
       note.phase = ((time - note.born) * 440 * 2 ** ((note.key - 69) / 12)) % 1
   }
   message(event: Pick<MidiEvent, 'status' | 'data'>): void {
+    this.applyMessage(event, true)
+  }
+  /** Raw output goes straight to the module; it must neither scale its CC7
+   * again nor overwrite the owning SMF track's remembered channel volume. */
+  rawMessage(event: Pick<MidiEvent, 'status' | 'data'>): void {
+    this.applyMessage(event, false)
+  }
+  private applyMessage(event: Pick<MidiEvent, 'status' | 'data'>, fromFile: boolean): void {
     const { status, data } = event,
       id = status & 15,
       kind = status & 0xf0,
@@ -94,7 +115,12 @@ export class MidiSynth {
         if (value === 0xf0) this.exclusive = []
         else if (value === 0xf7) {
           if (this.exclusive && resetsModule(this.exclusive)) {
-            this.channels = Array.from({ length: 16 }, channel)
+            this.channels = this.channels.map((previous) => {
+              const next = channel(fromFile ? this.bufferVolume : 127)
+              if (!fromFile) next.volume = previous.volume
+              next.used = fromFile || previous.used
+              return next
+            })
             this.notes = []
           }
           this.exclusive = undefined
@@ -107,6 +133,13 @@ export class MidiSynth {
       return
     }
     if (status < 0xf8) this.exclusive = undefined
+    if (kind === 0x90 && fromFile) {
+      // MIDIImpl sends this before the first note-on, including velocity zero.
+      // A raw controller sent before a track's delayed first note cannot
+      // replace the owner's initial remembered CC7 at this boundary.
+      if (!c.used) c.level = Math.trunc(c.volume * this.bufferVolume / 127) / 127
+      c.used = true
+    }
     if (kind === 0x90 && b) {
       if (this.notes.length >= 128) this.notes.shift()
       this.notes.push({
@@ -127,8 +160,10 @@ export class MidiSynth {
     } else if (kind === 0xc0) c.program = a
     else if (kind === 0xe0) c.bend = (a + (b << 7) - 8192) / 8192
     else if (kind === 0xb0) {
-      if (a === 7) c.volume = b / 127
-      else if (a === 11) c.expression = b / 127
+      if (a === 7) {
+        if (fromFile) { c.volume = b; c.used = true }
+        c.level = (fromFile ? Math.trunc(b * this.bufferVolume / 127) : b) / 127
+      } else if (a === 11) c.expression = b / 127
       else if (a === 10) c.pan = (b - 64) / 64
       else if (a === 1) c.modulation = b / 127
       else if (a === 64) {
@@ -149,7 +184,9 @@ export class MidiSynth {
           }
       } else if (a === 121) {
         const program = c.program
-        this.channels[id] = channel()
+        this.channels[id] = channel(fromFile ? this.bufferVolume : 127)
+        if (!fromFile) this.channels[id]!.volume = c.volume
+        this.channels[id]!.used = fromFile || c.used
         this.channels[id]!.program = program
         for (const note of this.notes)
           if (note.channel === id && !note.held) note.released = this.time
@@ -225,7 +262,10 @@ export class MidiSynth {
           wave = Math.sin(phase + Math.sin(phase * 2) * 2 * Math.exp(-age))
         else wave = base + 0.1 * Math.sin(phase * 3)
       }
-      const value = wave * envelope * note.velocity * c.volume * c.expression * 0.15
+      // Original SMF playback rewrites CC7 as integer channelVolume *
+      // BufferVolume / 127, including first notes and controller/module resets.
+      // The independent raw midiOut synth keeps BufferVolume=127.
+      const value = wave * envelope * note.velocity * c.level * c.expression * 0.15
       this.left += value * (c.pan > 0 ? 1 - c.pan : 1)
       this.right += value * (c.pan < 0 ? 1 + c.pan : 1)
     }

@@ -19,6 +19,7 @@ const save = (name: string, data: unknown) => writeFileSync(resolve(output, name
 
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
+  mkdirSync(resolve(game, 'savedata'), { recursive: true })
   for (const [name, bytes] of Object.entries(files)) writeFileSync(resolve(game, name), bytes)
   const startup = Buffer.from('\ufeff' + [
     'System.exitOnNoWindowStartup=false;System.exitOnWindowClose=false;',
