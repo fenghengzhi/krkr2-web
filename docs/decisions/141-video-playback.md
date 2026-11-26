@@ -21,3 +21,5 @@ WebKit 验收保留默认解码读回，同时用与实际图层相同的读取�
 第 133 批最终版的 Chromium、Firefox 和 WebKit 兼容清单各通过 32 项。Node 来自同一提交的 4,059 项已全部报告，其中 4,055 项通过，4 项图层断言失败。常规浏览器的九个分片在此次取回时仍在运行。这些结果对应第 133 批提交。第 134 至 140 批当时仍在等待执行。[第 133 批最终版](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759226490) · [第 140 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45771395938)
 
 本次清点的 43 份归档中有 42 份按大小和 SHA-256 核验。缺少的 Chromium PWA 归档仍待取回。已取得的三浏览器游戏库共 57 项通过，Firefox 和 WebKit 的 PWA 共 39 项通过。原版书签跨引擎对照为 124/124。[第 133 批最终版作业及产物](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759226490)
+
+第 141 批实现提交为 `0d64d8214f24ba61affb5bba7d0cd5c025caaf91`，新增三个 Node 用例和每个浏览器一个连续打开隐藏影片的用例，并扩充了分段回环、切轨和原版属性对照。GitHub 首次登记的状态为 `pending`，下一批取回结果。[第 141 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45773107877)
