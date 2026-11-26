@@ -21,3 +21,5 @@
 ## 已取回的托管结果
 
 第 133 批最终版新增四份常规浏览器分片报告，共 1,066 项通过、28 项失败、1 项跳过。Firefox 的两条原版介绍游戏路线和四项缩略图保存恢复均通过。此前缺少的 Chromium PWA 原件已取回，三个浏览器的游戏库及 PWA 用例合计 116/116 通过。本次清单列出的 47 份 ZIP 均已核对官方 SHA-256。第 134 至 141 批在此次取回时仍在队列中。[第 133 批最终版](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759226490) · [第 141 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45773107877)
+
+第 142 批实现提交为 `fd5f66b12a0f9e0b31a589eeafded7142a18f085`，GitHub 首次登记时为 `pending`。本批运行结果留到下一批取回。[第 142 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45775883723)
