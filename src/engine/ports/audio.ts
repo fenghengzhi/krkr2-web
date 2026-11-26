@@ -133,7 +133,8 @@ export type MixerCommand =
   | { op: 'stopFade'; id: number; finish: boolean }
   | { op: 'pauseAll'; paused: boolean }
   | { op: 'globalVolume'; volume: number }
-  | { op: 'waveMuted'; muted: boolean }
+  /** Environmental Wave attenuation only; absent volume preserves legacy silence. */
+  | { op: 'waveMuted'; muted: boolean; volume?: number }
   | { op: 'midiOut'; data: Uint8Array }
   | { op: 'midiMessage'; message: MidiOutputMessage }
   | { op: 'shutdown' }
@@ -148,7 +149,8 @@ export type AudioCommand =
       settings: SoundSettings
       filters?: readonly PhaseVocoderFilter[]
     }
-  | { op: 'focusMode'; mode: number }
+  /** Effective focus policy; optional native background level is 0..100000. */
+  | { op: 'focusMode'; mode: number; muteVolume?: number }
   | {
       /** Local Worker/backend call only; never sent across MessagePort. */
       op: 'openSource'

@@ -14,7 +14,7 @@ import type { DroppedTree } from '../engine/ports/storage-drop.ts'
 import type { WindowFileDropIdentity } from '../engine/ports/window-file-drop.ts'
 import type { ImageJpegPrecision } from '../engine/ports/image-jpeg.ts'
 import type { CddaDisc } from '../engine/ports/cdda.ts'
-export const PROTOCOL_VERSION = 56
+export const PROTOCOL_VERSION = 57
 export interface WindowFileDropRequest extends WindowFileDropIdentity {
   readonly generation: number
   readonly tree: DroppedTree<Blob>

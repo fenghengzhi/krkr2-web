@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 154 批补上远程游戏保存到库时的断点续传，并修复动态剧情选项、后台音乐音量与原版的差异。新增功能等待 GitHub-hosted 验证。[154 实现与验证](docs/decisions/154-remote-downloads-script-cursor-and-background-audio.md)
+
 第 153 批修复依赖标签属性生成选项的剧情，补上游戏控制过场画面颜色和 WAVE 单声道输出的路径，并修正会意外删除菜单位图的赋值行为。新增功能等待托管验证。[153 游戏兼容与验证](docs/decisions/153-live-tag-attributes-and-media-controls.md)
 
 第 152 批接入部分旧 MPEG／AVI 过场影片的浏览器内转换，并修正 ZIP 发行包按自定义入口启动及从游戏库重开的路径。这些新增行为尚待 GitHub-hosted 验证；已取回的 143–145 批原版对照不代表本批应用已通过。[152 功能、限制与验收](docs/decisions/152-legacy-movies-and-zip-entry.md)
@@ -76,6 +78,8 @@ Layer 与 Font 已分开管理原生生命周期：图层树使用弱关系，ch
 ```
 
 这里游戏看到的补丁文件名是 `patch.xp3`，服务器实际提供 `packages/update.bin`。相对链接从清单最终所在的目录解析。点击“保存当前游戏”后，游戏库会复制列出的文件，之后可从库中离线启动。[远程目录格式与验收](docs/decisions/148-remote-games-layer-options-and-midi-reset.md)
+
+将远程游戏保存到游戏库时，如果中途断线，可重新打开页面并点游戏库里的“继续下载”。服务器需支持 Range 和强 ETag。播放器会确认文件版本，校验磁盘上已保存的块，再下载剩余部分。含本地文件的游戏需重新选择同组文件后再保存。[下载恢复与版本校验](docs/decisions/154-remote-downloads-script-cursor-and-background-audio.md)
 
 打开含 XP3、补丁和散装资源的 ZIP 发行包时，先在“游戏位置”选择“自动识别游戏目录或 ZIP 发行包”，再选择单个 ZIP 或填写远程链接。游戏库会记住包内的游戏目录。[ZIP 发行包的使用范围与验收](docs/decisions/134-zip-distributions-midi-and-game-playback.md)
 

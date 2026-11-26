@@ -49,6 +49,9 @@ export class KagParser {
   curPos = 0
   curLabel = ''
   private buffer?: string
+  // Native CurLineStr retains its selected line even after a line-command
+  // advances CurLine. It changes when the next line is actually selected.
+  private lineText = ''
   private tagLine = 0
   private interrupted = false
   private recording?: { name: string; source: string }
@@ -66,7 +69,7 @@ export class KagParser {
     return this.storageName
   }
   get curLineStr(): string {
-    return this.buffer ?? this.scenario?.lines[this.curLine] ?? ''
+    return this.lineText
   }
   get callStackDepth(): number {
     return this.calls.length
@@ -146,6 +149,7 @@ export class KagParser {
     const loaded = !this.scenario || this.curStorage !== name || force
     if (loaded) {
       this.scenario = undefined
+      this.lineText = ''
       this.storageName = this.storageShortName = ''
       const provided = yield* this.callback('onScenarioLoad', name)
       const scenario = typeof provided === 'string' ? new Scenario(name, provided, true)
@@ -155,6 +159,7 @@ export class KagParser {
     }
     this.curLine = this.curPos = 0
     this.buffer = undefined
+    this.lineText = this.scenario!.lines[0] ?? ''
     // Native Rewind runs after onScenarioLoad and installation of its result.
     // That callback may reenter this parser while preparing a virtual story;
     // its temporary conditions/macros must not become the new story's state.
@@ -227,6 +232,8 @@ export class KagParser {
         throw new TvpError('TVPKAGReturnLostSync')
       this.curPos = integer(frame.pos)
       this.buffer = frame.lineBufferUsing ? string(frame.lineBuffer) : undefined
+      if (this.buffer !== undefined) this.lineText = this.buffer
+      else if (this.curLine < this.scenario!.lines.length) this.lineText = this.scenario!.lines[this.curLine]!
       this.restoreConditions(frame)
     }
     this.macroBase = integer(frame.macroArgStackBase)
@@ -242,6 +249,7 @@ export class KagParser {
   }
   *clear(): Task {
     this.scenario = undefined
+    this.lineText = ''
     this.storageName = this.storageShortName = ''
     this.curLine = this.curPos = 0
     this.buffer = undefined
@@ -279,7 +287,7 @@ export class KagParser {
     let work = 0
     while (this.scenario && this.curLine < this.scenario.lines.length) {
       if (++work % 1024 === 0) yield* this.effect('yield')
-      const source = this.curLineStr
+      const source = this.scenario.lines[this.curLine]!
       if (source.startsWith(';')) {
         this.nextLine()
         continue
@@ -303,10 +311,10 @@ export class KagParser {
         let script = ''
         while (
           this.curLine < this.scenario.lines.length &&
-          !/^(?:\[endscript\]\\?|@endscript)$/.test(this.curLineStr)
+          !/^(?:\[endscript\]\\?|@endscript)$/.test(this.scenario.lines[this.curLine]!)
         ) {
           if (++work % 1024 === 0) yield* this.effect('yield')
-          if (this.excludeLevel === -1) script += this.curLineStr + '\r\n'
+          if (this.excludeLevel === -1) script += this.scenario.lines[this.curLine]! + '\r\n'
           this.nextLine()
         }
         if (this.curLine === this.scenario.lines.length)
@@ -316,6 +324,7 @@ export class KagParser {
         this.nextLine()
         continue
       }
+      this.lineText = source
       return true
     }
     return false
@@ -343,6 +352,7 @@ export class KagParser {
       (token.lineCommand && !this.ignoreCR ? '\\' : '')
     if (buffer.length > 8 * 1024 * 1024) throw new Error('KAG macro expansion exceeds text budget')
     this.buffer = buffer
+    this.lineText = buffer
     this.curPos = start
   }
   private *readTag(source: string, start: number, lineCommand: boolean): Task<ParsedTag> {
@@ -355,7 +365,7 @@ export class KagParser {
     // An expression can observe curPos or take effect before a later error.
     for (;;) {
       let next: IteratorResult<Attribute, LexedTag>
-      try { next = fields.next() }
+      try { next = fields.next({ source: this.curLineStr, position: this.curPos }) }
       catch (error) {
         if (error instanceof KagTagSyntaxError) {
           this.curPos = error.position
@@ -675,6 +685,7 @@ export class KagParser {
       yield* this.goToLabel(label)
     } else {
       this.scenario = undefined
+      this.lineText = ''
       this.storageShortName = ''
       this.buffer = undefined
       this.curLine = this.curPos = 0
@@ -714,6 +725,7 @@ export class KagParser {
     this.curPos = other.curPos
     this.curLabel = other.curLabel
     this.buffer = other.buffer
+    this.lineText = other.lineText
     this.tagLine = other.tagLine
     this.recording = other.recording && { ...other.recording }
     this.macroBase = other.macroBase

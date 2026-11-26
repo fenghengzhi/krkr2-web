@@ -1,4 +1,4 @@
-import type { LibraryGame } from '../../protocol/library.ts'
+import type { LibraryDownload, LibraryGame } from '../../protocol/library.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import { copyGameEncodings, copyGameProject, type GameProject } from '../../engine/storage/project.ts'
 import { storageFilePath, toPublicStoragePath } from '../../engine/storage/public-path.ts'
@@ -9,6 +9,20 @@ export const LIBRARY_WRITE_LOCK = 'krkr2-library:v1:write'
 export const LIBRARY_BLOCK_BYTES = 1024 * 1024
 export const MAX_LIBRARY_GAMES = 256
 export const MAX_LIBRARY_BYTES = 64 * 1024 ** 3
+export interface LibraryDownloadRecord extends LibraryDownload {
+  /** Binds numbered OPFS files to the exact source order and game version. */
+  layout: string
+}
+export function validateDownload(value: unknown): LibraryDownloadRecord {
+  if (!value || typeof value !== 'object') throw new Error('Invalid unfinished library download')
+  const item = value as LibraryDownloadRecord
+  libraryId(item.id)
+  if (!/^game-[a-f0-9]{64}$/.test(item.gameId) || !/^[a-f0-9]{64}$/.test(item.layout) ||
+      typeof item.title !== 'string' || !item.title.trim() || item.title.length > 200 ||
+      !Number.isSafeInteger(item.size) || item.size < 0 || item.size > MAX_LIBRARY_BYTES ||
+      typeof item.reopenable !== 'boolean') throw new Error('Invalid unfinished library download')
+  return item
+}
 export interface LibraryFile {
   path: string
   size: number

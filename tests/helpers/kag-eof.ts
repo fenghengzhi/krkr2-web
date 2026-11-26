@@ -15,6 +15,7 @@ export const kagEofExpected: Readonly<Record<string, string>> = {
   'eof-clear': '1|CONTINUE|retained|1|AFTER|1',
   'eof-error': '1|1|1|AFTER',
   'eof-finalize': '1:0|interrupt|1:0|1|S',
+  'eof-owned-finalize': 'S|1|1|1:1|interrupt|1:1|1|E',
 }
 export const kagEofSource = String.raw`
 class EofParser extends KAGParser {
@@ -28,8 +29,9 @@ class EofTagValue {
   p.interrupt();
  }
 }
-// Return from the allocating frame so its temporary registers cannot retain
-// the value. The reused tag is the sole owner when the next parse clears it.
+// Historical implicit-release probe. Stock 147/148 retained a reference past
+// DicClear (its register pool does not clear every returned frame). Keep that
+// original comparison visible; the owned control below fixes the release site.
 function eofAttachValue(tag){tag.payload=new EofTagValue();}
 function eofFieldCount(value){
  var fields=[],count=0;fields.assign(value);
@@ -66,6 +68,14 @@ function kagEofRun(id,p){
    global.eofFinalizeParser=p;global.eofFinalizeAt="";eofAttachValue(held);
    next=p.getNextTag();result=global.eofFinalizeAt+"|"+next.tagname+"|"+p.curLine+":"+p.curPos+"|"+int(next===held);
    return result+"|"+p.getNextTag().text;
+  case "eof-owned-finalize":
+   p.loadScenario("eof-finalize.ks");held=p.getNextTag();
+   global.eofFinalizeParser=p;global.eofFinalizeAt="";
+   var owned=new EofTagValue();held.payload=owned;
+   next=p.getNextTag();result=next.text+"|"+int(held.payload===void)+"|"+int(isvalid owned);
+   invalidate owned;
+   result+="|"+global.eofFinalizeAt;next=p.getNextTag();
+   return result+"|"+next.tagname+"|"+p.curLine+":"+p.curPos+"|"+int(next===held)+"|"+p.getNextTag().text;
  }
  throw new Exception("Unknown EOF control");
 }

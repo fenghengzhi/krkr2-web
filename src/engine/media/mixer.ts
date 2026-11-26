@@ -60,7 +60,7 @@ interface Voice {
   sourcePipeline?: boolean
   ended?: boolean
   stream?: StreamPcm
-  gains?: { volume: number; volume2: number; globalVolume: number; pan: number; muted: boolean; left: number; right: number }
+  gains?: { volume: number; volume2: number; globalVolume: number; pan: number; focusVolume: number; left: number; right: number }
 }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 const lowerBound = <T>(items: T[], position: number, key: (item: T) => number): number => {
@@ -82,6 +82,7 @@ export class AudioMixer {
   private paused = false
   private globalVolume = 100000
   private waveMuted = false
+  private waveMuteVolume = 0
   private pending: AudioEvent[] = []
   private liveMidi = new MidiSynth()
   private midiDelayUntil: number | undefined
@@ -125,13 +126,14 @@ export class AudioMixer {
     return voice
   }
   private waveGains(voice: Voice) {
-    const { volume, volume2, pan } = voice.settings, cached = voice.gains
+    const { volume, volume2, pan } = voice.settings, cached = voice.gains,
+      focusVolume = this.waveMuted ? this.waveMuteVolume : 100000
     if (cached && cached.volume === volume && cached.volume2 === volume2 && cached.pan === pan &&
-        cached.globalVolume === this.globalVolume && cached.muted === this.waveMuted) return cached
+        cached.globalVolume === this.globalVolume && cached.focusVolume === focusVolume) return cached
     // Reuse across realtime blocks. Table/pow work is done at module startup;
     // unchanged controls allocate nothing, including silent/unloaded fades.
-    return voice.gains = { volume, volume2, pan, globalVolume: this.globalVolume, muted: this.waveMuted,
-      ...waveAudioGains(volume, volume2, this.globalVolume, pan, this.waveMuted) }
+    return voice.gains = { volume, volume2, pan, globalVolume: this.globalVolume, focusVolume,
+      ...waveAudioGains(volume, volume2, this.globalVolume, pan, this.waveMuted, this.waveMuteVolume) }
   }
   snapshot(id: number): SoundSnapshot {
     const voice = this.get(id),
@@ -263,7 +265,11 @@ export class AudioMixer {
       return { events: [] }
     }
     if (command.op === 'waveMuted') {
+      const volume = command.volume ?? 0
+      if (!Number.isInteger(volume) || volume < 0 || volume > 100000)
+        throw new Error('Invalid Wave background volume')
       this.waveMuted = command.muted
+      this.waveMuteVolume = volume
       return { events: [] }
     }
     if (command.op === 'midiOut') {

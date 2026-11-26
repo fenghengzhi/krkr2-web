@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 154 批增加真实下载中断、刷新续传、跨标签页修复损坏块和存读档验收。KAG 在同一解析器中嵌套取标签，后台声音用真实浏览器焦点事件和 AudioWorklet 录音检查。上批的构建修复在本次快照中仍排队。[154 验收与历史结果](decisions/154-remote-downloads-script-cursor-and-background-audio.md)
+
 第 153 批增加原版 SDK、TJS 源码与字节码、浏览器实际游戏操作的对照。影片使用同一暂停帧的原解码像素、屏幕截图、混合位图和光标下方的颜色分别验收。已公开的第 145、146 批构建日志均报告测试代码 TS2367，相关修复随本批验证。[153 验收与历史结果](decisions/153-live-tag-attributes-and-media-controls.md)
 
 第 152 批用独立原生 FFmpeg 生成带逐帧标记、颜色区间和已知声音的 MPEG／AVI 输入，再交给发布所用的固定 WASM 转换器。浏览器从真实游戏按钮检查定位、prepare、双图层画面、音画偏移和停止；PWA 在断网后首次转换游戏库里的 AVI。ZIP 验收用未经修改的原 KAG 模板，从自定义入口启动、点击保存并从游戏库刷新读档。新增实现和全部新增定义均尚待托管执行。[152 验收、限制与库存](decisions/152-legacy-movies-and-zip-entry.md)

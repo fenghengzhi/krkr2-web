@@ -8,6 +8,8 @@ export interface SourceFile {
   path: string
   source: ByteSource
   remoteIdentity?: string
+  /** Reopenable strong-ETag ranges; a full snapshot is fetched afresh. */
+  resumable?: boolean
 }
 
 /** The caller owns remote source lifetimes, including failed or cancelled batches. */
@@ -34,7 +36,7 @@ export async function resolveFiles(
     else {
       const source = await pool!.open(file.url)
       await checkpoint()
-      resolved.push({ path: file.path, source, remoteIdentity: source.identity })
+      resolved.push({ path: file.path, source, remoteIdentity: source.identity, resumable: source.mode === 'range' })
     }
   }
   await checkpoint()

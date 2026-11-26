@@ -1,12 +1,13 @@
 import { createRpcClient, type RpcClient } from 'vite-plugin-worker-rpc/runtime'
 import { transfer } from 'vite-plugin-worker-rpc/client'
-import type { LibraryApi, LibraryProgress, LibraryImport } from '../protocol/library.ts'
+import type { LibraryApi, LibraryImportRequest, LibraryProgress } from '../protocol/library.ts'
 
+interface ImportOperation { id: string; cancelled: boolean; terminated?: boolean }
 export class LibraryClient {
   private rpc?: RpcClient
   private channel?: MessageChannel
   private connected?: Promise<Awaited<ReturnType<LibraryApi['connect']>>>
-  private importing?: { id: string; cancelled: boolean }
+  private importing?: ImportOperation
   constructor(private readonly progress: (value: LibraryProgress) => void) {}
   private connect() {
     if (!this.rpc) {
@@ -32,9 +33,9 @@ export class LibraryClient {
     method: K,
     ...args: Parameters<LibraryApi[K]>
   ): Promise<Awaited<ReturnType<LibraryApi[K]>>> {
-    const operation =
+    const operation: ImportOperation | undefined =
       method === 'importGame'
-        ? { id: (args[0] as LibraryImport).operation, cancelled: false }
+        ? { id: (args[0] as LibraryImportRequest).operation, cancelled: false }
         : undefined
     if (operation) {
       if (this.importing) throw new Error('An import is already in progress')
@@ -47,12 +48,17 @@ export class LibraryClient {
       if (operation?.cancelled || this.rpc !== rpc)
         throw new DOMException('Library operation cancelled', 'AbortError')
       return (await rpc.call(method, args)) as Awaited<ReturnType<LibraryApi[K]>>
+    } catch (error) {
+      if (operation?.terminated) throw new DOMException('Library operation cancelled', 'AbortError')
+      throw error
     } finally {
       if (this.importing === operation) this.importing = undefined
     }
   }
   async cancel(operation: string): Promise<void> {
-    if (this.importing?.id === operation) this.importing.cancelled = true
+    const current = this.importing
+    if (!current || current.id !== operation) return
+    current.cancelled = true
     if (!this.rpc) return
     const rpc = this.rpc
     const timeout = Symbol('forced library cancellation')
@@ -68,7 +74,10 @@ export class LibraryClient {
           }, 2000)
         }),
       ])
-      if (outcome === timeout && this.rpc === rpc) this.close()
+      if (outcome === timeout && this.rpc === rpc && this.importing === current) {
+        current.terminated = true
+        this.close()
+      }
     } finally {
       if (timer) clearTimeout(timer)
     }

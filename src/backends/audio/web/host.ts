@@ -41,6 +41,7 @@ export class WebAudioHost {
   private resumeOnPage = false
   private globalVolume = 100000
   private focusMode = 0
+  private focusMuteVolume = 0
   private focusChanged = () => {
     void this.updateFocus().catch((error) =>
       this.fail(error instanceof Error ? error : new Error(String(error))),
@@ -196,7 +197,7 @@ export class WebAudioHost {
     const muted =
       (this.focusMode >= 1 && document.hidden) || (this.focusMode >= 2 && !document.hasFocus())
     return this.node && !this.closed
-      ? this.send(this.node, { op: 'waveMuted', muted })
+      ? this.send(this.node, { op: 'waveMuted', muted, volume: this.focusMuteVolume })
       : { events: [] }
   }
   private fail(error: Error): void {
@@ -366,7 +367,10 @@ export class WebAudioHost {
     if (this.closed) throw new Error('Audio host is closed')
     if (this.failure) throw this.failure
     if (command.op === 'focusMode') {
+      if (command.muteVolume !== undefined && (!Number.isInteger(command.muteVolume) || command.muteVolume < 0 || command.muteVolume > 100000))
+        throw new Error('Invalid Wave background volume')
       this.focusMode = command.mode
+      if (command.muteVolume !== undefined) this.focusMuteVolume = command.muteVolume
       return this.updateFocus()
     }
     if (command.op === 'pauseAll') {

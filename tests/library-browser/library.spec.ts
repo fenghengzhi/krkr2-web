@@ -227,15 +227,17 @@ test('a terminated stalled import is recovered without publishing incomplete fil
   await expect(page.locator('#library-operation')).toContainText('extra.bin')
   expect(await libraryDirectories(page)).toHaveLength(1)
   await page.unroute('**/assets/library.worker-*.js*')
+  await expect(page.locator('#cancel-library')).toHaveText('取消导入')
   await page.locator('#cancel-library').click()
   await expect(page.locator('#cancel-library')).toBeHidden({ timeout: 4000 })
+  await expect(page.locator('#library-operation')).toHaveText('已取消导入。')
   await expect.poll(() => libraryDirectories(page)).toEqual([])
   await expect(page.locator('.library-game')).toHaveCount(0)
   await expect(page.locator('#save-library')).toBeEnabled()
   await save(page, 'Recovered import')
 })
 
-test('cancelling a remote library copy aborts the network and removes its unpublished OPFS directory', async ({
+test('cancelling a remote library copy aborts the network and retains confirmed blocks for continuation', async ({
   page,
 }) => {
   let block = false
@@ -252,19 +254,29 @@ test('cancelling a remote library copy aborts the network and removes its unpubl
     await expect(page.locator('#logs')).toContainText('zip-ready:42:0')
     block = true
     await expect(page.locator('#save-library')).toBeEnabled()
+    await page.locator('#library-title').fill('Retried remote copy')
     await page.locator('#save-library').click()
     await expect
       .poll(() => server.requests.some((r) => r.range === 'bytes=1048576-2097151'))
       .toBe(true)
     expect(await libraryDirectories(page)).toHaveLength(1)
+    await expect(page.locator('#cancel-library')).toHaveText('停止下载')
     await page.locator('#cancel-library').click()
     await expect(page.locator('#cancel-library')).toBeHidden({ timeout: 1800 })
     await expect.poll(() => server.stats().aborted).toBeGreaterThan(0)
-    await expect.poll(() => libraryDirectories(page)).toEqual([])
+    expect(await libraryDirectories(page)).toHaveLength(1)
     await expect(page.locator('.library-game')).toHaveCount(0)
+    await expect(page.locator('.library-download')).toHaveCount(1)
+    await expect(page.locator('#library-operation')).toHaveText('下载已停止，可从未完成下载继续或移除。')
     await evaluate(page, 'Scripts.evalStorage("シーン/value.tjs")', '42')
     block = false
-    await save(page, 'Retried remote copy')
+    const resumedAt = server.requests.length
+    await page.locator('.library-download').getByRole('button', { name: '继续下载', exact: true }).click()
+    await expect(page.locator('.library-game h3')).toHaveText('Retried remote copy')
+    await expect(page.locator('.library-download')).toHaveCount(0)
+    await expect(page.locator('#library-operation')).toContainText('已复用')
+    expect(server.requests.slice(resumedAt).some((request) => request.method === 'GET' &&
+      request.range === 'bytes=0-1048575')).toBe(false)
   } finally {
     await server.close()
   }
@@ -332,7 +344,7 @@ test('a corrupt unused OPFS block is checked when first requested and invalidate
   expect(await libraryDirectories(page)).toEqual([])
 })
 
-test('the compact catalog migrates existing manifests atomically and preserves playable resources', async ({
+for (const schemaVersion of [1, 2]) test(`the v${schemaVersion} library migrates atomically and preserves its catalog and playable resources`, async ({
   page,
 }) => {
   const { gameIdentity } = await import('../../src/player/game-identity.ts')
@@ -355,13 +367,19 @@ test('the compact catalog migrates existing manifests atomically and preserves p
     fileCount: 1,
     files: [{ path: 'game.zip', size: bytes.length, hashes: [await hashBlock(bytes)] }],
   }
+  const catalog = { id: record.id, gameId, title: record.title, entry: record.entry,
+    backend: record.backend, createdAt: record.createdAt, size: record.size, fileCount: record.fileCount }
   // Stay on the same origin without mounting the app while seeding the older schema.
   await page.goto('/wasm/manifest.json')
   await page.evaluate(
-    async ({ record, bytes }) => {
+    async ({ record, catalog, bytes, schemaVersion }) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open('krkr2-library', 1)
-        request.onupgradeneeded = () => request.result.createObjectStore('games', { keyPath: 'id' })
+        const request = indexedDB.open('krkr2-library', schemaVersion)
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore('games', { keyPath: 'id' })
+          if (schemaVersion === 2)
+            request.result.createObjectStore('catalog', { keyPath: 'id' }).createIndex('legacy-title', 'title')
+        }
         request.onerror = () => reject(request.error)
         request.onsuccess = () => resolve(request.result)
       })
@@ -375,31 +393,38 @@ test('the compact catalog migrates existing manifests atomically and preserves p
       await stream.write(new Uint8Array(bytes))
       await stream.close()
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction('games', 'readwrite')
+        const tx = db.transaction(schemaVersion === 2 ? ['games', 'catalog'] : ['games'], 'readwrite')
         tx.objectStore('games').put(record)
+        if (schemaVersion === 2) tx.objectStore('catalog').put(catalog)
         tx.oncomplete = () => resolve()
         tx.onabort = () => reject(tx.error)
       })
       db.close()
     },
-    { record, bytes: [...bytes] },
+    { record, catalog, bytes: [...bytes], schemaVersion },
   )
   await page.goto('/?backend=asyncify')
   await expect(page.locator('#library-games h3')).toHaveText('Migrated game')
   await page.locator('.library-game').getByRole('button', { name: '启动', exact: true }).click()
   await expect(page.locator('#logs')).toContainText('zip-ready:42:0')
   const migrated = await page.evaluate(
-    async () =>
-      new Promise<{ version: number; stores: string[] }>((resolve, reject) => {
+    async (id) =>
+      new Promise<{ version: number; stores: string[]; indexes: string[]; catalog: unknown }>((resolve, reject) => {
         const request = indexedDB.open('krkr2-library')
         request.onerror = () => reject(request.error)
         request.onsuccess = () => {
-          resolve({ version: request.result.version, stores: [...request.result.objectStoreNames] })
-          request.result.close()
+          const db = request.result, tx = db.transaction('catalog'), store = tx.objectStore('catalog'), entry = store.get(id)
+          tx.onabort = () => { db.close(); reject(tx.error) }
+          tx.oncomplete = () => {
+            resolve({ version: db.version, stores: [...db.objectStoreNames], indexes: [...store.indexNames], catalog: entry.result })
+            db.close()
+          }
         }
       }),
+    record.id,
   )
-  expect(migrated).toEqual({ version: 2, stores: ['catalog', 'games'] })
+  expect(migrated).toEqual({ version: 3, stores: ['catalog', 'downloadBlocks', 'downloadRequests', 'downloads', 'games'],
+    indexes: schemaVersion === 2 ? ['legacy-title'] : [], catalog })
 })
 
 test('library names remain text and startup drafts survive refresh on a narrow screen', async ({

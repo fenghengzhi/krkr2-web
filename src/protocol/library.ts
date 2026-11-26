@@ -18,9 +18,17 @@ export interface LibraryStatus {
   available: boolean
   reason?: string
   games: LibraryGame[]
+  downloads?: LibraryDownload[]
   usage?: number
   quota?: number
   persisted: boolean
+}
+export interface LibraryDownload {
+  id: string
+  gameId: string
+  title: string
+  size: number
+  reopenable: boolean
 }
 export interface LibraryImport extends GameEncodings {
   operation: string
@@ -31,18 +39,20 @@ export interface LibraryImport extends GameEncodings {
   expectedGameId: string
   project?: GameProject
 }
+export type LibraryImportRequest = LibraryImport | { download: string; operation: string }
 export interface LibraryProgress {
   operation: string
   phase: 'preparing' | 'copying' | 'committing'
   completed: number
+  reused?: number
   total: number
   file: string
 }
 export interface LibraryApi {
   connect(events: MessagePort): Promise<LibraryStatus>
   list(): Promise<LibraryStatus>
-  importGame(request: LibraryImport): Promise<LibraryGame>
+  importGame(request: LibraryImportRequest): Promise<LibraryGame>
   cancel(operation: string): Promise<void>
-  remove(id: string): Promise<void>
+  remove(id: string, unfinishedOnly?: boolean): Promise<void>
   update(id: string, settings: Pick<LibraryGame, 'title' | 'entry' | 'backend'>): Promise<void>
 }

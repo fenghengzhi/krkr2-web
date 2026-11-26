@@ -21,8 +21,10 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
   const el = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!
   let state: LibraryStatus | undefined,
     operation: string | undefined,
-    revision = 0
+    revision = 0,
+    reusedBytes = 0
   let changing = false
+  let remoteOperation = false, userCancelled = false
   let shownGames = ''
   const client = new LibraryClient((progress: LibraryProgress) => {
     if (progress.operation !== operation) return
@@ -30,12 +32,14 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
     bar.hidden = false
     bar.max = Math.max(1, progress.total)
     bar.value = progress.completed
+    reusedBytes = Math.max(reusedBytes, progress.reused ?? 0)
     el('library-operation').textContent =
-      progress.phase === 'preparing'
+      (progress.phase === 'preparing'
         ? '正在准备来源…'
         : progress.phase === 'committing'
           ? '正在提交游戏目录…'
-          : `正在保存 ${progress.file} · ${amount(progress.completed)} / ${amount(progress.total)}`
+          : `正在保存 ${progress.file} · ${amount(progress.completed)} / ${amount(progress.total)}`) +
+      (reusedBytes ? ` · 已复用 ${amount(reusedBytes)}` : '')
   })
   const updates =
     typeof BroadcastChannel === 'undefined'
@@ -48,6 +52,7 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
       !state?.available || !!operation || changing || !current
     el<HTMLInputElement>('library-title').disabled = !!operation || changing
     el<HTMLButtonElement>('cancel-library').hidden = !operation
+    el('cancel-library').textContent = remoteOperation ? '停止下载' : '取消导入'
     el<HTMLButtonElement>('persist-library').disabled =
       !state?.available || !!state.persisted || typeof navigator.storage?.persist !== 'function'
     for (const button of root.querySelectorAll<HTMLButtonElement>('[data-library-action]'))
@@ -61,9 +66,9 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
     state = latest
     el('library-status').textContent = !state.available
       ? (state.reason ?? '此浏览器暂不支持游戏库。')
-      : `${state.games.length} 个游戏 · 资源 ${amount(state.games.reduce((sum, game) => sum + game.size, 0))}${state.usage !== undefined && state.quota !== undefined ? ` · 站点已用 ${amount(state.usage)} / 约 ${amount(state.quota)}` : ''}${state.persisted ? ' · 已获准保留数据' : ''}`
+      : `${state.games.length} 个游戏${state.downloads?.length ? ` · ${state.downloads.length} 个未完成下载` : ''} · 资源 ${amount(state.games.reduce((sum, game) => sum + game.size, 0))}${state.usage !== undefined && state.quota !== undefined ? ` · 站点已用 ${amount(state.usage)} / 约 ${amount(state.quota)}` : ''}${state.persisted ? ' · 已获准保留数据' : ''}`
     const games = el('library-games')
-    const signature = JSON.stringify(state.games)
+    const signature = JSON.stringify([state.games, state.downloads ?? []])
     // Focus/BroadcastChannel refreshes must not detach a pressed button or a
     // focused editor when the catalog has not changed.
     if (signature === shownGames) {
@@ -177,38 +182,92 @@ export function createGameLibrary(root: HTMLElement, options: Options) {
       row.append(info, controls, details)
       games.append(row)
     }
+    for (const download of state.downloads ?? []) {
+      const row = document.createElement('article'), info = document.createElement('div'),
+        title = document.createElement('h3'), description = document.createElement('p'),
+        controls = document.createElement('div')
+      row.className = 'library-download'
+      row.dataset.libraryDownloadId = download.id
+      title.textContent = download.title
+      description.textContent = `未完成下载 · 资源 ${amount(download.size)} · ` + (download.reopenable
+        ? '已保存的部分可继续下载，完成后即可从游戏库启动。'
+        : '包含本地文件，请重新选择同一组文件并保存当前游戏，以继续下载。')
+      info.append(title, description)
+      controls.className = 'library-controls'
+      const button = (name: string, task: () => Promise<void>) => {
+        const node = document.createElement('button')
+        node.textContent = name
+        node.dataset.libraryAction = name
+        node.addEventListener('click', () => { void task().catch(options.report) })
+        return node
+      }
+      if (download.reopenable)
+        controls.append(button('继续下载', () => importGame({ download: download.id })))
+      controls.append(button('移除下载', async () => {
+        changing = true
+        update()
+        try {
+          await client.call('remove', download.id, true)
+          el('library-operation').textContent = `已移除“${download.title}”的未完成下载。`
+          updates?.postMessage('changed')
+          await refresh()
+        } finally {
+          changing = false
+          update()
+        }
+      }))
+      row.append(info, controls)
+      games.append(row)
+    }
     update()
+  }
+  const importGame = async (request: CurrentGame | { download: string }) => {
+    if (operation || changing || !state?.available) return
+    operation = crypto.randomUUID()
+    reusedBytes = 0
+    remoteOperation = 'download' in request || request.files.some((file) => 'url' in file)
+    userCancelled = false
+    const remote = remoteOperation
+    let stopped = false
+    update()
+    try {
+      const game = await client.call('importGame', { ...request, operation })
+      el('library-operation').textContent = `已保存“${game.title}”，刷新页面后可从游戏库启动。` +
+        (reusedBytes ? ` 已复用 ${amount(reusedBytes)}。` : '')
+      updates?.postMessage('changed')
+    } catch (error) {
+      if (userCancelled && error instanceof Error && error.name === 'AbortError') stopped = true
+      else el('library-operation').textContent = error instanceof Error ? error.message : String(error)
+    } finally {
+      operation = undefined
+      remoteOperation = false
+      el<HTMLProgressElement>('library-progress').hidden = true
+      update()
+      await refresh()
+      if (stopped && !operation) {
+        const draft = state?.downloads?.find((download) => 'download' in request
+          ? download.id === request.download : download.gameId === request.expectedGameId)
+        el('library-operation').textContent = !remote ? '已取消导入。' : draft
+          ? draft.reopenable ? '下载已停止，可从未完成下载继续或移除。'
+            : '下载已停止。重新选择同一组文件后可继续，也可移除下载。'
+          : '下载已停止。'
+      }
+    }
   }
   el('library-save-form').addEventListener('submit', (event) => {
     event.preventDefault()
     const current = options.current()
     if (!current || operation || changing || !state?.available) return
-    operation = crypto.randomUUID()
     const request = {
       ...current,
-      operation,
       title: el<HTMLInputElement>('library-title').value.trim() || current.title,
     }
-    update()
-    void client
-      .call('importGame', request)
-      .then(async (game) => {
-        el('library-operation').textContent = `已保存“${game.title}”，刷新页面后可从游戏库启动。`
-        updates?.postMessage('changed')
-      })
-      .catch((error) => {
-        el('library-operation').textContent = error instanceof Error ? error.message : String(error)
-      })
-      .finally(() => {
-        operation = undefined
-        el<HTMLProgressElement>('library-progress').hidden = true
-        update()
-        void refresh().catch(options.report)
-      })
+    void importGame(request).catch(options.report)
   })
   el('cancel-library').addEventListener('click', () => {
     if (!operation) return
-    el('library-operation').textContent = '正在取消导入…'
+    userCancelled = true
+    el('library-operation').textContent = remoteOperation ? '正在停止下载…' : '正在取消导入…'
     void client.cancel(operation).catch(options.report)
   })
   el('persist-library').addEventListener('click', () => {

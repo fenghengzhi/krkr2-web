@@ -14,6 +14,7 @@ export interface LexedTag {
   raw: string
   lineCommand: boolean
 }
+export interface TagCursor { source: string; position: number }
 const space = (ch: string | undefined) => ch === ' ' || ch === '\t'
 /** KAG's ttstr::ToLowerCase folds ASCII letters only. Unicode names remain
  * distinct dictionary keys, including fullwidth and non-Latin capitals. */
@@ -36,7 +37,13 @@ export function lexTag(line: string, start: number, lineCommand: boolean) {
   while (pos < line.length && !space(line[pos]) && !ended()) pos++
   if (nameStart === pos) fail()
   const name = lowerKagName(line.slice(nameStart, pos))
-  function* fields(): Generator<Attribute, LexedTag> {
+  const resume = (cursor: TagCursor | undefined) => {
+    if (!cursor) return
+    line = cursor.source
+    pos = cursor.position
+    if (!Number.isSafeInteger(pos) || pos < 0 || pos > line.length) fail()
+  }
+  function* fields(): Generator<Attribute, LexedTag, TagCursor | undefined> {
     while (true) {
       skip()
       if (ended()) {
@@ -51,7 +58,7 @@ export function lexTag(line: string, start: number, lineCommand: boolean) {
       if (pos >= line.length) fail()
       if (line[pos] === '*') {
         pos++
-        yield { name: '', value: '', entity: false, parameter: false, forward: true, end: pos }
+        resume(yield { name: '', value: '', entity: false, parameter: false, forward: true, end: pos })
         continue
       }
       const attributeStart = pos
@@ -96,7 +103,9 @@ export function lexTag(line: string, start: number, lineCommand: boolean) {
         }
         value = value.replace(/`([\s\S])/g, '$1')
       }
-      yield { name: attribute, value, entity, parameter, end: pos }
+      // An entity can synchronously read this parser again. Native resumes
+      // from its live CurLineStr/CurPos, not the line that started the tag.
+      resume(yield { name: attribute, value, entity, parameter, end: pos })
     }
   }
   return { name, fields: fields() }

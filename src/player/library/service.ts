@@ -1,6 +1,6 @@
 import { LibraryIndex } from '../../backends/files/library-index.ts'
-import { OpfsLibraryFiles, OpfsReadPool } from '../../backends/files/opfs-library.ts'
-import { HttpRangePool } from '../../backends/files/http-range.ts'
+import { OpfsLibraryFiles, OpfsReadPool, hashBlock } from '../../backends/files/opfs-library.ts'
+import { HttpRangePool, remoteUrl } from '../../backends/files/http-range.ts'
 import { resolveFiles, type SourceFile } from '../../backends/files/source-files.ts'
 import { gameIdentity, projectIdentity } from '../game-identity.ts'
 import { copyGameEncodings, copyGameProject } from '../../engine/storage/project.ts'
@@ -9,7 +9,7 @@ import { importSources } from '../../backends/files/import-resources.ts'
 import { createSessionArchiveReader } from '../../backends/files/archive-reader.ts'
 import type {
   LibraryGame,
-  LibraryImport,
+  LibraryImportRequest,
   LibraryProgress,
   LibraryStatus,
 } from '../../protocol/library.ts'
@@ -32,7 +32,7 @@ export interface LibraryLease {
 }
 export class LibraryService {
   constructor(
-    private readonly index: Pick<LibraryIndex, 'get' | 'list' | 'put' | 'remove'>,
+    private readonly index: Pick<LibraryIndex, 'get' | 'catalog' | 'startDownload' | 'requestFor' | 'hashes' | 'saveHash' | 'put' | 'remove'>,
     private readonly files: Pick<OpfsLibraryFiles, 'write' | 'sources' | 'remove' | 'recover'>,
     private readonly locks: LockManager,
     private readonly storage: Pick<StorageManager, 'estimate' | 'persisted'>,
@@ -57,58 +57,65 @@ export class LibraryService {
     return new LibraryService(new LibraryIndex(), files, navigator.locks, navigator.storage)
   }
   async list(): Promise<LibraryStatus> {
-    await this.locks.request(LIBRARY_WRITE_LOCK, { ifAvailable: true }, async (lock) => {
-      if (lock)
-        await this.files.recover(new Set((await this.index.list()).map((record) => record.id)))
+    const { games, downloads } = await this.locks.request(LIBRARY_WRITE_LOCK, { ifAvailable: true }, async (lock) => {
+      const catalog = await this.index.catalog()
+      if (lock) await this.files.recover(new Set([...catalog.games, ...catalog.downloads].map((record) => record.id)))
+      return catalog
     })
-    const records = await this.index.list()
     const [estimate, persisted] = await Promise.allSettled([
       this.storage.estimate(),
       this.storage.persisted(),
     ])
     return {
       available: true,
-      games: records.sort((a, b) => b.createdAt - a.createdAt).map(summary),
+      games: games.sort((a, b) => b.createdAt - a.createdAt).map(summary),
+      downloads: downloads.map(({ id, title, gameId, size, reopenable }) => ({ id, title, gameId, size, reopenable })),
       ...(estimate.status === 'fulfilled' ? estimate.value : {}),
       persisted: persisted.status === 'fulfilled' && persisted.value,
     }
   }
   async importGame(
-    request: LibraryImport,
+    input: LibraryImportRequest,
     signal: AbortSignal,
     progress: (value: LibraryProgress) => void,
   ): Promise<LibraryGame> {
     signal.throwIfAborted()
-    const requestedProject = copyGameProject(request.project)
-    const encodings = copyGameEncodings(request)
-    const settings = gameSettings(request, requestedProject)
-    if (
-      !/^game-[a-f0-9]{64}$/.test(request.expectedGameId) ||
-      !Array.isArray(request.files) ||
-      !request.files.length ||
-      request.files.length > 10000
-    )
-      throw new Error('Invalid library import request')
-    for (const file of request.files)
-      if (typeof file.path !== 'string' || file.path.length > 1024)
-        throw new Error('Library paths must not exceed 1024 characters')
     return this.locks.request(LIBRARY_WRITE_LOCK, { signal }, async () => {
       signal.throwIfAborted()
-      const records = await this.index.list()
-      await this.files.recover(new Set(records.map((record) => record.id)))
-      if (records.length >= MAX_LIBRARY_GAMES)
+      const { games, downloads } = await this.index.catalog()
+      await this.files.recover(new Set([...games, ...downloads].map((item) => item.id)))
+      const downloadId = 'download' in input ? libraryId(input.download) : undefined
+      const selected = downloadId ? downloads.find((item) => item.id === downloadId) : undefined
+      if ('download' in input && !selected) throw new Error('这项下载已经完成或已被移除。')
+      if (selected && !selected.reopenable) throw new Error('请重新选择本地文件，然后保存当前游戏以继续下载。')
+      const request = 'download' in input
+        ? { ...await this.index.requestFor(input.download), operation: input.operation } : input
+      if (selected && request.expectedGameId !== selected.gameId) throw new Error('保存的下载来源与游戏版本不符。')
+      const requestedProject = copyGameProject(request.project)
+      const encodings = copyGameEncodings(request)
+      const settings = gameSettings(request, requestedProject)
+      if (
+        !/^game-[a-f0-9]{64}$/.test(request.expectedGameId) ||
+        !Array.isArray(request.files) ||
+        !request.files.length ||
+        request.files.length > 10000
+      )
+        throw new Error('Invalid library import request')
+      for (const file of request.files)
+        if (typeof file.path !== 'string' || file.path.length > 1024)
+          throw new Error('Library paths must not exceed 1024 characters')
+      if (games.length >= MAX_LIBRARY_GAMES)
         throw new Error('Library exceeds 256 games; remove an unused entry first')
       const http = new HttpRangePool({ cacheBytes: 0 })
       const cancel = () => http.close()
       signal.addEventListener('abort', cancel, { once: true })
-      const id = 'entry-' + crypto.randomUUID(),
-        readPool = new OpfsReadPool(signal)
-      let published = false,
+      const readPool = new OpfsReadPool(signal)
+      let id = 'entry-' + crypto.randomUUID(), durable = false, published = false, reused = 0,
         completed = 0,
         total = 0,
         lastReport = 0
       const report = (phase: LibraryProgress['phase'], file = '') => {
-        progress({ operation: request.operation, phase, completed, total, file })
+        progress({ operation: request.operation, phase, completed, total, file, ...(reused ? { reused } : {}) })
         lastReport = performance.now()
       }
       try {
@@ -124,15 +131,25 @@ export class LibraryService {
         }
         const sources = await resolveFiles(request.files, checkpoint, http)
         const sourceGameId = await gameIdentity(sources, checkpoint)
-        let project = requestedProject
-        if (requestedProject) {
+        // Identity is sorted by name, but numbered files and mount precedence
+        // follow the submitted order. Both must match before reusing bytes.
+        const layout = selected || sources.some((source) => source.resumable)
+          ? await hashBlock(new TextEncoder().encode(JSON.stringify(sources.map((source) => source.path)))) : undefined
+        const prior = selected ?? downloads.find((item) => item.gameId === request.expectedGameId && item.layout === layout)
+        let project = requestedProject, identity = await projectIdentity(sourceGameId, project)
+        // A saved remote recipe already contains the resolved project. Each
+        // URL has just been reopened; projectIdentity below pins the versions
+        // and project together without downloading XP3/ZIP headers again.
+        if (selected && selected.gameId !== identity)
+          throw new Error('Game sources changed; reload the game before saving it to the library')
+        if (requestedProject && !(prior?.reopenable && identity === prior.gameId)) {
           const reader = createSessionArchiveReader(undefined, encodings.zipEncoding)
           try {
             project = (await prepareProject(await importSources(sources, checkpoint, { lazyArchives: true }),
               { mode: 'root', ...requestedProject }, reader, checkpoint)).project
           } finally { reader.dispose() }
+          identity = await projectIdentity(sourceGameId, project)
         }
-        const identity = await projectIdentity(sourceGameId, project)
         if (identity !== request.expectedGameId)
           throw new Error('Game sources changed; reload the game before saving it to the library')
         total = sources.reduce((sum, file) => sum + file.source.size, 0)
@@ -143,6 +160,9 @@ export class LibraryService {
         )
         if (!Number.isSafeInteger(total) || blocks > 65536)
           throw new Error('Library entry exceeds 65,536 data blocks')
+        if (prior && (prior.layout !== layout || prior.gameId !== identity || prior.size !== total))
+          throw new Error('保存的下载来源与游戏版本不符。')
+        if (prior) { id = prior.id; durable = true }
         const record = validateRecord({
           version: 1,
           id,
@@ -164,20 +184,33 @@ export class LibraryService {
         })
         const estimate = await this.storage.estimate().catch(() => ({}) as StorageEstimate)
         if (
-          estimate.quota !== undefined &&
+          !prior && estimate.quota !== undefined &&
           estimate.usage !== undefined &&
           estimate.quota - estimate.usage <
             total + new TextEncoder().encode(JSON.stringify(record)).length
         )
           throw new DOMException('Not enough browser storage for this game', 'QuotaExceededError')
+        if (layout && !prior) {
+          if (downloads.length >= MAX_LIBRARY_GAMES) throw new Error('请先移除不再需要的未完成下载。')
+          const remote = request.files.flatMap((file) => 'url' in file ? [{ path: file.path, url: remoteUrl(file.url) }] : [])
+          const reopenable = remote.length === sources.length
+          await this.index.startDownload({ id, gameId: identity, title: settings.title, size: total, layout, reopenable },
+            reopenable ? { files: remote, expectedGameId: identity, ...settings, ...encodings, project } : undefined, signal)
+          durable = true
+        }
         for (const [index, source] of sources.entries()) {
           signal.throwIfAborted()
           report('copying', source.path)
-          record.files[index] = await this.files.write(id, index, source, signal, (bytes) => {
+          const saved = durable && source.resumable ? {
+            hashes: prior ? await this.index.hashes(id, index, signal) : new Map<number, string>(),
+            save: (block: number, hash: string) => this.index.saveHash(id, index, block, hash, signal),
+          } : undefined
+          record.files[index] = await this.files.write(id, index, source, signal, (bytes, fromDisk) => {
             completed += bytes
+            if (fromDisk) reused += bytes
             if (performance.now() - lastReport >= 50 || completed === total)
               report('copying', source.path)
-          })
+          }, saved)
         }
         const stored = await this.files.sources(id, record.files, readPool, signal)
         if ((await gameIdentity(stored, checkpoint)) !== sourceGameId)
@@ -192,7 +225,7 @@ export class LibraryService {
         http.close()
         readPool.close()
         // A terminated Worker may leave an orphan. Recovery under the same write lock removes it.
-        if (!published) await this.files.remove(id).catch(() => {})
+        if (!published && !durable) await this.files.remove(id).catch(() => {})
       }
     })
   }
@@ -251,9 +284,11 @@ export class LibraryService {
       throw error
     }
   }
-  async remove(id: string): Promise<void> {
+  async remove(id: string, unfinishedOnly = false): Promise<void> {
     libraryId(id)
     await this.locks.request(LIBRARY_WRITE_LOCK, async () => {
+      if (unfinishedOnly && !(await this.index.catalog()).downloads.some((item) => item.id === id))
+        throw new Error('这项下载已经完成或已被移除。')
       await this.locks.request(libraryReadLock(id), { ifAvailable: true }, async (lock) => {
         if (!lock)
           throw new Error(

@@ -5,7 +5,12 @@ class __SoundBase {
     if(owner===void)throw new Exception("SoundBuffer requires an action owner");
     if(typeof owner!="Object")throw new Exception("SoundBuffer requires an object action owner");
     __soundKind=kind;__soundOwner=owner;__filters=[];
-    __soundId=__host("Sound.create",kind,this);
+    var options=kind=="wave"?__host("Sound.waveOptions"):void;
+    // Native sound options initialize in the first Wave constructor. Convert
+    // its string through this VM's real int operation before handing it back;
+    // the host must not reenter a running VM to parse an option.
+    if(options!==void && options[1]!==void)options[1]=int(options[1]);
+    __soundId=__host("Sound.create",kind,this,options);
   }
   function __soundRun(method,args,filters=void) {
     var result=__host("Sound.call",__soundId,method,args,filters);

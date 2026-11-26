@@ -31,6 +31,7 @@ import type { EventClock } from '../scheduler/events.ts'
 import { MidiOutputExecutor } from './midi-output.ts'
 import { CddaDiscs, InvalidCddaDrive, openCddaSelection, type CddaSelection } from '../storage/cdda.ts'
 import { waveConversionOption } from './wave-output.ts'
+import { readWaveFocusOptions, type WaveFocusOptions } from './wave-focus.ts'
 interface Sound {
   id: number
   kind: SoundKind
@@ -68,6 +69,7 @@ export class SoundService {
   private globalFocusMode = 0
   private waveOptionsInitialized = false
   private waveConversion?: WaveConversion
+  private waveFocus: WaveFocusOptions = { mode: 0, volume: 0 }
   private disposed = false
   private closes = new Set<Promise<void>>()
   private closeErrors: unknown[] = []
@@ -91,7 +93,7 @@ export class SoundService {
       resolve(name: string): Resource | Promise<Resource>
       checkpoint(): void | Promise<void>
     },
-    private readonly getWaveConversionOption: () => string | undefined = () => undefined,
+    private readonly getWaveOption: (name: string) => string | undefined = () => undefined,
   ) {
     this.midiOutput = new MidiOutputExecutor(midiClock,
       (message) => this.command({ op: 'midiMessage', message }))
@@ -274,6 +276,12 @@ export class SoundService {
       if (!Number.isSafeInteger(value)) throw new Error('Invalid sound numeric argument')
       return value
     }
+    if (operation === 'Sound.waveOptions') {
+      if (this.disposed || this.cancelling) throw new Error('Sound service is disposed')
+      return this.waveOptionsInitialized ? undefined : scriptList([
+        this.getWaveOption('-wsmute'), this.getWaveOption('-wsmutevol'), this.getWaveOption('-wsforcecnv'),
+      ])
+    }
     if (operation === 'Sound.create') {
       if (this.disposed) throw new Error('Sound service is disposed')
       const kind = args[0],
@@ -284,8 +292,19 @@ export class SoundService {
       // WaveImpl initializes its process sound options in the first Wave
       // instance constructor, not in script bootstrap or on every Open.
       if (kind === 'wave' && !this.waveOptionsInitialized) {
-        this.waveConversion = waveConversionOption(this.getWaveConversionOption())
+        if (!isScriptObject(args[2])) throw new Error('Wave options require their native conversion')
+        const options = context.snapshot(args[2])
+        if (options.type !== 'array' || options.items.length !== 3) throw new Error('Invalid Wave startup options')
+        const [mode, percent, conversion] = options.items
+        if ((mode !== undefined && typeof mode !== 'string') || (percent !== undefined && typeof percent !== 'bigint') ||
+            (conversion !== undefined && typeof conversion !== 'string')) throw new Error('Invalid Wave startup options')
+        const focus = readWaveFocusOptions(mode, percent === undefined ? undefined : Number(BigInt.asIntN(32, percent)))
+        this.waveConversion = waveConversionOption(conversion)
+        this.waveFocus = focus
         this.waveOptionsInitialized = true
+        if (this.backend && (focus.mode || focus.volume))
+          await this.command({ op: 'focusMode', mode: Math.max(this.globalFocusMode, focus.mode), muteVolume: focus.volume })
+        if (this.disposed || this.cancelling) throw new Error('Sound service was closed during Wave initialization')
       }
       const id = this.nextId++
       const owner = this.objects.observe(callback, () => this.retire(id))
@@ -340,7 +359,7 @@ export class SoundService {
         if (args[1] !== undefined) {
           const mode = number(1)
           if (mode < 0 || mode > 2) throw new Error('Invalid sound global focus mode')
-          if (this.backend) await this.command({ op: 'focusMode', mode })
+          if (this.backend) await this.command({ op: 'focusMode', mode: Math.max(mode, this.waveFocus.mode), muteVolume: this.waveFocus.volume })
           this.globalFocusMode = mode
         }
         return BigInt(this.globalFocusMode)

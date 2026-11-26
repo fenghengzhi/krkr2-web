@@ -49,8 +49,8 @@ const api: LibraryApi = {
     current.abort.abort(new DOMException('Library import cancelled', 'AbortError'))
     await current.done.catch(() => {})
   },
-  async remove(id) {
-    await (await active()).remove(id)
+  async remove(id, unfinishedOnly) {
+    await (await active()).remove(id, unfinishedOnly)
   },
   async update(id, settings) {
     await (await active()).update(id, settings)

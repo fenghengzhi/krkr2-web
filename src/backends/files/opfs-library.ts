@@ -8,11 +8,16 @@ import {
 } from '../../player/library/records.ts'
 
 export interface LibraryWriter {
+  read?(bytes: Uint8Array, options: { at: number }): number
   write(bytes: Uint8Array, options: { at: number }): number
   truncate(size: number): void
   getSize(): number
   flush(): void
   close(): void
+}
+export interface LibraryCopyCheckpoint {
+  hashes: ReadonlyMap<number, string>
+  save(block: number, hash: string): Promise<void>
 }
 type SyncFile = Omit<FileSystemFileHandle, 'createSyncAccessHandle'> & {
   createSyncAccessHandle(): Promise<LibraryWriter>
@@ -27,16 +32,43 @@ export async function copyLibraryFile(
   source: SourceFile,
   writer: LibraryWriter,
   signal: AbortSignal,
-  progress: (bytes: number) => void,
+  progress: (bytes: number, reused?: boolean) => void,
+  checkpoint?: LibraryCopyCheckpoint,
 ): Promise<LibraryFile> {
   const hashes: string[] = []
   let deadline = performance.now() + 8
   try {
     signal.throwIfAborted()
-    writer.truncate(0)
+    const existing = checkpoint ? writer.getSize() : 0
+    if (!checkpoint || existing > source.source.size) writer.truncate(Math.min(existing, source.source.size))
     for (let offset = 0; offset < source.source.size; offset += BLOCK) {
       signal.throwIfAborted()
-      const length = Math.min(BLOCK, source.source.size - offset)
+      const length = Math.min(BLOCK, source.source.size - offset), block = offset / BLOCK,
+        expected = checkpoint?.hashes.get(block)
+      if (expected && writer.read && offset + length <= existing) {
+        const previous = new Uint8Array(length)
+        let read = 0
+        while (read < length) {
+          const count = writer.read(previous.subarray(read), { at: offset + read })
+          if (!Number.isSafeInteger(count) || count <= 0 || count > length - read) break
+          read += count
+          if (performance.now() >= deadline) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+            signal.throwIfAborted()
+            deadline = performance.now() + 8
+          }
+        }
+        if (read === length && await hashBlock(previous) === expected) {
+          signal.throwIfAborted()
+          hashes.push(expected)
+          progress(length, true)
+          if (performance.now() >= deadline) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+            deadline = performance.now() + 8
+          }
+          continue
+        }
+      }
       const bytes = await source.source.read(offset, length)
       signal.throwIfAborted()
       if (bytes.length !== length) throw new Error('Source file changed during library import')
@@ -52,6 +84,12 @@ export async function copyLibraryFile(
           deadline = performance.now() + 8
         }
         signal.throwIfAborted()
+      }
+      if (checkpoint) {
+        // A committed checksum may refer only to durable data. An interrupted
+        // write without a matching checkpoint is fetched again on retry.
+        writer.flush()
+        await checkpoint.save(block, hashes[block]!)
       }
       progress(length)
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -238,7 +276,8 @@ export class OpfsLibraryFiles {
     index: number,
     source: SourceFile,
     signal: AbortSignal,
-    progress: (bytes: number) => void,
+    progress: (bytes: number, reused?: boolean) => void,
+    checkpoint?: LibraryCopyCheckpoint,
   ): Promise<LibraryFile> {
     signal.throwIfAborted()
     const directory = await this.root.getDirectoryHandle(libraryId(id), { create: true })
@@ -246,7 +285,7 @@ export class OpfsLibraryFiles {
     const file = (await directory.getFileHandle(String(index), { create: true })) as SyncFile
     signal.throwIfAborted()
     const writer = await file.createSyncAccessHandle()
-    return copyLibraryFile(source, writer, signal, progress)
+    return copyLibraryFile(source, writer, signal, progress, checkpoint)
   }
   async sources(
     id: string,
