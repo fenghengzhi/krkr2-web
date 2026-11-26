@@ -15,3 +15,5 @@
 固定 SDK 附带的原版程序其普通内嵌配置为空。原版 Windows 作业保留该区域的读取结果，并运行空配置、外部配置、用户设置和命令行组合共五种情况。非空内嵌设置使用独立编写的测试数据验收。浏览器用实际游戏按钮检查启动路线、存档、导入设置和从库重启。[原版 Windows 验收](../../tests/probes/player-config-sdk.ts) · [浏览器验收](../../tests/browser/game-config.spec.ts)
 
 第 133 批首版最新取回的五个常规浏览器分片中，2,137 项通过、53 项失败、1 项跳过。该版 KAG 缩略图的实际保存与刷新读回在三种浏览器、两种后端及源码和字节码的 12 个组合上全部通过。原版介绍游戏已取得 Chromium 和 Firefox 的四条通过路线，WebKit 对应分片在本次取回时仍未报告。第 133 批最终版至第 138 批当时均在排队。[133 首版托管结果](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759125623)
+
+实现提交 `06ee58c5d8922039094771c3f1e3621dcae92c92` 已登记托管工作流，首次状态为 `pending`。本批新增 16 个 Node 用例，扩充原有四个浏览器启动配置用例及原版 Windows 对照。结果在下一轮取回。[第 139 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45769721383)
