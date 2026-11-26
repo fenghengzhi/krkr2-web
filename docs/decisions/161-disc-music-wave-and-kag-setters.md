@@ -23,3 +23,5 @@ CUE 以前已经接受 `FILE "disc.aiff" AIFF`，但播放时缺少对应解码�
 第 159 批已结束。此前记录的 PKSFX 测试类型错误阻断应用构建，依赖它的 Node、浏览器与声音素材作业均已跳过。第 160 批已通过独立的测试与工具类型检查、应用类型检查与生产构建、离线测试资源构建。取回时仍在生成 Deflate64 夹具，尚无 Node 或主浏览器结果。[第 159 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45824742294) · [第 160 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404)
 
 第 160 批原版图形对照为 124/124，原版 KAG 为 122/124，其中新增的五项宏参数读取对照全部匹配。Windows 声音对照中，停止态清空标志的观测已匹配，暂停态用例因托管机器没有声音驱动而未取得观测。本批新取回 29 份普通归档，共 61,939,968 字节，另复用 20 份已校验原件。[第 160 批托管运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404)
+
+第 161 批实现提交 `9506f2e542837bad1eb2ff87bdf74b6c3f6fbcab` 已在 GitHub-hosted Actions 登记，登记时为 `pending`。下一批取回结果。[第 161 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45831107660)

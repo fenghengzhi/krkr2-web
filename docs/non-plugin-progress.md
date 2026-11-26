@@ -4,6 +4,8 @@
 
 第 161 批接入多盘游戏的 CUE 配置、AIFF 配乐与旧 WAVE 读取，并修正 KAG 转发属性的赋值。第 160 批已通过应用生产构建，五项新增宏参数原版对照全部匹配，主浏览器结果在此次快照中尚未报告。[161 实现与托管证据](decisions/161-disc-music-wave-and-kag-setters.md)
 
+提交 `9506f2e` 的托管验证登记时为 `pending`。下一批取回运行结果。[第 161 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45831107660)
+
 第 160 批支持识别和选择带说明文件的 ZIP 游戏，从桌面备份选目录读档，并修正 KAG 宏的动态属性和配乐分支标志重置。第 159 批原版图形对照 124/124 匹配，取回时尚无主浏览器结果。[160 实现与托管证据](decisions/160-save-folders-kag-parameters-and-wave-flags.md)
 
 提交 `58f6469` 的托管验证登记时为 `queued`。下一批取回运行结果。[第 160 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45828022404)
