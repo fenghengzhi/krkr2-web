@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { waveMaskCases, waveMaskFiles } from '../helpers/wave-speaker-mask.ts'
+import { quadFiles, quadRows } from '../helpers/wave-quad.ts'
 import { decodeWav } from '../../src/formats/audio/wav.ts'
 import { AudioMixer } from '../../src/engine/media/mixer.ts'
 import { defaultSoundSettings } from '../../src/engine/ports/audio.ts'
@@ -54,8 +55,60 @@ try {
       maximumReferenceError, referenceAbsoluteTolerance: 2 ** -23, matched: true })
     save('comparison.json', { complete: false, results })
   }
+  // Fixed WaveImpl.cpp duplicates mono/stereo to FL/FR/BL/BR. Independently
+  // materialize all four planes with FFmpeg before applying the pre-existing
+  // Web downmix policy. Preserve both raw outputs, not just a scalar summary.
+  for (const channels of [1, 2]) {
+    const name = `quad-expand-${channels === 1 ? 'mono' : 'stereo'}`, frames = 8208,
+      bytes = quadFiles()[channels === 1 ? 'quad-mono.wav' : 'quad-stereo.wav'], input = resolve(output, name + '.wav'),
+      expandedPath = resolve(output, name + '.quad.f32le'), rightSource = channels === 1 ? 'c0' : 'c1'
+    writeFileSync(input, bytes)
+    const probeArgs = ['-v', 'error', '-show_streams', '-of', 'json', input]
+    commands.push({ executable: 'ffprobe', args: probeArgs }); save('commands.json', commands)
+    const probe = JSON.parse(execFileSync('ffprobe', probeArgs, { encoding: 'utf8', timeout: 30000 }))
+    save(name + '.ffprobe.json', probe)
+    assert.equal(probe.streams.length, 1); assert.equal(probe.streams[0].channels, channels)
+    assert.equal(probe.streams[0].sample_rate, '1000'); assert.equal(probe.streams[0].codec_name, 'pcm_s16le')
+    const quadArgs = ['-nostdin', '-v', 'error', '-i', input, '-af',
+      `aformat=sample_fmts=flt,pan=quad|FL=c0|FR=${rightSource}|BL=c0|BR=${rightSource}`,
+      '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1']
+    commands.push({ executable: 'ffmpeg', args: quadArgs }); save('commands.json', commands)
+    const quad = execFileSync('ffmpeg', quadArgs, { timeout: 30000, maxBuffer: 1024 * 1024 }),
+      quadView = new DataView(quad.buffer, quad.byteOffset, quad.byteLength)
+    writeFileSync(expandedPath, quad); assert.equal(quad.length, frames * 4 * 4)
+    for (let frame = 0; frame < frames; frame++) for (let channel = 0; channel < 4; channel++)
+      assert.equal(quadView.getFloat32((frame * 4 + channel) * 4, true),
+        quadRows[frame % 8]![channels === 1 ? 0 : channel % 2], `${name} duplicated plane ${channel}:${frame}`)
+    const stereoArgs = ['-nostdin', '-v', 'error', '-f', 'f32le', '-ar', '1000', '-ac', '4', '-channel_layout', 'quad',
+      '-i', expandedPath, '-af', 'pan=stereo|FL=FL+0.70710678*BL|FR=FR+0.70710678*BR',
+      '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1']
+    commands.push({ executable: 'ffmpeg', args: stereoArgs }); save('commands.json', commands)
+    const reference = execFileSync('ffmpeg', stereoArgs, { timeout: 30000, maxBuffer: 1024 * 1024 }),
+      view = new DataView(reference.buffer, reference.byteOffset, reference.byteLength), mixer = new AudioMixer(1000),
+      left = new Float32Array(frames), right = new Float32Array(frames), asset = decodeWav(bytes, { nativeRiff: true })!
+    writeFileSync(resolve(output, name + '.stereo.f32le'), reference); assert.equal(reference.length, frames * 2 * 4)
+    let maximumReferenceError = 0
+    try {
+      mixer.command({ op: 'load', id: 1, kind: 'wave', asset, settings: { ...defaultSoundSettings(), waveExpandQuad: true } })
+      mixer.command({ op: 'play', id: 1 }); mixer.render(left, right)
+      assert.equal(mixer.snapshot(1).channels, 4)
+      for (let frame = 0; frame < frames; frame++) for (const channel of [0, 1]) {
+        const value = quadRows[frame % 8]![channels === 1 ? 0 : channel]!,
+          expected = value === 0 ? 0 : Math.fround(value + value * 0.70710678),
+          independent = view.getFloat32((frame * 2 + channel) * 4, true), actual = channel ? right[frame]! : left[frame]!,
+          error = Math.abs(independent - expected)
+        assert(Number.isFinite(independent) && error <= 2 ** -23, `${name} stereo ${channel}:${frame}`)
+        maximumReferenceError = Math.max(maximumReferenceError, error)
+        assert.equal(actual, expected, `${name} exact Web output ${channel}:${frame}`)
+      }
+    } finally { mixer.command({ op: 'shutdown' }) }
+    results.push({ name, frames, inputChannels: channels, outputChannels: 4, inputSha256: hash(bytes),
+      quadSha256: hash(quad), referenceSha256: hash(reference), maximumReferenceError,
+      referenceAbsoluteTolerance: 2 ** -23, matched: true })
+    save('comparison.json', { complete: false, results })
+  }
   save('comparison.json', { complete: true, matched: results.length, results,
-    scope: 'FFmpeg resolves declared speaker names from actual WAVE headers. Explicit pan coefficients compare the Web stereo policy; not a physical Windows driver equivalence claim.' })
+    scope: 'FFmpeg resolves declared speaker names from actual WAVE headers; two further cases independently duplicate mono/stereo into four raw planes as in fixed WaveImpl. Explicit pan coefficients compare the Web stereo policy; not a physical Windows driver equivalence claim.' })
 } catch (error) {
   save('comparison.json', { complete: false, results, error: error instanceof Error ? error.message : String(error) })
   throw error

@@ -91,6 +91,8 @@ export interface PhaseVocoderFilter {
 export interface SoundSettings {
   /** Frozen native -wsforcecnv output policy; absent keeps existing output. */
   waveConversion?: WaveConversion
+  /** Frozen -wsexpandquad output option; absent preserves the source layout. */
+  waveExpandQuad?: boolean
   volume: number
   volume2: number
   pan: number
@@ -133,7 +135,7 @@ export type MixerCommand =
   /** Wave freeDirectSound destroys rendering buffers after Stop callbacks,
    * retaining the open decoder, loop manager and inherited fade controls. */
   | { op: 'releaseWaveBuffer'; id: number }
-  | { op: 'set'; id: number; property: Exclude<keyof SoundSettings, 'waveConversion'>; value: number | boolean }
+  | { op: 'set'; id: number; property: Exclude<keyof SoundSettings, 'waveConversion' | 'waveExpandQuad'>; value: number | boolean }
   | { op: 'flag'; id: number; index: number; value: number }
   /** Native WaveFlags.reset clears all flags under one loop-manager lock. */
   | { op: 'resetFlags'; id: number }

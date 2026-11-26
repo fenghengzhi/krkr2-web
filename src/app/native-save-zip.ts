@@ -57,11 +57,8 @@ export function createNativeSaveZipPicker(root: HTMLElement, options: {
   }
   choose.addEventListener('click', () => { pickerRevision = revision; input.click() })
   input.addEventListener('cancel', () => { pickerRevision = undefined })
-  input.addEventListener('change', () => {
-    const file = input.files?.[0], selectedAt = pickerRevision
-    input.value = ''
-    pickerRevision = undefined
-    if (!file || !session || selectedAt !== revision) return
+  const open = (file: File) => {
+    if (!session || busy) return
     reset()
     const openedAt = revision
     options.run(async (_, check) => {
@@ -76,6 +73,12 @@ export function createNativeSaveZipPicker(root: HTMLElement, options: {
         navigate('')
       } catch (error) { if (openedAt === revision) throw error }
     })
+  }
+  input.addEventListener('change', () => {
+    const file = input.files?.[0], selectedAt = pickerRevision
+    input.value = ''
+    pickerRevision = undefined
+    if (file && selectedAt === revision) open(file)
   })
   directory.addEventListener('change', () => navigate(directory.value))
   cancel.addEventListener('click', () => { reset(); choose.focus() })
@@ -94,7 +97,7 @@ export function createNativeSaveZipPicker(root: HTMLElement, options: {
     })
   })
   return {
-    reset,
+    reset, open,
     update(current: SessionClient | undefined, blocked: boolean) {
       busy = blocked
       if (session !== current) { session = current; reset() }

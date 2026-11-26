@@ -72,13 +72,16 @@ function generateMovieFixtures(directory, prefix) {
       rgb.set(color, (frame * width * height + y * width + x) * 3)
     }
   }
+  const bilingual = prefix === 'dvd-audio', alternate = bilingual ? Buffer.alloc(pcm.length) : undefined
   for (let sample = 0; sample < rate * 4; sample++) {
-    const time = sample / rate, frequency = time < .5 ? 0 : time < 1.6 ? 440 : time < 2.8 ? 660 : 880,
+    const time = sample / rate, frequency = time < .5 ? 0 : bilingual || time < 1.6 ? 440 : time < 2.8 ? 660 : 880,
       value = frequency ? Math.round(Math.sin(2 * Math.PI * frequency * time) * 0.18 * 32767) : 0
     pcm.writeInt16LE(value, sample * 2)
+    if (alternate && time >= .5) alternate.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 880 * time) * .18 * 32767), sample * 2)
   }
   writeFileSync(path(prefix + '-authored.rgb'), rgb)
   writeFileSync(path(prefix + '-authored.s16le'), pcm)
+  if (alternate) writeFileSync(path(prefix + '-alternate.s16le'), alternate)
   const run = (binary, args, name) => {
     const result = spawnSync(binary, args, { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 })
     writeFileSync(path(name + '.stdout.log'), result.stdout ?? '')
@@ -91,6 +94,17 @@ function generateMovieFixtures(directory, prefix) {
   const videoInput = ['-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', `${width}x${height}`],
     audioInput = ['-f', 's16le', '-ar', String(rate), '-ac', '1', '-i', path(prefix + '-authored.s16le')],
     fixturesByGroup = {
+      'large-dib': [
+        { file: 'legacy-large-dib.avi', aliases: [], video: 'rawvideo', audio: 'pcm_s16le', container: 'avi',
+          scale: 9, options: ['-vf', 'scale=iw*9:ih*9:flags=neighbor', '-c:v', 'rawvideo',
+            '-pix_fmt', 'bgr24', '-c:a', 'pcm_s16le', '-f', 'avi'] },
+      ],
+      'dvd-audio': [
+        { file: 'legacy-bilingual.mpg', aliases: [], video: 'mpeg2video', audio: 'ac3', secondAudio: 'pcm_dvd',
+          container: 'mpeg', bFrames: true, options: ['-c:v', 'mpeg2video', '-q:v', '2', '-g', '12', '-bf', '2',
+            '-pix_fmt', 'yuv420p', '-c:a:0', 'ac3', '-b:a:0', '192k', '-ac:a:0', '2',
+            '-c:a:1', 'pcm_s16be', '-ac:a:1', '2', '-muxpreload', '0', '-muxdelay', '0', '-f', 'vob'] },
+      ],
       'avi-adpcm': [
         { file: 'legacy-msvideo1.avi', aliases: [], video: 'msvideo1', videoTag: 'MSVC', audio: 'adpcm_ima_wav', container: 'avi',
           options: ['-c:v', 'msvideo1', '-vtag', 'MSVC', '-pix_fmt', 'rgb555le',
@@ -146,20 +160,26 @@ function generateMovieFixtures(directory, prefix) {
       }
       const [rateNum, rateDen] = item.fps ?? [fps, 1], itemFps = rateNum / rateDen, inputRate = `${rateNum}/${rateDen}`
       run('ffmpeg', [...common, ...videoInput, '-framerate', inputRate, '-i', path(prefix + '-authored.rgb'), ...(item.audioOffset ? ['-itsoffset', String(item.audioOffset)] : []),
-        ...soundInput, '-map', '0:v:0',
-        ...(item.audio ? ['-map', '1:a:0'] : []), ...item.options,
+        ...soundInput, ...(item.secondAudio ? ['-f', 's16le', '-ar', String(rate), '-ac', '1', '-i', path(prefix + '-alternate.s16le')] : []),
+        '-map', '0:v:0',
+        ...(item.audio ? ['-map', '1:a:0'] : []), ...(item.secondAudio ? ['-map', '2:a:0'] : []), ...item.options,
         '-r:v', inputRate, '-threads', '1', ...(item.elementary ? ['-frames:v', String(frames)] : ['-t', '4']), path(item.file)], item.file + '.encode')
       const probe = ['-v', 'error', '-analyzeduration', '10000000', '-probesize', '8388608']
       const metadata = JSON.parse(run('ffprobe', [...probe, '-show_streams', '-show_format', '-of', 'json', path(item.file)], item.file + '.probe')),
         videos = metadata.streams.filter((stream) => stream.codec_type === 'video'),
         audios = metadata.streams.filter((stream) => stream.codec_type === 'audio')
-      if (videos.length !== 1 || videos[0].codec_name !== item.video || videos[0].width !== width ||
-        videos[0].height !== height || (item.container && metadata.format.format_name !== item.container) ||
+      const audioCodecs = [item.audio, item.secondAudio].filter(Boolean)
+      const scale = item.scale ?? 1
+      if (videos.length !== 1 || videos[0].codec_name !== item.video || videos[0].width !== width * scale ||
+        videos[0].height !== height * scale || (item.container && metadata.format.format_name !== item.container) ||
         (item.videoTag && videos[0].codec_tag_string !== item.videoTag) ||
-        audios.length !== (item.audio ? 1 : 0) || (item.audio && (audios[0].codec_name !== item.audio || Number(audios[0].sample_rate) !== rate)))
+        audios.length !== audioCodecs.length || !audioCodecs.every((name) => audios.some((a) => a.codec_name === name)) ||
+        audios.some((a) => Number(a.sample_rate) !== rate || (bilingual && a.channels !== 2)))
         throw new Error(`Unexpected hosted legacy stream inventory: ${item.file} ${JSON.stringify(metadata.streams)}`)
       const timeline = JSON.parse(run('ffprobe', [...probe, '-fflags', '+genpts', '-select_streams', 'v:0', '-show_frames', '-of', 'json', path(item.file)], item.file + '.frames'))
       if (timeline.frames.length !== frames) throw new Error(`Unexpected hosted legacy frame count: ${item.file}`)
+      if (item.scale && !(videos[0].pix_fmt === 'bgr24' && Number(timeline.frames[96].pkt_pos) > 128 * 1024 ** 2))
+        throw new Error('Expected the final scene in the RGB AVI beyond the buffered input limit')
       const { times, inferredTimestampIndices, timeScope } = pictureTimes(item, metadata, timeline, itemFps, prefix === 'windows-media' || item.container === 'avi'),
         commonStart = item.elementary ? 0 : Number(metadata.format.start_time ?? videos[0].start_time ?? 0),
         normalizedVideoTimes = times.map((time) => time - commonStart)
@@ -169,10 +189,12 @@ function generateMovieFixtures(directory, prefix) {
         throw new Error(`Reordered MPEG input must retain B frames: ${item.file}`)
       if (item.audioOffset && !(Number(audios[0].start_time) - Number(videos[0].start_time) > .2))
         throw new Error(`Independent input must retain its delayed audio stream: ${item.file}`)
-      run('ffmpeg', [...common, '-i', path(item.file), '-map', '0:v:0', '-vsync', '0', '-pix_fmt', 'rgba', '-f', 'rawvideo', path(item.file + '.rgba')], item.file + '.decode')
+      run('ffmpeg', [...common, '-i', path(item.file), '-map', '0:v:0',
+        ...(item.scale ? ['-vf', `scale=${width}:${height}:flags=neighbor`] : []),
+        '-threads:v', '1', '-vsync', '0', '-pix_fmt', 'rgba', '-f', 'rawvideo', path(item.file + '.rgba')], item.file + '.decode')
       const decoded = readFileSync(path(item.file + '.rgba'))
       if (decoded.length !== width * height * 4 * frames) throw new Error(`Incomplete independent legacy decode: ${item.file}`)
-      const checkedFrames = item.elementary || prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm'
+      const checkedFrames = item.elementary || prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm' || bilingual || item.scale
         ? Array.from({ length: frames }, (_, i) => i) : [0, 25, 50, 80]
       const checks = checkedFrames.map((frame) => {
         const phase = frame < 40 ? 0 : frame < 70 ? 1 : 2, at = (frame * width * height + 32 * width + 48) * 4,
@@ -189,13 +211,15 @@ function generateMovieFixtures(directory, prefix) {
         if (code !== frame) throw new Error(`Independent legacy frame marker changed: ${item.file} ${code}/${frame}`)
         return { frame, color, code, timestamp: timeline.frames[frame] }
       })
-      let decodedAudio
-      if (prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm') {
-        const file = item.file + '.s16le'
-        run('ffmpeg', [...common, '-i', path(item.file), '-map', '0:a:0', '-ac', '1', '-ar', String(rate),
-          '-f', 's16le', path(file)], item.file + '.decode-audio')
+      const decodedTracks = []
+      if (prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm' || bilingual || item.scale) for (const [index, audio] of audios.entries()) {
+        const file = item.file + (bilingual ? '.audio-' + index : '') + '.s16le',
+          name = item.file + '.decode-audio' + (bilingual ? '-' + index : ''),
+          tone = bilingual ? audio.codec_name === 'ac3' ? 440 : 880 : undefined
+        run('ffmpeg', [...common, '-i', path(item.file), '-map', '0:a:' + index, '-ac', '1', '-ar', String(rate),
+          '-f', 's16le', path(file)], name)
         const samples = readFileSync(path(file)), toneChecks = []
-        for (const [start, frequency] of [[.17, 0], [.9, 440], [2.05, 660], [3.25, 880]]) {
+        for (const [start, frequency] of [[.17, 0], [.9, tone ?? 440], [2.05, tone ?? 660], [3.25, tone ?? 880]]) {
           let peak = 0, cycles = 0, previous = 0
           const first = Math.round(start * rate), count = Math.round(.2 * rate)
           for (let i = first; i < first + count; i++) {
@@ -209,12 +233,14 @@ function generateMovieFixtures(directory, prefix) {
             throw new Error(`Independent audio decode lost the authored tone: ${item.file} at ${start}s`)
           toneChecks.push({ start, peak, expectedHz: frequency, measuredHz: measured })
         }
-        decodedAudio = { file, bytes: samples.length, sha256: sha(samples), rate, checks: toneChecks }
+        decodedTracks.push({ file, bytes: samples.length, sha256: sha(samples), rate, checks: toneChecks,
+          ...(bilingual && { index, codec: audio.codec_name, tone, streamId: audio.id }) })
       }
       const bytes = readFileSync(path(item.file))
       for (const alias of item.aliases) writeFileSync(path(alias), bytes)
       fixtures.push({ file: item.file, aliases: item.aliases, bytes: bytes.length, sha256: sha(bytes),
-        videoCodec: item.video, videoTag: videos[0].codec_tag_string, audioCodec: item.audio, decodedAudio, audioInputOffset: item.audioOffset ?? 0,
+        videoCodec: item.video, videoTag: videos[0].codec_tag_string, audioCodec: audios[0]?.codec_name ?? null, decodedAudio: decodedTracks[0],
+        ...(bilingual && { audioTracks: decodedTracks }), audioInputOffset: item.audioOffset ?? 0,
         fps: itemFps, authoredVideoDuration: frames / itemFps, commonStart, normalizedVideoTimes,
         inferredTimestampIndices, timeScope, metadata, timeline,
         independentRgba: { file: item.file + '.rgba', bytes: decoded.length, sha256: sha(decoded) }, checks })
@@ -230,8 +256,10 @@ function generateMovieFixtures(directory, prefix) {
     authored: { rgb: { file: prefix + '-authored.rgb', bytes: rgb.length, sha256: sha(rgb) },
       pcm: { file: prefix + '-authored.s16le', bytes: pcm.length, sha256: sha(pcm), rate, channels: 1 },
       colors, colorIntervals: [[0, 1.6], [1.6, 2.8], [2.8, 4]], colorFrameIntervals: [[0, 40], [40, 70], [70, 100]],
-      soundIntervals: [{ start: 0, end: .5, frequency: 0 }, { start: .5, end: 1.6, frequency: 440 },
-        { start: 1.6, end: 2.8, frequency: 660 }, { start: 2.8, end: 4, frequency: 880 }],
+      ...(bilingual ? { alternatePcm: { file: prefix + '-alternate.s16le', bytes: alternate.length, sha256: sha(alternate) },
+        audioPrograms: [{ codec: 'ac3', toneHz: 440 }, { codec: 'pcm_dvd', toneHz: 880 }], initialSilenceSeconds: .5 } :
+      { soundIntervals: [{ start: 0, end: .5, frequency: 0 }, { start: .5, end: 1.6, frequency: 440 },
+        { start: 1.6, end: 2.8, frequency: 660 }, { start: 2.8, end: 4, frequency: 880 }] }),
       marker: { bits: 7, order: 'LSB first', x: 6, y: 44, width: 12, height: 16, dark: 16, light: 235 } },
     fixtures, commands }
   const manifest = (prefix === 'legacy' ? 'legacy-video' : prefix) + '-reference.json'
@@ -245,3 +273,5 @@ export const generateLegacyVideoFixtures = (directory) => generateMovieFixtures(
 export const generateWindowsMediaFixtures = (directory) => generateMovieFixtures(directory, 'windows-media')
 export const generateMpeg2XvidFixtures = (directory) => generateMovieFixtures(directory, 'mpeg2-xvid')
 export const generateAviAdpcmFixtures = (directory) => generateMovieFixtures(directory, 'avi-adpcm')
+export const generateDvdAudioFixtures = (directory) => generateMovieFixtures(directory, 'dvd-audio')
+export const generateLargeDibFixture = (directory) => generateMovieFixtures(directory, 'large-dib')

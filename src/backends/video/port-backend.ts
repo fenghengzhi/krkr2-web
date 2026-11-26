@@ -17,6 +17,7 @@ import { readVideoTimeline, readVideoTimelineBlob } from '../../formats/video/mp
 import { mp4MetadataByteLimit } from '../../formats/video/mp4-source.ts'
 import { legacyVideoFormat, nativeMovieMime, type LegacyVideoFormat } from './legacy/format.ts'
 import { transcodeLegacyMovie } from './legacy/transcode.ts'
+import { checkLegacyInputSize } from './legacy/module.ts'
 
 type LegacyConverter = (input: Blob | Uint8Array, format: LegacyVideoFormat, signal: AbortSignal) => Promise<Blob>
 type MoviePayload = { blob: Blob; buffered: boolean }
@@ -153,7 +154,7 @@ export class PortVideoBackend implements VideoBackend {
       return { media, charge: 0 }
     }
     const size = input instanceof Uint8Array ? input.byteLength : input.size
-    if (size > videoSourceLimits.bufferedBytes) throw new Error('Legacy movie input exceeds 128 MiB budget')
+    checkLegacyInputSize(size, !(bytes instanceof Uint8Array) && !bytes.buffered)
     // Reserve the next worker slot in order. A cancelled waiter releases
     // its source now, even when the preceding movie takes minutes to convert.
     const previous = this.conversionSlot

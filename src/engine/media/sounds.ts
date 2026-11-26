@@ -30,7 +30,7 @@ import { AudioResourceSources, type AudioSourceLease } from '../storage/audio-so
 import type { EventClock } from '../scheduler/events.ts'
 import { MidiOutputExecutor } from './midi-output.ts'
 import { CddaDiscs, InvalidCddaDrive, openCddaSelection, type CddaSelection } from '../storage/cdda.ts'
-import { waveConversionOption } from './wave-output.ts'
+import { waveConversionOption, waveExpandQuadOption } from './wave-output.ts'
 import { readWaveFocusOptions, type WaveFocusOptions } from './wave-focus.ts'
 interface Sound {
   id: number
@@ -74,6 +74,7 @@ export class SoundService {
   private globalFocusMode = 0
   private waveOptionsInitialized = false
   private waveConversion?: WaveConversion
+  private waveExpandQuad = false
   private waveFocus: WaveFocusOptions = { mode: 0, volume: 0 }
   private disposed = false
   private closes = new Set<Promise<void>>()
@@ -318,6 +319,7 @@ export class SoundService {
       if (this.disposed || this.cancelling) throw new Error('Sound service is disposed')
       return this.waveOptionsInitialized ? undefined : scriptList([
         this.getWaveOption('-wsmute'), this.getWaveOption('-wsmutevol'), this.getWaveOption('-wsforcecnv'),
+        this.getWaveOption('-wsexpandquad'), this.getWaveOption('-wsuse3d'),
       ])
     }
     if (operation === 'Sound.create') {
@@ -332,12 +334,14 @@ export class SoundService {
       if (kind === 'wave' && !this.waveOptionsInitialized) {
         if (!isScriptObject(args[2])) throw new Error('Wave options require their native conversion')
         const options = context.snapshot(args[2])
-        if (options.type !== 'array' || options.items.length !== 3) throw new Error('Invalid Wave startup options')
-        const [mode, percent, conversion] = options.items
+        if (options.type !== 'array' || options.items.length !== 5) throw new Error('Invalid Wave startup options')
+        const [mode, percent, conversion, quad, use3d] = options.items
         if ((mode !== undefined && typeof mode !== 'string') || (percent !== undefined && typeof percent !== 'bigint') ||
-            (conversion !== undefined && typeof conversion !== 'string')) throw new Error('Invalid Wave startup options')
+            (conversion !== undefined && typeof conversion !== 'string') || (quad !== undefined && typeof quad !== 'string') ||
+            (use3d !== undefined && typeof use3d !== 'string')) throw new Error('Invalid Wave startup options')
         const focus = readWaveFocusOptions(mode, percent === undefined ? undefined : Number(BigInt.asIntN(32, percent)))
         this.waveConversion = waveConversionOption(conversion)
+        this.waveExpandQuad = waveExpandQuadOption(quad, use3d)
         this.waveFocus = focus
         this.waveOptionsInitialized = true
         if (this.backend && (focus.mode || focus.volume))
@@ -371,6 +375,7 @@ export class SoundService {
             epoch: 0,
             ...defaultSoundSettings(),
             ...(kind === 'wave' && this.waveConversion ? { waveConversion: this.waveConversion } : {}),
+            ...(kind === 'wave' && this.waveExpandQuad ? { waveExpandQuad: true } : {}),
             status: 'unload',
             fading: false,
             flags: Array(16).fill(0),
@@ -838,7 +843,7 @@ export class SoundService {
         if (result.snapshot) sound.snapshot = result.snapshot
       }
       const state = sound.snapshot
-      if (sound.kind === 'wave' && state.waveConversion && (property === 'bits' || property === 'channels'))
+      if (sound.kind === 'wave' && (state.waveConversion || state.waveExpandQuad) && (property === 'bits' || property === 'channels'))
         value = BigInt(property === 'bits' ? sound.waveOutputBits : sound.waveOutputChannels)
       else if (property === 'position')
         value = BigInt(

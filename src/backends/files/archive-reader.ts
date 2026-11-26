@@ -57,7 +57,7 @@ export async function openArchive(resource: Resource, checkpoint: () => Promise<
     ? (await findXp3Archive(source, { checkpoint }))?.source : undefined
   if (xp3) {
     if (distributionOnly) return
-    return { kind: 'xp3', entries: await readXp3(xp3, inflate, { checkpoint, compressedSegments: pool ?? createArchiveInflatePool() }) }
+    return { kind: 'xp3', entries: await readXp3(xp3, inflate, { checkpoint, joinBlobs: archiveReader.joinBlobs, compressedSegments: pool ?? createArchiveInflatePool() }) }
   }
   if (executableZip || resource.zipDiskOffsets || zipSignature(prefix) || /\.zip$/i.test(resource.name)) {
     return { kind: 'zip', entries: await readZip(source, {

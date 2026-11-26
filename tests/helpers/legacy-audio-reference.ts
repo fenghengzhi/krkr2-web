@@ -6,24 +6,27 @@ import { writeFileSync } from 'node:fs'
 /** Hosted independent AAC decode. In particular, do not add an aresample,
  * adelay or timestamp repair filter here: the actual produced media must
  * contain its leading silence, even for a consumer ignoring an empty edit. */
-export function inspectLegacyAudio(moviePath: string, offset: number, observation: Record<string, unknown>) {
+export function inspectLegacyAudio(moviePath: string, offset: number, observation: Record<string, unknown>,
+  track?: { index: number; tone: number }) {
   assert(Number.isFinite(offset) && (offset === 0 || offset === .3))
-  const probe = ['-v', 'error', '-select_streams', 'a', '-show_streams', '-of', 'json', moviePath],
-    decode = ['-v', 'error', '-i', moviePath, '-map', '0:a:0', '-ac', '1', '-ar', '48000', '-f', 'f32le', 'pipe:1'],
+  const selector = track ? 'a:' + track.index : 'a', suffix = track ? '.audio-' + track.index : '',
+    probe = ['-v', 'error', '-select_streams', selector, '-show_streams', '-of', 'json', moviePath],
+    decode = ['-v', 'error', '-i', moviePath, '-map', '0:a:' + (track?.index ?? 0), '-ac', '1', '-ar', '48000', '-f', 'f32le', 'pipe:1'],
     report = { commands: [['ffprobe', ...probe], ['ffmpeg', ...decode]],
-      streams: [] as { sample_rate: string; start_time: string }[], bytes: 0, sha256: '',
+      streams: [] as { codec_name: string; channels: number; sample_rate: string; start_time: string }[], bytes: 0, sha256: '',
       checks: [] as { start: number; duration: number; expectedHz: number; peak: number; measuredHz: number }[] }
   // Publish before external decoding/assertions so a failed comparison retains
   // its command, metadata and already measured PCM, alongside the original MP4.
-  observation.audio = report
+  observation[track ? 'audio' + track.index : 'audio'] = report
   report.streams = (JSON.parse(execFileSync('ffprobe', probe, { encoding: 'utf8',
     timeout: 30000, maxBuffer: 1024 * 1024 })) as { streams: typeof report.streams }).streams
   assert.equal(report.streams.length, 1)
   const stream = report.streams[0]!, rate = Number(stream.sample_rate)
+  if (track) { assert.equal(stream.codec_name, 'aac'); assert.equal(stream.channels, 2) }
   assert(Number.isFinite(rate) && rate > 0)
   const pcm = execFileSync('ffmpeg', decode, { timeout: 60000, maxBuffer: 4 * 1024 * 1024 })
   report.bytes = pcm.length; report.sha256 = createHash('sha256').update(pcm).digest('hex')
-  writeFileSync(moviePath + '.f32le', pcm)
+  writeFileSync(moviePath + suffix + '.f32le', pcm)
   assert(Math.abs(Number(stream.start_time)) <= 1 / rate,
     'Converted audio must start at the common zero origin, with delay represented by PCM')
   assert.equal(pcm.length % 4, 0)
@@ -32,7 +35,7 @@ export function inspectLegacyAudio(moviePath: string, offset: number, observatio
   // and the delayed ASF keep another .3 s of relative audio delay. These
   // windows avoid codec onset ringing and never derive timing from output.
   const windows = offset ? [[.55, .15, 0], [1.05, .2, 440], [2.15, .2, 660], [3.35, .2, 880]]
-    : [[.18, .17, 0], [.9, .2, 440], [2.05, .2, 660], [3.25, .2, 880]]
+    : [[.18, .17, 0], [.9, .2, track?.tone ?? 440], [2.05, .2, track?.tone ?? 660], [3.25, .2, track?.tone ?? 880]]
   for (const [start, duration, expectedHz] of windows as [number, number, number][]) {
     const first = Math.round(start * 48000), count = Math.round(duration * 48000)
     let peak = 0, crossings = 0, previous = pcm.readFloatLE((first - 1) * 4)

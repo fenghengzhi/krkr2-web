@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PortVideoBackend } from '../../src/backends/video/port-backend.ts'
 import { legacyVideoFormat, type LegacyVideoFormat } from '../../src/backends/video/legacy/format.ts'
+import { checkLegacyInputSize } from '../../src/backends/video/legacy/module.ts'
 import { defaultVideoSettings, type VideoCommand } from '../../src/engine/ports/video.ts'
 import { ExecutionCancelled } from '../../src/engine/scheduler/control.ts'
 import { readVideoTimeline } from '../../src/formats/video/mp4.ts'
@@ -124,12 +125,20 @@ test('borrowed legacy sources and converted output have independent size checks'
   const block = new Blob([new Uint8Array(1024 * 1024)])
   const large = new Blob(Array<Blob>(129).fill(block))
   let conversions = 0
-  const f = transport(async () => { conversions++; return large })
+  const small = new Blob([await mp4File()]), f = transport(async (input) => {
+    conversions++
+    return input instanceof Blob && input.size === large.size ? small : large
+  })
   try {
-    await assert.rejects(f.port.command(open('large.avi', { blob: large, buffered: false })), /input exceeds 128 MiB/)
+    await assert.rejects(f.port.command(open('buffered.avi', { blob: large, buffered: true })), /input exceeds 128 MiB/)
     assert.equal(conversions, 0)
+    await f.port.command(open('large.avi', { blob: large, buffered: false }))
+    assert.equal(conversions, 1); assert.equal(f.opens.length, 1)
     await assert.rejects(f.port.command(open('large-output.mpg', Uint8Array.of(1), 2)), /Converted movie data exceeds/)
-    assert.equal(conversions, 1); assert.equal(f.opens.length, 0)
+    assert.equal(conversions, 2); assert.equal(f.opens.length, 1)
+    assert.doesNotThrow(() => checkLegacyInputSize(2 * 1024 ** 3, true))
+    assert.throws(() => checkLegacyInputSize(2 * 1024 ** 3 + 1, true), /2 GiB/)
+    assert.throws(() => checkLegacyInputSize(large.size, false), /128 MiB/)
   } finally { await f.close() }
 })
 

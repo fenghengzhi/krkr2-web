@@ -1,4 +1,5 @@
-import type { ArchiveReader, ByteSource, ImmutableBlob } from '../../engine/ports/storage.ts'
+import { extentBorrower } from '../../engine/storage/resource-source.ts'
+import type { ArchiveReader, ByteSource } from '../../engine/ports/storage.ts'
 
 export interface SectorLayout { bytes: number; payload: number }
 export interface DiscVolumeTrack {
@@ -57,46 +58,9 @@ export class TrackReader {
     if (blob.size !== length) invalid('borrowed Blob has an inconsistent size')
     return blob
   }
-  /** A fragmented file on a cooked disc can still consist entirely of
-   * existing Blob slices. Coalesce adjacent physical ranges before borrowing. */
   fileBorrower(extents: { start: number; size: number }[]): ByteSource['borrowBlob'] {
-    if (!this.canBorrow || !extents.length) return
-    const spans: { start: number; size: number; offset: number }[] = []
-    let size = 0
-    for (const extent of extents) {
-      const last = spans.at(-1)
-      if (last && extent.start === last.start + last.size) last.size += extent.size
-      else if (extent.size) spans.push({ ...extent, offset: size })
-      size += extent.size
-    }
-    const first = spans[0] ?? { start: extents[0]!.start, size: 0 }
-    if (spans.length <= 1) return (offset, length, checkpoint) => {
-      range(offset, length, size)
-      return this.borrowBlob(first.start + offset, length, checkpoint)
-    }
-    const join = this.join
-    if (!join) return
-    return async (offset, length, checkpoint) => {
-      range(offset, length, size)
-      await checkpoint?.()
-      const parts: ImmutableBlob[] = [], end = offset + length
-      let low = 0, high = spans.length
-      while (low < high) {
-        const middle = Math.floor((low + high) / 2), span = spans[middle]!
-        if (span.offset + span.size <= offset) low = middle + 1
-        else high = middle
-      }
-      for (let i = low; i < spans.length; i++) {
-        const span = spans[i]!
-        if (span.offset >= end) break
-        const from = Math.max(span.offset, offset), to = Math.min(span.offset + span.size, end)
-        if (from < to) parts.push(await this.borrowBlob(span.start + from - span.offset, to - from, checkpoint))
-      }
-      await checkpoint?.()
-      const blob = parts.length === 1 ? parts[0]! : join(parts)
-      if (blob.size !== length) invalid('joined file has an inconsistent size')
-      return blob
-    }
+    if (!this.canBorrow) return
+    return extentBorrower(extents, (offset, length, check) => this.borrowBlob(offset, length, check), this.join)
   }
   async read(offset: number, length: number): Promise<Uint8Array> {
     range(offset, length, this.size)

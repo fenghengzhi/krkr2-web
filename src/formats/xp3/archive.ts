@@ -2,9 +2,9 @@ import { TvpError } from '../../engine/system/tvp-error.ts'
 import { CompressionError } from '../binary/compression-error.ts'
 import type { Xp3Segment, Xp3SegmentPool } from './segments.ts'
 import { BinaryReader } from '../binary/reader.ts'
-import type { ByteSource, Inflater, Resource } from '../../engine/ports/storage.ts'
+import type { ArchiveReader, ByteSource, Inflater, Resource } from '../../engine/ports/storage.ts'
 import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
-import { borrowResourceBlob, resourceReadBounds, resourceViewBounds } from '../../engine/storage/resource-source.ts'
+import { borrowResourceBlob, extentBorrower, resourceReadBounds, resourceViewBounds } from '../../engine/storage/resource-source.ts'
 export { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 
 const signature = [0x58, 0x50, 0x33, 0x0d, 0x0a, 0x20, 0x0a, 0x1a, 0x8b, 0x67, 0x01]
@@ -63,7 +63,7 @@ function inflateError(error: unknown): never {
 export async function readXp3(
   source: ByteSource,
   inflate: Inflater,
-  options: { verifyAdler32?: boolean; checkpoint?: () => void | Promise<void>; compressedSegments?: Xp3SegmentPool } = {},
+  options: { verifyAdler32?: boolean; checkpoint?: () => void | Promise<void>; compressedSegments?: Xp3SegmentPool; joinBlobs?: ArchiveReader['joinBlobs'] } = {},
 ): Promise<Xp3Resource[]> {
   const located = await findXp3Archive(source, options)
   if (!located) throw new Error('XP3 signature not found')
@@ -179,19 +179,17 @@ export async function readXp3(
         await options.checkpoint?.()
         return output
       }
-      // Only physically contiguous, unprotected stored bytes can be borrowed.
-      // Compressed members must keep their existing verified range decoder.
-      const borrowedStart = segments[0]?.offset,
-        borrowable = source.borrowBlob && !protectedStorage && borrowedStart !== undefined &&
-          segments.every((segment) => !segment.compressed && segment.offset === borrowedStart + segment.logical)
-      const ranged = !options.verifyAdler32 && (options.compressedSegments || segments.every((s) => !s.compressed))
-        ? { size: fileSize, read: readRange,
-            ...(borrowable ? { async borrowBlob(offset: number, length: number, checkpoint?: () => void | Promise<void>) {
-              resourceViewBounds(fileSize, offset, length)
-              return borrowResourceBlob(source, borrowedStart! + offset, length,
-                async () => { await options.checkpoint?.(); await checkpoint?.() })
-            } } : {}),
-          } : undefined
+      // Stored XP3 segments follow index order even if another member sits
+      // between them on disk. Filtered or compressed data uses its decoder.
+      const allStored = segments.every((segment) => !segment.compressed)
+      const borrowBlob = source.borrowBlob && !options.verifyAdler32 && !protectedStorage && allStored
+        ? extentBorrower(segments.map((segment) => ({ start: segment.offset, size: segment.size })),
+          (at, length, check) => borrowResourceBlob(source, at, length,
+            async () => { await options.checkpoint?.(); await check?.() }), options.joinBlobs)
+        : undefined
+      const ranged = !options.verifyAdler32 && (options.compressedSegments || allStored)
+        ? { size: fileSize, read: readRange, ...(borrowBlob && { borrowBlob }) }
+        : undefined
       resources.push({
         name,
         size: fileSize,

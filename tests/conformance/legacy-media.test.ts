@@ -15,6 +15,7 @@ interface InputReference {
   file: string; bytes: number; sha256: string; audioCodec: string | null; videoCodec: string; videoTag: string
   fps: number; normalizedVideoTimes: number[]
   audioInputOffset: number
+  audioTracks?: { index: number; codec: string; streamId: string; tone: number }[]
 }
 
 for (const group of [
@@ -26,6 +27,8 @@ for (const group of [
     required: ['legacy-wmv1.wmv', 'legacy-wmv2.wmv'] },
   { label: 'AVI with MS Video 1/IMA ADPCM and DivX 3/Microsoft ADPCM', reference: 'avi-adpcm-reference.json', output: 'avi-adpcm',
     required: ['legacy-msvideo1.avi', 'legacy-div3.avi'] },
+  { label: 'MPEG-2 with selectable AC-3 and DVD LPCM', reference: 'dvd-audio-reference.json', output: 'dvd-audio',
+    required: ['legacy-bilingual.mpg'] },
 ]) test(`the actual single-thread legacy WASM decodes authored ${group.label} into complete selectable MP4 timelines`, { timeout: 600000 }, async () => {
   const directory = resolve('.generated/legacy-media'), fixtures = resolve('out/verification/video-tracks'),
     output = resolve('out/ci', group.output), hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
@@ -70,7 +73,14 @@ for (const group of [
       Object.assign(observation, { outputBytes: converted.length, outputSha256: hash(converted), timeline })
       assert.equal(blob.type, 'video/mp4'); assert.equal(String.fromCharCode(...converted.subarray(4, 8)), 'ftyp')
       assert(timeline)
-      assert.equal(timeline.videoStreams, 1); assert.equal(timeline.audioStreams, entry.audioCodec ? 1 : 0)
+      assert.equal(timeline.videoStreams, 1); assert.equal(timeline.audioStreams, entry.audioTracks?.length ?? (entry.audioCodec ? 1 : 0))
+      if (group.output === 'dvd-audio') {
+        assert.equal(entry.videoCodec, 'mpeg2video')
+        assert.deepEqual(entry.audioTracks!.map((track, index) => {
+          assert.equal(track.index, index)
+          return [track.codec, Number(track.streamId), track.tone]
+        }).sort(), [['ac3', 0x80, 440], ['pcm_dvd', 0xa0, 880]])
+      }
       assert.equal(timeline.times.length, reference.frames)
       assert.equal(timeline.videoTracks![0]!.width, reference.width)
       assert.equal(timeline.videoTracks![0]!.height, reference.height)
@@ -84,9 +94,11 @@ for (const group of [
       for (const [index, time] of timeline.times.entries())
         assert(Math.abs(time - expected[index]!) < .1, `${entry.file} frame ${index}: ${time} ms / independent source ${expected[index]} ms`)
       const decodedFailures: unknown[] = []
-      if (group.output === 'windows-media') try { inspectLegacyPictures(moviePath, entry.normalizedVideoTimes, observation) }
+      if (group.output === 'windows-media' || group.output === 'dvd-audio') try { inspectLegacyPictures(moviePath, entry.normalizedVideoTimes, observation) }
       catch (error) { decodedFailures.push(error) }
-      if (entry.audioCodec) try { inspectLegacyAudio(moviePath, entry.audioInputOffset, observation) }
+      for (const track of entry.audioTracks ?? (entry.audioCodec ? [undefined] : [])) try {
+        inspectLegacyAudio(moviePath, entry.audioInputOffset, observation, track)
+      }
       catch (error) { decodedFailures.push(error) }
       if (decodedFailures.length === 1) throw decodedFailures[0]
       if (decodedFailures.length) throw new AggregateError(decodedFailures, 'Independent picture and audio comparisons failed', { cause: decodedFailures[0] })
@@ -95,7 +107,7 @@ for (const group of [
     finally { observation.log = log }
   }
   writeFileSync(resolve(output, 'comparison.json'), JSON.stringify({ complete: !failures.length, manifest, cinepak: reference.cinepak,
-    scope: 'Real pinned WASM decoding and encoding; independent input frame timestamps and system FFmpeg decoded audio timing. Windows Media additionally checks all 100 decoded output picture markers and independent display PTS within 0.1 ms of source timestamps. Browser tests separately require visible frame markers, shared full RGBA and actual audio. Lossy conversion is not original DirectShow sample identity.',
+    scope: 'Real pinned WASM decoding and encoding, independent source timestamps and system FFmpeg audio readback. Windows Media and bilingual MPEG check all 100 picture markers and display timestamps within 0.1 ms. Bilingual MPEG also checks independent silence and tone windows for each decoded audio track.',
     observations }, null, 2) + '\n')
   if (failures.length === 1) throw failures[0]
   if (failures.length) throw new AggregateError(failures, 'Legacy movie conversions failed', { cause: failures[0] })

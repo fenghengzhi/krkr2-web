@@ -1,4 +1,4 @@
-import { MAX_RESOURCE_BYTES, type ByteSource, type ImmutableBlob, type Resource } from '../ports/storage.ts'
+import { MAX_RESOURCE_BYTES, type ArchiveReader, type ByteSource, type ImmutableBlob, type Resource } from '../ports/storage.ts'
 
 export interface ResourceSourceOptions {
   /** Complete-file fallback limit; callers may reduce the existing 64 MiB cap. */
@@ -34,6 +34,49 @@ export async function borrowResourceBlob(source: ByteSource, offset: number, len
   if (blob.size !== length || typeof blob.slice !== 'function' || typeof blob.arrayBuffer !== 'function')
     throw new Error('Resource returned an invalid immutable Blob view')
   return blob
+}
+
+/** Expose logical file ranges as ordered slices of their immutable backing.
+ * Adjacent physical extents need one slice. Disjoint extents require the
+ * platform's Blob join operation and can appear in any physical order. */
+export function extentBorrower(extents: readonly { start: number; size: number }[],
+  borrow: NonNullable<ByteSource['borrowBlob']>, join?: ArchiveReader['joinBlobs']): ByteSource['borrowBlob'] {
+  if (!extents.length) return
+  const spans: { start: number; size: number; offset: number }[] = []
+  let size = 0
+  for (const extent of extents) {
+    const last = spans.at(-1)
+    if (last && extent.start === last.start + last.size) last.size += extent.size
+    else if (extent.size) spans.push({ ...extent, offset: size })
+    size += extent.size
+  }
+  const first = spans[0] ?? { start: extents[0]!.start, size: 0 }
+  if (spans.length <= 1) return (offset, length, checkpoint) => {
+    resourceViewBounds(size, offset, length)
+    return borrow(first.start + offset, length, checkpoint)
+  }
+  if (!join) return
+  return async (offset, length, checkpoint) => {
+    resourceViewBounds(size, offset, length)
+    await checkpoint?.()
+    const parts: ImmutableBlob[] = [], end = offset + length
+    let low = 0, high = spans.length
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2), span = spans[middle]!
+      if (span.offset + span.size <= offset) low = middle + 1
+      else high = middle
+    }
+    for (let i = low; i < spans.length; i++) {
+      const span = spans[i]!
+      if (span.offset >= end) break
+      const from = Math.max(span.offset, offset), to = Math.min(span.offset + span.size, end)
+      if (from < to) parts.push(await borrow(span.start + from - span.offset, to - from, checkpoint))
+    }
+    await checkpoint?.()
+    const blob = parts.length === 1 ? parts[0]! : join(parts)
+    if (blob.size !== length) throw new Error('Joined file has an inconsistent size')
+    return blob
+  }
 }
 
 /** Borrow true source reads, or explicitly own one bounded complete fallback.

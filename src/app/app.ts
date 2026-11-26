@@ -24,6 +24,7 @@ import { createLiveDiscControls } from './live-disc.ts'
 import type { CddaDisc } from '../engine/ports/cdda.ts'
 import { createSaveTransfer } from './save-transfer.ts'
 import { createNativeSaveZipPicker } from './native-save-zip.ts'
+import { createNativeSaveDrop } from './native-save-drop.ts'
 import { createOfflinePanel } from './offline.ts'
 import { remoteUrl } from '../backends/files/http-range.ts'
 import { normalizePath } from '../engine/storage/resolver.ts'
@@ -62,6 +63,14 @@ export function mountApp(root: HTMLDivElement): void {
       <section class="card offline-panel" id="offline-panel"></section><footer><span>krkr2-web / a web-native runtime</span><span>TypeScript · WebAssembly · WebGL2</span></footer>
     </main>`
   const el = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!
+  const nativeSaveCard = el('native-save-hint').closest('section')!
+  nativeSaveCard.id = 'save-file-import'
+  el('native-save-hint').append(' 也可将存档文件、单个 savedata 目录或 ZIP 拖到这里；ZIP 会先显示目录选择，确认后再导入。')
+  const nativeSaveDropStatus = document.createElement('p')
+  nativeSaveDropStatus.id = 'native-save-drop-status'
+  nativeSaveDropStatus.className = 'muted'
+  nativeSaveDropStatus.setAttribute('role', 'status')
+  el('native-save-hint').after(nativeSaveDropStatus)
   const projectControls = document.createElement('div')
   projectControls.innerHTML = `<label for="project-mode">游戏位置</label><select id="project-mode"><option value="collection">文件集合（兼容已有导入）</option><option value="auto">自动识别游戏目录、ZIP 或光盘</option><option value="root">指定游戏目录或包</option></select><div id="project-directory-fields" hidden><label for="project-exe-directory">程序所在目录</label><input id="project-exe-directory" value="" placeholder="留空表示导入根目录" spellcheck="false"><label for="project-executable">游戏程序名或发行包（可选）</label><input id="project-executable" placeholder="例如 Story.exe 或 Release.zip&gt;Media/Disc1.cue" spellcheck="false"><div id="project-root-field" hidden><label for="project-root">游戏目录或包内根目录</label><input id="project-root" value="" placeholder="例如 game/ 或 data.xp3&gt;" spellcheck="false"></div></div><p class="muted" id="project-status" role="status">可从游戏目录、ZIP、自解压 ZIP 或光盘镜像启动。支持 ISO 9660、Joliet 和使用物理分区的 UDF 游戏 DVD。ZIP 内含光盘时请选择自动识别。CUE 需要配套的数据轨文件。</p>`
   root.querySelector('label[for="entry"]')!.before(projectControls)
@@ -132,6 +141,7 @@ export function mountApp(root: HTMLDivElement): void {
   let zipSaves: ReturnType<typeof createNativeSaveZipPicker> | undefined
   let offline: ReturnType<typeof createOfflinePanel> | undefined
   let gameFileDrop: ReturnType<typeof attachGameFileDrop> | undefined
+  let nativeSaveDrop: ReturnType<typeof createNativeSaveDrop> | undefined
   const log = (text: string, error = false) => {
     const line = document.createElement('p')
     line.className = error ? 'error' : ''
@@ -271,8 +281,10 @@ export function mountApp(root: HTMLDivElement): void {
     const savesPaused = snapshot?.state === 'paused' && !stopRequested
     versionSaves?.update(player?.session, savesPaused, savesBusy)
     zipSaves?.update(nativeSaves && savesPaused ? player?.session : undefined, savesBusy)
+    nativeSaveDrop?.update(nativeSaves && savesPaused ? player?.session : undefined, savesBusy)
     el('native-folder-control').hidden = !nativeSaves
     el('native-save-hint').hidden = !nativeSaves
+    nativeSaveDropStatus.hidden = !nativeSaves && !nativeSaveDropStatus.textContent
     el('native-zip-options').hidden = !nativeSaves
     el<HTMLButtonElement>('export-saves').disabled = savesBusy
     el<HTMLButtonElement>('import-saves').disabled = savesBusy || snapshot?.state !== 'paused'
@@ -310,6 +322,7 @@ export function mountApp(root: HTMLDivElement): void {
   })
   const stop = (): Promise<void> => {
     gameFileDrop?.cancel()
+    nativeSaveDrop?.cancel()
     if (stopping) return stopping
     const previous = player,
       previousClipboard = gameClipboard,
@@ -781,8 +794,8 @@ export function mountApp(root: HTMLDivElement): void {
     error: report,
   })
   window.addEventListener('pagehide', (event) => {
-    if (event.persisted) gameFileDrop?.cancel()
-    else gameFileDrop?.dispose()
+    if (event.persisted) { gameFileDrop?.cancel(); nativeSaveDrop?.cancel() }
+    else { gameFileDrop?.dispose(); nativeSaveDrop?.dispose() }
   })
   for (const [button, input] of [
     ['choose-files', 'files'],
@@ -826,6 +839,14 @@ export function mountApp(root: HTMLDivElement): void {
     encoding: saveZipEncoding,
     run: (action) => saveTransfer((current, check) => action(current.session, check)),
     imported: logImport,
+  })
+  nativeSaveDrop = createNativeSaveDrop(nativeSaveCard, {
+    run: (action) => saveTransfer((current, check) => action(current.session, check)),
+    openZip: (file) => zipSaves?.open(file),
+    resetZip: () => zipSaves?.reset(),
+    imported: logImport,
+    status: (message) => { setText(nativeSaveDropStatus, message); nativeSaveDropStatus.hidden = !message && el<HTMLSelectElement>('save-format').value !== 'native' },
+    error: report,
   })
   el('native-zip-encoding').addEventListener('change', () => zipSaves?.reset())
   el('export-saves').addEventListener('click', () => {

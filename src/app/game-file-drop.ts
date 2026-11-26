@@ -27,6 +27,9 @@ export function gameDropFiles(tree: BrowserDropTree): { files: LocalGameFile[]; 
  * fields and other page controls keep their separate input routes. */
 export function attachGameFileDrop(element: HTMLElement, options: {
   available(): boolean
+  unavailable?(): void
+  select?(tree: BrowserDropTree): { files: LocalGameFile[]; directory: boolean }
+  progress?: string
   load(files: LocalGameFile[], directory: boolean): Promise<void>
   status(message: string): void
   error(error: unknown): void
@@ -43,17 +46,17 @@ export function attachGameFileDrop(element: HTMLElement, options: {
   element.addEventListener('drop', (event) => {
     if (!files(event)) return
     event.preventDefault(); event.stopPropagation()
-    if (!options.available()) return
+    if (!options.available()) { options.unavailable?.(); return }
     cancel()
     try {
       // All capability acquisition must occur synchronously in this event.
       // Whole-game imports may contain thousands of loose root files. The
       // running game's Window.onFileDrop keeps its existing 256-root budget.
       const captured = captureDrop(event.dataTransfer!, dropLimits.entries), operation = new AbortController()
-      pending = operation; options.status('正在读取拖入的游戏文件…')
+      pending = operation; options.status(options.progress ?? '正在读取拖入的游戏文件…')
       void (async () => {
         try {
-          const selected = gameDropFiles(await enumerateDrop(captured, { signal: operation.signal, rootLimit: dropLimits.entries }))
+          const selected = (options.select ?? gameDropFiles)(await enumerateDrop(captured, { signal: operation.signal, rootLimit: dropLimits.entries }))
           operation.signal.throwIfAborted()
           if (pending !== operation) return
           if (!options.available()) { pending = undefined; options.status(''); return }

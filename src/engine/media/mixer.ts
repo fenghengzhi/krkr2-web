@@ -62,6 +62,7 @@ interface Voice {
   filterBudget?: AudioFilterBudget
   sourcePipeline?: boolean
   speakerMix?: StereoSpeakerMix
+  expandedQuad?: boolean
   ended?: boolean
   interpolationPreview?: {
     position: number; labelIndex: number; linkDirty: boolean; link?: LoopLink; flags: number[]
@@ -158,7 +159,7 @@ export class AudioMixer {
       sampleRate: asset?.sampleRate ?? 0,
       sampleCount: asset?.sampleCount ?? 0,
       ...(asset?.reportedSampleCount === undefined ? {} : { reportedSampleCount: asset.reportedSampleCount }),
-      channels: asset ? voice.settings.waveConversion === 'i16m' ? 1 : asset.channels : 0,
+      channels: asset ? voice.expandedQuad ? 4 : voice.settings.waveConversion === 'i16m' ? 1 : asset.channels : 0,
       bits: asset && voice.settings.waveConversion ? 16 : voice.filters?.length ? 32 : (asset?.bits ?? 0),
     }
   }
@@ -174,15 +175,17 @@ export class AudioMixer {
   private create(id: number, settings: SoundSettings, kind: SoundKind = 'wave'): Voice {
     if (!this.voices.has(id) && this.voices.size >= 256)
       throw new Error('Audio voice budget exceeded')
-    const { volume, volume2, pan, frequency, looping, paused, position, waveConversion } = settings
+    const { volume, volume2, pan, frequency, looping, paused, position, waveConversion, waveExpandQuad } = settings
     if (waveConversion !== undefined && waveConversion !== 'i16' && waveConversion !== 'i16m')
       throw new Error('Invalid Wave output conversion')
+    if (waveExpandQuad !== undefined && typeof waveExpandQuad !== 'boolean') throw new Error('Invalid Wave quad expansion')
     const voice: Voice = {
       id,
       kind,
       epoch: this.nextEpoch++,
       settings: { volume, volume2, pan, frequency, looping, paused, position,
-        ...(kind === 'wave' && waveConversion ? { waveConversion } : {}) },
+        ...(kind === 'wave' && waveConversion ? { waveConversion } : {}),
+        ...(kind === 'wave' && waveExpandQuad ? { waveExpandQuad: true } : {}) },
       status: 'unload',
       clock: 0,
       flags: Array(16).fill(0),
@@ -339,6 +342,9 @@ export class AudioMixer {
       if (retained) { voice.fade = retained.fade; voice.clock = retained.clock }
       voice.asset = stream ? stream.asset : asset
       voice.speakerMix = speakerMix
+      voice.expandedQuad = kind === 'wave' && !!voice.settings.waveExpandQuad &&
+        voice.settings.waveConversion !== 'i16m' && asset.kind !== 'midi' &&
+        !asset.speakerMask && asset.channels <= 2
       voice.stream = stream
       voice.filters = filters
       voice.sourcePipeline = asset.kind !== 'midi' && (filters.length > 0 || asset.loops.links.some((link) => link.smooth) || !!voice.settings.waveConversion)
@@ -852,6 +858,14 @@ export class AudioMixer {
             voice.synth!.render(settings.position / asset.sampleRate, step / asset.sampleRate)
             l = voice.synth!.left
             r = voice.synth!.right
+          } else if (voice.expandedQuad) {
+            // WaveImpl copies mono to FL/FR/BL/BR, or stereo to L/R/L/R,
+            // after source filtering and forced bit-depth conversion. Keep
+            // its source-frame clock and apply our existing quad-to-stereo
+            // coefficients without allocating duplicate streaming planes.
+            const frontLeft = sample(0), frontRight = asset.channels === 1 ? frontLeft : sample(1)
+            l = frontLeft + frontLeft * 0.70710678
+            r = frontRight + frontRight * 0.70710678
           } else if (voice.speakerMix && settings.waveConversion !== 'i16m') {
             l = r = 0
             for (let channel = 0; channel < voice.speakerMix.length; channel++) {

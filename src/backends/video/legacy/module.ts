@@ -1,10 +1,20 @@
+import { videoSourceLimits } from '../../../engine/ports/video.ts'
+
 export const legacyMediaLimits = {
-  inputBytes: 128 * 1024 ** 2,
-  outputBytes: 128 * 1024 ** 2,
+  inputBytes: videoSourceLimits.bufferedBytes,
+  borrowedInputBytes: videoSourceLimits.borrowedBytes,
+  outputBytes: videoSourceLimits.bufferedBytes,
   wasmBytes: 512 * 1024 ** 2,
   assetBytes: 16 * 1024 ** 2,
   milliseconds: 5 * 60 * 1000,
 } as const
+/** WORKERFS reads File/Blob slices on demand. Byte arrays are copied into
+ * MEMFS and remain subject to the ordinary buffered-video limit. */
+export function checkLegacyInputSize(size: number, borrowed: boolean): void {
+  if (!Number.isSafeInteger(size) || size < 1) throw new Error('Invalid legacy movie input size')
+  if (size > (borrowed ? legacyMediaLimits.borrowedInputBytes : legacyMediaLimits.inputBytes))
+    throw new Error(borrowed ? 'Borrowed legacy movie input exceeds 2 GiB budget' : 'Buffered legacy movie input exceeds 128 MiB budget')
+}
 export interface LegacyMediaManifest {
   abi: 1
   library: 'FFmpeg'

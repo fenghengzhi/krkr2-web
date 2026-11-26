@@ -10,6 +10,14 @@ const maxArchive = 96 * 1024 * 1024
 type Check = () => Promise<void>
 interface SaveEntry { name: string; size: number; read(): Promise<Uint8Array> }
 
+/** Already enumerated directory capabilities have relative paths rather than
+ * webkitRelativePath. Use the same collision, byte and cancellation checks. */
+export async function readNativeSaveBlobs(files: readonly { path: string; blob: Blob }[],
+  active: () => void = () => {}): Promise<SaveFile[]> {
+  return readEntries(files.map(({ path, blob }) => ({ name: path, size: blob.size,
+    read: async () => new Uint8Array(await blob.arrayBuffer()) })), checkpoint(active))
+}
+
 function validateEntries(entries: readonly { name: string; size: number }[]): void {
   if (!entries.length) throw new Error('没有存档文件')
   if (entries.length > MAX_SAVE_FILES) throw new Error('存档文件数量超过限制')

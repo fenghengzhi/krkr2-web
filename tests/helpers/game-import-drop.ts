@@ -22,8 +22,8 @@ export async function dropImportFiles(page: Page, files: readonly GameDropFile[]
 /** Acquire a real browser directory handle through DataTransfer's event-time
  * capability slot. Traversal/getFile are native OPFS operations; only the
  * drag gesture and capability accessor are supplied by the test harness. */
-export async function dropImportDirectory(page: Page, files: readonly GameDropFile[]) {
-  return page.locator('#game-file-import').evaluate(async (element, inputs) => {
+export async function dropImportDirectory(page: Page, files: readonly GameDropFile[], selector = '#game-file-import') {
+  return page.locator(selector).evaluate(async (element, inputs) => {
     const storage = await navigator.storage.getDirectory(), name = 'game-import-' + crypto.randomUUID(),
       directory = await storage.getDirectoryHandle(name, { create: true })
     try {

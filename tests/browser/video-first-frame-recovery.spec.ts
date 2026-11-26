@@ -8,6 +8,7 @@ import { installFirstFrameRecoveryGate, videoFirstFrameRecoverySource,
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia } from '../helpers/video-audio-probe.ts'
 import { installVideoAudioChannelProbe, observeVideoAudioChannels } from '../helpers/video-audio-channel-probe.ts'
 import { installHandoffReadbacks, captureHandoff } from '../helpers/video-handoff-capture.ts'
+import { compareFirstFrameParents } from '../helpers/video-first-frame-controls.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: a stalled cutscene candidate recovers with a real silent frame and preserves the paused game`, async ({ page }, info) => {
@@ -92,12 +93,20 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       }
       expect((await gate()).attempts.map((attempt) => attempt.mode)).toEqual(['recover', 'denied', 'cancel'])
     } catch (error) { failures.push(error) }
+    // Only after the original assertion has failed, reserve foreground time
+    // for its attachments, the two bounded controls and independent cleanup.
+    // Product rVFC/seek waits and every original assertion keep their limits.
+    if (failures.length && backend === 'asyncify' && !binary) test.setTimeout(info.timeout + 60000)
     try { await info.attach('first-frame-recovery-pixels.json.gz', {
       contentType: 'application/gzip', body: gzipSync(JSON.stringify(pixels)) }) } catch (error) { failures.push(error) }
     try { await info.attach('first-frame-recovery-observations', { contentType: 'application/json',
       body: JSON.stringify({ observations, gate: await gate(), media: await observeVideoMedia(page),
         audio: await observeVideoAudioChannels(page), logs: await page.locator('#logs').innerText() }) }) }
     catch (error) { failures.push(error) }
+    if (failures.length && backend === 'asyncify' && !binary) try {
+      await info.attach('independent-first-frame-parent-controls', { contentType: 'application/json',
+        body: JSON.stringify(await compareFirstFrameParents(page)) })
+    } catch (error) { failures.push(error) }
     try {
       if (await page.locator('#stop').isEnabled()) await page.locator('#stop').press('Enter')
       if (game) await game.waitForStopped()

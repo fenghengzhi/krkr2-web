@@ -3,6 +3,11 @@ import type { AudioCommand, PcmEncoding, WaveConversion } from '../ports/audio.t
 export const waveConversionOption = (value: string | undefined): WaveConversion | undefined =>
   value === 'i16' || value === 'i16m' ? value : undefined
 
+/** WaveImpl initializes quad expansion once. An explicitly requested 3D
+ * mode suppresses it at option parsing, even if a driver later falls back. */
+export const waveExpandQuadOption = (value: string | undefined, use3d: string | undefined): boolean =>
+  value === 'yes' && (use3d === undefined || use3d === 'no')
+
 /** With no intermediate signal processing, narrowing directly from RIFF's
  * original integer bytes preserves the low-bit boundary Float32 would lose.
  * Connected filters and Smooth need the original normalized input instead. */

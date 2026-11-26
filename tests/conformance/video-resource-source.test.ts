@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { BlobSource, inflate } from '../../src/backends/files/blob-source.ts'
 import { importSources } from '../../src/backends/files/import-resources.ts'
 import { prepareVideoBlob } from '../../src/backends/files/video-source.ts'
@@ -15,6 +18,8 @@ import { readVideoTimeline, readVideoTimelineBlob } from '../../src/formats/vide
 import { readXp3 } from '../../src/formats/xp3/archive.ts'
 import { readZip } from '../../src/formats/zip/archive.ts'
 import { xp3Fixture, embedXp3 } from '../helpers/xp3-fixtures.ts'
+import { writeSegmentedMovieXp3 } from '../helpers/large-video-game.ts'
+import { archiveReader } from '../../src/backends/files/archive-reader.ts'
 import { zipFixture, zipCodecs, centralRecords } from '../helpers/zip-fixtures.ts'
 
 function deferred<T>() {
@@ -23,6 +28,34 @@ function deferred<T>() {
   void promise.catch(() => {})
   return { promise, resolve, reject }
 }
+
+test('a movie split around another XP3 member borrows slices in logical playback order', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'krkr-split-movie-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const content = Uint8Array.of(2, 3, 5, 7, 11, 13, 17, 19), movie = join(dir, 'scene.avi'),
+    archive = join(dir, 'data.xp3'), split = 5, script = 'System.title="Chapter";'
+  await writeFile(movie, content)
+  await writeSegmentedMovieXp3(archive, movie, 'scene.avi', content.length, split, script)
+  const source = new BlobSource(new Blob([Uint8Array.from(await readFile(archive))])),
+    borrowed: number[][] = [], ranges: number[][] = [],
+    [entry, film] = await readXp3({ size: source.size,
+      read: async (at, n) => { ranges.push([at, n]); return source.read(at, n) },
+      borrowBlob: async (at, n) => { borrowed.push([at, n]); return source.borrowBlob(at, n) },
+    }, inflate, { joinBlobs: archiveReader.joinBlobs })
+  assert.equal(new TextDecoder().decode(await entry!.read()), script)
+  const view = film!.source; assert(view?.borrowBlob)
+  const reads = ranges.length, fromHead = 19 + (content.length - split) + Buffer.byteLength(script)
+  const slice = await view.borrowBlob(3, 4)
+  assert.deepEqual(borrowed, [[fromHead + 3, 2], [19, 2]])
+  assert.deepEqual(new Uint8Array(await slice.arrayBuffer()), content.slice(3, 7))
+  const media = await prepareVideoBlob(film!, controls().control)
+  assert.equal(media.buffered, false)
+  assert.deepEqual(new Uint8Array(await media.blob.arrayBuffer()), content)
+  assert.equal(ranges.length, reads)
+  assert.equal((await view.borrowBlob(view.size, 0)).size, 0)
+  const cancellation = new Error('Scene closed')
+  await assert.rejects(view.borrowBlob(0, 8, () => { throw cancellation }), (error) => error === cancellation)
+})
 function controls() {
   let cancelled = false
   const listeners = new Set<() => void>(), check = () => { if (cancelled) throw new ExecutionCancelled() }

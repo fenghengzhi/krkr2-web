@@ -262,6 +262,8 @@ jobs:
       windows-media-fixtures: ${{ steps.windows-media-fixtures.outcome }}
       mpeg2-xvid-fixtures: ${{ steps.mpeg2-xvid-fixtures.outcome }}
       avi-adpcm-fixtures: ${{ steps.avi-adpcm-fixtures.outcome }}
+      dvd-audio-fixtures: ${{ steps.dvd-audio-fixtures.outcome }}
+      large-dib-fixtures: ${{ steps.large-dib-fixtures.outcome }}
       deflate64-fixtures: ${{ steps.deflate64-fixtures.outcome }}
       udf-discs: ${{ steps.udf-discs.outcome }}
       udf-sparable-disc: ${{ steps.udf-sparable-disc.outcome }}
@@ -405,6 +407,29 @@ jobs:
           mkdirSync(directory, { recursive: true })
           generateAviAdpcmFixtures(directory)
           JS
+      - name: Author a bilingual MPEG cutscene and independently decode its AC-3 and DVD LPCM tracks
+        id: dvd-audio-fixtures
+        continue-on-error: true
+        run: |
+          node --input-type=module <<'JS' 2>&1 | tee out/ci/dvd-audio-fixtures.log
+          import { mkdirSync } from 'node:fs'
+          import { generateDvdAudioFixtures } from './scripts/generate-legacy-video-fixtures.mjs'
+          const directory = 'out/verification/video-tracks'
+          mkdirSync(directory, { recursive: true })
+          generateDvdAudioFixtures(directory)
+          JS
+      - name: Author a full-size DIB AVI and record packets beyond 128 MiB
+        id: large-dib-fixtures
+        continue-on-error: true
+        run: |
+          node --input-type=module <<'JS' 2>&1 | tee out/ci/large-dib-fixtures.log
+          import { mkdirSync } from 'node:fs'
+          import { generateLargeDibFixture } from './scripts/generate-legacy-video-fixtures.mjs'
+          const directory = 'out/verification/video-tracks'
+          mkdirSync(directory, { recursive: true })
+          generateLargeDibFixture(directory)
+          JS
+          gzip -n out/verification/video-tracks/legacy-large-dib.avi
       - name: Encode and independently decode long Vorbis music
         id: long-vorbis-fixture
         continue-on-error: true
@@ -567,6 +592,26 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.dvd-audio-fixtures.outcome == 'success' || steps.dvd-audio-fixtures.outcome == 'failure') }}
+        with:
+          name: dvd-audio-fixture-evidence
+          path: |
+            out/verification/video-tracks/dvd-audio*
+            out/verification/video-tracks/legacy-bilingual*
+            out/ci/dvd-audio-fixtures.log
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.large-dib-fixtures.outcome == 'success' || steps.large-dib-fixtures.outcome == 'failure') }}
+        with:
+          name: large-dib-fixture-evidence
+          path: |
+            out/verification/video-tracks/large-dib*
+            out/verification/video-tracks/legacy-large-dib*
+            out/ci/large-dib-fixtures.log
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() && (steps.long-vorbis-fixture.outcome == 'success' || steps.long-vorbis-fixture.outcome == 'failure') }}
         with:
           name: long-vorbis-fixture-evidence
@@ -686,6 +731,16 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.avi-adpcm-fixtures }}
+        run: test "$FIXTURE_OUTCOME" = success
+      - name: Require complete bilingual MPEG audio references
+        if: ${{ !cancelled() }}
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.dvd-audio-fixtures }}
+        run: test "$FIXTURE_OUTCOME" = success
+      - name: Require a large AVI with independently verified late frames
+        if: ${{ !cancelled() }}
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.large-dib-fixtures }}
         run: test "$FIXTURE_OUTCOME" = success
 
   node:

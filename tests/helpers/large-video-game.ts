@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { open, readFile, writeFile } from 'node:fs/promises'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
 import { join } from 'node:path'
 import { xp3Signature } from './xp3-fixtures.ts'
 
@@ -16,13 +18,34 @@ function boxes(bytes: Buffer, start: number, end: number): Box[] {
 }
 const u64 = (value: number) => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64LE(BigInt(value)); return bytes }
 const chunk = (tag: string, body: Buffer) => Buffer.concat([Buffer.from(tag), u64(body.length), body])
-function xp3Entry(name: string, size: number, offset: number) {
+function xp3Entry(name: string, segments: { size: number; offset: number }[]) {
+  const size = segments.reduce((total, segment) => total + segment.size, 0)
   const length = Buffer.alloc(2)
   length.writeUInt16LE(name.length)
   return chunk('File', Buffer.concat([
     chunk('info', Buffer.concat([Buffer.alloc(4), u64(size), u64(size), length, Buffer.from(name, 'utf16le')])),
-    chunk('segm', Buffer.concat([Buffer.alloc(4), u64(offset), u64(size), u64(size)])),
+    chunk('segm', Buffer.concat(segments.map((segment) =>
+      Buffer.concat([Buffer.alloc(4), u64(segment.offset), u64(segment.size), u64(segment.size)])))),
   ]))
+}
+
+/** Write the tail first, then another game file, then the beginning. Logical
+ * index order must be observed even when a borrow crosses the intervening file. */
+export async function writeSegmentedMovieXp3(path: string, moviePath: string, name: string, size: number,
+  split: number, startup: string) {
+  assert(Number.isSafeInteger(split) && split > 0 && split < size)
+  const script = Buffer.from(startup), tailAt = 19, scriptAt = tailAt + size - split,
+    headAt = scriptAt + script.length, indexAt = headAt + split,
+    index = Buffer.concat([xp3Entry('startup.tjs', [{ size: script.length, offset: scriptAt }]),
+      xp3Entry(name, [{ size: split, offset: headAt }, { size: size - split, offset: tailAt }])])
+  async function* bytes() {
+    yield Buffer.concat([xp3Signature, u64(indexAt)])
+    yield* createReadStream(moviePath, { start: split })
+    yield script
+    yield* createReadStream(moviePath, { end: split - 1 })
+    yield Buffer.concat([Buffer.alloc(1), u64(index.length), index])
+  }
+  await pipeline(bytes(), createWriteStream(path, { flags: 'wx' }))
 }
 
 /** A sparse hole inside mdat places both the authored FFmpeg H.264/AAC packets
@@ -66,7 +89,8 @@ export async function largeVideoGame(directory: string, archive: boolean, startu
     path = join(directory, archive ? 'data.xp3' : 'cutscene.mp4'), file = await open(path, 'w')
   try {
     if (archive) {
-      const index = Buffer.concat([xp3Entry('startup.tjs', script.length, 19), xp3Entry('cutscene.mp4', size, offset)])
+      const index = Buffer.concat([xp3Entry('startup.tjs', [{ size: script.length, offset: 19 }]),
+        xp3Entry('cutscene.mp4', [{ size, offset }])])
       const prefix = Buffer.concat([xp3Signature, u64(offset + size), script]),
         tail = Buffer.concat([Buffer.alloc(1), u64(index.length), index])
       assert.equal((await file.write(prefix, 0, prefix.length, 0)).bytesWritten, prefix.length)
