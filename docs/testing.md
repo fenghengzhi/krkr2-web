@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 174 批从播放器采录带预加重标记的 CD 音轨，并用独立解码器核对旧过场的静音区间。章节验收同时检查新对白和前一条历史，画面比较按绘图缓冲区的实际尺寸逐像素核对。[174 实现与托管证据](decisions/174-story-history-and-disc-audio.md)
+
 第 173 批增加用一次触屏点击进入原版 Introduction 章节的验收，并对照浏览器实际能跳到的影片起点和首帧。第 170 批 Firefox 主浏览器第 3 分片有 302 项通过、22 项失败，Node 作业取消。[173 实现与托管证据](decisions/173-touch-choices-and-movie-start.md)
 
 第 172 批恢复光盘启动用例对真实文件选择事件的观察，并修订原版 KAG 剧情的可点击区域与鼠标输入。另用发行配置驱动真实全屏画面与选项，用展开后的音频核对 WAVE 循环接缝。第 170 批 Chromium 游戏库的 36 项失败记录继续保留。[172 实现与托管证据](decisions/172-fullscreen-options-story-input-and-wave-loops.md)

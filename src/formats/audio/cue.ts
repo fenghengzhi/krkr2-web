@@ -6,8 +6,8 @@ export interface CueTrack {
   pregap: number; postgap: number; flags: string[]
 }
 export interface CueSheet { files: CueFile[]; tracks: CueTrack[] }
-export type CuePart = { kind: 'file'; file: number; startFrame: number; endFrame?: number } |
-  { kind: 'silence'; frames: number }
+export type CuePart = ({ kind: 'file'; file: number; startFrame: number; endFrame?: number } |
+  { kind: 'silence'; frames: number }) & { preEmphasis?: true }
 export const cueLimits = { bytes: 1024 * 1024, lines: 32768, files: 99, tracks: 99 } as const
 const invalid = (reason: string): never => { throw new Error(`Invalid CUE sheet: ${reason}`) }
 function time(value: string): number {
@@ -88,20 +88,23 @@ export function parseCue(text: string): CueSheet {
 export function cueTrackParts(sheet: CueSheet, number: number): CuePart[] | undefined {
   const at = sheet.tracks.findIndex((track) => track.number === number), track = sheet.tracks[at]
   if (!track || track.mode !== 'AUDIO') return undefined
-  if (track.flags.some((flag) => !['DCP', 'SCMS'].includes(flag)))
-    throw new Error('CUE track requires unsupported pre-emphasis or channel processing')
-  const next = sheet.tracks[at + 1], parts: CuePart[] = [], silence = (frames: number) => {
-    if (frames) parts.push({ kind: 'silence', frames })
-  }, nextStart = next?.indices.get(1), nextPregap = next?.indices.get(0) ?? nextStart
+  const flags = (owner: CueTrack): { preEmphasis?: true } => {
+    if (owner.flags.some((flag) => !['PRE', 'DCP', 'SCMS'].includes(flag)))
+      throw new Error('CUE track requires unsupported channel processing or control flags')
+    return owner.flags.includes('PRE') ? { preEmphasis: true } : {}
+  }
+  const next = sheet.tracks[at + 1], parts: CuePart[] = [], currentFlags = flags(track),
+    nextStart = next?.indices.get(1), nextPregap = next?.indices.get(0) ?? nextStart
   const endFrame = next?.file === track.file ? nextPregap : undefined
-  parts.push({ kind: 'file', file: track.file, startFrame: track.indices.get(1)!, ...(endFrame === undefined ? {} : { endFrame }) })
-  silence(track.postgap)
+  parts.push({ kind: 'file', file: track.file, startFrame: track.indices.get(1)!, ...(endFrame === undefined ? {} : { endFrame }), ...currentFlags })
+  if (track.postgap) parts.push({ kind: 'silence', frames: track.postgap, ...currentFlags })
   if (next) {
-    silence(next.pregap)
+    if (next.pregap) parts.push({ kind: 'silence', frames: next.pregap,
+      ...(next.mode === 'AUDIO' && next.flags.includes('PRE') ? { preEmphasis: true } : {}) })
     const start = next.file === track.file ? nextPregap! : 0
     if (nextStart! > start) {
       if (next.mode !== 'AUDIO') throw new Error('CUE data-track pregap cannot be decoded as audio')
-      parts.push({ kind: 'file', file: next.file, startFrame: start, endFrame: nextStart! })
+      parts.push({ kind: 'file', file: next.file, startFrame: start, endFrame: nextStart!, ...flags(next) })
     }
   }
   for (const part of parts) if (part.kind === 'file' && ['BINARY', 'MOTOROLA'].includes(sheet.files[part.file]!.type)) {

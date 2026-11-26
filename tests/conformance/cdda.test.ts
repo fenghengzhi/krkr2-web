@@ -64,7 +64,7 @@ test('CUE rejects invalid coordinates and explicitly separates unsupported physi
     'FILE a WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 01 AUDIO\nINDEX 01 00:01:00'])
     assert.throws(() => sheet(text), /Invalid CUE/)
   assert.throws(() => cueTrackParts(sheet('FILE a BINARY\nTRACK 01 MODE1/2048\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 01 00:01:00'), 2), /non-2352/)
-  assert.throws(() => cueTrackParts(sheet('FILE a WAVE\nTRACK 01 AUDIO\nFLAGS PRE\nINDEX 01 00:00:00'), 1), /pre-emphasis/)
+  assert.throws(() => cueTrackParts(sheet('FILE a WAVE\nTRACK 01 AUDIO\nFLAGS 4CH\nINDEX 01 00:00:00'), 1), /channel processing/)
   assert.throws(() => parseCue('x'.repeat(1024 * 1024 + 1)), /budget/)
 })
 
@@ -160,6 +160,62 @@ function resolver(files: Record<string, Uint8Array>, cues: string[], discs?: Par
     exact: async (name) => resources.get(name), cues: async () => cues,
     read: (resource) => resource.read(), decodeText: decodePlainText, checkpoint: async () => {} }, discs)
 }
+
+test('CD de-emphasis follows the track flags through postgap and the following INDEX 00, including random reads', async () => {
+  const cue = encode('FILE music.bin BINARY\nTRACK 01 AUDIO\nFLAGS DCP PRE\nINDEX 01 00:00:01\nPOSTGAP 00:00:01\n' +
+    'TRACK 02 AUDIO\nINDEX 00 00:00:03\nINDEX 01 00:00:04'),
+    discs = resolver({ 'music.cue': cue, 'music.bin': raw(5) }, ['music.cue']),
+    selected = (await discs.prepare('D:1'))!, sources = new AudioResourceSources(async () => {}),
+    lease = await openCddaSelection(selected, sources, () => true)
+  try {
+    assert.deepEqual(lease.cdda.parts.map((part) => [part.kind, !!part.preEmphasis]),
+      [['file', true], ['silence', true], ['file', false]])
+    const decoder = await openCddaPcmSource(lease.source, lease.cdda, {}, openPortablePcmSource)
+    try {
+      const [left, right] = await decoder.read(0, 2352)
+      assert.equal(decoder.info.sampleCount, 2352)
+      assert(left![0]! < 0 && left![0]! > -0.5, 'First sample follows the shelf step response')
+      assert.equal(left![500], -0.5); assert.equal(right![500], -0.25)
+      assert(left![1176]! > 0 && left![1176]! < 0.125, 'Postgap carries the preceding filter tail')
+      assert.equal(left![1764], -0.125, 'Next unflagged INDEX 00 starts with its original sample')
+      for (const at of [1755, 500, 1171, 580, 2]) {
+        const result = await decoder.read(at, 17)
+        assert.deepEqual(result, [left!.slice(at, at + 17), right!.slice(at, at + 17)])
+      }
+    } finally { await decoder.close() }
+  } finally { lease.release(); sources.dispose(); discs.dispose() }
+})
+
+test('a PRE track attenuates recorded tones according to the 50/15 microsecond CD curve', async () => {
+  const rate = 44100
+  for (const hz of [400, 3000, 8000, 11025, 16000, 20000]) {
+    const signal = Array.from({ length: rate }, (_, i) => 0.5 * Math.cos(2 * Math.PI * hz * i / rate)),
+      bytes = wave(signal, rate),
+      decoder = await openCddaPcmSource(source(bytes), { parts: [{ kind: 'file', offset: 0,
+        size: bytes.length, encoding: 'encoded', startFrame: 0, preEmphasis: true }] }, {}, openPortablePcmSource)
+    try {
+      const [plane] = await decoder.read(rate / 5, rate / 5)
+      const gain = Math.sqrt(2 * plane!.reduce((sum, v) => sum + v * v, 0) / plane!.length) / 0.5,
+        omega = 2 * Math.PI * hz, analog = Math.hypot(1, omega * 15e-6) / Math.hypot(1, omega * 50e-6)
+      assert(Math.abs(20 * Math.log10(gain / analog)) < 0.55, `CD curve at ${hz} Hz: ${gain}, expected ${analog}`)
+    } finally { await decoder.close() }
+  }
+})
+
+test('priming a full-size discontiguous PRE read fits the decoder budget and keeps channel state across pages', async () => {
+  const bytes = raw(180), decoder = await openCddaPcmSource(source(bytes), { parts: [{
+    kind: 'file', offset: 0, size: bytes.length, encoding: 's16le', startFrame: 0, preEmphasis: true,
+  }] }, {}, openPortablePcmSource)
+  try {
+    const start = 19876, length = 65536, expected = await decoder.read(start, length)
+    const first = await decoder.read(start, 32767), rest = await decoder.read(start + 32767, length - 32767)
+    for (const [index, channel] of expected.entries()) {
+      assert.equal(channel.length, length)
+      assert.deepEqual(first[index], channel.subarray(0, 32767))
+      assert.deepEqual(rest[index], channel.subarray(32767))
+    }
+  } finally { await decoder.close() }
+})
 test('virtual CDDA preserves direct files, binds explicit drives and resolves CUE-relative archive paths', async () => {
   const cue = encode('FILE "../audio/raw.bin" BINARY\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 01 00:00:01'),
     files = { 'game.xp3>disc/disc.cue': cue, 'game.xp3>audio/raw.bin': raw(2), '2.wav': wave([0.25], 44100) },

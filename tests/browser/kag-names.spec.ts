@@ -60,6 +60,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       for (const [phase, text] of [[1, 'HERO 7/2'], [2, 'friend 3']] as const) {
         await expect.poll(() => read('nameGameState()'), { timeout: 15000 })
           .toBe(`${phase}|*picked|${text}|1|l|0|1|1|1`)
+        if (phase === 1) expect(await read('kag.historyLayer.getLine(kag.historyLayer.dataLines-2)')).toBe('Continue')
         await expect(page.locator('#logs .error')).toHaveCount(0)
         await canvas.scrollIntoViewIfNeeded()
         await info.attach(`localized-macro-${phase}`, { body: await canvas.screenshot(), contentType: 'image/png' })

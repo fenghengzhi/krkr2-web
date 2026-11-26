@@ -59,6 +59,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       // The game owns the link; console reads never execute its handler.
       await page.mouse.click(box!.x + x! * box!.width / 640, box!.y + y! * box!.height / 480)
       await expect.poll(() => read('modeGameState()'), { timeout: 15000 }).toBe('1|*picked|ROUTE READY|1|l|0|11')
+      expect(await read('kag.historyLayer.getLine(kag.historyLayer.dataLines-2)')).toBe('Continue')
       await expect(page.locator('#logs .error')).toHaveCount(0)
       await canvas.scrollIntoViewIfNeeded()
       await info.attach('mode-route-text', { body: await canvas.screenshot(), contentType: 'image/png' })

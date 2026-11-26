@@ -19,8 +19,8 @@ export function copyCddaDiscs(value?: readonly CddaDisc[]): readonly CddaDisc[] 
   }))
 }
 /** Local decoder metadata; ByteSource and these ranges never cross a worklet. */
-export type CddaPcmPart = { kind: 'silence'; frames: number } | {
+export type CddaPcmPart = ({ kind: 'silence'; frames: number } | {
   kind: 'file'; offset: number; size: number; encoding: 'encoded' | 's16le' | 's16be'
   startFrame: number; endFrame?: number
-}
+}) & { preEmphasis?: true }
 export interface CddaPcmTrack { readonly parts: readonly CddaPcmPart[] }

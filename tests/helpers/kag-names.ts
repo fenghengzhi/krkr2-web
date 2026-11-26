@@ -79,11 +79,11 @@ export const kagNameStory = String.raw`*choice|Localized script names
 [macro name=ＨＥＲＯ][nowait]HERO [emb exp="mp['ＨＰ']"]/[emb exp="mp['ｈｐ']"][endnowait][endmacro]
 [macro name=ｈｅｒｏ][nowait]friend [emb exp="mp['ＨＰ']"][endnowait][endmacro]
 [MACRO NAME=NextLine][r][endmacro]
-[cm][nowait]CHOOSE[endnowait]
+[cm][hr][nowait]CHOOSE[endnowait]
 [r][link target=*picked]Continue[endlink]
 [s]
 *picked
-[cm][ＨＥＲＯ ＨＰ=7 ｈｐ=2]
+[cm][hr][ＨＥＲＯ ＨＰ=7 ｈｐ=2]
 [eval exp="global.nameGamePhase=1"]
 [l]
 [NEXTLINE][ｈｅｒｏ ＨＰ=3]
@@ -92,7 +92,7 @@ export const kagNameStory = String.raw`*choice|Localized script names
 [jump target=*end]
 WRONG
 *end
-[cm][nowait]END[endnowait]
+[cm][hr][nowait]END[endnowait]
 [eval exp="global.nameGamePhase=3"]
 [s]
 `

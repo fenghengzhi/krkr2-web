@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { mouseButtonChoiceSource, mouseButtonSteps, mouseButtonTrace } from '../helpers/mouse-button-choice.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 import { pointerPixel } from '../helpers/pointer-pixel.ts'
-import { readScreenshotPng } from '../helpers/screenshot-png.ts'
+import { canvasPixels } from '../helpers/canvas-pixels.ts'
 
 interface ButtonInput { type: string; button: number; detail: number; trusted: boolean; x: number; y: number }
 declare global { interface Window { buttonChoiceInputs: ButtonInput[] } }
@@ -38,11 +38,11 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         const trace = mouseButtonTrace(step.button, step.kind, step.x)
         await expect(page.getByText(`button-choice:${index + 1}:${step.state}|${trace}`, { exact: true }))
           .toBeVisible({ timeout: 15000 })
-        let screenshot: Buffer | undefined
         await expect.poll(async () => {
-          screenshot = await canvas.screenshot({ scale: 'css' })
-          const actual = readScreenshotPng(screenshot)
+          const actual = await canvasPixels(canvas)
           if (actual.width !== 240 || actual.height !== 160) return { width: actual.width, height: actual.height }
+          if (actual.bounds.width !== 240 || actual.bounds.height !== 160)
+            return { cssWidth: actual.bounds.width, cssHeight: actual.bounds.height }
           for (let y = 0; y < 160; y++) for (let x = 0; x < 240; x++) {
             const expected = y < 120 ? [48, 64, 80, 255] : step.color, at = (y * 240 + x) * 4
             for (let c = 0; c < 4; c++) if (actual.rgba[at + c] !== expected[c])
@@ -51,7 +51,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           return null
         }).toBeNull()
         observations.push({ index, button, detail, state: step.state, trace })
-        await info.attach(`button-choice-${index + 1}`, { body: screenshot!, contentType: 'image/png' })
+        await info.attach(`button-choice-${index + 1}`, { body: await canvas.screenshot({ scale: 'css' }), contentType: 'image/png' })
       }
       expect(await page.evaluate(() => window.buttonChoiceInputs)).toEqual(mouseButtonSteps.flatMap((step, index) => {
         const detail = index === 1 || index === 3 || index === 5 ? 2 : 1, button = [0, 2, 1][step.button]!

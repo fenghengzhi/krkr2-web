@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 174 批为带预加重标记的 CD 配乐加入播放支持，并修订旧过场转换时的声音起点。新增行为等待托管验证。[174 实现与托管证据](docs/decisions/174-story-history-and-disc-audio.md)
+
 第 173 批让触屏玩家能直接点选鼠标驱动的章节菜单，并修订了首个可播放画面晚于零秒时的影片定位。原版游戏和影片用例等待托管验证。[173 实现与托管证据](docs/decisions/173-touch-choices-and-movie-start.md)
 
 第 172 批支持游戏配置的全屏铺满、完整显示和原尺寸显示，修订 WAVE 循环接缝，并支持与游戏一起导入外置设置文件。第 170 批的生产构建和 UDF 独立制盘均已通过。[172 实现与托管证据](docs/decisions/172-fullscreen-options-story-input-and-wave-loops.md)

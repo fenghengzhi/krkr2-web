@@ -65,6 +65,10 @@ export function convertLegacyMovie(module: LegacyMediaModule, input: Blob | Uint
       '-c:v', 'libopenh264', '-threads:v', '1', '-profile:v', 'constrained_baseline', '-rc_mode', 'quality',
       '-b:v', '2000000', '-allow_skip_frames', '0', '-pix_fmt', 'yuv420p', '-vsync', '0', '-enc_time_base:v', '-1',
       '-avoid_negative_ts', 'disabled',
+      // Firefox played the delayed MPEG audio early when the delay lived in
+      // an MP4 empty edit. Pad each track to the shared origin in PCM so the
+      // sound also stays aligned when a browser ignores that edit.
+      '-af', 'aresample=async=1:first_pts=0',
       '-c:a', 'aac', '-threads:a', '1', '-b:a', '192k', '-movflags', '+faststart', '-f', 'mp4', '-y', '/output.mp4',
     ])
     if (status !== 0) throw new Error(`Legacy movie conversion failed (${status}): ${log.join('\n')}`)

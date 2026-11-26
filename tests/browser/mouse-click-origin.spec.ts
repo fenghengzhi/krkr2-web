@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { mouseClickOriginExpected, mouseClickOriginSource } from '../helpers/mouse-click-origin.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 import { pointerPixel } from '../helpers/pointer-pixel.ts'
-import { readScreenshotPng } from '../helpers/screenshot-png.ts'
+import { canvasPixels } from '../helpers/canvas-pixels.ts'
 
 interface ClickOriginEvent { type: string; x: number; y: number; button: number; trusted: boolean }
 declare global { interface Window { clickOriginEvents: ClickOriginEvent[] } }
@@ -14,6 +14,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       game = await launchWindowAttention(page, backend, binary, mouseClickOriginSource),
       canvas = game.surface('Drag choice').locator('canvas[data-window-id]')
     let pressed = false
+    let captured: Awaited<ReturnType<typeof canvasPixels>> | undefined
     try {
       await expect(canvas).toHaveJSProperty('width', 320)
       await expect(canvas).toHaveJSProperty('height', 180)
@@ -37,11 +38,10 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         await page.mouse.move(up.x, up.y); await page.mouse.up(); pressed = false
         await expect(page.getByText(`drag-choice:${index + 1}:${selected}:${mouseClickOriginExpected[index]}`, { exact: true }))
           .toBeVisible({ timeout: 20000 })
-        let captured: Buffer | undefined
         await expect.poll(async () => {
-          captured = await canvas.screenshot({ scale: 'css' })
-          const image = readScreenshotPng(captured)
+          const image = captured = await canvasPixels(canvas)
           if (image.width !== 320 || image.height !== 180) return { dimensions: [image.width, image.height] }
+          if (image.bounds.width !== 320 || image.bounds.height !== 180) return { cssDimensions: [image.bounds.width, image.bounds.height] }
           for (let y = 0; y < 180; y++) for (let x = 0; x < 320; x++) {
             const color = y < 140 ? x < 160 ? [32, 64, 96, 255] : [96, 64, 32, 255]
               : selected === 'left' ? [32, 112, 64, 255] : [112, 64, 32, 255], at = (y * 320 + x) * 4
@@ -50,8 +50,10 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           }
           return null
         }).toBeNull()
-        observations.push({ selected, down: [downX, 30], up: [upX, 90], trace: mouseClickOriginExpected[index] })
-        await info.attach(`drag-selected-${selected}`, { body: captured!, contentType: 'image/png' })
+        observations.push({ selected, down: [downX, 30], up: [upX, 90], trace: mouseClickOriginExpected[index],
+          width: captured!.width, height: captured!.height, bounds: captured!.bounds, devicePixelRatio: captured!.devicePixelRatio })
+        await info.attach(`drag-selected-${selected}`, { body: await canvas.screenshot({ scale: 'css', timeout: 5000 }), contentType: 'image/png' })
+        await info.attach(`drag-selected-${selected}-rgba`, { body: Buffer.from(captured!.rgba), contentType: 'application/octet-stream' })
       }
       const events = await page.evaluate(() => window.clickOriginEvents)
       expect(events.map((event) => [event.type, Math.trunc(event.x), Math.trunc(event.y), event.button, event.trusted]))
@@ -61,11 +63,16 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         ])
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
+    if (failures.length && captured) for (const attach of [
+      () => info.attach('drag-choice-last-captured-rgba', { body: Buffer.from(captured!.rgba), contentType: 'application/octet-stream' }),
+      async () => info.attach('drag-choice-failed-screen', { body: await canvas.screenshot({ scale: 'css', timeout: 5000 }), contentType: 'image/png' }),
+    ]) try { await attach() } catch (error) { failures.push(error) }
     try {
       await info.attach('mouse-click-origin', { contentType: 'application/json', body: JSON.stringify({
         observations, events: await page.evaluate(() => window.clickOriginEvents),
         source: mouseClickOriginSource, logs: await page.locator('#logs').innerText(),
-        scope: 'Trusted left-button down/move/up inside the same game canvas. Original Form Click uses the down point while MouseUp uses release; both actions and every screenshot pixel are checked. Double-click timing and outside-client click cancellation are unchanged.' }, null, 2) })
+        lastCanvas: captured && { width: captured.width, height: captured.height, bounds: captured.bounds, devicePixelRatio: captured.devicePixelRatio },
+        scope: 'Trusted left-button down/move/up inside the same game canvas. Original Form Click uses the down point while MouseUp uses release; both actions and every backing-canvas pixel are checked. Unmodified screen PNGs retain fractional CSS placement separately. Double-click timing and outside-client click cancellation are unchanged.' }, null, 2) })
     } catch (error) { failures.push(error) }
     try { if (pressed) await page.mouse.up(); await game.stop() } catch (error) { failures.push(error) }
     if (failures.length === 1) throw failures[0]

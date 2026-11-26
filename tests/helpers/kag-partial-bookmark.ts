@@ -1,7 +1,7 @@
 export const partialBookmarkFiles = {
   'first.ks': String.raw`[eval exp="f.partialResult=0"]
 *menu|Partial bookmark menu
-[cm][nowait]MENU [emb exp=f.partialResult][endnowait]
+[cm][hr][nowait]MENU [emb exp=f.partialResult][endnowait]
 [partialmark phase=menu]
 [r][link target=*enter]Enter chapter[endlink] / [link target=*load]Load lite file[endlink]
 [s]
@@ -14,7 +14,7 @@ export const partialBookmarkFiles = {
 [call storage=chapter.ks target=*load]
 [jump target=*returned]
 *returned|Returned to caller
-[cm][nowait]RETURN [emb exp=f.partialResult][endnowait]
+[cm][hr][nowait]RETURN [emb exp=f.partialResult][endnowait]
 [partialmark phase=returned]
 [if exp="global.partialOrigin=='file'"][r][link target=*live]Open saved branch[endlink][endif]
 [s]
@@ -24,7 +24,7 @@ export const partialBookmarkFiles = {
 [s]
 `,
   'chapter.ks': String.raw`*entry|Entered chapter
-[cm][nowait]CHAPTER [emb exp=f.partialResult][endnowait]
+[cm][hr][nowait]CHAPTER [emb exp=f.partialResult][endnowait]
 [partialmark phase=entry]
 [r][link target=*apply]Restore lite bookmark[endlink]
 [s]
@@ -38,7 +38,7 @@ export const partialBookmarkFiles = {
 [s]
 *destination|Restored destination
 [eval exp="f.partialResult=77"]
-[cm][nowait]DESTINATION [emb exp=f.partialResult][endnowait]
+[cm][hr][nowait]DESTINATION [emb exp=f.partialResult][endnowait]
 [partialmark phase=destination]
 [r][link target=*return]Return to caller[endlink]
 [s]
@@ -54,7 +54,7 @@ export const partialBookmarkFiles = {
 [s]
 *destination
 [partialbad][else][eval exp="f.partialResult=91"][endif]
-[cm][nowait]BRANCH [emb exp=f.partialResult][endnowait]
+[cm][hr][nowait]BRANCH [emb exp=f.partialResult][endnowait]
 [partialmark phase=branch]
 [r][link target=*return]Return to caller[endlink]
 [s]

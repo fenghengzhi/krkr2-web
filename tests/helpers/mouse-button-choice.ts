@@ -17,6 +17,9 @@ class ButtonWindow extends Window {
   function onMouseUp(x,y,button,shift){global.buttonRecord("window-up",x,y,button);}
   function action(event){
     if(event.type=="onHitTest"){global.buttonOwnerHits++;return;}
+    // Window activation, resize and movement also call this action. Only
+    // Layer events below have a Layer name and describe a game control.
+    if(!(event.target instanceof "Layer"))return;
     var name=event.target.name;
     if(event.type=="onMouseDown")global.buttonRecord(name+"-down",event.x,event.y,event.button);
     if(event.type=="onClick"){

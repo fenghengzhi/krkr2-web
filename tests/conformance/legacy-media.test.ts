@@ -8,10 +8,12 @@ import { convertLegacyMovie } from '../../src/backends/video/legacy/convert.ts'
 import { validateLegacyMediaManifest, type LegacyMediaFactory, type LegacyMediaManifest } from '../../src/backends/video/legacy/module.ts'
 import { readVideoTimelineBlob } from '../../src/formats/video/mp4.ts'
 import { legacyVideoFormat } from '../../src/backends/video/legacy/format.ts'
+import { inspectLegacyAudio } from '../helpers/legacy-audio-reference.ts'
 
 interface InputReference {
   file: string; bytes: number; sha256: string; audioCodec: string | null; videoCodec: string; videoTag: string
   fps: number; normalizedVideoTimes: number[]
+  audioInputOffset: number
 }
 
 for (const group of [
@@ -57,7 +59,8 @@ for (const group of [
         locateFile: (name) => resolve(directory, name) }),
         blob = convertLegacyMovie(module, bytes, format, log),
         converted = new Uint8Array(await blob.arrayBuffer()), timeline = await readVideoTimelineBlob(blob)
-      writeFileSync(resolve(output, entry.file + '.mp4'), converted)
+      const moviePath = resolve(output, entry.file + '.mp4')
+      writeFileSync(moviePath, converted)
       assert.equal(blob.type, 'video/mp4'); assert.equal(String.fromCharCode(...converted.subarray(4, 8)), 'ftyp')
       assert(timeline)
       assert.equal(timeline.videoStreams, 1); assert.equal(timeline.audioStreams, entry.audioCodec ? 1 : 0)
@@ -72,12 +75,13 @@ for (const group of [
       assert(expected.every(Number.isFinite))
       for (const [index, time] of timeline.times.entries())
         assert(Math.abs(time - expected[index]!) < .1, `${entry.file} frame ${index}: ${time} ms / independent source ${expected[index]} ms`)
+      if (entry.audioCodec) inspectLegacyAudio(moviePath, entry.audioInputOffset, observation)
       Object.assign(observation, { matched: true, outputBytes: converted.length, outputSha256: hash(converted), timeline, expectedTimes: expected })
     } catch (error) { observation.error = String(error); failures.push(error) }
     finally { observation.log = log }
   }
   writeFileSync(resolve(output, 'comparison.json'), JSON.stringify({ complete: !failures.length, manifest, cinepak: reference.cinepak,
-    scope: 'Real pinned WASM decoding and encoding; independent input frame timestamps. Browser tests separately require visible frame markers, shared full RGBA and actual audio. Lossy conversion is not original DirectShow sample identity.',
+    scope: 'Real pinned WASM decoding and encoding; independent input frame timestamps and system FFmpeg decoded audio timing. Browser tests separately require visible frame markers, shared full RGBA and actual audio. Lossy conversion is not original DirectShow sample identity.',
     observations }, null, 2) + '\n')
   if (failures.length === 1) throw failures[0]
   if (failures.length) throw new AggregateError(failures, 'Legacy movie conversions failed', { cause: failures[0] })

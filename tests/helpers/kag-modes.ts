@@ -66,13 +66,14 @@ function kagModeObserve(id){
 `
 
 /** Original KAG keeps all message/link handlers. These authored settings are
- * valid nonzero real booleans, not integer mode enumerations. */
+ * valid nonzero real booleans, not integer mode enumerations. The explicit hr
+ * separates chapter history: cm only repages history in everypage mode. */
 export const kagModeStory = String.raw`*choice|Parser options
-[cm][nowait]CHOOSE[endnowait]
+[cm][hr][nowait]CHOOSE[endnowait]
 [r][link target=*picked]Continue[endlink]
 [s]
 *picked
-[cm][nowait]
+[cm][hr][nowait]
 [if exp=true]ROUTE[else]WRONG[endif]
 [emb exp="' READY'"][endnowait]
 [eval exp="global.modeGamePhase=1"]
@@ -80,7 +81,7 @@ export const kagModeStory = String.raw`*choice|Parser options
 [jump target=*end]
 WRONG
 *end
-[cm][nowait]END[endnowait]
+[cm][hr][nowait]END[endnowait]
 [eval exp="global.modeGamePhase=2"]
 [s]
 `

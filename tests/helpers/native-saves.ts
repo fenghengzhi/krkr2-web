@@ -48,7 +48,7 @@ export const saveBytesDigest = (bytes: Uint8Array) => createHash('sha256').updat
 /** Original public KAG save/load tags, reached only by actual link clicks. */
 export const nativeSaveStory = String.raw`[eval exp="f.nativeProgress=7"]
 *checkpoint|Native save migration
-[cm][nowait]CHECKPOINT [emb exp="f.nativeProgress"][endnowait]
+[cm][hr][nowait]CHECKPOINT [emb exp="f.nativeProgress"][endnowait]
 [iscript]
 global.nativeRendered=global.kag.historyLayer.currentLine;
 global.nativeVisits++;
@@ -72,7 +72,7 @@ global.nativeSdkResult=nativeReadSdkBookmark();
 [endscript]
 [jump target=*checkpoint]
 *finish
-[cm][nowait]FINISHED[endnowait]
+[cm][hr][nowait]FINISHED[endnowait]
 [iscript]
 global.nativeRendered=global.kag.historyLayer.currentLine;
 Debug.message("native-save-story-finished:"+f.nativeProgress);

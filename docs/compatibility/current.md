@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 174 批支持 CUE 音轨的 FLAGS PRE 标记，旧过场转换会将音轨起点前的延迟写为静音采样。新增行为等待托管验证。[174 实现与托管证据](../decisions/174-story-history-and-disc-audio.md)
+
 第 173 批在触屏按下前把实际接触位置交给鼠标驱动的游戏，并让影片在浏览器能定位的最早位置接收首帧。新增行为等待验证。[173 实现与托管证据](../decisions/173-touch-choices-and-movie-start.md)
 
 第 172 批按 `-fszoom` 配置选择全屏缩放与居中裁切，游戏可从外置设置文件读取选项，普通 WAVE 在非整数采样位置按循环或跳转后的素材插值。新增行为等待托管验证。[172 实现与托管证据](../decisions/172-fullscreen-options-story-input-and-wave-loops.md)

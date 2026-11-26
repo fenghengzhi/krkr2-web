@@ -47,9 +47,9 @@ async function opticalFiles(files: Iterable<Resource>, checkpoint: () => Promise
   return sheets.length ? sheets : images
 }
 
-type SelectedPart = { kind: 'silence'; frames: number } | {
+type SelectedPart = ({ kind: 'silence'; frames: number } | {
   kind: 'file'; resource: Resource; encoding: 'encoded' | 's16le' | 's16be'; startFrame: number; endFrame?: number
-}
+}) & { preEmphasis?: true }
 export interface CddaSelection { readonly drive: string; readonly cue: string; readonly track: number; readonly parts?: readonly SelectedPart[]; readonly revision?: number }
 /** Marks only this resolver's explicit-drive rejection, not provider errors. */
 export class InvalidCddaDrive extends TvpError {
@@ -335,15 +335,14 @@ export class CddaDiscs {
       files = new Map<number, Resource>()
     if (parts) for (const part of parts) {
       if (part.kind === 'silence') { selected.push(part); continue }
-      const file = sheet.files[part.file]!
-      let audio = files.get(part.file)
+      const { file: index, ...range } = part, file = sheet.files[index]!
+      let audio = files.get(index)
       if (!audio) {
         audio = await this.cueFile(binding, file.name)
-        files.set(part.file, audio)
+        files.set(index, audio)
       }
-      selected.push({ kind: 'file', resource: audio,
-        encoding: file.type === 'BINARY' ? 's16le' : file.type === 'MOTOROLA' ? 's16be' : 'encoded',
-        startFrame: part.startFrame, ...(part.endFrame === undefined ? {} : { endFrame: part.endFrame }) })
+      selected.push({ ...range, resource: audio,
+        encoding: file.type === 'BINARY' ? 's16le' : file.type === 'MOTOROLA' ? 's16be' : 'encoded' })
       await this.storage.checkpoint()
     }
     return finish({ drive: disc.drive, cue: resource.name, track: parsed, ...(parts ? { parts: selected } : {}) })
@@ -365,15 +364,15 @@ export async function openCddaSelection(selection: CddaSelection, sources: Audio
   try {
     for (const part of selection.parts) {
       if (part.kind === 'silence') { parts.push(part); continue }
-      let entry = leases.find((entry) => entry.resource === part.resource)
+      const { resource, ...range } = part
+      let entry = leases.find((entry) => entry.resource === resource)
       if (!entry) {
-        const lease = await sources.open(part.resource, valid)
-        entry = { resource: part.resource, lease, offset: size }; leases.push(entry)
+        const lease = await sources.open(resource, valid)
+        entry = { resource, lease, offset: size }; leases.push(entry)
         size += lease.source.size; bufferedBytes += lease.bufferedBytes
         if (!Number.isSafeInteger(size)) throw new Error('Combined CDDA sources exceed safe byte offsets')
       }
-      parts.push({ kind: 'file', offset: entry.offset, size: entry.lease.source.size, encoding: part.encoding,
-        startFrame: part.startFrame, ...(part.endFrame === undefined ? {} : { endFrame: part.endFrame }) })
+      parts.push({ ...range, offset: entry.offset, size: entry.lease.source.size })
     }
     return { bufferedBytes, release, cdda: { parts }, source: { size, read: async (offset, length) => {
       if (released || !valid()) throw new Error('CDDA source owner has expired')

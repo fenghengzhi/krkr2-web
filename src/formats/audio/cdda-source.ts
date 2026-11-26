@@ -4,7 +4,20 @@ import { emptyLoops } from '../../engine/ports/audio.ts'
 import { OwnedPcmSource, PcmSourceContext, pcmSourceLimits, type PcmSource, type PcmSourceOptions } from './pcm-source.ts'
 
 type OpenEncoded = (source: ByteSource, options?: PcmSourceOptions) => Promise<PcmSource | undefined>
-interface Segment { start: number; count: number; decoder?: PcmSource; offset: number }
+interface Segment { start: number; count: number; decoder?: PcmSource; offset: number; preEmphasis?: true }
+
+/** Fit the 50/15 µs CD playback curve |(1+s·15µs)/(1+s·50µs)| at
+ * DC, one quarter of the sample rate, and Nyquist. A first-order shelf
+ * with (1+k)+(1-k)z^-1 has squared gain 1+k² at a quarter rate after
+ * dropping the common factor. These k values satisfy all three points. */
+function cdDeEmphasis(rate: number) {
+  const k = (seconds: number) => Math.hypot(1, Math.PI * rate * seconds) / Math.sqrt(3),
+    pole = k(50e-6), zero = k(15e-6), feedback = (pole - 1) / (pole + 1)
+  return { direct: (1 + zero) / (1 + pole), delayed: (1 - zero) / (1 + pole), feedback,
+    // For a seek, forget the old playhead and prime from real preceding
+    // samples. The omitted normalized tail is below Float32 subnormal range.
+    history: Math.max(1, Math.ceil(-160 * Math.LN2 / Math.log(Math.abs(feedback)))) }
+}
 class RawCddaSource extends OwnedPcmSource {
   constructor(context: PcmSourceContext, private readonly littleEndian: boolean) {
     if (context.source.size % 2352) throw new Error('Raw CDDA source is not an integral 2352-byte sector image')
@@ -25,22 +38,52 @@ class RawCddaSource extends OwnedPcmSource {
 }
 class CddaTrackSource extends OwnedPcmSource {
   private retiring?: Promise<void>
+  private readonly emphasis?: ReturnType<typeof cdDeEmphasis>
+  private filterMemory?: Float64Array
+  private nextPosition = -1
   constructor(context: PcmSourceContext, private readonly segments: Segment[],
     private readonly decoders: readonly PcmSource[], sampleRate: number, channels: number, count: number, bits: number) {
     super({ sampleRate, channels, bits, sampleCount: count, loops: emptyLoops() }, context)
+    if (segments.some((segment) => segment.preEmphasis)) {
+      this.emphasis = cdDeEmphasis(sampleRate)
+      this.filterMemory = new Float64Array(channels)
+    }
   }
   protected async readFrames(position: number, frames: number): Promise<Float32Array[]> {
-    const output = Array.from({ length: this.info.channels }, () => new Float32Array(frames))
+    const filter = this.emphasis, sequential = position === this.nextPosition,
+      history = filter && !sequential ? Math.min(position, filter.history) : 0,
+      first = position - history, end = position + frames,
+      output = Array.from({ length: this.info.channels }, () => new Float32Array(frames)),
+      memory = this.filterMemory?.slice()
+    if (!sequential) memory?.fill(0)
     for (const segment of this.segments) {
-      const start = Math.max(position, segment.start), end = Math.min(position + frames, segment.start + segment.count)
-      if (start >= end || !segment.decoder) continue
-      await this.context.checkpoint()
-      const planes = await segment.decoder.read(segment.offset + start - segment.start, end - start)
-      this.context.assertOpen()
-      if (planes.length !== output.length || planes.some((plane) => plane.length !== end - start))
-        throw new Error('Truncated CDDA segment decode')
-      for (let channel = 0; channel < output.length; channel++) output[channel]!.set(planes[channel]!, start - position)
+      const start = Math.max(first, segment.start), stop = Math.min(end, segment.start + segment.count)
+      if (start >= stop) continue
+      if (!segment.preEmphasis) memory?.fill(0)
+      for (let at = segment.preEmphasis ? start : Math.max(position, start); at < stop;) {
+        await this.context.checkpoint()
+        const count = Math.min(stop - at, pcmSourceLimits.readFrames),
+          planes = await segment.decoder?.read(segment.offset + at - segment.start, count)
+        this.context.assertOpen()
+        if (segment.decoder && (!planes || planes.length !== output.length || planes.some((plane) => plane.length !== count)))
+          throw new Error('Truncated CDDA segment decode')
+        for (let channel = 0; channel < output.length; channel++) {
+          const input = planes?.[channel], destination = output[channel]!
+          if (segment.preEmphasis && filter && memory) {
+            let state = memory[channel]!
+            for (let i = 0; i < count; i++) {
+              const sample = input?.[i] ?? 0, value = filter.direct * sample + state
+              state = filter.delayed * sample + filter.feedback * value
+              if (at + i >= position) destination[at + i - position] = value
+            }
+            memory[channel] = state
+          } else if (input) destination.set(input, at - position)
+        }
+        at += count
+      }
     }
+    this.filterMemory = memory
+    this.nextPosition = end
     return output
   }
   private retireDecoders(): Promise<void> {
@@ -131,7 +174,7 @@ export async function openCddaPcmSource(source: ByteSource, track: CddaPcmTrack,
         count = end - offset
       }
       if (!Number.isSafeInteger(total + count)) throw new Error('CDDA track exceeds safe sample range')
-      if (count) segments.push({ start: total, count, offset, decoder })
+      if (count) segments.push({ start: total, count, offset, decoder, preEmphasis: part.preEmphasis })
       total += count
     }
     if (!total) throw new Error('CUE audio track has no playable samples')
