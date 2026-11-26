@@ -4,6 +4,8 @@
 
 第 183 批处理 CloneCD 游戏盘启动与配乐、播放中更换影片轨道和游戏图层双击。第 172 批最终失败，第 173 批的构建、类型检查和三种浏览器的离线用例已通过。[183 实现与托管证据](decisions/183-clonecd-disc-playback-and-input.md)
 
+第 183 批实现提交 `4eb1849` 登记时为 `pending`，结果留到下一批取回。[第 183 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45885531653)
+
 第 182 批处理设备书签读档与另存、模态阅读区初始焦点和多声道 Vorbis 配乐。新取得的第 172 批 Firefox 游戏库报告为 109/110 通过，尚有一个大影片换轨用例超时。[182 实现与托管证据](decisions/182-device-bookmarks-modal-focus-and-vorbis.md)
 
 第 182 批实现提交 `76a8f35` 登记时为 `pending`，下一批取回结果。[第 182 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45883191112)

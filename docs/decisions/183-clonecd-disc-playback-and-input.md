@@ -23,3 +23,5 @@ Windows 托管用例启动原版 SDK 的游戏窗口，分别在同点和相邻�
 第 172 批最终失败。15 份常规浏览器报告累计 3,488 项通过、390 项失败、2 项跳过，另有 706 项未报告。WebKit 游戏库作业取消前记录了 88 项通过，余下 22 项未报告。Firefox 大影片用例的首错是等待定位后的画面超时，现有附件不足以将该超时归因于本批修订的暂停时钟。[第 172 批托管运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45859775217)
 
 第 173 批已取得生产构建和类型检查的通过结果。三种浏览器的离线用例合计 65 项通过，Chromium 原版 KAG 与运行时兼容用例 32 项通过。另有原版对照作业仍然失败。取回时第 174 至 182 批仍在排队。[第 173 批托管运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45861660259) · [第 182 批托管运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45883191112)
+
+第 183 批实现提交 `4eb1849` 已登记，登记时状态为 `pending`。下一批取回已发布的结果。[第 183 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45885531653)
