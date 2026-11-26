@@ -250,6 +250,63 @@ jobs:
             .generated/legacy-media/manifest.json
           retention-days: 90
 
+  windows-media9-originals:
+    name: Master ${{ matrix.profile }} cutscene with Windows Media Foundation
+    runs-on: windows-2025
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [wmv9, vc1]
+    env:
+      MOVIE_PROFILE: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.19.0'
+      - name: Prepare authored frames, stereo samples and their digests
+        run: |
+          mkdir -p out/windows-movie
+          node --input-type=module <<'JS'
+          import { writeWindowsMovieInputs } from './scripts/generate-legacy-video-fixtures.mjs'
+          writeWindowsMovieInputs('out/windows-movie')
+          JS
+          mv out/windows-movie/wmv9-inputs.json "out/windows-movie/$MOVIE_PROFILE-source.json"
+      - name: Enable the Windows media components if needed
+        shell: powershell
+        run: |
+          $feature = Get-WindowsFeature -Name Server-Media-Foundation
+          if ($feature -and !$feature.Installed) {
+            $installed = Install-WindowsFeature -Name Server-Media-Foundation
+            if (!$installed.Success) { throw 'Could not install Media Foundation on the hosted runner' }
+          }
+      - name: Build the Windows SDK media writer
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%V in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSROOT=%%V"
+          call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          cd out\windows-movie
+          cl /nologo /std:c++17 /EHsc /W4 ..\..\tests\native\author-windows-media.cpp /Fe:author.exe /link ole32.lib mf.lib mfplat.lib mfuuid.lib mfreadwrite.lib
+      - name: Encode the original WMV with the system audio and video codecs
+        run: |
+          cd out/windows-movie
+          ./author.exe "$MOVIE_PROFILE" 2>&1 | tee "$MOVIE_PROFILE-encode.log"
+          sha256sum "legacy-$MOVIE_PROFILE.wmv" > "$MOVIE_PROFILE-original.sha256"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() }}
+        with:
+          name: windows-media9-original-${{ matrix.profile }}
+          path: |
+            out/windows-movie/*.wmv
+            out/windows-movie/*.json
+            out/windows-movie/*.log
+            out/windows-movie/*.sha256
+          if-no-files-found: error
+          retention-days: 90
+
   udf-metadata-disc:
     name: Master a UDF 2.50 game disc with Windows IMAPI
     runs-on: windows-2025
@@ -331,12 +388,15 @@ jobs:
     name: WASM, types and production build
     # Still compile the main VM when an independent image build fails.
     if: ${{ !cancelled() }}
-    needs: [jpeg-fixtures, jpeg-kernel, png-kernel, legacy-media-kernel, udf-metadata-disc]
+    needs: [jpeg-fixtures, jpeg-kernel, png-kernel, legacy-media-kernel, udf-metadata-disc, windows-media9-originals]
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     outputs:
       legacy-fixtures: ${{ steps.legacy-fixtures.outcome }}
       windows-media-fixtures: ${{ steps.windows-media-fixtures.outcome }}
+      wmv9-readback: ${{ steps.wmv9-readback.outcome }}
+      vc1-readback: ${{ steps.vc1-readback.outcome }}
+      quicktime-fixtures: ${{ steps.quicktime-fixtures.outcome }}
       mpeg2-xvid-fixtures: ${{ steps.mpeg2-xvid-fixtures.outcome }}
       avi-adpcm-fixtures: ${{ steps.avi-adpcm-fixtures.outcome }}
       dvd-audio-fixtures: ${{ steps.dvd-audio-fixtures.outcome }}
@@ -451,6 +511,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        continue-on-error: true
+        with:
+          pattern: windows-media9-original-*
+          merge-multiple: true
+          path: out/verification/video-tracks
+      - name: Independently decode the original WMV9 game cutscene on Linux
+        id: wmv9-readback
+        continue-on-error: true
+        run: node --input-type=module -e "import { checkWindows9Fixture } from './scripts/generate-legacy-video-fixtures.mjs'; checkWindows9Fixture('out/verification/video-tracks')" 2>&1 | tee out/ci/wmv9-readback.log
+      - name: Independently decode the original VC-1 and WMA Pro game cutscene on Linux
+        id: vc1-readback
+        continue-on-error: true
+        run: node --input-type=module -e "import { checkVc1Fixture } from './scripts/generate-legacy-video-fixtures.mjs'; checkVc1Fixture('out/verification/video-tracks')" 2>&1 | tee out/ci/vc1-readback.log
+      - name: Author QuickTime Animation and MPEG-4 Part 2 movies and verify all numbered pictures and sound
+        id: quicktime-fixtures
+        continue-on-error: true
+        run: |
+          mkdir -p out/verification/video-tracks
+          node --input-type=module -e "import { generateQuickTimeFixtures } from './scripts/generate-legacy-video-fixtures.mjs'; generateQuickTimeFixtures('out/verification/video-tracks')" 2>&1 | tee out/ci/quicktime-fixtures.log
       - name: Generate and independently decode Windows Media fixtures
         id: windows-media-fixtures
         continue-on-error: true
@@ -649,7 +729,22 @@ jobs:
           name: windows-media-fixture-evidence
           path: |
             out/verification/video-tracks/windows-media*
-            out/verification/video-tracks/legacy-wmv*
+            out/verification/video-tracks/legacy-wmv1*
+            out/verification/video-tracks/legacy-wmv2*
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.quicktime-fixtures.outcome == 'success' || steps.quicktime-fixtures.outcome == 'failure' || steps.wmv9-readback.outcome == 'failure' || steps.vc1-readback.outcome == 'failure') }}
+        with:
+          name: independent-cutscene-readback
+          path: |
+            out/verification/video-tracks/wmv9*
+            out/verification/video-tracks/vc1*
+            out/verification/video-tracks/legacy-wmv9*
+            out/verification/video-tracks/legacy-vc1*
+            out/verification/video-tracks/quicktime*
+            out/verification/video-tracks/legacy-animation*
+            out/verification/video-tracks/legacy-part2*
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -829,6 +924,13 @@ jobs:
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.windows-media-fixtures }}
         run: test "$FIXTURE_OUTCOME" = success
+      - name: Require QuickTime fixtures and both Windows-authored movies with their independent readbacks
+        if: ${{ !cancelled() }}
+        env:
+          WMV9_RESULT: ${{ needs.build.outputs.wmv9-readback }}
+          VC1_RESULT: ${{ needs.build.outputs.vc1-readback }}
+          QUICKTIME_RESULT: ${{ needs.build.outputs.quicktime-fixtures }}
+        run: test "$WMV9_RESULT" = success && test "$VC1_RESULT" = success && test "$QUICKTIME_RESULT" = success
       - name: Require complete MPEG-2 and Xvid references
         if: ${{ !cancelled() }}
         env:
@@ -849,6 +951,42 @@ jobs:
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.large-dib-fixtures }}
         run: test "$FIXTURE_OUTCOME" = success
+
+  cutscene-conversion:
+    name: Check WMV, VC-1, QuickTime and MPEG-4 Part 2 cutscenes after WebAssembly conversion
+    needs: [build, legacy-media-kernel]
+    if: ${{ !cancelled() && needs.legacy-media-kernel.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: legacy-media-kernel
+          path: ${{ runner.temp }}/krkr-legacy-media
+      - run: tar -xzf "$RUNNER_TEMP/krkr-legacy-media/legacy-media-kernel.tar.gz"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: independent-cutscene-readback
+          path: out/verification/video-tracks
+      - name: Check original movie routing and decode each converted MP4 with the system reader
+        run: |
+          mkdir -p out/ci
+          node --import tsx --test --test-name-pattern='Windows Media 9|VC-1 Advanced Profile|QuickTime' tests/conformance/legacy-media.test.ts tests/conformance/legacy-video-port.test.ts 2>&1 | tee out/ci/cutscene-comparison.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() }}
+        with:
+          name: cutscene-conversion
+          path: out/ci/
+          retention-days: 90
 
   node:
     name: Node conformance and integration
@@ -1221,7 +1359,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, tools-types, udf-metadata-disc, wave-speaker-reference, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config, original-disc-search]
+    needs: [build, tools-types, udf-metadata-disc, windows-media9-originals, cutscene-conversion, wave-speaker-reference, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config, original-disc-search]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

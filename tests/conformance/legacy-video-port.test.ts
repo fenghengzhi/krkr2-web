@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PortVideoBackend } from '../../src/backends/video/port-backend.ts'
-import { legacyVideoFormat, type LegacyVideoFormat } from '../../src/backends/video/legacy/format.ts'
+import { legacyVideoFormat, needsQuickTimeConversion, type LegacyVideoFormat } from '../../src/backends/video/legacy/format.ts'
 import { checkLegacyInputSize } from '../../src/backends/video/legacy/module.ts'
 import { defaultVideoSettings, type VideoCommand } from '../../src/engine/ports/video.ts'
 import { ExecutionCancelled } from '../../src/engine/scheduler/control.ts'
@@ -169,4 +169,80 @@ test('cancelling the game source abandons the open and retains only the actual i
     assert.deepEqual(f.port.inspectSources(), { preparations: 0, bufferedBytes: 0, metadataBytes: 0 })
     assert.deepEqual(f.opens, [])
   } finally { finish(); await f.close() }
+})
+
+test('QuickTime and MPEG-4 Part 2 use their actual track descriptions even when the file was renamed', async () => {
+  const encoded = await mp4File(), seen: LegacyVideoFormat[] = []
+  const f = transport(async (input, format) => {
+    const bytes = input instanceof Uint8Array ? input : new Uint8Array(await input.arrayBuffer())
+    assert(bytes.length > 32)
+    seen.push(format)
+    return new Blob([encoded])
+  })
+  try {
+    for (const [file, alias, codec] of [['legacy-animation.mov', 'Opening.avi', 'rle '], ['legacy-part2.mp4', 'Ending.mp4', 'mp4v']] as const) {
+      const bytes = Uint8Array.from(await readFile(new URL('../../out/verification/video-tracks/' + file, import.meta.url)))
+      let descriptions: string[] = []
+      await readVideoTimeline(bytes, { acceptTracks(tracks) {
+        descriptions = tracks.filter((track) => track.handler === 'vide').flatMap((track) => track.entries)
+        return false
+      } })
+      assert.deepEqual(descriptions, [codec])
+      await f.port.command(open(alias, { blob: new Blob([bytes]), buffered: false }))
+      const result = f.opens.at(-1)!
+      assert.equal(result.name, alias)
+      assert(!(result.bytes instanceof Uint8Array))
+      assert.deepEqual(new Uint8Array(await result.bytes.blob.arrayBuffer()), encoded)
+      assert.equal(result.timeline?.videoStreams, 1)
+    }
+    // A codec spelling inside a padding box never changes a native H.264 open.
+    const padding = Uint8Array.of(0, 0, 0, 12, 102, 114, 101, 101, 109, 112, 52, 118)
+    const native = new Blob([encoded, padding], { type: 'video/mp4' })
+    await f.port.command(open('native.mov', { blob: native, buffered: false }))
+    const last = f.opens.at(-1)!; assert(!(last.bytes instanceof Uint8Array))
+    assert.equal(last.bytes.buffered, false); assert.equal(last.bytes.blob.size, native.size)
+    assert.deepEqual(seen, ['mov', 'mov'])
+  } finally { await f.close() }
+})
+
+test('QuickTime conversion preserves native and mixed-codec tracks outside the converter’s supported set', () => {
+  const track = (handler: string, ...entries: string[]) => ({ handler, entries })
+  assert(needsQuickTimeConversion([track('vide', 'avc1', 'mp4v'), track('soun', 'mp4a'), track('text', 'text')]))
+  assert(needsQuickTimeConversion([track('vide', 'avc3'), track('vide', 'rle '), track('soun', 'twos')]))
+  for (const tracks of [
+    [track('vide', 'avc1'), track('soun', 'mp4a')], [track('vide', 'av01', 'rle ')],
+    [track('vide', 'mp4v'), track('soun', 'Opus')], [track('vide', 'mp4v'), track('soun', 'enca')],
+    [track('vide', 'encv')], [track('meta', 'mp4v')], Array.from({ length: 17 }, () => track('vide', 'mp4v')),
+  ]) assert.equal(needsQuickTimeConversion(tracks), false)
+})
+
+test('QuickTime conversion failure retains the original bytes for native playback and releases the temporary reservation', async () => {
+  const bytes = Uint8Array.from(await readFile(new URL('../../out/verification/video-tracks/legacy-part2.mp4', import.meta.url)))
+  let attempts = 0
+  const f = transport(async () => { attempts++; throw new Error('Converter unavailable') })
+  try {
+    await f.port.command(open('old.mp4', bytes))
+    assert.equal(attempts, 1)
+    assert(f.opens[0]?.bytes instanceof Uint8Array); assert.deepEqual(f.opens[0].bytes, bytes)
+    assert.equal(f.port.inspectSources().bufferedBytes, 0)
+  } finally { await f.close() }
+})
+
+test('closing a QuickTime cutscene during conversion retires the request without reopening the original movie', async () => {
+  const bytes = Uint8Array.from(await readFile(new URL('../../out/verification/video-tracks/legacy-animation.mov', import.meta.url)))
+  let started!: () => void
+  const converting = new Promise<void>((resolve) => { started = resolve })
+  const f = transport((_input, format, signal) => new Promise<Blob>((_resolve, reject) => {
+    assert.equal(format, 'mov')
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    started()
+  }))
+  try {
+    const pending = assert.rejects(f.port.command(open('animation.mov', { blob: new Blob([bytes]), buffered: true })), /closed|superseded/)
+    await converting
+    await f.port.command({ op: 'close', id: 3, epoch: 2 })
+    await pending
+    assert.equal(f.opens.length, 0)
+    assert.deepEqual(f.port.inspectSources(), { preparations: 0, bufferedBytes: 0, metadataBytes: 0 })
+  } finally { await f.close() }
 })

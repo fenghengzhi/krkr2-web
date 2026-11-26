@@ -243,6 +243,16 @@ export function createStorageSelectorView(
           input.focus({ preventScroll: true })
           input.select()
         })
+        button.addEventListener('dblclick', (event) => {
+          if (event.button !== 0 || disposed || browsing || !enabled || !actions.available()) return
+          event.preventDefault()
+          // The common file dialog activates a file on double-click. Use
+          // exactly the normal confirmation path: Save still asks before
+          // replacing a file, and the engine rechecks the live namespace.
+          input.value = basename
+          const value = selection()
+          if (value !== undefined) actions.choose(value)
+        })
         files.append(button)
       }
       // Do not expose an incomplete subset when the filter budget is spent.
@@ -278,6 +288,43 @@ export function createStorageSelectorView(
     clearOverwrite()
     input.focus({ preventScroll: true })
   })
+  const selection = (): string | undefined => {
+    if (disposed || browsing || !enabled || !actions.available()) return undefined
+    try {
+      const raw = input.value.replaceAll('\\', '/')
+      if (!raw) throw new Error('请输入文件名。')
+      if (raw.length > 4096) throw new Error('文件路径不能超过 4096 个字符。')
+      const disc = nativeDiscPath(raw) ?? (discAddress(raw) ? raw : undefined)
+      if (disc && presentation.save) throw new Error('光盘为只读，请选择存档目录。')
+      if (!disc && /^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^game:\/\/\.\//i.test(raw))
+        throw new Error('请选择当前游戏中的文件。')
+      if (raw.startsWith('/')) throw new Error('请选择当前游戏中的文件。')
+      const name = getFullStoragePath(disc ?? (/^game:\/\/\.\//i.test(raw) ? raw : directory.value + raw))
+      if (name.endsWith('/') || name.endsWith('>')) throw new Error('请选择文件，而不是目录。')
+      // Keep the unextended name on the wire. The engine applies the rule
+      // exactly once, including a trailing dot that suppresses the default.
+      const choice: StorageSelectorChoice = {
+        name,
+        filterIndex: Number(filter.value),
+        overwrite: false,
+      }
+      // This is only the presentation snapshot. The engine repeats existence,
+      // ambiguity, archive and collision checks against the current storage.
+      const selectedName = effectiveName(name),
+        exists = listing.entries.some((entry) => folded(entry.name) === folded(selectedName))
+      if (presentation.save && exists) {
+        confirmOverwrite(choice)
+        return undefined
+      }
+      clearOverwrite()
+      submitted = choice
+      return JSON.stringify(choice)
+    } catch (reason) {
+      clearOverwrite()
+      actions.status(reason instanceof Error ? reason.message : String(reason))
+      return undefined
+    }
+  }
   render()
 
   return {
@@ -296,42 +343,6 @@ export function createStorageSelectorView(
       confirmOverwrite(submitted)
       return true
     },
-    selection(): string | undefined {
-      if (disposed || browsing || !actions.available()) return undefined
-      try {
-        const raw = input.value.replaceAll('\\', '/')
-        if (!raw) throw new Error('请输入文件名。')
-        if (raw.length > 4096) throw new Error('文件路径不能超过 4096 个字符。')
-        const disc = nativeDiscPath(raw) ?? (discAddress(raw) ? raw : undefined)
-        if (disc && presentation.save) throw new Error('光盘为只读，请选择存档目录。')
-        if (!disc && /^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^game:\/\/\.\//i.test(raw))
-          throw new Error('请选择当前游戏中的文件。')
-        if (raw.startsWith('/')) throw new Error('请选择当前游戏中的文件。')
-        const name = getFullStoragePath(disc ?? (/^game:\/\/\.\//i.test(raw) ? raw : directory.value + raw))
-        if (name.endsWith('/') || name.endsWith('>')) throw new Error('请选择文件，而不是目录。')
-        // Keep the unextended name on the wire. The engine applies the rule
-        // exactly once, including a trailing dot that suppresses the default.
-        const choice: StorageSelectorChoice = {
-          name,
-          filterIndex: Number(filter.value),
-          overwrite: false,
-        }
-        // This is only the presentation snapshot. The engine repeats existence,
-        // ambiguity, archive and collision checks against the current storage.
-        const selectedName = effectiveName(name),
-          exists = listing.entries.some((entry) => folded(entry.name) === folded(selectedName))
-        if (presentation.save && exists) {
-          confirmOverwrite(choice)
-          return undefined
-        }
-        clearOverwrite()
-        submitted = choice
-        return JSON.stringify(choice)
-      } catch (reason) {
-        clearOverwrite()
-        actions.status(reason instanceof Error ? reason.message : String(reason))
-        return undefined
-      }
-    },
+    selection,
   }
 }

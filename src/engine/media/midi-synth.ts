@@ -1,5 +1,6 @@
 import type { MidiAsset, MidiEvent } from '../ports/audio.ts'
 import { MidiPitch } from './midi-pitch.ts'
+import { resetsNativeSmfModule } from './midi-reset.ts'
 interface Channel {
   volume: number
   level: number
@@ -12,6 +13,7 @@ interface Channel {
   sustain: boolean
   mono: boolean
   modulation: number
+  percussion: boolean
 }
 interface Note {
   channel: number
@@ -23,8 +25,9 @@ interface Note {
   phase: number
   family: number
   tuning: number
+  percussion: boolean
 }
-const channel = (bufferVolume = 127, previous?: Channel): Channel => ({
+const channel = (bufferVolume = 127, previous?: Channel, percussion = false): Channel => ({
   volume: 100,
   level: Math.trunc(100 * bufferVolume / 127) / 127,
   used: false,
@@ -36,24 +39,28 @@ const channel = (bufferVolume = 127, previous?: Channel): Channel => ({
   sustain: false,
   mono: previous?.mono ?? false,
   modulation: 0,
+  percussion: previous?.percussion ?? percussion,
 })
 const tau = 2 * Math.PI
-// Payloads preceding EOX in the reset messages recognized by the original
-// Win32 MIDI sequencer. GS mode set carries more data after its address.
-const gsReset = [0x41, 0x10, 0x42, 0x12, 0x40, 0, 0x7f, 0, 0x41]
+// Module-level reset recognition is separate from KRKR's F0-prefix volume
+// resend. GS routing accepts the selected device's normal single-value DT1
+// packets; GS mode set retains the previously supported prefix behavior.
 const gsModeSet = [0x41, 0x10, 0x42, 0x12, 0, 0, 0x7f]
 const xgOn = [0x43, 0x10, 0x4c, 0, 0, 0x7e, 0]
+const gsAddress = (payload: number[]) => payload.length === 9 && payload[0] === 0x41 &&
+  payload[2] === 0x42 && payload[3] === 0x12 && payload[4] === 0x40
+const gsReset = (payload: number[]) => gsAddress(payload) && payload[5] === 0 && payload[6] === 0x7f
 function resetsModule(payload: number[]): boolean {
   const matches = (bytes: number[]) => bytes.every((value, at) => payload[at] === value)
   return (payload.length === 4 && payload[0] === 0x7e && payload[2] === 9 && (payload[3] === 1 || payload[3] === 3)) ||
-    (payload.length === gsReset.length && matches(gsReset)) || matches(gsModeSet) ||
+    gsReset(payload) || matches(gsModeSet) ||
     (payload.length === xgOn.length && matches(xgOn))
 }
 
 /** Browser-resident procedural instrument bank. MIDI sequencing and controller
  * behavior are separate from timbre; a sample-bank backend can replace this. */
 export class MidiSynth {
-  private channels = Array.from({ length: 16 }, () => channel())
+  private channels = Array.from({ length: 16 }, (_, id) => channel(127, undefined, id === 9))
   private notes: Note[] = []
   private cursor = 0
   private time = 0
@@ -61,6 +68,7 @@ export class MidiSynth {
   private exclusive?: number[]
   private bufferVolume = 127
   private masterGain = 1
+  private gsActive = false
   left = 0
   right = 0
   constructor(private readonly asset?: MidiAsset) {}
@@ -79,12 +87,12 @@ export class MidiSynth {
     this.resetSequence(false)
   }
   private resetSequence(keepParameters: boolean): void {
-    this.channels = this.channels.map((previous) => channel(this.bufferVolume, keepParameters ? previous : undefined))
+    this.channels = this.channels.map((previous, id) => channel(this.bufferVolume, keepParameters ? previous : undefined, id === 9))
     this.notes = []
     this.exclusive = undefined
     this.cursor = 0
     this.time = 0
-    if (!keepParameters) this.masterGain = 1
+    if (!keepParameters) { this.masterGain = 1; this.gsActive = false }
   }
   seek(time: number): void {
     this.position(time, false)
@@ -92,7 +100,8 @@ export class MidiSynth {
   /** MIDIImpl StopPlay/StartPlay rewinds tracks, silences notes and resets
    * controllers, but sends no ProgramChange. An instrument selected later in
    * the same song therefore remains selected on its next loop or replay;
-   * the old GS device also retains pan, mono mode and registered tuning. */
+   * the old GS device also retains pan, mono mode, registered tuning and its
+   * GS rhythm-part assignment. A module reset is separate from transport. */
   rewind(time: number): void {
     this.position(time, true)
   }
@@ -150,13 +159,25 @@ export class MidiSynth {
         else if (value === 0xf7) {
           if (this.exclusive && resetsModule(this.exclusive)) {
             this.masterGain = 1
-            this.channels = this.channels.map((previous) => {
-              const next = channel(fromFile ? this.bufferVolume : 127)
-              if (!fromFile) next.volume = previous.volume
-              next.used = fromFile || previous.used
+            this.gsActive = gsReset(this.exclusive)
+            const resend = fromFile && resetsNativeSmfModule(event)
+            this.channels = this.channels.map((previous, id) => {
+              const next = channel(resend ? this.bufferVolume : 127, undefined, id === 9)
+              if (!resend) next.volume = previous.volume
+              next.used = resend || previous.used
               return next
             })
             this.notes = []
+          } else if (this.exclusive && this.gsActive && gsAddress(this.exclusive) &&
+              (this.exclusive[5]! & 0xf0) === 0x10 && this.exclusive[6] === 0x15) {
+            // Older Windows GS compatible routing. KRKR forwards the packet
+            // unchanged; the selected device ignores dd, requires GS Reset,
+            // and maps part 0 to channel 10, parts 1..9 to channels 1..9.
+            // Microsoft MIDI 4db4520 UmpDispatcher::GsPartToChannel /
+            // DispatchSysEx and SynthEngine::SetDrumChannel. Existing notes
+            // retain their note-on instrument; this is not a GS sample bank.
+            const part = this.exclusive[5]! & 15, id = part === 0 ? 9 : part < 10 ? part - 1 : part
+            this.channels[id]!.percussion = this.exclusive[7] !== 0
           } else if (this.exclusive?.length === 6 && this.exclusive[0] === 0x7f &&
               this.exclusive[2] === 4 && this.exclusive[3] === 1) {
             // KRKR forwards F0/F7 unchanged. Universal real-time Device
@@ -210,6 +231,7 @@ export class MidiSynth {
         phase: phaseOrigins ? -phaseOrigins[id]! * 2 ** ((a - 69 + tuning) / 12) : 0,
         family: c.program >> 3,
         tuning,
+        percussion: c.percussion,
       })
     } else if (kind === 0x80 || kind === 0x90) {
       const note = this.notes.find((note) => note.channel === id && note.key === a && note.held)
@@ -294,7 +316,7 @@ export class MidiSynth {
       if ([0, 1, 3, 4, 12, 13, 14].includes(family))
         envelope *= Math.exp(-age / (family === 1 ? 0.65 : family === 4 ? 1.8 : 2.5))
       let wave: number
-      if (note.channel === 9) {
+      if (note.percussion) {
         this.noise ^= this.noise << 13
         this.noise ^= this.noise >>> 17
         this.noise ^= this.noise << 5

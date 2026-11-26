@@ -13,9 +13,9 @@ import type { Resource } from '../../engine/ports/storage.ts'
 import { ExecutionCancelled } from '../../engine/scheduler/control.ts'
 import { prepareVideoBlob } from '../files/video-source.ts'
 import type { VideoMessage, VideoRequest } from '../../protocol/video.ts'
-import { readVideoTimeline, readVideoTimelineBlob } from '../../formats/video/mp4.ts'
+import { readVideoTimeline, readVideoTimelineBlob, type VideoTimelineOptions } from '../../formats/video/mp4.ts'
 import { mp4MetadataByteLimit } from '../../formats/video/mp4-source.ts'
-import { legacyVideoFormat, nativeMovieMime, type LegacyVideoFormat } from './legacy/format.ts'
+import { legacyVideoFormat, nativeMovieMime, needsQuickTimeConversion, type LegacyVideoFormat } from './legacy/format.ts'
 import { transcodeLegacyMovie } from './legacy/transcode.ts'
 import { checkLegacyInputSize } from './legacy/module.ts'
 
@@ -143,10 +143,12 @@ export class PortVideoBackend implements VideoBackend {
   }
   private async prepareLegacy(bytes: MoviePayload | Uint8Array, format: LegacyVideoFormat, signal: AbortSignal) {
     const input = bytes instanceof Uint8Array ? bytes : bytes.blob
-    const header = input instanceof Uint8Array ? input.subarray(0, 12)
-      : new Uint8Array(await input.slice(0, 12).arrayBuffer())
+    let mime: ReturnType<typeof nativeMovieMime>
+    if (format !== 'mov') {
+      const header = input instanceof Uint8Array ? input.subarray(0, 12) : new Uint8Array(await input.slice(0, 12).arrayBuffer())
+      mime = nativeMovieMime(header)
+    }
     signal.throwIfAborted()
-    const mime = nativeMovieMime(header)
     if (mime) {
       const media: MoviePayload = bytes instanceof Uint8Array
         ? { blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime }), buffered: true }
@@ -193,9 +195,9 @@ export class PortVideoBackend implements VideoBackend {
         legacy = legacyVideoFormat(command.name)
       // Prepared buffered blobs already paid for their bytes. Direct callers
       // also need a bounded queue of private inputs while another movie runs.
-      const directCharge = legacy && !prepared
-        ? command.bytes instanceof Uint8Array ? command.bytes.byteLength : command.bytes.buffered ? command.bytes.blob.size : 0
-        : 0
+      const copiedInput = prepared ? 0 : command.bytes instanceof Uint8Array ? command.bytes.byteLength
+        : command.bytes.buffered ? command.bytes.blob.size : 0
+      let directCharge = legacy ? copiedInput : 0
       if (directCharge > videoSourceLimits.bufferedBytes - this.sourceBytes)
         throw new Error('Legacy movie input exceeds 128 MiB budget')
       let bytes: Uint8Array | MoviePayload
@@ -225,43 +227,87 @@ export class PortVideoBackend implements VideoBackend {
           if (this.openings.get(id) !== ticket)
             throw new Error('Video open was closed or superseded while reading metadata')
         }
-        let metadataBytes = 0
-        const options = {
-          checkpoint: async () => { checkpoint(); await sourceControl?.checkpoint(); checkpoint() },
-          yieldControl: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
-          reserveMetadata: (size: number) => {
-            checkpoint()
-            if (!Number.isSafeInteger(size) || size < 0 || this.metadataBytes + size > mp4MetadataByteLimit)
-              throw new Error('Video metadata exceeds 64 MiB budget')
-            metadataBytes += size
-            this.metadataBytes += size
-          },
-        }
-        metadata = (async () => {
+        const inspect = async (media: MoviePayload | Uint8Array, acceptTracks?: VideoTimelineOptions['acceptTracks']) => {
+          let metadataBytes = 0
+          const options: VideoTimelineOptions = {
+            acceptTracks,
+            checkpoint: async () => { checkpoint(); await sourceControl?.checkpoint(); checkpoint() },
+            yieldControl: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
+            reserveMetadata: (size) => {
+              checkpoint()
+              if (!Number.isSafeInteger(size) || size < 0 || this.metadataBytes + size > mp4MetadataByteLimit)
+                throw new Error('Video metadata exceeds 64 MiB budget')
+              metadataBytes += size
+              this.metadataBytes += size
+            },
+          }
           try {
-            if (legacy) {
-              const { media, charge } = await this.prepareLegacy(bytes, legacy, ticket.signal)
-              outgoing.bytes = media
+            return media instanceof Uint8Array ? await this.readTimeline(media, options) : await this.readBlobTimeline(media.blob, options)
+          } finally { this.metadataBytes -= metadataBytes }
+        }
+        let quickTimeFailure: Error | undefined
+        const withOriginalError = (error: unknown) => new AggregateError(
+          [quickTimeFailure, error], `QuickTime conversion and original playback failed: ${quickTimeFailure?.message}; ${String(error)}`,
+          { cause: error },
+        )
+        metadata = (async () => {
+          if (legacy) {
+            const { media, charge } = await this.prepareLegacy(bytes, legacy, ticket.signal)
+            outgoing.bytes = media
+            convertedCharge = charge
+            checkpoint()
+          }
+          let quickTime = false
+          let timeline = await inspect(outgoing.bytes, convertedCharge ? undefined : (tracks) => {
+            quickTime = needsQuickTimeConversion(tracks)
+            return !quickTime
+          })
+          if (quickTime) {
+            checkpoint()
+            const original = outgoing.bytes
+            try {
+              if (!legacy) {
+                if (copiedInput > videoSourceLimits.bufferedBytes - this.sourceBytes)
+                  throw new Error('Legacy movie input exceeds 128 MiB budget')
+                directCharge = copiedInput
+                this.sourceBytes += directCharge
+              }
+              const { media, charge } = await this.prepareLegacy(original, 'mov', ticket.signal)
               convertedCharge = charge
               checkpoint()
+              timeline = await inspect(media)
+              if (!timeline) throw new Error('Converted movie has no MP4 video timeline')
+              outgoing.bytes = media
+            } catch (error) {
+              // Some browsers can play these original files directly. Keep
+              // that route when conversion is unavailable or exceeds its cap.
+              checkpoint()
+              this.convertedBytes -= convertedCharge
+              convertedCharge = 0
+              quickTimeFailure = error instanceof Error ? error : new Error(String(error))
+              try { timeline = await inspect(original) } catch (originalError) {
+                checkpoint()
+                throw withOriginalError(originalError)
+              }
             }
-            const media = outgoing.bytes
-            if (media instanceof Uint8Array) return await this.readTimeline(media)
-            const timeline = await this.readBlobTimeline(media.blob, options)
-            if (convertedCharge && !timeline) throw new Error('Converted movie has no MP4 video timeline')
-            return timeline
-          } finally {
-            this.metadataBytes -= metadataBytes
           }
+          if (convertedCharge && !timeline) throw new Error('Converted movie has no MP4 video timeline')
+          return timeline
         })()
         const timeline = await waitForVideo(metadata, ticket.signal)
         checkpoint()
-        return await this.send({ ...outgoing, timeline }, outgoing.bytes instanceof Uint8Array ? undefined : () => {
-          if (this.closed || this.openings.get(id) !== ticket) return
-          // Same epoch retirement cannot close a later graph. Do not wait for
-          // the lost open reply; the host processes close while open awaits IO.
-          void this.send({ op: 'close', id, epoch: outgoing.epoch }).catch(() => {})
-        })
+        try {
+          return await this.send({ ...outgoing, timeline }, outgoing.bytes instanceof Uint8Array ? undefined : () => {
+            if (this.closed || this.openings.get(id) !== ticket) return
+            // Same epoch retirement cannot close a later graph. Do not wait for
+            // the lost open reply; the host processes close while open awaits IO.
+            void this.send({ op: 'close', id, epoch: outgoing.epoch }).catch(() => {})
+          })
+        } catch (error) {
+          checkpoint()
+          if (quickTimeFailure) throw withOriginalError(error)
+          throw error
+        }
       } finally {
         offSource?.()
         if (this.openings.get(id) === ticket) this.openings.delete(id)

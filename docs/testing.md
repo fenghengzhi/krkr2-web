@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 179 批由 Windows Media Foundation 编制原片，Linux FFmpeg 独立核对，再用当批转换器和浏览器检查过场。原版 KAG 命名书签与 MIDI 鼓轨各有游戏内验收。[179 实现与托管证据](decisions/179-windows-cutscenes-and-named-bookmarks.md)
+
 第 178 批用 Windows IMAPI 制作纯 UDF 和桥接游戏盘，用 7-Zip 核对两套目录及文件内容，并在网页中运行同一份原版 KAG。Chromium 常规用例开始按四个分片保存报告。[178 实现与托管证据](decisions/178-metadata-discs-and-game-restoration.md)
 
 第 177 批从独立的 AC-3 和 DVD LPCM 输入分别核对两轨声音，使用真实 BGR 影片定位到 128 MiB 之后，并核对原版书签导入、游戏内读档与四声道 Wave 输出。[177 实现与托管证据](decisions/177-bilingual-cutscenes-and-native-saves.md)

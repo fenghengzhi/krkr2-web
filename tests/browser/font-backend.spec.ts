@@ -73,6 +73,8 @@ test('missing proportional Mincho uses an available named serif while requested 
     measurements: { height: number; bold: boolean; text: string; expected: number; actual: number }[]
     rasterCompared: boolean
     rasterDiscrimination: unknown
+    cssDeclarations: { requested: string; resolved: string }[]
+    rasterReference: { kind: string; name: string }
     requestedWidths: number[]
   }>(page, info, `
 const backend=new BrowserGraphics(), owned=[], localFaces=[], candidates=[];
@@ -101,14 +103,33 @@ try {
   measurements.push({height,bold,text,expected,actual});
   check(actual===expected,'Named serif advance '+JSON.stringify({chosen,localFaces,height,bold,text,expected,actual}));
  }
- // Rasterization must use the same selected family as measurement. The
- // independent local face alias refers to the actual host font, not a bitmap
- // made by the application or a game-specific width table.
+ // local() proves availability, but an installed FontFace alias can use a
+ // different platform raster path from the ordinary CSS family. Compare
+ // ordinary family pixels exactly and retain the independent alias evidence.
+ // Equal platform pixels alone cannot identify the selected physical font.
  observations.phase='raster-named-serif';
- const actual=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:'MS PMincho',height:24});
+ const cssDeclarations=[];observations.cssDeclarations=cssDeclarations;
+ let fontOwner=Object.getPrototypeOf(ref);
+ while(fontOwner&&!Object.hasOwn(fontOwner,'font'))fontOwner=Object.getPrototypeOf(fontOwner);
+ const fontProperty=fontOwner&&Object.getOwnPropertyDescriptor(fontOwner,'font');
+ check(fontProperty?.configurable&&fontProperty.get&&fontProperty.set,'Canvas font property cannot be observed');
+ let actual;
+ Object.defineProperty(fontOwner,'font',{...fontProperty,set(value){
+  fontProperty.set.call(this,value);
+  check(cssDeclarations.length<8,'Unexpected Canvas font assignment count');
+  cssDeclarations.push({requested:String(value),resolved:fontProperty.get.call(this)});
+ }});
+ try {actual=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:'MS PMincho',height:24});}
+ finally {Object.defineProperty(fontOwner,'font',fontProperty);}
+ const expectedCss='24px "MS PMincho","ＭＳ Ｐ明朝","Times New Roman","Liberation Serif","Times",serif';
+ check(cssDeclarations.length>0&&cssDeclarations.every(row=>row.requested===expectedCss),'Requested CSS candidate order '+JSON.stringify(cssDeclarations));
  observations.raster={actual:{...actual,data:[...actual.data]}};
  observations.phase='raster-local-reference';
- const expected=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:chosen.alias,height:24});
+ const aliasReference=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:chosen.alias,height:24});
+ observations.raster.localAlias={...aliasReference,data:[...aliasReference.data]};
+ observations.phase='raster-ordinary-reference';
+ const expected=backend.text('AVATAR WAVE',24,0xffffff,{...font,face:chosen.name,height:24});
+ const rasterReference={kind:'ordinary-family',name:chosen.name};observations.rasterReference=rasterReference;
  observations.raster.expected={...expected,data:[...expected.data]};
  // The ordinary CSS family and a local() FontFace alias can resolve through
  // different platform paths despite identical rounded advances. Observe the
@@ -135,9 +156,12 @@ try {
    ...candidates.map(face=>({kind:'loaded-local-alias',name:face.alias,localName:face.name}))];
   for(const text of ['A','W','AVATAR WAVE']){
    const a=text==='AVATAR WAVE'?actual:backend.text(text,24,0xffffff,{...font,face:'MS PMincho',height:24}),
-    b=text==='AVATAR WAVE'?expected:backend.text(text,24,0xffffff,{...font,face:chosen.alias,height:24}),aa=place(a),bb=place(b),
+    b=text==='AVATAR WAVE'?expected:backend.text(text,24,0xffffff,{...font,face:chosen.name,height:24}),
+    local=text==='AVATAR WAVE'?aliasReference:backend.text(text,24,0xffffff,{...font,face:chosen.alias,height:24}),
+    aa=place(a),bb=place(b),ll=place(local),
     entry={text,actual:{raster:[a.left,a.top,a.width,a.height],...await summarize(aa)},
-     reference:{raster:[b.left,b.top,b.width,b.height],...await summarize(bb)},families:[]};
+     reference:{raster:[b.left,b.top,b.width,b.height],...await summarize(bb)},
+     localAlias:{raster:[local.left,local.top,local.width,local.height],...await summarize(ll)},families:[]};
    observations.rasterDiscrimination.cases.push(entry);
    for(const face of families){
     const canvas=new OffscreenCanvas(w,h),ctx=canvas.getContext('2d'),requestedFont='24px '+(face.name==='serif'?'serif':JSON.stringify(face.name));
@@ -151,7 +175,7 @@ try {
     const pixels=new Uint8Array(ctx.getImageData(0,0,w,h).data.buffer),state={};
     for(const key of ['fontKerning','fontStretch','fontVariantCaps','textRendering','letterSpacing','wordSpacing','direction'])if(key in ctx)state[key]=ctx[key];
     entry.families.push({...face,requestedFont,resolvedFont:ctx.font,metrics,baseline,state,...await summarize(pixels),
-     matchesActual:pixels.every((v,i)=>v===aa[i]),matchesReference:pixels.every((v,i)=>v===bb[i])});
+     matchesActual:pixels.every((v,i)=>v===aa[i]),matchesReference:pixels.every((v,i)=>v===bb[i]),matchesLocalAlias:pixels.every((v,i)=>v===ll[i])});
    }
   }
   observations.rasterDiscrimination.complete=true;
@@ -165,10 +189,12 @@ try {
  for(const [name,bytes] of [['MS PMincho',data.narrow],['Game Face',data.wide]]){
   const face=new FontFace(name,new Uint8Array(bytes));await face.load();self.fonts.add(face);owned.push(face);
  }
- const requestedWidths=['MS PMincho','MS PMincho,Game Face','Game Face,MS PMincho'].map(face=>backend.measure('A',{...font,face}).width);
+ const requestedWidths=['MS PMincho','MS PMincho,Game Face','Game Face,MS PMincho',
+  'krkr-no-such-candidate-179,Game Face,MS PMincho'].map(face=>backend.measure('A',{...font,face}).width);
  observations.requestedWidths=requestedWidths;
- check(JSON.stringify(requestedWidths)==='[10,10,18]','Requested face priority '+JSON.stringify(requestedWidths));
- postMessage({localFaces,selected:chosen.name,measurements,rasterCompared:true,rasterDiscrimination:observations.rasterDiscrimination,requestedWidths});
+ check(JSON.stringify(requestedWidths)==='[10,10,18,18]','Requested face priority '+JSON.stringify(requestedWidths));
+ postMessage({localFaces,selected:chosen.name,measurements,rasterCompared:true,rasterReference,cssDeclarations,
+  rasterDiscrimination:observations.rasterDiscrimination,requestedWidths});
 } finally {for(const face of owned)self.fonts.delete(face);backend.dispose();}
 `, { narrow: [...await readFile('tests/fixtures/font/narrow.ttf')], wide: [...await readFile('tests/fixtures/font/wide.ttf')] })
   await info.attach('system-serif-selection', { body: JSON.stringify(result, null, 2), contentType: 'application/json' })
@@ -177,7 +203,10 @@ try {
   expect(result.measurements).toHaveLength(12)
   expect(result.measurements.every((row) => row.actual === row.expected)).toBe(true)
   expect(result.rasterCompared).toBe(true)
-  expect(result.requestedWidths).toEqual([10, 10, 18])
+  expect(result.rasterReference).toEqual({ kind: 'ordinary-family', name: result.selected })
+  expect(result.cssDeclarations.length).toBeGreaterThan(0)
+  expect(result.cssDeclarations.every((row) => row.resolved.length > 0)).toBe(true)
+  expect(result.requestedWidths).toEqual([10, 10, 18, 18])
 })
 
 test('localized Mincho names use the available family and keep an exact requested face ahead of its counterpart', async ({ page }, info) => {

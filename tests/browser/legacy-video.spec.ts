@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { test, expect, observeVideoFrames } from '../helpers/video-presentation-browser.ts'
 import { installHandoffReadbacks, type ProbeWindow } from '../helpers/video-handoff-capture.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia, type VideoAudioObservation } from '../helpers/video-audio-probe.ts'
-import { legacyFrameCode, legacyVideoCases, windowsMediaCases, mpeg2XvidCases, aviAdpcmCases, legacyVideoColors, legacyVideoGame } from '../helpers/legacy-video-game.ts'
+import { legacyFrameCode, legacyVideoCases, windowsMediaCases, windows9Cases, vc1Cases, quickTimeCases, mpeg2XvidCases, aviAdpcmCases, legacyVideoColors, legacyVideoGame } from '../helpers/legacy-video-game.ts'
 
 interface ConvertedOpen {
   name: string; bytes: number; mime: string; signature?: string; sha256?: string; error?: string
@@ -19,6 +19,9 @@ for (const group of [
   { label: 'legacy MPEG and AVI', cases: legacyVideoCases, reference: 'legacy-video-reference.json' },
   { label: 'MPEG-2 program streams and Xvid AVI with MP3', cases: mpeg2XvidCases, reference: 'mpeg2-xvid-reference.json' },
   { label: 'Windows Media WMV and ASF', cases: windowsMediaCases, reference: 'windows-media-reference.json' },
+  { label: 'QuickTime Animation and MPEG-4 Part 2', cases: quickTimeCases, reference: 'quicktime-reference.json' },
+  { label: 'Windows Media 9', cases: windows9Cases, reference: 'wmv9-reference.json' },
+  { label: 'VC-1 Advanced Profile with WMA Professional', cases: vc1Cases, reference: 'vc1-reference.json' },
   { label: 'MS Video 1 and DivX 3 AVI with ADPCM sound', cases: aviAdpcmCases, reference: 'avi-adpcm-reference.json' },
 ]) for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: ${group.label} movies play authored pictures and timed sound through ordinary VideoOverlay controls`, async ({ page }, info) => {

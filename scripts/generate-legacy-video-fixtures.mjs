@@ -48,16 +48,17 @@ function pictureTimes(item, metadata, timeline, fps, requireAllTimestamps) {
     timeScope: 'Original container frame PTS minus common format start. At most two missing boundary PTS use the nearest observed PTS and authored rate.' }
 }
 
-// Called only from the shared GitHub-hosted fixture generation step. Nothing
-// in this file invokes the Web decoder or the candidate WASM transcoder.
-function generateMovieFixtures(directory, prefix) {
+const width = 96, height = 64, fps = 25, frames = 100, rate = 48000,
+  colors = [[220, 30, 30], [25, 210, 35], [30, 45, 220]],
+  sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
+
+function requireHosted() {
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted')
     throw new Error('Legacy movie fixtures require GitHub-hosted Actions')
-  const width = 96, height = 64, fps = 25, frames = 100, rate = 48000,
-    colors = [[220, 30, 30], [25, 210, 35], [30, 45, 220]],
-    rgb = Buffer.alloc(width * height * 3 * frames), pcm = Buffer.alloc(rate * 4 * 2),
-    commands = [], fixtures = [], sha = (bytes) => createHash('sha256').update(bytes).digest('hex'),
-    path = (name) => resolve(directory, name), common = ['-hide_banner', '-loglevel', 'error', '-y']
+}
+
+function sourceMovie(bilingual = false) {
+  const rgb = Buffer.alloc(width * height * 3 * frames), pcm = Buffer.alloc(rate * 4 * 2)
   // Broad colors identify the time interval; seven light/dark blocks encode
   // the individual frame. Interior samples tolerate codec/color conversion.
   for (let frame = 0; frame < frames; frame++) {
@@ -72,13 +73,53 @@ function generateMovieFixtures(directory, prefix) {
       rgb.set(color, (frame * width * height + y * width + x) * 3)
     }
   }
-  const bilingual = prefix === 'dvd-audio', alternate = bilingual ? Buffer.alloc(pcm.length) : undefined
+  const alternate = bilingual ? Buffer.alloc(pcm.length) : undefined
   for (let sample = 0; sample < rate * 4; sample++) {
     const time = sample / rate, frequency = time < .5 ? 0 : bilingual || time < 1.6 ? 440 : time < 2.8 ? 660 : 880,
       value = frequency ? Math.round(Math.sin(2 * Math.PI * frequency * time) * 0.18 * 32767) : 0
     pcm.writeInt16LE(value, sample * 2)
     if (alternate && time >= .5) alternate.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 880 * time) * .18 * 32767), sample * 2)
   }
+  return { rgb, pcm, alternate }
+}
+
+/** Windows Media Foundation accepts top-down NV12 and interleaved PCM.
+ * The authored color rectangles and bit markers align to 2x2 chroma cells. */
+export function writeWindowsMovieInputs(directory) {
+  requireHosted()
+  const { rgb, pcm } = sourceMovie(), area = width * height, stride = area * 3 / 2,
+    nv12 = Buffer.alloc(stride * frames), stereo = Buffer.alloc(pcm.length * 2)
+  for (let frame = 0; frame < frames; frame++) {
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const at = (frame * area + y * width + x) * 3, r = rgb[at], g = rgb[at + 1], b = rgb[at + 2],
+        base = frame * stride
+      nv12[base + y * width + x] = 16 + ((66 * r + 129 * g + 25 * b + 128) >> 8)
+      if (!(x % 2 || y % 2)) {
+        const uv = base + area + y / 2 * width + x
+        nv12[uv] = 128 + ((-38 * r - 74 * g + 112 * b + 128) >> 8)
+        nv12[uv + 1] = 128 + ((112 * r - 94 * g - 18 * b + 128) >> 8)
+      }
+    }
+  }
+  for (let at = 0; at < pcm.length; at += 2) {
+    const value = pcm.readInt16LE(at)
+    stereo.writeInt16LE(value, at * 2); stereo.writeInt16LE(value, at * 2 + 2)
+  }
+  writeFileSync(resolve(directory, 'source.nv12'), nv12)
+  writeFileSync(resolve(directory, 'source.pcm'), stereo)
+  writeFileSync(resolve(directory, 'wmv9-inputs.json'), JSON.stringify({
+    commit: process.env.GITHUB_SHA, frames, fps, width, height, rate, channels: 2,
+    rgbSha256: sha(rgb), monoSha256: sha(pcm), nv12Sha256: sha(nv12), stereoSha256: sha(stereo),
+  }, null, 2) + '\n')
+}
+
+// System FFmpeg encodes the local groups and independently decodes all groups.
+// The two Windows Media 9 originals arrive byte-for-byte from the Windows job.
+function generateMovieFixtures(directory, prefix) {
+  requireHosted()
+  const bilingual = prefix === 'dvd-audio', windowsMaster = prefix === 'wmv9' || prefix === 'vc1',
+    { rgb, pcm, alternate } = sourceMovie(bilingual), commands = [], fixtures = [],
+    path = (name) => resolve(directory, name), common = ['-hide_banner', '-loglevel', 'error', '-y']
   writeFileSync(path(prefix + '-authored.rgb'), rgb)
   writeFileSync(path(prefix + '-authored.s16le'), pcm)
   if (alternate) writeFileSync(path(prefix + '-alternate.s16le'), alternate)
@@ -121,6 +162,15 @@ function generateMovieFixtures(directory, prefix) {
           options: ['-c:v', 'mpeg4', '-vtag', 'XVID', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p',
             '-c:a', 'copy', '-f', 'avi'] },
       ],
+      quicktime: [
+        { file: 'legacy-animation.mov', aliases: [], video: 'qtrle', videoTag: 'rle ', audio: 'pcm_s16be',
+          options: ['-c:v', 'qtrle', '-pix_fmt', 'rgb24', '-c:a', 'pcm_s16be', '-f', 'mov'] },
+        { file: 'legacy-part2.mp4', aliases: [], video: 'mpeg4', videoTag: 'mp4v', audio: 'aac',
+          options: ['-c:v', 'mpeg4', '-q:v', '2', '-bf', '2', '-g', '12', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+            '-b:a', '128k', '-movflags', '+faststart', '-f', 'mp4'], bFrames: true },
+      ],
+      wmv9: [{ file: 'legacy-wmv9.wmv', aliases: [], video: 'wmv3', videoTag: 'WMV3', audio: 'wmav2', container: 'asf' }],
+      vc1: [{ file: 'legacy-vc1.wmv', aliases: [], video: 'vc1', videoTag: 'WVC1', audio: 'wmapro', container: 'asf' }],
       'windows-media': [
         { file: 'legacy-wmv1.wmv', aliases: [], video: 'wmv1', audio: 'wmav1',
           options: ['-c:v', 'wmv1', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p',
@@ -142,10 +192,18 @@ function generateMovieFixtures(directory, prefix) {
       ],
     }
   const cases = fixturesByGroup[prefix]
-  let failure, cinepakAvailable = false
+  const completeReadback = windowsMaster || prefix === 'quicktime'
+  let failure, authorInputs, cinepakAvailable = false
   try {
-    const encoders = run('ffmpeg', ['-hide_banner', '-encoders'], prefix + '-encoders')
-    cinepakAvailable = prefix === 'legacy' && /^\s*V\S*\s+cinepak\s/m.test(encoders)
+    if (windowsMaster) {
+      authorInputs = JSON.parse(readFileSync(path(prefix + '-source.json'), 'utf8'))
+      if (authorInputs.commit !== process.env.GITHUB_SHA || authorInputs.rgbSha256 !== sha(rgb) || authorInputs.monoSha256 !== sha(pcm))
+        throw new Error('Windows author inputs differ from this run’s original picture and sound')
+    }
+    if (prefix === 'legacy')
+      cinepakAvailable = /^\s*V\S*\s+cinepak\s/m.test(run('ffmpeg', ['-hide_banner', '-encoders'], prefix + '-encoders'))
+    else if (!windowsMaster) run('ffmpeg', ['-hide_banner', '-encoders'], prefix + '-encoders')
+    else run('ffmpeg', ['-version'], prefix + '-decoder-version')
     if (cinepakAvailable) cases.push({ file: 'legacy-cinepak.avi', aliases: [], video: 'cinepak', audio: 'pcm_s16le',
       options: ['-c:v', 'cinepak', '-q:v', '3', '-pix_fmt', 'rgb24', '-c:a', 'pcm_s16le', '-f', 'avi'] })
     for (const item of cases) {
@@ -159,11 +217,15 @@ function generateMovieFixtures(directory, prefix) {
         soundInput = ['-f', 'mp3', '-i', track]
       }
       const [rateNum, rateDen] = item.fps ?? [fps, 1], itemFps = rateNum / rateDen, inputRate = `${rateNum}/${rateDen}`
-      run('ffmpeg', [...common, ...videoInput, '-framerate', inputRate, '-i', path(prefix + '-authored.rgb'), ...(item.audioOffset ? ['-itsoffset', String(item.audioOffset)] : []),
+      if (!windowsMaster) run('ffmpeg', [...common, ...videoInput, '-framerate', inputRate, '-i', path(prefix + '-authored.rgb'), ...(item.audioOffset ? ['-itsoffset', String(item.audioOffset)] : []),
         ...soundInput, ...(item.secondAudio ? ['-f', 's16le', '-ar', String(rate), '-ac', '1', '-i', path(prefix + '-alternate.s16le')] : []),
         '-map', '0:v:0',
         ...(item.audio ? ['-map', '1:a:0'] : []), ...(item.secondAudio ? ['-map', '2:a:0'] : []), ...item.options,
         '-r:v', inputRate, '-threads', '1', ...(item.elementary ? ['-frames:v', String(frames)] : ['-t', '4']), path(item.file)], item.file + '.encode')
+      if (windowsMaster) {
+        const recordedHash = readFileSync(path(prefix + '-original.sha256'), 'utf8').trim().split(/\s+/)[0]
+        if (recordedHash !== sha(readFileSync(path(item.file)))) throw new Error('Original Windows media bytes differ: ' + item.file)
+      }
       const probe = ['-v', 'error', '-analyzeduration', '10000000', '-probesize', '8388608']
       const metadata = JSON.parse(run('ffprobe', [...probe, '-show_streams', '-show_format', '-of', 'json', path(item.file)], item.file + '.probe')),
         videos = metadata.streams.filter((stream) => stream.codec_type === 'video'),
@@ -174,13 +236,13 @@ function generateMovieFixtures(directory, prefix) {
         videos[0].height !== height * scale || (item.container && metadata.format.format_name !== item.container) ||
         (item.videoTag && videos[0].codec_tag_string !== item.videoTag) ||
         audios.length !== audioCodecs.length || !audioCodecs.every((name) => audios.some((a) => a.codec_name === name)) ||
-        audios.some((a) => Number(a.sample_rate) !== rate || (bilingual && a.channels !== 2)))
+        audios.some((a) => Number(a.sample_rate) !== rate || ((bilingual || windowsMaster) && a.channels !== 2)))
         throw new Error(`Unexpected hosted legacy stream inventory: ${item.file} ${JSON.stringify(metadata.streams)}`)
       const timeline = JSON.parse(run('ffprobe', [...probe, '-fflags', '+genpts', '-select_streams', 'v:0', '-show_frames', '-of', 'json', path(item.file)], item.file + '.frames'))
       if (timeline.frames.length !== frames) throw new Error(`Unexpected hosted legacy frame count: ${item.file}`)
       if (item.scale && !(videos[0].pix_fmt === 'bgr24' && Number(timeline.frames[96].pkt_pos) > 128 * 1024 ** 2))
         throw new Error('Expected the final scene in the RGB AVI beyond the buffered input limit')
-      const { times, inferredTimestampIndices, timeScope } = pictureTimes(item, metadata, timeline, itemFps, prefix === 'windows-media' || item.container === 'avi'),
+      const { times, inferredTimestampIndices, timeScope } = pictureTimes(item, metadata, timeline, itemFps, completeReadback || prefix === 'windows-media' || item.container === 'avi'),
         commonStart = item.elementary ? 0 : Number(metadata.format.start_time ?? videos[0].start_time ?? 0),
         normalizedVideoTimes = times.map((time) => time - commonStart)
       if (!Number.isFinite(commonStart) || normalizedVideoTimes.some((time, index) => !Number.isFinite(time) ||
@@ -194,7 +256,7 @@ function generateMovieFixtures(directory, prefix) {
         '-threads:v', '1', '-vsync', '0', '-pix_fmt', 'rgba', '-f', 'rawvideo', path(item.file + '.rgba')], item.file + '.decode')
       const decoded = readFileSync(path(item.file + '.rgba'))
       if (decoded.length !== width * height * 4 * frames) throw new Error(`Incomplete independent legacy decode: ${item.file}`)
-      const checkedFrames = item.elementary || prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm' || bilingual || item.scale
+      const checkedFrames = item.elementary || completeReadback || prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm' || bilingual || item.scale
         ? Array.from({ length: frames }, (_, i) => i) : [0, 25, 50, 80]
       const checks = checkedFrames.map((frame) => {
         const phase = frame < 40 ? 0 : frame < 70 ? 1 : 2, at = (frame * width * height + 32 * width + 48) * 4,
@@ -212,7 +274,7 @@ function generateMovieFixtures(directory, prefix) {
         return { frame, color, code, timestamp: timeline.frames[frame] }
       })
       const decodedTracks = []
-      if (prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm' || bilingual || item.scale) for (const [index, audio] of audios.entries()) {
+      if (completeReadback || prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm' || bilingual || item.scale) for (const [index, audio] of audios.entries()) {
         const file = item.file + (bilingual ? '.audio-' + index : '') + '.s16le',
           name = item.file + '.decode-audio' + (bilingual ? '-' + index : ''),
           tone = bilingual ? audio.codec_name === 'ac3' ? 440 : 880 : undefined
@@ -248,7 +310,9 @@ function generateMovieFixtures(directory, prefix) {
   } catch (error) { failure = error }
   const report = { schema: 1, commit: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID,
     generator: 'scripts/generate-legacy-video-fixtures.mjs',
-    scope: 'Independent native FFmpeg authors and decodes legacy inputs. No candidate transcode output is used as an expected image.',
+    scope: windowsMaster ? 'Windows Media Foundation encodes the original ASF; Linux FFmpeg independently reads the original picture markers, timestamps and audio.' :
+      'Independent native FFmpeg authors and decodes legacy inputs. No candidate transcode output is used as an expected image.',
+    ...(windowsMaster && { authorInputs }),
     complete: !failure, failure: failure ? String(failure) : undefined, width, height, fps, frames, duration: 4,
     ...(prefix === 'legacy' && { cinepak: { encoderAvailable: cinepakAvailable, file: cinepakAvailable ? 'legacy-cinepak.avi' : null,
       scope: cinepakAvailable ? 'Additional native/WASM decode fixture; no extra browser matrix.' : 'Hosted FFmpeg does not expose a Cinepak encoder; not verified.' },
@@ -275,3 +339,6 @@ export const generateMpeg2XvidFixtures = (directory) => generateMovieFixtures(di
 export const generateAviAdpcmFixtures = (directory) => generateMovieFixtures(directory, 'avi-adpcm')
 export const generateDvdAudioFixtures = (directory) => generateMovieFixtures(directory, 'dvd-audio')
 export const generateLargeDibFixture = (directory) => generateMovieFixtures(directory, 'large-dib')
+export const checkWindows9Fixture = (directory) => generateMovieFixtures(directory, 'wmv9')
+export const checkVc1Fixture = (directory) => generateMovieFixtures(directory, 'vc1')
+export const generateQuickTimeFixtures = (directory) => generateMovieFixtures(directory, 'quicktime')

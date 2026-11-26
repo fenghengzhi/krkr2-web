@@ -3,6 +3,12 @@ import { readAvcFrameDuration } from './avc-timing.ts'
 import { Mp4Data, mp4Tag, mp4TimelineStarts, readMp4Blob, cooperateMp4,
   type Mp4BlobSource, type Mp4MetadataOptions } from './mp4-source.ts'
 export type { Mp4BlobSource, Mp4MetadataOptions } from './mp4-source.ts'
+export interface Mp4TrackDescriptions { handler: string; entries: string[] }
+export interface VideoTimelineOptions extends Mp4MetadataOptions {
+  /** A caller that supplies its own decoder can decline the original timeline
+   * before MP4Box expands sample tables. Entries come from each track's stsd. */
+  acceptTracks?(tracks: readonly Mp4TrackDescriptions[]): boolean
+}
 const MAX_SAMPLES = 1000000
 /** Retain the original catalog while projecting one selected video timeline. */
 export function selectVideoTimeline(original: VideoTimeline, index: number): VideoTimeline {
@@ -43,24 +49,48 @@ export function selectVideoTimeline(original: VideoTimeline, index: number): Vid
 }
 /** MP4Box supplies DTS/CTS and fragmented sample tables; this adapter applies
  * edit lists and exposes presentation order instead of decoding order. */
-export async function readVideoTimeline(input: Uint8Array): Promise<VideoTimeline | undefined> {
+export async function readVideoTimeline(input: Uint8Array, options: VideoTimelineOptions = {}): Promise<VideoTimeline | undefined> {
   if (input.length < 8 || !mp4TimelineStarts.includes(mp4Tag(input, 4))) return
   // Own the complete source before the parser import can suspend. All video
   // catalogs refer to this same immutable observation, not a later caller view.
-  return parseVideoTimeline(Mp4Data.owned(Uint8Array.from(input)), {})
+  return parseVideoTimeline(Mp4Data.owned(Uint8Array.from(input)), options)
 }
 
 export async function readVideoTimelineBlob(source: Mp4BlobSource,
-  options: Mp4MetadataOptions = {}): Promise<VideoTimeline | undefined> {
+  options: VideoTimelineOptions = {}): Promise<VideoTimeline | undefined> {
   const data = await readMp4Blob(source, mp4TimelineStarts, options)
   return data && parseVideoTimeline(data, options)
 }
 
-async function parseVideoTimeline(bytes: Mp4Data, options: Mp4MetadataOptions): Promise<VideoTimeline | undefined> {
+/** Only a recognized, bounded inventory opts into another decoder. Leave
+ * unusual descriptions to the normal timeline parser and browser backend. */
+function collectSampleEntries(view: Mp4Data, body: number, limit: number, entries: string[]): boolean {
+  if (body + 8 > limit) return false
+  const count = view.getUint32(body + 4)
+  if (count > 256 - entries.length) return false
+  let at = body + 8
+  for (let i = 0; i < count; i++) {
+    if (at + 8 > limit) return false
+    let size = view.getUint32(at)
+    if (size === 1) {
+      if (at + 16 > limit) return false
+      size = Number(view.getBigUint64(at + 8))
+      if (!Number.isSafeInteger(size) || size < 16) return false
+    } else if (!size) size = limit - at
+    if (size < 8 || size > limit - at) return false
+    entries.push(view.tag(at + 4))
+    at += size
+  }
+  return at === limit
+}
+
+async function parseVideoTimeline(bytes: Mp4Data, options: VideoTimelineOptions): Promise<VideoTimeline | undefined> {
   const view = bytes, text = (at: number) => bytes.tag(at)
   let boxes = 0,
     totalSamples = 0
-  const inspect = (start: number, end: number, depth = 0) => {
+  const tracks: Mp4TrackDescriptions[] = []
+  let collectTracks = !!options.acceptTracks
+  const inspect = (start: number, end: number, depth = 0, parent = '', track?: Mp4TrackDescriptions) => {
     if (depth > 16) throw new Error('MP4 nesting limit exceeded')
     for (let at = start; at < end;) {
       if (++boxes > 100000 || at + 8 > end) throw new Error('Invalid MP4 box structure')
@@ -78,8 +108,17 @@ async function parseVideoTimeline(bytes: Mp4Data, options: Mp4MetadataOptions): 
       if (size < header || at + size > end) throw new Error('Truncated MP4 box')
       const body = at + header,
         limit = at + size
+      let childTrack = track
+      if (collectTracks && parent === 'moov' && depth === 1 && kind === 'trak') {
+        if (tracks.length >= 256) collectTracks = false
+        else { childTrack = { handler: '', entries: [] }; tracks.push(childTrack) }
+      }
+      if (collectTracks && track && parent === 'mdia' && kind === 'hdlr' && body + 12 <= limit)
+        track.handler = text(body + 8)
+      if (collectTracks && track && parent === 'stbl' && kind === 'stsd')
+        collectTracks = collectSampleEntries(view, body, limit, track.entries)
       if (['moov', 'trak', 'mdia', 'minf', 'stbl', 'edts', 'moof', 'traf', 'mvex'].includes(kind))
-        inspect(body, limit, depth + 1)
+        inspect(body, limit, depth + 1, kind, childTrack)
       if (['stts', 'ctts', 'stsc', 'stco', 'co64', 'stss', 'trun'].includes(kind)) {
         if (body + 8 > limit || view.getUint32(body + 4) > MAX_SAMPLES)
           throw new Error('MP4 sample table budget exceeded')
@@ -103,6 +142,7 @@ async function parseVideoTimeline(bytes: Mp4Data, options: Mp4MetadataOptions): 
   }
   inspect(0, bytes.length)
   await cooperateMp4(options)
+  if (collectTracks && options.acceptTracks && !options.acceptTracks(tracks)) return
   const { createFile } = await import('mp4box')
   await options.checkpoint?.()
   const file = createFile(false)

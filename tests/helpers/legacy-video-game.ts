@@ -21,6 +21,14 @@ export const windowsMediaCases = [
   { file: 'legacy-wmv2.asf', format: 'asf', audio: true, audioOffset: .3 },
 ] as const
 
+export const quickTimeCases = [
+  { file: 'legacy-animation.mov', format: 'mov', audio: true, audioOffset: 0 },
+  { file: 'legacy-part2.mp4', format: 'mov', audio: true, audioOffset: 0 },
+] as const
+
+export const windows9Cases = [{ file: 'legacy-wmv9.wmv', format: 'asf', audio: true, audioOffset: 0 }] as const
+export const vc1Cases = [{ file: 'legacy-vc1.wmv', format: 'asf', audio: true, audioOffset: 0 }] as const
+
 export const legacyVideoColors = [[220, 30, 30], [25, 210, 35], [30, 45, 220]] as const
 
 /** Author markers are intentionally coarse enough to survive MPEG/JPEG and

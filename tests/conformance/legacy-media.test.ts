@@ -25,6 +25,10 @@ for (const group of [
     required: ['legacy-mpeg2.mpg', 'legacy-xvid.avi'] },
   { label: 'ASF with WMV1/WMA1 and WMV2/WMA2', reference: 'windows-media-reference.json', output: 'windows-media',
     required: ['legacy-wmv1.wmv', 'legacy-wmv2.wmv'] },
+  { label: 'QuickTime Animation and MPEG-4 Part 2', reference: 'quicktime-reference.json', output: 'quicktime',
+    required: ['legacy-animation.mov', 'legacy-part2.mp4'] },
+  { label: 'Windows Media 9', reference: 'wmv9-reference.json', output: 'wmv9', required: ['legacy-wmv9.wmv'] },
+  { label: 'VC-1 Advanced Profile with WMA Professional', reference: 'vc1-reference.json', output: 'vc1', required: ['legacy-vc1.wmv'] },
   { label: 'AVI with MS Video 1/IMA ADPCM and DivX 3/Microsoft ADPCM', reference: 'avi-adpcm-reference.json', output: 'avi-adpcm',
     required: ['legacy-msvideo1.avi', 'legacy-div3.avi'] },
   { label: 'MPEG-2 with selectable AC-3 and DVD LPCM', reference: 'dvd-audio-reference.json', output: 'dvd-audio',
@@ -48,6 +52,12 @@ for (const group of [
   for (const name of group.required) assert(reference.fixtures.some((entry) => entry.file === name))
   if (group.output === 'windows-media')
     assert.deepEqual(reference.fixtures.map((entry) => [entry.videoCodec, entry.audioCodec]), [['wmv1', 'wmav1'], ['wmv2', 'wmav2']])
+  if (group.output === 'quicktime')
+    assert.deepEqual(reference.fixtures.map((entry) => [entry.videoCodec, entry.videoTag, entry.audioCodec]),
+      [['qtrle', 'rle ', 'pcm_s16be'], ['mpeg4', 'mp4v', 'aac']])
+  if (group.output === 'wmv9' || group.output === 'vc1')
+    assert.deepEqual(reference.fixtures.map((entry) => [entry.videoCodec, entry.videoTag, entry.audioCodec]),
+      [group.output === 'wmv9' ? ['wmv3', 'WMV3', 'wmav2'] : ['vc1', 'WVC1', 'wmapro']])
   if (group.output === 'mpeg2-xvid') {
     assert.deepEqual(reference.fixtures.map((entry) => [entry.videoCodec, entry.audioCodec]), [['mpeg2video', 'mp2'], ['mpeg4', 'mp3']])
     assert.equal(reference.fixtures.find((entry) => entry.file === 'legacy-xvid.avi')?.videoTag, 'XVID')
@@ -62,7 +72,7 @@ for (const group of [
       const bytes = new Uint8Array(readFileSync(resolve(fixtures, entry.file)))
       assert.equal(bytes.length, entry.bytes); assert.equal(hash(bytes), entry.sha256)
       // Each CLI invocation is a fresh native process, as in the real Worker.
-      const format = legacyVideoFormat(entry.file)
+      const format = group.output === 'quicktime' ? 'mov' : legacyVideoFormat(entry.file)
       assert(format)
       const module = await factory({ wasmBinary, noInitialRun: true, print: (line) => log.push(line), printErr: (line) => log.push(line),
         locateFile: (name) => resolve(directory, name) }),
@@ -94,7 +104,7 @@ for (const group of [
       for (const [index, time] of timeline.times.entries())
         assert(Math.abs(time - expected[index]!) < .1, `${entry.file} frame ${index}: ${time} ms / independent source ${expected[index]} ms`)
       const decodedFailures: unknown[] = []
-      if (group.output === 'windows-media' || group.output === 'dvd-audio') try { inspectLegacyPictures(moviePath, entry.normalizedVideoTimes, observation) }
+      if (['windows-media', 'wmv9', 'vc1', 'quicktime', 'dvd-audio'].includes(group.output)) try { inspectLegacyPictures(moviePath, entry.normalizedVideoTimes, observation) }
       catch (error) { decodedFailures.push(error) }
       for (const track of entry.audioTracks ?? (entry.audioCodec ? [undefined] : [])) try {
         inspectLegacyAudio(moviePath, entry.audioInputOffset, observation, track)

@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 179 批处理旧过场编码、双击命名书签和 GS 乐谱鼓轨。新取回的第 171 批报告确认，原版 Introduction 第二条路线已在 WebKit 的 Asyncify 后端通过。[179 实现与托管证据](decisions/179-windows-cutscenes-and-named-bookmarks.md)
+
 第 178 批处理 UDF 2.50 游戏盘、从旧版浏览器备份迁移存档、条件循环配乐和影片暂停时钟。本次取回的第 171 批三份浏览器报告合计 692 项通过、62 项失败。[178 实现与托管证据](decisions/178-metadata-discs-and-game-restoration.md)
 
 第 178 批实现提交 `b3974a2` 登记时为 `pending`。登记后修正了一条流式配乐测试的单采样边界预期，该修订随下一批验证。[第 178 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45873527327)

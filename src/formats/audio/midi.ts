@@ -1,6 +1,7 @@
 import { emptyLoops, type MidiAsset } from '../../engine/ports/audio.ts'
 import { TjsError } from '../../engine/system/tjs-error.ts'
 import { TvpError } from '../../engine/system/tvp-error.ts'
+import { resetsNativeSmfModule } from '../../engine/media/midi-reset.ts'
 interface Timed {
   tick: number
   order: number
@@ -8,18 +9,6 @@ interface Timed {
   data: number[]
   tempo?: number
 }
-// MIDIImpl::tTVPSMFTrack::ProcessEvent recognizes these prefixes only in a
-// complete F0 event. It sends the reset, waits 50 ms before its CC7 resend,
-// then continues the same-tick events. F7 continuation/escape is a separate
-// original branch and must not accidentally acquire this sequencer delay.
-const resetPrefixes = [
-  [0x41, 0x10, 0x42, 0x12, 0x40, 0, 0x7f, 0, 0x41, 0xf7],
-  [0x41, 0x10, 0x42, 0x12, 0, 0, 0x7f],
-  [0x7e, 0x7f, 9, 1, 0xf7],
-  [0x43, 0x10, 0x4c, 0, 0, 0x7e, 0, 0xf7],
-] as const
-const resetsNativeSmfModule = (event: Timed) => event.status === 0xf0 &&
-  resetPrefixes.some((prefix) => prefix.length <= event.data.length && prefix.every((value, index) => event.data[index] === value))
 export function decodeMidi(input: Uint8Array): MidiAsset {
   let bytes = input
   const ascii = (data: Uint8Array, at: number, n: number) =>
