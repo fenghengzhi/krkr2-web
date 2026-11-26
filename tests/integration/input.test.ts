@@ -135,7 +135,7 @@ b.left=0;b.onHitTest=function(x,y,hit){(global.Layer.onHitTest incontextof this)
     assert.equal(await session.evaluate('root.getLayerAt(20,5)===a'), '1')
     await session.evaluate('b.hitType=htMask')
     assert.equal(
-      await session.evaluate('root.getLayerAt(20,5)===b && b.getLayerAt(20,5,true)===null'),
+      await session.evaluate('root.getLayerAt(20,5)===b && b.getLayerAt(20,5,true)===a'),
       '1',
     )
   } finally {

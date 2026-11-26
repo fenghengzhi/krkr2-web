@@ -9,7 +9,8 @@ import {
 import { eriTruecolorCases, eriTruecolorFiles, eriTrueGray, eriTrueRgb, eriTrueRgba } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanCases, eriHuffmanFiles, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
 import { eriArithmeticCases, eriArithmeticFiles } from '../helpers/eri-arithmetic-fixtures.ts'
-import { eriDctCases, eriDctFiles } from '../helpers/eri-dct-fixtures.ts'
+import { eriDctCases, eriDctFiles, eriDctRejectedCases, eriDctBoundaryCases,
+  eriDctInitializationError } from '../helpers/eri-dct-fixtures.ts'
 import { dctEncoderRecipes, encoderPixels, encoderRecipes, indexedEncoderRecipe, prepareEncodedImages } from './eri-encoder.ts'
 import { noColorKey } from '../../src/engine/graphics/loading.ts'
 import type { Resource } from '../../src/engine/ports/storage.ts'
@@ -22,6 +23,7 @@ const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('he
 interface Case {
   id: string; source: string; mask?: string; index?: number; key?: number; province?: boolean
   width?: number; height?: number; expected?: readonly number[]; sdkReference?: boolean
+  initializationError?: boolean; boundaryObservation?: boolean; originalSha256?: string
 }
 const reversed = (values: readonly number[], stride: number) => [...values.slice(stride), ...values.slice(0, stride)]
 const cases119: Case[] = [
@@ -42,6 +44,10 @@ assert(corpus === 'authored' || corpus === 'encoder' || corpus === 'dct')
 const cases: Case[] = corpus === 'dct' ? [
   ...eriDctCases.filter((item) => !item.inline).map(({ name, width, height, rgba }) =>
     ({ id: name.slice(0, -4), source: name, width, height, expected: rgba })),
+  ...eriDctRejectedCases.filter((item) => !item.inline).map(({ name, width, height, originalSha256 }) =>
+    ({ id: name.slice(0, -4), source: name, width, height, initializationError: true, originalSha256 })),
+  ...eriDctBoundaryCases.map(({ name, width, height, rgba }) =>
+    ({ id: name.slice(0, -4), source: name, width, height, expected: rgba, boundaryObservation: true })),
   ...dctEncoderRecipes.map(({ id, width, height }) => ({ id, source: id + '.eri', width, height, sdkReference: true })),
 ] : corpus === 'encoder' ? encoderRecipes.map((recipe) => ({
   id: recipe.id, source: recipe.id + '.eri', width: recipe.width, height: recipe.height, expected: [...encoderPixels(recipe)],
@@ -75,6 +81,8 @@ if (corpus === 'dct') {
   const item = eriDctCases.find((entry) => entry.name === 'dct-422-alpha.eri')!
   cases.push({ id: 'dct-alpha-as-mask', source: item.name, mask: item.name, width: item.width, height: item.height,
     expected: item.rgba.map((value, at) => at % 4 === 3 ? item.gray[at - 3]! : value) })
+  cases.push({ id: 'dct-gamma-companion-mask', source: item.name, mask: 'dct-422-alpha-gamma.eri',
+    width: item.width, height: item.height, initializationError: true })
 }
 if (corpus === 'encoder') {
   const { id, width, height } = indexedEncoderRecipe, source = id + '.eri'
@@ -116,6 +124,7 @@ async function prepare() {
       unavailable[item.id] = failures[missing] ?? 'Missing prepared ERI input ' + missing
       continue
     }
+    if (item.originalSha256) assert.equal(sha(files[item.source]!), item.originalSha256, item.id)
     copy(item.source, item.id + '.eri')
     if (item.mask) copy(item.mask, item.id + '_m.eri')
     const key = item.index === undefined ? String(item.key ?? 'clNone') : 'clPalIdx+' + item.index
@@ -158,9 +167,11 @@ async function compare() {
     (bytes, selection, progress) => decodeSelectedImage(bytes, selection, {
       finish, async inflate() { throw new Error('Unexpected inflate') }, async host() { throw new Error('Unexpected host decoder') },
     }, progress), finish, { now: () => 0, check() {}, async yield() {} })
-  const results: { id: string; status: 'matched' | 'failed' | 'unreported' | 'preparation-failed'; error?: string; sha256?: string }[] = []
+  const results: { id: string; status: 'matched' | 'failed' | 'unreported' | 'preparation-failed'; error?: string; sha256?: string;
+    boundaryObservation?: boolean; nativeOutcome?: string }[] = []
   try {
     for (const item of cases) {
+      let nativeOutcome: string | undefined
       try {
         if (Object.hasOwn(manifest.unavailable, item.id)) {
           results.push({ id: item.id, status: 'preparation-failed', error: manifest.unavailable[item.id] })
@@ -172,6 +183,8 @@ async function compare() {
           continue
         }
         assert.equal(found.length, 1)
+        const fields = found[0]!.split('|')
+        nativeOutcome = fields[2]
         const name = item.id + '.eri', width = item.width ?? 3, height = item.height ?? 2
         let rgbaHash: string | undefined
         if (item.province) {
@@ -179,8 +192,19 @@ async function compare() {
           await assert.rejects(loader.province(name, width, height), (err: unknown) =>
             err instanceof TvpError && err.tvpMessage.id === 'TVPERILoadError' &&
             err.tvpMessage.args.length === 1 && err.tvpMessage.args[0] === provinceError)
+        } else if (item.initializationError || (item.boundaryObservation && nativeOutcome === 'error')) {
+          assert.equal(found[0], 'case|' + item.id + '|error|eri:' + eriDctInitializationError)
+          await assert.rejects(async () => {
+            const actual = (await loader.load(name, noColorKey)).image
+            save(item.id + '-web.json', { unexpectedSuccess: true,
+              width: actual.width, height: actual.height, rgba: [...actual.data] })
+          }, (err: unknown) => {
+            save(item.id + '-web-error.json', { error: String(err),
+              tvpMessage: err instanceof TvpError ? err.tvpMessage : null })
+            return err instanceof TvpError && err.tvpMessage.id === 'TVPERILoadError' &&
+              err.tvpMessage.args.length === 1 && err.tvpMessage.args[0] === eriDctInitializationError
+          })
         } else {
-          const fields = found[0]!.split('|')
           assert.equal(fields[2], 'ok', found[0]); assert.equal(fields.length, 6)
           assert.deepEqual(fields.slice(3, 5), [String(width), String(height)])
           const native = fields[5]!.split(',').map((channel) => { assert(/^\d+$/.test(channel)); return Number(channel) })
@@ -198,8 +222,10 @@ async function compare() {
           }
           rgbaHash = sha(actual.data)
         }
-        results.push({ id: item.id, status: 'matched', sha256: rgbaHash })
-      } catch (err) { results.push({ id: item.id, status: 'failed', error: String(err) }) }
+        results.push({ id: item.id, status: 'matched', sha256: rgbaHash,
+          boundaryObservation: item.boundaryObservation, nativeOutcome })
+      } catch (err) { results.push({ id: item.id, status: 'failed', error: String(err),
+        boundaryObservation: item.boundaryObservation, nativeOutcome }) }
     }
   } finally { loader.dispose() }
   const complete = sdk?.state === 'observed' && sdk.exitCode === 0 &&

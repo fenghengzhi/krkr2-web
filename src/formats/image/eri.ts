@@ -241,10 +241,14 @@ export function* decodeSelectedEri(bytes: Uint8Array, mode: ImageDecodeSelection
   const version = info.getUint32(0, true), transformation = info.getUint32(4, true),
     architecture = info.getUint32(8, true), type = info.getUint32(12, true),
     depth = info.getUint32(24, true), blockingDegree = info.getUint32(52, true), kind = type & TYPE_MASK
-  // Only these Initialize branches are established by the ERINA source. Do
-  // not classify other potentially valid codecs as native Initialize errors.
+  // Initialize errors come from the ERINA source or the fixed SDK observations
+  // below; other potentially valid codecs must not acquire invented errors.
   if (transformation === 1) {
     if ((architecture !== GAMMA && architecture !== HUFFMAN) || kind !== RGB || depth < 24) failed('Initialize')
+    // The pinned 2.32r2 SDK rejects this header combination before decoding.
+    // The newer ERINA mirror accepts it; do not infer that its acceptance
+    // describes the bundled library, or extend this result to other versions.
+    if (version === 0x00020100 && architecture === GAMMA) failed('Initialize')
     const alpha = (type & WITH_ALPHA) !== 0
     const image = yield* decodeEriDct(new EriBits(bytes.subarray(parsed.frame.start, parsed.frame.end)), {
       width, height, degree: blockingDegree, sampling: info.getUint32(32, true), alpha, huffman: architecture === HUFFMAN,

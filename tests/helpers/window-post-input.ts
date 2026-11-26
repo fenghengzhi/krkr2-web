@@ -1,7 +1,7 @@
 export const postedInputErrors: Readonly<Record<number, string>> = {
   0: 'count|', 1: 'unknown:<onClick>|', 2: 'parameters:<onKeyDown>|',
   3: 'field:<onKeyDown>:<key>|', 4: 'field:<onKeyDown>:<shift>|',
-  5: 'key-getter|key', 8: 'convert|',
+  5: 'key-getter|key', 8: 'object-convert|',
 }
 export const postedInputSource = String.raw`
 System.exitOnWindowClose=false;
@@ -28,6 +28,7 @@ class PostedNoFields {}
 class PostedNoShift {var key=65;}
 function postedHolders(){
  System.assignMessage("TJSBadParamCount","count");System.assignMessage("TJSVariantConvertError","convert");
+ System.assignMessage("TJSVariantConvertErrorToObject","object-convert");
  System.assignMessage("TVPSpecifiedEventNameIsUnknown","unknown:<%1>");
  System.assignMessage("TVPSpecifiedEventNeedsParameter","parameters:<%1>");
  System.assignMessage("TVPSpecifiedEventNeedsParameter2","field:<%1>:<%2>");

@@ -5,7 +5,8 @@ import { headless } from '../helpers/headless.ts'
 import { eriTruecolorFiles, eriTruecolorSource, eriTruecolorCases, eriTrueRgb,
   eriTrueGray, eriTruecolorError } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanFiles, eriHuffmanCases, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
-import { eriDctCases, eriDctFiles } from '../helpers/eri-dct-fixtures.ts'
+import { eriDctCases, eriDctFiles, eriDctRejectedCases, eriDctInitializationError,
+  eriDctAlpha, eriDctMaskedRgba } from '../helpers/eri-dct-fixtures.ts'
 import { eriArithmeticFiles, eriArithmeticCases } from '../helpers/eri-arithmetic-fixtures.ts'
 import { eriKey1 } from '../helpers/eri-fixtures.ts'
 
@@ -42,12 +43,36 @@ async function using(binary: boolean, run: (f: Awaited<ReturnType<typeof headles
 
 for (const binary of [false, true]) {
   const mode = binary ? 'bytecode' : 'source'
-  test(`${mode}: DCT ERI loads original-size RGB and alpha into the game Layer`, { timeout: 60000 }, async () => {
-    await using(binary, async ({ session }) => {
+  test(`${mode}: DCT ERI loads RGB, alpha and masks while native initialization failures publish no rows`, { timeout: 60000 }, async () => {
+    await using(binary, async ({ session }, reads, frames) => {
       for (const item of eriDctCases) {
         assert.equal(await session.evaluate(`tcLoad(tcImage,"${item.name}",clNone)`), 'ok')
         assert.equal(await session.evaluate('tcPixels(tcImage)'), item.rgba.join(','), item.name)
       }
+      assert.equal(await session.evaluate('tcLoad(tcCopy,"dct-mask.eri",clNone)'), 'ok')
+      assert.equal(await session.evaluate('tcPixels(tcCopy)'), eriDctMaskedRgba.join(','))
+      await session.evaluate('(System.clearGraphicCache(),0)')
+      for (const item of eriDctRejectedCases) for (let attempt = 1; attempt <= 2; attempt++) {
+        const before = frames.length
+        assert.equal(await session.evaluate(`tcLoad(tcImage,"${item.name}",clNone)`), `eri-true:<${item.reason}>`)
+        assert.equal(await session.evaluate('tcPixels(tcImage)'), Array(item.width * item.height * 4).fill(0).join(','),
+          'Size is published with defined Web zero storage; no private DCT rows reach the Layer')
+        assert.equal(frames.length, before)
+        assert.equal(session.snapshot().imageCacheEntries, 0)
+        assert.equal(reads.get(item.name), attempt)
+      }
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const before = frames.length
+        assert.equal(await session.evaluate('tcLoad(tcImage,"dct-mask-bad.eri",clNone)'), `eri-true:<${eriDctInitializationError}>`)
+        assert.equal(await session.evaluate('tcPixels(tcImage)'), eriDctAlpha.rgba.join(','), 'Completed main survives the rejected private mask')
+        assert.equal(await session.evaluate('tcPixels(tcCopy)'), eriDctMaskedRgba.join(','))
+        assert.equal(frames.length, before)
+        assert.equal(session.snapshot().imageCacheEntries, 0)
+        assert.equal(reads.get('dct-mask-bad.eri'), attempt)
+        assert.equal(reads.get('dct-mask-bad_m.eri'), attempt)
+      }
+      assert.equal(await session.evaluate('tcLoad(tcImage,"dct-mask.eri",clNone)'), 'ok')
+      assert.equal(await session.evaluate('tcPixels(tcImage)'), eriDctMaskedRgba.join(','))
     }, eriDctFiles())
   })
   test(`${mode}: arithmetic ERI reaches real Layers, keyed cache destinations and companion-mask failure recovery`, { timeout: 60000 }, async () => {

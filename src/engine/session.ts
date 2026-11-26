@@ -5453,13 +5453,16 @@ export class EngineSession {
             const visual = ['left', 'top', 'imageLeft', 'imageTop', 'visible', 'opacity', 'type',
               'hasImage', 'order', 'absolute', 'absoluteOrderMode', 'cached'].includes(text(1)),
               previousWindow = visual ? this.layerWindow(number(0)) : undefined,
-              before = visual ? this.layers.property(number(0), text(1)) : undefined
+              // Assigning the same absolute value can move a layer behind
+              // a sibling tied at that value. Invalidate the displayed order.
+              visualProperty = text(1) === 'absolute' ? 'order' : text(1),
+              before = visual ? this.layers.property(number(0), visualProperty) : undefined
             this.layers.set(
               number(0),
               text(1),
               typeof args[2] === 'string'
                 ? text(2)
-                : text(1).startsWith('clip') ||
+                : text(1).startsWith('clip') || text(1) === 'order' || text(1) === 'absolute' ||
                     text(1) === 'attentionLeft' ||
                     text(1) === 'attentionTop'
                   ? clipInteger(2)
@@ -5473,7 +5476,7 @@ export class EngineSession {
               this.deferredPaint.delete(number(0))
             }
             this.dirty = true
-            if (visual && before !== this.layers.property(number(0), text(1))) {
+            if (visual && before !== this.layers.property(number(0), visualProperty)) {
               if (previousWindow !== undefined) this.invalidateWindow(previousWindow)
               this.invalidateLayer(number(0))
             }

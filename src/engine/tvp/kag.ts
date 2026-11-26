@@ -3,7 +3,7 @@
 // expression entities, conditions and embeddings use the global TJS context.
 export const kagClass = String.raw`
 class KAGParser {
-  var __kagId, __kagMacros, __kagParams, __kagParamNames, __kagTag, __kagTagList;
+  var __kagId, __kagMacros, __kagParams, __kagParamNames, __kagParamDepth=0, __kagTag, __kagTagList;
   function KAGParser() {
     __kagId = __host("KAG.create");
     __kagMacros = %[]; __kagParams = []; __kagParamNames = []; __kagTag = %[]; __kagTagList = [];
@@ -32,15 +32,17 @@ class KAGParser {
           case "setMacro": __kagMacros[a[0]] = a[1]; break;
           case "eraseMacro":
             result = delete __kagMacros[a[0]]; break;
-          case "params": result = __kagParams.count ? %[values:__kagParams[__kagParams.count-1],names:__kagParamNames[__kagParams.count-1]] : null; break;
+          case "params": result = __kagParamDepth ? %[values:__kagParams[__kagParamDepth-1],names:__kagParamNames[__kagParamDepth-1]] : null; break;
           case "pushParams": __kagPushParams(a[0]); break;
-          case "popParams": __kagParams.count = a[0]; __kagParamNames.count = a[0]; break;
+          case "popParams": __kagParamDepth = a[0]; break;
+          case "clearParams": __kagClearParams(); break;
           case "restoreMacros": (Dictionary.assign incontextof __kagMacros)(a[0]); break;
           case "restoreParams":
-            __kagParams.clear(); __kagParamNames.clear();
+            __kagClearParams();
             for(var i=0;i<a[0].count;i++) {
               __kagParams.add(a[0][i].values); __kagParamNames.add(a[0][i].names);
             }
+            __kagParamDepth = __kagParams.count;
             break;
           case "yield": break;
           default: throw new Exception("Unknown KAG effect: " + operation.kind);
@@ -56,8 +58,14 @@ class KAGParser {
   function loadScenario(name) { __kagRun("loadScenario", string(name)); }
   function goToLabel(name) { __kagRun("goToLabel", string(name)); }
   function callLabel(name) { __kagRun("callLabel", string(name)); }
+  function __kagClearParams() {
+    __kagParams.clear(); __kagParamNames.clear(); __kagParamDepth=0;
+  }
   function __kagPushParams(values) {
-    __kagParamNames.add(values.taglist); delete values.taglist; __kagParams.add(values);
+    var depth=__kagParamDepth++;
+    __kagParamNames[depth]=values.taglist; delete values.taglist;
+    if(depth==__kagParams.count) __kagParams.add(%[]);
+    (Dictionary.assign incontextof __kagParams[depth])(values);
   }
   function __kagAcceptTag(next) {
     __kagTagList.assign(next.taglist);
@@ -73,7 +81,11 @@ class KAGParser {
   function clear() { __kagRun("clear"); }
   function clearCallStack() { __kagRun("clearCallStack"); }
   function popMacroArgs() { __kagRun("popMacroArgs"); }
-  function store() { return __host("KAG.store", __kagId, __kagMacros, __kagParams, __kagParamNames); }
+  function store() {
+    var params=[],names=[];
+    for(var i=0;i<__kagParamDepth;i++){params.add(__kagParams[i]);names.add(__kagParamNames[i]);}
+    return __host("KAG.store", __kagId, __kagMacros, params, names);
+  }
   function restore(data) { __kagRun("restore", data); }
   function assign(parser) {
     if(!(parser instanceof "KAGParser")) {
@@ -82,8 +94,14 @@ class KAGParser {
     }
     __host("KAG.assign", __kagId, parser.__kagId);
     (Dictionary.assign incontextof __kagMacros)(parser.__kagMacros);
-    __kagParams.assignStruct(parser.__kagParams);
-    __kagParamNames.assignStruct(parser.__kagParamNames);
+    __kagClearParams();
+    for(var i=0;i<parser.__kagParamDepth;i++) {
+      var values=%[],names=[];
+      (Dictionary.assign incontextof values)(parser.__kagParams[i]);
+      names.assign(parser.__kagParamNames[i]);
+      __kagParams.add(values); __kagParamNames.add(names);
+    }
+    __kagParamDepth=parser.__kagParamDepth;
   }
   function interrupt() { __host("KAG.interrupt", __kagId); }
   function resetInterrupt() { __host("KAG.resetInterrupt", __kagId); }
@@ -96,7 +114,7 @@ class KAGParser {
   function onReturn(tag) { return true; }
   function onAfterReturn() {}
   property macros { getter() { return __kagMacros; } }
-  property macroParams { getter() { return __kagParams.count ? __kagParams[__kagParams.count-1] : null; } }
+  property macroParams { getter() { return __kagParamDepth ? __kagParams[__kagParamDepth-1] : null; } }
   property mp { getter() { return macroParams; } }
   property curStorage {
     getter() { return __host("KAG.get", __kagId, "curStorage"); }

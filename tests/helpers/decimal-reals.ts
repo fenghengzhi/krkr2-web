@@ -17,11 +17,22 @@ export const decimalCases = [
   { id: 'zero', token: '0.00000000000000000000000000', value: 0 },
   { id: 'negative-zero', token: '-0.00000000000000000000000000', value: -0 },
   { id: 'smallest-normal', token: '2.2250738585072014e-308', value: 2 ** -1022 },
-  { id: 'largest-finite', token: '1.7976931348623157e308', value: Number.MAX_VALUE },
+  // Original SDK run 45518090473 wrote this bit pattern for the literal,
+  // converted string and restored save. The C library used by Web rounds up.
+  { id: 'largest-finite', token: '1.7976931348623157e308', value: Number.MAX_VALUE, stockBits: '7feffffffffffffe' },
   { id: 'overflow', token: '1.0e400', value: Infinity },
   { id: 'negative-overflow', token: '-1.0e400', value: -Infinity },
   { id: 'underflow', token: '1.0e-400', value: 0 },
   { id: 'negative-underflow', token: '-1.0e-400', value: -0 },
+] as const
+
+// Neighboring spellings and equivalent scales distinguish a decimal-parser
+// difference from a failure to serialize or reload the final bits.
+export const decimalBoundaryTokens = [
+  '1.7976931348623150e308', '1.7976931348623154e308', '1.7976931348623155e308',
+  '1.7976931348623156e308', '1.7976931348623157e308', '1.7976931348623158e308',
+  '1.7976931348623159e308', '-1.7976931348623157e308', '17976931348623157.0e292',
+  '0.17976931348623157e309', '1.7976931348623157e307', '1.7976931348623157',
 ] as const
 
 export function doubleBits(value: number): string {
@@ -55,15 +66,22 @@ function decimalPoolControl(){
   var a=[1.25,NaN,0.5,-0.0,+0.0];
   return [int(a[0]==5.0/4),string(a[1]),int(a[2]==1.0/2),string(a[3]),string(a[4])].join(",");
 }
-function decimalObserve(prefix){
-  var literals=[${decimalCases.map((r) => r.token).join(',')}];
-  var strings=[${decimalCases.map((r) => JSON.stringify('text' in r ? r.text : r.token)).join(',')}],converted=[];
+function decimalSave(prefix,literals,strings){
+  var converted=[];
   for(var i=0;i<strings.count;i++)converted.add(real(strings[i]));
   literals.saveStruct(prefix+"literal.tjs");
   converted.saveStruct(prefix+"converted.tjs");
   var restored=Scripts.evalStorage(prefix+"literal.tjs");
   restored.saveStruct(prefix+"restored.tjs");
   return literals.count;
+}
+function decimalObserve(prefix){
+  return decimalSave(prefix,[${decimalCases.map((r) => r.token).join(',')}],
+    [${decimalCases.map((r) => JSON.stringify('text' in r ? r.text : r.token)).join(',')}]);
+}
+function decimalBoundaryObserve(prefix){
+  return decimalSave(prefix+"boundary-",[${decimalBoundaryTokens.join(',')}],
+    [${decimalBoundaryTokens.map((s) => JSON.stringify(s)).join(',')}]);
 }
 `
 

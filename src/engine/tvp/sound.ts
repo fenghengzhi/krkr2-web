@@ -19,7 +19,10 @@ class __SoundBase {
     // The native method checks count and converts ttstr before entering Open.
     // A failed conversion must leave the current decoder, labels and fade live.
     var storage=string(args[0]);
-    __soundRun("stopFade",[false]);__clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[storage],__soundKind=="wave"?global.WaveSoundBuffer.__snapshotPhaseVocoderFilters(__filters):void);
+    // WaveImpl::Clear stops/rewinds media without ending BaseSoundBuffer's
+    // fade. MIDI/CDDA keep their separate original open policies.
+    if(__soundKind=="wave")__soundRun("stop",[]);else __soundRun("stopFade",[false]);
+    __clearSoundLabels();__soundRun("unload",[]);__clearSoundLabels();__soundRun("open",[storage],__soundKind=="wave"?global.WaveSoundBuffer.__snapshotPhaseVocoderFilters(__filters):void);
   }
   function play(){__soundRun("play",[]);}
   function stop(){__soundRun("stop",[]);}

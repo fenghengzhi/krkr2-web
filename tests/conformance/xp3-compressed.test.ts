@@ -69,7 +69,7 @@ test('normal XP3 and combined-EXE readers resolve mixed compressed segments, ali
       f.reads.length = 0
       assert.equal((await opened.source.read(10, 0)).length, 0)
       assert.equal((await opened.source.read(entry.size, 0)).length, 0)
-      assert.deepEqual(f.reads, [])
+      assert.equal(f.reads.length, 0)
       const [a, b] = await Promise.all([opened.source.read(3, entry.size - 4), opened.source.read(8, 9)])
       assert.deepEqual([...a], [...f.plain.subarray(3, -1)]); assert.deepEqual([...b], [...f.plain.subarray(8, 17)])
       assert.equal(f.reads.filter(([offset]) => offset === f.locations[1]).length, 1)

@@ -7,6 +7,7 @@ import { wavePrecisionFiles } from '../helpers/extensible-wave.ts'
 import { wavePositionExpected, wavePositionFiles, wavePositionSource } from '../helpers/wave-position.ts'
 import { waveFadeExpected, waveFadeDelayedExpected, waveFadeSource } from '../helpers/wave-fade.ts'
 import { waveFrequencyExpected, waveFrequencyFiles, waveFrequencySource } from '../helpers/wave-frequency.ts'
+import { waveReopenExpected, waveReopenFiles, waveReopenSource } from '../helpers/wave-reopen.ts'
 import { soundOpenExpected, soundOpenFiles, soundOpenSource } from '../helpers/sound-open.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
@@ -25,9 +26,10 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   'foreign-guid.wav': 'wave:<foreign-guid.wav>', ...wavePositionExpected,
   ...Object.fromEntries(Object.entries(waveFadeExpected).map(([id, value]) => ['fade-' + id, value])),
   'fade-delayed': waveFadeDelayedExpected, 'frequency-original': waveFrequencyExpected,
+  ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
   'xp3-compressed': [xp3SegmentScript, xp3SegmentText, xp3CompressedAudioHeader, 'closed'].join('~') }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles() }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -57,6 +59,9 @@ if (process.argv[2] === 'prepare') {
     soundOpenSource,
     ...Object.keys(soundOpenExpected).map((kind) =>
       `try{record("sound-open-${kind}|"+soundOpenObserve("${kind}"));}catch(e){record("sound-open-${kind}|unexpected-error:"+e.message);}`),
+    waveReopenSource,
+    ...Object.keys(waveReopenExpected).map((kind) =>
+      `try{record("wave-reopen-${kind}|"+waveReopenObserve("${kind}"));}catch(e){record("wave-reopen-${kind}|unexpected-error:"+e.message);}`),
     // Normal public archive/TextStream/Wave open calls only. Do not play or
     // construct a device buffer: Windows audio availability is not this gate.
     'try{Scripts.execStorage("compressed-audio.xp3>compressed-audio.tjs");var xp3Proof=[xp3SegmentScript,xp3CompressedText("compressed-audio.xp3>"),xp3CompressedOpen("compressed-audio.xp3>"),xp3CompressedClose()];record("xp3-compressed|"+xp3Proof.join("~"));}catch(e){record("xp3-compressed|unexpected-error:"+e.message);}',
@@ -96,6 +101,8 @@ if (process.argv[2] === 'prepare') {
   const complete = sdk.commit === manifest.commit && sdk.state === 'observed' && sdk.exitCode === 0 &&
     lines.length === results.length + 2 && lines[0] === 'start' && lines.at(-1) === 'done' && results.every((r) => r.matched)
   save('comparison.json', { commit: manifest.commit, complete, observationSha256: digest(raw), results,
+    waveReopen: { planned: Object.keys(waveReopenExpected).length,
+      matched: results.filter((row) => row.id.startsWith('wave-reopen-') && row.matched).length },
     xp3Archive: manifest.xp3Archive,
     host: wine ? 'Ubuntu / Wine 32-bit / PulseAudio' : 'Windows / DirectSound',
     processState: sdk.state ?? 'unreported', exitCode: sdk.exitCode ?? null, processReportError,

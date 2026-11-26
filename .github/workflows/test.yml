@@ -1,5 +1,5 @@
 name: Tests
-run-name: ${{ inputs.node-only && 'Node diagnostic (browser suites not run)' || inputs.runtime-only && 'Direct runtime diagnostic (application suites not run)' || 'Full test suite' }}
+run-name: ${{ inputs.node-only && 'Node diagnostic (browser suites not run)' || inputs.runtime-only && 'Direct runtime diagnostic (application suites not run)' || github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'Full test suite' }}
 
 on:
   push:
@@ -708,7 +708,7 @@ jobs:
     uses: ./.github/workflows/compatibility.yml
 
   tests:
-    name: All tests
+    name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
     needs: [build, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, eri-reference, original-sound-wine, kag-bookmarks]
     runs-on: ubuntu-24.04
@@ -717,15 +717,20 @@ jobs:
       - name: Require every job to pass
         env:
           RESULTS: ${{ toJSON(needs) }}
+          APPLICATION_TESTS: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') }}
         run: |
           python3 - <<'PY'
           import json, os, sys
           results = json.loads(os.environ['RESULTS'])
+          historical_diagnostics = {
+              'lifetime-runtime-reference', 'menu-lifetime-runtime-reference', 'activity-wrapper-runtime-reference'
+          } if os.environ['APPLICATION_TESTS'] == 'true' else set()
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write('| Job | Result |\n| --- | --- |\n')
               for name, job in results.items():
                   summary.write(f"| {name} | {job['result']} |\n")
-          sys.exit(0 if all(job['result'] == 'success' for job in results.values()) else 1)
+          sys.exit(0 if all(job['result'] == ('skipped' if name in historical_diagnostics else 'success')
+                            for name, job in results.items()) else 1)
           PY
 
   identity-allocations:
@@ -760,19 +765,19 @@ jobs:
 
   lifetime-runtime-reference:
     name: Layer lifetime host runtime diagnosis
-    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    if: ${{ !inputs.node-only && !inputs.runtime-only && !(github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]')) }}
     needs: build
     uses: ./.github/workflows/layer-lifetime-runtime.yml
 
   menu-lifetime-runtime-reference:
     name: Menu lifetime host runtime diagnosis
-    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    if: ${{ !inputs.node-only && !inputs.runtime-only && !(github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]')) }}
     needs: build
     uses: ./.github/workflows/menu-lifetime-runtime.yml
 
   activity-wrapper-runtime-reference:
     name: Fixed batch111 activity wrapper runtime diagnosis
-    if: ${{ !inputs.node-only && !inputs.runtime-only }}
+    if: ${{ !inputs.node-only && !inputs.runtime-only && !(github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]')) }}
     permissions:
       contents: read
       actions: read

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createHash } from 'node:crypto'
 import { decodeSelectedEri } from '../../src/formats/image/eri.ts'
 import { EriInverseDct } from '../../src/formats/image/eri-idct.ts'
 import { ImageDecodeError } from '../../src/formats/image/selection.ts'
-import { eriDctCases } from '../helpers/eri-dct-fixtures.ts'
+import { eriDctCases, eriDctRejectedCases } from '../helpers/eri-dct-fixtures.ts'
 
 function finish<T>(work: Generator<void, T>): T {
   for (;;) { const result = work.next(); if (result.done) return result.value }
@@ -48,5 +49,21 @@ test('ERI DCT reports image size and withholds scanlines on invalid frame contro
       write() { events.push('write') }, row() { events.push('row') } })), (error) =>
       error instanceof ImageDecodeError && error.reason === 'ERIDecoder::' + phase + ' failed.')
     assert.deepEqual(events, ['size'])
+  }
+})
+
+test('ERI DCT preserves the original 20100 Gamma rejection before publishing any row', () => {
+  for (const item of eriDctRejectedCases) {
+    if (item.originalSha256)
+      assert.equal(createHash('sha256').update(item.bytes).digest('hex'), item.originalSha256, item.name)
+    for (const mode of ['normal', 'grayscale'] as const) {
+      const sizes: number[][] = [], rows: number[] = []
+      assert.throws(() => finish(decodeSelectedEri(item.bytes, mode, {
+        size(w, h) { sizes.push([w, h]) }, write() { assert.fail('Initialization failure published pixels') },
+        row(y) { rows.push(y) },
+      })), (error) => error instanceof ImageDecodeError && error.reason === item.reason, item.name)
+      assert.deepEqual(sizes, [[item.width, item.height]], item.name)
+      assert.deepEqual(rows, [], item.name)
+    }
   }
 })

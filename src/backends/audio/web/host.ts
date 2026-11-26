@@ -378,7 +378,7 @@ export class WebAudioHost {
       this.globalVolume = command.volume
       if (!this.node) return { events: [] }
     }
-    if (command.op === 'close') {
+    if (command.op === 'close' || command.op === 'unload') {
       this.operations.cancel(command.id)
       if (!this.node) return { events: [] }
     }

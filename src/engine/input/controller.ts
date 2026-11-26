@@ -536,16 +536,16 @@ export class InputController {
     getDisabled = false,
   ): Generator<InputCall, number, unknown> {
     const epoch = this.epoch
+    // The draw device sends pointer input to its displayed layer manager.
+    // A script query supplies its own layer, which may belong to another one.
+    const origin = root ?? this.root()
+    if (!origin) return 0
     this.hitDepth++
     try {
-      for (const candidate of this.layers.hitCandidates(x, y, root, excludeSelf)) {
+      for (const candidate of this.layers.hitCandidates(x, y, origin, excludeSelf)) {
         const { id } = candidate
         if (!this.layers.has(id)) continue
         if ([...this.detaching].some((ancestor) => this.layers.contains(ancestor, id))) continue
-        // A native pointer packet searches only the displayed window. An
-        // explicit Layer.getLayerAt still searches the requested subtree.
-        if (root === undefined && this.windowId && this.layers.get(id).windowId !== this.windowId())
-          continue
         this.hitChoice.set(id, true)
         yield {
           target: id,

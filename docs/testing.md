@@ -2,6 +2,10 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 131 批新增 12 个常规 Node 定义及每个浏览器项目 8 个定义。十个图层排序与命中场景共用同一套原版 SDK 和 Web 脚本。另有七个宏字典和五个换轨淡变场景，以及 12 种接近双精度上限的十进制写法。浏览器在原 KAG 模板中读回已保存的层顺序，并采样 AudioWorklet 输出的左右声道。[131 验收记录](decisions/131-layer-order-macro-arguments-and-wave-reopen.md)
+
+本次推送选择 `[application tests]`。GitHub 将运行显示为 **Application and compatibility tests**，要求构建、Node、浏览器、直接运行时、发行兼容及原版对照等本批作业成功。三组专门重复历史宿主运行时问题的诊断在汇总中显示为 `skipped`。它们的既有报告按原提交保留。
+
 第 130 批新增 18 个常规 Node 测试和每个浏览器项目 12 个测试，另有 4 个使用原版结果的 Chromium DCT 验收。原版 Windows 在独立项目中保存 21 个十进制数值并记录实数常量池对照，再用 Web 源码和字节码会话读取原版保存的值。有效的 DCT 图片逐一进入 SDK，缺少的输入单独报告并导致总体失败。窗口输入对照有 11 项跨平台公共行为，高字节字符另存原版观察。原转场项目保留 21 项原有断言，新增 3 项图层调色对照。专门的 Chromium 作业使用原版原始像素核对作者生成的三种采样图像。[130 验收记录](decisions/130-decimal-values-dct-and-game-input.md)
 
 第 129 批新增 11 个 Node 测试、每个浏览器项目 9 个测试。大声音验收使用完整的 72 MiB 压缩前 PCM，以三个不同音调核对原位、远端和回跳。Windows 的 SLI／WAVE 作业扩至 33 项，也读取同一格式的 XP3 和跨分段 UTF-16 文字。127 已取回的十个 Node 断言失败和四项未报告分别保留。[129 验收记录](decisions/129-compressed-xp3-and-playback.md)

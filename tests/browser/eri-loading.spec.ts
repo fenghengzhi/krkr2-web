@@ -10,7 +10,8 @@ import {
   eriTruecolorCases, eriTruecolorError, eriTruecolorFiles, eriTruecolorSource, eriTrueGray, eriTrueRgb, eriTrueRgba,
 } from '../helpers/eri-truecolor-fixtures.ts'
 import { eriHuffmanCases, eriHuffmanFiles, eriHuffmanPaletteCases } from '../helpers/eri-huffman-fixtures.ts'
-import { eriDctCases, eriDctFiles } from '../helpers/eri-dct-fixtures.ts'
+import { eriDctCases, eriDctFiles, eriDctRejectedCases, eriDctInitializationError,
+  eriDctAlpha, eriDctMaskedRgba } from '../helpers/eri-dct-fixtures.ts'
 import { eriArithmeticCases, eriArithmeticFiles } from '../helpers/eri-arithmetic-fixtures.ts'
 
 async function frame(canvas: Locator) {
@@ -183,16 +184,40 @@ for (const suite of colorSuites) for (const backend of ['asyncify', 'jspi']) for
   })
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
-  test(`${backend}/${binary ? 'bytecode' : 'source'}: DCT ERI quadrant colors and alpha reach the game canvas`, async ({ page }) => {
+  test(`${backend}/${binary ? 'bytecode' : 'source'}: DCT ERI pixels, masks and initialization-error recovery reach the game canvas`, async ({ page }, info) => {
     test.setTimeout(120000)
     const game = await launchWindowAttention(page, backend, binary, sizedColorSource,
-      Object.entries(eriDctFiles()).map(([name, bytes]) => ({ name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) })))
+      Object.entries(eriDctFiles()).map(([name, bytes]) => ({ name, mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) }))),
+      observed: string[] = [], failures: unknown[] = []
     try {
       const canvas = game.surface('ERI truecolor').locator('canvas[data-window-id]')
       for (const item of eriDctCases) {
         await evaluate(page, `tcLoad(tcImage,"${item.name}",clNone)`, 'ok')
         await evaluate(page, 'tcShowSizedMask()', '0')
         await expect.poll(() => frame(canvas)).toEqual(expectedFrame(item.rgba, item.width))
+        observed.push(item.name)
       }
-    } finally { await game.stop() }
+      await evaluate(page, 'tcLoad(tcCopy,"dct-mask.eri",clNone)', 'ok')
+      await evaluate(page, 'tcPixels(tcCopy)', eriDctMaskedRgba.join(','))
+      for (const item of eriDctRejectedCases) {
+        await evaluate(page, `tcLoad(tcImage,"${item.name}",clNone)`, `eri-true:<${item.reason}>`)
+        await evaluate(page, 'tcPixels(tcImage)', Array(item.width * item.height * 4).fill(0).join(','))
+        observed.push(item.name + ':Initialize rejected')
+      }
+      await evaluate(page, 'tcLoad(tcImage,"dct-mask-bad.eri",clNone)', `eri-true:<${eriDctInitializationError}>`)
+      await evaluate(page, 'tcPixels(tcImage)', eriDctAlpha.rgba.join(','))
+      await evaluate(page, 'tcPixels(tcCopy)', eriDctMaskedRgba.join(','))
+      observed.push('dct-mask-bad.eri:companion Initialize rejected')
+      await evaluate(page, 'tcLoad(tcImage,"dct-mask.eri",clNone)', 'ok')
+      await evaluate(page, 'tcShowSizedMask()', '0')
+      await expect.poll(() => frame(canvas)).toEqual(expectedFrame(eriDctMaskedRgba, eriDctAlpha.width))
+      observed.push('dct-mask.eri:recovered')
+      await expect(page.locator('#logs .error')).toHaveCount(0)
+    } catch (error) { failures.push(error) }
+    try {
+      await info.attach('eri-dct-contract', { contentType: 'application/json', body: JSON.stringify({ backend, binary, observed }) })
+    } catch (error) { failures.push(error) }
+    try { await game.stop() } catch (error) { failures.push(error) }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length) throw new AggregateError(failures, 'DCT ERI browser consumer or cleanup failed', { cause: failures[0] })
   })

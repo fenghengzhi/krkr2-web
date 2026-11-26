@@ -6,17 +6,29 @@ import { ForwardTree, statsFor } from './eri-huffman-fixtures.ts'
 
 interface DctFixture {
   name: string; width: number; height: number; degree: number; sampling: number
-  alpha?: boolean; positive?: boolean; inline?: boolean; ac?: boolean; chromaAC?: boolean; huffman?: boolean
+  alpha?: boolean; positive?: boolean; inline?: boolean; ac?: boolean; chromaAC?: boolean; huffman?: boolean; version?: number
 }
 
 const shapes: DctFixture[] = [
-  { name: 'dct-444.eri', width: 19, height: 18, degree: 3, sampling: 0x40404 },
-  { name: 'dct-422-alpha.eri', width: 18, height: 17, degree: 4, sampling: 0x40202, positive: true, alpha: true },
-  { name: 'dct-411-ac.eri', width: 9, height: 5, degree: 5, sampling: 0x40101, ac: true },
-  { name: 'dct-422-gamma-chroma.eri', width: 17, height: 16, degree: 3, sampling: 0x40202, chromaAC: true },
+  { name: 'dct-444.eri', width: 19, height: 18, degree: 3, sampling: 0x40404, huffman: true },
+  { name: 'dct-422-alpha.eri', width: 18, height: 17, degree: 4, sampling: 0x40202, positive: true, alpha: true, huffman: true },
+  { name: 'dct-411-ac.eri', width: 9, height: 5, degree: 5, sampling: 0x40101, ac: true, huffman: true },
   { name: 'dct-422-chroma.eri', width: 17, height: 16, degree: 3, sampling: 0x40202, chromaAC: true, huffman: true },
-  { name: 'dct-inline-gamma.eri', width: 17, height: 9, degree: 3, sampling: 0x40101, ac: true, inline: true },
   { name: 'dct-inline.eri', width: 18, height: 9, degree: 3, sampling: 0x40101, ac: true, inline: true, huffman: true },
+]
+// Preserve the original 20100/Gamma inputs as initialization-error controls.
+// Their coefficients are unchanged; no failed native pixels become a success
+// oracle. The original ZIP hashes below are checked only on hosted runners.
+const gammaShapes: (DctFixture & { originalSha256?: string })[] = [
+  { ...shapes[0]!, name: 'dct-444-gamma.eri', huffman: false,
+    originalSha256: '6037ff72d7e10442f6df90acc647d76afeee1c47c04a2d24e8a96d096b27cb3b' },
+  { ...shapes[1]!, name: 'dct-422-alpha-gamma.eri', huffman: false,
+    originalSha256: '2ba98776bc2bcdcc9420a272045a47cc8ee574cfa57a07b600b6d39f1816d372' },
+  { ...shapes[2]!, name: 'dct-411-ac-gamma.eri', huffman: false,
+    originalSha256: '1238c371ac5cabcfb45a4aa1389bde30be2347c9754922bcfc3f58c26f4ed62c' },
+  { ...shapes[3]!, name: 'dct-422-gamma-chroma.eri', huffman: false,
+    originalSha256: '21e733d229a8e925288c15f418bb2c821e61e9d2cb3d9e609132f7caf4e14797' },
+  { name: 'dct-inline-gamma.eri', width: 17, height: 9, degree: 3, sampling: 0x40101, ac: true, inline: true },
 ]
 
 function build(shape: DctFixture) {
@@ -78,7 +90,7 @@ function build(shape: DctFixture) {
     for (let i = 0; i < dc.length; i++) writeScales()
     writeAC(spectra.flat())
   }
-  const info = eriFixtureWords(shape.huffman ? 0x20200 : 0x20100, 1, shape.huffman ? 0xfffffffc : 0xffffffff, alpha ? 0x04000001 : 1, width, positive ? height : -height,
+  const info = eriFixtureWords(shape.version ?? (shape.huffman ? 0x20200 : 0x20100), 1, shape.huffman ? 0xfffffffc : 0xffffffff, alpha ? 0x04000001 : 1, width, positive ? height : -height,
     alpha ? 32 : 24, 0, sampling, 0, 0, 0, 0, degree, 0, 0, 0)
   const rgba: number[] = [], gray: number[] = []
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
@@ -98,6 +110,23 @@ function build(shape: DctFixture) {
 }
 
 export const eriDctCases = shapes.map(build)
+export const eriDctInitializationError = 'ERIDecoder::Initialize failed.'
+export const eriDctRejectedCases = gammaShapes.map((shape) => {
+  const { name, width, height, bytes, inline } = build(shape)
+  return { name, width, height, bytes, inline, reason: eriDctInitializationError, originalSha256: shape.originalSha256 }
+})
+// These cross the two header fields independently. No prior SDK result exists:
+// the hosted comparison records its actual success or exact initialization
+// error, then requires the selected Web loader to agree.
+export const eriDctBoundaryCases = [
+  build({ ...shapes[3]!, name: 'dct-422-gamma-v20200.eri', version: 0x20200, huffman: false }),
+  build({ ...shapes[3]!, name: 'dct-422-huffman-v20100.eri', version: 0x20100 }),
+]
+export const eriDctAlpha = eriDctCases.find((item) => item.alpha)!
+export const eriDctMaskedRgba = eriDctAlpha.rgba.map((value, at) => at % 4 === 3 ? eriDctAlpha.gray[at - 3]! : value)
 export function eriDctFiles(): Record<string, Uint8Array> {
-  return Object.fromEntries(eriDctCases.map(({ name, bytes }) => [name, bytes]))
+  const files = Object.fromEntries([...eriDctCases, ...eriDctRejectedCases, ...eriDctBoundaryCases]
+    .map(({ name, bytes }) => [name, bytes]))
+  return { ...files, 'dct-mask.eri': eriDctAlpha.bytes, 'dct-mask_m.eri': eriDctAlpha.bytes,
+    'dct-mask-bad.eri': eriDctAlpha.bytes, 'dct-mask-bad_m.eri': files['dct-422-alpha-gamma.eri']! }
 }

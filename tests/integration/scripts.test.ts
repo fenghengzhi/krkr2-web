@@ -74,6 +74,37 @@ test('nested successful and failed compilation preserves outer class metadata in
   }
 })
 
+test('a fresh VM constructs a game class whose base comes from a qualified name in exported bytecode', async () => {
+  const source = `
+    class GamePanel { var label; function GamePanel(value){label=value;} function describe(){return label;} }
+    var sceneTypes=%[panels:%[base:GamePanel]];
+    class HistoryPanel extends global.sceneTypes.panels.base {
+      function HistoryPanel(){super.GamePanel("history");}
+    }
+    var panel=new HistoryPanel();
+  `
+  const original = await headless({ 'panel.tjs': source, 'startup.tjs': 'Scripts.execStorage("panel.tjs");' })
+  let binaries: SaveFile[]
+  try {
+    await original.session.start()
+    assert.equal(await original.session.evaluate('panel.describe()'), 'history')
+    for (const debug of [false, true])
+      await original.session.evaluate(`Scripts.compileStorage("panel.tjs","savedata/panel-${debug}.cjs",false,${debug},false)`)
+    binaries = original.session.exportSaves()
+  } finally { await original.session.stop() }
+
+  for (const debug of [false, true]) {
+    const fresh = await headless({
+      'startup.tjs': 'Scripts.execStorage("panel.cjs");',
+      'panel.cjs': bytes(binaries, `savedata/panel-${debug}.cjs`),
+    })
+    try {
+      await fresh.session.start()
+      assert.equal(await fresh.session.evaluate('[panel.describe(),int(panel instanceof "GamePanel")].join(",")'), 'history,1')
+    } finally { await fresh.session.stop() }
+  }
+})
+
 test('native exec/eval and storage calls preserve exact caller frames without bootstrap wrappers', async () => {
   const { session } = await headless(
     {

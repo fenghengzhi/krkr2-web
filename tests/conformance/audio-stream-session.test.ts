@@ -130,14 +130,12 @@ function halt(){sound.stop();return sound.status+"|"+sound.samplePosition;}
 
       assert.equal(await session.evaluate('seekFar()'), String(far))
       blocks.length = 0
-      clock.advance(20)
       await settlePages()
-      assert.equal(await session.evaluate('sound.samplePosition'), String(far), 'A missing seek page must not advance source time')
+      assert.equal(await session.evaluate('sound.samplePosition'), String(far), 'Prefetch does not advance source time')
       assert.equal(await session.evaluate('sound.status'), 'play')
       assert.equal(await session.evaluate('streamLabels.join("|")'), 'early')
-      assert.equal(blocks.reduce((sum, block) => sum + block.left.length, 0), 20)
-      assert(blocks.every((block) => block.left.every((value) => value === 0) && block.right.every((value) => value === 0)))
-      assert(wave.reads.some((read) => read.offset >= 44 + far * 2), 'The seek must request the distant source range')
+      assert.equal(blocks.length, 0, 'No render is needed to start fetching the seek destination')
+      assert(wave.reads.some((read) => read.offset >= 44 + far * 2), 'The public seek itself requests the distant source range')
 
       blocks.length = 0
       clock.advance(40)

@@ -18,6 +18,9 @@ function project(){
 }
 function addSecondary(){
   var second=new Layer(win,null);second.setSize(70,80);second.fillRect(0,0,70,80,0xffff0000);
+  global.hitTrace=[];
+  second.onClick=function(x,y){global.hitTrace.add("secondary");};
+  child.onClick=function(x,y){global.hitTrace.add("displayed");};
   global.savedSecondary=second;
   return second.__id;
 }
@@ -106,13 +109,16 @@ for (const binary of [false, true]) {
     } finally { await f.stop() }
   })
 
-  test(`${mode}: an undisplayed secondary manager cannot alter the displayed destination or frame`, async () => {
+  test(`${mode}: physical clicks and rendered frames use the displayed manager while explicit queries address their owner`, async () => {
     const f = await fixture(binary)
     try {
       const before = structuredClone(f.frames.at(-1))
       await f.run('addSecondary')
       assert.equal(await f.session.evaluate('savedSecondary.width'), '70')
       assert.deepEqual(f.frames.at(-1), before)
+      assert.equal(await f.session.evaluate('int(savedSecondary.getLayerAt(40,32)===savedSecondary)+","+int(root.getLayerAt(40,32)===child)'), '1,1')
+      await f.session.click(22, 14)
+      assert.equal(await f.session.evaluate('hitTrace.join(",")'), 'displayed')
       assert.equal(await f.run('project'), '43,49')
       assert.deepEqual([f.view().virtualCursor!.x, f.view().virtualCursor!.y], [24, 23])
     } finally { await f.stop() }

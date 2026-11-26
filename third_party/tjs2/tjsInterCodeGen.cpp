@@ -3630,6 +3630,9 @@ namespace TJS // following is in the namespace
         PutCode(0, NODE_POS);
         PutCode(TJS_TO_VM_REG_ADDR(resaddr), NODE_POS);
         PutCode(0, NODE_POS);
+        // A qualified base expression can use more registers than the
+        // class's initial name temporary. Include them in its frame size.
+        ClearFrame(fr);
 
         if(hold) {
             SuperClassExpr = node;

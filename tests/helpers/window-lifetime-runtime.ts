@@ -18,6 +18,15 @@ var failManaged=true;
 class ThrowingManaged {function finalize(){managedFinalized++;if(failManaged)throw new Exception("managed-finalizer");}}
 class MutatingManaged {var owner,second,third;function MutatingManaged(w,s,t){owner=w;second=s;third=t;}function finalize(){owner.remove(second);owner.add(third);managedFinalized++;}}
 function bound(){return this.marker;}
+function deviceLifetimeStep(stage){
+ if(stage==0){finalized=0;makeWindow();global.deviceBefore=win.drawDevice;}
+ else if(stage==1)global.deviceNext=new Window.PassThroughDrawDevice();
+ else if(stage==2)win.drawDevice=deviceNext;
+ else if(stage==3)win.drawDevice=void;
+ else if(stage==4){global.deviceLast=new Window.PassThroughDrawDevice();win.drawDevice=deviceLast;}
+ else if(stage==5)delete global.win;
+ else if(stage==6){delete global.deviceBefore;delete global.deviceNext;delete global.deviceLast;}
+}
 `)
 
 /** Real Window/Session ownership, compiled scripts and native hooks in each browser. */
@@ -89,6 +98,12 @@ export async function exerciseWindowLifetime(
     retired: ReturnType<typeof state>
     result: string
   }[] = []
+  const drawDeviceOwnership: {
+    stage: string
+    observed: ReturnType<typeof state>
+    expected: { windowSources: number; weakOwners: number; result: string }
+    result: string
+  }[] = []
   let baseline: ReturnType<typeof state> | undefined,
     active = 'initialize'
   const restored = async () => {
@@ -133,8 +148,9 @@ export async function exerciseWindowLifetime(
     await execute('makeWindow();')
     const owned = state()
     check(
-      owned.windowSources === 1 && owned.weakOwners === baseline.weakOwners + 1,
-      'Window owner is not independently observed',
+      owned.windowSources === baseline.windowSources + 1 &&
+        owned.weakOwners === baseline.weakOwners + 2,
+      'Window and default draw device are not independently observed',
     )
     check(
       (await session.evaluate('win.__windowMenu===null')) === '1',
@@ -146,6 +162,60 @@ export async function exerciseWindowLifetime(
       (await session.evaluate('finalized')) === '1',
       'Implicit Window finalizer did not run once',
     )
+
+    active = 'draw-device-replacement'
+    // The step function is loaded with the rest of window-owned.tjs/cjs. Keep
+    // old script identities alive so invalidation cannot be confused with GC.
+    const deviceBaseline = baseline
+    const observeDevice = async (
+      stage: string,
+      windowDelta: number,
+      ownerDelta: number,
+      expression: string,
+      expectedResult: string,
+    ) => {
+      const result = await session.evaluate(expression)
+      await session.idle()
+      const observed = state(), expected = {
+        windowSources: deviceBaseline.windowSources + windowDelta,
+        weakOwners: deviceBaseline.weakOwners + ownerDelta,
+        result: expectedResult,
+      }
+      drawDeviceOwnership.push({ stage, observed, expected, result })
+      check(
+        observed.windowSources === expected.windowSources &&
+          observed.weakOwners === expected.weakOwners && result === expected.result,
+        'Draw device ownership mismatch at ' + stage,
+      )
+      return observed
+    }
+    await execute('deviceLifetimeStep(0);')
+    const deviceWindow = await session.evaluate('win.__windowId')
+    const deviceOwned = await observeDevice('default-created', 1, 2,
+      'win.__windowId+","+(isvalid win)+","+(isvalid deviceBefore)+","+int(win.drawDevice===deviceBefore)+","+int(deviceBefore.interface>0)+","+int(win.__windowMenu===null)',
+      deviceWindow + ',1,1,1,1,1')
+    await execute('deviceLifetimeStep(1);')
+    await observeDevice('unbound-created', 1, 3,
+      'win.__windowId+","+(isvalid deviceBefore)+","+(isvalid deviceNext)+","+int(win.drawDevice===deviceBefore)+","+int(deviceNext.interface!=deviceBefore.interface)',
+      deviceWindow + ',1,1,1,1')
+    await execute('deviceLifetimeStep(2);')
+    await observeDevice('default-invalidated-by-replacement', 1, 2,
+      'win.__windowId+","+(isvalid win)+","+(isvalid deviceBefore)+","+(isvalid deviceNext)+","+int(win.drawDevice===deviceNext)',
+      deviceWindow + ',1,0,1,1')
+    await execute('deviceLifetimeStep(3);')
+    await observeDevice('device-cleared-window-retained', 1, 1,
+      'win.__windowId+","+(isvalid win)+","+(isvalid deviceNext)+","+int(win.drawDevice===void)+","+win.caption',
+      deviceWindow + ',1,0,1,original')
+    await execute('deviceLifetimeStep(4);')
+    await observeDevice('new-device-attached', 1, 2,
+      'win.__windowId+","+(isvalid win)+","+(isvalid deviceLast)+","+int(win.drawDevice===deviceLast)+","+int(deviceLast.interface>0)',
+      deviceWindow + ',1,1,1,1')
+    await execute('deviceLifetimeStep(5);')
+    await observeDevice('window-released-devices-invalidated', 0, 0,
+      '(isvalid deviceBefore)+","+(isvalid deviceNext)+","+(isvalid deviceLast)+","+finalized',
+      '0,0,0,1')
+    await execute('deviceLifetimeStep(6);')
+    await record(deviceOwned, 'independent creation, replacement, detach and release')
 
     active = 'returned-window'
     await execute('finalized=0;')
@@ -368,12 +438,12 @@ export async function exerciseWindowLifetime(
       Object.values(stopped).every((value) => value === 0) && rendererCloses === 1,
       'Window stop retained native or host resources',
     )
-    return { variant, binary, baseline, cases, stopped, rendererCloses }
+    return { variant, binary, baseline, cases, drawDeviceOwnership, stopped, rendererCloses }
   } catch (error) {
     throw new Error(
       String(error) +
         '; window observations=' +
-        JSON.stringify({ variant, binary, active, baseline, cases, current: state(), logs }),
+        JSON.stringify({ variant, binary, active, baseline, cases, drawDeviceOwnership, current: state(), logs }),
     )
   } finally {
     closeGate?.release()

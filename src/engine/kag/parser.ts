@@ -192,6 +192,9 @@ export class KagParser {
     this.buffer = undefined
     yield* this.clearCallStack()
     yield* this.breakCondition()
+    // Pop only retires the active depth. Native Clear also releases every
+    // cached parameter dictionary, including slots above the active depth.
+    yield* this.effect('clearParams')
     return
   }
   interrupt(): void {
@@ -587,7 +590,9 @@ export class KagParser {
     this.tagLine = other.tagLine
     this.recording = other.recording && { ...other.recording }
     this.macroBase = other.macroBase
-    this.macroDepth = other.macroDepth
+    // Native assignment clears the destination pool before reading the
+    // source depth; self-assignment therefore has no active macro arguments.
+    this.macroDepth = other === this ? 0 : other.macroDepth
     this.calls = other.calls.map((frame) => ({ ...frame }))
     this.restoreConditions(other.conditions())
     this.debugLevel = other.debugLevel

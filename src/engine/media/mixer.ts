@@ -43,6 +43,8 @@ interface Voice {
   status: SoundSnapshot['status']
   clock: number
   fade?: Fade
+  /** Media is retired, but its inherited Wave controls survive the next open. */
+  unloaded?: boolean
   flags: number[]
   labelIndex: number
   linkDirty: boolean
@@ -287,11 +289,14 @@ export class AudioMixer {
           throw new Error('SLI link is outside the decoded audio')
       const filters = this.filters(id, asset, command.filters ?? [])
       const stream = asset.kind === 'stream' ? new StreamPcm(id, asset) : undefined
+      const previous = this.voices.get(id),
+        retained = previous?.kind === 'wave' && previous.unloaded ? previous : undefined
       const voice = this.create(
         id,
-        settings,
+        retained?.settings ?? settings,
         command.kind ?? (asset.kind === 'midi' ? 'midi' : 'wave'),
       )
+      if (retained) { voice.fade = retained.fade; voice.clock = retained.clock }
       voice.asset = stream ? stream.asset : asset
       voice.stream = stream
       voice.filters = filters
@@ -300,6 +305,23 @@ export class AudioMixer {
       voice.settings.position = 0
       voice.settings.paused = false
       if (asset.kind === 'midi') voice.synth = new MidiSynth(asset)
+    } else if (command.op === 'unload') {
+      const previous = this.voices.get(id)
+      if (previous && previous.kind !== 'wave') throw new Error('Only Wave media can retain its fade on unload')
+      if (!previous || (!previous.fade && !previous.unloaded)) {
+        this.voices.delete(id)
+        return { events: [] }
+      }
+      // Create a control-only replacement: no old PCM, stream pages, filter
+      // chain, synth, label cursor or loop state survives this boundary.
+      const voice = this.create(id, { ...previous.settings, frequency: 0, position: 0, paused: false }, 'wave')
+      // There is no replacement media yet. Keep its control-event identity
+      // while decoder cleanup awaits; source replies are independently fenced
+      // by streamId, and SoundService cancels events on actual status changes.
+      voice.epoch = previous.epoch
+      voice.clock = previous.clock
+      voice.fade = previous.fade
+      voice.unloaded = true
     } else if (command.op === 'close') {
       this.voices.delete(id)
       return { events: [] }
@@ -309,6 +331,7 @@ export class AudioMixer {
       if (command.op === 'play' && voice.asset && voice.status !== 'play') {
         if (voice.ended || settings.position >= voice.asset.sampleCount) this.seek(voice, 0)
         else this.resetFilters(voice)
+        voice.stream?.ready(Math.floor(settings.position), 2)
         voice.status = 'play'
         voice.epoch = this.nextEpoch++
       } else if (command.op === 'stop') {
@@ -345,6 +368,10 @@ export class AudioMixer {
             if (number < 0 || number > (voice.asset?.sampleCount ?? 0))
               throw new Error('Sound position is outside the stream')
             this.seek(voice, number)
+            // Request a public seek's destination before the next output
+            // block, including while paused/stopped. Internal SLI traversal
+            // keeps its own atomic range preflight instead of prefetching.
+            voice.stream?.ready(Math.floor(number), 2)
             voice.epoch = this.nextEpoch++
           } else if (property === 'frequency') {
             // WaveImpl forwards zero as DirectSound's DSBFREQUENCY_ORIGINAL.

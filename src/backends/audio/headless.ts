@@ -130,11 +130,11 @@ export class HeadlessAudioBackend implements AudioBackend {
       }
     }
     // A direct load/create also supersedes an older decoder for this id.
-    if (command.op === 'close' || command.op === 'load' || command.op === 'create') {
+    if (command.op === 'close' || command.op === 'unload' || command.op === 'load' || command.op === 'create') {
       this.operations.cancel(command.id)
       this.streams.cancelPreparing(command.id)
       const previous = this.streams.current(command.id)
-      let cleanup = command.op === 'close' ? this.streams.retire(command.id) : Promise.resolve()
+      let cleanup = command.op === 'close' || command.op === 'unload' ? this.streams.retire(command.id) : Promise.resolve()
       try {
         const result = this.mixer.command(command)
         if (command.op === 'load' && previous) cleanup = this.streams.discard(previous)

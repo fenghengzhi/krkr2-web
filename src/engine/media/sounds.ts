@@ -176,6 +176,13 @@ export class SoundService {
     sound.ready = true
     if (result.snapshot) sound.snapshot = result.snapshot
   }
+  private async unloadMedia(sound: Sound): Promise<SoundSnapshot | undefined> {
+    if (!sound.resourceRequested) return
+    const result = await this.voiceCommand(sound, { op: sound.kind === 'wave' ? 'unload' : 'close', id: sound.id })
+    // An unload result exists only for retained Wave controls; it owns no
+    // decoder or PCM. Its live volume can have advanced during async cleanup.
+    return result.snapshot
+  }
   private receive(event: AudioEvent): void {
     if (event.type === 'error') {
       this.error(new Error(event.message))
@@ -183,6 +190,7 @@ export class SoundService {
     }
     const sound = this.buffers.get(event.id)
     if (!sound || event.epoch !== sound.snapshot.epoch) return
+    const inheritedFade = sound.kind === 'wave' && event.type === 'fade'
     sound.snapshot = event.snapshot
     const version = sound.version,
       name =
@@ -208,7 +216,10 @@ export class SoundService {
     const valid = () =>
       this.buffers.get(sound.id) === sound &&
       sound.version === version &&
-      sound.snapshot.epoch === event.epoch
+      // Already admitted Wave fade callbacks belong to the SoundBuffer.
+      // Native status changes still revoke them through version; a stale
+      // transport event cannot enter here through a retired media epoch.
+      (inheritedFade || sound.snapshot.epoch === event.epoch)
     try {
       void this.dispatch(held, name, args, valid, sound)
         .finally(() => this.objects.release(held))
@@ -440,18 +451,17 @@ export class SoundService {
         keepStopped = sound.cdda?.drive === sound.preparedCdda.selection.drive
       }
       const previous = sound.snapshot.status
-      this.cancelEvents(sound)
-      if (sound.resourceRequested) await this.voiceCommand(sound, { op: 'close', id: sound.id })
+      const retained = await this.unloadMedia(sound)
       sound.filters?.release()
       sound.filters = undefined
-      sound.resourceRequested = false
-      sound.ready = false
+      sound.resourceRequested = !!retained
+      sound.ready = !!retained
       sound.cdda = undefined
       sound.labels = scriptRecord({})
       sound.snapshot = {
-        ...sound.snapshot,
+        ...(retained ?? sound.snapshot),
         status: keepStopped ? 'stop' : 'unload',
-        epoch: 0,
+        epoch: retained?.epoch ?? 0,
         position: 0,
         paused: false,
         frequency: 0,
@@ -460,9 +470,10 @@ export class SoundService {
         reportedSampleCount: undefined,
         channels: 0,
         bits: 0,
-        fading: false,
+        fading: retained?.fading ?? false,
         flags: Array(16).fill(0),
       }
+      if (sound.kind !== 'wave' || previous !== sound.snapshot.status) this.cancelEvents(sound)
       if (previous !== sound.snapshot.status) callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
     } else if (method === 'open' || method === 'openCdda') {
       let selected: CddaSelection | undefined
@@ -473,7 +484,7 @@ export class SoundService {
       }
       sound.preparedCdda = undefined
       sound.cdda = selected
-      this.cancelEvents(sound)
+      if (sound.kind !== 'wave') this.cancelEvents(sound)
       const name = selected?.cue ?? text(0),
         previous = sound.snapshot.status
       if (selected && !selected.parts) {
@@ -536,8 +547,9 @@ export class SoundService {
         // would let another sound connect while the old decoder is still live.
         if (this.buffers.get(sound.id) !== sound) throw error
         const cleanupErrors: unknown[] = []
+        let retained: SoundSnapshot | undefined
         try {
-          if (sound.resourceRequested) await this.voiceCommand(sound, { op: 'close', id: sound.id })
+          retained = await this.unloadMedia(sound)
         } catch (failure) {
           cleanupErrors.push(failure)
         }
@@ -555,8 +567,9 @@ export class SoundService {
           sound.filters?.release()
         } finally {
           sound.filters = undefined
-          sound.resourceRequested = false
-          sound.ready = false
+          sound.resourceRequested = !!retained
+          sound.ready = !!retained
+          if (retained) sound.snapshot = retained
         }
         if (sound.kind === 'wave' && error instanceof WaveFormatError)
           throw new TvpError('TVPUnknownWaveFormat', [name], error.message, { cause: error })
@@ -577,8 +590,10 @@ export class SoundService {
             ]),
         ),
       )
-      if (sound.snapshot.status !== previous)
+      if (sound.snapshot.status !== previous) {
+        if (sound.kind === 'wave') this.cancelEvents(sound)
         callbacks.push({ name: 'onStatusChanged', args: [sound.snapshot.status] })
+      }
     } else if (method === 'play' || method === 'stop') {
       if (method === 'play' && sound.cdda && !sound.cdda.parts)
         throw new Error(`Imported CDDA track ${sound.cdda.track} is absent or is a data track`)

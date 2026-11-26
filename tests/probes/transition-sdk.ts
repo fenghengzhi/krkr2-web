@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { transitionOptionCases, transitionOptionFiles, transitionOptionsSource } from '../helpers/transition-options.ts'
 import { layerGammaCases, layerGammaExpected, layerGammaSource } from '../helpers/layer-gamma.ts'
+import { layerOrderCases, layerOrderSource } from '../helpers/layer-order.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -11,7 +12,7 @@ assert.equal(process.env.RUNNER_OS, 'Windows')
 const output = resolve('out/verification/native-eri/transition'), game = resolve(output, 'game')
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const files = transitionOptionFiles()
-const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) }))]
+const cases = [...transitionOptionCases, ...layerGammaCases.map((row) => ({ id: row.id, expected: layerGammaExpected(row) })), ...layerOrderCases]
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 
 if (process.argv[2] === 'prepare') {
@@ -26,16 +27,20 @@ if (process.argv[2] === 'prepare') {
     'transitionOptionClose();',
     layerGammaSource,
     ...layerGammaCases.map(({ id }) => `record("${id}|"+layerGammaRun("${id}"));`),
-    'layerGammaClose();record("done");System.exit();',
+    'layerGammaClose();',
+    layerOrderSource,
+    ...layerOrderCases.map(({ id }) => `try{record("${id}|"+layerOrderRun("${id}"));}catch(e){record("${id}|error:"+e.message);}`),
+    'layerOrderClose();record("done");System.exit();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
   save('inputs.json', {
     commit: process.env.GITHUB_SHA, startupSha256: sha(startup),
     helperSha256: sha(readFileSync('tests/helpers/transition-options.ts')),
     gammaHelperSha256: sha(readFileSync('tests/helpers/layer-gamma.ts')),
+    orderHelperSha256: sha(readFileSync('tests/helpers/layer-order.ts')),
     cases,
     files: Object.entries(files).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) })),
-    scope: 'Original beginTransition option controls followed by independent live Layer gamma contrast/clip/alpha/province observations. No timing/render equivalence, no no-image/self-source/null-pointer cases.',
+    scope: 'Original beginTransition options, Layer gamma contrast, and overlapping layer order and hit targets.',
   })
 } else if (process.argv[2] === 'compare') {
   mkdirSync(output, { recursive: true })
@@ -52,13 +57,12 @@ if (process.argv[2] === 'prepare') {
   const expectedFiles = Object.entries(files).map(([name, bytes]) => ({ name, bytes: bytes.length, sha256: sha(bytes) }))
   if (JSON.stringify(manifest?.files) !== JSON.stringify(expectedFiles)) evidenceErrors.push('Fixture hash manifest differs')
   for (const [name, expected] of [
-    ['startup.tjs', manifest?.startupSha256],
-    ['../helper', manifest?.helperSha256],
-    ['../gamma-helper', manifest?.gammaHelperSha256],
+    [resolve(game, 'startup.tjs'), manifest?.startupSha256],
+    [resolve('tests/helpers/transition-options.ts'), manifest?.helperSha256],
+    [resolve('tests/helpers/layer-gamma.ts'), manifest?.gammaHelperSha256],
+    [resolve('tests/helpers/layer-order.ts'), manifest?.orderHelperSha256],
   ] as const) {
-    const path = name === '../helper' ? resolve('tests/helpers/transition-options.ts')
-      : name === '../gamma-helper' ? resolve('tests/helpers/layer-gamma.ts') : resolve(game, name)
-    if (!existsSync(path) || sha(readFileSync(path)) !== expected) evidenceErrors.push(`${name}: source hash differs or is missing`)
+    if (!existsSync(name) || sha(readFileSync(name)) !== expected) evidenceErrors.push(`${name}: source hash differs or is missing`)
   }
   for (const [name, bytes] of Object.entries(files)) {
     const path = resolve(game, name)
@@ -80,11 +84,13 @@ if (process.argv[2] === 'prepare') {
     transitionOptions: { planned: transitionOptionCases.length,
       matched: results.slice(0, transitionOptionCases.length).filter((row) => row.matched).length },
     gamma: { planned: layerGammaCases.length,
-      matched: results.slice(transitionOptionCases.length).filter((row) => row.matched).length },
+      matched: results.slice(transitionOptionCases.length, transitionOptionCases.length + layerGammaCases.length).filter((row) => row.matched).length },
+    layerOrder: { planned: layerOrderCases.length,
+      matched: results.slice(-layerOrderCases.length).filter((row) => row.matched).length },
     complete, sequenceMatches, evidenceErrors, sdkState: sdk?.state ?? 'unreported',
     sdkExitCode: sdk?.exitCode ?? null, sdkTimedOut: sdk?.timedOut ?? null, results, lines,
     observationSha256: sha(raw),
-    scope: 'Independent original SDK option-read/error and Layer gamma observations, separately counted. Actual source/bytecode Session and browser consumers are separate required evidence.',
+    scope: 'Stock SDK option-read/error, gamma, sibling order and hit targets. Web source, bytecode and rendered game results are recorded by their respective jobs.',
   })
   assert(complete, 'Original transition option observations differ or are incomplete')
 } else throw new Error('Expected prepare or compare')

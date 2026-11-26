@@ -215,7 +215,12 @@ class Layer {
       __host("Layer.update",__id,int(args[0]),int(args[1]),int(args[2]),int(args[3]));
     }
   }
-  function getLayerAt(x,y,excludeSelf=false,getDisabled=false) { return __host("Input.hit",__id,int(x),int(y),int(excludeSelf),int(getDisabled)); }
+  function getLayerAt(args*) {
+    var id=global.__host("Layer.identity",this);
+    if(args.count<2)return global.__host("Input.hit",id);
+    var excludeSelf=!!args[2],getDisabled=!!args[3];
+    return global.__host("Input.hit",id,int(args[0]),int(args[1]),excludeSelf,getDisabled);
+  }
   ${['Main', 'Mask', 'Province']
     .map(
       (plane) => `function get${plane}Pixel(args*){

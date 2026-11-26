@@ -42,6 +42,7 @@ export class LifetimeAudioBackend implements AudioBackend {
   failOpen?: Error
   failClose?: Error
   private epoch = 0
+  private retainedControls = new Set<number>()
 
   listen(callback: (event: AudioEvent) => void) {
     this.listeners.add(callback)
@@ -73,13 +74,15 @@ export class LifetimeAudioBackend implements AudioBackend {
     this.commands.push('id' in command ? { op: command.op, id: command.id } : { op: command.op })
     if (command.op === 'open' || command.op === 'create') {
       const opened = command.op === 'open'
+      const previous = opened && this.retainedControls.has(command.id) ? this.voices.get(command.id) : undefined
       const snapshot: SoundSnapshot = {
         ...defaultSoundSettings(),
         ...command.settings,
+        ...(previous ? { volume: previous.volume, volume2: previous.volume2, pan: previous.pan, looping: previous.looping } : {}),
         id: command.id,
         epoch: ++this.epoch,
         status: opened ? 'stop' : 'unload',
-        fading: false,
+        fading: previous?.fading ?? false,
         flags: Array(16).fill(0),
         sampleRate: opened ? 1000 : 0,
         sampleCount: opened ? 100 : 0,
@@ -88,6 +91,7 @@ export class LifetimeAudioBackend implements AudioBackend {
       }
       // The resource exists before open settles, including when open rejects.
       this.voices.set(command.id, snapshot)
+      this.retainedControls.delete(command.id)
       if (opened) {
         const gate = this.nextOpen
         this.nextOpen = undefined
@@ -98,21 +102,29 @@ export class LifetimeAudioBackend implements AudioBackend {
       }
       return { snapshot: this.copy(snapshot), events: [] }
     }
-    if (command.op === 'close') {
+    if (command.op === 'close' || command.op === 'unload') {
       const gate = this.nextClose
       this.nextClose = undefined
       await gate?.wait()
-      this.voices.delete(command.id)
+      const previous = this.voices.get(command.id), keep = command.op === 'unload' &&
+        !!previous && (previous.fading || this.retainedControls.has(command.id))
+      if (keep) {
+        this.retainedControls.add(command.id)
+        Object.assign(previous, { status: 'unload', position: 0,
+          sampleRate: 0, sampleCount: 0, frequency: 0, channels: 0, bits: 0, paused: false, flags: Array(16).fill(0) })
+      } else { this.voices.delete(command.id); this.retainedControls.delete(command.id) }
       this.closedIds.push(command.id)
       const error = this.failClose
       this.failClose = undefined
       if (error) throw error
-      return { events: [] }
+      return { ...(keep ? { snapshot: this.copy(previous!) } : {}), events: [] }
     }
     if (!('id' in command)) return { events: [] }
     const snapshot = this.voices.get(command.id)
     assert(snapshot, `${command.op} accessed a closed or unknown voice`)
-    if (command.op === 'play' || command.op === 'stop') snapshot.status = command.op
+    if (command.op === 'play' || command.op === 'stop') {
+      if (snapshot.sampleCount) snapshot.status = command.op
+    }
     else if (command.op === 'fade') snapshot.fading = true
     else if (command.op === 'stopFade') snapshot.fading = false
     else if (command.op === 'flag') snapshot.flags[command.index] = command.value
@@ -124,6 +136,7 @@ export class LifetimeAudioBackend implements AudioBackend {
   async close(): Promise<void> {
     this.terminalCloses++
     this.voices.clear()
+    this.retainedControls.clear()
     this.listeners.clear()
   }
 }

@@ -18,6 +18,7 @@ import {
 } from '../script/runtime.ts'
 import { InputControllers } from './controllers.ts'
 import type { InputPacket } from '../ports/input.ts'
+import { TjsError } from '../system/tjs-error.ts'
 export class InputService {
   private next = 1
   private operations = new Map<
@@ -273,11 +274,17 @@ export class InputService {
       controller.chooseHit(id, !!number(1))
       return reply(undefined)
     }
-    if (name === 'Input.hit')
+    if (name === 'Input.hit') {
+      if (args.length < 3) throw new TjsError('TJSBadParamCount')
+      const coordinate = (i: number) => {
+        const value = args[i]
+        return typeof value === 'bigint' ? Number(BigInt.asIntN(32, value)) : number(i) | 0
+      }
       return this.startInput(
-        controller.getLayerAt(id, number(1), number(2), !!number(3), !!number(4)),
+        controller.getLayerAt(id, coordinate(1), coordinate(2), !!number(3), !!number(4)),
         controller,
       )
+    }
     if (name === 'Input.mode')
       return this.startInput(
         number(1) ? controller.setMode(id) : controller.removeMode(id),

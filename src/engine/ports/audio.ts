@@ -115,6 +115,8 @@ export type MixerCommand =
       filters?: readonly PhaseVocoderFilter[]
     }
   | { op: 'filters'; id: number; filters: readonly PhaseVocoderFilter[] }
+  /** Wave Clear retires media while its inherited fade timer remains alive. */
+  | { op: 'unload'; id: number }
   | { op: 'play' | 'stop' | 'close' | 'inspect'; id: number }
   | { op: 'set'; id: number; property: keyof SoundSettings; value: number | boolean }
   | { op: 'flag'; id: number; index: number; value: number }

@@ -96,14 +96,14 @@ export class PortAudioBackend implements AudioBackend {
       return { events: [] }
     }
     if (command.op === 'openSource') return this.openSource(command)
-    if (command.op === 'close' || command.op === 'create' || command.op === 'load') {
-      if (command.op === 'close') {
+    if (command.op === 'close' || command.op === 'unload' || command.op === 'create' || command.op === 'load') {
+      if (command.op === 'close' || command.op === 'unload') {
         const publication = this.publishing.get(command.id)
         if (publication) publication.closeEpoch++
       }
       this.operations.cancel(command.id)
       this.streams.cancelPreparing(command.id)
-      if (command.op === 'close') {
+      if (command.op === 'close' || command.op === 'unload') {
         const results = await Promise.allSettled([this.send(command), this.streams.retire(command.id)])
         const failures = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
         if (failures.length) throw new AggregateError(failures, 'Audio command or stream cleanup failed')

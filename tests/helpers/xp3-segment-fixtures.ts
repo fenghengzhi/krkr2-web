@@ -73,8 +73,7 @@ class Xp3CompressedSound extends WaveSoundBuffer {
  function onLabel(name){Debug.message("xp3-compressed-label:"+global.xp3AudioPhase+":"+name);}
 }
 function xp3CompressedText(prefix=""){
- var stream=Storages.createTextStreamForRead(prefix+"segment-text.txt");
- var text=stream.read();invalidate stream;return text;
+ var lines=[];lines.load(prefix+"segment-text.txt");return lines.join("\n");
 }
 function xp3CompressedOpen(prefix=""){
  global.xp3Audio=new Xp3CompressedSound();

@@ -230,13 +230,15 @@ export class LayerTree {
         imeMode: 0,
       }
     this.layers.set(id, layer)
-    if (parent) {
-      const owner = this.get(parent)
-      owner.children.push(id)
-      owner.childrenRevision++
-      layer.absolute = owner.children.length - 1
-    }
+    if (parent) this.addChild(this.get(parent), layer)
     return id
+  }
+  private addChild(parent: LayerState, layer: LayerState): void {
+    const last = parent.children.at(-1)
+    if (parent.absoluteOrderMode && last !== undefined)
+      layer.absolute = (this.get(last).absolute + 1) | 0
+    parent.children.push(layer.id)
+    parent.childrenRevision++
   }
   get(id: number): LayerState {
     const layer = this.layers.get(id)
@@ -595,31 +597,30 @@ export class LayerTree {
       this.get(layer.parent).childrenRevision++
     }
     layer.parent = parent
-    if (parent) {
-      const owner = this.get(parent)
-      owner.children.push(id)
-      owner.childrenRevision++
-      layer.absolute = owner.children.length - 1
-    }
+    if (parent) this.addChild(this.get(parent), layer)
   }
   order(id: number, index: number, absolute = false): void {
     const layer = this.get(id)
     if (!layer.parent) throw new TvpError('TVPCannotMovePrimaryOrSiblingless', [], 'This layer has no siblings')
     const parent = this.get(layer.parent)
-    const previous = [...parent.children]
     this.set(parent.id, 'absoluteOrderMode', Number(absolute))
-    const children = parent.children
-    children.splice(children.indexOf(id), 1)
+    const children = parent.children, from = children.indexOf(id)
+    let to = Math.max(0, Math.min(children.length - 1, index))
     if (absolute) {
+      const first = children.findIndex((child) => this.get(child).absolute >= index)
+      to = first < 0 ? children.length : first
+      if (from < to) to--
       layer.absolute = index
-      const at = children.findIndex((id) => this.get(id).absolute >= index)
-      children.splice(at < 0 ? children.length : at, 0, id)
-    } else children.splice(Math.max(0, Math.min(children.length, index)), 0, id)
-    if (children.some((child, at) => child !== previous[at])) parent.childrenRevision++
+    }
+    if (from === to) return
+    children.splice(from, 1)
+    children.splice(to, 0, id)
+    parent.childrenRevision++
   }
   move(id: number, other: number, before: boolean): void {
     const layer = this.get(id),
       sibling = this.get(other)
+    if (layer.parent) this.set(layer.parent, 'absoluteOrderMode', 0)
     if (!layer.parent || this.get(layer.parent).children.length <= 1)
       throw new TvpError('TVPCannotMovePrimaryOrSiblingless', [], 'This layer has no siblings')
     if (id === other || layer.parent !== sibling.parent)
@@ -997,7 +998,7 @@ export class LayerTree {
   *hitCandidates(
     x: number,
     y: number,
-    root?: number,
+    origin?: number,
     excludeSelf = false,
   ): Generator<{ id: number; x: number; y: number }> {
     const tree = this
@@ -1015,7 +1016,7 @@ export class LayerTree {
         if (item.parent === id) yield* visit(child, x - item.left, y - item.top)
       }
       if (!tree.has(id)) return
-      if (excludeSelf && id === root) return
+      if (excludeSelf && id === origin) return
       const ix = Math.floor(x - layer.imageLeft),
         iy = Math.floor(y - layer.imageTop),
         bitmap = layer.bitmap
@@ -1028,10 +1029,23 @@ export class LayerTree {
             : layer.hitThreshold <= 0
       if (hit) yield { id, x, y }
     }
-    if (root) yield* visit(root, x, y)
-    else
-      for (const layer of [...this.layers.values()].reverse())
-        if (layer.primary) yield* visit(layer.id, x, y)
+    if (origin !== undefined) {
+      let layer = this.get(origin)
+      while (layer.parent) {
+        x = (x + layer.left) | 0
+        y = (y + layer.top) | 0
+        layer = this.get(layer.parent)
+      }
+      // A detached layer retains its manager. As in GetMostFrontChildAt,
+      // its local coordinates still address that manager's current primary.
+      const primary = layer.primary ? layer : [...this.layers.values()].find(
+        (candidate) => candidate.primary && candidate.managerId === layer.managerId,
+      )
+      if (primary) yield* visit(primary.id, x, y)
+      return
+    }
+    for (const layer of [...this.layers.values()].reverse())
+      if (layer.primary) yield* visit(layer.id, x, y)
   }
   hitTest(
     x: number,
