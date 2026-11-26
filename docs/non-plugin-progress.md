@@ -2,7 +2,7 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
-第 135 批让多个图层共享同一张游戏背景与点击区域，修复 KAG 宏转发 TJS 对象和 Wave 平滑循环的混音比例。131 完整常规浏览器结果为 3,140 项通过、65 项失败、2 项跳过。132 已取得全部 4,036 项 Node 结果及原版书签、图片和声音的对照，133 两版和 134 在取回时仍排队。[135 实现与验收](decisions/135-shared-game-layers-macro-values-and-wave-loops.md)
+第 135 批让多个图层共享同一张游戏背景与点击区域，修复 KAG 宏转发 TJS 对象和 Wave 平滑循环的混音比例。131 完整常规浏览器结果为 3,140 项通过、65 项失败、2 项跳过。132 已取得全部 4,036 项 Node 结果及原版书签、图片和声音的对照，133 两版和 134 在取回时仍排队。135 实现提交 `aba8404` 的托管运行首次登记为 `pending`。[135 实现与验收](decisions/135-shared-game-layers-macro-values-and-wave-loops.md) · [第 135 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45763956289)
 
 第 134 批接入 ZIP 发行包自动识别、压缩大音乐的范围读取和游戏库恢复，校准 MIDI 音量与淡出，并修订游戏路线的只读观察、KAG 图层保存调用和截图像素验收。新增 11 个 Node 用例、每浏览器 8 个常规用例及 4 个游戏库用例，实现提交 `82a8aa0` 的托管验证首次登记为 `pending`。[134 实现与验收](decisions/134-zip-distributions-midi-and-game-playback.md) · [第 134 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45761489263)
 

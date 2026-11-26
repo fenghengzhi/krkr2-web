@@ -22,4 +22,4 @@ Web 的渲染、截图和命中测试直接读取共享图像。绘图或加载�
 
 第 132 批取回时仍在运行。Node 已报告全部 4,036 项，其中 4,023 项通过、11 项失败、2 项因超时取消。原版有损 ERI 对照 15/15 匹配，KAG 解析器 57/57、跨引擎书签比较 116/116。声音对照在 Wine 上完成 40/40，Windows 上完成 37/40，另三项报告没有声音驱动。原版十进制数值的 Web 比较仍只有 6/18 匹配。第 133 批的两个提交和第 134 批在这次取回时均在排队。[132 托管运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45757288264) · [133 首版](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759125623) · [133 最终版](https://github.com/fenghengzhi/krkr2-web/actions/runs/45759226490) · [134 托管运行](https://github.com/fenghengzhi/krkr2-web/actions/runs/45761489263)
 
-本批新增 20 个 Node 用例，每个常规浏览器项目新增 12 个用例。Windows SDK 图层组增至 60 个场景，KAG 解析器组增至 69 个场景。Node 托管作业也会使用固定原版 C++ 混音函数逐采样校验 16 位 PCM，并将比较数据随作业归档。会话协议为 48，以传递音频源的 PCM 格式。已列出的历史产物共 92 份，均已按大小和 SHA-256 核验。本批新行为等待 GitHub 托管运行，下一批集中取回结果。
+本批新增 20 个 Node 用例，每个常规浏览器项目新增 12 个用例。Windows SDK 图层组增至 60 个场景，KAG 解析器组增至 69 个场景。Node 托管作业也会使用固定原版 C++ 混音函数逐采样校验 16 位 PCM，并将比较数据随作业归档。会话协议为 48，以传递音频源的 PCM 格式。已列出的历史产物共 92 份，均已按大小和 SHA-256 核验。本批实现提交 `aba8404c2b15cb5a4fd08cd196d86a1236ea4fb6` 的托管运行首次登记为 `pending`，尚无执行结论。下一批集中取回结果。[第 135 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45763956289)
