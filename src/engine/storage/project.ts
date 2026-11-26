@@ -50,18 +50,21 @@ export function copyProjectSelection(value?: ProjectSelection): ProjectSelection
 
 /** Use the actual imported spelling. Only loose launchers participate; an
  * installer or utility next to the game makes automatic inference ambiguous. */
-export function findProjectExecutable(resources: readonly Resource[], project: GameProject, selected = project.executable): string | undefined {
+export function projectExecutableResource(resources: readonly Resource[], project: GameProject, selected = project.executable): Resource | undefined {
   const candidates = resources.filter(({ name, aliasOf }) => !aliasOf && !name.includes('>') && /\.exe$/i.test(name))
   if (selected !== undefined) {
     const path = parseStoragePath(selected), exact = candidates.find((entry) => entry.name === path)
-    if (exact) return exact.name
+    if (exact) return exact
     const matches = candidates.filter((entry) => entry.name.toLowerCase() === path.toLowerCase())
     if (matches.length > 1) throw new Error('Ambiguous executable: ' + path)
-    return matches[0]?.name
+    return matches[0]
   }
   const local = candidates.filter((entry) => extractStoragePath(entry.name).toLowerCase() === project.executableDirectory.toLowerCase())
-  if (local.length === 1) return local[0]!.name
-  return local.find((entry) => project.directory.startsWith(entry.name + '>') && !/(?:^|\/)data\.exe$/i.test(entry.name))?.name
+  if (local.length === 1) return local[0]
+  return local.find((entry) => project.directory.startsWith(entry.name + '>') && !/(?:^|\/)data\.exe$/i.test(entry.name))
+}
+export function findProjectExecutable(resources: readonly Resource[], project: GameProject, selected = project.executable): string | undefined {
+  return projectExecutableResource(resources, project, selected)?.name
 }
 
 /** Decide only from actual imported files/indices. Never execute an EXE or

@@ -68,3 +68,17 @@ test('optional configuration read errors are reported, cancellation and ambiguou
   await assert.rejects(readProjectConfig(project, [files[0]!, file('Game/STORY.cf'), file('Game/Story.CF')],
     new Map(), reader), /Ambiguous engine configuration/)
 })
+
+test('a legacy whole-file-only launcher still honors external and user settings without reading the large image', async () => {
+  const warnings: string[] = []
+  const launcher: Resource = { name: 'Game/Story.exe', size: 96 * 1024 * 1024,
+    read: async () => { throw new Error('Unexpected whole executable read') } }
+  const result = await readProjectConfig(project, [launcher,
+    ascii('Game/Story.cf', 'datapath=$(exepath)/Profiles\r\nroute=default'),
+    ascii('Game/Profiles/Story.cfu', 'route=user'),
+  ], new Map(), { ...reader, warn: (message) => warnings.push(message) })
+  assert.equal(result?.dataDirectory, 'Game/Profiles/')
+  assert.equal(result?.arguments.get('-route'), 'user')
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0]!, /Game\/Story\.exe.*range/)
+})

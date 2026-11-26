@@ -1,6 +1,6 @@
 import type { ArchiveReader, Resource } from '../ports/storage.ts'
 import { copyGameProject, copyProjectSelection, findProjectExecutable, selectProjectLazy, type GameProject, type ProjectSelection } from './project.ts'
-import { extractStoragePath, parseStoragePath, toPublicStoragePath } from './public-path.ts'
+import { extractStorageName, extractStoragePath, parseStoragePath, toPublicStoragePath } from './public-path.ts'
 
 // An outer ZIP can be the directory tree a player would normally unpack.
 // Only the real game archive below that directory uses KRKR's '>' delimiter.
@@ -30,11 +30,21 @@ async function selectInside(entries: readonly Resource[], selection: ProjectLoca
   checkpoint: () => Promise<void>): Promise<ProjectLocation | undefined> {
   if (selection.mode === 'root') return selection
   const executables = entries.filter((file) => /\.exe$/i.test(file.name))
-  const selectedExe = selection.executable && parseStoragePath(selection.executable)
+  let selectedExe = selection.executable && parseStoragePath(selection.executable)
+  if (!selection.executableDirectory && selectedExe && !selectedExe.includes('/')) {
+    const folded = selectedExe.toLowerCase()
+    // A ZIP often wraps the whole release in a top-level directory. Resolve
+    // a supplied filename there when it identifies exactly one launcher.
+    if (!executables.some((file) => file.name.toLowerCase() === folded)) {
+      const named = executables.filter((file) => extractStorageName(file.name).toLowerCase() === folded)
+      if (named.length > 1) throw new Error('ZIP 中有多个同名程序，请填写程序所在目录。')
+      if (named.length) selectedExe = named[0]!.name
+    }
+  }
   let folder = selection.executableDirectory || (selectedExe ? extractStoragePath(selectedExe) : await gameFolder(entries, checkpoint))
   if (folder === undefined && executables.length === 1) folder = extractStoragePath(executables[0]!.name)
   if (folder === undefined) return
-  return { mode: 'auto', executableDirectory: folder, executable: selection.executable }
+  return { mode: 'auto', executableDirectory: folder, executable: selectedExe && toPublicStoragePath(selectedExe) }
 }
 
 export async function prepareProject(resources: Resource[], requested: ProjectSelection, reader: ArchiveReader,

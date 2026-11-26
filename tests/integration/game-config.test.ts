@@ -3,6 +3,7 @@ import test from 'node:test'
 import { createHeadlessRuntime, headless } from '../helpers/headless.ts'
 import { createHeadlessImageJpegProvider } from '../helpers/image-jpeg.ts'
 import { jpegContractFiles } from '../helpers/jpeg-contract.ts'
+import { embedXp3, xp3Fixture } from '../helpers/xp3-fixtures.ts'
 import { MemorySaveStore } from '../../src/engine/ports/saves.ts'
 
 const project = { directory: 'Story/Data/', executableDirectory: 'Story/' }
@@ -54,5 +55,32 @@ for (const binary of [false, true]) for (const hostOverride of [false, true]) {
     try { await session.stop() } catch (error) { failures.push(error) }
     if (failures.length === 1) throw failures[0]
     if (failures.length) throw new AggregateError(failures, 'Game configuration or cleanup failed', { cause: failures[0] })
+  })
+}
+
+for (const binary of [false, true]) {
+  test(`${binary ? 'bytecode' : 'source'}: a combined launcher reads its embedded defaults and runs the game packed in the same file`, async (t) => {
+    const chapter = `
+var chapterWindow=new Window();chapterWindow.caption="Bonus chapter";chapterWindow.visible=true;
+var chapter=[System.getArgument("-route"),System.getArgument("-edition"),System.exeName,
+ Storages.getPlacedPath("chapter.tjs"),System.dataPath].join("|");
+[chapter].save(System.dataPath+"chapter.txt","utf-8");`
+    const archive = xp3Fixture({
+      'startup.tjs': binary
+        ? 'Scripts.compileStorage("chapter.tjs",System.dataPath+"chapter.cjs",false,true,false);Scripts.execStorage(System.dataPath+"chapter.cjs");'
+        : 'Scripts.execStorage("chapter.tjs");',
+      'chapter.tjs': chapter, 'Story.cf': 'route=wrong-archive-file',
+    }, { compressed: true })
+    const image = embedXp3(archive.bytes, 768 * 1024), at = 512 * 1024 + 16
+    image.write('XOPT_EMBED_AREA_', at, 'ascii'); image.writeUInt32LE(256, at + 16)
+    image.write('datapath=$(exepath)/Profiles\r\nroute=starter\r\nedition=complete\r\n', at + 20, 'ascii')
+    const { session } = await headless({
+      'Release/Story.exe': image, 'Release/Profiles/Story.cfu': 'route=bonus\r\ndatapath=Other',
+    }, { project: { directory: 'Release/Story.exe>', executableDirectory: 'Release/' } })
+    t.after(() => session.stop())
+    await session.start()
+    const expected = 'bonus|complete|game://./Release/Story.exe|game://./Release/Story.exe>chapter.tjs|game://./Release/Profiles/'
+    assert.equal(await session.evaluate('chapter'), expected)
+    assert.equal(new TextDecoder().decode(session.exportSaves().find((file) => file.path === 'Release/Profiles/chapter.txt')!.bytes).trimEnd(), expected)
   })
 }

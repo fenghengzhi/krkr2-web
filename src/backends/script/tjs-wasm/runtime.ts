@@ -980,6 +980,13 @@ export class TjsWasmRuntime implements ScriptRuntime {
     this.consoleOutput = handler
     this.call('krkr_set_console', this.vm, Number(!!handler))
   }
+  setScriptOperators(globalEval: boolean, compatAsterisk: boolean): void {
+    this.assertAlive()
+    if (this.busy) throw new Error('Cannot change operator settings while TJS is running')
+    if (typeof this.module._krkr_set_script_operators !== 'function')
+      throw new Error('TJS WASM is missing game script operator settings')
+    this.call('krkr_set_script_operators', Number(globalEval), Number(compatAsterisk))
+  }
   async invoke(
     callback: ScriptObject,
     args: ScriptValue[] = [],

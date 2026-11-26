@@ -1812,12 +1812,21 @@ extern "C" void krkr_compiler_checkpoint() {
     deadline = emscripten_get_now() + 8;
 }
 
+// Each module owns one VM. The Web platform classes are compiled with their
+// native-binding syntax before the selected game's compiler options take over.
+API void krkr_set_script_operators(int globalEval, int compatAsterisk) {
+    TJSEvalOperatorIsOnGlobal = globalEval != 0;
+    TJSWarnOnNonGlobalEvalOperator = globalEval != 0;
+    TJSUnaryAsteriskIgnoresPropAccess = compatAsterisk != 0;
+}
+
 API Vm* krkr_create(int debugMode) {
     auto vm = std::make_unique<Vm>();
     // Each module owns exactly one VM. Set immutable creation options before
     // tTJS acquires its balanced debug object map and stack tracer references.
     TJSEnableDebugMode = debugMode != 0;
     TJSWarnOnExecutionOnDeletingObject = TJSEnableDebugMode;
+    krkr_set_script_operators(0, 0);
     vm->engine = new tTJS();
     krkr::initializeTvpMessages();
     TJSGetRandomBits128 = fillRandomBits128;

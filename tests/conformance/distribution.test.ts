@@ -45,6 +45,22 @@ test('distribution discovery preserves native startup priority, independent choi
   } finally { reader.dispose() }
 })
 
+test('a named ZIP launcher resolves beside its game, and duplicate filenames require the program directory', async () => {
+  const reader = createSessionArchiveReader()
+  const launch = { mode: 'auto' as const, executable: 'story.exe' }
+  const inputs = [member('Release/Story.EXE', 'launcher'), member('Release/Setup.exe', 'installer'), member('Release/data.xp3', 'game')]
+  try {
+    const zip = packed(distributionZip(inputs))
+    const selected = (await prepareProject([zip], launch, reader, checkpoint)).project!
+    assert.equal(selected.directory, 'Release/data.xp3>')
+    assert.equal(selected.executable, 'game://./Release/Story.EXE')
+    const ambiguous = packed(distributionZip([...inputs, member('Extras/Story.exe', 'demo')]))
+    await assert.rejects(prepareProject([ambiguous], launch, reader, checkpoint), /程序所在目录/)
+    const explicit = (await prepareProject([ambiguous], { ...launch, executableDirectory: 'Release/' }, reader, checkpoint)).project!
+    assert.equal(explicit.executable, selected.executable)
+  } finally { reader.dispose() }
+})
+
 test('ZIP method 8 checks every byte before exposing a requested prefix and supports independent caller ranges', async () => {
   const reader = createSessionArchiveReader()
   try {

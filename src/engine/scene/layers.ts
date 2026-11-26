@@ -76,6 +76,7 @@ const MAX_BYTES = 64 * 1024 * 1024
 const noImageTypes = new Set([0, 6, 7])
 export class LayerTree {
   private initialImage?: Bitmap
+  defaultHoldAlpha = false
   constructor(private readonly systemColors = new SystemColors()) {}
   has(id: number): boolean {
     return this.layers.has(id)
@@ -203,7 +204,7 @@ export class LayerTree {
         // shared transparent-white default image. It does not refill it.
         neutralColor: parent ? neutralColor(2) : 0xffffffff,
         face: 128,
-        holdAlpha: false,
+        holdAlpha: this.defaultHoldAlpha,
         imageModified: true,
         absoluteOrderMode: false,
         absolute: 0,

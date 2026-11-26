@@ -2,6 +2,8 @@
 
 整体目标：完成 KRKR2 Web 模拟器，先实现插件以外的功能，让游戏从资源加载、TJS／KAG 执行、画面与输入、音视频到存档和退出贯通运行。补齐接口之外，还要核对原版行为、处理失败与资源生命周期，并通过 GitHub-hosted Actions 的批量验证和真实游戏验收。当前目标未完成；各批次是这个目标的子任务，未报告、失败或取消的验证不能计为通过。
 
+第 139 批读取游戏内嵌选项，使存档目录、图层遮罩和旧 TJS 运算符按游戏配置生效。第 133 批首版的 KAG 缩略图存读档已在 12 个组合通过，其常规浏览器分片仍有失败。[139 范围与验收](decisions/139-embedded-game-options-and-script-modes.md)
+
 第 138 批接入游戏自带的 `.cf`、用户存档目录下的 `.cfu` 和多个 EXE 时的程序选择。已取回第 133 批首版 WebKit 游戏库的 19 项通过结果，136 和 137 当时仍在排队。138 实现提交 `4a423e7` 的托管验证首次登记为 `pending`。[138 配置与验收](decisions/138-game-startup-configuration.md) · [第 138 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45768308104)
 
 第 137 批修正菜单和截图中无主图图层的淡化、KAG 解析开关的取值，以及影片打开参数错误时的播放状态。132 最终常规浏览器结果为 3,160 项通过、81 项失败、2 项跳过。133 首版仍有 4 项 Node 图层断言失败，WebKit 的原 KAG 模板打开历史记录时超时。137 提交 `a969378` 的验证首次登记为 `pending`。[137 实现与验收](decisions/137-layer-groups-parser-flags-and-movie-open.md) · [第 137 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45766826621)

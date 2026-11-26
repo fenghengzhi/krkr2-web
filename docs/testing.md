@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 139 批在同一文件内测试 EXE 普通配置和追加的游戏 XP3，把字节码在相反配置的两个会话间转移，并用原版 Windows 与浏览器对照真实 TJS 求值、属性和像素行为。[139 范围与验收](decisions/139-embedded-game-options-and-script-modes.md)
+
 第 138 批用原版 Windows、源码与字节码会话和实际浏览器检查启动配置。验收读取真实 JPEG 解码器收到的精度参数、存档里的槽位内容，以及游戏库重启后用户设置选中的路线。[138 配置与验收](decisions/138-game-startup-configuration.md)
 
 第 137 批把透明子树的原始遮罩、无主图图层的独占与重叠区域、KAG 解析开关交给原版 Windows 对照。浏览器分别观察窗口画面与截图、真实剧情选项和播放中影片遇到参数错误后的后续帧与声音。[137 实现与验收](decisions/137-layer-groups-parser-flags-and-movie-open.md)

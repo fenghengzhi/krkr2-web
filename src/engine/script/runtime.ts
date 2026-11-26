@@ -164,6 +164,8 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
   /** Version read from the loaded native TJS kernel, not an emulated SDK version. */
   readonly languageVersion?: string
   readonly nativeWindowInput?: boolean
+  /** Select the game's TJS operator conventions after installing the platform classes. */
+  setScriptOperators?(globalEval: boolean, compatAsterisk: boolean): void
   /** Attach a native instance without retaining its owner. Its host operation
    * receives [identifier, owner] during native invalidation, before member deletion.
    * Optional private state is strongly owned until successful native invalidation

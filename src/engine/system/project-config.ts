@@ -1,13 +1,14 @@
 import { MAX_RESOURCE_BYTES, type Resource } from '../ports/storage.ts'
-import { findProjectExecutable, type GameProject } from '../storage/project.ts'
+import { projectExecutableResource, type GameProject } from '../storage/project.ts'
 import { chopStorageExt, extractStorageName, extractStoragePath } from '../storage/public-path.ts'
 import { parseEngineConfig } from './config-file.ts'
+import { readEmbeddedConfig } from './embedded-config.ts'
 import { normalizeSystemDataPath } from './environment.ts'
 
 interface ConfigReader {
   saved(name: string): Resource | undefined
   decode(bytes: Uint8Array): Promise<string>
-  check(): void
+  check(): void | Promise<void>
   warn(message: string): void
 }
 
@@ -19,10 +20,11 @@ export async function readProjectConfig(
   host: ReadonlyMap<string, string>,
   { saved, decode, check, warn }: ConfigReader,
 ) {
-  const executable = findProjectExecutable(files, project)
-  if (!executable) return
+  const launcher = projectExecutableResource(files, project)
+  if (!launcher) return
+  const executable = launcher.name
   const options = async (name: string) => {
-    check()
+    await check()
     let file = saved(name)
     if (!file) {
       const folded = name.toLowerCase()
@@ -40,15 +42,17 @@ export async function readProjectConfig(
       // SysInitImpl uses a Windows ANSI reader independent of TJS encoding.
       text = await decode(bytes)
     } catch (error) {
-      check()
+      await check()
       warn(`Unable to read engine configuration ${file.name}: ${String(error)}`)
       return new Map<string, string>()
     }
-    check()
+    await check()
     return parseEngineConfig(text)
   }
+  const embedded = await readEmbeddedConfig(launcher, { decode, checkpoint: check, warn })
   const stem = chopStorageExt(executable), defaults = await options(stem + '.cf')
-  const dataDirectory = normalizeSystemDataPath(host.get('-datapath') ?? defaults.get('-datapath'), extractStoragePath(executable))
+  const dataDirectory = normalizeSystemDataPath(host.get('-datapath') ?? defaults.get('-datapath') ?? embedded.get('-datapath'),
+    extractStoragePath(executable))
   const user = await options(dataDirectory + extractStorageName(stem) + '.cfu')
-  return { executable, dataDirectory, arguments: new Map([...defaults, ...user, ...host]) }
+  return { executable, dataDirectory, arguments: new Map([...embedded, ...defaults, ...user, ...host]) }
 }

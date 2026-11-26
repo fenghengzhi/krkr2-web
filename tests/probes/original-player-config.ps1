@@ -33,6 +33,10 @@ try {
   if ((Get-Item $original).Length -ne $pin.engineBytes -or $engineSha256 -cne $pin.engineSha256) {
     throw 'Pinned SDK executable size or digest differs.'
   }
+  # Read the stock marker and its empty original text without modifying or
+  # launching that file. A separate process below observes real default modes.
+  node --import tsx tests/probes/player-config-sdk.ts inspect-stock $original
+  if ($LASTEXITCODE -ne 0) { throw 'Fixed stock embedded option bytes differ from the recorded identity.' }
   $acquisition.state = 'verified'
   $acquisition.archiveSha256 = $pin.archiveSha256
   $acquisition.engineSha256 = $engineSha256

@@ -1177,7 +1177,7 @@ jobs:
       - name: Prepare independent external configuration inputs
         id: prepare_config
         run: node --import tsx tests/probes/player-config-sdk.ts prepare
-      - name: Observe four isolated original engine processes
+      - name: Observe stock and configured original engine processes
         shell: pwsh
         run: ./tests/probes/original-player-config.ps1
       - name: Compare argument precedence and the actual saved data paths

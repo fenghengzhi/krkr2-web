@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 139 批接入游戏 EXE 的内嵌启动设置，支持按配置保留新图层的遮罩，并让旧脚本按指定规则求值和读写属性。新增行为待托管验证。[139 范围与验收](../decisions/139-embedded-game-options-and-script-modes.md)
+
 第 138 批支持游戏程序旁的 `.cf` 和存档目录的 `.cfu`。游戏可以从设置中读取剧情路线、图像解码选项和实际存档位置，游戏库重启时会再次读取。新增行为待托管验证。[138 配置与验收](../decisions/138-game-startup-configuration.md)
 
 第 137 批修正淡化图层组中独占区域的亮度，支持游戏用非零小数开启 KAG 剧情标签和忽略换行，并保留因文件名参数错误而未能切换的旧影片。新增行为待托管验证。[137 实现与验收](../decisions/137-layer-groups-parser-flags-and-movie-open.md)

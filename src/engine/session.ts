@@ -329,6 +329,7 @@ export class EngineSession {
   readonly control = new ExecutionControl()
   private readonly queue = new SerialQueue()
   private readonly storage: StorageResolver
+  private readonly storageCheckpoint: () => Promise<void>
   private readonly dropped: DropStorage
   private readonly project?: GameProject
   private readonly cddaDiscs: CddaDiscs
@@ -547,14 +548,14 @@ export class EngineSession {
       this.project,
     )
     let archiveYieldAt = deps.now() + 8, archiveSteps = 0
-    this.storage = new StorageResolver(this.project?.directory ?? '', !this.project, deps.archives,
-      async () => {
-        await this.control.wait(); this.control.check()
-        if (++archiveSteps >= 64 || deps.now() >= archiveYieldAt) {
-          await deps.yieldToHost(); this.control.check()
-          archiveSteps = 0; archiveYieldAt = deps.now() + 8
-        }
-      })
+    this.storageCheckpoint = async () => {
+      await this.control.wait(); this.control.check()
+      if (++archiveSteps >= 64 || deps.now() >= archiveYieldAt) {
+        await deps.yieldToHost(); this.control.check()
+        archiveSteps = 0; archiveYieldAt = deps.now() + 8
+      }
+    }
+    this.storage = new StorageResolver(this.project?.directory ?? '', !this.project, deps.archives, this.storageCheckpoint)
     this.cddaDiscs = new CddaDiscs({
       currentDirectory: this.project?.directory ?? '',
       exists: async (name) => {
@@ -726,7 +727,7 @@ export class EngineSession {
         const startup = await readProjectConfig(this.project, projectFiles, this.systemArguments, {
           saved: (path) => this.saves.resource(path),
           decode: (bytes) => this.deps.readText(bytes, '', 'shift_jis', 'plain'),
-          check: () => this.control.check(),
+          check: this.storageCheckpoint,
           warn: (message) => this.log(message),
         })
         if (startup) {
@@ -737,6 +738,8 @@ export class EngineSession {
       this.control.check()
       const jpegPrecision = this.systemArguments.get('-jpegdec')
       this.jpegPrecision = jpegPrecision === 'low' || jpegPrecision === 'high' ? jpegPrecision : 'normal'
+      const holdAlpha = this.systemArguments.get('-holdalpha')
+      this.layers.defaultHoldAlpha = holdAlpha === 'yes' || holdAlpha === 'true'
       this.runtime = await this.deps.createRuntime((...args) => this.host(...args), this.control, {
         debugMode: this.systemArguments.get('-debug') === 'yes',
       })
@@ -1157,6 +1160,12 @@ export class EngineSession {
       this.discard(await this.runtime.execute(rectClass, 'krkr2-web/rect.tjs'))
       this.discard(await this.runtime.execute(soundClasses, 'krkr2-web/sound.tjs'))
       this.discard(await this.runtime.execute(videoClass, 'krkr2-web/video.tjs'))
+      const globalEval = this.systemArguments.get('-evalcontext') === 'global'
+      const compatAsterisk = this.systemArguments.get('-unaryaster') === 'compat'
+      if (globalEval || compatAsterisk) {
+        if (!this.runtime.setScriptOperators) throw new Error('Script runtime does not support the requested TJS operator settings')
+        this.runtime.setScriptOperators(globalEval, compatAsterisk)
+      }
       this.setState('ready')
       if (!this.control.cancelled) {
         const maintenance = new SystemMaintenance(
