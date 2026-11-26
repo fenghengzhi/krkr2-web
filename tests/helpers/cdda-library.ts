@@ -32,8 +32,9 @@ class DiscButton extends Layer {
   function onClick(){
     var track=selected;
     if(track=="lookup"){
-      var drive=Storages.searchCD("kiriKiri_disc"),music=Storages.searchCD("Game Music");
-      if(!drive || !music || drive==music || Storages.searchCD("unrelated album title")!="")throw new Exception("Disc label lookup failed");
+      var drive=Storages.searchCD("kiriKiri_disc"),music=Storages.searchCD("Game Music"),absent=Storages.searchCD("unrelated album title");
+      if((drive!=="D" && drive!=="E") || (music!=="D" && music!=="E") || drive===music || absent!=="")
+        throw new Exception("Disc label lookup failed: "+[drive,music,absent].join("|"));
       Debug.message("disc-labels:"+drive+"|"+music);track=drive+":1";
     }
     global.discSelect(track);

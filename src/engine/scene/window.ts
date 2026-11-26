@@ -1,6 +1,7 @@
 import type { WindowGeometry } from '../ports/window-geometry.ts'
 import { copyWindowGeometry } from './window-geometry.ts'
 import { TvpError } from '../system/tvp-error.ts'
+import type { FullscreenZoom } from './fullscreen.ts'
 
 export interface WindowView {
   width: number
@@ -52,6 +53,7 @@ export class WindowState implements WindowView {
   showScrollBars = true
   focusable = true
   fullScreen = false
+  fullscreenZoom: FullscreenZoom = 'inner'
   layerLeft = 0
   layerTop = 0
   zoomNumer = 1

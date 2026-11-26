@@ -1,6 +1,7 @@
 import type { Rect } from './graphics.ts'
 import type { MenuSnapshot } from '../scene/menus.ts'
 import type { WindowView } from '../scene/window.ts'
+import type { FullscreenZoom } from '../scene/fullscreen.ts'
 
 /** Local transport lifetime ended; unrelated host failures retain their identity. */
 export class WindowGeometryRetiredError extends Error {
@@ -24,6 +25,8 @@ export interface WindowGeometry {
   paintBox: Rect
   /** Drawing zoom can differ from the public requested zoom in fullscreen. */
   actualZoom: { numer: number; denom: number }
+  /** Left/top portion of the centered fullscreen image outside the viewport. */
+  fullscreenCrop?: { x: number; y: number }
   /** Occupied pixels, not nominal OS metrics; overlay scrollbars can be zero. */
   scrollbars: { horizontal: number; vertical: number }
   scroll: { x: number; y: number; maxX: number; maxY: number }
@@ -37,6 +40,7 @@ export interface WindowGeometryRequest {
   primary: { width: number; height: number }
   /** Only explicit inner setters update this fullscreen preference. */
   innerRequest: { width: number; height: number }
+  fullscreenZoom?: FullscreenZoom
   operation: 'create' | 'outer' | 'inner' | 'chrome' | 'content'
   /** Missing axes retain that axis in the operation's own coordinate domain. */
   size?: { width?: number; height?: number }

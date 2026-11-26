@@ -219,8 +219,10 @@ export function createGameWindows(
       box(surface.scrollbox, viewport.x - client.x, viewport.y - client.y,
         viewport.width + scrollbars.vertical, viewport.height + scrollbars.horizontal)
       surface.scrollbox.style.overflow = view.showScrollBars ? 'auto' : 'hidden'
-      surface.scrollSpace.style.width = `${Math.max(viewport.width, paintBox.x - viewport.x + scroll.x + paintBox.width)}px`
-      surface.scrollSpace.style.height = `${Math.max(viewport.height, paintBox.y - viewport.y + scroll.y + paintBox.height)}px`
+      const spaceWidth = measured.fullscreenCrop ? viewport.width + scroll.maxX : Math.max(viewport.width, paintBox.x - viewport.x + scroll.x + paintBox.width)
+      const spaceHeight = measured.fullscreenCrop ? viewport.height + scroll.maxY : Math.max(viewport.height, paintBox.y - viewport.y + scroll.y + paintBox.height)
+      surface.scrollSpace.style.width = `${spaceWidth}px`
+      surface.scrollSpace.style.height = `${spaceHeight}px`
       const previousScroll = surface.presentedScroll
       // A native DOM scroll is visible before its scroll event and Worker
       // observation round-trip. Repeated Window state must not write the old

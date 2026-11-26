@@ -2,6 +2,7 @@ import type { Rect } from '../ports/graphics.ts'
 import type { WindowGeometry, WindowGeometryPort, WindowGeometryRequest, WindowGeometryScroll } from '../ports/window-geometry.ts'
 import { WindowGeometryRetiredError } from '../ports/window-geometry.ts'
 import { deviceMulDiv } from './draw-device.ts'
+import { fullscreenLayout } from './fullscreen.ts'
 
 export const windowGeometryLimit = 4096
 const integer = (value: unknown, min: number, max: number) =>
@@ -25,6 +26,8 @@ export function copyWindowGeometry(value: WindowGeometry): WindowGeometry {
       !contained(value.outer, value.client) || !contained(value.client, value.inner) ||
       !contained(value.inner, value.viewport)) fail()
   const z = value.actualZoom, s = value.scroll, bars = value.scrollbars
+  const crop = value.fullscreenCrop
+  if (crop && (!integer(crop.x, 0, 0x7fffffff) || !integer(crop.y, 0, 0x7fffffff))) fail()
   if (!z || !integer(z.numer, 1, 0x7fffffff) || !integer(z.denom, 1, 0x7fffffff) ||
       !s || !integer(s.maxX, 0, 0x7fffffff) || !integer(s.maxY, 0, 0x7fffffff) ||
       !integer(s.x, 0, s.maxX) || !integer(s.y, 0, s.maxY) || !bars ||
@@ -34,7 +37,7 @@ export function copyWindowGeometry(value: WindowGeometry): WindowGeometry {
   return { revision: value.revision, surfaceEpoch: value.surfaceEpoch, platform: value.platform,
     outer: copyRect(value.outer), client: copyRect(value.client), inner: copyRect(value.inner),
     viewport: copyRect(value.viewport), paintBox: copyRect(value.paintBox),
-    actualZoom: { ...z }, scrollbars: { ...bars }, scroll: { ...s } }
+    actualZoom: { ...z }, ...(crop && { fullscreenCrop: { ...crop } }), scrollbars: { ...bars }, scroll: { ...s } }
 }
 export function validateWindowGeometry(request: WindowGeometryRequest, value: WindowGeometry): WindowGeometry {
   const g = copyWindowGeometry(value), inset = request.view.innerSunken && !request.view.fullScreen ? 2 : 0,
@@ -42,12 +45,16 @@ export function validateWindowGeometry(request: WindowGeometryRequest, value: Wi
     height = deviceMulDiv(request.primary.height, g.actualZoom.numer, g.actualZoom.denom),
     x = deviceMulDiv(request.view.layerLeft, g.actualZoom.numer, g.actualZoom.denom),
     y = deviceMulDiv(request.view.layerTop, g.actualZoom.numer, g.actualZoom.denom)
-  if (g.revision !== request.revision ||
+  const full = request.view.fullScreen && request.fullscreenZoom !== undefined
+    ? fullscreenLayout(g.inner, request.innerRequest, request.fullscreenZoom) : undefined,
+    crop = full?.crop ?? { x: 0, y: 0 }
+  if (full && g.actualZoom.numer * full.zoom.denom !== g.actualZoom.denom * full.zoom.numer) fail()
+  if (g.revision !== request.revision || crop.x !== (g.fullscreenCrop?.x ?? 0) || crop.y !== (g.fullscreenCrop?.y ?? 0) ||
       g.inner.x !== g.client.x + Math.min(inset, g.client.width) ||
       g.inner.y !== g.client.y + Math.min(inset, g.client.height) ||
       g.inner.width !== Math.max(0, g.client.width - inset * 2) ||
       g.inner.height !== Math.max(0, g.client.height - inset * 2) ||
-      g.paintBox.x !== g.viewport.x + x - g.scroll.x || g.paintBox.y !== g.viewport.y + y - g.scroll.y ||
+      g.paintBox.x !== g.viewport.x + x - g.scroll.x - crop.x || g.paintBox.y !== g.viewport.y + y - g.scroll.y - crop.y ||
       g.paintBox.width !== Math.max(0, width) || g.paintBox.height !== Math.max(0, height)) fail()
   return g
 }
@@ -87,26 +94,22 @@ export class HeadlessWindowGeometry implements WindowGeometryPort {
       outer = { x: 0, y: 0, width, height }, client = { ...outer },
       inner = { x: Math.min(inset, width), y: Math.min(inset, height),
         width: Math.max(0, width - inset * 2), height: Math.max(0, height - inset * 2) },
-      actualZoom = view.fullScreen
-        ? width * request.innerRequest.height <= height * request.innerRequest.width
-          ? { numer: width, denom: request.innerRequest.width }
-          : { numer: height, denom: request.innerRequest.height }
-        : { numer: view.zoomNumer, denom: view.zoomDenom },
-      fittedWidth = view.fullScreen ? Math.trunc(request.innerRequest.width * actualZoom.numer / actualZoom.denom) : inner.width,
-      fittedHeight = view.fullScreen ? Math.trunc(request.innerRequest.height * actualZoom.numer / actualZoom.denom) : inner.height,
-      viewport = { x: inner.x + Math.trunc((inner.width - fittedWidth) / 2),
-        y: inner.y + Math.trunc((inner.height - fittedHeight) / 2), width: fittedWidth, height: fittedHeight },
+      full = view.fullScreen ? fullscreenLayout(inner, request.innerRequest, request.fullscreenZoom) : undefined,
+      actualZoom = full?.zoom ?? { numer: view.zoomNumer, denom: view.zoomDenom },
+      viewport = full?.area ?? inner,
       paintWidth = Math.max(0, deviceMulDiv(request.primary.width, actualZoom.numer, actualZoom.denom)),
       paintHeight = Math.max(0, deviceMulDiv(request.primary.height, actualZoom.numer, actualZoom.denom)),
       left = deviceMulDiv(view.layerLeft, actualZoom.numer, actualZoom.denom),
       top = deviceMulDiv(view.layerTop, actualZoom.numer, actualZoom.denom),
-      maxX = view.showScrollBars ? Math.max(0, left + paintWidth - viewport.width) : 0,
-      maxY = view.showScrollBars ? Math.max(0, top + paintHeight - viewport.height) : 0,
+      maxX = view.showScrollBars ? Math.max(0, left + paintWidth - (full?.width ?? viewport.width)) : 0,
+      maxY = view.showScrollBars ? Math.max(0, top + paintHeight - (full?.height ?? viewport.height)) : 0,
       x = request.resetScroll ? 0 : Math.min(maxX, prior.scroll.x),
       y = request.resetScroll ? 0 : Math.min(maxY, prior.scroll.y)
     return validateWindowGeometry(request, { revision: request.revision, surfaceEpoch: 0, platform: 'headless',
       outer, client, inner, viewport, actualZoom, scrollbars: { horizontal: 0, vertical: 0 }, scroll: { x, y, maxX, maxY },
-      paintBox: { x: viewport.x + left - x, y: viewport.y + top - y, width: paintWidth, height: paintHeight } })
+      ...(full?.crop && { fullscreenCrop: full.crop }),
+      paintBox: { x: viewport.x + left - x - (full?.crop?.x ?? 0), y: viewport.y + top - y - (full?.crop?.y ?? 0),
+        width: paintWidth, height: paintHeight } })
   }
   subscribe(_listener: (observation: WindowGeometryScroll) => void): () => void { return () => {} }
   retire(windowId: number): void { if (!this.closed) this.retired.add(windowId) }

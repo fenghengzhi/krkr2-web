@@ -55,13 +55,14 @@ global.registryRendered=kag.historyLayer.currentLine;global.registryVisits++;
 [cm][hr][nowait]WRONG REGISTRY ROUTE[endnowait][s]
 `
 
-export function registryGame(binary: boolean) {
+export function registryGame(binary: boolean, companion = false) {
   const original = readFileSync(new URL('../fixtures/compatibility/kag3_template.xp3', import.meta.url)),
     hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
   if (hash(original) !== '5a1bdb7d33b7077a47ebfb889524c381216c44b65e8dc69d6c9cbb3453458644')
     throw new Error('The original KAG template changed')
   const chosen = registry('REGISTRY ROUTE', 7, '*selected'), other = registry('OTHER REGISTRY', 99, '*wrong'),
-    registryFile = binary ? 'Game/config.xp3>settings.reg' : 'Game/settings.reg',
+    registryFile = companion ? binary ? 'Settings.xp3>Prefs/settings.reg' : 'settings.reg'
+      : binary ? 'Game/config.xp3>settings.reg' : 'Game/settings.reg',
     hook = binary
       ? 'Scripts.compileStorage(System.exePath+"registry-observer.tjs",System.dataPath+"registry.cjs",false,true,false);Scripts.execStorage(System.dataPath+"registry.cjs");'
       : 'Scripts.execStorage(System.exePath+"registry-observer.tjs");',
@@ -74,10 +75,15 @@ export function registryGame(binary: boolean) {
       { name: 'Game/config.xp3', bytes: xp3Fixture({ 'settings.reg': chosen }).bytes },
       { name: 'Game/other.reg', bytes: other },
     ],
-    buffer = distributionZip(inputs.map((file) => member(file.name, file.bytes)))
-  return { files: [{ name: 'RegistryGame.zip', buffer, mimeType: 'application/octet-stream' }],
+    buffer = distributionZip(inputs.map((file) => member(file.name, file.bytes))),
+    sideFiles = !companion ? [] : [binary
+      ? { name: 'Settings.xp3', buffer: xp3Fixture({ 'Prefs/settings.reg': chosen, 'private.tjs': '99' }).bytes }
+      : { name: 'settings.reg', buffer: chosen }, { name: 'outside-only.tjs', buffer: Buffer.from('99') }],
+    files = [{ name: 'RegistryGame.zip', buffer }, ...sideFiles].map((file) => ({ ...file, mimeType: 'application/octet-stream' }))
+  return { files, companion,
     registryFile, publicRegistryFile: 'game://./' + registryFile, otherFile: 'Game/other.reg',
-    manifest: { binary, registryFile, selectedRegistrySha256: hash(chosen), alternateRegistrySha256: hash(other),
+    manifest: { binary, companion, registryFile, selectedRegistrySha256: hash(chosen), alternateRegistrySha256: hash(other),
       zipBytes: buffer.length, zipSha256: hash(buffer),
+      imported: files.map((file) => ({ name: file.name, bytes: file.buffer.length, sha256: hash(file.buffer) })),
       files: inputs.map((file) => ({ name: file.name, bytes: file.bytes.length, sha256: hash(file.bytes) })), story, observer } }
 }

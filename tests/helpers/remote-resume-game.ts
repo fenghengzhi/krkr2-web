@@ -16,7 +16,7 @@ global.resumeRendered=kag.historyLayer.currentLine;global.resumeVisits++;
 [r][link target=*scene]Read downloaded scene[endlink] / [link target=*load]Load slot[endlink]
 [s]
 *scene
-[image layer=base page=fore storage=scene.bmp]
+[image layer=base page=fore storage=scene.bmp clipleft=0 cliptop=0 clipwidth=640 clipheight=480]
 [eval exp="f.resumeValue=7"]
 [jump target=*checkpoint]
 *checkpoint|Downloaded scene

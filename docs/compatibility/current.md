@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 172 批按 `-fszoom` 配置选择全屏缩放与居中裁切，游戏可从外置设置文件读取选项，普通 WAVE 在非整数采样位置按循环或跳转后的素材插值。新增行为等待托管验证。[172 实现与托管证据](../decisions/172-fullscreen-options-story-input-and-wave-loops.md)
+
 第 171 批让脚本通过 `System.readRegValue` 读取玩家指定的游戏设置，并补齐 KAG 菜单访问键与 MIDI 乐谱内的主音量变化。新增兼容行为等待托管验证。[171 实现与托管证据](../decisions/171-game-registry-menu-keys-and-midi-volume.md)
 
 第 170 批为只有 UDF 文件系统的游戏 DVD 增加卷标、目录和资源读取，接入直接启动、按盘符取文件和换盘。实现范围为单卷、2048 字节逻辑块和 Type 1 物理分区。UDF 1.02、2.01 独立制盘及实际游玩结果待托管验收。[170 实现与托管证据](../decisions/170-udf-game-dvds-and-offline-release.md)

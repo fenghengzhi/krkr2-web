@@ -1,5 +1,5 @@
 *arrival|Disc chapter
-[image layer=base page=fore storage=Title.bmp]
+[image layer=base page=fore storage=Title.bmp clipleft=0 cliptop=0 clipwidth=640 clipheight=480]
 [cm][hr][nowait][emb exp="global.discTitle"] [emb exp="f.discProgress"][endnowait]
 [iscript]
 global.discRendered=kag.historyLayer.currentLine;global.discVisits++;

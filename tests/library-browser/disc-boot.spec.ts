@@ -77,9 +77,24 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       observations.push({ packaged, drive, mapping, launcher,
         files: input.files.map((file) => ({ name: file.name, bytes: file.buffer.length,
           sha256: createHash('sha256').update(file.buffer).digest('hex') })) })
-      await page.locator('#files').setInputFiles(input.files)
-      expect(await page.locator('#files').evaluate((node) => Array.from((node as HTMLInputElement).files!, (file) => file.name)))
-        .toEqual(input.files.map((file) => file.name))
+      const picker = page.locator('#files')
+      // The application consumes and clears FileList in its change handler
+      // so the player can select the same disc again. Observe the actual
+      // selection during dispatch, while the filenames and bytes are present.
+      const selection = await picker.evaluateHandle((node) => {
+        const input = node as HTMLInputElement
+        const selected: { name: string; size: number }[] = []
+        input.addEventListener('change', () => {
+          for (const file of input.files ?? []) selected.push({ name: file.name, size: file.size })
+        }, { capture: true, once: true })
+        return selected
+      })
+      try {
+        await picker.setInputFiles(input.files)
+        const selected = await selection.jsonValue()
+        observations.push({ selected })
+        expect(selected).toEqual(input.files.map((file) => ({ name: file.name, size: file.buffer.length })))
+      } finally { await selection.dispose() }
       await ready()
       await clickLink(0, '*enter'); await chapter(42, 1)
       await info.attach('disc-first-chapter', { body: await canvas.screenshot({ timeout: 5000 }), contentType: 'image/png' })

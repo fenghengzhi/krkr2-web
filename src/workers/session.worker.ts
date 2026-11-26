@@ -156,7 +156,7 @@ const api: SessionApi = {
       if (requested.mode !== 'collection' || (!libraryLease && discOnlyInput(filesReady.map((file) => file.path)))) {
         distributionReader = createSessionArchiveReader(undefined, preparedEncodings.zipEncoding)
         resources = await importSources(filesReady, checkpoint, { lazyArchives: true })
-        const mount = await prepareProject(resources, requested, distributionReader, checkpoint, entry, libraryLease?.record.cddaDiscs ?? discs)
+        const mount = await prepareProject(resources, { ...requested, ...preparedEncodings }, distributionReader, checkpoint, entry, libraryLease?.record.cddaDiscs ?? discs)
         resources = mount.resources
         discImports = mount.discImports
         configFiles = mount.configFiles

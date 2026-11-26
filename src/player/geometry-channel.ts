@@ -45,6 +45,7 @@ export class GeometryChannel {
         !Number.isSafeInteger(request.revision)) return
     if (!positive(request.revision) || !request.view || !request.menus || !request.primary ||
         !request.innerRequest || typeof request.resetScroll !== 'boolean' ||
+        (request.fullscreenZoom !== undefined && !['inner', 'outer', 'none'].includes(request.fullscreenZoom)) ||
         !['create', 'outer', 'inner', 'chrome', 'content'].includes(request.operation)) {
       this.reject(request, 'Invalid Window geometry request'); return
     }

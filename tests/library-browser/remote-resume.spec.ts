@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { test, expect, libraryDirectories } from '../helpers/library-browser.ts'
 import { remoteResumeGame, resumeBlockBytes } from '../helpers/remote-resume-game.ts'
 import { readScreenshotPng } from '../helpers/screenshot-png.ts'
+import { kagGameLinkClick } from '../helpers/kag-game-controls.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode cancellation and changed version' : 'source connection loss'}: remote KAG downloads resume after refresh and retain the actual scene and bookmark offline`, async ({ page }, info) => {
@@ -36,6 +37,11 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect.poll(() => read('resumeState()'), { timeout: 15000 }).toBe(opening
         ? `0|RESUME READY|${visits}|*choice|2|0`
         : `${value}|SCENE ${value}|${visits}|*checkpoint|3|0`)
+      if (!opening) {
+        expect(await read('[kag.fore.base.width,kag.fore.base.height].join("|")')).toBe('640|480')
+        expect(await read('(function(){var b=kag.fore.base,v=[];for(var y=0;y<8;y++)for(var x=0;x<8;x++)v.add(b.getMainPixel(x,y));return v.join(",");})()'))
+          .toBe(Array(64).fill(String(0x336699)).join(','))
+      }
     }
     const ready = async () => {
       await expect(page.getByText('resume-game-ready', { exact: true })).toBeVisible({ timeout: 45000 })
@@ -49,19 +55,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await page.locator('#remote-url').fill(fixture.server.url + '/manifest.json')
       await page.locator('#load-url').click(); await ready()
     }
-    const clickLink = async (index: number, target: string) => {
-      const fields = (await read(`(function(){var m=kag.current,l=m.links[${index}],x=l.x[0]+(l.w[0]>>1),y=l.y[0]+(l.h[0]>>1);
-        if(!l.fixed[0]){x+=m.lineLayerOriginX+m.getLineLayerLeftOffset();y+=m.lineLayerOriginY+m.getLineLayerTopOffset();}
-        for(var p=m;p!==null;p=p.parent){x+=p.left;y+=p.top;}return [x,y,l.w[0],l.h[0],l.target,int(m.selProcessLock)].join("|");})()`)).split('|')
-      expect(fields).toHaveLength(6); expect(fields[4]).toBe(target); expect(fields[5]).toBe('0')
-      const [x, y, width, height] = fields.slice(0, 4).map(Number)
-      expect(width).toBeGreaterThan(0); expect(height).toBeGreaterThan(0)
-      expect(x).toBeGreaterThanOrEqual(0); expect(x).toBeLessThan(640)
-      expect(y).toBeGreaterThanOrEqual(0); expect(y).toBeLessThan(480)
-      await canvas.scrollIntoViewIfNeeded({ timeout: 5000 })
-      const box = await canvas.boundingBox(); expect(box).not.toBeNull()
-      await canvas.click({ position: { x: x! * box!.width / 640, y: y! * box!.height / 480 }, timeout: 5000 })
-    }
+    const clickLink = kagGameLinkClick(page, read, observations)
     const storage = async (id?: string) => page.evaluate(async (id) => {
       const counts = await new Promise<Record<string, number>>((resolve, reject) => {
         const request = indexedDB.open('krkr2-library')

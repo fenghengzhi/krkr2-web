@@ -42,6 +42,9 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
       await expect.poll(() => read('discVisits')).toBe(String(visits))
       expect(await read('Storages.getPlacedPath("story.ks")')).toBe(`file://./${drive.toLowerCase()}/routes/story.ks`)
       expect(await read('kag.fore.base.getMainPixel(0,0)')).toBe(String(0x336699))
+      expect(await read('[kag.fore.base.width,kag.fore.base.height].join("|")')).toBe('640|480')
+      expect(await read('(function(){var b=kag.fore.base,v=[];for(var y=0;y<4;y++)for(var x=0;x<4;x++)v.add(b.getMainPixel(x,y));return v.join(",");})()'))
+        .toBe(Array(16).fill(String(0x336699)).join(','))
       expect(await read('discRendered')).toContain(`Moon disc scene ${value}`)
     }
     const stop = async () => {

@@ -101,7 +101,7 @@ async function locateGame(entries: readonly Resource[], selection: ProjectLocati
  * container was supplied. An existing loose game's selection is unchanged. */
 export function discOnlyInput(names: readonly string[]): boolean {
   return names.some((name) => /\.(?:iso|cue)$/i.test(name)) &&
-    names.every((name) => /\.(?:iso|cue|bin|img|wav|mp3|aiff?|txt|md)$/i.test(name))
+    names.every((name) => /\.(?:iso|cue|bin|img|wav|mp3|aiff?|txt|md|reg)$/i.test(name))
 }
 export async function prepareProject(resources: Resource[], requested: ProjectSelection, reader: ArchiveReader,
   checkpoint: () => Promise<void>, entry = 'startup.tjs', discs?: readonly CddaDisc[],
@@ -221,10 +221,10 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
       if (names.size % 256 === 0) await checkpoint()
     }
     const project = disc?.project ?? await select(members, inner!)
-    // Discs beside the selected release belong to its optical drives. Their
-    // archives and loose files must not become installed scripts or assets.
+    // Disc and explicitly selected registry sources beside the release stay
+    // isolated. They must not become installed scripts or AutoPath assets.
     const discImports = resources.filter((file) => file !== archive && !file.aliasOf && !file.name.includes('>'))
-    const hasDiscImports = discImports.length > 0 && (discImports.some((file) => /\.(?:cue|iso|zip)$/i.test(file.name)) ||
+    const hasDiscImports = discImports.length > 0 && (setting.registryFile !== undefined || discImports.some((file) => /\.(?:cue|iso|zip)$/i.test(file.name)) ||
       discs?.some((disc) => disc.cue.includes('>')))
     return { resources: members, project: copyGameProject({ ...project, distribution: archive.name })!,
       ...(hasDiscImports && { discImports }),
@@ -291,7 +291,27 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     // Preserve the preceding native/SFX result and identity. Only a collection
     // with no loose/native project enters ordinary ZIP discovery. An XP3 input
     // remains an explicit native resource rather than being silently discarded.
-    if (!originals.some((file) => file.archiveKind === 'xp3' || /\.xp3$/i.test(file.name))) {
+    const nativeArchives = originals.filter((file) => file.archiveKind === 'xp3' || /\.xp3$/i.test(file.name))
+    let tryOrdinary = nativeArchives.length === 0
+    // A player can explicitly identify a non-game XP3 as the settings source.
+    // Inspect only that container's index, never its registry payload. Any
+    // native game, an unreadable index or another XP3 keeps the old priority.
+    const registry = setting.registryFile && parseStoragePath(setting.registryFile),
+      registryRoot = registry?.includes('>') ? registry.slice(0, registry.indexOf('>')) : undefined
+    if (!tryOrdinary && nativeArchives.length === 1 && registryRoot &&
+        originals.some((file) => /\.zip$/i.test(file.name)) &&
+        nativeArchives[0]!.name.toLowerCase() === registryRoot.toLowerCase()) {
+      try {
+        const index = await reader.open(nativeArchives[0]!, checkpoint)
+        await checkpoint()
+        if (index?.kind === 'xp3') tryOrdinary = !await locateGame([...index.entries], { mode: 'auto' },
+          checkpoint, probe, 'files', entryName, relativeEntry, false)
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') throw error
+        await checkpoint()
+      }
+    }
+    if (tryOrdinary) {
       let ordinary: Awaited<ReturnType<typeof mountDistribution>>
       for (const file of originals) {
         if (!/\.zip$/i.test(file.name)) continue

@@ -4,15 +4,15 @@ import { test, expect } from '../helpers/library-browser.ts'
 import { kagGameControls } from '../helpers/kag-game-controls.ts'
 import { registryGame } from '../helpers/registry-game.ts'
 
-for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
-  test(`${backend}/${binary ? 'bytecode and XP3 registry' : 'source and loose registry'}: an explicitly selected game registry drives the original KAG route and survives library restart`, async ({ page }, info) => {
+for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) for (const companion of [false, true])
+  test(`${backend}/${companion ? binary ? 'bytecode and companion XP3 registry' : 'source and companion loose registry' : binary ? 'bytecode and XP3 registry' : 'source and loose registry'}: an explicitly selected game registry drives the original KAG route and survives library restart`, async ({ page }, info) => {
     test.setTimeout(180000)
     const errors: string[] = [], failures: unknown[] = [], observations: unknown[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !await page.evaluate(() => 'Suspending' in WebAssembly), 'JSPI unavailable')
-    const fixture = registryGame(binary), { read, clickLink } = kagGameControls(page, observations),
-      canvas = page.locator('#stage canvas[data-window-id]'), title = `Registry route ${backend} ${binary}`,
+    const fixture = registryGame(binary, companion), { read, clickLink } = kagGameControls(page, observations),
+      canvas = page.locator('#stage canvas[data-window-id]'), title = `Registry route ${backend} ${binary} ${companion}`,
       item = page.locator('.library-game').filter({ has: page.getByRole('heading', { name: title, exact: true }) })
     const ready = async (configured: boolean) => {
       await expect(page.getByText('registry-game-ready', { exact: true })).toBeVisible({ timeout: 45000 })
@@ -24,6 +24,10 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       expect(await read('registryReads()')).toBe(configured ? 'REGISTRY ROUTE|7|*selected|1|1' : 'void|void|void|0|1')
       expect(await read('int(registryScore===7)')).toBe(configured ? '1' : '0')
       expect(await read('System.exePath+"|"+System.dataPath')).toBe('game://./Game/|game://./Game/savedata/')
+      if (companion) {
+        expect(await read('int(Storages.isExistentStorage("game://./outside-only.tjs"))')).toBe('0')
+        expect(await read(`int(Storages.isExistentStorage("game://./${binary ? 'Settings.xp3' : 'settings.reg'}"))`)).toBe('0')
+      }
       if (configured) await expect(page.locator('#project-status')).toContainText(fixture.publicRegistryFile)
       else await expect(page.locator('#project-status')).not.toContainText('游戏注册表：')
     }, chapter = async (value: number, visits: number) => {
@@ -58,11 +62,15 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     try {
       await page.locator('#project-mode').selectOption('auto')
       await expect(page.locator('#registry-file')).toHaveValue('')
+      // With no registry selection an XP3 keeps its original native-game
+      // priority. Select the game explicitly for this default/no-read control.
+      if (companion && binary) await page.locator('#project-executable').fill('RegistryGame.zip')
       await page.locator('#files').setInputFiles(fixture.files)
       await ready(false)
       await stop()
       await page.locator('#clear-log').click()
       await page.locator('#registry-file').fill(fixture.registryFile)
+      if (companion && binary) await page.locator('#project-executable').fill('')
       await page.locator('#restart').click()
       await ready(true)
       await clickLink(0, '*selected'); await chapter(7, 2)

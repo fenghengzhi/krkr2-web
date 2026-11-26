@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { test, expect, libraryDirectories } from '../helpers/library-browser.ts'
 import { saveTransferGame, saveTransferObserver, saveTransferStory } from '../helpers/save-transfer-game.ts'
+import { kagGameLinkClick } from '../helpers/kag-game-controls.ts'
 
 interface Backup { gameId: string; files: { path: string; base64: string }[] }
 interface SavedRow { path: string; bytes: number[]; updatedAt: number }
@@ -49,22 +50,7 @@ for (const backend of ['asyncify', 'jspi']) for (const legacy of [false, true])
         : `${edition}|${value}|VALUE ${value}|${visits}|*checkpoint|2|0`)
       await expect(page.locator('#logs .error')).toHaveCount(0)
     }
-    const clickLink = async (index: number, target: string) => {
-      const parts = (await read(`(function(){var m=kag.current,l=m.links[${index}];
-        var x=l.x[0]+(l.w[0]>>1),y=l.y[0]+(l.h[0]>>1);
-        if(!l.fixed[0]){x+=m.lineLayerOriginX+m.getLineLayerLeftOffset();y+=m.lineLayerOriginY+m.getLineLayerTopOffset();}
-        for(var p=m;p!==null;p=p.parent){x+=p.left;y+=p.top;}
-        return [x,y,l.w[0],l.h[0],l.target,int(m.selProcessLock)].join("|");})()`)).split('|')
-      expect(parts).toHaveLength(6); expect(parts[4]).toBe(target); expect(parts[5]).toBe('0')
-      const [x, y, width, height] = parts.slice(0, 4).map(Number)
-      expect(width).toBeGreaterThan(0); expect(height).toBeGreaterThan(0)
-      expect(x).toBeGreaterThanOrEqual(0); expect(x).toBeLessThan(640)
-      expect(y).toBeGreaterThanOrEqual(0); expect(y).toBeLessThan(480)
-      await canvas.scrollIntoViewIfNeeded({ timeout: 5000 })
-      const box = await canvas.boundingBox(); expect(box).not.toBeNull()
-      observations.push({ click: target, point: [x, y], box })
-      await canvas.click({ position: { x: x! * box!.width / 640, y: y! * box!.height / 480 }, timeout: 5000 })
-    }
+    const clickLink = kagGameLinkClick(page, read, observations)
     const backup = async (label: string): Promise<Backup> => {
       await page.locator('#save-format').selectOption('backup')
       const [download] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }), page.locator('#export-saves').click()])

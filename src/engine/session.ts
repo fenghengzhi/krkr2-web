@@ -7,6 +7,7 @@ import { assertClipboardText, unavailableClipboard, type ClipboardPort } from '.
 import { unavailableHelp, type HelpPort } from './ports/help.ts'
 import { getWebLocalName, openHelpDocument } from './system/help.ts'
 import { SystemMaintenance } from './system/maintenance.ts'
+import { FullscreenOptions } from './scene/fullscreen.ts'
 import { readRegistryExport, type GameRegistry } from './system/registry.ts'
 import { TvpError } from './system/tvp-error.ts'
 import { TjsError } from './system/tjs-error.ts'
@@ -323,6 +324,7 @@ class StaleWindowGeometry extends Error {
 
 export class EngineSession {
   private readonly windowGeometry: WindowGeometryPort
+  private readonly fullscreenOptions = new FullscreenOptions()
   private nextGeometryRequest = 1
   private readonly geometryRequests = new Map<number, number>()
   private readonly geometrySignatures = new Map<number, string>()
@@ -351,6 +353,7 @@ export class EngineSession {
   private readonly zipEncoding: ZipNameEncoding
   private readonly registryFile?: string
   private registry?: Promise<GameRegistry>
+  private readonly registryImports?: StorageResolver
   private readonly cddaDiscs: CddaDiscs
   private readonly images = new ImageLoader(
     (name, optionalImage) => this.findResource(name, optionalImage),
@@ -583,6 +586,7 @@ export class EngineSession {
     }
     const imports = deps.discImports && new StorageResolver('', false, deps.discImports.archives, this.storageCheckpoint)
     if (imports && deps.discImports) imports.mount(deps.discImports.resources)
+    this.registryImports = imports
     this.cddaDiscs = new CddaDiscs({
       currentDirectory: boot ? '' : this.project?.directory ?? '',
       exists: async (name) => {
@@ -3308,7 +3312,7 @@ export class EngineSession {
     return JSON.stringify([state.width, state.height, state.innerSunken, state.borderStyle,
       state.showScrollBars, state.fullScreen, state.layerLeft, state.layerTop,
       state.zoomNumer, state.zoomDenom, state.minWidth, state.minHeight, state.maxWidth, state.maxHeight,
-      state.innerWidthRequest, state.innerHeightRequest, id, primary?.width ?? 0, primary?.height ?? 0,
+      state.innerWidthRequest, state.innerHeightRequest, state.fullscreenZoom, id, primary?.width ?? 0, primary?.height ?? 0,
       this.menus.snapshot(window.id).root ?? null])
   }
   private measureWindowGeometry(window: WindowRecord, candidate: WindowState,
@@ -3333,6 +3337,7 @@ export class EngineSession {
         view: candidate.view(), menus: this.menus.snapshot(window.id),
         primary: { width: primary?.width ?? 0, height: primary?.height ?? 0 },
         innerRequest: { width: candidate.innerWidthRequest, height: candidate.innerHeightRequest },
+        ...(candidate.fullScreen && candidate.fullscreenZoom !== 'inner' && { fullscreenZoom: candidate.fullscreenZoom }),
         operation, ...(size ? { size: { ...size } } : {}), resetScroll },
       signature = this.windowGeometrySignature(window, candidate),
       check = () => {
@@ -3363,7 +3368,7 @@ export class EngineSession {
     // changed while the host measured an isolated DOM candidate.
     for (const key of ['width', 'height', 'innerSunken', 'borderStyle', 'showScrollBars', 'fullScreen',
       'layerLeft', 'layerTop', 'zoomNumer', 'zoomDenom', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
-      'innerWidthRequest', 'innerHeightRequest', 'fullscreenRestore'] as const)
+      'innerWidthRequest', 'innerHeightRequest', 'fullscreenRestore', 'fullscreenZoom'] as const)
       Object.assign(window.state, { [key]: candidate[key] })
     if (candidate.fullScreen !== !!beforeFullscreen) {
       window.state.left = candidate.left
@@ -3518,6 +3523,7 @@ export class EngineSession {
     if (geometryProperty) {
       if (property === 'fullScreen' && candidate.fullScreen !== window.state.fullScreen) {
         if (candidate.fullScreen) {
+          candidate.fullscreenZoom = this.fullscreenOptions.select(this.systemArguments)
           candidate.fullscreenRestore = { left: window.state.left, top: window.state.top,
             width: window.state.width, height: window.state.height, innerSunken: window.state.innerSunken }
           candidate.left = candidate.top = 0
@@ -4280,7 +4286,18 @@ export class EngineSession {
   private async loadRegistry(name: string): Promise<GameRegistry> {
     // The player chose one imported file. A script's AutoPath or a save
     // sharing its basename cannot silently supply a different registry.
-    const file = await this.storage.findAsync(name)
+    const path = parseStoragePath(name), delimiter = path.indexOf('>'),
+      root = delimiter < 0 ? path : path.slice(0, delimiter),
+      installed = await this.storage.findAsync(root)
+    this.control.check()
+    // Existing exact game addresses win, including an archive whose requested
+    // member is missing or invalid. Do not replace that failure from a sibling.
+    // The selected distribution itself has already been expanded at mount.
+    const distribution = this.project?.distribution
+    const file = installed ? delimiter < 0 ? installed : await this.storage.findAsync(path)
+      : delimiter >= 0 && distribution && root.toLowerCase() === distribution.toLowerCase()
+        ? await this.storage.findAsync(path.slice(delimiter + 1))
+        : await this.registryImports?.findAsync(path)
     if (!file) throw new TvpError('TVPCannotOpenStorage', [name], 'Registry export not found: ' + name)
     return readRegistryExport(file, (bytes) => {
       const hasBom = bytes[0] === 0xff && bytes[1] === 0xfe || bytes[0] === 0xfe && bytes[1] === 0xff ||

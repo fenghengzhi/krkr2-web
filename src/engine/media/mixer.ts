@@ -61,6 +61,11 @@ interface Voice {
   sourcePipeline?: boolean
   speakerMix?: StereoSpeakerMix
   ended?: boolean
+  interpolationPreview?: {
+    position: number; labelIndex: number; linkDirty: boolean; link?: LoopLink; flags: number[]
+    ended?: boolean; status: SoundSnapshot['status']; fade?: Fade
+    filterChain?: AudioFilterChain; filterSource?: FilteredWaveSource
+  }
   stream?: StreamPcm
   gains?: { volume: number; volume2: number; globalVolume: number; pan: number; focusVolume: number; left: number; right: number }
 }
@@ -598,14 +603,59 @@ export class AudioMixer {
       this.event(voice, 'label', label.name)
     }
   }
-  private pcm(voice: Voice, channel: number, position: number): number {
-    if (voice.stream) return voice.stream.sample(channel, position)
+  /** WaveLoopManager concatenates link targets before device resampling. At
+   * a fractional position just before a hard jump, the right-hand sample is
+   * therefore from that logical output, not the abandoned physical file tail.
+   * Preview the existing control walk without publishing labels, flags or EOF.
+   * Integer samples and ordinary sequential runs allocate no preview state. */
+  private interpolationNeighbor(voice: Voice): number | undefined {
+    const position = voice.settings.position, next = Math.ceil(position), asset = voice.asset!
+    if (voice.kind !== 'wave' || next === position || voice.sourcePipeline ||
+        next < Math.min(this.link(voice)?.from ?? asset.sampleCount, asset.sampleCount)) return
+    // Reuse one tiny snapshot even for deliberately very short looping tones.
+    // Streaming's outer preflight has a separate snapshot, so nesting is safe.
+    const saved: NonNullable<Voice['interpolationPreview']> = voice.interpolationPreview ??= { position: 0, labelIndex: 0, linkDirty: false,
+      flags: Array(16).fill(0), status: 'unload' }, pending = this.pending.length
+    saved.position = position; saved.labelIndex = voice.labelIndex; saved.linkDirty = voice.linkDirty
+    saved.link = voice.link; saved.ended = voice.ended; saved.status = voice.status
+    saved.fade = voice.fade; saved.filterChain = voice.filterChain; saved.filterSource = voice.filterSource
+    for (let i = 0; i < voice.flags.length; i++) saved.flags[i] = voice.flags[i]!
+    try {
+      // The real device-rate accumulator can land a few ULPs below an integer.
+      // advance() intentionally drops sub-nanoframe remainders; the interpolation
+      // neighbor is nevertheless that exact integer sample, not floor(position).
+      if (next - position <= 1e-9) voice.settings.position = next
+      else this.advance(voice, next - position)
+      if (voice.status === 'play' && this.prepareSample(voice)) return Math.floor(voice.settings.position)
+      // A genuinely non-looping EOF retains the existing endpoint hold.
+      // Previewing it must neither end the voice nor flush its audible labels.
+      return
+    } finally {
+      voice.settings.position = saved.position
+      voice.labelIndex = saved.labelIndex
+      voice.linkDirty = saved.linkDirty
+      voice.link = saved.link
+      for (let i = 0; i < voice.flags.length; i++) voice.flags[i] = saved.flags[i]!
+      voice.ended = saved.ended
+      voice.status = saved.status
+      voice.fade = saved.fade
+      voice.filterChain = saved.filterChain
+      voice.filterSource = saved.filterSource
+      this.pending.length = pending
+    }
+  }
+  private pcm(voice: Voice, channel: number, position: number, neighbor?: number): number {
+    if (voice.stream) {
+      if (neighbor === undefined) return voice.stream.sample(channel, position)
+      const index = Math.floor(position), fraction = position - index
+      return voice.stream.sample(channel, index) * (1 - fraction) + voice.stream.sample(channel, neighbor) * fraction
+    }
     const asset = voice.asset as PcmAsset
     const data = asset.data[channel]
     if (!data || position < 0 || position >= asset.sampleCount) return 0
     const index = Math.floor(position),
       fraction = position - index
-    return data[index]! * (1 - fraction) + (data[index + 1] ?? data[index]!) * fraction
+    return data[index]! * (1 - fraction) + (data[neighbor ?? index + 1] ?? data[index]!) * fraction
   }
   private advance(voice: Voice, remaining: number, preflight = false): boolean {
     const asset = voice.asset!,
@@ -645,6 +695,10 @@ export class AudioMixer {
     const position = voice.settings.position
     return this.streamRangeReady(voice.stream!, position, position + advance)
   }
+  private streamInterpolationReady(voice: Voice): boolean {
+    const neighbor = this.interpolationNeighbor(voice)
+    return neighbor === undefined || voice.stream!.ready(neighbor, 1)
+  }
   private prefetchStream(voice: Voice, initial = false): void {
     const stream = voice.stream
     if (!stream) return
@@ -680,7 +734,10 @@ export class AudioMixer {
         voice.asset!.loops.labels[voice.labelIndex]?.position ?? Infinity,
         voice.asset!.sampleCount)
     // Straight runs need only a bounded current/interpolation/advance range.
-    if (position + step < boundary) return this.streamReady(voice, step) ? true : 'waiting'
+    if (position + step < boundary) {
+      const current = this.streamReady(voice, step), neighbor = this.streamInterpolationReady(voice)
+      return current && neighbor ? true : 'waiting'
+    }
     // Preflight the complete output sample, including all skipped labels and
     // SLI jumps at high playback rates. Neither the initial prepare nor advance
     // may publish control changes when any required page is still missing.
@@ -693,7 +750,7 @@ export class AudioMixer {
     try {
       // EOF/error at the current position already has its original semantics.
       if (!this.prepareSample(voice)) { terminal = true; return false }
-      const ready = this.streamReady(voice)
+      const current = this.streamReady(voice), neighbor = this.streamInterpolationReady(voice), ready = current && neighbor
       if (!this.advance(voice, step, true) || !ready) return 'waiting'
     } finally {
       voice.stream!.endPreflight()
@@ -728,13 +785,13 @@ export class AudioMixer {
         asset = voice.asset
       let gains = voice.kind === 'wave' ? this.waveGains(voice) : undefined
       if (voice.synth) voice.synth.setBufferVolume(midiBufferVolume(settings.volume, settings.volume2))
-      let chain: AudioFilterChain | undefined, waiting = false
+      let chain: AudioFilterChain | undefined, neighbor: number | undefined, waiting = false
       const label = (name: string, position: number) => {
         settings.position = position
         this.event(voice, 'label', name)
       }
       const sample = (channel: number) =>
-        chain ? chain.sample(channel) : this.pcm(voice, channel, settings.position)
+        chain ? chain.sample(channel) : this.pcm(voice, channel, settings.position, neighbor)
       for (let frame = 0; frame < left.length; frame++) {
         voice.clock += dt
         if (voice.fade && voice.clock + 1e-10 >= voice.fade.next) {
@@ -773,6 +830,7 @@ export class AudioMixer {
             if (ready === 'waiting') { waiting = true; continue }
             if (!ready) continue
           } else if (!this.prepareSample(voice)) continue
+          neighbor = asset.kind === 'midi' || chain ? undefined : this.interpolationNeighbor(voice)
           let l: number, r: number
           if (asset.kind === 'midi') {
             voice.synth!.render(settings.position / asset.sampleRate, step / asset.sampleRate)

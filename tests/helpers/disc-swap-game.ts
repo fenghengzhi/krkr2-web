@@ -20,7 +20,7 @@ global.swapOpening=kag.historyLayer.currentLine;
 [eval exp="f.swapProgress=Scripts.evalStorage('D:/Routes/開幕.tjs')"]
 [jump target=*arrival]
 *arrival|Second disc chapter
-[image layer=base page=fore storage="D:/Art/Title.bmp"]
+[image layer=base page=fore storage="D:/Art/Title.bmp" clipleft=0 cliptop=0 clipwidth=640 clipheight=480]
 [cm][hr][nowait][emb exp="Scripts.evalStorage('D:/Routes/Moon Finale.tjs')"] [emb exp="f.swapProgress"][endnowait]
 [iscript]
 global.swapRendered=kag.historyLayer.currentLine;global.swapVisits++;

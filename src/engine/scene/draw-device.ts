@@ -28,8 +28,8 @@ export function drawDeviceGeometry(view: DrawingView, primaryWidth: number, prim
   const zoom = view.geometry?.actualZoom ?? { numer: view.zoomNumer, denom: view.zoomDenom },
     scroll = view.geometry?.scroll
   return {
-    x: deviceMulDiv(view.layerLeft, zoom.numer, zoom.denom) - (scroll?.x ?? 0),
-    y: deviceMulDiv(view.layerTop, zoom.numer, zoom.denom) - (scroll?.y ?? 0),
+    x: deviceMulDiv(view.layerLeft, zoom.numer, zoom.denom) - (scroll?.x ?? 0) - (view.geometry?.fullscreenCrop?.x ?? 0),
+    y: deviceMulDiv(view.layerTop, zoom.numer, zoom.denom) - (scroll?.y ?? 0) - (view.geometry?.fullscreenCrop?.y ?? 0),
     width: deviceMulDiv(primaryWidth, zoom.numer, zoom.denom),
     height: deviceMulDiv(primaryHeight, zoom.numer, zoom.denom),
   }

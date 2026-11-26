@@ -18,8 +18,8 @@ export function videoOutputRectangle(
     left = zoomEdge(settings.left, zoomNumer, zoomDenom),
     top = zoomEdge(settings.top, zoomNumer, zoomDenom)
   return {
-    left,
-    top,
+    left: left - (window.geometry?.fullscreenCrop?.x ?? 0),
+    top: top - (window.geometry?.fullscreenCrop?.y ?? 0),
     width: zoomEdge(settings.left + settings.width, zoomNumer, zoomDenom) - left,
     height: zoomEdge(settings.top + settings.height, zoomNumer, zoomDenom) - top,
   }

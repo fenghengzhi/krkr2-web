@@ -1,6 +1,7 @@
 import type { WindowGeometry, WindowGeometryRequest } from '../engine/ports/window-geometry.ts'
 import { validateWindowGeometry, windowGeometryLimit } from '../engine/scene/window-geometry.ts'
 import { deviceMulDiv } from '../engine/scene/draw-device.ts'
+import { fullscreenLayout } from '../engine/scene/fullscreen.ts'
 import { createGameMenus } from './game-menus.ts'
 
 const rectangle = (x: number, y: number, width: number, height: number) => ({ x, y, width, height })
@@ -68,23 +69,16 @@ export function measureWindowGeometry(
         Math.max(0, width - frame.borderX * 2), Math.max(0, height - frame.top - frame.bottom)),
       inner = rectangle(client.x + Math.min(inset, client.width), client.y + Math.min(inset, client.height),
         Math.max(0, client.width - inset * 2), Math.max(0, client.height - inset * 2)),
-      actualZoom = fullScreen
-        ? (width * request.innerRequest.height <= height * request.innerRequest.width
-          ? { numer: width, denom: request.innerRequest.width }
-          : { numer: height, denom: request.innerRequest.height })
-        : { numer: view.zoomNumer, denom: view.zoomDenom },
+      full = fullScreen ? fullscreenLayout(inner, request.innerRequest, request.fullscreenZoom) : undefined,
+      actualZoom = full?.zoom ?? { numer: view.zoomNumer, denom: view.zoomDenom },
       paintWidth = Math.max(0, deviceMulDiv(request.primary.width, actualZoom.numer, actualZoom.denom)),
       paintHeight = Math.max(0, deviceMulDiv(request.primary.height, actualZoom.numer, actualZoom.denom)),
       left = deviceMulDiv(view.layerLeft, actualZoom.numer, actualZoom.denom),
       top = deviceMulDiv(view.layerTop, actualZoom.numer, actualZoom.denom)
-    let area = { ...inner }
-    if (fullScreen) {
-      const fitWidth = Math.trunc(request.innerRequest.width * actualZoom.numer / actualZoom.denom),
-        fitHeight = Math.trunc(request.innerRequest.height * actualZoom.numer / actualZoom.denom)
-      area = rectangle(Math.trunc((width - fitWidth) / 2), Math.trunc((height - fitHeight) / 2), fitWidth, fitHeight)
-    }
+    const area = full?.area ?? inner
     scrollbox.style.cssText = `left:${area.x}px;top:${area.y}px;width:${area.width}px;height:${area.height}px;overflow:${view.showScrollBars ? 'auto' : 'hidden'}`
-    const extentX = Math.max(0, left + paintWidth), extentY = Math.max(0, top + paintHeight)
+    const extentX = Math.max(0, left + paintWidth - ((full?.width ?? area.width) - area.width)),
+      extentY = Math.max(0, top + paintHeight - ((full?.height ?? area.height) - area.height))
     spacer.style.width = `${extentX}px`; spacer.style.height = `${extentY}px`
     const viewport = rectangle(area.x, area.y, scrollbox.clientWidth, scrollbox.clientHeight),
       scrollbars = { horizontal: area.height - viewport.height, vertical: area.width - viewport.width },
@@ -102,7 +96,8 @@ export function measureWindowGeometry(
     return validateWindowGeometry(request, {
       revision: request.revision, surfaceEpoch, platform: 'dom', outer, client, inner, viewport, actualZoom, scrollbars,
       scroll: { x, y, maxX, maxY },
-      paintBox: rectangle(viewport.x + left - x, viewport.y + top - y, paintWidth, paintHeight),
+      ...(full?.crop && { fullscreenCrop: full.crop }),
+      paintBox: rectangle(viewport.x + left - x - (full?.crop?.x ?? 0), viewport.y + top - y - (full?.crop?.y ?? 0), paintWidth, paintHeight),
     })
   } finally { try { menus.dispose() } finally { element.remove() } }
 }
