@@ -19,3 +19,5 @@
 第 166 批影片转换器构建成功。应用生产构建随后因纯引擎 TypeScript 配置无法识别 CUE 解码器中的 `TextDecoder` 而失败，依赖该构建的 Node 和浏览器作业被跳过。本批将同一套文本解码逻辑放回文件后端，光盘读取使用后端提供的解码器。托管验收涵盖 UTF-8、两种字节序的 UTF-16 和 Shift-JIS。独立类型检查作业也开始使用纯引擎配置，可以在原生媒体构建结束前报告这类错误。[第 166 批转换器](https://github.com/fenghengzhi/krkr2-web/actions/runs/45843758935/job/139991941317) · [应用构建日志](https://github.com/fenghengzhi/krkr2-web/actions/runs/45843758935/job/139993446443) · [文本解码](../../src/backends/files/blob-source.ts)
 
 第 167 批的工具类型检查和影片转换器构建均已通过。已发布的 FFmpeg 比较文件记录 10/10 个声道布局匹配，取证时该作业与应用构建都还在运行，尚无该批游戏库报告。本批新增行为等待下一批取回托管证据。[第 167 批声道对照](https://github.com/fenghengzhi/krkr2-web/actions/runs/45846712743/job/140002166277) · [第 167 批应用构建](https://github.com/fenghengzhi/krkr2-web/actions/runs/45846712743/job/140002713374)
+
+第 168 批实现提交 `fea67c6` 登记时为 `queued`，运行结果在下一批取回。[第 168 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45849334408)
