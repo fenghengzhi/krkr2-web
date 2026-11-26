@@ -11,6 +11,11 @@ export const mpeg2XvidCases = [
   { file: 'legacy-xvid.avi', format: 'avi', audio: true, audioOffset: 0 },
 ] as const
 
+export const aviAdpcmCases = [
+  { file: 'legacy-msvideo1.avi', format: 'avi', audio: true, audioOffset: 0 },
+  { file: 'legacy-div3.avi', format: 'avi', audio: true, audioOffset: 0 },
+] as const
+
 export const windowsMediaCases = [
   { file: 'legacy-wmv1.wmv', format: 'asf', audio: true, audioOffset: 0 },
   { file: 'legacy-wmv2.asf', format: 'asf', audio: true, audioOffset: .3 },
@@ -20,7 +25,7 @@ export const legacyVideoColors = [[220, 30, 30], [25, 210, 35], [30, 45, 220]] a
 
 /** Author markers are intentionally coarse enough to survive MPEG/JPEG and
  * H.264 conversion. They identify every frame without fixed decoded bytes. */
-export function legacyFrameCode(pixels: readonly number[]): number {
+export function legacyFrameCode(pixels: ArrayLike<number>): number {
   if (pixels.length !== 96 * 64 * 4) throw new Error('Wrong legacy movie frame dimensions')
   let code = 0
   for (let bit = 0; bit < 7; bit++) {

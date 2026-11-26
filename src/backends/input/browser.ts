@@ -682,7 +682,6 @@ export class BrowserInput {
       button,
       shift,
       clicks,
-      ...(clicks === 1 && this.lastMouseDownPoint ? { clickPaintBoxPoint: { ...this.lastMouseDownPoint } } : {}),
       ...this.screenEvent(event),
     })
     if (type === 'up') {
@@ -944,6 +943,8 @@ export class BrowserInput {
         ...packet,
         pointerSequence: sequence,
         ...(capturedPoint ? { paintBoxPoint: capturedPoint } : {}),
+        ...(packet.type === 'up' && packet.clicks === 1 && this.lastMouseDownPoint
+          ? { clickPaintBoxPoint: { ...this.lastMouseDownPoint } } : {}),
       }
     }
     if (packet.type === 'leave' || packet.type === 'cancel') {

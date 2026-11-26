@@ -183,7 +183,7 @@ test('only the primary mouse button synthesizes VCL Click and DblClick while all
   } finally { coordinator.close(); env.restore() }
 })
 
-test('a release carries the original PaintBox click point without a second physical observation', async () => {
+for (const device of ['mouse', 'touch'] as const) test(`a ${device} release carries the original PaintBox click point across a view change`, async () => {
   const env = dom(), canvas = env.canvas(), packets: InputPacket[] = [],
     pointers: { x: number; y: number }[] = [], errors: unknown[] = [],
     coordinator = new BrowserInputCoordinator(async (packet) => { packets.push(packet) }, async () => {},
@@ -195,18 +195,27 @@ test('a release carries the original PaintBox click point without a second physi
     coordinator.attach(101, 1, canvas as unknown as HTMLCanvasElement)
     coordinator.setWindow(101, view); coordinator.setInput(101, inputView())
     canvas.focus(); await settle(); packets.length = 0; pointers.length = 0
-    env.mouse(canvas, 'mousedown', 1, 20); await settle()
+    const contact = (phase: 'down' | 'move' | 'up', x: number) => {
+      if (device === 'mouse') env.mouse(canvas, 'mouse' + phase, phase === 'up' ? 0 : 1, x)
+      else env.dispatch(canvas, 'pointer' + phase, { pointerType: 'touch', pointerId: 4, isPrimary: true,
+        clientX: x, clientY: 10, width: 2, height: 2 })
+    }
+    contact('down', 20); await settle()
     coordinator.setWindow(101, { ...view, zoomNumer: 2, zoomDenom: 3, layerLeft: -3, layerTop: 5 })
-    env.mouse(canvas, 'mousemove', 1, 150); env.mouse(canvas, 'mouseup', 0, 150)
+    contact('move', 150); contact('up', 150)
     await settle()
     const mouse = packets.filter((packet) => ['down', 'move', 'up'].includes(packet.type)), up = mouse.at(-1)!
-    assert.deepEqual(mouse.map((packet) => packet.type), ['down', 'move', 'up'])
-    assert.deepEqual(mouse[0]!.paintBoxPoint, { x: 18, y: 12 })
+    const approach = device === 'touch'
+    assert.deepEqual(mouse.map((packet) => packet.type), approach ? ['move', 'down', 'move', 'up'] : ['down', 'move', 'up'])
+    assert.deepEqual(mouse.find((packet) => packet.type === 'down')!.paintBoxPoint, { x: 18, y: 12 })
     assert.deepEqual(up.paintBoxPoint, { x: 152, y: 7 })
     assert.deepEqual(up.clickPaintBoxPoint, { x: 18, y: 12 })
-    assert.deepEqual(pointers, [{ x: 20, y: 10 }, { x: 150, y: 10 }, { x: 150, y: 10 }])
+    assert.deepEqual(pointers, (approach ? [20, 20, 150, 150] : [20, 150, 150]).map(x => ({ x, y: 10 })))
+    if (approach) assert.deepEqual(packets.flatMap((p) => 'id' in p ? [[p.type, p.x, p.y]] : []), [
+      ['touchDown', 20, 10], ['touchMove', 150, 10], ['touchUp', 150, 10],
+    ])
     assert.equal(packets.some((packet) => packet.type === 'click'), false)
-    assert.equal(new Set(mouse.map((packet) => packet.pointerSequence)).size, 3)
+    assert.equal(new Set(mouse.map((packet) => packet.pointerSequence)).size, mouse.length)
     assert.deepEqual(errors, [])
   } finally { coordinator.close(); env.restore() }
 })

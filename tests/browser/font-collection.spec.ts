@@ -3,7 +3,7 @@ import { fontCollectionCases, fontCollectionFiles, fontCollectionFrameMismatch,
   fontCollectionGameSource, fontCollectionLists } from '../helpers/font-collection-game.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
 import { pointerPixel } from '../helpers/pointer-pixel.ts'
-import { readScreenshotPng } from '../helpers/screenshot-png.ts'
+import { canvasPixels } from '../helpers/canvas-pixels.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: dialogue pages use all collection families and styles and filename loading returns to face zero`, async ({ page }, info) => {
@@ -23,23 +23,28 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         if (phase) { const point = await pointerPixel(canvas, 60, 80); await page.mouse.click(point.x, point.y) }
         await expect(page.getByText(`collection-face:${phase}:${row.width}:${row.face}:${Number(row.bold)}:${Number(row.file)}`, { exact: true })).toBeVisible({ timeout: 15000 })
         if (row.file) await expect(page.getByText('collection-file-charset:' + fontCollectionLists.fileCharset, { exact: true })).toBeVisible()
-        let png: Buffer | undefined
+        let captured: Awaited<ReturnType<typeof canvasPixels>> | undefined
         try {
           await expect.poll(async () => {
-            png = await canvas.screenshot({ scale: 'css', timeout: 5000 })
-            const image = readScreenshotPng(png)
-            const mismatch = fontCollectionFrameMismatch(image.rgba, image.width, image.height, phase)
-            if (observations.length < 96) observations.push({ phase, ...row, mismatch })
+            const image = captured = await canvasPixels(canvas),
+              mismatch = image.bounds.width !== 480 || image.bounds.height !== 100
+                ? { cssDimensions: [image.bounds.width, image.bounds.height] }
+                : fontCollectionFrameMismatch(Uint8Array.from(image.rgba), image.width, image.height, phase)
+            if (observations.length < 96) observations.push({ phase, ...row, mismatch,
+              width: image.width, height: image.height, bounds: image.bounds, devicePixelRatio: image.devicePixelRatio })
             return mismatch
           }, { timeout: 15000 }).toBeNull()
         } catch (error) {
           const pictureFailures = [error]
-          if (png) try { await info.attach(`font-collection-failed-${phase}`, { body: png, contentType: 'image/png' }) }
+          if (captured) try { await info.attach(`font-collection-failed-${phase}-rgba`, { body: Buffer.from(captured.rgba), contentType: 'application/octet-stream' }) }
+          catch (attachmentError) { pictureFailures.push(attachmentError) }
+          try { await info.attach(`font-collection-failed-${phase}`, { body: await canvas.screenshot({ scale: 'css', timeout: 5000 }), contentType: 'image/png' }) }
           catch (attachmentError) { pictureFailures.push(attachmentError) }
           if (pictureFailures.length > 1) throw new AggregateError(pictureFailures, 'Font collection picture and failure attachment failed', { cause: error })
           throw error
         }
-        await info.attach(`font-collection-${phase}`, { body: png!, contentType: 'image/png' })
+        await info.attach(`font-collection-${phase}`, { body: await canvas.screenshot({ scale: 'css', timeout: 5000 }), contentType: 'image/png' })
+        await info.attach(`font-collection-${phase}-rgba`, { body: Buffer.from(captured!.rgba), contentType: 'application/octet-stream' })
       }
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
@@ -47,7 +52,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       () => info.attach('authored-font-collection', { body: fixture.files['dialogue.ttc'], contentType: 'font/collection' }),
       () => info.attach('font-collection-game', { contentType: 'application/json', body: JSON.stringify({
         fixture: fixture.evidence, source: fontCollectionGameSource, observations,
-        scope: 'Actual Font.getList and source/bytecode Layer.drawText, real clicks, entire target panel compared with standalone authored font references. Only the TTC participates in family discovery; filename mode must use its first member.' }, null, 2) }),
+        scope: 'Actual Font.getList and source/bytecode Layer.drawText, real clicks, entire backing-canvas target panel compared with standalone authored font references. Exact intrinsic/CSS extents, geometric observations and unmodified screen PNGs retain fractional placement separately. Only the TTC participates in family discovery; filename mode must use its first member.' }, null, 2) }),
       async () => info.attach('font-collection-log', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }),
     ]) try { await report() } catch (error) { failures.push(error) }
     try {

@@ -3,6 +3,7 @@ import { evaluate } from '../helpers/browser-expression.ts'
 import { kagGameControls, kagGameLinkPoint } from '../helpers/kag-game-controls.ts'
 import { originalIntroduction } from '../helpers/kag-intro-package.ts'
 import { kagIntroStateExpression } from '../helpers/kag-intro-observation.ts'
+import { pointerPixel } from '../helpers/pointer-pixel.ts'
 const source = String.raw`
 var window=new Window();window.setInnerSize(160,80);window.visible=true;
 var root=new Layer(window,null);root.setSize(160,80);root.fillRect(0,0,160,80,0xff101010);
@@ -37,23 +38,17 @@ for (const backend of ['asyncify', 'jspi'])
       .setInputFiles({ name: 'startup.tjs', mimeType: 'text/plain', buffer: Buffer.from(source) })
     await expect(page.locator('#logs')).toContainText('input-ready')
     await expect(page.locator('#evaluate')).toBeEnabled()
-    const canvas = page.locator('canvas'),
-      bounds = (await canvas.boundingBox())!
-    await page.mouse.move(
-      bounds.x + (bounds.width * 10) / 160,
-      bounds.y + (bounds.height * 10) / 80,
-    )
+    const canvas = page.locator('canvas'), a = await pointerPixel(canvas, 10, 10), b = await pointerPixel(canvas, 70, 10)
+    await page.mouse.move(a.x, a.y)
     await expect(canvas).toHaveCSS('cursor', 'pointer')
     await expect(canvas).toHaveAttribute('title', 'button a')
     await page.mouse.down()
-    await page.mouse.move(
-      bounds.x + (bounds.width * 70) / 160,
-      bounds.y + (bounds.height * 10) / 80,
-    )
+    await page.mouse.move(b.x, b.y)
     await page.mouse.up()
-    await evaluate(page, 'position.indexOf("a:")==0 && clicked==""', '1')
-    await canvas.click({ position: { x: (bounds.width * 10) / 160, y: (bounds.height * 10) / 80 } })
-    await expect(page.locator('#logs')).toContainText('clicked=a')
+    await evaluate(page, 'position+"|"+clicked', 'a:70,10|a')
+    const again = await pointerPixel(canvas, 10, 10)
+    await page.mouse.click(again.x, again.y)
+    await expect(page.getByText('clicked=aa', { exact: true })).toBeVisible()
     await page.keyboard.press('Tab')
     await page.keyboard.type('Hi')
     // Keep Tab and typing adjacent. Only after all real key events have been
@@ -100,7 +95,7 @@ test.describe('touch input', () => {
   test.use({ hasTouch: true })
   for (const backend of ['asyncify', 'jspi'])
     test(`${backend}: tapping two controls updates hover before each press and clicks each once`, async ({
-      page,
+      page, browserName,
     }) => {
       const errors: string[] = []
       page.on('pageerror', (error) => errors.push(error.message))
@@ -125,6 +120,19 @@ test.describe('touch input', () => {
       )
       await expect(page.locator('#logs')).toContainText('clicked=ab')
       await evaluate(page, '[touches,clicked,downTargets,int(window.focusedLayer===b)].join("|")', '2|ab|a/a,b/b,|1')
+      // The portable Playwright touch API exposes taps. Chromium's touch
+      // driver can also keep a real contact down across both controls.
+      if (browserName === 'chromium') {
+        const canvas = page.locator('canvas'), start = await pointerPixel(canvas, 10, 10),
+          end = await pointerPixel(canvas, 70, 10), driver = await page.context().newCDPSession(page)
+        try {
+          await driver.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [start] })
+          await driver.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [end] })
+          await driver.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+          await expect(page.getByText('clicked=aba', { exact: true })).toBeVisible()
+          await evaluate(page, '[touches,clicked,position,int(window.focusedLayer===a)].join("|")', '3|aba|a:70,10|1')
+        } finally { await driver.detach() }
+      }
       await page.locator('#stop').click()
       await expect(page.locator('.game-text-input')).toHaveCount(0)
       expect(errors).toEqual([])

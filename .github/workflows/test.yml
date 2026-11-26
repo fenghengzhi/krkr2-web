@@ -261,6 +261,7 @@ jobs:
       legacy-fixtures: ${{ steps.legacy-fixtures.outcome }}
       windows-media-fixtures: ${{ steps.windows-media-fixtures.outcome }}
       mpeg2-xvid-fixtures: ${{ steps.mpeg2-xvid-fixtures.outcome }}
+      avi-adpcm-fixtures: ${{ steps.avi-adpcm-fixtures.outcome }}
       deflate64-fixtures: ${{ steps.deflate64-fixtures.outcome }}
       udf-discs: ${{ steps.udf-discs.outcome }}
       long-vorbis-fixture: ${{ steps.long-vorbis-fixture.outcome }}
@@ -391,6 +392,17 @@ jobs:
           const directory = 'out/verification/video-tracks'
           mkdirSync(directory, { recursive: true })
           generateMpeg2XvidFixtures(directory)
+          JS
+      - name: Generate and independently decode MS Video 1 and DivX 3 AVI with ADPCM
+        id: avi-adpcm-fixtures
+        continue-on-error: true
+        run: |
+          node --input-type=module <<'JS' 2>&1 | tee out/ci/avi-adpcm-fixtures.log
+          import { mkdirSync } from 'node:fs'
+          import { generateAviAdpcmFixtures } from './scripts/generate-legacy-video-fixtures.mjs'
+          const directory = 'out/verification/video-tracks'
+          mkdirSync(directory, { recursive: true })
+          generateAviAdpcmFixtures(directory)
           JS
       - name: Encode and independently decode long Vorbis music
         id: long-vorbis-fixture
@@ -536,6 +548,17 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.avi-adpcm-fixtures.outcome == 'success' || steps.avi-adpcm-fixtures.outcome == 'failure') }}
+        with:
+          name: avi-adpcm-fixture-evidence
+          path: |
+            out/verification/video-tracks/avi-adpcm*
+            out/verification/video-tracks/legacy-msvideo1*
+            out/verification/video-tracks/legacy-div3*
+            out/ci/avi-adpcm-fixtures.log
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() && (steps.long-vorbis-fixture.outcome == 'success' || steps.long-vorbis-fixture.outcome == 'failure') }}
         with:
           name: long-vorbis-fixture-evidence
@@ -629,6 +652,11 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.mpeg2-xvid-fixtures }}
+        run: test "$FIXTURE_OUTCOME" = success
+      - name: Require complete MS Video 1 and DivX 3 AVI/ADPCM references
+        if: ${{ !cancelled() }}
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.avi-adpcm-fixtures }}
         run: test "$FIXTURE_OUTCOME" = success
 
   node:

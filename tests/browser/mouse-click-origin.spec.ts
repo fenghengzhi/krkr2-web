@@ -74,7 +74,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
         lastCanvas: captured && { width: captured.width, height: captured.height, bounds: captured.bounds, devicePixelRatio: captured.devicePixelRatio },
         scope: 'Trusted left-button down/move/up inside the same game canvas. Original Form Click uses the down point while MouseUp uses release; both actions and every backing-canvas pixel are checked. Unmodified screen PNGs retain fractional CSS placement separately. Double-click timing and outside-client click cancellation are unchanged.' }, null, 2) })
     } catch (error) { failures.push(error) }
-    try { if (pressed) await page.mouse.up(); await game.stop() } catch (error) { failures.push(error) }
+    try { if (pressed) await page.mouse.up() } catch (error) { failures.push(error) }
+    try { await game.stop() } catch (error) { failures.push(error) }
     if (failures.length === 1) throw failures[0]
     if (failures.length) throw new AggregateError(failures, 'Drag choice or cleanup failed', { cause: failures[0] })
   })

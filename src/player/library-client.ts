@@ -19,13 +19,25 @@ export class LibraryClient {
           }),
         { pool: 1 },
       ))
-      const channel = (this.channel = new MessageChannel())
-      channel.port1.onmessage = (event: MessageEvent<LibraryProgress>) => {
-        if (this.rpc === rpc) this.progress(event.data)
+      const failed = (error: unknown): never => {
+        // A late rejection from a retired connection cannot close its retry.
+        if (this.rpc === rpc) {
+          try { this.close() }
+          catch (cleanup) { throw new AggregateError([error, cleanup], 'Library connection and cleanup failed', { cause: error }) }
+        }
+        throw error
       }
-      this.connected = rpc.call('connect', [
-        transfer(channel.port2, [channel.port2]),
-      ]) as ReturnType<LibraryApi['connect']>
+      try {
+        const channel = (this.channel = new MessageChannel())
+        channel.port1.onmessage = (event: MessageEvent<LibraryProgress>) => {
+          if (this.rpc === rpc) this.progress(event.data)
+        }
+        this.connected = (rpc.call('connect', [
+          transfer(channel.port2, [channel.port2]),
+        ]) as ReturnType<LibraryApi['connect']>).catch(failed)
+      } catch (error) {
+        failed(error)
+      }
     }
     return this.connected!
   }
@@ -41,9 +53,8 @@ export class LibraryClient {
       if (this.importing) throw new Error('An import is already in progress')
       this.importing = operation
     }
-    const connected = this.connect(),
-      rpc = this.rpc!
     try {
+      const connected = this.connect(), rpc = this.rpc!
       await connected
       if (operation?.cancelled || this.rpc !== rpc)
         throw new DOMException('Library operation cancelled', 'AbortError')
@@ -83,11 +94,14 @@ export class LibraryClient {
     }
   }
   close(): void {
-    this.rpc?.dispose()
-    this.channel?.port1.close()
-    this.channel?.port2.close()
+    const rpc = this.rpc, channel = this.channel, errors: unknown[] = []
     this.rpc = undefined
     this.channel = undefined
     this.connected = undefined
+    for (const close of [() => rpc?.dispose(), () => channel?.port1.close(), () => channel?.port2.close()]) {
+      try { close() } catch (error) { errors.push(error) }
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Library client cleanup failed', { cause: errors[0] })
   }
 }

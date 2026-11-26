@@ -91,6 +91,14 @@ function generateMovieFixtures(directory, prefix) {
   const videoInput = ['-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', `${width}x${height}`],
     audioInput = ['-f', 's16le', '-ar', String(rate), '-ac', '1', '-i', path(prefix + '-authored.s16le')],
     fixturesByGroup = {
+      'avi-adpcm': [
+        { file: 'legacy-msvideo1.avi', aliases: [], video: 'msvideo1', videoTag: 'MSVC', audio: 'adpcm_ima_wav', container: 'avi',
+          options: ['-c:v', 'msvideo1', '-vtag', 'MSVC', '-pix_fmt', 'rgb555le',
+            '-c:a', 'adpcm_ima_wav', '-f', 'avi'] },
+        { file: 'legacy-div3.avi', aliases: [], video: 'msmpeg4v3', videoTag: 'DIV3', audio: 'adpcm_ms', container: 'avi',
+          options: ['-c:v', 'msmpeg4', '-vtag', 'DIV3', '-q:v', '2', '-g', '12', '-bf', '0', '-pix_fmt', 'yuv420p',
+            '-c:a', 'adpcm_ms', '-f', 'avi'] },
+      ],
       'mpeg2-xvid': [
         { file: 'legacy-mpeg2.mpg', aliases: [], video: 'mpeg2video', audio: 'mp2', container: 'mpeg', audioOffset: .3, bFrames: true,
           options: ['-c:v', 'mpeg2video', '-q:v', '2', '-g', '12', '-bf', '2', '-pix_fmt', 'yuv420p',
@@ -164,7 +172,8 @@ function generateMovieFixtures(directory, prefix) {
       run('ffmpeg', [...common, '-i', path(item.file), '-map', '0:v:0', '-vsync', '0', '-pix_fmt', 'rgba', '-f', 'rawvideo', path(item.file + '.rgba')], item.file + '.decode')
       const decoded = readFileSync(path(item.file + '.rgba'))
       if (decoded.length !== width * height * 4 * frames) throw new Error(`Incomplete independent legacy decode: ${item.file}`)
-      const checkedFrames = item.elementary || prefix === 'mpeg2-xvid' ? Array.from({ length: frames }, (_, i) => i) : [0, 25, 50, 80]
+      const checkedFrames = item.elementary || prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm'
+        ? Array.from({ length: frames }, (_, i) => i) : [0, 25, 50, 80]
       const checks = checkedFrames.map((frame) => {
         const phase = frame < 40 ? 0 : frame < 70 ? 1 : 2, at = (frame * width * height + 32 * width + 48) * 4,
           color = [...decoded.subarray(at, at + 4)]
@@ -181,7 +190,7 @@ function generateMovieFixtures(directory, prefix) {
         return { frame, color, code, timestamp: timeline.frames[frame] }
       })
       let decodedAudio
-      if (prefix === 'mpeg2-xvid') {
+      if (prefix === 'mpeg2-xvid' || prefix === 'avi-adpcm') {
         const file = item.file + '.s16le'
         run('ffmpeg', [...common, '-i', path(item.file), '-map', '0:a:0', '-ac', '1', '-ar', String(rate),
           '-f', 's16le', path(file)], item.file + '.decode-audio')
@@ -235,3 +244,4 @@ export const generateLegacyVideoFixtures = (directory) => generateMovieFixtures(
 /** Separate invocation/report: a failed MPEG fixture must not suppress WMV. */
 export const generateWindowsMediaFixtures = (directory) => generateMovieFixtures(directory, 'windows-media')
 export const generateMpeg2XvidFixtures = (directory) => generateMovieFixtures(directory, 'mpeg2-xvid')
+export const generateAviAdpcmFixtures = (directory) => generateMovieFixtures(directory, 'avi-adpcm')

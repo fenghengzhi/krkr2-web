@@ -68,27 +68,27 @@ function kagConditionResumeFile(path){
 export const kagConditionGameFiles = {
   'first.ks': String.raw`[eval exp="f.stackValue=0"]
 *menu|Conditional chapter
-[cm][nowait]MENU[endnowait][stackmark phase=menu]
+[cm][hr][nowait]MENU[endnowait][stackmark phase=menu]
 [r][link target=*enter]Enter chapter[endlink]
 [s]
 *enter
 [call storage=branch.ks target=*entry]
 [jump target=*returned]
 *returned|Original caller
-[cm][nowait]RETURN [emb exp=f.stackValue][endnowait][stackmark phase=returned]
+[cm][hr][nowait]RETURN [emb exp=f.stackValue][endnowait][stackmark phase=returned]
 [s]
 `,
   'branch.ks': String.raw`*entry
 [if exp=false][if exp=true]
 *saved
 [endif][else]
-[cm][nowait]FIRST PASS[endnowait][stackmark phase=initial]
+[cm][hr][nowait]FIRST PASS[endnowait][stackmark phase=initial]
 [r][link target=*resume]Read saved branch[endlink]
 [s]
 [endif]
 [eval exp="f.stackValue=7"]
 *result|Restored branch
-[cm][nowait]RESTORED [emb exp=f.stackValue][endnowait][stackmark phase=restored]
+[cm][hr][nowait]RESTORED [emb exp=f.stackValue][endnowait][stackmark phase=restored]
 [r][link target=*save]Save slot[endlink] / [link target=*change]Change[endlink] / [link target=*load]Load slot[endlink] / [link target=*return]Return[endlink]
 [s]
 *resume
@@ -99,7 +99,7 @@ export const kagConditionGameFiles = {
 [jump target=*result]
 *change
 [eval exp="f.stackValue=99"]
-[cm][nowait]CHANGED [emb exp=f.stackValue][endnowait][stackmark phase=changed]
+[cm][hr][nowait]CHANGED [emb exp=f.stackValue][endnowait][stackmark phase=changed]
 [r][link target=*load]Load slot[endlink]
 [s]
 *load

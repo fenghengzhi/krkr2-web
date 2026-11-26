@@ -9,6 +9,7 @@ import { validateLegacyMediaManifest, type LegacyMediaFactory, type LegacyMediaM
 import { readVideoTimelineBlob } from '../../src/formats/video/mp4.ts'
 import { legacyVideoFormat } from '../../src/backends/video/legacy/format.ts'
 import { inspectLegacyAudio } from '../helpers/legacy-audio-reference.ts'
+import { inspectLegacyPictures } from '../helpers/legacy-picture-reference.ts'
 
 interface InputReference {
   file: string; bytes: number; sha256: string; audioCodec: string | null; videoCodec: string; videoTag: string
@@ -23,6 +24,8 @@ for (const group of [
     required: ['legacy-mpeg2.mpg', 'legacy-xvid.avi'] },
   { label: 'ASF with WMV1/WMA1 and WMV2/WMA2', reference: 'windows-media-reference.json', output: 'windows-media',
     required: ['legacy-wmv1.wmv', 'legacy-wmv2.wmv'] },
+  { label: 'AVI with MS Video 1/IMA ADPCM and DivX 3/Microsoft ADPCM', reference: 'avi-adpcm-reference.json', output: 'avi-adpcm',
+    required: ['legacy-msvideo1.avi', 'legacy-div3.avi'] },
 ]) test(`the actual single-thread legacy WASM decodes authored ${group.label} into complete selectable MP4 timelines`, { timeout: 600000 }, async () => {
   const directory = resolve('.generated/legacy-media'), fixtures = resolve('out/verification/video-tracks'),
     output = resolve('out/ci', group.output), hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
@@ -46,6 +49,9 @@ for (const group of [
     assert.deepEqual(reference.fixtures.map((entry) => [entry.videoCodec, entry.audioCodec]), [['mpeg2video', 'mp2'], ['mpeg4', 'mp3']])
     assert.equal(reference.fixtures.find((entry) => entry.file === 'legacy-xvid.avi')?.videoTag, 'XVID')
   }
+  if (group.output === 'avi-adpcm')
+    assert.deepEqual(reference.fixtures.map((entry) => [entry.videoCodec, entry.videoTag, entry.audioCodec]),
+      [['msvideo1', 'MSVC', 'adpcm_ima_wav'], ['msmpeg4v3', 'DIV3', 'adpcm_ms']])
   for (const entry of reference.fixtures) {
     const log: string[] = [], observation: Record<string, unknown> = { input: entry.file, videoCodec: entry.videoCodec, audioCodec: entry.audioCodec }
     observations.push(observation)
@@ -61,6 +67,7 @@ for (const group of [
         converted = new Uint8Array(await blob.arrayBuffer()), timeline = await readVideoTimelineBlob(blob)
       const moviePath = resolve(output, entry.file + '.mp4')
       writeFileSync(moviePath, converted)
+      Object.assign(observation, { outputBytes: converted.length, outputSha256: hash(converted), timeline })
       assert.equal(blob.type, 'video/mp4'); assert.equal(String.fromCharCode(...converted.subarray(4, 8)), 'ftyp')
       assert(timeline)
       assert.equal(timeline.videoStreams, 1); assert.equal(timeline.audioStreams, entry.audioCodec ? 1 : 0)
@@ -71,17 +78,24 @@ for (const group of [
       assert.equal(entry.fps, fps)
       assert(Math.abs(timeline.frameDuration - 1000 / fps) < .001)
       const expected = entry.normalizedVideoTimes.map((time) => time * 1000)
+      observation.expectedTimes = expected
       assert.equal(expected.length, reference.frames)
       assert(expected.every(Number.isFinite))
       for (const [index, time] of timeline.times.entries())
         assert(Math.abs(time - expected[index]!) < .1, `${entry.file} frame ${index}: ${time} ms / independent source ${expected[index]} ms`)
-      if (entry.audioCodec) inspectLegacyAudio(moviePath, entry.audioInputOffset, observation)
-      Object.assign(observation, { matched: true, outputBytes: converted.length, outputSha256: hash(converted), timeline, expectedTimes: expected })
+      const decodedFailures: unknown[] = []
+      if (group.output === 'windows-media') try { inspectLegacyPictures(moviePath, entry.normalizedVideoTimes, observation) }
+      catch (error) { decodedFailures.push(error) }
+      if (entry.audioCodec) try { inspectLegacyAudio(moviePath, entry.audioInputOffset, observation) }
+      catch (error) { decodedFailures.push(error) }
+      if (decodedFailures.length === 1) throw decodedFailures[0]
+      if (decodedFailures.length) throw new AggregateError(decodedFailures, 'Independent picture and audio comparisons failed', { cause: decodedFailures[0] })
+      observation.matched = true
     } catch (error) { observation.error = String(error); failures.push(error) }
     finally { observation.log = log }
   }
   writeFileSync(resolve(output, 'comparison.json'), JSON.stringify({ complete: !failures.length, manifest, cinepak: reference.cinepak,
-    scope: 'Real pinned WASM decoding and encoding; independent input frame timestamps and system FFmpeg decoded audio timing. Browser tests separately require visible frame markers, shared full RGBA and actual audio. Lossy conversion is not original DirectShow sample identity.',
+    scope: 'Real pinned WASM decoding and encoding; independent input frame timestamps and system FFmpeg decoded audio timing. Windows Media additionally checks all 100 decoded output picture markers and independent display PTS within 0.1 ms of source timestamps. Browser tests separately require visible frame markers, shared full RGBA and actual audio. Lossy conversion is not original DirectShow sample identity.',
     observations }, null, 2) + '\n')
   if (failures.length === 1) throw failures[0]
   if (failures.length) throw new AggregateError(failures, 'Legacy movie conversions failed', { cause: failures[0] })

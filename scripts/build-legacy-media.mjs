@@ -69,7 +69,7 @@ const link = ['-O2', '-sMODULARIZE=1', '-sEXPORT_ES6=1', '-sEXPORT_NAME=createLe
     '--enable-ffmpeg', '--disable-avdevice', '--disable-postproc', '--disable-shared', '--enable-static',
     '--enable-avformat', '--enable-avcodec', '--enable-avfilter', '--enable-swscale', '--enable-swresample',
     '--enable-libopenh264', '--enable-protocol=file', '--enable-demuxer=mpegps,mpegvideo,avi,asf',
-    '--enable-decoder=mpeg1video,mpeg2video,mpeg4,mp2,mp3,cinepak,mjpeg,wmv1,wmv2,wmav1,wmav2,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le',
+    '--enable-decoder=mpeg1video,mpeg2video,mpeg4,msmpeg4v3,msvideo1,mp2,mp3,adpcm_ima_wav,adpcm_ms,cinepak,mjpeg,wmv1,wmv2,wmav1,wmav2,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le',
     '--enable-parser=mpegvideo,mpeg4video,mpegaudio,mjpeg,h264,aac', '--enable-encoder=libopenh264,aac', '--enable-muxer=mp4',
     '--enable-filter=buffer,buffersink,abuffer,abuffersink,null,anull,format,aformat,scale,aresample',
     '--enable-bsf=aac_adtstoasc,extract_extradata', '--pkg-config=pkg-config',

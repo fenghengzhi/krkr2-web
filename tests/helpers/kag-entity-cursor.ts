@@ -102,7 +102,7 @@ Debug.message("entity-cursor-game-ready");
 `
 export const kagEntityStory = String.raw`[eval exp="f.entityProgress=0"]
 *choice|Adjacent route records
-[cm][nowait]CHOOSE[endnowait]
+[cm][hr][nowait]CHOOSE[endnowait]
 [iscript]
 global.entityGameRendered=global.kag.historyLayer.currentLine;global.entityGameVisits++;
 [endscript]
@@ -112,7 +112,7 @@ global.entityGameRendered=global.kag.historyLayer.currentLine;global.entityGameV
 [eval exp="f.entityProgress=int(global.entityGameOption.score)"]
 [jump target=*checkpoint]
 *checkpoint|Generated chapter
-[cm][nowait]CHAPTER [emb exp=f.entityProgress][endnowait]
+[cm][hr][nowait]CHAPTER [emb exp=f.entityProgress][endnowait]
 [iscript]
 global.entityGameRendered=global.kag.historyLayer.currentLine;global.entityGameVisits++;
 [endscript]

@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { test, expect, observeVideoFrames } from '../helpers/video-presentation-browser.ts'
 import { installHandoffReadbacks, type ProbeWindow } from '../helpers/video-handoff-capture.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia, type VideoAudioObservation } from '../helpers/video-audio-probe.ts'
-import { legacyFrameCode, legacyVideoCases, windowsMediaCases, mpeg2XvidCases, legacyVideoColors, legacyVideoGame } from '../helpers/legacy-video-game.ts'
+import { legacyFrameCode, legacyVideoCases, windowsMediaCases, mpeg2XvidCases, aviAdpcmCases, legacyVideoColors, legacyVideoGame } from '../helpers/legacy-video-game.ts'
 
 interface ConvertedOpen {
   name: string; bytes: number; mime: string; signature?: string; sha256?: string; error?: string
@@ -19,6 +19,7 @@ for (const group of [
   { label: 'legacy MPEG and AVI', cases: legacyVideoCases, reference: 'legacy-video-reference.json' },
   { label: 'MPEG-2 program streams and Xvid AVI with MP3', cases: mpeg2XvidCases, reference: 'mpeg2-xvid-reference.json' },
   { label: 'Windows Media WMV and ASF', cases: windowsMediaCases, reference: 'windows-media-reference.json' },
+  { label: 'MS Video 1 and DivX 3 AVI with ADPCM sound', cases: aviAdpcmCases, reference: 'avi-adpcm-reference.json' },
 ]) for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
   test(`${backend}/${binary ? 'bytecode' : 'source'}: ${group.label} movies play authored pictures and timed sound through ordinary VideoOverlay controls`, async ({ page }, info) => {
     test.setTimeout(240000)
@@ -86,15 +87,21 @@ for (const group of [
         expect(await page.locator('video[data-video-id]').evaluate((video) => !(video as HTMLVideoElement).paused)).toBe(true)
       }).toPass({ timeout: 15000 })
     }
-    const capture = async (phase: string, frame: number, expectedSourceFrame: number, prepared = false) => {
+    const capture = async (phase: string, frame: number, sourceTimes: number[], prepared = false) => {
+      let expectedSourceFrame = 0
+      for (const [index, time] of sourceTimes.entries()) if (time <= frame / 25 + 1e-6) expectedSourceFrame = index
       const sample = await canvas.evaluate((node) => {
         const canvas = node as HTMLCanvasElement,
           video = document.querySelector<HTMLVideoElement>(`video[data-video-id][data-window-id="${canvas.dataset.windowId}"]`)
         if (!video || video.readyState < 2 || !video.paused || video.seeking) throw new Error('Legacy movie capture requires a settled paused decoder')
-        return (window as unknown as ProbeWindow).handoffReadbacks.capture(video, canvas)
+        return { ...(window as unknown as ProbeWindow).handoffReadbacks.capture(video, canvas),
+          duration: video.duration, seekable: Array.from({ length: video.seekable.length }, (_, i) =>
+            [video.seekable.start(i), video.seekable.end(i)]) }
       })
       const digest = (pixels: readonly number[]) => createHash('sha256').update(Uint8Array.from(pixels)).digest('hex'),
         compact = { phase, clockFrame: frame, expectedSourceFrame, prepared, dropped: sample.dropped,
+          sourceStartSeconds: sourceTimes[0], expectedFrameStartSeconds: sourceTimes[expectedSourceFrame],
+          nextFrameStartSeconds: sourceTimes[expectedSourceFrame + 1], mediaDuration: sample.duration, seekable: sample.seekable,
           media: { position: sample.media.position, paused: sample.media.paused, seeking: sample.media.seeking,
             width: sample.media.width, height: sample.media.height, sha256: digest(sample.media.pixels), frame: -1 },
           production: sample.production && { position: sample.production.position, width: sample.production.width,
@@ -106,10 +113,10 @@ for (const group of [
       expect([sample.media.width, sample.media.height]).toEqual([96, 64])
       expect(sample.media.position).toBe(frame / 25)
       compact.media.frame = legacyFrameCode(sample.media.pixels)
-      expect(compact.media.frame).toBe(expectedSourceFrame)
       const actual = sample.production!.pixels, displayedFrame = legacyFrameCode(actual), colorPhase = displayedFrame < 40 ? 0 : displayedFrame < 70 ? 1 : 2,
         at = (32 * 96 + 48) * 4
       compact.production!.frame = displayedFrame; compact.production!.center = actual.slice(at, at + 4)
+      expect(compact.media.frame).toBe(expectedSourceFrame)
       if (prepared) expect(displayedFrame).toBeLessThan(40)
       else { expect(displayedFrame).toBe(expectedSourceFrame); expect(actual).toEqual(sample.media.pixels) }
       for (let channel = 0; channel < 3; channel++)
@@ -156,12 +163,7 @@ for (const group of [
         await expect(canvas).toBeVisible()
         const meta = (await read('[legacyMovie.originalWidth,legacyMovie.originalHeight,legacyMovie.fps,legacyMovie.numberOfFrame,legacyMovie.totalTime,legacyMovie.numberOfAudioStream,legacyMovie.numberOfVideoStream].join("|")')).split('|').map(Number)
         const duration = await page.locator('video[data-video-id]').evaluate((video) => (video as HTMLVideoElement).duration),
-          source = parsed.fixtures.find((f) => f.file === item.file || f.aliases.includes(item.file))!,
-          sourceFrameAt = (seconds: number) => {
-            let frame = 0
-            for (const [at, time] of source.normalizedVideoTimes.entries()) if (time <= seconds + 1e-6) frame = at
-            return frame
-          }
+          source = parsed.fixtures.find((f) => f.file === item.file || f.aliases.includes(item.file))!
         expect(await read('legacyOpenClock')).toBe('0|0')
         expect(source.normalizedVideoTimes).toHaveLength(100)
         if (item.file === 'legacy-wmv1.wmv') expect(source.normalizedVideoTimes[0]).toBeGreaterThan(0)
@@ -177,12 +179,12 @@ for (const group of [
         expect(opened.timeline.audioStreams).toBe(item.audio ? 1 : 0)
         readings.push({ file: item.file, meta, opened })
         expect((await observeVideoAudio(page)).liveUrls).toBe(1)
-        await capture(item.file + '-opened', 0, sourceFrameAt(0))
+        await capture(item.file + '-opened', 0, source.normalizedVideoTimes)
         for (const [action, frame] of [[1, 25], [2, 50], [3, 80]] as const) {
           await click(action)
           await expect(page.getByText(`legacy-action:${index}:${action}:pause`, { exact: true })).toBeVisible()
           expect(await read('legacyMovie.frame+"|"+legacyMovie.position')).toBe(`${frame}|${frame * 40}`)
-          await capture(item.file + '-seek-' + frame, frame, sourceFrameAt(frame / 25))
+          await capture(item.file + '-seek-' + frame, frame, source.normalizedVideoTimes)
         }
         await click(4)
         await expect(page.getByText(`legacy-action:${index}:4:play`, { exact: true })).toBeVisible()
@@ -191,7 +193,7 @@ for (const group of [
           if (await button.isVisible()) await button.click({ timeout: 500 })
           expect(await read('legacyState()')).toBe(`${index}|pause|0|0|1|0`)
         }).toPass({ timeout: 20000 })
-        const first = await capture(item.file + '-prepared', 0, sourceFrameAt(0), true), events = (await read('legacyEvents.join("|")')).split('|'),
+        const first = await capture(item.file + '-prepared', 0, source.normalizedVideoTimes, true), events = (await read('legacyEvents.join("|")')).split('|'),
           returned = events.indexOf('return:play'), frameEvent = events.findIndex((event) => event.startsWith('frame:')),
           period = events.findIndex((event) => event.startsWith('period:2:'))
         expect(returned).toBeGreaterThanOrEqual(0); expect(frameEvent).toBeGreaterThan(returned); expect(period).toBeGreaterThan(frameEvent)

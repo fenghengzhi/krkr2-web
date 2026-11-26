@@ -39,6 +39,7 @@ export async function buildClientStopEmbedding() {
             return [
               `export { SessionClient } from ${JSON.stringify(resolve('src/player/session-client.ts'))};`,
               `export { LibraryClient } from ${JSON.stringify(resolve('src/player/library-client.ts'))};`,
+              `export { exerciseLibraryCancellation, exerciseLibraryConnectRetry, exerciseLibraryRetiredConnection } from ${JSON.stringify(resolve('tests/helpers/library-client-boundary.ts'))};`,
             ].join('\n')
           },
         },
@@ -107,16 +108,19 @@ interface StopBoundaryObservation {
   }[]
   channels: { closed: [number, number] }[]
 }
+type BoundaryOperation = 'stop' | 'cancel' | 'refreshWindowGeometry' | 'importGame' | 'connect'
 declare global {
   interface Window {
     clientStopBoundary: {
-      arm(operation: 'stop' | 'cancel' | 'refreshWindowGeometry'): void
+      arm(...operations: BoundaryOperation[]): void
+      release(operation: BoundaryOperation): void
+      failConnect(phase: 'construction' | 'post'): void
       read(): StopBoundaryObservation
     }
   }
 }
 
-/** Explicit fault: withhold one real reply, after the actual Worker produced it.
+/** Explicit fault: withhold named real replies after the actual Worker produced them.
  * All requests, other responses, Worker construction/termination and port closes
  * call the native implementation exactly once. No runtime or save result is faked. */
 export async function observeClientStopBoundary(page: Page) {
@@ -130,13 +134,23 @@ export async function observeClientStopBoundary(page: Page) {
       records = new WeakMap<Worker, StopBoundaryObservation['workers'][number]>(),
       channels: StopBoundaryObservation['channels'] = [],
       ports = new WeakMap<MessagePort, { channel: number; index: 0 | 1 }>()
-    let armed: 'stop' | 'cancel' | 'refreshWindowGeometry' | undefined,
-      held: { worker: Worker; id: string; operation: string } | undefined
+    const armed = new Set<string>(), held = new Map<string,
+      { worker: Worker; id: string; operation: string; event?: MessageEvent }>()
+    let failConnect: 'construction' | 'post' | undefined
     window.clientStopBoundary = {
-      arm(operation) {
-        if (armed || held) throw new Error('Only one reply may be withheld per fixture')
-        armed = operation
+      arm(...operations) {
+        if (armed.size || held.size) throw new Error('A reply boundary is already armed')
+        for (const operation of operations) armed.add(operation)
       },
+      release(operation) {
+        for (const [id, entry] of held) if (entry.operation === operation && entry.event) {
+          held.delete(id)
+          // Deliver the actual saved Worker payload once; its computation and
+          // database effect already happened. No reply value is manufactured.
+          entry.worker.dispatchEvent(new MessageEvent('message', { data: entry.event.data }))
+        }
+      },
+      failConnect(phase) { failConnect = phase },
       read: () => structuredClone({ workers, channels }),
     }
     window.MessageChannel = new Proxy(NativeChannel, {
@@ -157,6 +171,10 @@ export async function observeClientStopBoundary(page: Page) {
     }
     window.Worker = new Proxy(NativeWorker, {
       construct(target, args, newTarget) {
+        if (failConnect === 'construction' && (args[1] as WorkerOptions | undefined)?.name === 'krkr2-library') {
+          failConnect = undefined
+          throw new Error('Fixture library Worker construction unavailable')
+        }
         const worker = Reflect.construct(target, args, newTarget) as Worker,
           record: StopBoundaryObservation['workers'][number] = {
             name: (args[1] as WorkerOptions | undefined)?.name ?? '',
@@ -169,12 +187,13 @@ export async function observeClientStopBoundary(page: Page) {
         worker.addEventListener(
           'message',
           (event: MessageEvent<{ id?: string; type?: string }>) => {
+            const entry = event.data?.id ? held.get(event.data.id) : undefined
             if (
-              held?.worker === worker &&
-              event.data?.id === held.id &&
+              entry?.worker === worker &&
               event.data.type === 'RAW'
             ) {
-              record.held.push({ id: held.id, operation: held.operation, type: event.data.type })
+              entry.event = event
+              record.held.push({ id: entry.id, operation: entry.operation, type: event.data.type })
               // Registered before RPC's receive listener. This explicit boundary
               // fault does not alter or execute the already-completed Worker task.
               event.stopImmediatePropagation()
@@ -193,17 +212,20 @@ export async function observeClientStopBoundary(page: Page) {
           type?: string
           argumentList?: { value?: unknown }[]
         },
-        operation = packet?.argumentList?.[0]?.value,
-        result = Reflect.apply(nativePost, this, [message, options])
+        operation = packet?.argumentList?.[0]?.value
+      if (failConnect === 'post' && operation === 'connect' && records.get(this)?.name === 'krkr2-library') {
+        failConnect = undefined
+        throw new Error('Fixture library connect transport unavailable')
+      }
+      const result = Reflect.apply(nativePost, this, [message, options])
       if (
         packet?.type === 'APPLY' &&
         typeof packet.id === 'string' &&
         typeof operation === 'string'
       ) {
         records.get(this)?.sent.push({ id: packet.id, operation })
-        if (operation === armed) {
-          held = { worker: this, id: packet.id, operation }
-          armed = undefined
+        if (armed.delete(operation)) {
+          held.set(packet.id, { worker: this, id: packet.id, operation })
         }
       }
       return result
@@ -212,6 +234,7 @@ export async function observeClientStopBoundary(page: Page) {
       const result = Reflect.apply(nativeTerminate, this, []),
         record = records.get(this)
       if (record) record.terminated++
+      for (const [id, entry] of held) if (entry.worker === this) held.delete(id)
       return result
     }
   })

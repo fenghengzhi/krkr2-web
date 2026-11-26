@@ -128,7 +128,7 @@ Debug.message("live-tag-game-ready");
 `
 export const kagLiveStory = String.raw`[eval exp="f.liveProgress=0"]
 *choice|Live generated choice
-[cm][nowait]CHOOSE[endnowait]
+[cm][hr][nowait]CHOOSE[endnowait]
 [iscript]
 global.liveGameRendered=global.kag.historyLayer.currentLine;global.liveGameVisits++;
 [endscript]
@@ -138,7 +138,7 @@ global.liveGameRendered=global.kag.historyLayer.currentLine;global.liveGameVisit
 [eval exp="f.liveProgress=int(global.liveGameChoice.score)"]
 [jump target=*checkpoint]
 *checkpoint|Live choice chapter
-[cm][nowait]CHAPTER [emb exp=f.liveProgress][endnowait]
+[cm][hr][nowait]CHAPTER [emb exp=f.liveProgress][endnowait]
 [iscript]
 global.liveGameRendered=global.kag.historyLayer.currentLine;global.liveGameVisits++;
 [endscript]

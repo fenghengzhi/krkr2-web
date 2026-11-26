@@ -89,7 +89,17 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       const looping = await capture('distant-sli-phrase-and-seam', 880, 3)
       expect(looping.before.position).toBeGreaterThanOrEqual(84 * 48000)
       expect(looping.after.position).toBeLessThan(86 * 48000)
-      await expect.poll(() => page.getByText('long-label:late', { exact: true }).count()).toBeGreaterThanOrEqual(2)
+      // Observe distinct game-owned events, not repeated log rows that the UI
+      // may coalesce. The literal name also drives the visible story panel.
+      for (const ordinal of [1, 2])
+        await expect(page.getByText(`long-label:late:${ordinal}`, { exact: true })).toBeVisible()
+      await expect.poll(() => canvas.evaluate((node) => {
+        const canvas = node as HTMLCanvasElement, copy = new OffscreenCanvas(canvas.width, canvas.height),
+          context = copy.getContext('2d', { willReadFrequently: true })!
+        context.drawImage(canvas, 0, 0)
+        return [...context.getImageData(390, 90, 1, 1).data]
+      })).toEqual([32, 128, 64, 255])
+      await info.attach('long-vorbis-story-hooks', { contentType: 'image/png', body: await canvas.screenshot() })
       await expect(page.locator('#logs .error')).toHaveCount(0); expect(errors).toEqual([])
     } catch (error) { failures.push(error) }
     try { await info.attach('long-vorbis-game', { contentType: 'application/json', body: JSON.stringify({ observations, errors, logs: await page.locator('#logs').innerText() }, null, 2) }) }

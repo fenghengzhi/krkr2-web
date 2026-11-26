@@ -44,7 +44,9 @@ for (const binary of [false, true]) test(`${binary ? 'bytecode' : 'source'}: lon
     await take(loopStart, 210, true)
     assert.equal(await session.evaluate('longMusic.status+":"+longMusic.looping'), 'play:0')
     assert.equal(await session.evaluate('longMusic.labels.join(",")'), 'late,late,late')
+    assert.equal(await session.evaluate('longMusic.lateCount'), '3', 'Only the exact authored name advances the story hook')
     await session.evaluate('(longMusic.stop(),longMusic.play(),longSeek(2304000),0)'); await take(48 * rate, 4)
+    assert.equal(await session.evaluate('longMusic.lateCount'), '3', 'Stop and seeking before the phrase do not deliver future labels')
     await session.evaluate('invalidate longMusic')
     assert.deepEqual(audio.mixer.inspectStreams(), { voices: 0, bytes: 0, pending: 0, reservedBytes: 0 })
   } catch (error) { failures.push(error) }

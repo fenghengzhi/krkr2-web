@@ -89,17 +89,17 @@ function kagEofObserve(id){
 `
 
 export const kagEofStory = String.raw`*choice|Generated choice
-[cm][nowait]CHOOSE[endnowait]
+[cm][hr][nowait]CHOOSE[endnowait]
 [r][link target=&global.eofGameChoice.target][emb exp=global.eofGameChoice.label][endlink]
 [s]
 *picked
-[cm][nowait]CONTINUED[endnowait]
+[cm][hr][nowait]CONTINUED[endnowait]
 [eval exp="global.eofGamePhase=1"]
 [l]
 [jump target=*end]
 WRONG
 *end
-[cm][nowait]END[endnowait]
+[cm][hr][nowait]END[endnowait]
 [eval exp="global.eofGamePhase=2"]
 [s]
 `
