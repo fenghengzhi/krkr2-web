@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { discStoryGame } from './disc-story.ts'
+import { discStoryProject } from './disc-story.ts'
 
 export const discBootDirectory = 'DiscGame'
 export const discBootVolume = 'KRKR_STORY'
@@ -9,7 +9,7 @@ const wide = (text: string) => Buffer.from('\ufeff' + text, 'utf16le')
 /** Reuse the original template, authored chapter menu and observer from the
  * data-disc route. All startup inputs now live inside the imported ISO. */
 export function discBootProjectFiles(binary: boolean) {
-  const files = discStoryGame(binary).filter((file) => !['story.cue', 'story.iso', 'AfterInit2.tjs'].includes(file.name))
+  const files = discStoryProject(binary).filter((file) => file.name !== 'AfterInit2.tjs')
   const hook = String.raw`
 var discBootRoot=System.exePath;
 if(discBootRoot=="")throw new Exception("No project directory for the disc hook");

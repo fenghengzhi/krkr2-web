@@ -37,6 +37,7 @@ export class FilteredWaveSource implements FilterPcmSource {
    * That retry must not enqueue the same endpoint again. A real rewind/jump
    * starts a new traversal; ordinary labels keep their existing unit timing. */
   private eofLabelsQueued = false
+  private pendingUnit?: { position: number; decoderPosition: number; eofLabelsQueued: boolean; frames: number }
   starved = false
   position: number
   constructor(
@@ -46,6 +47,7 @@ export class FilteredWaveSource implements FilterPcmSource {
     private readonly looping: () => boolean,
     private readonly budget: () => AudioFilterBudget,
     private readonly access?: PcmAccess,
+    private readonly freezeUnitOnStarvation = false,
   ) {
     if (asset.kind === 'stream' && !access) throw new Error('Streaming filtered source requires PCM access')
     this.position = Math.trunc(position)
@@ -156,8 +158,15 @@ export class FilteredWaveSource implements FilterPcmSource {
     }
     while (written < frames) {
       this.step()
-      const link = this.nearest(this.position)
+      const pending = this.pendingUnit, link = pending ? undefined : this.nearest(this.position)
       let boundary: number | undefined
+      if (pending) {
+        // A decoder I/O wait does not run GetNearestEvent again. Script flag
+        // changes apply to later units; seek/Stop rebuild this source instead.
+        this.position = pending.position
+        this.decoderPosition = pending.decoderPosition
+        this.eofLabelsQueued = pending.eofLabelsQueued
+      }
       if (link) {
         if (link.from === this.position) {
           if (++jumpsWithoutProgress >= 10)
@@ -176,13 +185,19 @@ export class FilteredWaveSource implements FilterPcmSource {
       }
       // Freeze this request unit before evaluating any flag expressions in it.
       // In particular a newly eligible link behind its end is not retroactive.
-      let unit = Math.min(
+      let unit = pending?.frames ?? Math.min(
         frames - written,
         boundary === undefined ? Infinity : boundary - this.position,
       )
       if (this.crossfadeLength) unit = Math.min(unit, this.crossfadeLength - this.crossfadePosition)
       if (unit <= 0) throw new Error('Audio filter loop makes no forward progress')
-      if (!this.crossfadeLength && !this.ready(this.decoderPosition, unit)) return starve()
+      if (unit > frames - written) throw new Error('Pending Wave decode unit changed its destination extent')
+      if (!this.crossfadeLength && !this.ready(this.decoderPosition, unit)) {
+        if (this.freezeUnitOnStarvation) this.pendingUnit = { position: this.position,
+          decoderPosition: this.decoderPosition, eofLabelsQueued: this.eofLabelsQueued, frames: unit }
+        return starve()
+      }
+      this.pendingUnit = undefined
       jumpsWithoutProgress = 0
       const labels = this.asset.loops.labels,
         end = this.position + unit

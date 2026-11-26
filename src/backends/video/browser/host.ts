@@ -24,7 +24,7 @@ import { legacyVideoFormat } from '../legacy/format.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
 import { VideoSampleHistory, videoSeekTime, waitForClockPresentation, type ClockPresentationTarget } from './clock-seek.ts'
 import { VideoPeriod } from '../../../engine/media/video-period.ts'
-import { recoverVideoFirstFrame } from './first-frame-recovery.ts'
+import { pauseRecoveredVideo, recoverVideoFirstFrame } from './first-frame-recovery.ts'
 import {
   createVideoMixingSurface,
   releaseVideoMixingSurface,
@@ -865,6 +865,7 @@ export class WebVideoHost {
           if (settled) return
           settled = true
           const failures: unknown[] = error === undefined ? [] : [error]
+          let pause: Promise<void> | undefined
           for (const release of [cancelTimeout,
             () => { if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback) },
             () => movie.abort.signal.removeEventListener('abort', cancel),
@@ -872,14 +873,23 @@ export class WebVideoHost {
               element.removeEventListener('canplaythrough', resumeRecovery)
               const recovery = movie.firstFrameRecovery
               movie.firstFrameRecovery = undefined
-              recovery?.close()
+              if (recovery?.started && !failures.length) {
+                pause = pauseRecoveredVideo(element, movie.abort.signal, {
+                  schedule: (callback, delay) => this.timeouts.start(delay, callback),
+                  stop: () => recovery.close(),
+                })
+              } else recovery?.close()
             }]) {
             try { release() } catch (failure) { failures.push(failure) }
           }
-          if (failures.length > 1)
-            reject(new AggregateError(failures, 'Video first frame or presentation cleanup failed', { cause: failures[0] }))
-          else if (failures.length) reject(failures[0])
-          else resolve()
+          const finish = () => {
+            if (failures.length > 1)
+              reject(new AggregateError(failures, 'Video first frame or presentation cleanup failed', { cause: failures[0] }))
+            else if (failures.length) reject(failures[0])
+            else resolve()
+          }
+          if (pause) void pause.then(finish, (error) => { failures.push(error); finish() })
+          else finish()
         }
         const complete = () => {
           if (loaded && presented) done()

@@ -27,7 +27,7 @@ import {
 import { FilteredWaveSource, filteredWaveSourceMemoryBytes } from './filtered-wave-source.ts'
 import { phaseVocoderMemoryBytes, validatePhaseVocoderParameters } from './phase-vocoder.ts'
 import { StreamPcm, streamPageFrames, streamPcmReservation } from './stream-pcm.ts'
-import { applySliExpression } from '../../formats/audio/sli.ts'
+import { applySliExpression, sliExpressionTarget } from '../../formats/audio/sli.ts'
 import { waveAudioGains } from './wave-audio.ts'
 import { convertWaveOutput } from './wave-output.ts'
 import { waveSpeakerMix, type StereoSpeakerMix } from './wave-speaker-mask.ts'
@@ -61,6 +61,8 @@ interface Voice {
   filterSource?: FilteredWaveSource
   filterBudget?: AudioFilterBudget
   sourcePipeline?: boolean
+  /** Ordinary self-modifying conditional SLI uses WaveImpl's 8 Hz Decode units. */
+  decodeUnitFrames?: number
   speakerMix?: StereoSpeakerMix
   expandedQuad?: boolean
   ended?: boolean
@@ -73,6 +75,17 @@ interface Voice {
   gains?: { volume: number; volume2: number; globalVolume: number; pan: number; focusVolume: number; left: number; right: number }
 }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+function conditionalDecodeFrames(kind: SoundKind, asset: AudioAsset, filters: readonly PhaseVocoderFilter[]): number | undefined {
+  if (kind !== 'wave' || asset.kind === 'midi' || filters.length || asset.loops.links.some((link) => link.smooth)) return
+  let conditional = 0
+  for (const link of asset.loops.links)
+    if (link.condition !== 'no' && link.variable >= 0 && link.variable < 16) conditional |= 1 << link.variable
+  if (!conditional) return
+  for (const label of asset.loops.labels) {
+    const target = sliExpressionTarget(label.name)
+    if (target !== undefined && (conditional & (1 << target))) return Math.floor(asset.sampleRate / 8)
+  }
+}
 const lowerBound = <T>(items: T[], position: number, key: (item: T) => number): number => {
   let left = 0,
     right = items.length
@@ -202,6 +215,7 @@ export class AudioMixer {
     filters: readonly PhaseVocoderFilter[],
     activeWindows: readonly number[] = [],
     conversion = false,
+    decodeUnitFrames?: number,
   ): PhaseVocoderFilter[] {
     if (filters.length > 4) throw new Error('Audio filter chain exceeds four stages')
     if (filters.length && asset.kind === 'midi') throw new Error('Audio filters require PCM audio')
@@ -227,15 +241,16 @@ export class AudioMixer {
       items: readonly PhaseVocoderFilter[],
       windows: readonly number[],
       smooth: boolean,
+      unitFrames?: number,
     ) => {
       for (let index = 0; index < items.length; index++) {
         const window = Math.max(items[index]!.window, windows[index] ?? 0)
         bytes += phaseVocoderMemoryBytes(channels, window) + channels * window * 20
       }
-      if (items.length || smooth) bytes += audioFilterChainMemoryBytes(channels)
+      if (items.length || smooth) bytes += audioFilterChainMemoryBytes(channels, unitFrames)
     }
     const smooth = asset.kind !== 'midi' && asset.loops.links.some((link) => link.smooth)
-    reserve(asset.channels, next, activeWindows, smooth || conversion)
+    reserve(asset.channels, next, activeWindows, smooth || conversion || !!decodeUnitFrames, decodeUnitFrames)
     if ((next.length || smooth) && asset.kind !== 'midi') bytes += filteredWaveSourceMemoryBytes(asset)
     for (const voice of this.voices.values()) {
       if (voice.id === id || !voice.asset) continue
@@ -245,7 +260,8 @@ export class AudioMixer {
           throw new Error('Audio filter is already connected to a voice')
       count += connected.length
       const otherSmooth = voice.asset.kind !== 'midi' && voice.asset.loops.links.some((link) => link.smooth)
-      reserve(voice.asset.channels, connected, voice.filterChain?.windows() ?? [], otherSmooth || !!voice.settings.waveConversion)
+      reserve(voice.asset.channels, connected, voice.filterChain?.windows() ?? [],
+        otherSmooth || !!voice.settings.waveConversion || !!voice.decodeUnitFrames, voice.decodeUnitFrames)
       if ((connected.length || otherSmooth) && voice.asset.kind !== 'midi')
         bytes += filteredWaveSourceMemoryBytes(voice.asset)
     }
@@ -332,7 +348,8 @@ export class AudioMixer {
           throw new Error('SLI link is outside the decoded audio')
       const kind = command.kind ?? (asset.kind === 'midi' ? 'midi' : 'wave'), previous = this.voices.get(id),
         retained = previous?.kind === kind && previous.unloaded ? previous : undefined
-      const filters = this.filters(id, asset, command.filters ?? [], [], kind === 'wave' && !!(retained?.settings ?? settings).waveConversion)
+      const decodeUnitFrames = conditionalDecodeFrames(kind, asset, command.filters ?? []),
+        filters = this.filters(id, asset, command.filters ?? [], [], kind === 'wave' && !!(retained?.settings ?? settings).waveConversion, decodeUnitFrames)
       const stream = asset.kind === 'stream' ? new StreamPcm(id, asset) : undefined
       const voice = this.create(
         id,
@@ -347,7 +364,8 @@ export class AudioMixer {
         !asset.speakerMask && asset.channels <= 2
       voice.stream = stream
       voice.filters = filters
-      voice.sourcePipeline = asset.kind !== 'midi' && (filters.length > 0 || asset.loops.links.some((link) => link.smooth) || !!voice.settings.waveConversion)
+      voice.decodeUnitFrames = decodeUnitFrames
+      voice.sourcePipeline = asset.kind !== 'midi' && (filters.length > 0 || asset.loops.links.some((link) => link.smooth) || !!voice.settings.waveConversion || !!decodeUnitFrames)
       voice.status = 'stop'
       voice.settings.frequency = asset.sampleRate
       voice.settings.position = 0
@@ -407,7 +425,7 @@ export class AudioMixer {
           )
         )
           throw new Error('Connected audio filter order cannot change before reopen')
-        const filters = this.filters(id, voice.asset, command.filters, voice.filterChain?.windows(), !!voice.settings.waveConversion)
+        const filters = this.filters(id, voice.asset, command.filters, voice.filterChain?.windows(), !!voice.settings.waveConversion, voice.decodeUnitFrames)
         voice.filterChain?.configure(filters)
         voice.filters = filters
       } else if (command.op === 'set') {
@@ -504,6 +522,7 @@ export class AudioMixer {
         () => voice.settings.looping,
         () => voice.filterBudget!,
         voice.stream,
+        !!voice.decodeUnitFrames,
       )
       voice.filterChain = new AudioFilterChain(
         voice.asset!.channels,
@@ -511,6 +530,7 @@ export class AudioMixer {
         voice.filterSource,
         voice.settings.waveConversion ? (data, frames) => convertWaveOutput(data, frames,
           voice.settings.waveConversion!, voice.filters?.length ? 'f32' : voice.asset!.pcmEncoding) : undefined,
+        voice.decodeUnitFrames,
       )
     }
     voice.filterChain.setBudget(budget)

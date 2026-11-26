@@ -250,11 +250,88 @@ jobs:
             .generated/legacy-media/manifest.json
           retention-days: 90
 
+  udf-metadata-disc:
+    name: Master a UDF 2.50 game disc with Windows IMAPI
+    runs-on: windows-2025
+    timeout-minutes: 12
+    outputs:
+      disc-readback: ${{ steps.readback.outcome }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - name: Prepare the original KAG project and chapter
+        run: |
+          dir=out/verification/disc-volumes
+          mkdir -p "$dir"
+          (cd "$dir" && python ../../../scripts/generate-story-disc.py --files-only)
+          node --import tsx --input-type=module <<'JS'
+          import { mkdirSync, writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          import { discBootDirectory, discBootProjectFiles } from './tests/helpers/disc-boot.ts'
+          const game = join('out/verification/disc-volumes/story-files', discBootDirectory)
+          mkdirSync(game, { recursive: true })
+          for (const { name, buffer } of discBootProjectFiles(false)) writeFileSync(join(game, name), buffer)
+          JS
+      - name: Master the image with redundant metadata
+        shell: powershell
+        run: |
+          .\scripts\author-metadata-disc.ps1 -Source out/verification/disc-volumes/story-files -Output out/verification/disc-volumes/boot-udf250-metadata-source.iso
+          .\scripts\author-metadata-disc.ps1 -Source out/verification/disc-volumes/story-files -Output out/verification/disc-volumes/boot-udf250-bridge-source.iso -Bridge
+      - name: Check the actual partition map and independently extract every game file
+        id: readback
+        run: |
+          python scripts/verify-metadata-disc.py
+          python scripts/verify-metadata-disc.py --bridge
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() }}
+        with:
+          name: udf-metadata-disc
+          path: |
+            out/verification/disc-volumes/boot-udf250-metadata-source.iso
+            out/verification/disc-volumes/udf-metadata-manifest.json
+            out/verification/disc-volumes/boot-udf250-bridge-source.iso
+            out/verification/disc-volumes/udf-bridge-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Read the Japanese chapter through the Windows-mounted bridge disc
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = 'out/verification/disc-volumes'
+          $iso = (Resolve-Path "$base/boot-udf250-bridge-source.iso").Path
+          $mounted = Mount-DiskImage -ImagePath $iso -StorageType ISO -PassThru
+          try {
+            $until = [DateTime]::UtcNow.AddSeconds(15)
+            do {
+              $volume = $mounted | Get-Volume
+              if ($volume.DriveLetter) { break }
+              Start-Sleep -Milliseconds 250
+            } while ([DateTime]::UtcNow -lt $until)
+            if (!$volume.DriveLetter -or $volume.FileSystem -ne 'UDF' -or $volume.FileSystemLabel -ne 'KRKR_STORY') {
+              throw "Unexpected mounted volume: $($volume.FileSystem) $($volume.FileSystemLabel)"
+            }
+            $chapter = (Get-ChildItem "$base/story-files/Routes" -Filter '*.tjs' | Where-Object { $_.Name -cmatch '[^\x00-\x7F]' }).Name
+            if (!$chapter) { throw 'Source chapter missing' }
+            $actual = Get-FileHash -LiteralPath "$($volume.DriveLetter):/Routes/$chapter"
+            if ($actual.Hash -ne (Get-FileHash -LiteralPath "$base/story-files/Routes/$chapter").Hash) {
+              throw 'Chapter differs on automatically mounted Windows game disc'
+            }
+            $volume | Format-List DriveLetter, FileSystem, FileSystemLabel
+            $actual
+          } finally { Dismount-DiskImage -ImagePath $iso }
+
   build:
     name: WASM, types and production build
     # Still compile the main VM when an independent image build fails.
     if: ${{ !cancelled() }}
-    needs: [jpeg-fixtures, jpeg-kernel, png-kernel, legacy-media-kernel]
+    needs: [jpeg-fixtures, jpeg-kernel, png-kernel, legacy-media-kernel, udf-metadata-disc]
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     outputs:
@@ -436,6 +513,12 @@ jobs:
         run: |
           mkdir -p out/verification/long-vorbis
           node scripts/generate-long-vorbis-fixture.mjs 2>&1 | tee out/ci/long-vorbis-fixture.log
+      - name: Include the same-run IMAPI game disc in the browser and Node test inputs
+        if: needs.udf-metadata-disc.outputs.disc-readback == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: udf-metadata-disc
+          path: out/verification/disc-volumes
       - name: Author ISO and Joliet data tracks and read back their contents
         id: disc-volumes
         continue-on-error: true
@@ -651,6 +734,10 @@ jobs:
             !out/verification/disc-volumes/boot-udf201-sparable-source.iso
             !out/verification/disc-volumes/udf-sparable-manifest.json
             !out/verification/disc-volumes/udf-sparable-logs/
+            !out/verification/disc-volumes/boot-udf250-metadata-source.iso
+            !out/verification/disc-volumes/udf-metadata-manifest.json
+            !out/verification/disc-volumes/boot-udf250-bridge-source.iso
+            !out/verification/disc-volumes/udf-bridge-manifest.json
           if-no-files-found: error
           retention-days: 90
 
@@ -691,7 +778,7 @@ jobs:
     name: Independent AIFF track and UDF game disc verification
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Require independently decoded AIFF disc tracks
         env:
@@ -707,6 +794,26 @@ jobs:
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.udf-sparable-disc }}
         run: test "$FIXTURE_OUTCOME" = success
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: ${{ !cancelled() }}
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        if: ${{ !cancelled() }}
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - if: ${{ !cancelled() }}
+        run: npm ci
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        if: ${{ !cancelled() }}
+        with:
+          name: udf-metadata-disc
+          path: out/verification/disc-volumes
+      - name: Verify paths, file bytes and metadata mirror recovery
+        if: ${{ !cancelled() }}
+        run: node --import tsx --test tests/conformance/udf.test.ts tests/conformance/udf-metadata-game.test.ts
 
   legacy-fixture-result:
     name: Independent legacy movie fixture verification
@@ -849,7 +956,7 @@ jobs:
           retention-days: 90
 
   browser:
-    name: Browser / ${{ matrix.browser }} / ${{ matrix.suite }}${{ matrix.shardIndex && format(' / shard {0}/{1}', matrix.shardIndex, matrix.shardTotal) || '' }} (${{ matrix.os }})
+    name: Browser / ${{ matrix.browser }} / ${{ matrix.batch.suite }}${{ matrix.batch.shardIndex && format(' / shard {0}/{1}', matrix.batch.shardIndex, matrix.batch.shardTotal) || '' }} (${{ matrix.os }})
     if: ${{ !inputs.node-only && !inputs.runtime-only }}
     needs: build
     runs-on: ${{ matrix.os }}
@@ -857,21 +964,22 @@ jobs:
     env:
       KRKR_TEST_HEADED: ${{ matrix.headed }}
       KRKR_TEST_BROWSER: ${{ matrix.browser }}
-      KRKR_TEST_SUITE: ${{ matrix.suite }}
+      KRKR_TEST_SUITE: ${{ matrix.batch.suite }}
       KRKR_TEST_WORKERS: ${{ matrix.workers }}
-      KRKR_TEST_SHARD_INDEX: ${{ matrix.shardIndex || '' }}
-      KRKR_TEST_SHARD_TOTAL: ${{ matrix.shardTotal || '' }}
+      KRKR_TEST_SHARD_INDEX: ${{ matrix.batch.shardIndex || '' }}
+      KRKR_TEST_SHARD_TOTAL: ${{ matrix.batch.shardTotal || '' }}
       LIBGL_ALWAYS_SOFTWARE: '1'
     strategy:
       fail-fast: false
       matrix:
         browser: [chromium, firefox, webkit]
-        suite: [browser, library, pwa]
-        exclude:
-          - browser: webkit
-            suite: browser
-          - browser: firefox
-            suite: browser
+        batch:
+          - { suite: browser, shardIndex: '1', shardTotal: '4' }
+          - { suite: browser, shardIndex: '2', shardTotal: '4' }
+          - { suite: browser, shardIndex: '3', shardTotal: '4' }
+          - { suite: browser, shardIndex: '4', shardTotal: '4' }
+          - { suite: library }
+          - { suite: pwa }
         include:
           - browser: chromium
             os: ubuntu-24.04
@@ -885,67 +993,6 @@ jobs:
             os: macos-15
             headed: '0'
             workers: '1'
-          # Each headed Firefox worker owns its display on a separate runner.
-          # Four hosted shards reduce unreported tails in failure-heavy runs.
-          # Preserve file order and assertion deadlines; never share a physical
-          # pointer between two headed browser processes on one Xvfb server.
-          - browser: firefox
-            suite: browser
-            os: ubuntu-24.04
-            headed: '1'
-            workers: '1'
-            shardIndex: '1'
-            shardTotal: '4'
-          - browser: firefox
-            suite: browser
-            os: ubuntu-24.04
-            headed: '1'
-            workers: '1'
-            shardIndex: '2'
-            shardTotal: '4'
-          - browser: firefox
-            suite: browser
-            os: ubuntu-24.04
-            headed: '1'
-            workers: '1'
-            shardIndex: '3'
-            shardTotal: '4'
-          - browser: firefox
-            suite: browser
-            os: ubuntu-24.04
-            headed: '1'
-            workers: '1'
-            shardIndex: '4'
-            shardTotal: '4'
-          # Keep each file's existing execution order and one worker per Mac.
-          - browser: webkit
-            suite: browser
-            os: macos-15
-            headed: '0'
-            workers: '1'
-            shardIndex: '1'
-            shardTotal: '4'
-          - browser: webkit
-            suite: browser
-            os: macos-15
-            headed: '0'
-            workers: '1'
-            shardIndex: '2'
-            shardTotal: '4'
-          - browser: webkit
-            suite: browser
-            os: macos-15
-            headed: '0'
-            workers: '1'
-            shardIndex: '3'
-            shardTotal: '4'
-          - browser: webkit
-            suite: browser
-            os: macos-15
-            headed: '0'
-            workers: '1'
-            shardIndex: '4'
-            shardTotal: '4'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -965,9 +1012,10 @@ jobs:
           const suite = process.env.KRKR_TEST_SUITE
           const index = process.env.KRKR_TEST_SHARD_INDEX
           const total = process.env.KRKR_TEST_SHARD_TOTAL
-          if ((index || total) &&
-              (!['webkit', 'firefox'].includes(project) || suite !== 'browser' ||
-               !['1', '2', '3', '4'].includes(index) || total !== '4')) {
+          const validShard = suite === 'browser'
+            ? ['1', '2', '3', '4'].includes(index) && total === '4'
+            : !index && !total
+          if (!validShard) {
             throw new Error('Unexpected browser shard selection')
           }
           writeFileSync('out/ci/browser-job.json', JSON.stringify({
@@ -1107,7 +1155,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: browser-results-${{ matrix.browser }}-${{ matrix.suite }}${{ matrix.shardIndex && format('-shard-{0}-of-{1}', matrix.shardIndex, matrix.shardTotal) || '' }}
+          name: browser-results-${{ matrix.browser }}-${{ matrix.batch.suite }}${{ matrix.batch.shardIndex && format('-shard-{0}-of-{1}', matrix.batch.shardIndex, matrix.batch.shardTotal) || '' }}
           path: |
             out/ci/
             test-results/
@@ -1173,7 +1221,7 @@ jobs:
   tests:
     name: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[application tests]') && 'Application and compatibility tests' || 'All tests' }}
     if: ${{ always() && !inputs.node-only && !inputs.runtime-only }}
-    needs: [build, tools-types, wave-speaker-reference, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config, original-disc-search]
+    needs: [build, tools-types, udf-metadata-disc, wave-speaker-reference, legacy-fixture-result, deflate64-fixture-result, long-vorbis-fixture-result, cdda-aiff-fixture-result, node, browser, native-activity, runtime, compatibility, identity-allocations, cursor-reference, window-move-reference, window-geometry-reference, termination-reference, variant-stack-reference, lifetime-runtime-reference, menu-lifetime-runtime-reference, activity-wrapper-runtime-reference, png-kernel, png-lowbit, png-reference, png-stream-comparison, png-palette-comparison, jpeg-fixtures, jpeg-kernel, jpeg-reference, jpeg-comparison, legacy-media-kernel, eri-reference, original-sound-wine, kag-bookmarks, native-save-transfer, native-player-config, original-disc-search]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

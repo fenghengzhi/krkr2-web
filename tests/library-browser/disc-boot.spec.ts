@@ -2,20 +2,37 @@ import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { test, expect } from '../helpers/library-browser.ts'
 import { discBootInput, discReleaseInput } from '../helpers/disc-boot.ts'
-import { udfGameDisc, udfSparableGameDisc } from '../helpers/udf-game-discs.ts'
+import { udfGameDisc, udfMetadataGameDisc, udfSparableGameDisc } from '../helpers/udf-game-discs.ts'
 import { kagGameControls } from '../helpers/kag-game-controls.ts'
 
-for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) for (const container of ['disc', 'zip', 'udf', 'udf-sparable']) {
-  const packaged = container === 'zip', sparable = container === 'udf-sparable', udf = container === 'udf' || sparable
-  if (sparable && binary) continue
-  test(`${backend}/${sparable ? 'UDF 2.01 sparable source' : udf ? (binary ? 'UDF 2.01 bytecode' : 'UDF 1.02 source') : (packaged ? 'ZIP release ' : '') + (binary ? 'CUE+ISO bytecode' : 'ISO-only source')}: importing the complete disc boots original KAG and restores its chapter after library refresh`, async ({ page }, info) => {
+const editions = [
+  ...[false, true].flatMap((binary) => [
+    { kind: 'disc', binary, label: binary ? 'CUE+ISO bytecode' : 'ISO-only source', suffix: '',
+      names: binary ? ['boot.cue', 'boot-bytecode.iso'] : ['boot-source.iso'], open: () => discBootInput(binary) },
+    { kind: 'zip', binary, label: 'ZIP release ' + (binary ? 'CUE+ISO bytecode' : 'ISO-only source'), suffix: ' ZIP',
+      names: binary ? ['StoryBytecode.zip.003', 'StoryBytecode.zip.002', 'StoryBytecode.zip.001'] : ['StorySource.zip'],
+      open: () => discReleaseInput(binary) },
+    { kind: 'udf', binary, label: binary ? 'UDF 2.01 bytecode' : 'UDF 1.02 source', suffix: ' UDF',
+      names: [binary ? 'boot-udf201-bytecode.iso' : 'boot-udf102-source.iso'], open: () => udfGameDisc(binary) },
+  ]),
+  { kind: 'udf-sparable', binary: false, label: 'UDF 2.01 sparable source', suffix: ' UDF sparable',
+    names: ['boot-udf201-sparable-source.iso'], open: udfSparableGameDisc },
+  { kind: 'udf-metadata', binary: false, label: 'UDF 2.50 metadata source', suffix: ' UDF metadata',
+    names: ['boot-udf250-metadata-source.iso'], open: () => udfMetadataGameDisc(false) },
+  { kind: 'udf-bridge', binary: false, label: 'UDF 2.50 bridge source', suffix: ' UDF bridge',
+    names: ['boot-udf250-bridge-source.iso'], open: () => udfMetadataGameDisc(true) },
+]
+
+for (const backend of ['asyncify', 'jspi']) for (const edition of editions) {
+  const { binary, kind } = edition, packaged = kind === 'zip', udf = kind.startsWith('udf')
+  test(`${backend}/${edition.label}: importing the complete disc boots original KAG and restores its chapter after library refresh`, async ({ page }, info) => {
     test.setTimeout(180000)
-    const input = sparable ? udfSparableGameDisc() : udf ? udfGameDisc(binary) : packaged ? discReleaseInput(binary) : discBootInput(binary),
+    const input = edition.open(),
       drive = packaged ? 'G' : 'D', medium = `file://./${drive.toLowerCase()}/`,
       mapping = packaged ? (binary ? 'G=Media/boot.cue' : 'G=StorySource.zip>Media/boot-source.iso') : '',
       launcher = packaged && binary ? 'StoryBytecode.zip>Media/boot.cue' : '',
       errors: string[] = [], observations: unknown[] = [], failures: unknown[] = [],
-      title = `Boot disc ${backend} ${binary}${sparable ? ' UDF sparable' : udf ? ' UDF' : packaged ? ' ZIP' : ''}`, canvas = page.locator('#stage canvas[data-window-id]'),
+      title = `Boot disc ${backend} ${binary}${edition.suffix}`, canvas = page.locator('#stage canvas[data-window-id]'),
       item = page.locator('.library-game').filter({ has: page.getByRole('heading', { name: title, exact: true }) }),
       { read, clickLink } = kagGameControls(page, observations)
     page.on('pageerror', (error) => errors.push(error.message))
@@ -71,11 +88,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) 
         await page.locator('#project-exe-directory').fill('')
         await page.locator('#project-executable').fill(launcher)
       }
-      expect(input.files.map((file) => file.name)).toEqual(udf
-        ? [sparable ? 'boot-udf201-sparable-source.iso' : binary ? 'boot-udf201-bytecode.iso' : 'boot-udf102-source.iso'] : packaged
-        ? binary ? ['StoryBytecode.zip.003', 'StoryBytecode.zip.002', 'StoryBytecode.zip.001'] : ['StorySource.zip']
-        : binary ? ['boot.cue', 'boot-bytecode.iso'] : ['boot-source.iso'])
-      observations.push({ packaged, sparable, drive, mapping, launcher,
+      expect(input.files.map((file) => file.name)).toEqual(edition.names)
+      observations.push({ kind, packaged, sparable: kind === 'udf-sparable', drive, mapping, launcher,
         files: input.files.map((file) => ({ name: file.name, bytes: file.buffer.length,
           sha256: createHash('sha256').update(file.buffer).digest('hex') })) })
       const picker = page.locator('#files')

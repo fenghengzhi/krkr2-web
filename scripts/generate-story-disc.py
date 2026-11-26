@@ -3,6 +3,7 @@ from pathlib import Path
 import codecs
 import struct
 import subprocess
+import sys
 import zipfile
 
 
@@ -10,6 +11,8 @@ def tjs(source):
     return codecs.BOM_UTF16_LE + source.encode("utf-16-le")
 
 
+if sys.argv[1:] not in ([], ["--files-only"]):
+    raise ValueError("Expected no arguments or --files-only")
 root = Path("story-files")
 for directory in ("Routes", "Books", "Art", "Empty"):
     (root / directory).mkdir(parents=True, exist_ok=True)
@@ -26,6 +29,9 @@ pixels = bytes.fromhex("99 66 33") * 16
 header = struct.pack("<2sIHHI", b"BM", 54 + len(pixels), 0, 0, 54)
 bitmap = struct.pack("<IiiHHIIiiII", 40, 4, 4, 1, 24, 0, len(pixels), 0, 0, 0, 0)
 (root / "Art/Title.bmp").write_bytes(header + bitmap + pixels)
+
+if sys.argv[1:] == ["--files-only"]:
+    sys.exit(0)
 
 subprocess.run(["genisoimage", "-quiet", "-input-charset", "utf-8", "-J", "-V", "KRKR_STORY",
                 "-o", "story.iso", str(root)], check=True)

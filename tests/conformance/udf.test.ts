@@ -388,3 +388,52 @@ test('a rewritable game disc follows its newest sparing table for the root, scen
   }), /Game stopped during disc read/)
   assert(!disc.reads.some(([at]) => at >= (partitionStart + 80) * blockSize && at < (partitionStart + 96) * blockSize))
 })
+
+test('UDF metadata offsets follow separate file extents and recover a chapter entry from its mirror', async () => {
+  const disc = image(), sector = (n: number) => n * blockSize
+  for (const base of [257, 270]) {
+    const lvd = new Uint8Array(510), view = dataView(lvd), at = 446
+    lvd.set(disc.regions.get(sector(base + 2))!)
+    lvd.set(longAd(blockSize, 0, 0, 1), 248)
+    view.setUint16(240, 0x250, true); view.setUint32(264, 70, true); view.setUint32(268, 2, true)
+    lvd[at] = 2; lvd[at + 1] = 64; entity(lvd, at + 4, '*UDF Metadata Partition')
+    view.setUint16(at + 36, 1, true); view.setUint16(at + 38, 7, true)
+    view.setUint32(at + 40, 4, true); view.setUint32(at + 44, 5, true); view.setUint32(at + 48, 0xffffffff, true)
+    view.setUint32(at + 52, 32, true); view.setUint16(at + 56, 16, true); lvd[at + 58] = 1
+    disc.put(base + 2, descriptor(6, base + 2, lvd, 3))
+  }
+  // Logical blocks 0..31 and 32..63 occupy different runs. The mirror
+  // has one contiguous run elsewhere. The chapter body uses the physical partition.
+  const primary = concat([shortAd(sector(32), 64), shortAd(sector(32), 160)]),
+    mirror = shortAd(sector(64), 224)
+  for (const [location, type, ad] of [[4, 250, primary], [5, 251, mirror]] as const) {
+    const entry = fileEntry(location, sector(64), ad, 0)
+    entry[27] = type; disc.putFile(location, descriptor(261, location, entry, 3))
+  }
+  const fsd = disc.regions.get(sector(partitionStart))!.slice()
+  disc.regions.delete(sector(partitionStart))
+  fsd.set(longAd(blockSize, 1, 0, 1), 400); descriptor(256, 0, fsd, 3)
+  const name = cs0('Chapter.tjs'), fid = new Uint8Array(Math.ceil((38 + name.length) / 4) * 4)
+  fid[19] = name.length; dataView(fid).setUint16(16, 1, true)
+  fid.set(longAd(blockSize, 33, 0, 1), 20); fid.set(name, 38)
+  descriptor(257, 32, fid, 3)
+  const chapter = ascii('The lantern is lit.'), body = fileEntry(33, chapter.length, longAd(chapter.length, 300), 1),
+    root = fileEntry(1, fid.length, shortAd(fid.length, 32), 0, true)
+  for (const [logical, bytes] of [[0, fsd], [1, root], [32, fid], [33, body]] as const) {
+    disc.putFile(logical < 32 ? 64 + logical : 160 + logical - 32, bytes)
+    disc.putFile(224 + logical, bytes)
+  }
+  disc.putFile(300, chapter)
+  const healthy = await openDiscFilesystem(disc.source, track()); assert(healthy)
+  assert.deepEqual(await contents(await healthy.file('chapter.tjs')), chapter)
+  assert(!disc.reads.some(([at]) => at === sector(partitionStart + 5)), 'Do not read the mirror on a healthy disc')
+
+  disc.regions.delete(sector(partitionStart + 161))
+  const recovered = await openDiscFilesystem(disc.source, track()); assert(recovered)
+  assert.deepEqual(await recovered.list(), [{ name: 'Chapter.tjs', size: chapter.length, directory: false }])
+  assert.deepEqual(await contents(await recovered.file('CHAPTER.TJS')), chapter)
+
+  disc.regions.delete(sector(partitionStart + 4))
+  const fromMirror = await openDiscFilesystem(disc.source, track()); assert(fromMirror)
+  assert.deepEqual(await contents(await fromMirror.file('Chapter.tjs')), chapter)
+})

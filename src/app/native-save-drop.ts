@@ -23,7 +23,7 @@ export function createNativeSaveDrop(root: HTMLElement, options: {
   let session: SessionClient | undefined, blocked = true, revision = 0
   const drop = attachGameFileDrop(root, {
     available: () => !!session && !blocked,
-    unavailable: () => options.status('请先选择“原版游戏存档”并暂停当前游戏，等待已有存档操作完成后再拖入。'),
+    unavailable: () => options.status('请先暂停当前游戏并等待已有存档操作完成。拖入原版存档前，请选择“原版游戏存档”。JSON 备份可用导入或备份目录选择按钮。'),
     select: nativeSaveDropFiles,
     progress: '正在读取拖入的存档…',
     status: options.status,

@@ -65,3 +65,21 @@ export function udfSparableGameDisc() {
     throw new Error('UDF sparable bytes or relocated packet differ from the authoring manifest')
   return { files: [{ name, buffer, mimeType: 'application/octet-stream' }], manifest }
 }
+
+export function udfMetadataGameDisc(bridge: boolean) {
+  const base = new URL('../../out/verification/disc-volumes/', import.meta.url)
+  const manifest = JSON.parse(readFileSync(new URL(bridge ? 'udf-bridge-manifest.json' : 'udf-metadata-manifest.json', base), 'utf8')) as {
+    name: string; complete: boolean; bridge: boolean; commit: string; revision: number; bytes: number; sha256: string;
+    duplicate: boolean; primary: number; mirror: number; partitionMaps: string[]; tree: Record<string, string | null>; isoTree?: Record<string, string | null>
+  }
+  const name = bridge ? 'boot-udf250-bridge-source.iso' : 'boot-udf250-metadata-source.iso'
+  if (!manifest.complete || manifest.name !== name || manifest.bridge !== bridge || manifest.revision !== 0x250 ||
+      !manifest.duplicate || manifest.primary === manifest.mirror || manifest.partitionMaps.join(',') !== 'physical,metadata' ||
+      !manifest.tree['DiscGame/data.xp3'] || !manifest.tree['Routes/開幕.tjs'] ||
+      process.env.GITHUB_SHA && manifest.commit !== process.env.GITHUB_SHA)
+    throw new Error('Incomplete IMAPI game disc or independent directory readback')
+  const buffer = readFileSync(new URL(name, base))
+  if (buffer.length !== manifest.bytes || createHash('sha256').update(buffer).digest('hex') !== manifest.sha256)
+    throw new Error('IMAPI game disc bytes differ from the readback manifest')
+  return { files: [{ name, buffer, mimeType: 'application/octet-stream' }], manifest }
+}

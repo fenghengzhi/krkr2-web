@@ -1,61 +1,11 @@
 import type { TrackReader } from './track.ts'
 
-// ECMA-167 parts 3 and 4; ECMA TR/112 parts 4 and 7 (UDF 2.01 and 1.02).
-// All addresses here are 2048-byte DVD logical sectors. ICB block numbers
-// later stored in a directory are relative to a mapped partition.
-export const udfBlock = 2048
-export class UdfFormatError extends Error {}
-export function udfError(reason: string): never { throw new UdfFormatError('UDF: ' + reason) }
-export const viewOf = (bytes: Uint8Array) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-export interface IcbAddress { block: number; partition: number }
-interface SparedPacket { original: number; physical: number }
-export interface UdfPartition {
-  start: number
-  blocks: number
-  sparing?: { packetSize: number; packets: SparedPacket[] }
-}
-export interface UdfVolume { label: string; partitions: UdfPartition[]; root: IcbAddress }
-export function longAddress(view: DataView, at: number): IcbAddress {
-  return { block: view.getUint32(at + 4, true), partition: view.getUint16(at + 8, true) }
-}
-/** Return the first physically contiguous portion of a logical extent. Most
- * DVD files span thousands of unchanged packets and need only one run. */
-export function mappedExtent(partitions: UdfPartition[], address: IcbAddress, bytes: number) {
-  const part = partitions[address.partition]
-  if (!part || address.block >= part.blocks || Math.ceil(bytes / udfBlock) > part.blocks - address.block)
-    return udfError('extent outside its physical partition')
-  const block = address.block, sparing = part.sparing
-  if (!sparing?.packets.length) return { physical: part.start + block, bytes }
-  const { packets, packetSize } = sparing, within = block % packetSize, packet = block - within
-  let low = 0, high = packets.length
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2)
-    if (packets[middle]!.original < packet) low = middle + 1
-    else high = middle
-  }
-  const next = packets[low]
-  if (next?.original === packet)
-    return { physical: next.physical + within, bytes: Math.min(bytes, (packetSize - within) * udfBlock) }
-  return { physical: part.start + block, bytes: next ? Math.min(bytes, (next.original - block) * udfBlock) : bytes }
-}
+import { readAllocatedRuns, descriptor, parseFileEntry, longAddress, mappedExtent, udfBlock, udfError, UdfFormatError, viewOf,
+  type IcbAddress, type SparedPacket, type UdfPartition } from './udf-allocation.ts'
 
-/** ECMA-167 descriptor tag and CRC-ITU-T, initial value zero. The tag's
- * location is absolute in a volume sequence and partition-relative in an ICB. */
-export function descriptor(bytes: Uint8Array, location?: number): DataView {
-  if (bytes.length < 16) return udfError('short descriptor tag')
-  const view = viewOf(bytes), version = view.getUint16(2, true), length = view.getUint16(10, true)
-  let sum = 0, crc = 0
-  for (let i = 0; i < 16; i++) if (i !== 4) sum += bytes[i]!
-  if ((version !== 2 && version !== 3) || (sum & 255) !== bytes[4] ||
-      (location !== undefined && view.getUint32(12, true) !== location) || length > bytes.length - 16)
-    return udfError('inconsistent descriptor tag')
-  for (const byte of bytes.subarray(16, 16 + length)) {
-    crc ^= byte << 8
-    for (let bit = 0; bit < 8; bit++) crc = ((crc << 1) ^ (crc & 0x8000 ? 0x1021 : 0)) & 0xffff
-  }
-  if (crc !== view.getUint16(8, true)) return udfError('descriptor CRC mismatch')
-  return view
-}
+// The root ICB is relative to a logical partition. The volume recognition
+// sequence and anchor use absolute 2048-byte sectors within this track.
+export interface UdfVolume { label: string; partitions: UdfPartition[]; root: IcbAddress; mirror?: () => Promise<UdfVolume> }
 
 /** OSTA Compressed Unicode uses either one byte per code unit or UCS-2BE. */
 export function udfText(bytes: Uint8Array): string {
@@ -121,6 +71,36 @@ async function readSparing(reader: TrackReader, part: UdfPartition, map: DataVie
   return { start: part.start, blocks: part.blocks, sparing: { packetSize, packets: newest.packets } }
 }
 
+// UDF 2.50 §§2.2.10, 2.2.13: a metadata block is an offset in a
+// special file on the physical or sparable partition. Its mirror has its
+// own file entry and can have a completely different extent layout.
+async function readMetadata(reader: TrackReader, backing: UdfPartition, map: DataView, mirror: boolean): Promise<UdfPartition> {
+  const block = map.getUint32(mirror ? 44 : 40, true)
+  const span = mappedExtent([backing], { partition: 0, block }, udfBlock)
+  const entry = parseFileEntry(await reader.read(span.physical * udfBlock, udfBlock), block)
+  if (entry.type !== (mirror ? 251 : 250) || entry.mode !== 0 || !entry.size || entry.size % udfBlock)
+    return udfError('invalid metadata file entry')
+  const runs = await readAllocatedRuns(reader, [backing], entry.allocation, entry.mode, 0, entry.size)
+  if (runs.some((run) => run.length % udfBlock)) return udfError('unaligned metadata extent')
+  return { start: 0, blocks: entry.size / udfBlock, metadata: runs }
+}
+
+async function readFileSet(reader: TrackReader, partitions: UdfPartition[], lvd: DataView, label: string): Promise<UdfVolume> {
+  const address = longAddress(lvd, 248), fileSetBytes = lvd.getUint32(248, true)
+  if (!fileSetBytes || fileSetBytes > 64 * udfBlock) return udfError('unsupported file set sequence')
+  for (let i = 0; i < Math.ceil(fileSetBytes / udfBlock); i++) {
+    const block = address.block + i, { physical } = mappedExtent(partitions, { ...address, block }, fileSetBytes - i * udfBlock)
+    const bytes = await reader.read(physical * udfBlock, udfBlock), fsd = descriptor(bytes, block)
+    if (fsd.getUint16(0, true) === 256) {
+      const root = longAddress(fsd, 400)
+      mappedExtent(partitions, root, udfBlock)
+      return { label, partitions, root }
+    }
+    if (fsd.getUint16(0, true) === 8) break
+  }
+  return udfError('missing file set descriptor')
+}
+
 async function readSequence(reader: TrackReader, sequence: Extent): Promise<UdfVolume> {
   const blocks = reader.size / udfBlock, recorded = new Map<number, UdfPartition & { sequence: number }>()
   const visited = new Set<number>()
@@ -153,37 +133,47 @@ async function readSequence(reader: TrackReader, sequence: Extent): Promise<UdfV
     return udfError('unsupported logical volume or logical block size')
   const maps = lvd.getUint32(268, true), mapBytes = lvd.getUint32(264, true), partitions: UdfPartition[] = []
   if (!maps || maps > 256 || mapBytes > logical.length - 440) return udfError('invalid partition maps')
-  let at = 440
+  let at = 440, backingNumber: number | undefined, metadata: DataView | undefined
   for (let i = 0; i < maps; i++) {
     const type = logical[at], length = logical[at + 1]
     if (!length || at + length > 440 + mapBytes) return udfError('incomplete partition map')
     const physical = type === 1 && length === 6
-    if (!physical && !(type === 2 && length === 64 && identifier(logical, at + 5, 23) === '*UDF Sparable Partition'))
-      return udfError('unsupported partition map')
+    const kind = type === 2 && length === 64 ? identifier(logical, at + 5, 23) : ''
     const vol = at + (physical ? 2 : 36)
+    if (!physical && kind !== '*UDF Sparable Partition' && kind !== '*UDF Metadata Partition')
+      return udfError('unsupported partition map')
     if (lvd.getUint16(vol, true) !== 1) return udfError('multiple UDF volumes are not supported')
-    const part = recorded.get(lvd.getUint16(vol + 2, true))
+    const number = lvd.getUint16(vol + 2, true), part = recorded.get(number)
     if (!part) return udfError('unmapped physical partition')
-    partitions.push(physical ? part : await readSparing(reader, part, viewOf(logical.subarray(at, at + length))))
+    const map = viewOf(logical.subarray(at, at + length))
+    if (kind === '*UDF Metadata Partition') {
+      if (i !== 1 || maps !== 2 || number !== backingNumber)
+        return udfError('metadata partition does not reference its underlying partition')
+      metadata = map
+    } else {
+      partitions.push(physical ? part : await readSparing(reader, part, map))
+      if (i === 0) backingNumber = number
+    }
     at += length
   }
   if (at !== 440 + mapBytes) return udfError('unexpected partition map length')
   const labelSize = logical[211]!
   if (labelSize > 127) return udfError('invalid logical volume name')
   const label = udfText(logical.subarray(84, 84 + labelSize))
-  const address = longAddress(lvd, 248), fileSetBytes = lvd.getUint32(248, true)
-  if (!fileSetBytes || fileSetBytes > 64 * udfBlock) return udfError('unsupported file set sequence')
-  for (let i = 0; i < Math.ceil(fileSetBytes / udfBlock); i++) {
-    const block = address.block + i, { physical } = mappedExtent(partitions, { ...address, block }, fileSetBytes - i * udfBlock)
-    const bytes = await reader.read(physical * udfBlock, udfBlock), fsd = descriptor(bytes, block)
-    if (fsd.getUint16(0, true) === 256) {
-      const root = longAddress(fsd, 400)
-      mappedExtent(partitions, root, udfBlock)
-      return { label, partitions, root }
-    }
-    if (fsd.getUint16(0, true) === 8) break
+  if (!metadata) return readFileSet(reader, partitions, lvd, label)
+  const backing = partitions[0]!, map = metadata
+  const open = async (mirror: boolean) => {
+    const part = await readMetadata(reader, backing, map, mirror)
+    return readFileSet(reader, [backing, part], lvd, label)
   }
-  return udfError('missing file set descriptor')
+  try {
+    const volume = await open(false)
+    if (map.getUint8(58) & 1) volume.mirror = () => open(true)
+    return volume
+  } catch (error) {
+    if (!(error instanceof UdfFormatError)) throw error
+    return open(true)
+  }
 }
 
 /** Called for a BEA01 extended recognition area. Do not search ordinary ISO

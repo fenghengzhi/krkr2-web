@@ -6,6 +6,8 @@
 
 当前已跑通真实 TJS 脚本、异步资源读取、XP3/ZIP、图层/像素、浏览器文字、KAGParser、输入/焦点/模态、计时调度、菜单、Wave/MIDI 声音和 MP4 视频。图形部分包含 26 种像素运算、子树透明度、三种内置转场、截图/缩放/仿射、BMP/PNG/TLG 存档与图像缓存；原有 KAG 已跑通对话/选择、历史记录、转场、缩略图保存和刷新读档。**完整图形与系统 API、流式媒体、旧视频编码及商业游戏兼容仍未完成。** 详细行为与限制见 [当前兼容范围](docs/compatibility/current.md)。
 
+第 178 批扩展游戏光盘读取，让玩家能使用 UDF 2.50 盘和桥接盘中的日文章节名。本批还处理从旧版浏览器备份恢复进度、配乐的条件循环和影片暂停时钟。新增行为等待托管验证。[178 实现与托管证据](docs/decisions/178-metadata-discs-and-game-restoration.md)
+
 第 177 批为双语 MPEG 过场接入 AC-3 与 DVD LPCM 声音，支持从文件或分段 XP3 播放大型未压缩 AVI，并支持把原版存档目录或 ZIP 拖入已暂停的游戏。新增行为等待托管验证。[177 实现与托管证据](docs/decisions/177-bilingual-cutscenes-and-native-saves.md)
 
 第 176 批接入可擦写 UDF 游戏盘和分段存放的大过场，新增从文件夹拖入游戏及游戏脚本释放 Wave 播放缓冲的支持。新增行为等待托管验证。[176 实现与托管证据](docs/decisions/176-rewritable-discs-and-game-imports.md)

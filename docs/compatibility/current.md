@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 178 批接入 UDF 2.50 元数据分区及其镜像，并优先通过可挂载的 UDF 目录查找桥接盘上的文件。播放器增加旧版备份目录迁移，媒体修订涉及条件循环配乐和首帧恢复后的暂停时钟。结果待托管验收。[178 实现与托管证据](../decisions/178-metadata-discs-and-game-restoration.md)
+
 第 177 批支持双语 MPEG 的 AC-3 与 DVD LPCM、Windows DIB 过场、已存储 XP3 成员的非连续片段，以及游戏可选的 Wave 四声道扩展。新增功能等待托管验收。[177 实现与托管证据](../decisions/177-bilingual-cutscenes-and-native-saves.md)
 
 第 176 批加入 UDF 可替换分区读取，浏览器可拼接分散在镜像中的已记录文件段来播放大过场，并支持拖入游戏和脚本释放 Wave 播放缓冲。新增行为等待验证。[176 实现与托管证据](../decisions/176-rewritable-discs-and-game-imports.md)

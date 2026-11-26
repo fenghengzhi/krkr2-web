@@ -17,6 +17,7 @@ import { waveResetFiles, waveResetExpected, waveResetSource } from '../helpers/w
 import { waveRiffFiles, waveRiffNames, waveRiffSdkExpected, waveRiffSource } from '../helpers/wave-riff-layout.ts'
 import { waveMaskFiles, waveMaskSdkExpected, waveMaskSdkNames, waveMaskSdkSource } from '../helpers/wave-speaker-mask.ts'
 import { waveFreeExpected, waveFreeFiles, waveFreeSource } from '../helpers/wave-free.ts'
+import { conditionalFiles, conditionalSdkExpected, conditionalSource } from '../helpers/wave-conditional-unit.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -42,11 +43,12 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   ...waveRiffSdkExpected,
   ...waveMaskSdkExpected,
   ...waveFreeExpected,
+  'wave-conditional-first': conditionalSdkExpected,
   ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
   'xp3-decoder': [xp3SegmentScript, xp3SegmentText, 'stop', '48000', '0', '12000', '36320736', '1452000'].join('~'),
   'xp3-compressed': [xp3SegmentScript, xp3SegmentText, xp3CompressedAudioHeader, 'closed'].join('~') }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles(), ...waveResetFiles(), ...waveRiffFiles(), ...waveMaskFiles(), ...waveFreeFiles() }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles(), ...waveResetFiles(), ...waveRiffFiles(), ...waveMaskFiles(), ...waveFreeFiles(), ...conditionalFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -112,10 +114,12 @@ if (process.argv[2] === 'prepare') {
     waveFadeSource,
     waveSeekSource,
     waveTailSource,
+    conditionalSource,
     ...Object.keys(waveFadeExpected).map((id) =>
       `try{record("fade-${id}|"+waveFadeObserve("${id}"));}catch(e){record("fade-${id}|unexpected-error:"+e.message);}`),
     'waveTailAfter=function(id,result){if(id=="done"){global.record("done");global.System.exit();}else global.record(id+"|"+result);};',
-    'waveSeekAfter=function(result){global.record("wave-seek-labels|"+result);global.waveTailSdkStart();};',
+    'branchAfter=function(result){global.record("wave-conditional-first|"+result);global.waveTailSdkStart();};',
+    'waveSeekAfter=function(result){global.record("wave-seek-labels|"+result);global.branchSdkStart();};',
     'fadeDelayedAfter=function(result){global.record("fade-delayed|"+result);global.waveSeekSdkStart();};fadeDelayedStart();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
@@ -149,6 +153,8 @@ if (process.argv[2] === 'prepare') {
   const complete = sdk.commit === manifest.commit && sdk.state === 'observed' && sdk.exitCode === 0 &&
     lines.length === results.length + 2 && lines[0] === 'start' && lines.at(-1) === 'done' && results.every((r) => r.matched)
   save('comparison.json', { commit: manifest.commit, complete, observationSha256: digest(raw), results,
+    conditionalWave: { planned: 1, matched: results.filter((row) => row.id === 'wave-conditional-first' && row.matched).length,
+      scope: 'Actual ordinary Wave playback must deliver the first middle-phrase label before a flag-enabled later phrase. Fixed Decode chooses its read boundary before evaluating flag labels; no-device errors remain failures.' },
     waveRelease: { planned: Object.keys(waveFreeExpected).length,
       matched: results.filter((row) => row.id.startsWith('wave-free-') && row.matched).length,
       scope: 'Public static/instance freeDirectSound: unloaded controls retain fade, two paused playing Wave buffers stop in creation order, retain labels/flags/looping and can play again. Missing DirectSound remains a failed device observation; hardware PCM equivalence is not claimed.' },

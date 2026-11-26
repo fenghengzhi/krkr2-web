@@ -49,6 +49,13 @@ export class TrackReader {
     if (!Number.isSafeInteger(this.size)) invalid('track size is not an exact byte offset')
     this.canBorrow = bytes === sectorSize && payload === 0 && !!this.borrow
   }
+  /** Recognition needs only the header, including the XA mode bytes if present. */
+  async recognitionHeader(sector: number, length: number): Promise<Uint8Array | undefined> {
+    const { bytes, payload } = this.track.layout
+    range(sector * sectorSize, length, this.size)
+    const raw = await this.source.read((this.track.first + sector) * bytes, payload + length)
+    if (raw.length === payload + length && isDataSector(raw, this.track.layout)) return raw.subarray(payload)
+  }
   async borrowBlob(offset: number, length: number, checkpoint?: () => void | Promise<void>) {
     range(offset, length, this.size)
     if (!this.canBorrow || !this.borrow) throw new Error('Disc track has no contiguous Blob backing')

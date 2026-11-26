@@ -1,7 +1,7 @@
 import type { ArchiveReader, ByteSource } from '../../engine/ports/storage.ts'
 import { TrackReader, type DiscVolumeTrack } from './track.ts'
 import { foldDiscName as fold, discPathParts as pathParts } from './path.ts'
-import { openUdfVolume } from './udf.ts'
+import { openBridgedUdf, openUdfVolume } from './udf.ts'
 
 /** Read-only optical namespace with recorded spelling and case-insensitive lookup. */
 export interface DiscEntry { readonly name: string; readonly size: number; readonly directory: boolean }
@@ -207,11 +207,13 @@ class Filesystem implements DiscFilesystem {
   }
 }
 
-/** Preserve ISO/Joliet selection on bridged discs. A UDF recognition area
- * in place of an ISO descriptor selects the UDF volume on the same track. */
+/** Prefer a recognized UDF namespace on a bridge. When the independent UDF
+ * volume cannot be mounted, use the first Joliet or primary ISO directory. */
 export async function openDiscFilesystem(source: ByteSource, track: DiscVolumeTrack, joinBlobs?: ArchiveReader['joinBlobs']): Promise<DiscFilesystem | undefined> {
   const reader = new TrackReader(source, track, joinBlobs)
-  let primary: Volume | undefined
+  const openBridge = async (at: number, terminated: boolean, fallback: Uint8Array, joliet: boolean) =>
+    await openBridgedUdf(reader, at, terminated) ?? new Filesystem(reader, readVolume(fallback, joliet, reader.size))
+  let primary: Uint8Array | undefined
   for (let sector = 16; sector < 80 && (sector + 1) * sectorSize <= reader.size; sector++) {
     const bytes = await reader.read(sector * sectorSize, sectorSize)
     const id = String.fromCharCode(...bytes.subarray(1, 6))
@@ -220,11 +222,11 @@ export async function openDiscFilesystem(source: ByteSource, track: DiscVolumeTr
       if (primary) invalid('incomplete volume descriptor sequence')
       return
     }
-    if (bytes[0] === 255) return primary ? new Filesystem(reader, primary) : undefined
-    if (bytes[0] === 1 && !primary) primary = readVolume(bytes, false, reader.size)
+    if (bytes[0] === 255) return primary ? openBridge(sector, true, primary, false) : undefined
+    if (bytes[0] === 1 && !primary) primary = bytes
     else if (bytes[0] === 2 && primary && bytes[88] === 37 && bytes[89] === 47 &&
         (bytes[90] === 64 || bytes[90] === 67 || bytes[90] === 69))
-      return new Filesystem(reader, readVolume(bytes, true, reader.size))
+      return openBridge(sector, false, bytes, true)
   }
   if (primary) invalid('missing volume descriptor terminator within 64 sectors')
   return

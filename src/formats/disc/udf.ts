@@ -2,11 +2,11 @@ import type { ByteSource } from '../../engine/ports/storage.ts'
 import type { DiscEntry, DiscFilesystem } from './filesystem.ts'
 import { discPathParts, foldDiscName } from './path.ts'
 import type { TrackReader } from './track.ts'
-import { descriptor, longAddress, mappedExtent, readUdfVolume, udfBlock, udfError, udfText, viewOf,
-  type IcbAddress, type UdfVolume } from './udf-volume.ts'
+import { readAllocatedRuns, descriptor, parseFileEntry, longAddress, mappedExtent, runIndex, udfBlock, udfError, UdfFormatError, viewOf,
+  type IcbAddress, type UdfRun } from './udf-allocation.ts'
+import { readUdfVolume, udfText, type UdfVolume } from './udf-volume.ts'
 
-interface Run { offset: number; length: number; block: number; physical?: number }
-interface Node { type: number; source: ByteSource; runs: Run[]; icb: IcbAddress; embedded: boolean }
+interface Node { type: number; source: ByteSource; runs: UdfRun[]; icb: IcbAddress; embedded: boolean }
 interface Child { name: string; icb: IcbAddress; directory: boolean }
 
 // Readers may retain an individual file view independently of either cache.
@@ -38,17 +38,7 @@ function readBounds(size: number, offset: number, length: number): void {
     udfError('read outside file')
 }
 
-function runIndex(runs: Run[], offset: number): number {
-  let low = 0, high = runs.length
-  while (low + 1 < high) {
-    const middle = Math.floor((low + high) / 2)
-    if (runs[middle]!.offset <= offset) low = middle
-    else high = middle
-  }
-  return low
-}
-
-function extentSource(reader: TrackReader, size: number, runs: Run[], inline?: Uint8Array): ByteSource {
+function extentSource(reader: TrackReader, size: number, runs: UdfRun[], inline?: Uint8Array): ByteSource {
   const source: ByteSource = { size, async read(offset, length) {
     readBounds(size, offset, length)
     if (length > 64 * 1024 * 1024) return udfError('single file read exceeds 64 MiB')
@@ -78,82 +68,15 @@ class UdfFilesystem implements DiscFilesystem {
   private readonly dirs = new MetadataCache<Map<string, Child>>()
   constructor(private readonly reader: TrackReader, private readonly volume: UdfVolume) {}
 
-  private *mappedRuns(address: IcbAddress, length: number) {
-    for (let offset = 0; offset < length;) {
-      const block = address.block + offset / udfBlock
-      const span = mappedExtent(this.volume.partitions, { partition: address.partition, block }, length - offset)
-      yield { ...span, block, offset }
-      offset += span.bytes
-    }
-  }
-
-  private async allocated(start: Uint8Array, mode: number, partition: number, size: number): Promise<Run[]> {
-    if (mode !== 0 && mode !== 1) return udfError('unsupported allocation descriptor type')
-    const width = mode === 0 ? 8 : 16, seen = new Set<number>(), runs: Run[] = []
-    let table = start, written = 0, count = 0
-    for (;;) {
-      if (table.length % width !== 0) return udfError('incomplete allocation descriptor')
-      const view = viewOf(table)
-      let continuation: Uint8Array | undefined
-      for (let at = 0; at < table.length; at += width) {
-        if (++count > 65536) return udfError('too many allocation descriptors')
-        const raw = view.getUint32(at, true), length = raw & 0x3fffffff, kind = raw >>> 30
-        if (!length) break
-        const address = { block: view.getUint32(at + 4, true), partition: mode === 0 ? partition : view.getUint16(at + 8, true) }
-        if (kind === 3) {
-          if (at + width !== table.length || length < 24 || length > 1024 * 1024 || seen.size >= 1024)
-            return udfError('invalid allocation extent continuation')
-          const bytes = new Uint8Array(length)
-          for (const run of this.mappedRuns(address, length)) {
-            if (run.offset === 0) {
-              if (seen.has(run.physical)) return udfError('repeated allocation extent continuation')
-              seen.add(run.physical)
-            }
-            bytes.set(await this.reader.read(run.physical * udfBlock, run.bytes), run.offset)
-          }
-          const next = descriptor(bytes, address.block), fields = next.getUint32(20, true)
-          if (next.getUint16(0, true) !== 258 || fields > bytes.length - 24) return udfError('bad allocation extent descriptor')
-          continuation = bytes.subarray(24, 24 + fields)
-        } else {
-          if (!Number.isSafeInteger(written + length)) return udfError('file length exceeds exact byte offsets')
-          const visible = Math.min(length, size - written)
-          if (kind === 0) {
-            for (const run of this.mappedRuns(address, length)) {
-              if (run.offset >= visible) break
-              runs.push({ offset: written + run.offset, length: Math.min(run.bytes, visible - run.offset),
-                block: run.block, physical: run.physical * udfBlock })
-              if (runs.length > 131072) return udfError('too many recorded file extents')
-            }
-          } else {
-            // An allocated but unrecorded extent has an address. A sparse
-            // unallocated extent has none. Both return zero bytes to the game.
-            if (kind === 1) mappedExtent(this.volume.partitions, address, length)
-            if (visible > 0) runs.push({ offset: written, length: visible, block: address.block })
-          }
-          written += length
-        }
-      }
-      if (!continuation) break
-      table = continuation
-    }
-    if (written < size) return udfError('file allocation is shorter than its information length')
-    return runs
-  }
+  get label(): string { return this.volume.label }
 
   private async node(icb: IcbAddress): Promise<Node> {
     const block = mappedExtent(this.volume.partitions, icb, udfBlock).physical, cached = this.nodes.get(block)
     if (cached) return cached
-    const bytes = await this.reader.read(block * udfBlock, udfBlock), view = descriptor(bytes, icb.block)
-    const id = view.getUint16(0, true), type = bytes[27]!, mode = view.getUint16(34, true) & 7
-    if ((id !== 261 && id !== 266) || view.getUint16(20, true) !== 4)
-      return udfError('expected a direct file entry or extended file entry')
-    const base = id === 261 ? 176 : 216, start = base + view.getUint32(base - 8, true), length = view.getUint32(base - 4, true)
-    const size = Number(view.getBigUint64(56, true))
-    if (!Number.isSafeInteger(size) || start + length > bytes.length) return udfError('invalid file entry lengths')
-    const allocation = bytes.subarray(start, start + length), embedded = mode === 3
-    if (embedded && size > allocation.length) return udfError('truncated embedded file')
+    const bytes = await this.reader.read(block * udfBlock, udfBlock)
+    const { mode, type, size, allocation, embedded } = parseFileEntry(bytes, icb.block)
     const inline = embedded ? allocation.slice(0, size) : undefined
-    const runs = embedded ? [] : await this.allocated(allocation, mode, icb.partition, size)
+    const runs = embedded ? [] : await readAllocatedRuns(this.reader, this.volume.partitions, allocation, mode, icb.partition, size)
     return this.nodes.save(block, { icb, type, embedded, runs, source: extentSource(this.reader, size, runs, inline) },
       224 + runs.length * 64 + (inline?.length ?? 0))
   }
@@ -221,10 +144,42 @@ class UdfFilesystem implements DiscFilesystem {
   async openRoot(): Promise<void> { await this.lookup('') }
 }
 
-export async function openUdfVolume(reader: TrackReader, begin: number): Promise<DiscFilesystem | undefined> {
+export async function openUdfVolume(reader: TrackReader, begin: number): Promise<(DiscFilesystem & { readonly label: string }) | undefined> {
   const volume = await readUdfVolume(reader, begin)
   if (!volume) return
   const fs = new UdfFilesystem(reader, volume)
-  await fs.openRoot()
-  return fs
+  const loadMirror = volume.mirror
+  if (!loadMirror) { await fs.openRoot(); return fs }
+  let mirror: Promise<UdfFilesystem> | undefined
+  const read = async <T>(operation: (copy: UdfFilesystem) => Promise<T>): Promise<T> => {
+    try { return await operation(fs) }
+    catch (error) {
+      if (!(error instanceof UdfFormatError)) throw error
+      mirror ??= loadMirror().then((copy) => new UdfFilesystem(reader, copy)).catch((failure: unknown) => {
+        mirror = undefined
+        throw failure
+      })
+      return operation(await mirror)
+    }
+  }
+  await read((copy) => copy.openRoot())
+  return { label: volume.label, file: (path) => read((copy) => copy.file(path)), list: (path) => read((copy) => copy.list(path)) }
+}
+
+/** A bridge advertises UDF in the recognition area adjoining the ISO
+ * descriptors. A disc with an unreadable or unsupported UDF still has
+ * its separately mountable ISO directory. Source I/O errors propagate. */
+export async function openBridgedUdf(reader: TrackReader, after: number, terminated: boolean) {
+  if (reader.size <= 256 * udfBlock) return
+  for (let sector = after + 1; sector < Math.min(after + 65, reader.size / udfBlock); sector++) {
+    const header = await reader.recognitionHeader(sector, 7)
+    if (!header || header[6] !== 1) return
+    const id = String.fromCharCode(...header.subarray(1, 6))
+    if (id === 'BEA01' && header[0] === 0) {
+      try { return await openUdfVolume(reader, sector) }
+      catch (error) { if (!(error instanceof UdfFormatError)) throw error; return }
+    }
+    if (terminated || id !== 'CD001') return
+    terminated = header[0] === 255
+  }
 }

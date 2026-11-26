@@ -223,9 +223,10 @@ interface PlaybackBlock {
   complete: boolean
 }
 const playbackBlockFrames = 256, playbackBlocks = 4
+const playbackBlockCount = (frames: number) => Math.max(playbackBlocks, Math.ceil(384 / frames) + 1)
 /** Playback lookahead only; per-stage scratch/DSP and source fades are separate. */
-export const audioFilterChainMemoryBytes = (channels: number): number =>
-  channels * playbackBlockFrames * playbackBlocks * Float32Array.BYTES_PER_ELEMENT
+export const audioFilterChainMemoryBytes = (channels: number, blockFrames = playbackBlockFrames): number =>
+  channels * blockFrames * playbackBlockCount(blockFrames) * Float32Array.BYTES_PER_ELEMENT
 
 /** Keeps device/audible time separate from source lookahead and every stage's hop queues. */
 export class AudioFilterChain {
@@ -239,7 +240,10 @@ export class AudioFilterChain {
   private budget!: AudioFilterBudget
   starved = false
   constructor(channels: number, filters: readonly PhaseVocoderFilter[], source: FilterPcmSource,
-    private readonly convertOutput?: (data: readonly Float32Array[], frames: number) => void) {
+    private readonly convertOutput?: (data: readonly Float32Array[], frames: number) => void,
+    private readonly blockFrames: number = playbackBlockFrames) {
+    if (!Number.isInteger(blockFrames) || blockFrames < 125 || blockFrames > 48000)
+      throw new Error('Audio playback unit is outside the bounded source-rate range')
     this.stages = []
     let upstream = source
     for (const filter of filters) {
@@ -249,12 +253,12 @@ export class AudioFilterChain {
     }
     this.final = upstream
     const block = (): PlaybackBlock => ({
-      data: Array.from({ length: channels }, () => new Float32Array(playbackBlockFrames)),
+      data: Array.from({ length: channels }, () => new Float32Array(blockFrames)),
       segments: new WaveSegmentQueue(),
       frames: 0,
       complete: false,
     })
-    this.blocks = Array.from({ length: playbackBlocks }, block)
+    this.blocks = Array.from({ length: playbackBlockCount(blockFrames) }, block)
   }
   setBudget(budget: AudioFilterBudget): void {
     this.budget = budget
@@ -268,18 +272,18 @@ export class AudioFilterChain {
   }
   private fill(block: PlaybackBlock): void {
     if (block.complete) return
-    const available = playbackBlockFrames - block.frames,
+    const available = this.blockFrames - block.frames,
       destination = block.data.map((channel) => channel.subarray(block.frames)),
       read = this.final.read(destination, available, block.segments)
     if (!Number.isInteger(read) || read < 0 || read > available)
       throw new Error('Audio filter source returned an invalid playback frame count')
     this.convertOutput?.(destination, read)
     block.frames += read
-    block.complete = block.frames === playbackBlockFrames || !this.final.starved
+    block.complete = block.frames === this.blockFrames || !this.final.starved
   }
   private block(offset: number): PlaybackBlock {
-    if (offset >= playbackBlocks) throw new Error('Audio filter playback lookahead exceeded')
-    const block = this.blocks[(this.current + offset) % playbackBlocks]!
+    if (offset >= this.blocks.length) throw new Error('Audio filter playback lookahead exceeded')
+    const block = this.blocks[(this.current + offset) % this.blocks.length]!
     if (offset >= this.queued) {
       block.frames = 0
       block.complete = false
@@ -330,7 +334,7 @@ export class AudioFilterChain {
       )
       this.lastSourcePosition = block.segments.positionAt(block.frames)
       this.position -= block.frames
-      this.current = (this.current + 1) % playbackBlocks
+      this.current = (this.current + 1) % this.blocks.length
       this.queued--
       block = this.blocks[this.current]!
     }
@@ -371,7 +375,7 @@ export class AudioFilterChain {
     if (!this.canAdvance(frames)) return
     let remaining = frames
     // frequency is bounded by 384000 and output sample rate by 1000, so a single
-    // output sample cannot traverse an unbounded number of 256-frame blocks.
+    // output sample cannot traverse an unbounded number of playback blocks.
     while (remaining > 1e-9) {
       const block = this.blocks[this.current]!
       if (!block.frames) return

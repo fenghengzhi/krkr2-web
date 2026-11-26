@@ -8,7 +8,7 @@ import type { ZipNameEncoding } from '../formats/zip/names.ts'
 
 const maxArchive = 96 * 1024 * 1024
 type Check = () => Promise<void>
-interface SaveEntry { name: string; size: number; read(): Promise<Uint8Array> }
+export interface SaveDirectoryEntry { name: string; size: number; read(): Promise<Uint8Array> }
 
 /** Already enumerated directory capabilities have relative paths rather than
  * webkitRelativePath. Use the same collision, byte and cancellation checks. */
@@ -41,7 +41,7 @@ function checkpoint(active: () => void): Check {
   }
 }
 
-async function readEntries(entries: SaveEntry[], check: Check): Promise<SaveFile[]> {
+async function readEntries(entries: SaveDirectoryEntry[], check: Check): Promise<SaveFile[]> {
   await check()
   validateEntries(entries)
   const result: SaveFile[] = []
@@ -53,6 +53,34 @@ async function readEntries(entries: SaveEntry[], check: Check): Promise<SaveFile
   return result
 }
 
+/** Both desktop archives and browser backups offer explicit, data-relative
+ * subtree selection. No decoding or writes happen during directory browsing. */
+export function createSaveDirectory(name: string, entries: readonly SaveDirectoryEntry[], active: () => void) {
+  const check = checkpoint(active)
+  return {
+    name,
+    directory(prefix: string) {
+      active()
+      const children = new Set<string>()
+      let count = 0, size = 0
+      for (const entry of entries) {
+        if (!entry.name.startsWith(prefix)) continue
+        count++; size += entry.size
+        const slash = entry.name.indexOf('/', prefix.length)
+        if (slash !== -1) children.add(entry.name.slice(0, slash + 1))
+      }
+      return { children: [...children].sort(), count, size, fits: count > 0 && count <= MAX_SAVE_FILES && size <= MAX_SAVE_BYTES }
+    },
+    async read(prefix: string) {
+      if (prefix && !prefix.endsWith('/')) throw new Error('请选择备份中的目录')
+      const selected = entries.filter((entry) => entry.name.startsWith(prefix)).map((entry) => ({
+        ...entry, name: entry.name.slice(prefix.length),
+      }))
+      return readEntries(selected, check)
+    },
+  }
+}
+
 /** Index only. A desktop backup can contain a large game alongside its saves.
  * The save limits and full member CRCs apply to the selected subtree. */
 export async function openNativeSaveZip(file: File, active: () => void, zipEncoding?: ZipNameEncoding) {
@@ -61,29 +89,9 @@ export async function openNativeSaveZip(file: File, active: () => void, zipEncod
   const entries = await readZip(new BlobSource(file), { ...zipNameCodecs(zipEncoding),
     inflate: (bytes, size) => inflateRaw(bytes, size, check), checkpoint: check })
   await check()
-  return {
-    name: file.name,
-    directory(prefix: string) {
-      active()
-      const children = new Set<string>()
-      let count = 0, size = 0
-      for (const entry of entries) {
-        if (!entry.name.startsWith(prefix)) continue
-        count++
-        size += entry.size
-        const slash = entry.name.indexOf('/', prefix.length)
-        if (slash !== -1) children.add(entry.name.slice(0, slash + 1))
-      }
-      return { children: [...children].sort(), count, size, fits: count > 0 && count <= MAX_SAVE_FILES && size <= MAX_SAVE_BYTES }
-    },
-    async read(prefix: string) {
-      if (prefix && !prefix.endsWith('/')) throw new Error('请选择 ZIP 中的目录')
-      const selected = entries.filter((entry) => entry.name.startsWith(prefix)).map((entry) => ({
-        name: entry.name.slice(prefix.length), size: entry.size, read: () => entry.read(),
-      }))
-      return readEntries(selected, check)
-    },
-  }
+  return createSaveDirectory(file.name, entries.map((entry) => ({
+    name: entry.name, size: entry.size, read: () => entry.read(),
+  })), active)
 }
 
 /** Data-directory-relative files, containing their original bytes. */

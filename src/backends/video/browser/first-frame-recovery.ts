@@ -1,6 +1,46 @@
 type StartupVideo = Pick<HTMLVideoElement, 'paused' | 'muted' | 'readyState' | 'play' | 'pause' |
   'getVideoPlaybackQuality'>
 
+/** A warmup can report paused=true before the platform has published its
+ * stopped clock. Subscribe before closing recovery and wait for the actual
+ * pause event, so a cached zero cannot bypass the required restoration seek. */
+export function pauseRecoveredVideo(video: EventTarget & { readonly paused: boolean },
+  signal: AbortSignal, options: { stop(): void; schedule(callback: () => void, delay: number): () => void }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const alreadyPaused = video.paused
+    let settled = false, stopped = false, observed = false, cancelTimeout = () => {}
+    const done = (error?: unknown) => {
+      if (settled) return
+      settled = true
+      cancelTimeout()
+      video.removeEventListener('pause', paused)
+      signal.removeEventListener('abort', cancel)
+      error === undefined ? resolve() : reject(error)
+    }, complete = () => {
+      if (!stopped || settled) return
+      if (signal.aborted) cancel()
+      else if (alreadyPaused || observed) {
+        if (!video.paused) done(new Error('Video recovery pause did not stop playback'))
+        else done()
+      }
+    }, paused = () => { observed = true; complete() },
+      cancel = () => done(new Error('Video recovery pause cancelled'))
+    try {
+      if (!alreadyPaused && !signal.aborted) {
+        video.addEventListener('pause', paused)
+        signal.addEventListener('abort', cancel, { once: true })
+        cancelTimeout = options.schedule(() => done(new Error('Video recovery pause timed out')), 15000)
+        if (settled) cancelTimeout()
+      }
+      // Cleanup is still required for an already cancelled or paused warmup.
+      // A synchronous test/event cannot publish success until stop returns.
+      options.stop()
+      stopped = true
+      complete()
+    } catch (error) { done(error) }
+  })
+}
+
 /** A stalled private decoder may need to run before it submits its first image.
  * This never substitutes loadeddata, a timer or a decoded-frame count for rVFC.
  * The caller still owns that gate and must restore the starting media clock. */

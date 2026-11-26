@@ -152,16 +152,27 @@ export function parseSliBytes(bytes: Uint8Array): LoopInfo {
 /** ++/-- may parse an operand but always change by one. Invalid expressions
  * still remain ordinary label notifications. Only unsigned decimal tokens
  * exist in the original label expression grammar. */
-export function applySliExpression(flags: number[], name: string): boolean {
+function readSliExpression(name: string) {
   const nul = name.indexOf('\0')
   if (nul >= 0) name = name.slice(0, nul)
   const match = /^:[\x01-\x20]*\[[\x01-\x20]*(\d+)[\x01-\x20]*\][\x01-\x20]*(\+\+|--|\+=|-=|=)[\x01-\x20]*(?:(\d+)|\[[\x01-\x20]*(\d+)[\x01-\x20]*\])?[\x01-\x20]*$/.exec(name)
-  if (!match) return false
+  if (!match) return undefined
   const index = Number(match[1]), operator = match[2]!, indirect = match[4] === undefined ? undefined : Number(match[4]),
-    operand = indirect === undefined ? Number(match[3] ?? 0) : flags[indirect]!
+    literal = Number(match[3] ?? 0)
   if (index >= 16 || (indirect !== undefined && indirect >= 16) ||
       (!['++', '--'].includes(operator) && match[3] === undefined && indirect === undefined) ||
-      !Number.isInteger(operand) || operand < 0 || operand > 0x7fffffff) return false
+      !Number.isInteger(literal) || literal < 0 || literal > 0x7fffffff) return undefined
+  return { index, operator, indirect, literal }
+}
+/** Identify real flag-writing labels without evaluating or changing flags. */
+export const sliExpressionTarget = (name: string): number | undefined => readSliExpression(name)?.index
+
+export function applySliExpression(flags: number[], name: string): boolean {
+  const expression = readSliExpression(name)
+  if (!expression) return false
+  const { index, operator, indirect, literal } = expression,
+    operand = indirect === undefined ? literal : flags[indirect]!
+  if (!Number.isInteger(operand) || operand < 0 || operand > 0x7fffffff) return false
   const previous = flags[index]!, value = operator === '=' ? operand : operator === '++' ? previous + 1
     : operator === '--' ? previous - 1 : operator === '+=' ? previous + operand : previous - operand
   flags[index] = Math.max(0, Math.min(9999, value))

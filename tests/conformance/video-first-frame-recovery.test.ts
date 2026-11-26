@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { recoverVideoFirstFrame } from '../../src/backends/video/browser/first-frame-recovery.ts'
+import { pauseRecoveredVideo, recoverVideoFirstFrame } from '../../src/backends/video/browser/first-frame-recovery.ts'
 
 function fixture() {
   let expire!: () => void, cancelled = false, allowed = true, starts = 0, plays = 0,
@@ -74,4 +74,58 @@ test('suspended and retired recovery cannot start background playback or resume 
   f.resolve(); await Promise.resolve()
   f.recovery.resume()
   assert.deepEqual([f.plays, f.state.paused, f.state.muted, f.errors.length], [2, true, false, 0])
+})
+
+test('warmup restoration waits for the stopped clock event, including synchronous pause and already-paused media', async () => {
+  class Video extends EventTarget { paused = false; clock = 0 }
+  for (const mode of ['queued', 'synchronous', 'already-paused'] as const) {
+    const video = new Video(), controller = new AbortController()
+    let scheduled = 0, cancelled = 0, stops = 0, complete = false
+    video.paused = mode === 'already-paused'
+    const work = pauseRecoveredVideo(video, controller.signal, {
+      schedule(_callback, delay) { assert.equal(delay, 15000); scheduled++; return () => { cancelled++ } },
+      stop() {
+        stops++; video.paused = true
+        if (mode === 'synchronous') {
+          video.clock = .47592458333315335
+          video.dispatchEvent(new Event('pause'))
+        }
+      },
+    }).then(() => { complete = true })
+    await Promise.resolve()
+    if (mode === 'queued') {
+      assert.equal(complete, false, 'paused=true with cached zero is not a stopped clock observation')
+      assert.equal(video.clock, 0)
+      video.clock = .47592458333315335
+      video.dispatchEvent(new Event('pause'))
+    }
+    await work
+    assert.equal(complete, true); assert.equal(stops, 1)
+    assert.equal(scheduled, mode === 'already-paused' ? 0 : 1)
+    assert.equal(cancelled, scheduled)
+    assert.equal(video.clock, mode === 'already-paused' ? 0 : .47592458333315335)
+  }
+})
+
+test('warmup pause cancellation, missing events and synchronous cleanup errors remain bounded failures', async () => {
+  class Video extends EventTarget { paused = false }
+  for (const mode of ['cancelled-before', 'cancelled-after', 'no-event', 'stop-error'] as const) {
+    const video = new Video(), controller = new AbortController(), original = new Error('Pause cleanup failed')
+    let expire!: () => void, cancelled = 0, stops = 0
+    if (mode === 'cancelled-before') controller.abort()
+    const work = pauseRecoveredVideo(video, controller.signal, {
+      schedule(callback, delay) { assert.equal(delay, 15000); expire = callback; return () => { cancelled++ } },
+      stop() {
+        stops++; video.paused = true
+        if (mode === 'stop-error') { video.dispatchEvent(new Event('pause')); throw original }
+      },
+    })
+    if (mode === 'cancelled-after') controller.abort()
+    if (mode === 'no-event') expire()
+    await assert.rejects(work, (error) => mode === 'stop-error' ? error === original
+      : error instanceof Error && error.message === (mode === 'no-event' ? 'Video recovery pause timed out' : 'Video recovery pause cancelled'))
+    assert.equal(stops, 1)
+    assert.equal(cancelled, mode === 'cancelled-before' ? 0 : 1)
+    video.dispatchEvent(new Event('pause'))
+  }
 })

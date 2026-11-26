@@ -33,7 +33,8 @@ test('reads independently authored ISO and Joliet labels from cooked and raw dat
         },
       }
       assert.equal(await readDiscVolumeLabel(source, track), expected)
-      assert.deepEqual(reads, [16, 17])
+      assert.deepEqual(reads, bytes === plain ? [16, 17, 18] : [16, 17, 18, 19],
+        'Only ISO descriptors and the immediately adjoining bridge header are read')
     }
   }
 })

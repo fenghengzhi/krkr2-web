@@ -27,7 +27,7 @@ function discState(){return [kag.currentLabel,kag.current.numLinks,kag.conductor
 function discSlot(){var slot=Scripts.evalStorage(kag.getBookMarkFileNameAtNum(0));return [slot.user.discProgress,slot.core.mainConductor.curLabel].join("|");}
 Debug.message("story-disc-ready:"+discRoot+"|"+discTitle+"|"+discBonus);`
 
-export function discStoryGame(binary: boolean) {
+export function discStoryProject(binary: boolean) {
   const original = readFileSync(new URL('../fixtures/compatibility/kag3_template.xp3', import.meta.url))
   if (createHash('sha256').update(original).digest('hex') !== '5a1bdb7d33b7077a47ebfb889524c381216c44b65e8dc69d6c9cbb3453458644')
     throw new Error('The original KAG template changed')
@@ -40,8 +40,13 @@ export function discStoryGame(binary: boolean) {
     { name: 'patch.xp3', buffer: xp3Fixture({ 'first.ks': wide(menu) }).bytes },
     { name: 'AfterInit2.tjs', buffer: wide(hook) },
     { name: 'story-observer.tjs', buffer: wide(observer) },
-    { name: 'story.cue', buffer: Buffer.from(discStoryCue) },
-    { name: 'story.iso', buffer: discStoryImage() },
   ]
   return files.map((file) => ({ ...file, mimeType: 'application/octet-stream' }))
+}
+
+export function discStoryGame(binary: boolean) {
+  const mimeType = 'application/octet-stream'
+  return [...discStoryProject(binary),
+    { name: 'story.cue', buffer: Buffer.from(discStoryCue), mimeType },
+    { name: 'story.iso', buffer: discStoryImage(), mimeType }]
 }
