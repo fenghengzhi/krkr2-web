@@ -150,7 +150,7 @@ function referenceTaglistExtension(){
  var p=new ReferenceParser(),value=%[name:"kept"],result,failed=false,primary;
  try{
   referenceSeed(p,"references-reserved.ks",value);p.macroParams.taglist=value;p.macroParams.__kagReference=value;
-  var tag=referenceNext(p,"emit");result=int(tag.taglist instanceof "Array")+"|"+int(tag.taglist.indexOf("taglist")>=0)+"|"+int(tag.__kagReference===value);
+  var tag=referenceNext(p,"emit");result=int(tag.taglist instanceof "Array")+"|"+int(tag.taglist.find("taglist")>=0)+"|"+int(tag.__kagReference===value);
   referenceFinish(p);
  }catch(e){failed=true;primary=e;}
  try{invalidate p;}catch(e){if(failed)Debug.message("reference-cleanup:"+e.message);else throw e;}

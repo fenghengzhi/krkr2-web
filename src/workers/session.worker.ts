@@ -4,8 +4,7 @@ import { importSources } from '../backends/files/import-resources.ts'
 import { resolveFiles, type SourceFile } from '../backends/files/source-files.ts'
 import { HttpRangePool } from '../backends/files/http-range.ts'
 import { gameIdentity, projectIdentity } from '../player/game-identity.ts'
-import { copyProjectSelection, type GameProject, type ProjectSelection } from '../engine/storage/project.ts'
-import { zipNameEncoding, type ZipNameEncoding } from '../formats/zip/names.ts'
+import { copyGameEncodings, copyProjectSelection, type GameEncodings, type GameProject, type ProjectSelection } from '../engine/storage/project.ts'
 import { prepareProject } from '../engine/storage/distribution.ts'
 import { createSessionArchiveReader } from '../backends/files/archive-reader.ts'
 import { prepareDroppedResources } from '../backends/files/drop-resources.ts'
@@ -20,7 +19,7 @@ const sources = new HttpRangePool()
 // The outer ZIP feeds the game's own archive decoder. Separate their cursors
 // so an inner read can request more outer bytes while its decoder is active.
 let distributionReader: ReturnType<typeof createSessionArchiveReader> | undefined
-let preparedZipEncoding: ZipNameEncoding = 'cp437'
+let preparedEncodings: GameEncodings = {}
 sources.signal.addEventListener('abort', () => distributionReader?.dispose(), { once: true })
 let prepared: SourceFile[] | undefined
 let preparedResources: Resource[] | undefined
@@ -135,15 +134,14 @@ const api: SessionApi = {
         filesReady = libraryLease.files
         identity = libraryLease.record.gameId
         requested = libraryLease.record.project ? { mode: 'root', ...libraryLease.record.project } : { mode: 'collection' }
-        preparedZipEncoding = zipNameEncoding(libraryLease.record.zipEncoding)
       } else {
         filesReady = await resolveFiles(files, checkpoint, sources)
         identity = await gameIdentity(filesReady, checkpoint)
         requested = copyProjectSelection(selection)
-        preparedZipEncoding = zipNameEncoding(requested.zipEncoding)
       }
+      preparedEncodings = copyGameEncodings(libraryLease?.record ?? requested)
       if (requested.mode !== 'collection') {
-        distributionReader = createSessionArchiveReader(undefined, preparedZipEncoding)
+        distributionReader = createSessionArchiveReader(undefined, preparedEncodings.zipEncoding)
         resources = await importSources(filesReady, checkpoint, { lazyArchives: true })
         const mount = await prepareProject(resources, requested, distributionReader, checkpoint)
         resources = mount.resources
@@ -181,7 +179,7 @@ const api: SessionApi = {
       throw new Error('Invalid Window move capability')
     if (!prepared || request.gameId !== gameId)
       throw new Error('Prepare the game sources before initializing')
-    session = createSession(request, preparedProject, preparedProject?.distribution ? distributionReader : undefined, preparedZipEncoding)
+    session = createSession(request, preparedProject, preparedProject?.distribution ? distributionReader : undefined, preparedEncodings)
     generation = request.generation
     session.control.onCancel(() => sources.close())
     await session.initialize(preparedResources)

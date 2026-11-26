@@ -3,11 +3,10 @@ import { OpfsLibraryFiles, OpfsReadPool } from '../../backends/files/opfs-librar
 import { HttpRangePool } from '../../backends/files/http-range.ts'
 import { resolveFiles, type SourceFile } from '../../backends/files/source-files.ts'
 import { gameIdentity, projectIdentity } from '../game-identity.ts'
-import { copyGameProject } from '../../engine/storage/project.ts'
+import { copyGameEncodings, copyGameProject } from '../../engine/storage/project.ts'
 import { prepareProject } from '../../engine/storage/distribution.ts'
 import { importSources } from '../../backends/files/import-resources.ts'
 import { createSessionArchiveReader } from '../../backends/files/archive-reader.ts'
-import { zipNameEncoding } from '../../formats/zip/names.ts'
 import type {
   LibraryGame,
   LibraryImport,
@@ -81,7 +80,7 @@ export class LibraryService {
   ): Promise<LibraryGame> {
     signal.throwIfAborted()
     const requestedProject = copyGameProject(request.project)
-    const zipEncoding = zipNameEncoding(request.zipEncoding)
+    const encodings = copyGameEncodings(request)
     const settings = gameSettings(request, requestedProject)
     if (
       !/^game-[a-f0-9]{64}$/.test(request.expectedGameId) ||
@@ -127,7 +126,7 @@ export class LibraryService {
         const sourceGameId = await gameIdentity(sources, checkpoint)
         let project = requestedProject
         if (requestedProject) {
-          const reader = createSessionArchiveReader(undefined, zipEncoding)
+          const reader = createSessionArchiveReader(undefined, encodings.zipEncoding)
           try {
             project = (await prepareProject(await importSources(sources, checkpoint, { lazyArchives: true }),
               { mode: 'root', ...requestedProject }, reader, checkpoint)).project
@@ -148,7 +147,7 @@ export class LibraryService {
           version: 1,
           id,
           gameId: identity,
-          ...(zipEncoding === 'cp437' ? {} : { zipEncoding }),
+          ...encodings,
           ...(project === undefined ? {} : { project, sourceGameId }),
           ...settings,
           createdAt: Date.now(),

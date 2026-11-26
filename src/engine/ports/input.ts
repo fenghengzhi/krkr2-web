@@ -36,6 +36,10 @@ export type InputPacket = {
    * Window callbacks must not reinterpret this point after a queued zoom or
    * layer-origin change. Touch events never use this field. */
   paintBoxPoint?: { x: number; y: number }
+  /** A browser mouse-up can also deliver the native ordinary Click. VCL's
+   * Click uses the Form's last mouse-down PaintBox point, while MouseUp keeps
+   * the current release point. Only up/clicks=1 packets carry this snapshot. */
+  clickPaintBoxPoint?: { x: number; y: number }
   /** Browser geometry/physical sampling only. Conversion happens after native
    * keyboard routing and trap-key admission in the engine. */
   mouseKeyObservation?: MouseKeyObservation

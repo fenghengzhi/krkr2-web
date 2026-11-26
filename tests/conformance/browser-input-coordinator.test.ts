@@ -138,6 +138,34 @@ function dom() {
 
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
 
+test('a release carries the original PaintBox click point without a second physical observation', async () => {
+  const env = dom(), canvas = env.canvas(), packets: InputPacket[] = [],
+    pointers: { x: number; y: number }[] = [], errors: unknown[] = [],
+    coordinator = new BrowserInputCoordinator(async (packet) => { packets.push(packet) }, async () => {},
+      (x, y) => { pointers.push({ x, y }) }, (error) => errors.push(error), { gamepad: false })
+  try {
+    canvas.clientWidth = 200; canvas.clientHeight = 100
+    const view = { ...new WindowState().view(), width: 200, height: 100, visible: true,
+      zoomNumer: 1, zoomDenom: 2, layerLeft: 3, layerTop: -3 }
+    coordinator.attach(101, 1, canvas as unknown as HTMLCanvasElement)
+    coordinator.setWindow(101, view); coordinator.setInput(101, inputView())
+    canvas.focus(); await settle(); packets.length = 0; pointers.length = 0
+    env.mouse(canvas, 'mousedown', 1, 20); await settle()
+    coordinator.setWindow(101, { ...view, zoomNumer: 2, zoomDenom: 3, layerLeft: -3, layerTop: 5 })
+    env.mouse(canvas, 'mousemove', 1, 150); env.mouse(canvas, 'mouseup', 0, 150)
+    await settle()
+    const mouse = packets.filter((packet) => ['down', 'move', 'up'].includes(packet.type)), up = mouse.at(-1)!
+    assert.deepEqual(mouse.map((packet) => packet.type), ['down', 'move', 'up'])
+    assert.deepEqual(mouse[0]!.paintBoxPoint, { x: 18, y: 12 })
+    assert.deepEqual(up.paintBoxPoint, { x: 152, y: 7 })
+    assert.deepEqual(up.clickPaintBoxPoint, { x: 18, y: 12 })
+    assert.deepEqual(pointers, [{ x: 20, y: 10 }, { x: 150, y: 10 }, { x: 150, y: 10 }])
+    assert.equal(packets.some((packet) => packet.type === 'click'), false)
+    assert.equal(new Set(mouse.map((packet) => packet.pointerSequence)).size, 3)
+    assert.deepEqual(errors, [])
+  } finally { coordinator.close(); env.restore() }
+})
+
 test('one captured screen fact is copied to global observation, pointer RPC and packet with a move-only restore target', { timeout: 30000 }, async () => {
   const env = dom(), canvas = env.canvas(), packets: InputPacket[] = [],
     screens: PhysicalPointerScreen[] = [], pointers: { sequence?: number; screen?: PhysicalPointerScreen }[] = [], errors: unknown[] = [],

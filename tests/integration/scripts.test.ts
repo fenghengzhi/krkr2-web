@@ -270,6 +270,36 @@ test('textEncoding controls script, native text, KAG and compile reads while BOM
   }
 })
 
+// Literal game bytes, independent of the browser's decoder. C3 A9 is also
+// legal UTF-8, so initial Western text cannot use the automatic UTF-8 probe.
+for (const [scriptEncoding, hex, title] of [
+  ['big5', 'a4a4a4e5', '中文'], ['gbk', 'd6d0cec4', '中文'],
+  ['windows-1252', 'c3a9', 'Ã©'], ['shift_jis', '93fa967b', '日本'],
+  ['utf-8', 'e99baa', '雪'],
+] as const) {
+  test(`load ${scriptEncoding} startup, chapter and compiled scripts before a game sets its decoder`, async () => {
+    const { session } = await headless({
+      'startup.tjs': text(hex, 'var opening="', '";var gameParser=new KAGParser();gameParser.loadScenario("first.ks");'),
+      'first.ks': text(hex), 'title.txt': text(hex),
+      'chapter.tjs': text(hex, '"', '"'), 'japanese.tjs': text('93fa967b', '"', '"'),
+      'unicode.tjs': Buffer.from('\ufeff"🎮"', 'utf16le'), 'explicit.tjs': '"🎮"',
+    }, { scriptEncoding })
+    try {
+      await session.start()
+      assert.equal(await session.evaluate('opening'), title)
+      assert.equal(await session.evaluate(Array.from(title, () => 'gameParser.getNextTag().text').join('+')), title)
+      assert.equal(await session.evaluate('[].load("title.txt")[0]'), title)
+      await session.evaluate('Scripts.compileStorage("chapter.tjs",System.dataPath+"chapter.cjs",true,false,true)')
+      assert.equal(await session.evaluate('Scripts.evalStorage(System.dataPath+"chapter.cjs")'), title)
+      assert.equal(await session.evaluate('Scripts.evalStorage("explicit.tjs","utf-8")'), '🎮')
+      assert.equal(await session.evaluate('Scripts.evalStorage("unicode.tjs")'), '🎮')
+      await execute(session, 'Scripts.textEncoding="SJIS";')
+      assert.equal(await session.evaluate('Scripts.evalStorage("japanese.tjs")'), '日本')
+      assert.equal(session.snapshot().scriptEncoding, scriptEncoding, 'restart uses the original launch preference')
+    } finally { await session.stop() }
+  })
+}
+
 for (const cancelled of [false, true])
   test(`compileStorage ${cancelled ? 'cancels' : 'resumes'} a suspended warning without executing source`, async () => {
     let entered!: () => void, release!: () => void

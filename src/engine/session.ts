@@ -11,7 +11,7 @@ import { TvpError } from './system/tvp-error.ts'
 import { TjsError } from './system/tjs-error.ts'
 import { mapTextStreamError } from './system/text-stream-error.ts'
 import type { TvpMessageId } from './system/tvp-message-ids.ts'
-import { ScriptTextEncoding } from './script/text-encoding.ts'
+import { ScriptTextEncoding, type ScriptEncoding } from './script/text-encoding.ts'
 import { debugBridge } from './tvp/debug.ts'
 import { DebugLog } from './diagnostics/log.ts'
 import { DebugPanels, type DebugPanel, type DebugVisibility } from './diagnostics/panels.ts'
@@ -175,6 +175,7 @@ const ignoredAdmission = (): SessionAdmission => ({
 export interface SessionSnapshot {
   project?: GameProject
   zipEncoding?: ZipNameEncoding
+  scriptEncoding?: ScriptEncoding
   windows?: WindowPresentation[]
   activeWindow?: number
   mainWindow?: number
@@ -255,6 +256,7 @@ export interface SessionDependencies {
   cddaDiscs?: readonly CddaDisc[]
   project?: GameProject
   zipEncoding?: ZipNameEncoding
+  scriptEncoding?: ScriptEncoding
   archives?: ArchiveReader
   /** The page implements the matching request/reply presentation protocol. */
   windowMoveSupported?: boolean
@@ -326,7 +328,7 @@ export class EngineSession {
   private clipboardClosed = false
   private readonly help: HelpPort
   private helpClosed = false
-  private readonly textEncoding = new ScriptTextEncoding()
+  private readonly textEncoding: ScriptTextEncoding
   private readonly fontCatalog: FontCatalog
   private padFonts = new Map<string, NamedFontFace[]>()
   private readonly fontSelection: FontSelection
@@ -543,6 +545,7 @@ export class EngineSession {
     }
     this.project = copyGameProject(deps.project)
     this.zipEncoding = zipNameEncoding(deps.zipEncoding)
+    this.textEncoding = new ScriptTextEncoding(deps.scriptEncoding)
     const cddaDiscs = copyCddaDiscs(deps.cddaDiscs)
     // Reject invalid configuration before clocks or subscribed host resources
     // are consulted. A failed constructor has no disposal owner yet.
@@ -2854,6 +2857,13 @@ export class EngineSession {
           Number.isInteger(value) && value >= -2147483648 && value <= 2147483647)
       ) throw new Error('Invalid PaintBox mouse coordinates')
     }
+    if (packet.clickPaintBoxPoint !== undefined) {
+      const point = packet.clickPaintBoxPoint
+      if (packet.type !== 'up' || packet.clicks !== 1 || !point || typeof point !== 'object' ||
+          ![point.x, point.y].every((value) =>
+            Number.isInteger(value) && value >= -2147483648 && value <= 2147483647))
+        throw new Error('Invalid PaintBox click coordinates')
+    }
     if (packet.mouseKeyObservation !== undefined) {
       const sample = packet.mouseKeyObservation
       if (!sample || !Number.isSafeInteger(sample.windowId) || sample.windowId <= 0 ||
@@ -3080,6 +3090,7 @@ export class EngineSession {
     return {
       ...packet,
       paintBoxPoint: { ...(packet.paintBoxPoint ?? paintBoxPoint(window.state, packet.x, packet.y)) },
+      ...(packet.clickPaintBoxPoint ? { clickPaintBoxPoint: { ...packet.clickPaintBoxPoint } } : {}),
     }
   }
   private postInput(packet: InputPacket, window: WindowRecord, additionalValid?: () => boolean): void {
@@ -4022,6 +4033,7 @@ export class EngineSession {
       resources: this.storage.count,
       ...(this.project ? { project: { ...this.project } } : {}),
       ...(this.zipEncoding === 'cp437' ? {} : { zipEncoding: this.zipEncoding }),
+      ...(this.textEncoding.initial === 'auto' ? {} : { scriptEncoding: this.textEncoding.initial }),
       ...this.layers.inspect(),
       handles: runtime?.handles ?? 0,
       memoryBytes: runtime?.memoryBytes ?? 0,

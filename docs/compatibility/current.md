@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 146 批为无 BOM 的 TJS 与 KAG 加入游戏级编码选择。普通鼠标单击采用按下位置，无扬声器标记的六声道 WAVE 按原版次序播放。新增行为等待托管验证。[146 范围与验收](../decisions/146-game-text-mouse-clicks-and-wave-speakers.md)
+
 第 145 批为旧 ZIP 发行包和存档接入日文、简体中文和繁体中文文件名编码，游戏库重开时恢复选择。图层影片等待真实准备帧，高上升部字体能保留完整的字幕装饰线。新增实现等待托管验证。[145 范围与验收](../decisions/145-zip-file-names-video-prepare-and-text.md)
 
 第 144 批支持多个程序并存时识别内嵌 XP3 游戏，保留嵌套 KAG 宏中的实数类型，并交付 WAVE 曲尾的 SLI 标签。新增行为待托管验证。[144 范围与验收](../decisions/144-combined-games-macro-values-and-audio-cues.md)

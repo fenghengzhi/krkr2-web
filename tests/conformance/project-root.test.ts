@@ -105,6 +105,18 @@ test('library manifests preserve frozen project identity and accept unchanged le
     next = { ...old, gameId: await projectIdentity(base, selected), sourceGameId: base, project: selected }
   assert.equal(validateRecord(old), old)
   assert.equal(Object.hasOwn(summary(old), 'project'), false)
+  assert.equal(Object.hasOwn(summary(old), 'scriptEncoding'), false)
+  assert.deepEqual(copyProjectSelection({ mode: 'collection', scriptEncoding: 'auto' }), { mode: 'collection' })
+  for (const setting of ['big5', 'windows-1252'] as const) {
+    const configured = { ...next, zipEncoding: 'shift_jis' as const, scriptEncoding: setting }
+    const catalog = validateSummary(summary(validateRecord(configured)))
+    assert.equal(catalog.scriptEncoding, setting)
+    assert.equal(catalog.zipEncoding, 'shift_jis')
+    assert.equal(catalog.gameId, next.gameId)
+    assert.equal(copyProjectSelection({ mode: 'auto', scriptEncoding: setting }).scriptEncoding, setting)
+  }
+  assert.throws(() => validateRecord({ ...old, scriptEncoding: 'unknown' }), /脚本与剧情编码/)
+  assert.throws(() => validateSummary({ ...old, scriptEncoding: null }), /脚本与剧情编码/)
   assert.deepEqual(validateSummary(summary(validateRecord(next))).project, selected)
   assert.throws(() => validateRecord({ ...next, sourceGameId: undefined }), /project metadata/)
   assert.throws(() => validateRecord({ ...next, project: project('bin/./data.xp3>') }), /project metadata/)

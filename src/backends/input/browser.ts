@@ -161,6 +161,7 @@ export class BrowserInput {
   private touches = new Map<number, { x: number; y: number; startX: number; startY: number }>()
   private mouseTouch: number | undefined
   private clicks = new Map<number, number>()
+  private lastMouseDownPoint?: { x: number; y: number }
   private view?: WindowView
   private input?: InputView
   private sourceWindowId?: number
@@ -380,6 +381,7 @@ export class BrowserInput {
       this.mouseButtons = 0
       this.mouseTouch = undefined
       this.clicks.clear()
+      this.lastMouseDownPoint = undefined
       this.touches.clear()
       this.pressed.clear()
       this.releasePointerCaptures()
@@ -397,6 +399,7 @@ export class BrowserInput {
       this.mouseTouch = undefined
       this.touches.clear()
       this.clicks.clear()
+      this.lastMouseDownPoint = undefined
       this.pressed.clear()
       this.cancelComposition()
       this.releasePointerCaptures()
@@ -664,14 +667,15 @@ export class BrowserInput {
       this.mouseButtons = event.buttons || this.mouseButtons | (1 << event.button)
       this.clicks.set(button, event.detail || 1)
     }
-    const shift = shiftState(event)
+    const shift = shiftState(event), clicks = type === 'up' ? (this.clicks.get(button) ?? 0) : 0
     this.modifiers(shift)
     this.push({
       type,
       ...p,
       button,
       shift,
-      clicks: type === 'up' ? (this.clicks.get(button) ?? 0) : 0,
+      clicks,
+      ...(clicks === 1 && this.lastMouseDownPoint ? { clickPaintBoxPoint: { ...this.lastMouseDownPoint } } : {}),
       ...this.screenEvent(event),
     })
     if (type === 'up') {
@@ -855,6 +859,7 @@ export class BrowserInput {
   private clearTransient(): void {
     this.mouseButtons = 0
     this.clicks.clear()
+    this.lastMouseDownPoint = undefined
     this.touches.clear()
     this.releasePointerCaptures()
     this.mouseTouch = undefined
@@ -913,6 +918,9 @@ export class BrowserInput {
       const capturedPoint = this.view && paintBoxPoint(this.view, packet.x, packet.y),
         sequence = this.observePointer(packet.x, packet.y, packet.physicalScreen)
       if (sequence === undefined) return
+      // WindowForm's Click later uses exactly the point posted for MouseDown,
+      // not another projection sampled around focus/hook callbacks.
+      if (packet.type === 'down') this.lastMouseDownPoint = capturedPoint && { ...capturedPoint }
       // VCL captures PaintBox-relative integers before the Window callback.
       // Preserve this origin snapshot while the packet waits behind earlier
       // input; raw coordinates still feed physical observation and takeover.

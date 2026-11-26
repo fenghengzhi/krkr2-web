@@ -1,7 +1,6 @@
 import type { LibraryGame } from '../../protocol/library.ts'
-import { zipNameEncoding } from '../../formats/zip/names.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
-import { copyGameProject, type GameProject } from '../../engine/storage/project.ts'
+import { copyGameEncodings, copyGameProject, type GameProject } from '../../engine/storage/project.ts'
 import { storageFilePath, toPublicStoragePath } from '../../engine/storage/public-path.ts'
 
 export const LIBRARY_DIRECTORY = 'krkr2-library-v1'
@@ -129,13 +128,14 @@ export function summary({
   project,
   sourceGameId,
   zipEncoding,
+  scriptEncoding,
 }: LibraryGame): LibraryGame {
   return { id, gameId, title, entry, backend, createdAt, size, fileCount,
-    ...(zipEncoding && zipEncoding !== 'cp437' ? { zipEncoding } : {}),
+    ...copyGameEncodings({ zipEncoding, scriptEncoding }),
     ...(project === undefined ? {} : { project: copyGameProject(project), sourceGameId }) }
 }
 function projectMetadata(game: LibraryGame): void {
-  zipNameEncoding(game.zipEncoding)
+  copyGameEncodings(game)
   const project = copyGameProject(game.project)
   if (project === undefined) {
     if (game.sourceGameId !== undefined) throw new Error('Unexpected library project identity')

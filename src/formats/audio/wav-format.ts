@@ -7,7 +7,14 @@ export interface WaveFormat {
   containerBits: number
   bits: number
   align: number
+  /** Input plane for each canonical output plane; absent means intact copy. */
+  channelOrder?: readonly number[]
 }
+
+// Fixed WaveImpl::TVPWaveFormatToBuffer: an unspecified six-channel source is
+// FL, FC, FR, BL, BR, LF. DirectSound receives FL, FR, FC, LF, BL, BR. Preserve
+// that conversion before our existing stereo mixer consumes canonical planes.
+const unmaskedSixChannelOrder = [0, 2, 1, 5, 3, 4] as const
 
 // The first four bytes encode the subtype. The remaining twelve belong to
 // the standard KSDATAFORMAT GUID and are significant even for PCM.
@@ -19,7 +26,7 @@ export function readWaveFormat(bytes: Uint8Array): WaveFormat | undefined {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
     channels = view.getUint16(2, true), sampleRate = view.getUint32(4, true),
     align = view.getUint16(12, true), containerBits = view.getUint16(14, true)
-  let code = view.getUint16(0, true), bits = containerBits
+  let code = view.getUint16(0, true), bits = containerBits, speakerMask = 0
   if (code === 0xfffe) {
     if (bytes.length < 40 || view.getUint16(16, true) !== 22) throw new WaveFormatError('Malformed extensible WAVE')
     code = view.getUint32(24, true)
@@ -28,6 +35,7 @@ export function readWaveFormat(bytes: Uint8Array): WaveFormat | undefined {
       return
     }
     bits = view.getUint16(18, true)
+    speakerMask = view.getUint32(20, true)
   }
   if (code !== 1 && code !== 3) return
   const floating = code === 3
@@ -36,7 +44,8 @@ export function readWaveFormat(bytes: Uint8Array): WaveFormat | undefined {
         ![8, 16, 24, 32].includes(containerBits) || bits < 8 || bits > containerBits))
     throw new WaveFormatError('Unsupported WAVE PCM format')
   if (align !== channels * containerBits / 8) throw new Error('Invalid WAVE block alignment')
-  return { channels, sampleRate, align, containerBits, bits, floating }
+  return { channels, sampleRate, align, containerBits, bits, floating,
+    ...(channels === 6 && speakerMask === 0 ? { channelOrder: unmaskedSixChannelOrder } : {}) }
 }
 
 export function waveInfo(format: WaveFormat, size: number): AudioInfo {
@@ -57,7 +66,7 @@ export function copyWaveSamples(format: WaveFormat, bytes: Uint8Array, output: F
     sampleBytes = containerBits / 8, padding = containerBits - bits, scale = 2 ** (bits - 1)
   for (let offset = 0, frame = destination; offset < bytes.length; offset += align, frame++) {
     for (let channel = 0; channel < channels; channel++) {
-      const at = offset + channel * sampleBytes
+      const at = offset + (format.channelOrder?.[channel] ?? channel) * sampleBytes
       let value: number
       if (floating) value = containerBits === 32 ? input.getFloat32(at, true) : input.getFloat64(at, true)
       else if (containerBits === 8) value = (input.getUint8(at) - 128) / 128

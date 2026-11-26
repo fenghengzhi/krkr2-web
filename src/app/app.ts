@@ -3,6 +3,7 @@ import { createPlayer } from '../player/create-player.ts'
 import { demoFiles } from './demo.ts'
 import { readNativeSaves, writeNativeSaves } from '../player/native-saves.ts'
 import { zipNameEncoding, zipNameEncodings, type ZipNameEncoding } from '../formats/zip/names.ts'
+import { scriptEncoding, scriptEncodings, type ScriptEncoding } from '../engine/script/text-encoding.ts'
 import { encodeBackup, decodeBackup } from '../player/save-backup.ts'
 import type { BackendPreference, GameInput } from '../protocol/session.ts'
 import type { SessionSnapshot } from '../engine/session.ts'
@@ -60,15 +61,24 @@ export function mountApp(root: HTMLDivElement): void {
   }
   const zipOptions = zipNameEncodings.map((name) => `<option value="${name}">${zipLabels[name]}</option>`).join('')
   projectControls.insertAdjacentHTML('beforeend', `<label for="zip-encoding">未标记的 ZIP 文件名编码</label><select id="zip-encoding">${zipOptions}</select>`)
+  const scriptLabels: Record<ScriptEncoding, string> = {
+    auto: '自动（先 UTF-8，再尝试日文）', shift_jis: zipLabels.shift_jis, gbk: zipLabels.gbk,
+    big5: zipLabels.big5, 'windows-1252': '西欧（Windows-1252）', 'utf-8': 'UTF-8',
+  }
+  const scriptOptions = scriptEncodings.map((name) => `<option value="${name}">${scriptLabels[name]}</option>`).join('')
+  projectControls.insertAdjacentHTML('beforeend', `<label for="script-encoding">无 BOM 的脚本与剧情编码</label><select id="script-encoding">${scriptOptions}</select>`)
   el('native-save-hint').insertAdjacentHTML('afterend', `<div id="native-zip-options" hidden><label for="native-zip-encoding">存档 ZIP 文件名编码</label><select id="native-zip-encoding"><option value="">沿用当前游戏</option>${zipOptions}</select></div>`)
   const projectSelection = (): ProjectSelection => {
     const mode = el<HTMLSelectElement>('project-mode').value,
-      zipEncoding = zipNameEncoding(el<HTMLSelectElement>('zip-encoding').value),
+      encodings = {
+        zipEncoding: zipNameEncoding(el<HTMLSelectElement>('zip-encoding').value),
+        scriptEncoding: scriptEncoding(el<HTMLSelectElement>('script-encoding').value),
+      },
       executableDirectory = el<HTMLInputElement>('project-exe-directory').value.trim(),
       executable = el<HTMLInputElement>('project-executable').value.trim() || undefined
     return copyProjectSelection(mode === 'root'
-      ? { mode, directory: el<HTMLInputElement>('project-root').value.trim(), executableDirectory, executable, zipEncoding }
-      : mode === 'auto' ? { mode, executableDirectory, executable, zipEncoding } : { mode: 'collection', zipEncoding })
+      ? { mode, directory: el<HTMLInputElement>('project-root').value.trim(), executableDirectory, executable, ...encodings }
+      : mode === 'auto' ? { mode, executableDirectory, executable, ...encodings } : { mode: 'collection', ...encodings })
   }
   const updateProjectControls = () => {
     const mode = el<HTMLSelectElement>('project-mode').value
@@ -572,7 +582,9 @@ export function mountApp(root: HTMLDivElement): void {
         const projectLocation = loaded.project
           ? `当前游戏：${loaded.project.directory || './'} · 程序目录：${loaded.project.executableDirectory || './'}`
           : '当前游戏：文件集合（兼容已有导入）'
-        el('project-status').textContent = projectLocation + (loaded.zipEncoding ? ' · ZIP 文件名：' + zipLabels[loaded.zipEncoding] : '')
+        el('project-status').textContent = projectLocation +
+          (loaded.zipEncoding ? ' · ZIP 文件名：' + zipLabels[loaded.zipEncoding] : '') +
+          (loaded.scriptEncoding ? ' · 脚本与剧情：' + scriptLabels[loaded.scriptEncoding] : '')
         log('会话就绪。点击画面继续。')
       }
     } catch (error) {
@@ -638,6 +650,7 @@ export function mountApp(root: HTMLDivElement): void {
             backend: el<HTMLSelectElement>('backend').value as BackendPreference,
             ...(snapshot?.project ? { project: snapshot.project } : {}),
             ...(snapshot?.zipEncoding ? { zipEncoding: snapshot.zipEncoding } : {}),
+            ...(snapshot?.scriptEncoding ? { scriptEncoding: snapshot.scriptEncoding } : {}),
           }
         : undefined,
     canPlay: () => !busy,
