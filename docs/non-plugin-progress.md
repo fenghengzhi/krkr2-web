@@ -4,6 +4,8 @@
 
 第 156 批接入分卷游戏的启动、补丁读取和入库离线重开，修正新图层默认对白字号并实现 MIDI 单音声道。取回的第 151、152 批原版图形均为 93/93 匹配，KAG 均为 98/102 匹配。两批的网页游戏验收因当时的类型错误跳过。[156 实现与托管证据](decisions/156-split-game-archives-default-font-and-midi.md)
 
+实现提交 `8f9460d` 已在 GitHub-hosted Actions 登记，登记时为 `pending`。结果留到下一批取回。[第 156 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45815768302)
+
 第 155 批修复了游戏选不到字体合集中的后续成员、读回嵌套条件书签后走错分支，以及配乐复位或重播时声像移到中央的问题。上一次取回时，第 150 批原版 KAG 为 95/99 匹配，第 151 至 154 批仍在队列中。[155 实现与托管证据](decisions/155-font-collections-conditional-saves-and-midi.md)
 
 实现提交 `c6e23ad` 登记时为 `pending`，下一批取回验证结果。[第 155 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45813557063)

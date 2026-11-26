@@ -23,3 +23,5 @@
 第 151、152 批的原版图形对照均为 **93/93 匹配**，包括此前有差异的立绘采样。两批原版 KAG 均为 98/102 匹配，三项剧情结尾差异和一项部分书签差异仍有记录。第 152 批的旧影片转换器已在托管机器上成功构建。两批应用构建都停在视频测试的 TS2367，依赖应用构建的网页验收跳过。第 153 批已提交类型修复，本次取回时第 153 至 155 批仍在排队。[第 151 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45800870443) · [第 152 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45804548247) · [第 153 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45808179488)
 
 本次取回并核对了 51 份新的原始归档，共 71,451,418 字节，另复用 24 份既有原件。第 156 批新增 16 项 Node 验收，每个常规浏览器项目新增 8 项，每个游戏库浏览器项目新增 4 项，原版 SDK 增加 3 项默认字体对照。新增行为等待托管验证。
+
+实现提交 `8f9460db680d8fcae2555aac6d0eeb6ff70b0adb` 的应用与兼容性验证登记时为 `pending`，结果留到下一批取回。[第 156 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45815768302)
