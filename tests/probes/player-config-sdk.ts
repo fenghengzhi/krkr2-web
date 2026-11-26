@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { startupScriptModesSource } from '../helpers/startup-script-modes.ts'
+import { expectedVideoSegments, videoSegmentSource } from '../helpers/video-segment.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
 assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted')
@@ -65,6 +66,7 @@ System.exitOnNoWindowStartup=false;System.exitOnWindowClose=false;
 var records=[];
 function record(value){records.add(value);records.save("native-events.txt");}
 function argument(name){var value=System.getArgument(name);return value===void?"<void>":string(value).escape();}
+${id === 'embedded-empty' ? videoSegmentSource : ''}
 record("start");
 System.exceptionHandler=function(e){record("fatal|"+e.message.escape());System.exit();return true;};
 try{
@@ -79,6 +81,7 @@ try{
  System.graphicCacheLimit=0;record("cache|zero|"+System.graphicCacheLimit);
  System.graphicCacheLimit=gcsAuto;record("cache|restored|"+System.graphicCacheLimit);
  Scripts.execStorage("modes.tjs");record("modes|"+startupScriptModes());
+ ${id === 'embedded-empty' ? 'var segmentWindow=new Window();var segmentMovie=new VideoOverlay(segmentWindow);record("segments|"+segmentChecks(segmentMovie));invalidate segmentMovie;invalidate segmentWindow;' : ''}
  var proof=${JSON.stringify('config-proof:' + id + '|')}+argument("-route")+"|"+argument("-datapath");
  [proof].save(System.dataPath+"config-proof.txt");
  record("saved|"+[].load(System.dataPath+"config-proof.txt")[0]);record("done");
@@ -165,7 +168,7 @@ if (process.argv[2] === 'inspect-stock') {
       journalSha256: string | undefined, proofSha256: string | undefined
     const prefix = ['start', 'exe|<exe>/', `data|<exe>/${item.directory.toLowerCase()}/`,
       ...Object.entries(item.expected).map(([key, value]) => `argument|${key}|${value === null ? '<void>' : escape(value)}`),
-    ], suffix = [`modes|${item.modes}`, `saved|${expectedProof}`, 'done']
+    ], suffix = [`modes|${item.modes}`, ...(item.id === 'embedded-empty' ? ['segments|' + expectedVideoSegments] : []), `saved|${expectedProof}`, 'done']
     let expected = [...prefix, ...(item.cacheLimit === 'auto' ? ['<host automatic cache observations>'] : cacheRows(item.cacheLimit)), ...suffix]
     try {
       processState = JSON.parse(readFileSync(resolve(directory, 'sdk-process.json'), 'utf8').replace(/^\ufeff/, ''))

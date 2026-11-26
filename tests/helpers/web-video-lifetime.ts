@@ -14,6 +14,7 @@ export type WebVideoLifetimeCase =
   | 'supersede-first-frame'
   | 'shutdown-failure'
   | 'cancel-failure'
+  | 'hidden-first-frames'
 const check = (value: unknown, message: string) => {
   if (!value) throw new Error(message)
 }
@@ -53,7 +54,9 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
       number,
       { callback: VideoFrameRequestCallback; now: number; metadata: VideoFrameCallbackMetadata }
     >(),
-    messages: string[] = []
+    messages: string[] = [],
+    firstFrames: Array<{ id: string | undefined; paused: boolean; clock: number;
+      visibility: string; opacity: string; width: number; height: number }> = []
   const originalCreate = document.createElement,
     originalUrl = URL.createObjectURL,
     originalRevoke = URL.revokeObjectURL,
@@ -80,6 +83,13 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
   }
   HTMLVideoElement.prototype.requestVideoFrameCallback = function (callback) {
     const id = originalRequest.call(this, (now, metadata) => {
+      const surface = this.closest<HTMLElement>('.video-presentation-surface')
+      if (surface) {
+        const rect = this.getBoundingClientRect()
+        firstFrames.push({ id: this.dataset.videoId, paused: this.paused, clock: this.currentTime,
+          visibility: getComputedStyle(this).visibility, opacity: getComputedStyle(surface).opacity,
+          width: rect.width, height: rect.height })
+      }
       if (holdFrames) held.set(id, { callback, now, metadata })
       else {
         frames.delete(id)
@@ -132,14 +142,14 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
       channel.port2.postMessage({ type: 'ack', serial: data.serial } satisfies VideoMessage)
     }
   }
-  const open = (id = 7, epoch = 1) =>
+  const open = (id = 7, epoch = 1, settings = defaultVideoSettings()) =>
     send({
       op: 'open',
       id,
       epoch,
       name: 'colors.mp4',
       bytes,
-      settings: defaultVideoSettings(),
+      settings,
     })
   const rejected = (promise: Promise<unknown>) =>
     promise.then(
@@ -174,12 +184,38 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
         (await rejected(open())).includes('video-insert-primary'),
         'Cleanup replaced insertion error',
       )
+    } else if (name === 'hidden-first-frames') {
+      const results = [await open(7), await open(8, 1, { ...defaultVideoSettings(), mode: 1 })]
+      check(results.every((result) => result.snapshot?.status === 'stop' && result.snapshot.position === 0),
+        'First-frame loading changed a paused movie clock or status')
+      check(firstFrames.length === 2 && firstFrames.every((frame) => frame.paused && frame.clock === 0 &&
+        frame.visibility === 'visible' && frame.opacity === '0' && frame.width > 0 && frame.height > 0),
+      'A hidden decoder had no connected presentation surface at its real first callback')
+      check(!document.querySelector('.video-presentation-surface'), 'First-frame surfaces survived completion')
+      const images = [...node.querySelectorAll('video')].map((video) => {
+        check(video.paused && video.currentTime === 0 && getComputedStyle(video).visibility === 'hidden',
+          'Completed hidden movies were played, seeked or exposed')
+        check(video.videoWidth === 64 && video.videoHeight === 48, 'Wrong decoded dimensions')
+        const context = new OffscreenCanvas(64, 48).getContext('2d', { willReadFrequently: true })!
+        context.drawImage(video, 0, 0)
+        return context.getImageData(0, 0, 64, 48).data
+      })
+      check(images.length === 2 && images[0]!.every((value, at) => value === images[1]![at]),
+        'Sequential hidden decoders did not retain the same complete first image')
+      for (let at = 0; at < images[0]!.length; at += 4)
+        check(images[0]![at]! > 240 && images[0]![at + 1]! < 15 && images[0]![at + 2]! < 15 && images[0]![at + 3] === 255,
+          'The authored red first frame was not decoded')
     } else if (name === 'close-first-frame') {
       const opening = rejected(open())
       await until(() => held.size === 1)
+      const late = held.values().next().value!
       await send({ op: 'close', id: 7, epoch: 2 })
       check((await opening).includes('cancelled'), 'Pending open survived close')
       check(cancelledFrames === 1, 'Held first frame was not cancelled')
+      check(!document.querySelector('.video-presentation-surface'), 'Close retained the first-frame surface')
+      late.callback(late.now, late.metadata)
+      check(!node.querySelector('video') && !document.querySelector('.video-presentation-surface'),
+        'A late real callback restored retired video DOM')
     } else if (name === 'supersede-first-frame') {
       const older = rejected(open())
       await until(() => held.size === 1)
@@ -238,7 +274,8 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
       'Video resources survived cleanup',
     )
     check(
-      !node.querySelector('video') && !node.querySelector('.video-plane'),
+      !node.querySelector('video') && !node.querySelector('.video-plane') &&
+        !document.querySelector('.video-presentation-surface'),
       'Video DOM survived cleanup',
     )
     check(observerCloses === 1, 'Video observer did not disconnect once')
@@ -258,6 +295,7 @@ export async function exerciseWebVideoLifetime(name: WebVideoLifetimeCase, bytes
       videos: node.querySelectorAll('video').length,
       messages,
       cancelledResources,
+      firstFrames,
     }
   } finally {
     failContainer = false

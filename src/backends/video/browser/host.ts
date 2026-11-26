@@ -9,8 +9,8 @@ import {
   type VideoSnapshot,
   type VideoTimeline,
 } from '../../../engine/ports/video.ts'
-import { videoFrameAt, videoPresentedFrameAt,
-  videoClockFrameAt, videoClockFrameTime, videoClockSnapshot, videoClockFrameUpdate } from '../../../engine/media/video-time.ts'
+import { videoFrameAt, videoPresentedFrameAt, videoReportedFrameAt,
+  videoClockFrameAt, videoClockFrameTime, videoClockMilliseconds, videoClockSnapshot, videoClockFrameUpdate } from '../../../engine/media/video-time.ts'
 import { videoOutputRectangle } from '../../../engine/media/video-mixing.ts'
 import type { Pixels } from '../../../engine/ports/graphics.ts'
 import type { WindowView } from '../../../engine/scene/window.ts'
@@ -19,7 +19,7 @@ import type { WebAudioHost } from '../../audio/web/host.ts'
 import type { CursorRasterLayer, CursorScene } from '../../input/cursor.ts'
 import { selectVideoTimeline } from '../../../formats/video/mp4.ts'
 import { VideoEncodedResources, type VideoEncodedSource, type VideoEncodedVariant } from './encoded-source.ts'
-import { VideoSampleHistory, waitForClockPresentation } from './clock-seek.ts'
+import { VideoSampleHistory, waitForClockPresentation, type ClockPresentationTarget } from './clock-seek.ts'
 import { VideoPeriod } from '../../../engine/media/video-period.ts'
 import {
   createVideoMixingSurface,
@@ -557,10 +557,12 @@ export class WebVideoHost {
         const epoch = movie.epoch, targetFrame = Math.max(0, s.segmentLoopStartFrame),
           active = () => !movie.disposed && this.movies.get(movie.id) === movie &&
             movie.epoch === epoch && movie.status === 'play'
-        void this.seek(
-          movie,
-          videoClockFrameTime(clockTimeline, targetFrame, movie.element.duration * 1000),
-        ).then(
+        const duration = movie.element.duration * 1000
+        // A script may configure the segment before opening any movie. Only
+        // resolve the destination against this graph when its boundary fires.
+        const targetTime = Math.min(duration, videoClockMilliseconds(clockTimeline, targetFrame))
+        if (targetTime === duration && movie.element.ended) return false
+        void this.seek(movie, targetTime).then(
           () => {
             if (!active()) return
             movie.period.seekFrame(targetFrame)
@@ -571,7 +573,8 @@ export class WebVideoHost {
               snapshot: this.snapshot(movie),
               reason: 3,
             })
-            this.play(movie)
+            if (targetTime < duration) this.play(movie)
+            else this.finishPlayback(movie)
           },
           (error) => {
             if (active()) this.fail(error)
@@ -685,13 +688,14 @@ export class WebVideoHost {
       this.arm(movie)
     }
   }
-  private async seekClockPresented(movie: Movie, position: number, current: () => void, exactSeconds?: number): Promise<void> {
+  private async seekClockPresented(movie: Movie, position: number, current: () => void, exactSeconds?: number,
+    target?: ClockPresentationTarget): Promise<void> {
     current()
     const seek = () => exactSeconds === undefined ? this.seek(movie, position) : this.seekSeconds(movie, exactSeconds)
     // A true no-op has no seek event or new compositor submission to await.
     if (!movie.element.seeking && movie.element.readyState >= 2 &&
         Math.abs(movie.element.currentTime * 1000 - position) <= 0.00001 &&
-        movie.presentedTime !== undefined) {
+        movie.presentedTime !== undefined && (!target || target.contains(movie.presentedTime))) {
       await seek()
       current()
       return
@@ -701,57 +705,20 @@ export class WebVideoHost {
       (expired) => this.timeouts.start(15000, expired), (metadata) => this.observePresentation(movie, metadata),
       movie.timeline && movie.presentedTime !== undefined && movie.seenSamples.available
         ? { timeline: movie.timeline, previousTime: movie.presentedTime, seenSamples: movie.seenSamples }
-        : undefined)
+        : undefined, target)
   }
   private async seekPresented(movie: Movie, position: number, frameSeek = false): Promise<void> {
-    if (frameSeek) {
-      const epoch = movie.epoch
-      return this.seekClockPresented(movie, position, () => this.current(movie, epoch))
-    }
-    const timeline = movie.timeline,
-      target = videoFrameAt(timeline!, position),
-      matches = (time: number) => videoPresentedFrameAt(timeline!, time) === target
-    if (Math.abs(movie.element.currentTime * 1000 - position) <= 0.00001 &&
-        movie.presentedTime !== undefined && matches(movie.presentedTime)) {
-      await this.seek(movie, position)
-      if (movie.abort.signal.aborted) throw new Error('Video operation cancelled')
-      return
-    }
-    await new Promise<void>((resolve, reject) => {
-      let settled = false, sought = false, presented = false, callback: number | undefined
-      let cancelTimeout = () => {}
-      const done = (error?: unknown) => {
-        if (settled) return
-        settled = true
-        cancelTimeout()
-        if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback)
-        movie.abort.signal.removeEventListener('abort', cancel)
-        error ? reject(error) : resolve()
-      }, complete = () => {
-        if (sought && presented) {
-          if (movie.element.seeking || Math.abs(movie.element.currentTime * 1000 - position) > 0.001)
-            done(new Error('Video seek changed the requested media clock'))
-          else done()
-        }
-      },
-        cancel = () => done(new Error('Video operation cancelled')),
-        request = () => {
-          callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
-            callback = undefined
-            if (settled) return
-            this.observePresentation(movie, metadata)
-            if (matches(metadata.mediaTime * 1000)) { presented = true; complete() }
-            else { try { request() } catch (error) { done(error) } }
-          })
-        }
-      movie.abort.signal.addEventListener('abort', cancel, { once: true })
-      if (movie.abort.signal.aborted) { cancel(); return }
-      cancelTimeout = this.timeouts.start(15000, () => done(new Error('Video selected track frame timed out')))
-      try {
-        request()
-        void this.seek(movie, position).then(() => { sought = true; complete() }, done)
-      } catch (error) { done(error) }
-    })
+    const epoch = movie.epoch, timeline = movie.timeline!, target = videoFrameAt(timeline, position)
+    // A normal time seek still selects the containing source sample. Firefox
+    // can report the requested clock inside that sample (the frozen interleaved
+    // stream reports 1 s between PTS 0.938070 and 1.021403), not its exact PTS.
+    // Require a fresh submission and the requested clock as well as that sample
+    // interval. Average-frame seeks retain their distinct clock-only contract.
+    return this.seekClockPresented(movie, position, () => this.current(movie, epoch), undefined,
+      frameSeek ? undefined : {
+        contains: (time) => videoReportedFrameAt(timeline, time) === target,
+        exact: (time) => videoPresentedFrameAt(timeline, time) === target,
+      })
   }
   private async seekRetainedFrame(movie: Movie, position: number, expected: Pixels, historicalPresentation?: number,
     exactSeconds?: number): Promise<void> {
@@ -838,14 +805,30 @@ export class WebVideoHost {
         presented = false,
         settled = false
       let callback: number | undefined
+      let presentation: HTMLDivElement | undefined
       let cancelTimeout = () => {}
       const done = (error?: unknown) => {
         if (settled) return
         settled = true
-        cancelTimeout()
-        if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback)
-        movie.abort.signal.removeEventListener('abort', cancel)
-        error ? reject(error) : resolve()
+        const failures: unknown[] = error === undefined ? [] : [error]
+        for (const release of [cancelTimeout,
+          () => { if (callback !== undefined) movie.element.cancelVideoFrameCallback(callback) },
+          () => movie.abort.signal.removeEventListener('abort', cancel),
+          () => {
+            if (!presentation) return
+            const surface = presentation
+            presentation = undefined
+            try {
+              if (movie.disposed) movie.element.remove()
+              else movie.container.insertBefore(movie.element, movie.container.firstChild)
+            } finally { surface.remove() }
+          }]) {
+          try { release() } catch (failure) { failures.push(failure) }
+        }
+        if (failures.length > 1)
+          reject(new AggregateError(failures, 'Video first frame or presentation cleanup failed', { cause: failures[0] }))
+        else if (failures.length) reject(failures[0])
+        else resolve()
       }
       const complete = () => {
         if (loaded && presented) done()
@@ -880,10 +863,34 @@ export class WebVideoHost {
         done(new Error('Video first frame timed out; ' + JSON.stringify(observation)))
       })
       try {
+        // Loading a second hidden/layer movie must not depend on its game's
+        // visibility, clipping or a surface that has not yet been presented.
+        // Give the actual decoder a connected, nonzero presentation surface;
+        // opacity keeps it out of the game image. This never plays or seeks the
+        // movie, and loadeddata alone still cannot release the first-frame gate.
+        const rect = movie.element.getBoundingClientRect(), style = getComputedStyle(movie.element)
+        if (!movie.element.isConnected || style.visibility !== 'visible' || style.display === 'none' ||
+            rect.width <= 0 || rect.height <= 0) {
+          presentation = document.createElement('div')
+          presentation.className = 'video-presentation-surface'
+          presentation.inert = true
+          presentation.setAttribute('aria-hidden', 'true')
+          Object.assign(presentation.style, { position: 'fixed', left: '0', top: '0',
+            width: '1px', height: '1px', overflow: 'hidden', visibility: 'visible',
+            opacity: '0', pointerEvents: 'none' })
+          // Keep a staged replacement inside its existing parking owner, so
+          // it remains distinguishable from committed video while decoding.
+          ;(movie.container.closest('.video-parking') ?? document.body).append(presentation)
+          presentation.append(movie.element)
+        }
         callback = movie.element.requestVideoFrameCallback((_now, metadata) => {
-          this.observePresentation(movie, metadata)
-          presented = true
-          complete()
+          callback = undefined
+          if (settled) return
+          try {
+            this.observePresentation(movie, metadata)
+            presented = true
+            complete()
+          } catch (error) { done(error) }
         })
         void load().then(() => {
           loaded = true
@@ -903,11 +910,6 @@ export class WebVideoHost {
     if (!Number.isSafeInteger(settings.enabledVideoStream) || settings.enabledVideoStream < 0 ||
         settings.enabledVideoStream >= (movie.timeline?.videoStreams ?? 1))
       throw new Error('Invalid video stream')
-    if (settings.segmentLoopEndFrame >= 0) {
-      videoClockFrameTime(this.clockTimeline(movie), settings.segmentLoopStartFrame, movie.element.duration * 1000)
-      if (settings.segmentLoopEndFrame > videoClockFrameAt(this.clockTimeline(movie), movie.element.duration * 1000))
-        throw new Error('Video segment ends outside its frame clock')
-    }
     if (settings.periodEventFrame !== movie.settings.periodEventFrame)
       movie.period.set(settings.periodEventFrame, this.snapshot(movie).frame)
     movie.settings = { ...settings,
@@ -1016,28 +1018,30 @@ export class WebVideoHost {
       try { this.advanceClock(movie) } catch (error) { this.fail(error) }
     }
     element.onended = () => {
-      if (movie.disposed || movie.status !== 'play' || !element.ended) return
-      if (this.advanceClock(movie)) return
-      if (movie.settings.loop) {
-        const epoch = movie.epoch,
-          active = () => !movie.disposed && this.movies.get(movie.id) === movie &&
-            movie.epoch === epoch && movie.status === 'play'
-        void this.seek(movie, 0).then(() => {
-          if (!active()) return
-          movie.period.rewind()
-          this.emit({ type: 'period', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie), reason: 0 })
-          this.play(movie)
-        }, (error) => { if (active()) this.fail(error) })
-      } else {
-        movie.status = 'stop'
-        this.cancelFrame(movie)
-        this.emit({ type: 'ended', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie) })
-      }
+      if (element.ended && !this.advanceClock(movie)) this.finishPlayback(movie)
     }
     element.addEventListener('error', () => {
       if (!movie.disposed)
         this.fail(new Error(`Video playback failed: ${element.error?.message ?? element.error?.code}`))
     }, { signal: movie.abort.signal })
+  }
+  private finishPlayback(movie: Movie): void {
+    if (movie.disposed || movie.seeking || movie.status !== 'play') return
+    if (movie.settings.loop) {
+      const epoch = movie.epoch,
+        active = () => !movie.disposed && this.movies.get(movie.id) === movie &&
+          movie.epoch === epoch && movie.status === 'play'
+      void this.seek(movie, 0).then(() => {
+        if (!active()) return
+        movie.period.rewind()
+        this.emit({ type: 'period', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie), reason: 0 })
+        this.play(movie)
+      }, (error) => { if (active()) this.fail(error) })
+    } else {
+      movie.status = 'stop'
+      this.cancelFrame(movie)
+      this.emit({ type: 'ended', id: movie.id, epoch: movie.epoch, snapshot: this.snapshot(movie) })
+    }
   }
   private async loadMovie(movie: Movie): Promise<void> {
     await this.loadFirstFrame(movie, () => this.wait(movie, 'loadeddata', () => movie.element.readyState >= 2, () => {

@@ -1,12 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hasClockAlignedPresentation, VideoSampleHistory, waitForClockPresentation,
-  type ClockPresentationSource } from '../../src/backends/video/browser/clock-seek.ts'
+  type ClockPresentationSource, type ClockPresentationTarget } from '../../src/backends/video/browser/clock-seek.ts'
 import type { VideoTimeline } from '../../src/engine/ports/video.ts'
+import { videoFrameAt, videoPresentedFrameAt, videoReportedFrameAt } from '../../src/engine/media/video-time.ts'
 
 /** Controlled media/callback boundaries; real decoding and complete RGBA
  * handoffs remain in the three-browser video-audio-tracks/handoff suites. */
-function fixture(aborted = false, source?: ClockPresentationSource) {
+function fixture(aborted = false, source?: ClockPresentationSource,
+  target?: ClockPresentationTarget, position = 500) {
   const abort = new AbortController(), callbacks = new Map<number, VideoFrameRequestCallback>(),
     cancelled: number[] = [], observed: number[] = [], order: string[] = []
   let id = 0, resolveSeek!: () => void, expire!: () => void, timerCleared = false,
@@ -20,11 +22,11 @@ function fixture(aborted = false, source?: ClockPresentationSource) {
       cancelVideoFrameCallback(handle: number) { cancelled.push(handle); callbacks.delete(handle) },
     }
   if (aborted) abort.abort()
-  const pending = waitForClockPresentation(state as HTMLVideoElement, 500, 7, abort.signal,
+  const pending = waitForClockPresentation(state as HTMLVideoElement, position, 7, abort.signal,
     () => { if (!current) throw new Error('Graph or operation was superseded') },
-    () => { order.push('seek'); state.currentTime = 0.5; return pendingSeek },
+    () => { order.push('seek'); state.currentTime = position / 1000; return pendingSeek },
     (expired) => { expire = expired; return () => { timerCleared = true } },
-    (metadata) => observed.push(metadata.mediaTime), source)
+    (metadata) => observed.push(metadata.mediaTime), source, target)
   void pending.then(() => { outcome = 'resolved' }, () => { outcome = 'rejected' })
   const metadata = (change: Partial<VideoFrameCallbackMetadata> = {}): VideoFrameCallbackMetadata => ({
     presentationTime: performance.now(), expectedDisplayTime: performance.now(),
@@ -55,6 +57,48 @@ test('clock frame seek accepts a fresh 0.666667 PTS at the exact 0.5 media clock
   assert.equal(f.state.currentTime, 0.5)
   assert.equal(f.timerCleared, true)
   assert.equal(f.callbacks.size, 0)
+})
+
+test('a normal time seek accepts Firefox\'s fresh clock inside the selected sample, never an adjacent sample', async () => {
+  // Frozen ffprobe packet integers from video-interleaved.mp4, time_base 1/12288.
+  // The real Firefox callback reports 1.0, between PTS 11527 and 12551.
+  const timeline: VideoTimeline = { times: [0, 10503, 11527, 12551, 13575].map((pts) => pts * 1000 / 12288),
+    duration: 73991 * 1000 / 12288, frameDuration: 1000 / 12, videoStreams: 1, audioStreams: 1 },
+    index = videoFrameAt(timeline, 1000),
+    target: ClockPresentationTarget = {
+      contains: (time) => videoReportedFrameAt(timeline, time) === index,
+      exact: (time) => videoPresentedFrameAt(timeline, time) === index,
+    },
+    f = fixture(false, undefined, target, 1000)
+  try {
+    f.seeked()
+    f.fire({ mediaTime: 1.021403 })
+    f.fire({ mediaTime: 0.854736 })
+    await Promise.resolve()
+    assert.equal(f.outcome, 'pending', 'A fresh adjacent sample must not satisfy the selected interval')
+    assert.deepEqual(f.observed, [])
+    f.fire({ mediaTime: 1, presentedFrames: 7 })
+    f.fire({ mediaTime: 1, presentationTime: -1 })
+    await Promise.resolve()
+    assert.equal(f.outcome, 'pending', 'A matching interval must still be a new presentation')
+    f.fire({ mediaTime: 1, presentedFrames: 8 })
+    await f.pending
+    assert.deepEqual(f.observed, [1])
+    assert.equal(f.state.currentTime, 1)
+    assert.equal(f.callbacks.size, 0)
+    assert.equal(f.timerCleared, true)
+  } finally { f.abort.abort(); await f.pending.catch(() => {}) }
+  const repeat = fixture(false, { timeline, previousTime: timeline.times[index]!, seenSamples: new Set([index]) }, target, 1000)
+  try {
+    repeat.seeked()
+    repeat.fire({ mediaTime: 1, presentationTime: -1 })
+    await Promise.resolve()
+    assert.equal(repeat.outcome, 'pending', 'A repeated interval-only clock still needs a new timestamp')
+    repeat.fire({ mediaTime: 11527 / 12288, presentationTime: -1 })
+    await repeat.pending
+    assert.deepEqual(repeat.observed, [11527 / 12288], 'An exact target sample preserves the original normal-seek contract')
+    assert.equal(repeat.state.currentTime, 1)
+  } finally { repeat.abort.abort(); await repeat.pending.catch(() => {}) }
 })
 
 function sourceClock(times = [0, 250, 1000], duration = 1250): ClockPresentationSource {

@@ -34,6 +34,7 @@ for (const name of [
   'supersede-first-frame',
   'shutdown-failure',
   'cancel-failure',
+  'hidden-first-frames',
 ] as const satisfies readonly WebVideoLifetimeCase[])
   test(`browser video resources: ${name}`, async ({ page }) => {
     const errors: string[] = []
@@ -71,7 +72,7 @@ for (const name of [
     expect(result.audioCloses).toBe(result.connected)
     expect(result.revokedUrls).toBe(result.createdUrls)
     expect(result.connected).toBe(
-      ['shutdown-failure', 'supersede-first-frame', 'cancel-failure'].includes(name) ? 2 : 1,
+      ['shutdown-failure', 'supersede-first-frame', 'cancel-failure', 'hidden-first-frames'].includes(name) ? 2 : 1,
     )
     expect(result.observerCloses).toBe(1)
     expect([

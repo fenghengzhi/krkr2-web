@@ -412,6 +412,10 @@ export class VideoService {
         throw new Error('Invalid video numeric argument')
       return value
     }
+    const int32 = (i: number) => {
+      const value = input[i]
+      return Number(BigInt.asIntN(32, typeof value === 'bigint' ? value : BigInt(number(i))))
+    }
     const apply = async (command: VideoCommand) => {
       const result = await this.videoCommand(video, command)
       if (result.snapshot) video.snapshot = result.snapshot
@@ -499,7 +503,7 @@ export class VideoService {
       if (!video.ready && graphSettings.has(property))
         return scriptRecord({ value, callbacks: scriptList([]) })
       const setting = property === 'audioVolume' || property === 'audioBalance' || property === 'periodEventFrame'
-        ? Number(BigInt.asIntN(32, typeof input[1] === 'bigint' ? input[1] : BigInt(number(1))))
+        ? int32(1)
         : number(1)
       if (property === 'periodEventFrame') {
         if (video.ready) await apply({ op: 'period', ...identity(), frame: setting })
@@ -542,15 +546,8 @@ export class VideoService {
         else video.snapshot = state
       }
     } else if (method === 'segment') {
-      const start = number(0),
-        end = number(1)
-      if (
-        !Number.isSafeInteger(start) ||
-        !Number.isSafeInteger(end) ||
-        (!(start === -1 && end === -1) && !(start >= 0 && end > start))
-      )
-        throw new Error('Invalid video loop segment')
-      const state = { ...video.snapshot, segmentLoopStartFrame: start, segmentLoopEndFrame: end }
+      if (input.length < 2) throw new TjsError('TJSBadParamCount')
+      const state = { ...video.snapshot, segmentLoopStartFrame: int32(0), segmentLoopEndFrame: int32(1) }
       if (video.ready) await apply({ op: 'set', ...identity(), settings: videoSettings(state) })
       else video.snapshot = state
     } else if (method === 'audioStream' || method === 'videoStream') {

@@ -73,6 +73,12 @@ movie.open("sound.mp4");movie.play();
       expect(observed.media.rate).toBe(1); expect(observed.media.opacity).toBe('1')
       expect(observed.media.background).toBe('rgb(0, 0, 0)')
       expect(observed.audio.graphs).toHaveLength(1); expect(observed.audio.liveUrls).toBe(1)
+      await evaluate(page, '(function(){movie.pause();movie.loop=false;movie.frame=0;movie.setSegmentLoop(2147483647,6);movie.play();return movie.segmentLoopStartFrame;})()', '2147483647')
+      await expect.poll(() => page.locator('video[data-video-id]').evaluate((node) => {
+        const element = node as HTMLVideoElement
+        return element.ended && element.currentTime === element.duration
+      })).toBe(true)
+      await evaluate(page, 'movie.status', 'stop')
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
     try { await info.attach('video-graph-owned-controls', { contentType: 'application/json', body: JSON.stringify({

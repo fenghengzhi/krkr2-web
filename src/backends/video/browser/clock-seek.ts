@@ -64,6 +64,11 @@ export function hasClockAlignedPresentation(source: ClockPresentationSource, pos
 /** A public frame seek sets a media clock. A fresh compositor submission is a
  * separate condition: its mediaTime need not equal that requested clock.
  * Keep this gate distinct from exact-PTS lookup and retained-image comparison. */
+export interface ClockPresentationTarget {
+  contains(mediaTime: number): boolean
+  exact(mediaTime: number): boolean
+}
+
 export function waitForClockPresentation(
   video: HTMLVideoElement,
   position: number,
@@ -74,6 +79,7 @@ export function waitForClockPresentation(
   deadline: (expired: () => void) => () => void,
   observe: (metadata: VideoFrameCallbackMetadata) => void,
   source?: ClockPresentationSource,
+  target?: ClockPresentationTarget,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const startedAt = performance.now()
@@ -104,8 +110,15 @@ export function waitForClockPresentation(
             current()
             // A counter increase remains mandatory for either timestamp
             // proof. No readyState, pixel similarity or seeked-only fallback.
-            if (!Number.isSafeInteger(metadata.presentedFrames) || metadata.presentedFrames <= previousFrames ||
+            const mediaTime = metadata.mediaTime * 1000
+            // Ordinary position seeks already accepted the selected sample's
+            // exact PTS before this shared gate. Preserve that domain when a
+            // browser backdates compositor timestamps, including revisiting a
+            // seen sample. Interval-only reports still require timestamp proof.
+            if ((target && !target.contains(mediaTime)) ||
+                !Number.isSafeInteger(metadata.presentedFrames) || metadata.presentedFrames <= previousFrames ||
                 ((!Number.isFinite(metadata.presentationTime) || metadata.presentationTime < startedAt) &&
+                 !target?.exact(mediaTime) &&
                  !(source && hasClockAlignedPresentation(source, position, video.currentTime,
                    metadata, startedAt, performance.now())))) {
               request()

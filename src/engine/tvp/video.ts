@@ -19,7 +19,10 @@ class VideoOverlay {
   function setPos(args*){if(args.count<2)throw new global.Exception("VideoOverlay.setPos requires two arguments");__host("Video.geometry",__videoId,"setPos",int(args[0]),int(args[1]));}
   function setSize(args*){if(args.count<2)throw new global.Exception("VideoOverlay.setSize requires two arguments");__host("Video.geometry",__videoId,"setSize",int(args[0]),int(args[1]));}
   function setBounds(args*){if(args.count<4)throw new global.Exception("VideoOverlay.setBounds requires four arguments");__host("Video.geometry",__videoId,"setBounds",int(args[0]),int(args[1]),int(args[2]),int(args[3]));}
-  function setSegmentLoop(start,end){__videoRun("segment",[int(start),int(end)]);}
+  function setSegmentLoop(args*){
+    if(args.count<2){__videoRun("segment",[]);return;}
+    __videoRun("segment",[int(args[0]),int(args[1])]);
+  }
   function cancelSegmentLoop(){__videoRun("segment",[-1,-1]);}
   function setPeriodEvent(args*){if(args.count==0)periodEventFrame=-1;else if(args.count==1)periodEventFrame=args[0];}
   function cancelPeriodEvent(){periodEventFrame=-1;}

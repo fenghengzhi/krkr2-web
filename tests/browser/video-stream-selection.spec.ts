@@ -1,11 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { createHash } from 'node:crypto'
+import { gzipSync } from 'node:zlib'
 import { test, expect, observeVideoFrames } from '../helpers/video-presentation-browser.ts'
 import { evaluate } from '../helpers/browser-expression.ts'
 import { launchWindowAttention } from '../helpers/web-window-attention.ts'
-import { stopGeometryPage } from '../helpers/window-geometry-browser.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia } from '../helpers/video-audio-probe.ts'
 import { installVideoSeekRegistrations, observeVideoSeekRegistrations } from '../helpers/video-seek-registration.ts'
+import { installHandoffReadbacks } from '../helpers/video-handoff-capture.ts'
+import { selectionReadbacks, referencePanel, selectionRegion, selectionScreen } from '../helpers/video-selection-capture.ts'
 
 for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
 for (const container of ['multitrack', 'interleaved']) for (const mode of [1, 2]) {
@@ -15,17 +18,19 @@ for (const container of ['multitrack', 'interleaved']) for (const mode of [1, 2]
     let game: Awaited<ReturnType<typeof launchWindowAttention>> | undefined
     await installVideoAudioProbe(page)
     await installVideoSeekRegistrations(page)
+    await installHandoffReadbacks(page)
     await observeVideoFrames(page)
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !(await page.evaluate(() => 'Suspending' in WebAssembly)), 'JSPI unavailable')
     try {
       game = await launchWindowAttention(page, backend, binary, `
-var win=new Window();win.caption="video-streams";win.setInnerSize(240,60);win.visible=true;
-var root=new Layer(win,null);root.setSize(240,60);root.fillRect(0,0,240,60,0xff000000);
-var a=new Layer(win,root),b=new Layer(win,root);a.visible=b.visible=true;b.left=80;
-var r0=new Layer(win,root),r1=new Layer(win,root);r0.left=r1.left=160;r0.visible=true;r1.visible=false;
+var win=new Window();win.caption="video-streams";win.setInnerSize(256,64);win.visible=true;
+var root=new Layer(win,null);root.setSize(256,64);root.fillRect(0,0,256,64,0xff000000);
+var holder=new Layer(win,root);holder.setPos(2,2,252,60);holder.fillRect(0,0,252,60,0xff000000);holder.visible=true;
+var a=new Layer(win,holder),b=new Layer(win,holder);a.visible=b.visible=true;b.left=84;
+var r0=new Layer(win,holder),r1=new Layer(win,holder);r0.left=r1.left=168;r0.visible=true;r1.visible=false;
 var movie=new VideoOverlay(win);movie.mode=${mode};movie.layer1=a;movie.layer2=b;
-movie.setBounds(0,0,80,60);movie.open("tracks.mp4");movie.visible=true;movie.pause();movie.position=1000;
+movie.setBounds(2,2,80,60);movie.open("tracks.mp4");movie.visible=true;movie.pause();movie.position=1000;
 movie.enabledAudioStream=1;
 var ref0=new VideoOverlay(win);ref0.mode=vomLayer;ref0.layer1=r0;ref0.open("ref0.mp4");ref0.audioVolume=0;ref0.pause();ref0.position=1000;
 var ref1=new VideoOverlay(win);ref1.mode=vomLayer;ref1.layer1=r1;ref1.open("ref1.mp4");ref1.audioVolume=0;ref1.pause();ref1.position=1000;
@@ -36,15 +41,40 @@ var ref1=new VideoOverlay(win);ref1.mode=vomLayer;ref1.layer1=r1;ref1.open("ref1
       ], true)
       await expect(page.locator('video[data-video-id]')).toHaveCount(3)
       const capture = async (stream: number) => {
-        const media = await page.locator('video[data-video-id]').evaluateAll((nodes) => nodes.map((node) => {
-          const video = node as HTMLVideoElement, canvas = new OffscreenCanvas(video.videoWidth, video.videoHeight),
-            context = canvas.getContext('2d')!
-          context.drawImage(video, 0, 0)
-          return { position: video.currentTime, paused: video.paused, seeking: video.seeking,
-            width: canvas.width, height: canvas.height, pixels: [...context.getImageData(0, 0, canvas.width, canvas.height).data] }
-        }))
-        expect(media).toHaveLength(3)
-        const actual = media[0]!, reference = media[stream + 1]!
+        const canvas = game!.surface('video-streams').locator('canvas[data-window-id]'),
+          readbacks = await selectionReadbacks(canvas), rawName = `video-selection-readbacks-${readings.length}.json.gz`,
+          hash = (pixels: readonly number[]) => ({ bytes: pixels.length,
+            sha256: createHash('sha256').update(Uint8Array.from(pixels)).digest('hex') }),
+          reading: Record<string, unknown> = { stream, rawAttachment: rawName,
+            media: readbacks.videos.map(({ before, after, capture, error }) => ({ before, after, error,
+              ...(capture ? { width: capture.media.width, height: capture.media.height,
+                cpu: hash(capture.reads.cpu), default: hash(capture.reads.default),
+                production: capture.production && { ...capture.production, pixels: hash(capture.production.pixels) } } : {}) })) }
+        readings.push(reading)
+        // Complete CPU/default/repeated/redrawn/production bytes and all
+        // deltas survive an assertion failure, without huge numeric JSON in
+        // every successful report row. These are observations, not tolerances.
+        await info.attach(rawName, { contentType: 'application/gzip', body: gzipSync(Buffer.from(JSON.stringify(readbacks))) })
+        expect(readbacks.videos.map(({ before }) => before.id)).toEqual(['1', '2', '3'])
+        for (const observation of readbacks.videos) {
+          expect(observation.error).toBeUndefined()
+          expect(observation.after).toEqual(observation.before)
+          expect(observation.before.paused).toBe(true); expect(observation.before.seeking).toBe(false)
+          expect(Math.abs(observation.before.position - 1)).toBeLessThanOrEqual(0.000001)
+          // rVFC reports the sample's media time, not necessarily the seek
+          // clock. The interleaved reference's frame containing 1 s starts
+          // earlier. Preserve that observation; the independent stream-copy
+          // decoder and complete pixels below identify the selected image.
+          const presented = Number(observation.before.presentedTime)
+          expect(Number.isFinite(presented)).toBe(true)
+          expect(presented).toBeGreaterThanOrEqual(0)
+          expect(presented).toBeLessThanOrEqual(observation.before.duration)
+          expect(Number(observation.before.presentedFrames)).toBeGreaterThan(0)
+          const sample = observation.capture!
+          expect(sample.reads.cpuRepeated).toEqual(sample.reads.cpu)
+          expect(sample.reads.cpuRedrawn).toEqual(sample.reads.cpu)
+        }
+        const actual = readbacks.videos[0]!.capture!.media, reference = readbacks.videos[stream + 1]!.capture!.media
         expect([actual.width, actual.height]).toEqual(stream ? [80, 60] : [64, 48])
         expect(actual.pixels).toEqual(reference.pixels)
         expect(actual.paused).toBe(true); expect(actual.seeking).toBe(false)
@@ -53,25 +83,28 @@ var ref1=new VideoOverlay(win);ref1.mode=vomLayer;ref1.layer1=r1;ref1.open("ref1
           // Independent FFmpeg stream-copy references use one video track
           // from this exact container, with packet hashes and PTS/DTS checked
           // during generation (the historical regular references are retained).
-          // Compare both bound Layer regions against that reference through
-          // a real game-canvas screenshot, in addition to complete decoder RGBA.
-          const png = await game!.surface('video-streams').locator('canvas[data-window-id]').screenshot()
-          const screen = await page.evaluate(async (url) => {
-            const bitmap = await createImageBitmap(await (await fetch(url)).blob()),
-              context = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')!
-            try {
-              context.drawImage(bitmap, 0, 0)
-              const width = bitmap.width / 3
-              if (!Number.isInteger(width)) throw new Error('Unexpected game screenshot width')
-              return [0, 1, 2].map((index) => [...context.getImageData(index * width, 0, width, bitmap.height).data])
-            } finally { bitmap.close() }
-          }, 'data:image/png;base64,' + png.toString('base64'))
-          expect(screen[0]).toEqual(screen[2]); expect(screen[1]).toEqual(screen[2])
-          await info.attach(`video-track-${stream}-${readings.length}`, { body: png, contentType: 'image/png' })
+          // Production layer readback also has to match; merely observing two
+          // identical test-owned decoders would not prove the actual picture.
+          for (const index of [0, stream + 1]) {
+            const production = readbacks.videos[index]!.capture!.production!
+            expect(production).toBeDefined(); expect(production.willReadFrequently).toBe(true)
+            expect(production.source).toBe(readbacks.videos[index]!.before.source)
+            expect(Math.abs(production.position - 1)).toBeLessThanOrEqual(0.000001)
+            expect([production.width, production.height]).toEqual([reference.width, reference.height])
+            expect(production.pixels).toEqual(reference.pixels)
+          }
+          const paint = readbacks.paint!, expected = referencePanel(reference.width, reference.height, reference.pixels)
+          expect([paint.width, paint.height]).toEqual([256, 64])
+          for (const x of [2, 86, 170]) expect(selectionRegion(paint.pixels, paint.width, x, 2)).toEqual(expected)
+          const screen = await selectionScreen(page, canvas, info, `video-track-${stream}-${readings.length}`)
+          reading.screen = { ...screen, panels: screen.panels.map(hash) }
+          expect(screen.rectangles.map(({ width, height }) => [width, height])).toEqual(Array(3).fill([
+            screen.rectangles[0]!.width, screen.rectangles[0]!.height]))
+          expect(screen.panels[0]).toEqual(screen.panels[2]); expect(screen.panels[1]).toEqual(screen.panels[2])
         }
         const resources = await observeVideoAudio(page)
         expect(resources.liveUrls).toBe(3); expect(resources.graphs).toHaveLength(3)
-        readings.push({ stream, media, resources })
+        reading.resources = resources
       }
       await capture(0)
       for (const stream of [1, 0, 1]) {
@@ -80,7 +113,7 @@ var ref1=new VideoOverlay(win);ref1.mode=vomLayer;ref1.layer1=r1;ref1.open("ref1
         await evaluate(page, `(function(){movie.enabledVideoStream=${stream};r0.visible=${stream === 0};r1.visible=${stream === 1};
 return [movie.enabledVideoStream,movie.enabledAudioStream,movie.status,movie.position,movie.fps,movie.frame,
 movie.originalWidth,movie.originalHeight,movie.numberOfVideoStream,movie.layer1===a,movie.layer2===b,a.left,b.left].join(",");})()`,
-        `${stream},1,pause,1000,${fps},${fps},${dimensions},2,1,1,0,80`)
+        `${stream},1,pause,1000,${fps},${fps},${dimensions},2,1,1,0,84`)
         await capture(stream)
       }
       const urls = (await observeVideoAudio(page)).createdUrls
@@ -150,6 +183,15 @@ movie.originalWidth,movie.originalHeight,movie.numberOfVideoStream,movie.layer1=
           // transaction record its own 15 s timeout/rollback before teardown.
           await staged.first().waitFor({ state: 'detached', timeout: 17000 })
         }
+        const firstFrame = page.locator('.video-presentation-surface')
+        if (await firstFrame.count()) {
+          await info.attach('pending-initial-video-frame', { body: JSON.stringify(await observeVideoMedia(page)),
+            contentType: 'application/json' })
+          // Keep the failed 12 s startup assertion. Preserve the decoder's own
+          // bounded timeout/error before Stop, including a committed-id ref0
+          // which is not a staged audio/video replacement in .video-parking.
+          await firstFrame.first().waitFor({ state: 'detached', timeout: 17000 })
+        }
       } catch (diagnostic) { failures.push(diagnostic) }
     }
     try { await info.attach('video-stream-selection', { contentType: 'application/json', body: JSON.stringify({
@@ -157,7 +199,17 @@ movie.originalWidth,movie.originalHeight,movie.numberOfVideoStream,movie.layer1=
       seekRegistrations: await observeVideoSeekRegistrations(page), logs: await page.locator('#logs').innerText(),
     }) }) } catch (error) { failures.push(error) }
     try {
-      if (game) await game.stop(); else await stopGeometryPage(page)
+      if (game) await game.stop()
+      else {
+        // Failed startup is cleanup, not a physical-input test. Firefox's
+        // archived failure waited on click stability until the global timeout;
+        // invoke the real Stop button once, then retain the actual retirement
+        // and resource assertions without waiting for a compositor tick.
+        const stop = page.locator('#stop')
+        if (await stop.isEnabled()) await stop.dispatchEvent('click')
+        await expect(page.locator('#status')).toHaveText('待机')
+        await expect(page.locator('.game-window[data-window-id],.game-text-input')).toHaveCount(0)
+      }
       const resources = await observeVideoAudio(page)
       expect(resources.liveUrls).toBe(0); expect(resources.graphs).toHaveLength(0)
       expect(resources.revokedUrls).toBe(resources.createdUrls)

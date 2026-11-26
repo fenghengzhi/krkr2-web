@@ -10,6 +10,9 @@ export const videoPeriodCases = [
   ['closed-future', '1:-1:1'],
   ['whole-loop', '1:-1:0,1'],
   ['segment', '1:-1:3,1'],
+  ['negative-segment-start', '1:-1:3,1'],
+  ['segment-end-after-movie', '1:-1:1'],
+  ['inactive-segment', '1:-1:1'],
 ] as const
 
 /** One real game button advances the scenario. The movie's own frame callback
@@ -39,7 +42,7 @@ class CueMovie extends VideoOverlay {
 var cueMovie=new CueMovie(cueWindow);cueMovie.mode=vomLayer;cueMovie.layer1=cueImage;
 cueMovie.open("colors.mp4");cueMovie.pause();cueMovie.visible=true;
 function cueNext(){
- if(cueActive || cueIndex>=11)return;
+ if(cueActive || cueIndex>=${videoPeriodCases.length})return;
  cueCount=0;cueReasons.clear();cueMovie.pause();cueMovie.loop=false;cueMovie.cancelSegmentLoop();
  cueMarker.fillRect(0,0,16,16,0xff000000);cueMarker.update();
  // The consumed control deliberately retains the previous one-shot result.
@@ -57,6 +60,9 @@ function cueNext(){
   case 8:cueName="closed-future";cueMovie.close();cueMovie.setPeriodEvent(6);cueMovie.open("colors.mp4");cueMovie.pause();break;
   case 9:cueName="whole-loop";cueMovie.frame=12;cueMovie.setPeriodEvent(6);cueMovie.position=1200;cueMovie.loop=true;break;
   case 10:cueName="segment";cueMovie.frame=12;cueMovie.setPeriodEvent(6);cueMovie.setSegmentLoop(6,14);break;
+  case 11:cueName="negative-segment-start";cueMovie.frame=12;cueMovie.setPeriodEvent(6);cueMovie.setSegmentLoop(-9,14);break;
+  case 12:cueName="segment-end-after-movie";cueMovie.close();cueMovie.setSegmentLoop(-12,400);cueMovie.open("colors.mp4");cueMovie.pause();cueMovie.setPeriodEvent(6);break;
+  case 13:cueName="inactive-segment";cueMovie.frame=0;cueMovie.setSegmentLoop(2147483647,0);cueMovie.setPeriodEvent(6);break;
  }
  cueIndex++;cueActive=true;cueMovie.play();Debug.message("cue-start:"+cueName);
 }

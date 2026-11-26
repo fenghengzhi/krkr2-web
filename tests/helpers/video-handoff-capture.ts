@@ -9,7 +9,7 @@ interface Readback {
   willReadFrequently: boolean
   pixels: number[]
 }
-interface HandoffProbe {
+export interface HandoffProbe {
   capture(video: HTMLVideoElement, canvas: HTMLCanvasElement): {
     media: { position: number; paused: boolean; seeking: boolean; width: number; height: number; pixels: number[] }
     reads: { default: number[]; defaultRepeated: number[]; defaultRedrawn: number[];
@@ -20,7 +20,7 @@ interface HandoffProbe {
     dropped: number
   }
 }
-type ProbeWindow = Window & { handoffReadbacks: HandoffProbe }
+export type ProbeWindow = Window & { handoffReadbacks: HandoffProbe }
 
 /** Observe the real host's full readback without changing its result. Test
  * readbacks are excluded so they cannot become their own production oracle. */
@@ -28,7 +28,7 @@ export async function installHandoffReadbacks(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const contexts = new WeakMap<OffscreenCanvasRenderingContext2D, boolean>(),
       sources = new WeakMap<OffscreenCanvasRenderingContext2D, HTMLVideoElement>(),
-      records: Readback[] = [], getContext = OffscreenCanvas.prototype.getContext,
+      records = new Map<string, Readback>(), getContext = OffscreenCanvas.prototype.getContext,
       draw = OffscreenCanvasRenderingContext2D.prototype.drawImage,
       read = OffscreenCanvasRenderingContext2D.prototype.getImageData
     let capturing = false, dropped = 0
@@ -53,8 +53,13 @@ export async function installHandoffReadbacks(page: Page): Promise<void> {
       if (!capturing && video && args[0] === 0 && args[1] === 0 &&
           args[2] === video.videoWidth && args[3] === video.videoHeight) {
         if (image.data.length <= 256 * 256 * 4) {
-          if (records.length === 64) { records.shift(); dropped++ }
-          records.push({ source: video.currentSrc || video.src, position: video.currentTime,
+          const source = video.currentSrc || video.src
+          // Keep one latest observation per encoded source. An actively
+          // playing movie must not evict a still-paused reference merely by
+          // presenting more frames; distinct source ownership stays bounded.
+          records.delete(source)
+          if (records.size === 64) { records.delete(records.keys().next().value!); dropped++ }
+          records.set(source, { source, position: video.currentTime,
             width: image.width, height: image.height, willReadFrequently: contexts.get(this) === true,
             pixels: [...image.data] })
         } else dropped++
@@ -64,7 +69,7 @@ export async function installHandoffReadbacks(page: Page): Promise<void> {
     ;(window as unknown as ProbeWindow).handoffReadbacks = {
       capture(video, canvas) {
         const source = video.currentSrc || video.src,
-          production = [...records].reverse().find((entry) => entry.source === source)
+          production = records.get(source)
         capturing = true
         try {
           const width = video.videoWidth, height = video.videoHeight,

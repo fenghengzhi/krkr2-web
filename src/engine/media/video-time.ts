@@ -17,13 +17,16 @@ export function videoClockSnapshot(timeline: VideoTimeline | undefined, time: nu
     totalTime: Math.max(0, Math.trunc(duration)),
   }
 }
+/** Native SetFrame converts AvgTimePerFrame * frame to integral 100 ns units. */
+export function videoClockMilliseconds(timeline: VideoTimeline, frame: number): number {
+  return Math.trunc((timeline.frameDuration / 1000) * 10000000 * frame) / 10000
+}
 export function videoClockFrameTime(timeline: VideoTimeline | undefined, frame: number, duration: number): number {
   if (!timeline || videoClockFrameAt(timeline, duration) < 0)
     throw new Error('This video container has no supported frame clock')
   if (!Number.isInteger(frame) || frame < 0 || frame >= videoClockFrameAt(timeline, duration))
     throw new Error('Video frame is outside the stream')
-  // Native SetFrame converts AvgTimePerFrame * frame to integral 100 ns units.
-  return Math.trunc((timeline.frameDuration / 1000) * 10000000 * frame) / 10000
+  return videoClockMilliseconds(timeline, frame)
 }
 
 /** VideoOvlImpl's EC_UPDATE consumer preserves the layer renderer's frame

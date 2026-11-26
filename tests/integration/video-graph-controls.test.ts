@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { videoFixture } from '../helpers/video-lifetime.ts'
+import { expectedVideoSegments, videoSegmentSource } from '../helpers/video-segment.ts'
 
 const source = `
+${videoSegmentSource}
 makeMovie();movie.mode=vomMixer;movie.setBounds(3,4,32,24);
 function controls(){return [movie.playRate,movie.audioVolume,movie.audioBalance,movie.mixingMovieAlpha,movie.enabledAudioStream,movie.enabledVideoStream].join(",");}
 function preferences(){return [movie.left,movie.top,movie.width,movie.height,movie.visible,movie.loop,movie.mode,movie.segmentLoopStartFrame,movie.segmentLoopEndFrame,movie.periodEventFrame].join(",");}
@@ -22,6 +24,17 @@ async function scenario(binary: boolean, body: (f: Fixture) => Promise<void>) {
 
 for (const binary of [false, true]) {
   const label = binary ? 'bytecode' : 'source'
+  test(`${label}: segment bounds use native integer and arity rules before and after open`, { timeout: 60000 },
+    () => scenario(binary, async (f) => {
+      assert.equal(await f.session.evaluate('segmentChecks(movie)'), expectedVideoSegments)
+      assert.equal(f.video.commands.length, 0)
+      await f.execute('movie.setSegmentLoop(-12,400);movie.open("movie.mp4");')
+      assert.equal(await f.session.evaluate('segmentRange(movie)'), '-12,400')
+      await f.execute('movie.cancelSegmentLoop();')
+      assert.equal(await f.session.evaluate('segmentChecks(movie)'), expectedVideoSegments)
+      await f.execute('movie.setSegmentLoop(12,0);movie.close();movie.open("movie.mp4");')
+      assert.equal(await f.session.evaluate('segmentRange(movie)'), '12,0')
+    }))
   test(`${label}: unopened graph controls are no-ops while VideoOverlay retains its object preferences`, { timeout: 60000 },
     () => scenario(binary, async (f) => {
       assert.equal(await f.session.evaluate('controls()'), closedControls)

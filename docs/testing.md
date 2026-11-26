@@ -2,6 +2,8 @@
 
 本项目的测试和可执行验证探测统一在 GitHub 托管 runner 上运行。本地只进行开发与代码检查，不运行 Node 测试、Playwright、专项探测或 `npm run check`，也不使用本机 self-hosted runner。
 
+第 141 批把影片循环参数读回交给原版 Windows 和 Web 源码、字节码对照。浏览器用实际影片检查负起点回环、超过片长的边界和剧情提示回调。[141 验收](decisions/141-video-playback.md)
+
 第 140 批把原版图像缓存启动值和脚本改限与源码、字节码和实际浏览器画廊对照。已有检验缓存命中、图片独立副本和清理的脚本显式启用 `gcsAuto`，继续检查原有断言。[140 验收](decisions/140-game-graphics-cache.md)
 
 第 139 批在同一文件内测试 EXE 普通配置和追加的游戏 XP3，把字节码在相反配置的两个会话间转移，并用原版 Windows 与浏览器对照真实 TJS 求值、属性和像素行为。[139 范围与验收](decisions/139-embedded-game-options-and-script-modes.md)
