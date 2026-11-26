@@ -25,7 +25,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       await expect(page.locator('#logs .error')).toHaveCount(0)
     } catch (error) { failures.push(error) }
     try { await info.attach('text-metric-observations', { body: JSON.stringify({ source: textMetricSource, observations,
-      scope: 'Real Next clicks, visible text and whole-frame equality against authored row positions 0/24/24/0. System glyph pixels are compared within the same frame; Windows raster identity is not asserted.',
+      scope: 'Six discarded metric calls must leave the first empty dialogue at zero. Real Next clicks then consume text height and preserve whole-frame equality against authored row positions 0/24/24/0. System glyph pixels are compared within the same frame; Windows raster identity is not asserted.',
       logs: await page.locator('#logs').innerText() }, null, 2), contentType: 'application/json' }) }
     catch (error) { failures.push(error) }
     try { await game.stop() } catch (error) { failures.push(error) }

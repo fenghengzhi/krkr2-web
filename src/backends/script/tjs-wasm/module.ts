@@ -73,6 +73,8 @@ export interface WasmManifest {
     /** Optional original Window.postInputEvent argument reader; absent kernels
      * retain their explicitly selected legacy script wrapper. */
     nativeWindowInput?: number
+    /** Font measurement methods do no conversion or measurement without a result destination. */
+    nativeFontMetrics?: number
     nativeStorages?: number
     /** Distinct, suspendable text writer preflight before native allocation. */
     nativeTextStreams?: number

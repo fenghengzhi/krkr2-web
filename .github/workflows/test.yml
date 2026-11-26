@@ -207,6 +207,7 @@ jobs:
     timeout-minutes: 40
     outputs:
       legacy-fixtures: ${{ steps.legacy-fixtures.outcome }}
+      windows-media-fixtures: ${{ steps.windows-media-fixtures.outcome }}
     steps:
       - name: Reject conflicting diagnostic selections
         if: ${{ inputs.node-only && inputs.runtime-only }}
@@ -299,10 +300,23 @@ jobs:
           exit "$failed"
       - name: Build offline update fixtures
         run: node scripts/build-pwa-fixtures.mjs 2>&1 | tee out/ci/pwa-build.log
-      - name: Generate shared project-owned video track fixtures
+      - name: Install independent movie fixture encoders
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
+      - name: Generate and independently decode Windows Media fixtures
+        id: windows-media-fixtures
+        continue-on-error: true
+        run: |
+          node --input-type=module <<'JS' 2>&1 | tee out/ci/windows-media-fixtures.log
+          import { mkdirSync } from 'node:fs'
+          import { generateWindowsMediaFixtures } from './scripts/generate-legacy-video-fixtures.mjs'
+          const directory = 'out/verification/video-tracks'
+          mkdirSync(directory, { recursive: true })
+          generateWindowsMediaFixtures(directory)
+          JS
+      - name: Generate shared project-owned video track fixtures
+        run: |
           node scripts/generate-video-track-fixtures.mjs 2>&1 | tee out/ci/video-track-fixtures.log
       - name: Generate and independently decode legacy movie fixtures
         id: legacy-fixtures
@@ -357,6 +371,15 @@ jobs:
           path: out/ci/
           retention-days: 90
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ !cancelled() && (steps.windows-media-fixtures.outcome == 'success' || steps.windows-media-fixtures.outcome == 'failure') }}
+        with:
+          name: windows-media-fixture-evidence
+          path: |
+            out/verification/video-tracks/windows-media*
+            out/verification/video-tracks/legacy-wmv*
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() && steps.legacy-fixtures.outcome == 'failure' }}
         with:
           name: legacy-fixture-evidence
@@ -378,6 +401,11 @@ jobs:
       - name: Require complete legacy movie references
         env:
           FIXTURE_OUTCOME: ${{ needs.build.outputs.legacy-fixtures }}
+        run: test "$FIXTURE_OUTCOME" = success
+      - name: Require complete Windows Media references
+        if: ${{ !cancelled() }}
+        env:
+          FIXTURE_OUTCOME: ${{ needs.build.outputs.windows-media-fixtures }}
         run: test "$FIXTURE_OUTCOME" = success
 
   node:

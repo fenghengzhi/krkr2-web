@@ -41,7 +41,7 @@ function customState(){return [f.customProgress,global.customRendered,global.cus
 function customStored(){var saved=Scripts.evalStorage(kag.getBookMarkFileNameAtNum(0));return [saved.user.customProgress,saved.core.mainConductor.curLabel].join("|");}
 Debug.message("custom-entry-game-ready");
 `
-export async function customEntryDistribution(binary: boolean) {
+export async function customEntryDistribution(binary: boolean, container: 'zip' | 'sfx' = 'zip') {
   const original = await readFile(new URL('../fixtures/compatibility/kag3_template.xp3', import.meta.url)),
     hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
     originalSha256 = hash(original), wide = (text: string) => Buffer.from('\ufeff' + text, 'utf16le')
@@ -56,8 +56,16 @@ export async function customEntryDistribution(binary: boolean) {
       ? 'Scripts.compileStorage(System.exePath+"observer.tjs",System.dataPath+"custom-observer.cjs",false,true,false);Scripts.execStorage(System.dataPath+"custom-observer.cjs");'
       : 'Scripts.execStorage(System.exePath+"observer.tjs");') },
     { name: 'Release/Tools/startup.tjs', bytes: wide('throw new Exception("A bundled tools sample was launched instead of boot.tjs");') },
-  ], bytes = distributionZip(files.map((file) => member(file.name, file.bytes)))
-  return { bytes, evidence: { originalSha256, originalBytes: original.length, zipSha256: hash(bytes), zipBytes: bytes.length,
+  ], zip = distributionZip(files.map((file) => member(file.name, file.bytes))),
+    prefix = container === 'sfx' ? Buffer.alloc(4096) : Buffer.alloc(0)
+  // This deliberately is not an executable PE image. The browser receives
+  // it only as archive bytes. ZIP offsets remain relative to the ZIP payload.
+  if (prefix.length) prefix.write('MZ inert SFX fixture; do not execute. ZIP starts at byte 4096.\r\n', 'ascii')
+  const bytes = Buffer.concat([prefix, zip]), name = 'custom-entry.' + (container === 'sfx' ? 'exe' : 'zip'),
+    mimeType = container === 'sfx' ? 'application/octet-stream' : 'application/zip'
+  return { bytes, name, mimeType, evidence: { originalSha256, originalBytes: original.length,
+    container, prefixBytes: prefix.length, prefixSha256: hash(prefix), inputSha256: hash(bytes), inputBytes: bytes.length,
+    zipSha256: hash(zip), zipBytes: zip.length,
     files: files.map((file) => ({ name: file.name, bytes: file.bytes.length, sha256: hash(file.bytes) })),
-    scope: 'Unmodified original KAG template in an independently named archive, started by an authored boot.tjs and public auto-path/exec APIs. An unrelated tools startup is retained as a negative control. Only the observer is compiled in the bytecode arm.' } }
+    scope: 'Unmodified original KAG template in an independently named archive, started by an authored boot.tjs and public auto-path/exec APIs. An unrelated tools startup is retained as a negative control. Only the observer is compiled in the bytecode arm. The optional MZ prefix is inert input and is never executed.' } }
 }

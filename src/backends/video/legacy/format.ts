@@ -1,6 +1,9 @@
 import { mp4Tag, mp4TimelineStarts } from '../../../formats/video/mp4-source.ts'
 
-export type LegacyVideoFormat = 'mpeg' | 'mpegvideo' | 'avi'
+const legacyVideoFormats = ['mpeg', 'mpegvideo', 'avi', 'asf'] as const
+export type LegacyVideoFormat = typeof legacyVideoFormats[number]
+export const isLegacyVideoFormat = (value: unknown): value is LegacyVideoFormat =>
+  typeof value === 'string' && (legacyVideoFormats as readonly string[]).includes(value)
 
 /** These are the movie providers selected by the stock Win32 extension
  * dispatch. Keep MP4, WebM and unrelated resources on the native path. */
@@ -12,6 +15,12 @@ export function legacyVideoFormat(name: string): LegacyVideoFormat | undefined {
     case 'mpv':
     case 'm1v': return 'mpegvideo'
     case 'avi': return 'avi'
+    // Fixed dsmovie IsWindowsMediaFile routes all three to CWMReader and
+    // WMV/WMA Decoder DMOs. Here the selected non-DRM subset is WMV1/2 with
+    // WMA1/2; a video stream remains required, even under a .wma alias.
+    case 'wmv':
+    case 'asf':
+    case 'wma': return 'asf'
   }
 }
 

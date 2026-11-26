@@ -1,4 +1,4 @@
-import type { LegacyVideoFormat } from './format.ts'
+import { isLegacyVideoFormat, type LegacyVideoFormat } from './format.ts'
 import { legacyMediaLimits, type LegacyMediaModule } from './module.ts'
 
 /** Paged output avoids MEMFS's geometric growth plus old-buffer copy. MP4's
@@ -49,7 +49,7 @@ function outputFile(module: LegacyMediaModule) {
  * application's immutable Blob uses read-only WORKERFS without a full copy. */
 export function convertLegacyMovie(module: LegacyMediaModule, input: Blob | Uint8Array, format: LegacyVideoFormat, log: readonly string[]): Blob {
   const blob = input instanceof Blob, size = blob ? input.size : input.byteLength
-  if (size < 1 || size > legacyMediaLimits.inputBytes || !['mpeg', 'mpegvideo', 'avi'].includes(format))
+  if (size < 1 || size > legacyMediaLimits.inputBytes || !isLegacyVideoFormat(format))
     throw new Error('Invalid legacy movie conversion request')
   module.FS.mkdir('/input')
   try {

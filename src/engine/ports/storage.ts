@@ -49,6 +49,8 @@ export interface ArchiveReader {
   /** Release shared decoded segment caches. Open resource handles stay usable. */
   compact?(): void
   open(resource: Resource, checkpoint: () => Promise<void>): Promise<ArchiveIndex | undefined>
+  /** Inspect a prospective ZIP installer without indexing a native combined EXE. */
+  openDistribution?(resource: Resource, checkpoint: () => Promise<void>): Promise<ArchiveIndex | undefined>
   probeXp3(resource: Resource, checkpoint: () => Promise<void>): Promise<boolean>
   probeArchive?(resource: Resource, checkpoint: () => Promise<void>): Promise<boolean>
 }

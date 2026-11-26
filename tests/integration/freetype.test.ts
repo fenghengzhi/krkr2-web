@@ -47,7 +47,7 @@ test('session stop releases cached font faces before disposing the graphics back
   const { session } = await headless(
     {
       'startup.tjs':
-        'var w=new Window(),a=new Layer(w,null);a.font.face="font.ttf";a.font.faceIsFileName=true;a.font.getTextWidth("A");',
+        'var w=new Window(),a=new Layer(w,null);a.font.face="font.ttf";a.font.faceIsFileName=true;var width=a.font.getTextWidth("A");',
       'font.ttf': bytes,
     },
     {

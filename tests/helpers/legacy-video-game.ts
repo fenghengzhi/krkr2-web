@@ -6,6 +6,11 @@ export const legacyVideoCases = [
   { file: 'legacy-elementary.mpv', format: 'mpegvideo', audio: false, audioOffset: 0 },
 ] as const
 
+export const windowsMediaCases = [
+  { file: 'legacy-wmv1.wmv', format: 'asf', audio: true, audioOffset: 0 },
+  { file: 'legacy-wmv2.asf', format: 'asf', audio: true, audioOffset: .3 },
+] as const
+
 export const legacyVideoColors = [[220, 30, 30], [25, 210, 35], [30, 45, 220]] as const
 
 /** Author markers are intentionally coarse enough to survive MPEG/JPEG and
@@ -22,14 +27,14 @@ export function legacyFrameCode(pixels: readonly number[]): number {
   return code
 }
 
-export const legacyVideoGameSource = String.raw`
+export function legacyVideoGame(cases: readonly { file: string }[]): string { return String.raw`
 System.exitOnNoWindowStartup=false;System.exitOnWindowClose=false;
 var legacyWindow=new Window();legacyWindow.caption="Legacy movie player";legacyWindow.setInnerSize(200,128);
 var legacyRoot=new Layer(legacyWindow,null);legacyRoot.setSize(200,128);legacyRoot.holdAlpha=false;
 legacyRoot.fillRect(0,0,200,128,0xff102030);
 var legacyLeft=new Layer(legacyWindow,legacyRoot),legacyRight=new Layer(legacyWindow,legacyRoot);
 legacyLeft.setSize(96,64);legacyRight.setPos(104,0,96,64);legacyLeft.visible=legacyRight.visible=true;
-var legacyFiles=${JSON.stringify(legacyVideoCases.map((item) => item.file))},legacyIndex=0;
+var legacyFiles=${JSON.stringify(cases.map((item) => item.file))},legacyIndex=0;
 var legacyEvents=[],legacyDropped=0,legacyPrepareCount=0;
 function legacyRecord(value){if(legacyEvents.count<384)legacyEvents.add(value);else legacyDropped++;}
 function legacyWord(layer){
@@ -75,4 +80,6 @@ for(var i=0;i<8;i++){
  button.onClick=function(){global.legacyAction(this.action);};legacyButtons.add(button);
 }
 legacyWindow.visible=true;legacyOpen();
-`
+` }
+
+export const legacyVideoGameSource = legacyVideoGame(legacyVideoCases)

@@ -1105,6 +1105,32 @@ public:
         return body.AsObjectClosureNoAddRef().FuncCall(0, nullptr, nullptr, result, count, args, context);
     }
 };
+class FontMetricMethod final : public tTJSNativeClassMethod, private SystemDelegate {
+    Vm* vm;
+    static tjs_error noOp(tTJSVariant*, tjs_int, tTJSVariant**, iTJSDispatch2*) { return TJS_S_OK; }
+public:
+    FontMetricMethod(Vm* vm, const tTJSVariant& body)
+        : tTJSNativeClassMethod(noOp), SystemDelegate(vm, body), vm(vm) {}
+    tjs_error FuncCall(tjs_uint32 flag, const tjs_char* member, tjs_uint32* hint,
+        tTJSVariant* result, tjs_int count, tTJSVariant** args, iTJSDispatch2* context) override {
+        if(member) return tTJSNativeClassMethod::FuncCall(flag, member, hint, result, count, args, context);
+        if(!context) return TJS_E_NATIVECLASSCRASH;
+        if(shuttingDown) return TJS_E_INVALIDOBJECT;
+        const auto* object = dynamic_cast<tTJSCustomObject*>(context);
+        if(object && !object->IsLifetimeValid()) return TJS_E_INVALIDOBJECT;
+        const auto classId = TJSFindNativeClassID(u"krkr2-web.HostLifetime.Font.invalidate");
+        iTJSNativeInstance* instance = nullptr;
+        if(classId < 0 || TJS_FAILED(context->NativeInstanceSupport(TJS_NIS_GETINSTANCE, classId, &instance)))
+            return TJS_E_NATIVECLASSCRASH;
+        const auto* font = dynamic_cast<HostLifetime*>(instance);
+        if(!font || font->Identifier(vm) <= 0) return TJS_E_NATIVECLASSCRASH;
+        if(result) result->Clear();
+        if(count < 1) return TJS_E_BADPARAMCOUNT;
+        if(!result) return TJS_S_OK;
+        krkr::ExecutionFrame delegation(2);
+        return body.AsObjectClosureNoAddRef().FuncCall(0, nullptr, nullptr, result, count, args, context);
+    }
+};
 class SystemProperty final : public tTJSNativeClassProperty, private SystemDelegate {
 public:
     SystemProperty(Vm* vm, const tTJSVariant& body)
@@ -1851,6 +1877,7 @@ API int krkr_random_source_version() { return 1; }
 API int krkr_native_messages_version() { return 3; }
 API int krkr_native_midi_version() { return 1; }
 API int krkr_window_input_version() { return 1; }
+API int krkr_font_metrics_version() { return 1; }
 // No VM entry, release drain or CleanupErrors scope: this may be called by a
 // host logger while a script import is suspended, without consuming its errors.
 API Reply* krkr_format_tvp_message(const Reply* request) {
@@ -2051,6 +2078,25 @@ static const tTJSVariant* systemBindingBody(Vm* vm, unsigned handle, bool proper
     const auto type = body->GetContextType();
     if(property ? type != ctProperty : type != ctFunction && type != ctExprFunction) return nullptr;
     return &found->second;
+}
+// Original Font methods validate arity, then only convert the text and enter
+// GetTextSize if the caller supplied a result. Reuse the established delegate
+// owner and entry policy; the TJS body still handles normal Layer/font work.
+API int krkr_value_set_font_metric_method(Vm* vm, tTJSVariant* value,
+    const tjs_char* member, unsigned handle) {
+    if(shuttingDown || !vm || !value || !member) return 0;
+    constexpr const tjs_char* names[] = {u"getTextWidth", u"getTextHeight",
+        u"getEscWidthX", u"getEscWidthY", u"getEscHeightX", u"getEscHeightY"};
+    bool supported = false;
+    for(const auto* name : names) if(!TJS_strcmp(member, name)) supported = true;
+    if(!supported) return 0;
+    const auto* body = systemBindingBody(vm, handle, false);
+    if(!body) return 0;
+    try {
+        krkr::NativeOwner<FontMetricMethod> method(new FontMetricMethod(vm, *body));
+        *value = tTJSVariant(method.get());
+        return 1;
+    } catch(...) { return 0; }
 }
 API int krkr_class_system_method(Vm* vm, tTJSVariant* value, const tjs_char* member, unsigned handle, int policy) {
     if(!member) return 0;

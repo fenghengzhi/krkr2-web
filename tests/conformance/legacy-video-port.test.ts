@@ -28,7 +28,8 @@ test('legacy movie conversion retains the game name and sends owned MP4 bytes an
   const encoded = await mp4File(), timeline = await readVideoTimeline(encoded)
   assert(timeline); assert(timeline.times.length > 1); assert.equal(timeline.audioStreams, 1)
   const routes = [['op.MPG?mode=1', 'mpeg'], ['opening.mpeg', 'mpeg'], ['disc.xp3>cut.MPV', 'mpegvideo'],
-    ['ending.m1v', 'mpegvideo'], ['video/opening.AVI', 'avi']] as const
+    ['ending.m1v', 'mpegvideo'], ['video/opening.AVI', 'avi'], ['opening.WMV?width=96', 'asf'],
+    ['data.xp3>video/intro.asf', 'asf'], ['movie.wma', 'asf']] as const
   const seen: LegacyVideoFormat[] = [], input = Uint8Array.of(0, 0, 1, 0xba, 3, 4)
   const f = transport(async (data, format, signal) => {
     signal.throwIfAborted()
@@ -47,7 +48,7 @@ test('legacy movie conversion retains the game name and sends owned MP4 bytes an
       assert.deepEqual(new Uint8Array(await outgoing.bytes.blob.arrayBuffer()), encoded)
     }
     assert.deepEqual(seen, routes.map(([, format]) => format))
-    for (const name of ['data.avi>clip.mp4', 'clip.mp4?old.mpg', 'clip?old.avi', 'sound.wav', 'movie.webm'])
+    for (const name of ['data.avi>clip.mp4', 'clip.mp4?old.mpg', 'clip?old.avi', 'pack.wmv>clip.mp4', 'clip?old.asf', 'sound.wav', 'movie.webm'])
       assert.equal(legacyVideoFormat(name), undefined)
   } finally { await f.close() }
 })

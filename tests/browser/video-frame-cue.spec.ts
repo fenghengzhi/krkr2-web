@@ -72,7 +72,12 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           expect(trace).toContain('cancel'); expect(period).toBe(-1); expect(frames.at(-1)).toBeGreaterThanOrEqual(12)
         } else {
           expect(trace.filter((entry) => entry.startsWith('period:'))).toEqual([`period:1:${name === 'close' ? 'unload' : 'play'}`])
-          expect(period).toBeGreaterThan(trace.findLastIndex((entry) => entry.startsWith('frame:')))
+          let lastFrame = -1
+          for (let index = trace.length - 1; index >= 0; index--) if (trace[index]!.startsWith('frame:')) {
+            lastFrame = index
+            break
+          }
+          expect(period).toBeGreaterThan(lastFrame)
           if (name === 'future') { expect(trace.indexOf('future:8')).toBeLessThan(period); expect(frames.at(-1)).toBeGreaterThanOrEqual(8) }
           if (name === 'tail') expect(frames.at(-1)).toBe(17)
           if (name === 'close') expect(trace.indexOf('closed')).toBeLessThan(period)

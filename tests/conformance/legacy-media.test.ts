@@ -7,17 +7,23 @@ import { pathToFileURL } from 'node:url'
 import { convertLegacyMovie } from '../../src/backends/video/legacy/convert.ts'
 import { validateLegacyMediaManifest, type LegacyMediaFactory, type LegacyMediaManifest } from '../../src/backends/video/legacy/module.ts'
 import { readVideoTimelineBlob } from '../../src/formats/video/mp4.ts'
+import { legacyVideoFormat } from '../../src/backends/video/legacy/format.ts'
 
 interface InputReference {
   file: string; bytes: number; sha256: string; audioCodec: string | null; videoCodec: string
   normalizedVideoTimes: number[]
 }
 
-test('the actual single-thread legacy WASM decodes authored MPEG and AVI into complete selectable MP4 timelines', { timeout: 600000 }, async () => {
+for (const group of [
+  { label: 'MPEG and AVI', reference: 'legacy-video-reference.json', output: 'legacy-media',
+    required: ['legacy-program.mpg', 'legacy-mjpeg.avi', 'legacy-elementary.m1v'] },
+  { label: 'ASF with WMV1/WMA1 and WMV2/WMA2', reference: 'windows-media-reference.json', output: 'windows-media',
+    required: ['legacy-wmv1.wmv', 'legacy-wmv2.wmv'] },
+]) test(`the actual single-thread legacy WASM decodes authored ${group.label} into complete selectable MP4 timelines`, { timeout: 600000 }, async () => {
   const directory = resolve('.generated/legacy-media'), fixtures = resolve('out/verification/video-tracks'),
-    output = resolve('out/ci/legacy-media'), hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
+    output = resolve('out/ci', group.output), hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
     manifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8')) as LegacyMediaManifest,
-    reference = JSON.parse(readFileSync(resolve(fixtures, 'legacy-video-reference.json'), 'utf8')) as {
+    reference = JSON.parse(readFileSync(resolve(fixtures, group.reference), 'utf8')) as {
       complete: boolean; frames: number; fps: number; width: number; height: number; fixtures: InputReference[]; cinepak: unknown
     }, observations: unknown[] = [], failures: unknown[] = []
   mkdirSync(output, { recursive: true })
@@ -29,9 +35,9 @@ test('the actual single-thread legacy WASM decodes authored MPEG and AVI into co
   }
   const { default: factory } = await import(pathToFileURL(resolve(directory, manifest.assets.mjs.file)).href) as { default: LegacyMediaFactory },
     wasmBinary = new Uint8Array(readFileSync(resolve(directory, manifest.assets.wasm.file)))
-  assert(reference.fixtures.some((entry) => entry.file === 'legacy-program.mpg'))
-  assert(reference.fixtures.some((entry) => entry.file === 'legacy-mjpeg.avi'))
-  assert(reference.fixtures.some((entry) => entry.file === 'legacy-elementary.m1v'))
+  for (const name of group.required) assert(reference.fixtures.some((entry) => entry.file === name))
+  if (group.output === 'windows-media')
+    assert.deepEqual(reference.fixtures.map((entry) => [entry.videoCodec, entry.audioCodec]), [['wmv1', 'wmav1'], ['wmv2', 'wmav2']])
   for (const entry of reference.fixtures) {
     const log: string[] = [], observation: Record<string, unknown> = { input: entry.file, videoCodec: entry.videoCodec, audioCodec: entry.audioCodec }
     observations.push(observation)
@@ -39,9 +45,11 @@ test('the actual single-thread legacy WASM decodes authored MPEG and AVI into co
       const bytes = new Uint8Array(readFileSync(resolve(fixtures, entry.file)))
       assert.equal(bytes.length, entry.bytes); assert.equal(hash(bytes), entry.sha256)
       // Each CLI invocation is a fresh native process, as in the real Worker.
+      const format = legacyVideoFormat(entry.file)
+      assert(format)
       const module = await factory({ wasmBinary, noInitialRun: true, print: (line) => log.push(line), printErr: (line) => log.push(line),
         locateFile: (name) => resolve(directory, name) }),
-        blob = convertLegacyMovie(module, bytes, entry.file.endsWith('.avi') ? 'avi' : entry.file.endsWith('.m1v') ? 'mpegvideo' : 'mpeg', log),
+        blob = convertLegacyMovie(module, bytes, format, log),
         converted = new Uint8Array(await blob.arrayBuffer()), timeline = await readVideoTimelineBlob(blob)
       writeFileSync(resolve(output, entry.file + '.mp4'), converted)
       assert.equal(blob.type, 'video/mp4'); assert.equal(String.fromCharCode(...converted.subarray(4, 8)), 'ftyp')

@@ -132,6 +132,12 @@ export class TjsWasmRuntime implements ScriptRuntime {
     return typeof this.module._krkr_window_input_version === 'function' &&
       this.call('krkr_window_input_version') === 1
   }
+  get nativeFontMetrics(): boolean {
+    this.assertAlive()
+    return typeof this.module._krkr_font_metrics_version === 'function' &&
+      this.call('krkr_font_metrics_version') === 1 &&
+      typeof this.module._krkr_value_set_font_metric_method === 'function'
+  }
   private assertAlive(allowDisposing = false): void {
     if (this.disposed || (this.disposing && !allowDisposing))
       throw new Error('TJS runtime is disposed')
@@ -219,6 +225,15 @@ export class TjsWasmRuntime implements ScriptRuntime {
       if (value.name === 'getTraceString') this.call('krkr_value_set_trace_function', pointer)
       else if (value.name === 'midiOut') this.call('krkr_value_set_midi_out_function', this.vm, pointer)
       else throw new Error('Unknown native method')
+    } else if (value.type === 'font-metric-method') {
+      if (!this.nativeFontMetrics) throw new Error('TJS WASM is missing native Font metric support')
+      if (!value.name || value.name.includes('\0')) throw new Error('Invalid Font metric method name')
+      this.assertObject(value.callback)
+      const name = this.textPointer(value.name)
+      try {
+        if (!this.call('krkr_value_set_font_metric_method', this.vm, pointer, name, value.callback.id))
+          throw new Error(`Cannot bind Font.${value.name}`)
+      } finally { this.call('free', name) }
     } else if (value.type === 'native-class') {
       if (value.name !== 'Scripts') throw new Error('Unknown native class')
       this.call('krkr_value_set_scripts_class', this.vm, pointer)

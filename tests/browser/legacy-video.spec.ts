@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { test, expect, observeVideoFrames } from '../helpers/video-presentation-browser.ts'
 import { installHandoffReadbacks, type ProbeWindow } from '../helpers/video-handoff-capture.ts'
 import { installVideoAudioProbe, observeVideoAudio, observeVideoMedia, type VideoAudioObservation } from '../helpers/video-audio-probe.ts'
-import { legacyFrameCode, legacyVideoCases, legacyVideoColors, legacyVideoGameSource } from '../helpers/legacy-video-game.ts'
+import { legacyFrameCode, legacyVideoCases, windowsMediaCases, legacyVideoColors, legacyVideoGame } from '../helpers/legacy-video-game.ts'
 
 interface ConvertedOpen {
   name: string; bytes: number; mime: string; signature?: string; sha256?: string; error?: string
@@ -15,17 +15,21 @@ type ObservedWindow = Window & {
   videoAudioObservation(): VideoAudioObservation
 }
 
-for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
-  test(`${backend}/${binary ? 'bytecode' : 'source'}: legacy MPEG and AVI movies play authored pictures and timed sound through ordinary VideoOverlay controls`, async ({ page }, info) => {
+for (const group of [
+  { label: 'legacy MPEG and AVI', cases: legacyVideoCases, reference: 'legacy-video-reference.json' },
+  { label: 'Windows Media WMV and ASF', cases: windowsMediaCases, reference: 'windows-media-reference.json' },
+]) for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
+  test(`${backend}/${binary ? 'bytecode' : 'source'}: ${group.label} movies play authored pictures and timed sound through ordinary VideoOverlay controls`, async ({ page }, info) => {
     test.setTimeout(240000)
-    const failures: unknown[] = [], errors: string[] = [], readings: unknown[] = [], traces: unknown[] = []
+    const cases = group.cases, legacyVideoGameSource = legacyVideoGame(cases),
+      failures: unknown[] = [], errors: string[] = [], readings: unknown[] = [], traces: unknown[] = []
     let sequence = 0, failedCapture: unknown
     page.on('pageerror', (error) => errors.push(error.message))
     await observeVideoFrames(page)
     await installHandoffReadbacks(page)
     await installVideoAudioProbe(page)
     // Observe only the real Video.open on its existing port. The game still
-    // supplies the original MPEG/AVI bytes, and the backend owns conversion.
+    // supplies the original container bytes, and the backend owns conversion.
     await page.addInitScript(() => {
       const NativeChannel = MessageChannel, opens: ConvertedOpen[] = [], pending: Promise<void>[] = []
       window.MessageChannel = new Proxy(NativeChannel, { construct(target, args, newTarget) {
@@ -129,11 +133,11 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
       }
     }
     try {
-      const rawManifest = readFileSync(resolve(directory, 'legacy-video-reference.json')), parsed = JSON.parse(rawManifest.toString('utf8')) as {
+      const rawManifest = readFileSync(resolve(directory, group.reference)), parsed = JSON.parse(rawManifest.toString('utf8')) as {
         complete: boolean; fixtures: { file: string; aliases: string[]; bytes: number; sha256: string; normalizedVideoTimes: number[] }[]
       }
       manifest = parsed; expect(parsed.complete).toBe(true)
-      const inputs = legacyVideoCases.map((item) => {
+      const inputs = cases.map((item) => {
         const buffer = readFileSync(resolve(directory, item.file)), source = parsed.fixtures.find((f) => f.file === item.file || f.aliases.includes(item.file))!
         expect(source).toBeDefined(); expect(buffer.length).toBe(source.bytes)
         expect(createHash('sha256').update(buffer).digest('hex')).toBe(source.sha256)
@@ -145,7 +149,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           : 'Scripts.execStorage("legacy-game.tjs");') },
         { name: 'legacy-game.tjs', mimeType: 'text/plain', buffer: Buffer.from(legacyVideoGameSource) }, ...inputs,
       ])
-      for (const [index, item] of legacyVideoCases.entries()) {
+      for (const [index, item] of cases.entries()) {
         if (index) await click(0)
         await expect(page.getByText(`legacy-ready:${index}:${item.file}`, { exact: true })).toBeVisible({ timeout: 90000 })
         await expect(canvas).toBeVisible()
@@ -221,8 +225,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
           }
         }
         if (item.audio) {
-          // The PS interval is after the unshifted source would already be
-          // audible. It fails if the real +0.3s stream offset is discarded.
+          // Delayed PS/ASF audio must still be silent after the unshifted
+          // source would be audible: the real +0.3s offset cannot be discarded.
           const low = item.audioOffset ? .55 : .18, high = item.audioOffset ? .7 : .35,
             silent = played.filter((sample) => sample.time >= low && sample.time <= high && !sample.paused)
           expect(silent.length).toBeGreaterThanOrEqual(2)

@@ -5,6 +5,7 @@ import { MAX_RESOURCE_BYTES } from '../../engine/ports/storage.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import type { ByteSource, Inflater, Resource } from '../../engine/ports/storage.ts'
 import { cp437 } from './names.ts'
+import { zipEndOffsets, type ExecutableZipLocation } from './executable.ts'
 import { borrowResourceBlob, resourceReadBounds, resourceViewBounds } from '../../engine/storage/resource-source.ts'
 
 export const MAX_ZIP_ENTRIES = 100000
@@ -84,12 +85,16 @@ async function filename(
 
 /** Index central records without decompressing entries. Member payloads are read and checked on demand. */
 export async function readZip(source: ByteSource, codecs: ZipCodecs,
-  diskStarts: readonly number[] = [0]): Promise<ZipResource[]> {
+  volumes: readonly number[] = [0], executable?: ExecutableZipLocation): Promise<ZipResource[]> {
   const check = () => codecs.checkpoint()
   if (!Number.isSafeInteger(source.size) || source.size < 22)
     throw new Error('Truncated ZIP archive')
-  if (diskStarts[0] !== 0 || diskStarts.some((at, i) =>
-    !Number.isSafeInteger(at) || at >= source.size || (i > 0 && at <= diskStarts[i - 1]!)))
+  const prefixBytes = executable?.base ?? 0
+  if (!Number.isSafeInteger(prefixBytes) || prefixBytes < 0 || prefixBytes >= source.size ||
+      (prefixBytes !== 0 && volumes.length !== 1)) throw new Error('Invalid executable ZIP prefix')
+  const diskStarts = prefixBytes ? [prefixBytes] : volumes
+  if (volumes[0] !== 0 || volumes.some((at, i) =>
+    !Number.isSafeInteger(at) || at >= source.size || (i > 0 && at <= volumes[i - 1]!)))
     throw new Error('Invalid ZIP volume boundaries')
   const lastDisk = diskStarts.length - 1
   const address = (disk: number, relative: number) => {
@@ -108,40 +113,36 @@ export async function readZip(source: ByteSource, codecs: ZipCodecs,
     await codecs.checkpoint()
     return bytes
   }
-  const tailOffset = Math.max(0, source.size - 65557),
+  const tailOffset = executable?.endRecord ?? Math.max(0, source.size - 65557),
     tail = await read(tailOffset, source.size - tailOffset),
     view = new DataView(tail.buffer, tail.byteOffset, tail.byteLength)
   let end = -1, missingDisk = false
-  for (let at = tail.length - 22; at >= 0; at--) {
-    if (
-      view.getUint32(at, true) === 0x06054b50 &&
-      at + 22 + view.getUint16(at + 20, true) === tail.length
-    ) {
-      const thisDisk = view.getUint16(at + 4, true),
-        firstDirectoryDisk = view.getUint16(at + 6, true),
-        count = view.getUint16(at + 10, true),
-        size = view.getUint32(at + 12, true),
-        offset = view.getUint32(at + 16, true),
-        directoryBase = diskStarts[firstDirectoryDisk]
-      if (thisDisk !== 0xffff && thisDisk !== lastDisk ||
-        firstDirectoryDisk !== 0xffff && directoryBase === undefined || tailOffset + at < diskStarts[lastDisk]!) {
-        missingDisk = true
-        continue
-      }
-      // An EOCD-looking byte sequence inside a comment is not enough to locate an archive.
-      if (
-        count !== 0xffff &&
-        size !== 0xffffffff &&
-        offset !== 0xffffffff &&
-        directoryBase !== undefined && directoryBase + offset + size !== tailOffset + at
-      ) {
-        const locatorAt = tailOffset + at - 20
-        if (locatorAt < 0 || new BinaryReader(await read(locatorAt, 20)).u32() !== 0x07064b50)
-          continue
-      }
-      end = at
-      break
+  for (const at of zipEndOffsets(view)) {
+    if (executable && at !== 0) continue
+    const thisDisk = view.getUint16(at + 4, true),
+      firstDirectoryDisk = view.getUint16(at + 6, true),
+      count = view.getUint16(at + 10, true),
+      size = view.getUint32(at + 12, true),
+      offset = view.getUint32(at + 16, true),
+      directoryBase = diskStarts[firstDirectoryDisk]
+    if (thisDisk !== 0xffff && thisDisk !== lastDisk ||
+      firstDirectoryDisk !== 0xffff && directoryBase === undefined || tailOffset + at < diskStarts[lastDisk]!) {
+      missingDisk = true
+      continue
     }
+    // An EOCD-looking byte sequence inside a comment is not enough to locate an archive.
+    if (
+      count !== 0xffff &&
+      size !== 0xffffffff &&
+      offset !== 0xffffffff &&
+      directoryBase !== undefined && directoryBase + offset + size !== tailOffset + at
+    ) {
+      const locatorAt = tailOffset + at - 20
+      if (locatorAt < 0 || new BinaryReader(await read(locatorAt, 20)).u32() !== 0x07064b50)
+        continue
+    }
+    end = at
+    break
   }
   if (end < 0) {
     if (missingDisk) throw new Error('Split ZIP 缺少分卷或卷号不匹配，请同时选择 .z01 起的全部分卷及最后的 .zip。')

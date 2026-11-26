@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 158 批在自动模式下可从 ZIP 格式的自解压 EXE 读取游戏，并支持含 WMV1／WMV2 视频的 ASF 过场。字体度量按脚本是否取用结果决定是否更新文字尺寸缓存。新增行为等待托管验收。[158 范围与验证](../decisions/158-executable-zip-windows-media-and-font-calls.md)
+
 第 157 批支持暂停后从此浏览器内另一版本的存档目录复制文件，默认保留当前版本的同名文件。图层影片按每帧回调执行后的标记触发时间点，图层空文本高度跟随位图最近一次度量。新增行为等待托管验收。[157 范围与验证](../decisions/157-game-version-saves-and-playback.md)
 
 第 156 批支持按字节分卷的 XP3／ZIP 和 PKZIP 编号磁盘，库中保留原分卷。相对入口可以指向发行目录内的子目录。新图层使用日文原版默认字体及字号，MIDI 旋律声道可以切换单音与复音。新增行为等待托管验证。[156 兼容范围与证据](../decisions/156-split-game-archives-default-font-and-midi.md)

@@ -3,10 +3,18 @@ import { readFileSync } from 'node:fs'
 export const textMetricFiles = () => ({ 'metric-coverage.tft': new Uint8Array(readFileSync(new URL('../fixtures/font/coverage-v1.tft', import.meta.url))) })
 export const textMetricCases = [
   { id: 'text-metric-empty', expected: '0|0|0|1|24|0|24|0|24' },
-  { id: 'text-metric-setter', expected: '24|24|24|24|0|0|0' },
-  { id: 'text-metric-bitmap', expected: '24|0|0|24' },
-  { id: 'text-metric-draw', expected: '0|24|24|0' },
-  { id: 'text-metric-map', expected: '24|0|4|24|0|4|0|1|24|24|0' },
+  // 157's original SDK observes zero here: textMetricWarm deliberately
+  // discards getTextWidth's result, so the native method does not measure.
+  { id: 'text-metric-setter', expected: '0|0|0|0|0|0|0' },
+  { id: 'text-metric-bitmap', expected: '0|0|0|0' },
+  { id: 'text-metric-draw', expected: '0|0|0|0' },
+  { id: 'text-metric-map', expected: '0|0|4|24|0|4|0|1|24|24|0' },
+  { id: 'text-metric-used-setter', expected: '24|24|24|24|0|0|0' },
+  { id: 'text-metric-used-bitmap', expected: '24|0|0|24' },
+  { id: 'text-metric-used-draw', expected: '0|24|24|0' },
+  { id: 'text-metric-used-map', expected: '24|0|4|24|0|4|0|1|24|24|0' },
+  { id: 'text-metric-results', expected: '0,0,0,0,0,0|24,24,24,24,24,24|Integer,Integer,Real,Real,Real,Real|6|1|0|24' },
+  { id: 'text-metric-entry', expected: 'metric-count,metric-count,metric-count,metric-count,metric-count,metric-count|6|metric-string,metric-string,metric-string,metric-string,metric-string,metric-string|6|metric-image:getTextWidth,metric-image:getTextHeight,metric-image:getEscWidthX,metric-image:getEscWidthY,metric-image:getEscHeightX,metric-image:getEscHeightY' },
 ] as const
 
 /** Stock BaseBitmap 1764/1941–42/2544–2603: cached empty text starts at
@@ -14,43 +22,75 @@ export const textMetricCases = [
  * All controls use live Layer/Font objects and a separately authored TFT. */
 export const textMetricSource = String.raw`
 function textMetricWarm(layer){layer.font.getTextWidth("A");return layer.font.getTextHeight("");}
+function textMetricUsedWarm(layer){var width=layer.font.getTextWidth("A");if(width<=0)throw new Exception("Expected actual glyph width");return layer.font.getTextHeight("");}
+var textMetricArgumentReads=0;
+function textMetricArgument(){global.textMetricArgumentReads++;return "A";}
 function textMetricRun(id,a,b){
- var f=a.font,g=b.font,result;f.height=24;g.height=24;
+ var f=a.font,g=b.font,result,warm=global.textMetricWarm;f.height=24;g.height=24;
+ if(id.substr(0,17)=="text-metric-used-"){id="text-metric-"+id.substr(17);warm=global.textMetricUsedWarm;}
  if(id=="text-metric-empty"){
   result=[f.getTextHeight(""),f.getTextWidth(""),int(f.getEscHeightY("")),int(f.getTextWidth("A")>0),f.getTextHeight(""),
    f.getTextWidth(""),f.getTextHeight(""),g.getTextHeight("")].join("|");
   a.fillRect(0,0,1,1,0xffffffff);return result+"|"+f.getTextHeight("");
  }
  if(id=="text-metric-setter"){
-  result=textMetricWarm(a);f.height=24;result+="|"+f.getTextHeight("");f.face=f.face;result+="|"+f.getTextHeight("");
+  result=warm(a);f.height=24;result+="|"+f.getTextHeight("");f.face=f.face;result+="|"+f.getTextHeight("");
   f.bold=false;result+="|"+f.getTextHeight("");f.height=25;f.height=24;result+="|"+f.getTextHeight("");
-  textMetricWarm(a);f.bold=true;f.bold=false;result+="|"+f.getTextHeight("");
-  textMetricWarm(a);f.angle=300;f.angle=0;return result+"|"+f.getTextHeight("");
+  var warmed=warm(a);f.bold=true;f.bold=false;result+="|"+f.getTextHeight("");
+  warmed=warm(a);f.angle=300;f.angle=0;return result+"|"+f.getTextHeight("");
  }
  if(id=="text-metric-bitmap"){
-  textMetricWarm(a);a.setImageSize(32,32);result=f.getTextHeight("");
+  var warmed=warm(a);a.setImageSize(32,32);result=f.getTextHeight("");
   a.setImageSize(33,32);a.setImageSize(32,32);result+="|"+f.getTextHeight("");
-  textMetricWarm(a);a.assignImages(b);result+="|"+f.getTextHeight("");
-  textMetricWarm(a);a.fillRect(0,0,1,1,0xffffffff);return result+"|"+f.getTextHeight("");
+  warmed=warm(a);a.assignImages(b);result+="|"+f.getTextHeight("");
+  warmed=warm(a);a.fillRect(0,0,1,1,0xffffffff);return result+"|"+f.getTextHeight("");
  }
  if(id=="text-metric-draw"){
   a.drawText(0,0,"A",0xffffff);result=f.getTextHeight("");
-  result+="|"+textMetricWarm(a);a.drawText(0,0,"A",0xffffff);result+="|"+f.getTextHeight("");
+  result+="|"+warm(a);a.drawText(0,0,"A",0xffffff);result+="|"+f.getTextHeight("");
   f.height=25;f.height=24;a.drawText(0,0,"A",0xffffff);return result+"|"+f.getTextHeight("");
  }
  if(id=="text-metric-map"){
-  result=textMetricWarm(b);f.mapPrerenderedFont("metric-coverage.tft");result+="|"+g.getTextHeight("");
+  result=warm(b);f.mapPrerenderedFont("metric-coverage.tft");result+="|"+g.getTextHeight("");
   result+="|"+g.getTextWidth("A")+"|"+g.getTextHeight("");
   f.mapPrerenderedFont("metric-coverage.tft");result+="|"+g.getTextHeight("")+"|"+g.getTextWidth("A");
   f.unmapPrerenderedFont();result+="|"+g.getTextHeight("")+"|"+int(g.getTextWidth("A")>0)+"|"+g.getTextHeight("");
   f.unmapPrerenderedFont();return result+"|"+g.getTextHeight("")+"|"+f.getTextHeight("");
+ }
+ var methods=["getTextWidth","getTextHeight","getEscWidthX","getEscWidthY","getEscHeightX","getEscHeightY"];
+ if(id=="text-metric-results"){
+  var ignored=[],used=[],types=[];global.textMetricArgumentReads=0;
+  for(var i=0;i<methods.count;i++){
+   f.height=25;f.height=24;f[methods[i]](global.textMetricArgument());ignored.add(f.getTextHeight(""));
+   var value=f[methods[i]]("A");types.add(typeof value);used.add(f.getTextHeight(""));
+  }
+  f.height=25;f.height=24;var bound=g.getTextWidth,otherWidth=bound("A");
+  return ignored.join(",")+"|"+used.join(",")+"|"+types.join(",")+"|"+textMetricArgumentReads+"|"+
+   int(otherWidth>0)+"|"+f.getTextHeight("")+"|"+g.getTextHeight("");
+ }
+ if(id=="text-metric-entry"){
+  System.assignMessage("TJSBadParamCount","metric-count");
+  System.assignMessage("TJSVariantConvertError","metric-string");System.assignMessage("TVPUnsupportedLayerType","metric-image:%1");
+  var arity=[],converted=[],images=[],ignored=0,noImage=0;
+  for(var i=0;i<methods.count;i++){
+   try{f[methods[i]]();arity.add("unexpected");}catch(e){arity.add(e.message);}
+   f[methods[i]](<%00%>);ignored++;
+   try{var value=f[methods[i]](<%00%>);converted.add("unexpected");}catch(e){converted.add(e.message);}
+  }
+  a.hasImage=false;
+  for(var i=0;i<methods.count;i++){
+   f[methods[i]]("A");noImage++;
+   try{var value=f[methods[i]]("A");images.add("unexpected");}catch(e){images.add(e.message);}
+  }
+  a.hasImage=true;
+  return arity.join(",")+"|"+ignored+"|"+converted.join(",")+"|"+noImage+"|"+images.join(",");
  }
  throw new Exception("Unknown text metric control");
 }
 function textMetricObserve(id){
  var w=void,a=void,b=void,result,failed=false,primary,cleanup=[];
  try{w=new Window();a=new Layer(w,null);b=new Layer(w,a);a.setImageSize(32,32);b.setImageSize(32,32);result=textMetricRun(id,a,b);}catch(e){failed=true;primary=e;}
- try{if(a!==void && isvalid a)a.font.unmapPrerenderedFont();}catch(e){cleanup.add(e.message);}
+ try{if(a!==void && isvalid a && a.hasImage)a.font.unmapPrerenderedFont();}catch(e){cleanup.add(e.message);}
  try{if(b!==void && isvalid b)invalidate b;}catch(e){cleanup.add(e.message);}
  try{if(a!==void && isvalid a)invalidate a;}catch(e){cleanup.add(e.message);}
  try{if(w!==void && isvalid w)invalidate w;}catch(e){cleanup.add(e.message);}
@@ -81,6 +121,11 @@ function textMetricMenu(){
  global.textMetricReference=new Layer(textMetricWindow,root);textMetricWindow.add(textMetricReference);textMetricReference.setPos(160,0,160,80);textMetricReference.holdAlpha=false;textMetricReference.visible=true;textMetricReference.font.height=24;
  global.textMetricButton=new Layer(textMetricWindow,root);textMetricWindow.add(textMetricButton);textMetricButton.setPos(0,80,320,32);textMetricButton.holdAlpha=false;textMetricButton.visible=true;
  textMetricButton.onClick=function(){global.textMetricNext();};
+ // Author code may request a warm-up and ignore its return. Stock native
+ // measurement methods leave the empty-line cache untouched in that case.
+ textMetricLayer.font.getTextWidth("A");textMetricLayer.font.getTextHeight("A");
+ textMetricLayer.font.getEscWidthX("A");textMetricLayer.font.getEscWidthY("A");
+ textMetricLayer.font.getEscHeightX("A");textMetricLayer.font.getEscHeightY("A");
  global.textMetricDraw();textMetricWindow.visible=true;Debug.message("text-metric-game-ready");
 }
 `

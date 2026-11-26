@@ -90,6 +90,7 @@ export interface ScriptClass {
 }
 export type ScriptValue =
   | { readonly type: 'native-method'; readonly name: 'getTraceString' | 'midiOut' }
+  | { readonly type: 'font-metric-method'; readonly name: string; readonly callback: ScriptObject }
   | { readonly type: 'native-class'; readonly name: 'Scripts' }
   | undefined
   | null
@@ -164,6 +165,8 @@ export interface ScriptRuntime extends HostContext, HostObjectLifetime {
   /** Version read from the loaded native TJS kernel, not an emulated SDK version. */
   readonly languageVersion?: string
   readonly nativeWindowInput?: boolean
+  /** Optional native Font measurement entry policy, including discarded results. */
+  readonly nativeFontMetrics?: boolean
   /** Select the game's TJS operator conventions after installing the platform classes. */
   setScriptOperators?(globalEval: boolean, compatAsterisk: boolean): void
   /** Original string-variant conversion followed by the native signed32 cast;

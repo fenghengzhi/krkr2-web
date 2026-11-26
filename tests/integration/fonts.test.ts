@@ -162,7 +162,7 @@ test('stop cancels a pending font load and releases its late FontFace without re
     {
       'startup.tjs':
         setup +
-        'a.font.face="late.ttf";a.font.faceIsFileName=true;a.font.getTextWidth("A");Debug.message("should not resume");',
+        'a.font.face="late.ttf";a.font.faceIsFileName=true;var lateWidth=a.font.getTextWidth("A");Debug.message("should not resume");',
       'late.ttf': new Uint8Array([1]),
     },
     {

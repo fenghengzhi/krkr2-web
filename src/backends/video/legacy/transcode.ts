@@ -1,4 +1,4 @@
-import type { LegacyVideoFormat } from './format.ts'
+import { isLegacyVideoFormat, type LegacyVideoFormat } from './format.ts'
 import { legacyMediaLimits } from './module.ts'
 
 declare const __KRKR_LEGACY_MEDIA_MANIFEST_FILE__: string
@@ -19,7 +19,7 @@ export async function transcodeLegacyMovie(input: Uint8Array | Blob, format: Leg
   if (signal.aborted) throw signal.reason ?? new DOMException('Legacy movie cancelled', 'AbortError')
   const size = input instanceof Blob ? input.size : input.byteLength, url = manifestUrl
   if (!url) throw new Error('Legacy movie kernel URL has not been configured')
-  if (!['mpeg', 'mpegvideo', 'avi'].includes(format)) throw new Error('Unsupported legacy movie container')
+  if (!isLegacyVideoFormat(format)) throw new Error('Unsupported legacy movie container')
   if (!Number.isSafeInteger(size) || size < 1 || size > legacyMediaLimits.inputBytes)
     throw new Error('Legacy movie exceeds 128 MiB input budget')
   if (active) throw new Error('Legacy movie conversion is already active in this session')

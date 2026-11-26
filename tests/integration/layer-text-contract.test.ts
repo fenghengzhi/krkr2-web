@@ -5,8 +5,10 @@ import type { GraphicsDecoder } from '../../src/engine/ports/graphics.ts'
 
 const setup = String.raw`
 System.assignMessage("TVPNotDrawableLayerType","text-contract:no-image");
+System.assignMessage("TVPUnsupportedLayerType","text-contract:unsupported:%1");
 System.assignMessage("TVPNotDrawableFaceType","text-contract:face:%1");
 System.assignMessage("TVPNegativeOpacityNotSupportedOnThisFace","text-contract:negative-addalpha");
+System.assignMessage("TJSBadParamCount","text-contract:count");
 var win=new Window(),layer=new Layer(win,null);
 layer.type=ltAlpha;layer.face=dfAlpha;layer.setImageSize(16,16);
 layer.font.height=12;
@@ -244,12 +246,12 @@ var explicitVoid=[font.getTextWidth(void),font.getTextHeight(void),
         const errors = (await run.session.evaluate('errors.join("|")')).split('|')
         assert.equal(errors.length, 7)
         for (let i = 0; i < queries.length; i++)
-          assert.match(errors[i]!, new RegExp(`Missing text for ${queries[i]}`))
+          assert.equal(errors[i], 'text-contract:count')
         assert.match(errors[6]!, /Missing storage for mapPrerenderedFont/)
         probe.assertUntouched()
         probe.open()
         await run.continue()
-        assert.equal(await run.session.evaluate('explicitVoid'), '0,12,0,0,0,12')
+        assert.equal(await run.session.evaluate('explicitVoid'), '0,0,0,0,0,0')
         assert.equal(probe.calls.glyph, 0)
         assert.equal(probe.calls.loadFont, 0)
       } finally {
@@ -288,7 +290,7 @@ var restoredIdentity=(isvalid font)+","+(font===layer.font);
         try {
           const errors = (await run.session.evaluate('errors.join("|")')).split('|')
           assert.equal(errors.length, queries.length)
-          for (const error of errors) assert.equal(error, 'text-contract:no-image')
+          for (const [index, error] of errors.entries()) assert.equal(error, 'text-contract:unsupported:' + queries[index])
           assert.equal(await run.session.evaluate('properties'), 'contract.ttf,1,12,0,1,1,1,1')
           probe.assertUntouched()
           probe.open()

@@ -1,7 +1,5 @@
-import { inflate, inflateRaw } from './blob-source.ts'
+import { openArchive } from './archive-reader.ts'
 import { createArchiveInflatePool } from './archive-inflater.ts'
-import { findXp3Archive, hasXp3Signature, readXp3 } from '../../formats/xp3/archive.ts'
-import { readZip } from '../../formats/zip/archive.ts'
 import { MAX_RESOURCE_BYTES, type Resource } from '../../engine/ports/storage.ts'
 import { normalizePath } from '../../engine/storage/resolver.ts'
 import type { GameFile } from '../../protocol/session.ts'
@@ -9,7 +7,6 @@ import { resolveFiles, type SourceFile } from './source-files.ts'
 import type { HttpRangePool } from './http-range.ts'
 import { borrowResourceBlob } from '../../engine/storage/resource-source.ts'
 import type { ZipNameEncoding } from '../../formats/zip/names.ts'
-import { zipNameCodecs } from './zip-names.ts'
 import { joinArchiveVolumes } from './archive-volumes.ts'
 
 /** Prepare a complete mount before publishing any of its paths to the running session. */
@@ -71,28 +68,10 @@ export async function importSources(
     const { name, source } = resource, containerIndex = resources.length
     if (!source) throw new Error('Imported file has no byte source: ' + name)
     add(resource)
-    const prefix = await source.read(0, Math.min(source.size, 11)),
-      zipMagic =
-        prefix &&
-        prefix[0] === 0x50 &&
-        prefix[1] === 0x4b &&
-        ((prefix[2] === 3 && prefix[3] === 4) || (prefix[2] === 5 && prefix[3] === 6))
-    const xp3 = /\.xp3$/i.test(name) || hasXp3Signature(prefix) ? source
-      : prefix[0] === 0x4d && prefix[1] === 0x5a
-        ? (await findXp3Archive(source, { checkpoint }))?.source : undefined,
-      entries = xp3
-        ? await readXp3(xp3, inflate, { checkpoint, compressedSegments })
-        : /\.zip$/i.test(name) || zipMagic
-          ? await readZip(source, {
-              inflate: (bytes, size) => inflateRaw(bytes, size, checkpoint),
-              ...zipNameCodecs(options.zipEncoding),
-              compressedRanges: compressedSegments,
-              checkpoint,
-            }, resource.zipDiskOffsets)
-          : []
-    if (xp3 || /\.zip$/i.test(name) || zipMagic)
-      resources[containerIndex] = { ...resources[containerIndex]!, archiveKind: xp3 ? 'xp3' : 'zip' }
-    for (const entry of entries) {
+    const archive = await openArchive(resource, checkpoint, compressedSegments, options.zipEncoding)
+    if (!archive) continue
+    resources[containerIndex] = { ...resource, archiveKind: archive.kind }
+    for (const entry of archive.entries) {
       await checkpoint()
       const canonical = name + '>' + entry.name
       add({ ...entry, aliasOf: canonical })

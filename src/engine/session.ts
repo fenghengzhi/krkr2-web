@@ -116,7 +116,7 @@ import { windowClass } from './tvp/window.ts'
 import { drawDeviceClass } from './tvp/draw-device.ts'
 import { DrawDevices } from './scene/draw-devices.ts'
 import { layerClass } from './tvp/layer.ts'
-import { fontClass } from './tvp/font.ts'
+import { fontClass, fontMetricMethods } from './tvp/font.ts'
 import { transitionBridge } from './tvp/transitions.ts'
 import { rectClass } from './tvp/rect.ts'
 import { fontSpec, fontSignature, DEFAULT_LAYER_FONT_FACE } from './graphics/font.ts'
@@ -1191,7 +1191,7 @@ export class EngineSession {
       this.discard(await this.runtime.execute(modalBridge, 'krkr2-web/modal.tjs'))
       this.discard(await this.runtime.execute(padClass, 'krkr2-web/pad.tjs'))
       this.discard(await this.runtime.execute(transitionBridge, 'krkr2-web/transitions.tjs'))
-      this.discard(await this.runtime.execute(fontClass, 'krkr2-web/font.tjs'))
+      this.discard(await this.runtime.execute(fontClass(this.runtime.nativeFontMetrics === true), 'krkr2-web/font.tjs'))
       this.discard(await this.runtime.execute(layerClass, 'krkr2-web/layer.tjs'))
       this.discard(await this.runtime.execute(rectClass, 'krkr2-web/rect.tjs'))
       this.discard(await this.runtime.execute(soundClasses, 'krkr2-web/sound.tjs'))
@@ -5784,8 +5784,18 @@ export class EngineSession {
         }
         break
       }
+      case 'Font.metricMethod': {
+        const name = text(0)
+        if (!(fontMetricMethods as readonly string[]).includes(name) || !isScriptObject(args[1]))
+          throw new Error('Invalid Font metric delegate')
+        value = { type: 'font-metric-method', name, callback: args[1] }
+        break
+      }
       case 'Font.measure': {
-        const layer = this.layerObjects!.fontLayer(args[2]), bitmap = this.layers.bitmap(layer.id)
+        const layer = this.layerObjects!.fontLayer(args[2])
+        if (typeof args[3] === 'string' && (fontMetricMethods as readonly string[]).includes(args[3]) && !this.layers.get(layer.id).bitmap)
+          throw new TvpError('TVPUnsupportedLayerType', [args[3]])
+        const bitmap = this.layers.bitmap(layer.id)
         if (!isScriptObject(args[1])) throw new Error('Expected font data')
         const data = context.snapshot(args[1])
         if (data.type !== 'dictionary') throw new Error('Expected font dictionary')

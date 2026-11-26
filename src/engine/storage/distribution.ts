@@ -133,36 +133,63 @@ export async function prepareProject(resources: Resource[], requested: ProjectSe
     // launcher shares the project. Existing project/save IDs stay stable.
     return copyGameProject({ ...project, executable: chosen ? toPublicStoragePath(chosen) : choice.executable })!
   }
-  const savedZip = selection.mode === 'root' ? selection.distribution : undefined
-  // An explicit outer.zip>entry keeps that archive address resolvable. A
-  // frozen library distribution is authoritative even if its entry changes.
-  const archive = savedZip !== undefined ? resources.find((file) => file.name === savedZip)
-    : selection.mode === 'auto' && resources.length === 1 && /\.zip$/i.test(resources[0]!.name) &&
-      !(entryInArchive && entryName === resources[0]!.name.toLowerCase()) ? resources[0] : undefined
-  if (savedZip !== undefined && !archive) throw new Error('Saved game distribution ZIP is missing: ' + savedZip)
-  if (archive) {
-    const index = await reader.open(archive, checkpoint)
+  const mountDistribution = async (archive: Resource, choice: ProjectLocation, frozen = false) => {
+    const index = /\.exe$/i.test(archive.name) && !frozen
+      ? await reader.openDistribution?.(archive, checkpoint) : await reader.open(archive, checkpoint)
     await checkpoint()
-    if (savedZip !== undefined && index?.kind !== 'zip') throw new Error('Saved game distribution is not a ZIP')
-    if (index?.kind === 'zip') {
-      const members = reader.joinVolumes ? await reader.joinVolumes(index.entries, checkpoint) : [...index.entries]
-      const inner = await locateGame(members, selection, checkpoint, probe, 'zip', entryName, relativeEntry)
-      if (inner) {
-        const names = new Set<string>()
-        for (const entry of members) {
-          if (names.has(entry.name)) throw new Error('Duplicate ZIP distribution member: ' + entry.name)
-          names.add(entry.name)
-          if (names.size % 256 === 0) await checkpoint()
-        }
-        const project = await select(members, inner)
-        return { resources: members, project: copyGameProject({ ...project, distribution: archive.name }) }
-      }
+    if (index?.kind !== 'zip') {
+      if (frozen) throw new Error('Saved game distribution is not a ZIP')
+      return
     }
+    const members = reader.joinVolumes ? await reader.joinVolumes(index.entries, checkpoint) : [...index.entries]
+    const inner = await locateGame(members, choice, checkpoint, probe, 'zip', entryName, relativeEntry)
+    if (!inner) return
+    const names = new Set<string>()
+    for (const entry of members) {
+      if (names.has(entry.name)) throw new Error('Duplicate ZIP distribution member: ' + entry.name)
+      names.add(entry.name)
+      if (names.size % 256 === 0) await checkpoint()
+    }
+    const project = await select(members, inner)
+    return { resources: members, project: copyGameProject({ ...project, distribution: archive.name })! }
   }
-  if (selection.mode === 'root' || selection.executableDirectory) return { resources, project: await select(resources, selection) }
+  if (selection.mode === 'root') {
+    if (selection.distribution !== undefined) {
+      const archive = resources.find((file) => file.name === selection.distribution)
+      if (!archive) throw new Error('Saved game distribution ZIP is missing: ' + selection.distribution)
+      return (await mountDistribution(archive, selection, true))!
+    }
+    return { resources, project: await select(resources, selection) }
+  }
+  // An explicit outer.zip>entry keeps that archive address resolvable.
   const originals = resources.filter((file) => !file.aliasOf && !file.name.includes('>'))
-  // The player's explicit entry can be a loose script or an archive address.
-  // Its physical file at the import root must take precedence over bundled demos.
+  const selectedExe = selection.executable && parseStoragePath(selection.executable)
+  const matches = selectedExe ? originals.filter((file) => file.name.toLowerCase() === selectedExe.toLowerCase()) : []
+  const exact = matches.find((file) => file.name === selectedExe)
+  if (!exact && matches.length > 1) throw new Error('Ambiguous executable: ' + selectedExe)
+  const named = exact ?? matches[0]
+  const outer = named || (originals.length === 1 ? originals[0] : undefined)
+  if (outer && /\.(?:zip|exe)$/i.test(outer.name) && !(entryInArchive && entryName === outer.name.toLowerCase())) {
+    // Naming the installer selects the package. Its game has its own program
+    // directory and optional engine executable inside.
+    const choice = named ? { mode: 'auto' as const } : selection
+    const mounted = await mountDistribution(outer, choice)
+    if (mounted) return mounted
+  }
+  if (selection.executableDirectory) return { resources, project: await select(resources, selection) }
   const location = await locateGame(originals, selection, checkpoint, probe, 'files', entryName, relativeEntry)
+  if (!location && !outer && !entryInArchive && !selection.executable) {
+    // A release folder may include a readme alongside its installer. Loose
+    // games and native combined executables above keep their original priority.
+    let found: Awaited<ReturnType<typeof mountDistribution>>
+    for (const file of originals) {
+      if (!/\.exe$/i.test(file.name)) continue
+      const mounted = await mountDistribution(file, selection)
+      if (!mounted) continue
+      if (found) throw new Error('找到多个自解压 ZIP 游戏，请在“游戏程序名”填写所选发行包的路径。')
+      found = mounted
+    }
+    if (found) return found
+  }
   return { resources, project: await select(resources, location ?? selection) }
 }

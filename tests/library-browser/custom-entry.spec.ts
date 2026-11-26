@@ -3,15 +3,15 @@ import { readFile } from 'node:fs/promises'
 import { test, expect } from '../helpers/library-browser.ts'
 import { customEntryDistribution, customEntryObserver, customEntryPaths, customEntryStory } from '../helpers/custom-entry-distribution.ts'
 
-for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
-  test(`${backend}/${binary ? 'bytecode' : 'source'}: a chosen ZIP entry launches the original game and retains its route when reopened from the library`, async ({ page }, info) => {
+for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true]) for (const container of ['zip', 'sfx'] as const)
+  test(`${backend}/${binary ? 'bytecode' : 'source'}/${container}: a chosen ZIP entry launches the original game and retains its route when reopened from the library`, async ({ page }, info) => {
     test.setTimeout(150000)
     const failures: unknown[] = [], errors: string[] = [], observations: unknown[] = []
     let sequence = 0
     page.on('pageerror', (error) => errors.push(error.message))
     await page.goto(`/?backend=${backend}`)
     test.skip(backend === 'jspi' && !await page.evaluate(() => 'Suspending' in WebAssembly), 'JSPI unavailable')
-    const fixture = await customEntryDistribution(binary), title = `Custom entry ${backend} ${binary ? 'compiled' : 'source'}`,
+    const fixture = await customEntryDistribution(binary, container), title = `Custom entry ${backend} ${binary ? 'compiled' : 'source'} ${container}`,
       item = page.locator('.library-game').filter({ has: page.getByRole('heading', { name: title, exact: true }) }),
       canvas = page.locator('#stage canvas[data-window-id]')
     const read = async (expression: string): Promise<string> => {
@@ -89,7 +89,7 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     try {
       await page.locator('#project-mode').selectOption('auto')
       await page.locator('#entry').fill('boot.tjs')
-      await page.locator('#files').setInputFiles({ name: 'custom-entry.zip', mimeType: 'application/zip', buffer: fixture.bytes })
+      await page.locator('#files').setInputFiles({ name: fixture.name, mimeType: fixture.mimeType, buffer: fixture.bytes })
       await ready(); await state(0, 1, true)
       await click(0, '*selected'); await state(7, 2)
       await click(0, '*save'); await state(7, 3)
@@ -116,8 +116,8 @@ for (const backend of ['asyncify', 'jspi']) for (const binary of [false, true])
     } catch (error) { failures.push(error) }
     for (const report of [
       () => info.attach('custom-entry-observations', { body: JSON.stringify({ input: fixture.evidence, observations, errors,
-        scope: 'Player-selected ZIP startup, unmodified original KAG system, real route/save/load links, frozen library project/entry and unchanged native bookmark bytes after a full refresh.' }, null, 2), contentType: 'application/json' }),
-      () => info.attach('custom-entry-input', { body: fixture.bytes, contentType: 'application/zip' }),
+        scope: 'Player-selected ZIP startup, including inert MZ-prefixed EXE archive input, unmodified original KAG system, real route/save/load links, frozen library project/entry and unchanged native bookmark bytes after a full refresh. The host never executes the input stub.' }, null, 2), contentType: 'application/json' }),
+      () => info.attach('custom-entry-input', { body: fixture.bytes, contentType: fixture.mimeType }),
       () => info.attach('custom-entry-source', { body: customEntryStory + '\n' + customEntryObserver, contentType: 'text/plain' }),
       async () => info.attach('custom-entry-logs', { body: await page.locator('#logs').innerText(), contentType: 'text/plain' }),
     ]) try { await report() } catch (error) { failures.push(error) }
