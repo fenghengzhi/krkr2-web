@@ -25,3 +25,5 @@
 第 171 批新取得六份普通浏览器报告，其中 1,943 项通过、333 项失败、1 项跳过。取消的作业另留有 661 项未报告，Firefox 第 1 分片的产物也未能取得。WebKit 的 Asyncify 后端已经跑通原版 Introduction 第二条路线，同一分片取消前尚未报告该路线的 JSPI 结果。取回时第 171 批仍有一个作业在运行，第 172 至 178 批均在排队。[第 171 批托管记录](https://github.com/fenghengzhi/krkr2-web/actions/runs/45857270320) · [第 178 批](https://github.com/fenghengzhi/krkr2-web/actions/runs/45873527327)
 
 Chromium 的明朝字体记录显示，同一可用字体用普通 CSS 字体族和用 `local()` 别名加载时，字宽与像素可能不同。本批调整测试的参考来源，按普通字体族逐字节比较，另保留别名对照。同时记录真实画布收到的候选顺序，用两种已知宽度的字体核对首选缺失时的选择。[字体选择验收](../../tests/browser/font-backend.spec.ts)
+
+第 179 批实现提交 `8bcbe5c` 登记时为 `pending`，结果留到下一批取回。[第 179 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45875774925)

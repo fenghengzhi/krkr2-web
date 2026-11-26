@@ -4,6 +4,8 @@
 
 第 179 批处理旧过场编码、双击命名书签和 GS 乐谱鼓轨。新取回的第 171 批报告确认，原版 Introduction 第二条路线已在 WebKit 的 Asyncify 后端通过。[179 实现与托管证据](decisions/179-windows-cutscenes-and-named-bookmarks.md)
 
+第 179 批实现提交 `8bcbe5c` 登记时为 `pending`，结果留到下一批取回。[第 179 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45875774925)
+
 第 178 批处理 UDF 2.50 游戏盘、从旧版浏览器备份迁移存档、条件循环配乐和影片暂停时钟。本次取回的第 171 批三份浏览器报告合计 692 项通过、62 项失败。[178 实现与托管证据](decisions/178-metadata-discs-and-game-restoration.md)
 
 第 178 批实现提交 `b3974a2` 登记时为 `pending`。登记后修正了一条流式配乐测试的单采样边界预期，该修订随下一批验证。[第 178 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45873527327)
