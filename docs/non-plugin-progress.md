@@ -6,7 +6,7 @@
 
 本次固定取回 143–145 的 49 份新原件，并复用 20 份已校验原件。143、144 已结束，应用均因历史视频类型错误而未执行依赖构建的验收；145 在快照中尚未完成类型检查，Node 与主浏览器未报告。144、145 的原版 KAG 均 87/87 匹配，原版图形仍各有五项历史 sprite 差异。146–151 在同一次快照中仍排队，不能以原版专项通过代替这些批次的实际网页结果。完整失败、未报告与来源见 [152 证据记录](decisions/152-legacy-movies-and-zip-entry.md)。
 
-<!-- 第 152 批提交与 GitHub Actions run ID 由提交负责人登记。 -->
+第 152 批实现提交为 `dcaa83f`，GitHub 登记时为 `pending`。本批结果在下一次运行时取回。[第 152 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45804548247)
 
 第 151 批修正读档时选择剧情分支的顺序，按原版实测调整立绘变换与混合，补上游戏候选字体选择和 MIDI 通道调音。第 143 批原版图形对照中有 5 项与旧预期不同，应用构建仍受历史视频类型错误影响。151 的提交 `2d1d56f` 已登记排队。[151 实现与验证](decisions/151-bookmark-restore-and-game-rendering.md) · [第 151 批托管验证](https://github.com/fenghengzhi/krkr2-web/actions/runs/45800870443)
 
