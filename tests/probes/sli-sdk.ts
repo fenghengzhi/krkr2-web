@@ -12,6 +12,7 @@ import { waveGainSource, waveGainPublicExpected } from '../helpers/wave-gain.ts'
 import { waveSeekFiles, waveSeekSource, waveSeekSdkExpected } from '../helpers/wave-seek.ts'
 import { soundOpenExpected, soundOpenFiles, soundOpenSource } from '../helpers/sound-open.ts'
 import { waveBooleanExpected, waveBooleanSource } from '../helpers/wave-booleans.ts'
+import { waveTailFiles, waveTailSdkExpected, waveTailSource } from '../helpers/wave-tail.ts'
 import { createLongCompressedXp3, xp3CompressedAudioHeader, xp3SegmentScript, xp3SegmentText } from '../helpers/xp3-segment-fixtures.ts'
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true')
@@ -32,11 +33,12 @@ const expected: Record<string, string> = { open: 'open', names: '0|10|40|41|400|
   'wave-gain-controls': waveGainPublicExpected,
   'wave-seek-labels': waveSeekSdkExpected,
   ...waveBooleanExpected,
+  ...waveTailSdkExpected,
   ...Object.fromEntries(Object.entries(waveReopenExpected).map(([id, value]) => ['wave-reopen-' + id, value])),
   ...Object.fromEntries(Object.entries(soundOpenExpected).map(([kind, value]) => ['sound-open-' + kind, value])),
   'xp3-decoder': [xp3SegmentScript, xp3SegmentText, 'stop', '48000', '0', '12000', '36320736', '1452000'].join('~'),
   'xp3-compressed': [xp3SegmentScript, xp3SegmentText, xp3CompressedAudioHeader, 'closed'].join('~') }
-const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles() }
+const precision = wavePrecisionFiles(), files = { ...sliNativeFiles(), ...precision, ...wavePositionFiles(), ...waveFrequencyFiles(), ...soundOpenFiles(), ...waveReopenFiles(), ...waveSeekFiles(), ...waveTailFiles() }
 const save = (name: string, data: unknown) => writeFileSync(resolve(output, name), JSON.stringify(data, null, 2) + '\n')
 if (process.argv[2] === 'prepare') {
   mkdirSync(game, { recursive: true })
@@ -88,9 +90,11 @@ if (process.argv[2] === 'prepare') {
      }`,
     waveFadeSource,
     waveSeekSource,
+    waveTailSource,
     ...Object.keys(waveFadeExpected).map((id) =>
       `try{record("fade-${id}|"+waveFadeObserve("${id}"));}catch(e){record("fade-${id}|unexpected-error:"+e.message);}`),
-    'waveSeekAfter=function(result){global.record("wave-seek-labels|"+result);global.record("done");global.System.exit();};',
+    'waveTailAfter=function(id,result){if(id=="done"){global.record("done");global.System.exit();}else global.record(id+"|"+result);};',
+    'waveSeekAfter=function(result){global.record("wave-seek-labels|"+result);global.waveTailSdkStart();};',
     'fadeDelayedAfter=function(result){global.record("fade-delayed|"+result);global.waveSeekSdkStart();};fadeDelayedStart();',
   ].join('\n'), 'utf16le')
   writeFileSync(resolve(game, 'startup.tjs'), startup)
@@ -129,6 +133,9 @@ if (process.argv[2] === 'prepare') {
     waveBoolean: { planned: Object.keys(waveBooleanExpected).length,
       matched: results.filter((row) => row.id.startsWith('wave-bool-') && row.matched).length,
       scope: 'Unopened ordinary Wave boolean setters: real/object/octet/null versus numeric string conversion, single evaluation and independent owners. These controls do not require a DirectSound device and do not claim hardware PCM equivalence.' },
+    waveTail: { planned: Object.keys(waveTailSdkExpected).length,
+      matched: results.filter((row) => row.id.startsWith('wave-tail-') && row.matched).length,
+      scope: 'Actual ordinary Wave playback, with and without an inactive Smooth link. The exact source endpoint label starts a second file, is delivered once, and precedes natural stop. Missing DirectSound or missing callbacks remain failures, never substitutes for audio playback.' },
     waveSeekScope: 'Seven actual-play SLI first-label observations: initial zero output rate, integer millisecond conversion, rejected endpoint/negative/out-of-range requests, exact sample seek, uint64 multiplication wrap, and retained/recreated output rates across reopen. Hardware PCM and elapsed getter positions are not inferred; an unavailable DirectSound device remains a failed observation.',
     xp3Archive: manifest.xp3Archive,
     host: wine ? 'Ubuntu / Wine 32-bit / PulseAudio' : 'Windows / DirectSound',

@@ -48,8 +48,8 @@ export function copyProjectSelection(value?: ProjectSelection): ProjectSelection
   return { mode: 'auto', executableDirectory, ...launcher }
 }
 
-/** Use the actual imported spelling. Only loose launchers participate; an
- * installer or utility next to the game makes automatic inference ambiguous. */
+/** Use the imported spelling or the combined EXE that supplies the selected
+ * project root. Ordinary sibling executables alone do not identify a launcher. */
 export function projectExecutableResource(resources: readonly Resource[], project: GameProject, selected = project.executable): Resource | undefined {
   const candidates = resources.filter(({ name, aliasOf }) => !aliasOf && !name.includes('>') && /\.exe$/i.test(name))
   if (selected !== undefined) {
@@ -65,6 +65,18 @@ export function projectExecutableResource(resources: readonly Resource[], projec
 }
 export function findProjectExecutable(resources: readonly Resource[], project: GameProject, selected = project.executable): string | undefined {
   return projectExecutableResource(resources, project, selected)?.name
+}
+
+/** Automatic launch may see a game and its setup tools together. Inspect the
+ * stored XP3 mark only. Two marked programs need the player's choice. */
+async function findCombinedExecutable(executables: readonly Resource[], probe: (file: Resource) => Promise<boolean>): Promise<Resource | undefined> {
+  let found: Resource | undefined
+  for (const file of executables) {
+    if (!await probe(file)) continue
+    if (found) throw new Error('找到多个内嵌 XP3 的游戏程序，请在“游戏程序名”填写要启动的文件名。')
+    found = file
+  }
+  return found
 }
 
 /** Decide only from actual imported files/indices. Never execute an EXE or
@@ -114,7 +126,8 @@ export function selectProject(resources: readonly Resource[], requested?: Projec
 /** Native project selection tests the raw data.xp3/data.exe existence. Only
  * the self-combined EXE step probes an XP3 mark; no archive index is opened. */
 export async function selectProjectLazy(resources: readonly Resource[], requested: ProjectSelection | undefined,
-  reader: ArchiveReader, checkpoint: () => Promise<void>): Promise<GameProject | undefined> {
+  reader: ArchiveReader, checkpoint: () => Promise<void>,
+  probe = (file: Resource) => reader.probeXp3(file, checkpoint)): Promise<GameProject | undefined> {
   const selection = copyProjectSelection(requested)
   if (selection.mode === 'collection') return undefined
   if (selection.mode === 'root' && selection.directory.includes('>') && !selection.directory.endsWith('>')) {
@@ -129,17 +142,24 @@ export async function selectProjectLazy(resources: readonly Resource[], requeste
   }
   const selected = selectProject(resources, selection.mode === 'auto'
     ? { ...selection, executable: undefined } : selection, true)!
-  if (selection.mode !== 'auto' || selection.executable === undefined) return selected
+  if (selection.mode !== 'auto') return selected
   const fallback = selected.executableDirectory,
     atSelfStep = selected.directory.toLowerCase() === fallback.toLowerCase() ||
       selected.directory.toLowerCase() === (fallback + 'data/').toLowerCase()
   if (!atSelfStep) return selected
-  const resolver = new StorageResolver()
-  resolver.mount([...resources])
-  const executable = resolver.find(parseStoragePath(selection.executable))
-  if (!executable) throw new Error('Selected executable was not imported')
+  let executable: Resource | undefined
+  if (selection.executable === undefined) {
+    const candidates = resources.filter((file) => !file.aliasOf && !file.name.includes('>') && /\.exe$/i.test(file.name) &&
+      extractStoragePath(file.name).toLowerCase() === fallback.toLowerCase())
+    executable = await findCombinedExecutable(candidates, probe)
+  } else {
+    const resolver = new StorageResolver()
+    resolver.mount([...resources])
+    const named = resolver.find(parseStoragePath(selection.executable))
+    if (!named) throw new Error('Selected executable was not imported')
+    await checkpoint()
+    if (await probe(named)) executable = named
+  }
   await checkpoint()
-  const combined = await reader.probeXp3(executable, checkpoint)
-  await checkpoint()
-  return combined ? copyGameProject({ ...selected, directory: executable.name + '>' }) : selected
+  return executable ? copyGameProject({ ...selected, directory: executable.name + '>' }) : selected
 }

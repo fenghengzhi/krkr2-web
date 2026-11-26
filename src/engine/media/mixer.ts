@@ -526,6 +526,11 @@ export class AudioMixer {
         continue
       }
       if (settings.position >= asset.sampleCount) {
+        // WaveLoopManager queues labels before the decoder reports its short
+        // final read; WaveImpl flushes those events before natural stop. An
+        // explicit link at EOF still wins above, and manual seek/stop never
+        // enter this playback boundary.
+        this.labelsThrough(voice, asset.sampleCount)
         if (settings.looping) {
           this.seek(voice, settings.position % asset.sampleCount)
           continue
@@ -535,15 +540,7 @@ export class AudioMixer {
         this.event(voice, 'ended')
         return false
       }
-      const labels = asset.loops.labels
-      while (
-        voice.labelIndex < labels.length &&
-        labels[voice.labelIndex]!.position <= settings.position
-      ) {
-        const label = labels[voice.labelIndex++]!
-        this.expression(voice, label.name)
-        this.event(voice, 'label', label.name)
-      }
+      this.labelsThrough(voice, settings.position)
       return true
     }
     voice.status = 'stop'
@@ -553,6 +550,14 @@ export class AudioMixer {
       message: `Audio voice ${voice.id}: loop makes no forward progress or exceeds the per-sample link budget`,
     })
     return false
+  }
+  private labelsThrough(voice: Voice, position: number): void {
+    const labels = voice.asset!.loops.labels
+    while (voice.labelIndex < labels.length && labels[voice.labelIndex]!.position <= position) {
+      const label = labels[voice.labelIndex++]!
+      this.expression(voice, label.name)
+      this.event(voice, 'label', label.name)
+    }
   }
   private pcm(voice: Voice, channel: number, position: number): number {
     if (voice.stream) return voice.stream.sample(channel, position)

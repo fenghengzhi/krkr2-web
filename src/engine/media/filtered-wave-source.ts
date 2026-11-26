@@ -33,6 +33,10 @@ export class FilteredWaveSource implements FilterPcmSource {
   private crossfadeLength = 0
   private crossfadePosition = 0
   private decoderPosition: number
+  /** A short Decode can expose the endpoint label before its zero-frame retry.
+   * That retry must not enqueue the same endpoint again. A real rewind/jump
+   * starts a new traversal; ordinary labels keep their existing unit timing. */
+  private eofLabelsQueued = false
   starved = false
   position: number
   constructor(
@@ -139,12 +143,14 @@ export class FilteredWaveSource implements FilterPcmSource {
     let written = 0,
       jumpsWithoutProgress = 0,
       committedPosition = this.position,
-      committedDecoderPosition = this.decoderPosition
+      committedDecoderPosition = this.decoderPosition,
+      committedEofLabelsQueued = this.eofLabelsQueued
     const starve = () => {
       // Zero-length link traversal belongs to the next request unit. A target
       // page miss must not commit those jumps before any PCM can be read.
       this.position = committedPosition
       this.decoderPosition = committedDecoderPosition
+      this.eofLabelsQueued = committedEofLabelsQueued
       this.starved = true
       return written
     }
@@ -157,6 +163,7 @@ export class FilteredWaveSource implements FilterPcmSource {
           if (++jumpsWithoutProgress >= 10)
             throw new Error('Audio filter loop makes no forward progress')
           this.position = link.to
+          this.eofLabelsQueued = false
           if (!this.crossfadeLength) this.decoderPosition = this.position
           continue
         }
@@ -186,12 +193,14 @@ export class FilteredWaveSource implements FilterPcmSource {
       ) {
         this.step()
         const label = labels[i]!
+        if (label.position === this.asset.sampleCount && this.eofLabelsQueued) continue
         this.expression(label.name)
         // Web normalization: locate the label in actual output once. The fixed
         // native source adds both per-request written and the growing queue
         // length, double-counting earlier units; that legacy quirk is excluded.
         segments.appendLabel(label.name, base + written + label.position - this.position)
       }
+      if (end > this.asset.sampleCount) this.eofLabelsQueued = true
       // The native source records the requested unit before Decode reports an
       // EOF-short read. Real cursor/written progress below still uses decoded frames.
       segments.appendSegment({ start: this.position, length: unit, filteredLength: unit })
@@ -228,10 +237,12 @@ export class FilteredWaveSource implements FilterPcmSource {
           if (!this.looping() || this.position === 0) break
           this.position = 0
           this.decoderPosition = 0
+          this.eofLabelsQueued = false
         }
       }
       committedPosition = this.position
       committedDecoderPosition = this.decoderPosition
+      committedEofLabelsQueued = this.eofLabelsQueued
     }
     return written
   }

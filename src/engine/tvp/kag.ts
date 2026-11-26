@@ -22,8 +22,10 @@ class KAGParser {
     if(!__kagParamDepth)return null;
     var fields=[],values=%[],bindings=[];fields.assign(__kagParams[__kagParamDepth-1]);
     for(var i=0;i<fields.count;i+=2){
-      var value=fields[i+1];
-      if(typeof value=="Object" || typeof value=="Octet"){
+      var value=fields[i+1],kind=typeof value;
+      // Keep native Real variants as well: the host's parser-state numbers
+      // represent integers, which must not erase a real's type or signed zero.
+      if(kind=="Object" || kind=="Octet" || kind=="Real"){
         if(references.count>=100000)throw new Exception("KAG parameter reference budget exceeded");
         values[fields[i]]=void;bindings.add([fields[i],references.count]);references.add(value);
       }else values[fields[i]]=value;

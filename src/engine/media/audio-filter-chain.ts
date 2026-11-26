@@ -320,13 +320,26 @@ export class AudioFilterChain {
     if (!this.canAdvance(0)) return false
     let block = this.blocks[this.current]!
     while (block.frames && this.position >= block.frames) {
+      // advance is deliberately exclusive at its final sample. Deliver the
+      // exact boundary when playback reaches the next sample, before retiring
+      // this block (including a short block carrying a natural EOF label).
+      block.segments.emitThrough(block.frames, true, (label) =>
+        emit(label.name, block.segments.positionAt(label.offset)),
+      )
       this.lastSourcePosition = block.segments.positionAt(block.frames)
       this.position -= block.frames
       this.current = (this.current + 1) % playbackBlocks
       this.queued--
       block = this.blocks[this.current]!
     }
-    if (!block.frames) return false
+    if (!block.frames) {
+      // If a file ends exactly at a request boundary, its label is discovered
+      // by the next zero-frame Decode. It remains a real audible endpoint.
+      block.segments.emitThrough(0, true, (label) =>
+        emit(label.name, block.segments.positionAt(label.offset)),
+      )
+      return false
+    }
     this.lastSourcePosition = block.segments.positionAt(this.position)
     block.segments.emitThrough(this.position, true, (label) =>
       emit(label.name, block.segments.positionAt(label.offset)),

@@ -1,5 +1,7 @@
 # 当前实现范围
 
+第 144 批支持多个程序并存时识别内嵌 XP3 游戏，保留嵌套 KAG 宏中的实数类型，并交付 WAVE 曲尾的 SLI 标签。新增行为待托管验证。[144 范围与验收](../decisions/144-combined-games-macro-values-and-audio-cues.md)
+
 第 143 批修正立绘缩放与旋转的取样、KAG 非 ASCII 宏名与参数名的识别，以及 Wave 暂停和循环的 TJS 布尔转换。新增行为待托管验证。[143 范围与验收](../decisions/143-game-sprites-script-names-and-sound.md)
 
 第 142 批为大过场影片接入文件切片、游戏库文件的分块校验和 MP4 元数据选轨。本地文件视图总计最多 2 GiB。从 HTTP 范围源拼出的影片需要在播放前完整读入，缓冲源总计最多 128 MiB。新增实现等待托管验证。[142 范围及限制](../decisions/142-large-game-movies.md)
